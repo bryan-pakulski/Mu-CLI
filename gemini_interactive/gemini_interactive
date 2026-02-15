@@ -11,6 +11,13 @@ import glob
 import time
 import re
 from datetime import datetime
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import WordCompleter, PathCompleter, NestedCompleter, Completer, Completion, FuzzyWordCompleter
+from prompt_toolkit.styles import Style
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.formatted_text import HTML
 from google import genai
 from google.genai import types
 
@@ -37,84 +44,139 @@ if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
 
 
-# --- Autocomplete Logic ---
-class SimpleCompleter:
-    def __init__(self):
-        self.commands = [
-            "/file",
-            "/f",
-            "/add",
-            "/clearfiles",
-            "/cf",
-            "/clear",
-            "/c",
-            "/view",
-            "/v",
-            "/model",
-            "/system",
-            "/sys",
-            "/thinking",
-            "/quit",
-            "/exit",
-            "/q",
-            "/help",
-            "/h",
-            "/list",
-            "/ls",
-            "/load",
-            "/open",
-            "/new",
-            "/delete",
-            "/rm",
-        ]
+# --- Input Management ---
+# Helper to get current session names dynamically
+def get_session_names():
+    history_dir = os.path.expanduser("~/.gemini_chats/")
+    if not os.path.exists(history_dir):
+        return []
+    files = glob.glob(os.path.join(history_dir, "*.json"))
+    return [os.path.basename(f).replace(".json", "") for f in files]
 
-    def complete(self, text, state):
-        buffer = readline.get_line_buffer()
-
-        # 1. Command Completion
-        if buffer.startswith("/") and " " not in buffer:
-            options = [c + " " for c in self.commands if c.startswith(text)]
-            if state < len(options):
-                return options[state]
-            return None
-
-        # 2. File Completion
-        parts = buffer.split(" ", 1)
-        if len(parts) > 0 and parts[0] in ["/file", "/f", "/add"]:
-            return self.path_complete(text, state)
-
-        # 3. Session Completion (for load/delete)
-        if len(parts) > 0 and parts[0] in ["/load", "/open", "/delete", "/rm"]:
-            return self.session_complete(text, state)
-
-        return None
-
-    def path_complete(self, text, state):
-        path = os.path.expanduser(text)
-        pattern = path + "*"
-        matches = glob.glob(pattern)
-        formatted_matches = []
-        for m in matches:
-            if os.path.isdir(m):
-                formatted_matches.append(m + os.sep)
-            else:
-                formatted_matches.append(m)
-
-        if state < len(formatted_matches):
-            return formatted_matches[state]
-        return None
-
-    def session_complete(self, text, state):
-        files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
+class DynamicSessionCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        history_dir = os.path.expanduser("~/.gemini_chats/")
+        if not os.path.exists(history_dir):
+            return []
+        files = glob.glob(os.path.join(history_dir, "*.json"))
         sessions = [os.path.basename(f).replace(".json", "") for f in files]
-        matches = [s for s in sessions if s.startswith(text)]
-        if state < len(matches):
-            return matches[state]
-        return None
+        
+        # Use FuzzyWordCompleter logic for session names
+        completer = FuzzyWordCompleter(sessions)
+        yield from completer.get_completions(document, complete_event)
+
+class InputHandler:
+    def __init__(self):
+        # PathCompleter handles local file system paths
+        path_completer = PathCompleter(expanduser=True)
+        
+        # DynamicSessionCompleter handles session JSON files
+        session_completer = DynamicSessionCompleter()
+
+        # NestedCompleter allows context-aware suggestions (e.g., /file shows file paths)
+        self.completer = NestedCompleter.from_nested_dict({
+            '/file': path_completer,
+            '/f': path_completer,
+            '/clear': None,
+            '/clearfiles': None,
+            '/view': None,
+            '/quit': None,
+            '/exit': None,
+            '/help': None,
+            '/model': {
+                'gemini-2.5-flash': None,
+                'gemini-3-pro-preview': None,
+            },
+            '/system': None,
+            '/thinking': None,
+            '/list': None,
+            '/load': session_completer,
+            '/new': None,
+            '/delete': session_completer,
+            '/tokens': None,
+            '/summary': None
+        })
+
+        # 2. Styling (Coloring the prompt elements)
+        self.style = Style.from_dict({
+            'prompt': 'ansicyan bold',
+            'rprompt': 'bg:ansiblue ansiwhite',
+            'files': 'ansiyellow',
+        })
+
+        # 3. Persistent Input History (saved to disk, distinct from chat history)
+        history_file = os.path.expanduser("~/.gemini_cli_input_history")
+        
+        # 4. Key Bindings (Add shortcuts like Meta+Enter to submit)
+        self.kb = KeyBindings()
+        
+        @self.kb.add('enter')
+        def _(event):
+            """
+            Custom Enter behavior:
+            - If line starts with '/', submit immediately.
+            - Otherwise, insert a newline (multiline mode).
+            """
+            buff = event.current_buffer
+            text = buff.text.strip()
+
+            # Check if it looks like a command
+            if text.startswith("/"):
+                buff.validate_and_handle()
+            else:
+                # Standard multiline behavior: insert newline
+                buff.insert_text('\n')
+
+        @self.kb.add('escape', 'enter')
+        def _(event):
+            """Bind Meta+Enter (Esc+Enter) to submit input."""
+            event.current_buffer.validate_and_handle()
+
+        # 5. The Session Object
+        self.session = PromptSession(
+            history=FileHistory(history_file),
+            auto_suggest=AutoSuggestFromHistory(),
+            completer=self.completer,
+            style=self.style,
+            key_bindings=self.kb,
+            multiline=True, # Enable true multiline editing
+        )
+
+    def get_input(self, session_name, staged_files):
+        # Dynamic Prompt Formatting
+        files_text = ""
+        if staged_files:
+            f_names = ", ".join([f["display_name"] for f in staged_files])
+            files_text = f" [Files: {f_names}]"
+
+        # HTML formatting for the prompt text
+        message = HTML(
+            f"<prompt>[{session_name}]</prompt>"
+            f"<files>{files_text}</files> "
+            f"<prompt>>>></prompt> "
+        )
+
+        # Bottom toolbar for hints
+        def bottom_toolbar():
+            return HTML(' <b>[Meta+Enter]</b> or <b>[Esc] [Enter]</b> to submit | <b>/help</b> for commands')
+
+        try:
+            return self.session.prompt(
+                message,
+                bottom_toolbar=bottom_toolbar,
+                prompt_continuation=self._prompt_continuation,
+            ).strip()
+        except KeyboardInterrupt:
+            return ""
+        except EOFError:
+            raise EOFError
+
+    def _prompt_continuation(self, width, line_number, is_soft_wrap):
+        """Renders the dots (...) for multiline inputs."""
+        return HTML(f'<prompt>{("." * (width - 1)) + " "}</prompt>')
 
 
 # --- Session Management ---
-
 class SessionManager:
     def __init__(self):
         self.current_session_name = DEFAULT_SESSION_NAME
@@ -602,28 +664,17 @@ def main():
     session = Session(client, args.model, args.thinking, args.system, session_manager)
 
     # --- Readline autocomplete --- #
-    completer = SimpleCompleter()
-    readline.set_completer_delims(" \t\n")
-    readline.set_completer(completer.complete)
-    readline.parse_and_bind("tab: complete")
-    if sys.platform == "darwin":
-        readline.parse_and_bind("bind ^I rl_complete")
+    input_handler = InputHandler()
 
     sys_status = "SET" if session.system_instruction else "NONE"
     print_splash(session.model, session.thinking, sys_status)
 
     while True:
         try:
-            # Construct prompt string showing attached files
-            prompt_str = f"{Colors.BLUE}[{session.session_manager.current_session_name}] >>> {Colors.ENDC}"
-            if session.staged_files:
-                files_str = ", ".join([f["display_name"] for f in session.staged_files])
-                prompt_str = (
-                    f"{Colors.YELLOW}[Files: {files_str}]{Colors.ENDC}\n" + prompt_str
-                )
-
-            # Use custom multiline input function
-            user_input = get_multiline_input(prompt_str).strip()
+            user_input = input_handler.get_input(
+                session.session_manager.current_session_name, 
+                session.staged_files
+            ) 
 
             if not user_input:
                 continue

@@ -1,22 +1,21 @@
 # Gemini CLI
 
-A powerful, interactive command-line interface for Google's Gemini models. This tool offers
-persistent chat sessions, file attachments, syntax highlighting, and "thinking" mode support,
-all from your terminal.
+A powerful, interactive command-line interface for Google's Gemini models. This tool features **long-term vector memory** (RAG), persistent chat sessions, file attachments, and rich syntax highlighting, all from y
 
 ## Features
 
-- **Persistent Sessions**: Chat history is saved automatically (`~/.gemini_chats/`). You can  
-  switch between conversations, list them, or delete them.
-- **Chat Summarisation**: Long chain conversations are summarised intermittently to reduce token usage whilst still maintaining long context.
-- **Smart Formatting**:
-  - Markdown rendering (via `glow` if installed).
-  - Raw code block output for easy copying.
+- **Long-term Vector Memory**: Uses **ChromaDB** to store and index conversation history. The model automatically recalls relevant details from past turns (even those outside the active context window) using seman
+- **Persistent Sessions**: Chat history is saved automatically (`~/.gemini_chats/`). You can switch between conversations, list them, or delete them.
+- **Rich UI**: Beautiful terminal formatting using the `Rich` library, including:
+  - Markdown rendering with panels.
+  - Syntax highlighting for code blocks (easy to copy).
+  - Spinners and status indicators.
 - **File Attachments**: Upload local files (images, PDFs, text) to the context using `/file`.
-- **Autocomplete**: Tab-completion for commands, file paths, and session names.
+- **Smart Input**:
+  - **Autocomplete**: Context-aware tab-completion for commands, file paths, and session names.
+  - **Multiline Editing**: Press `Meta+Enter` (or `Esc` then `Enter`) to submit, allowing easy entry of long prompts or code.
 - **Thinking Mode**: Toggle Gemini's "thinking" process for complex reasoning tasks.
 - **System Instructions**: Set custom system prompts on the fly.
-- **Multi-line Input**: End a line with `\` to continue typing on the next line.
 
 ## Prerequisites
 
@@ -66,9 +65,10 @@ python gemini_cli.py
 
 | Argument | Description |
 | :--- | :--- |
-| `--model` | Set default model (default: `gemini-2.0-flash-thinking-exp-1219`) |
+| `--model` | Set default model (default: `gemini-3-pro-preview`) |
 | `--thinking` | Start with thinking mode enabled |
 | `--system` | Set initial system instruction |
+| `--debug` | Enable debug logs for memory retrieval and vector operations |
 
 ### In-Chat Commands
 
@@ -78,23 +78,29 @@ python gemini_cli.py
 | `/new [name]` | | Start a new chat session |
 | `/list` | `/ls` | List available saved sessions |
 | `/load [name]` | `/open` | Switch to a specific session |
-| `/delete [name]`| `/rm` | Delete a session |
+| `/delete [name]`| `/rm` | Delete a session and its memory index |
 | `/file [path]` | `/f` | Attach a file to the next message |
 | `/clearfiles` | `/cf` | Clear currently staged files |
 | `/view` | `/v` | View full history of current chat |
 | `/clear` | `/c` | Clear history of current chat |
+| `/search [query]`| | Manually search vector memory for a topic |
+| `/reindex` | | Force rebuild of vector memory from chat history |
 | `/system [txt]` | `/sys` | Update system prompt |
-| `/tokens` | | View token usage (estimates) |
-| `/summary` | | View current summarisation of conversation |
+| `/tokens` | | View context stats (window size vs total history) |
+| `/model [name]` | | View or change the active model |
 | `/thinking` | | Toggle thinking mode on/off |
 | `/quit` | `/q` | Exit the application |
 
+## Input Shortcuts
+
+- **Submit Message**: Press `Meta+Enter` (Alt+Enter) OR `Esc` followed by `Enter`.
+- **New Line**: Press `Enter` (Standard multiline editing is enabled).
+- **Autocomplete**: Press `Tab` to complete commands or file paths.
+
 ## Tips
 
-- **Multi-line Input**: If you want to paste a large block of code or write a long prompt, end
-  your line with a backslash `\` and press Enter. You can continue typing on the next line.
-- **File Uploads**: You can attach multiple files before sending a message. Use `/f
-  path/to/file1`, then `/f path/to/file2`, then type your prompt.
+- **Memory Retrieval**: The tool automatically queries memory before sending your prompt. If you want to see what the AI "remembers" about a specific topic without sending a message to the API, use `/search <topic
+- **File Uploads**: You can attach multiple files before sending a message. Use `/f path/to/file1`, then `/f path/to/file2`, then type your prompt.
 
 ## License
 

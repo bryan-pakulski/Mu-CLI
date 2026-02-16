@@ -93,7 +93,6 @@ def render_response(text):
             console.print(md)                                                                             
             console.print("") # Add a little breathing room                    
 
-
 class MemoryEngine:
     def __init__(self, session_name, debug=False):
         self.debug = debug
@@ -130,8 +129,8 @@ class MemoryEngine:
 
     def memorize(self, text, role, turn_index):
         """
-        We will still chop the text into chunks for the Vector Database (so we can find specific lines of code or concepts), but we will store the full original text in the metadata of those chunks. When a chunk is found,
-        we retrieve the full text of that turn instead of the fragment.                                                                                                                                                      
+        We will still chop the text into chunks for the Vector Database (so we can find specific lines of code or concepts), but we will store the full original text in the metadata of those chunks. When a chunk i
+        we retrieve the full text of that turn instead of the fragment.                                                                                                                                              
 
         This trades a small amount of disk space (text duplication in metadata) for perfect context retrieval.
         """
@@ -167,12 +166,17 @@ class MemoryEngine:
             })
 
         if ids:
-            self.collection.add(ids=ids, documents=documents, metadatas=metadatas)
+            try:
+                self.collection.add(ids=ids, documents=documents, metadatas=metadatas)
+            except Exception as e:
+                if self.debug:
+                     console.print(f"[red][DEBUG] Failed to add memory: {e}[/red]")
 
-    def recall(self, query, n_results=5, threshold=0.75):
+    def recall(self, query, n_results=5, threshold=0.8):
         """
         Retrieves relevant memory.
         Enhancement: Returns the FULL text of the matched turns, not just the chunks.
+        Default threshold increased to 0.8 to be more permissive.
         """
         if self.collection.count() == 0:
             if self.debug:
@@ -183,11 +187,16 @@ class MemoryEngine:
             console.print(f"[dim][DEBUG] Querying memory for: '{query}'[/dim]")
 
         # 1. Search for best matches using chunks
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=n_results,
-            include=["metadatas", "distances"]
-        )
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                include=["metadatas", "distances"]
+            )
+        except Exception as e:
+            if self.debug:
+                console.print(f"[red][DEBUG] ChromaDB Query Error: {e}[/red]")
+            return []
  
         if not results or not results['ids'] or not results['ids'][0]:
             if self.debug:
@@ -247,7 +256,6 @@ class MemoryEngine:
                 console.print("[green][DEBUG] Memory collection cleared.[/green]")
         except Exception as e:
             console.print(f"[red]Error clearing memory: {e}")
-  
 # --- Input Management ---
 # Helper to get current session names dynamically
 def get_session_names():
@@ -299,7 +307,6 @@ class InputHandler:
             '/new': None,
             '/delete': session_completer,
             '/tokens': None,
-            '/summary': None,
             '/search': None,
         })
 
@@ -387,7 +394,6 @@ class SessionManager:
     def __init__(self):
         self.current_session_name = DEFAULT_SESSION_NAME
         self.history = []  # THE FULL ARCHIVE
-        self.summary = ""  # The accumulated summary text
         self.summary_anchor = 0  # Index in history covered by the summary
         self._load_session(DEFAULT_SESSION_NAME)
 
@@ -400,7 +406,6 @@ class SessionManager:
         
         # Defaults
         self.history = []
-        self.summary = ""
         self.summary_anchor = 0
 
         if os.path.exists(filepath):
@@ -413,7 +418,6 @@ class SessionManager:
                     self.history = data # Legacy migration
                 elif isinstance(data, dict):
                     self.history = data.get("history", [])
-                    self.summary = data.get("summary", "")
                     self.summary_anchor = data.get("summary_anchor", 0)
 
             except (json.JSONDecodeError, IOError):
@@ -424,7 +428,6 @@ class SessionManager:
         try:
             data = {
                 "history": self.history,
-                "summary": self.summary,
                 "summary_anchor": self.summary_anchor
             }
             with open(filepath, "w") as f:
@@ -480,7 +483,6 @@ class SessionManager:
 
     def clear_current_history(self):
         self.history = []
-        self.summary = ""
  
         self.save_history()
         console.print("[green]Current chat history cleared.")
@@ -499,7 +501,7 @@ class SessionManager:
 
             for part in turn.get("parts", []):
                 if "text" in part:
-                    console.print("[blue][bold] {role}")
+                    console.print(f"[blue][bold] {role}")
                     if role == "User":
                         console.print(Panel(part["text"], title=role, style=style, title_align=align, box=box.ROUNDED))
                     else:
@@ -619,7 +621,6 @@ class Session:
         
         # Configuration for Optimization
         self.rolling_window_size = 10  # Keep last 10 messages raw
-        self.summary_trigger_threshold = 20 # Summarize when unsummarized count > 20
 
     def add_file(self, file_path):
         uploaded = upload_file(self.client, file_path)
@@ -735,7 +736,6 @@ def print_help():
     table.add_row("/quit", "/q", "Exit")
     table.add_row("/reindex", "", "Rebuild vector memory")
     table.add_row("/search <query>", "", "Search memory")
-    table.add_row("/summary", "", "Show summary")
     table.add_row("/system <txt>", "/sys", "Update system prompt")
     table.add_row("/thinking", "", "Toggle thinking mode")
     table.add_row("/tokens", "", "Show context token usage")
@@ -919,9 +919,6 @@ def main():
                             session.memory.memorize(text_content, role, i)
                             count += 1
                     print(f"[green]Indexed {count} turns into vector memory.")
-                elif cmd == "/summary":
-                    console.print("[yellow]summary: ")
-                    console.print(session.session_manager.summary)
                 elif cmd in ["/search", "/recall"]:
                     if arg:
                         console.print(f"[cyan]Searching memory for:[/cyan] {arg}")
@@ -938,13 +935,11 @@ def main():
                     # (This is an approximation based on list length, not actual tokenizer)
                     hist_len = len(session.session_manager.history)
                     anchor = session.session_manager.summary_anchor
-                    summary_len = len(session.session_manager.summary.split())
                     
                     print("[yellow]--- Context Stats ---")
                     print(f"Total History Turns: {hist_len}")
                     print(f"Summarized Turns:    {anchor}")
                     print(f"Active Turns (Window): {hist_len - anchor}")
-                    print(f"Summary Length:      ~{summary_len} words")
                     print("[dim](Actual token count is displayed after generation)")
 
                 elif cmd == "/thinking":

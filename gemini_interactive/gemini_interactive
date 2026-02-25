@@ -9,6 +9,9 @@ import mimetypes
 import glob
 import time
 import re
+import io
+import base64
+import shutil
 from datetime import datetime
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -30,27 +33,128 @@ from rich.syntax import Syntax
 from rich import box
 from rich.table import Table
 
+from rank_bm25 import BM25Okapi
+
+# Try importing PIL for image handling
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
 # Configuration
 HISTORY_DIR = os.path.expanduser("~/.gemini_chats/")
+IMAGE_DIR = os.path.join(HISTORY_DIR, "images")
 DEFAULT_SESSION_NAME = "default"
 
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
+if not os.path.exists(IMAGE_DIR):
+    os.makedirs(IMAGE_DIR)
 
 # Rich Console
 console = Console()
 
+# --- Pricing & Models ---
+# Prices are in USD per 1 Million Tokens (Input / Output)
+# Tiers often split at 128k or 200k tokens.
+PRICING_DB = {
+    "gemini-3.1-pro-preview":       {"in": 2.00, "out": 12.00, "in_high": 4.00, "out_high": 18.00, "cutoff": 200000},
+    "gemini-3-pro-preview":       {"in": 2.00, "out": 12.00, "in_high": 4.00, "out_high": 18.00, "cutoff": 200000},
+    "gemini-3-flash-preview":     {"in": 0.50, "out": 3.00,  "in_high": 0.50, "out_high": 3.0,  "cutoff": 1000000},
+    "gemini-3-pro-image-preview": {"in": 2.0, "out": 12, "in_high": 2.0, "out_high": 120, "cutoff": 128000},
+    "gemini-2.5-pro":             {"in": 1.25, "out": 10.00,  "in_high": 2.50, "out_high": 15.00, "cutoff": 200000},
+    "gemini-2.5-flash":           {"in": 0.30, "out": 2.50, "in_high": 0.3, "out_high": 2.50,  "cutoff": 128000},
+}
+
+KNOWN_MODELS = [
+    "gemini-3.1-pro-preview",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-3-pro-image-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+]
+
+def calculate_cost(model_name, input_tokens, output_tokens):
+    """Calculates estimated cost based on model pricing tiers."""
+    # Normalize model name to find pricing (handle variations like -preview)
+    pricing = None
+    for k, v in PRICING_DB.items():
+        if k in model_name:
+            pricing = v
+            break
+    
+    if not pricing:
+        return None
+
+    # Determine Tier
+    is_high_tier = input_tokens > pricing.get("cutoff", 128000)
+    
+    in_rate = pricing["in_high"] if is_high_tier else pricing["in"]
+    out_rate = pricing["out_high"] if is_high_tier else pricing["out"]
+
+    cost = (input_tokens / 1_000_000 * in_rate) + (output_tokens / 1_000_000 * out_rate)
+    return cost
+
+def display_image_in_terminal(image_data, mime_type="image/png"):
+    """
+    Saves image to disk and attempts to display it inline using CLI protocols.
+    """
+    if not HAS_PIL:
+        console.print("[yellow]PIL not installed. Cannot process image bytes.[/yellow]")
+        return
+
+    timestamp = int(time.time())
+    ext = mimetypes.guess_extension(mime_type) or ".png"
+    filename = f"img_{timestamp}{ext}"
+    filepath = os.path.join(IMAGE_DIR, filename)
+
+    try:
+        # Save to disk
+        image = Image.open(io.BytesIO(image_data))
+        image.save(filepath)
+        
+        # 1. Print clickable link (supported by most modern terminals)
+        file_url = f"file://{filepath}"
+        console.print(f"\n[bold cyan]Image Generated:[/bold cyan] [link={file_url}]{filepath}[/link]")
+
+        # 2. Attempt Inline Display
+        # Check for iTerm2 (imgcat)
+        term = os.environ.get("TERM_PROGRAM", "")
+        if "iTerm" in term:
+            # Simple iTerm2 inline image protocol
+            b64_data = base64.b64encode(image_data).decode('ascii')
+            print(f"\033]1337;File=inline=1:{b64_data}\a")
+            return
+
+        # Check for Kitty
+        if "kitty" in term:
+            try:
+                subprocess.run(["kitty", "+kitten", "icat", filepath], check=False)
+                return
+            except FileNotFoundError:
+                pass
+
+        # Check for external tools (timg, catimg)
+        if shutil.which("timg"):
+            subprocess.run(["timg", "-g", "100x100", filepath], check=False)
+        elif shutil.which("catimg"):
+            subprocess.run(["catimg", "-w", "100", filepath], check=False)
+        else:
+            # Fallback: simple size info
+            console.print(f"[dim](Image size: {image.size[0]}x{image.size[1]})[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to display image: {e}[/red]")
+
 def render_response(text):                                                                                
     """                                                                                                   
     Renders text using Rich.                                                                              
-    Text is Markdown formatted.                                                                           
-    Code is printed raw (flush left) for easy copying.                                                    
     """                                                                                                   
     if not text.strip():                                                                                  
         return                                                                                            
                                                                                                           
-    # Split the text by code blocks                                                                       
-    # This regex captures the ```lang ... ``` blocks including the backticks                              
     parts = re.split(r"(```(?:[\w\+\-\.]+)?\s*\n.*?```)", text, flags=re.DOTALL)                          
                                                                                                           
     for part in parts:                                                                                    
@@ -58,20 +162,11 @@ def render_response(text):
             continue                                                                                      
                                                                                                           
         if part.startswith("```"):                                                                        
-            # --- CODE BLOCK HANDLING ---                                                                 
             lines = part.split("\n")                                                                      
-            # Extract language (e.g., ```python -> python)                                                
             language = lines[0].strip("`").strip() or "text"                                              
-                                                                                                          
-            # Extract code content (remove first and last lines which are ```)                            
             code_content = "\n".join(lines[1:-1])                                                         
                                                                                                           
-            # 1. Print a header (pure visual, not part of selection)                                      
             console.print(f" [bold cyan]┌── {language} ─────────────────────────────────[/bold cyan]")    
-                                                                                                          
-            # 2. Print the Syntax object                                                                  
-            # background_color="default" ensures it blends with your terminal                             
-            # word_wrap=False ensures long lines don't break copy-paste                                   
             syntax = Syntax(                                                                              
                 code_content,                                                                             
                 language,                                                                                 
@@ -82,18 +177,16 @@ def render_response(text):
                 background_color="default"                                                                
             )                                                                                             
             console.print(syntax)                                                                         
-                                                                                                          
-            # 3. Print a footer                                                                           
             console.print(" [bold cyan]└────────────────────────────────────────────[/bold cyan]")       
-                                                                                                          
         else:                                                                                             
-            # --- TEXT HANDLING ---                                                                       
-            # Render standard markdown for the conversation parts                                         
             md = Markdown(part.strip())                                                                   
             console.print(md)                                                                             
-            console.print("") # Add a little breathing room                    
+            console.print("") 
 
-class MemoryEngine:
+class SotaMemoryEngine:
+    """
+    Dual Indexing: Stores data in both Chroma (Vector) and BM25 (Keyword).
+    """
     def __init__(self, session_name, debug=False):
         self.debug = debug
         self.db_path = os.path.expanduser("~/.gemini_memory")
@@ -101,23 +194,34 @@ class MemoryEngine:
             os.makedirs(self.db_path)
 
         self.client = chromadb.PersistentClient(path=self.db_path)
-
         self.ef = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="all-MiniLM-L6-v2"
         )
-
         self.collection = self.client.get_or_create_collection(
             name=session_name,
             embedding_function=self.ef,
             metadata={"hnsw:space": "cosine"}
         )
 
-    def _sliding_window(self, text, chunk_size=100, overlap=20):
-        """Splits text into chunks of words with overlap."""
+        self.bm25 = None
+        self.bm25_corpus = [] 
+        self.bm25_ids = []    
+        self._rebuild_bm25()
+
+    def _rebuild_bm25(self):
+        existing_data = self.collection.get()
+        if existing_data and existing_data['documents']:
+            self.bm25_corpus = existing_data['documents']
+            self.bm25_ids = existing_data['ids']
+            tokenized_corpus = [doc.lower().split() for doc in self.bm25_corpus]
+            self.bm25 = BM25Okapi(tokenized_corpus)
+        else:
+            self.bm25 = None
+
+    def _sliding_window(self, text, chunk_size=150, overlap=30):
         words = text.split()
         if len(words) <= chunk_size:
             return [text]
-
         chunks = []
         for i in range(0, len(words), chunk_size - overlap):
             chunk = words[i:i + chunk_size]
@@ -126,138 +230,107 @@ class MemoryEngine:
                 break
         return chunks
 
-
     def memorize(self, text, role, turn_index):
-        """
-        We will still chop the text into chunks for the Vector Database (so we can find specific lines of code or concepts), but we will store the full original text in the metadata of those chunks. When a chunk i
-        we retrieve the full text of that turn instead of the fragment.                                                                                                                                              
-
-        This trades a small amount of disk space (text duplication in metadata) for perfect context retrieval.
-        """
         if not text.strip(): return
 
-        # Use sliding window for granular vector search, 
-        # but we will store the FULL text in metadata to allow full context retrieval.
         chunks = self._sliding_window(text)
-
-        if self.debug:
-            console.print(f"[dim][DEBUG] Memorizing Turn {turn_index} ({role}): {len(chunks)} chunks[/dim]")
-
+        
         ids = []
         documents = []
         metadatas = []
 
         for i, chunk in enumerate(chunks):
             chunk_id = f"{turn_index}_{i}"
-            
-            # We still enrich the vector content with temporal context
-            enriched_content = f"[Turn {turn_index} {role}]: {chunk}"
+            enriched_content = f"[{role.upper()}]: {chunk}"
 
             ids.append(chunk_id)
             documents.append(enriched_content)
             metadatas.append({
                 "role": role,
                 "turn": turn_index,
-                "chunk": i,
+                "chunk_index": i,
                 "timestamp": time.time(),
-                # Store the full original text in every chunk's metadata.
-                # This allows us to retrieve the COMPLETE context if any part of it matches.
                 "full_text": text 
             })
 
         if ids:
             try:
                 self.collection.add(ids=ids, documents=documents, metadatas=metadatas)
+                self._rebuild_bm25() 
+                if self.debug:
+                     console.print(f"[dim][DEBUG] Memorized {len(ids)} chunks.[/dim]")
             except Exception as e:
-                if self.debug:
-                     console.print(f"[red][DEBUG] Failed to add memory: {e}[/red]")
+                console.print(f"[red]Memory Error: {e}[/red]")
 
-    def recall(self, query, n_results=5, threshold=0.8):
-        """
-        Retrieves relevant memory.
-        Enhancement: Returns the FULL text of the matched turns, not just the chunks.
-        Default threshold increased to 0.8 to be more permissive.
-        """
+    def recall(self, query, n_results=5):
         if self.collection.count() == 0:
-            if self.debug:
-                console.print("[dim][DEBUG] Memory is empty.[/dim]")
             return []
 
-        if self.debug:
-            console.print(f"[dim][DEBUG] Querying memory for: '{query}'[/dim]")
-
-        # 1. Search for best matches using chunks
-        try:
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                include=["metadatas", "distances"]
-            )
-        except Exception as e:
-            if self.debug:
-                console.print(f"[red][DEBUG] ChromaDB Query Error: {e}[/red]")
-            return []
- 
-        if not results or not results['ids'] or not results['ids'][0]:
-            if self.debug:
-                console.print("[dim][DEBUG] No matches found.[/dim]")
-            return []
-
-        # 2. Filter by Threshold & Deduplicate by Turn
-        # We want to return unique *Turns*, not unique *Chunks*.
-        seen_turns = set()
-        unique_memories = []
-
-        raw_ids = results['ids'][0]
-        raw_dists = results['distances'][0]
-        raw_metas = results['metadatas'][0]
-
-        for id_, dist, meta in zip(raw_ids, raw_dists, raw_metas):
-            if dist > threshold:
-                if self.debug:
-                    console.print(f"[dim][DEBUG] Ignored result {id_}: distance {dist:.3f} > {threshold}[/dim]")
-                continue
-
-            turn_id = meta.get('turn')
-            
-            # If we haven't seen this turn yet, add its full text
-            if turn_id not in seen_turns:
-                seen_turns.add(turn_id)
-                # Retrieve the full text we stored in metadata
-                full_text = meta.get('full_text', "")
-                if full_text:
-                    unique_memories.append({
-                        "turn": turn_id,
-                        "text": full_text,
-                        "role": meta.get('role')
-                    })
-
-        # 3. Sort by Turn ID (Chronological)
-        unique_memories.sort(key=lambda x: x['turn'])
+        vector_results = self.collection.query(
+            query_texts=[query],
+            n_results=n_results * 2 
+        )
         
-        final_docs = [m['text'] for m in unique_memories]
+        vector_ranks = {}
+        if vector_results['ids']:
+            for rank, doc_id in enumerate(vector_results['ids'][0]):
+                vector_ranks[doc_id] = rank + 1
+
+        bm25_ranks = {}
+        if self.bm25:
+            tokenized_query = query.lower().split()
+            bm25_scores = self.bm25.get_scores(tokenized_query)
+            top_n_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:n_results*2]
+            
+            for rank, idx in enumerate(top_n_indices):
+                doc_id = self.bm25_ids[idx]
+                bm25_ranks[doc_id] = rank + 1
+
+        fused_scores = {}
+        k = 60
+        all_ids = set(vector_ranks.keys()) | set(bm25_ranks.keys())
+        
+        for doc_id in all_ids:
+            v_score = 1 / (k + vector_ranks[doc_id]) if doc_id in vector_ranks else 0
+            k_score = 1 / (k + bm25_ranks[doc_id]) if doc_id in bm25_ranks else 0
+            fused_scores[doc_id] = v_score + k_score
+
+        sorted_ids = sorted(fused_scores.keys(), key=lambda x: fused_scores[x], reverse=True)[:n_results]
+
+        final_texts = []
+        seen_turns = set()
+
+        if sorted_ids:
+            docs = self.collection.get(ids=sorted_ids, include=['metadatas', 'documents'])
+            id_to_meta = {id_: meta for id_, meta in zip(docs['ids'], docs['metadatas'])}
+            
+            for doc_id in sorted_ids:
+                meta = id_to_meta.get(doc_id)
+                if not meta: continue
+                
+                turn_id = meta.get('turn')
+                if turn_id not in seen_turns:
+                    doc_content = docs['documents'][docs['ids'].index(doc_id)]
+                    final_texts.append(doc_content)
+                    seen_turns.add(turn_id)
 
         if self.debug:
-             console.print(f"[dim][DEBUG] Retrieved {len(final_docs)} full memories.[/dim]")
+            console.print(f"[dim][DEBUG] Hybrid Recall: {len(final_texts)} results.[/dim]")
 
-        return final_docs
+        return final_texts
 
     def clear(self):
-        """Deletes the vector collection for this session."""
-        try:
-            self.client.delete_collection(self.collection.name)
-            # Recreate empty
-            self.collection = self.client.create_collection(
-                name=self.collection.name,
-                embedding_function=self.ef,
-                metadata={"hnsw:space": "cosine"}
-            )
-            if self.debug:
-                console.print("[green][DEBUG] Memory collection cleared.[/green]")
-        except Exception as e:
-            console.print(f"[red]Error clearing memory: {e}")
+        self.client.delete_collection(self.collection.name)
+        self.collection = self.client.create_collection(
+            name=self.collection.name,
+            embedding_function=self.ef,
+            metadata={"hnsw:space": "cosine"}
+        )
+        self.bm25 = None
+        self.bm25_corpus = []
+        self.bm25_ids = []
+
 # --- Input Management ---
-# Helper to get current session names dynamically
 def get_session_names():
     history_dir = os.path.expanduser("~/.gemini_chats/")
     if not os.path.exists(history_dir):
@@ -273,19 +346,17 @@ class DynamicSessionCompleter(Completer):
         files = glob.glob(os.path.join(history_dir, "*.json"))
         sessions = [os.path.basename(f).replace(".json", "") for f in files]
         
-        # Use FuzzyWordCompleter logic for session names
         completer = FuzzyWordCompleter(sessions)
         yield from completer.get_completions(document, complete_event)
 
 class InputHandler:
     def __init__(self):
-        # PathCompleter handles local file system paths
         path_completer = PathCompleter(expanduser=True)
-        
-        # DynamicSessionCompleter handles session JSON files
         session_completer = DynamicSessionCompleter()
 
-        # NestedCompleter allows context-aware suggestions (e.g., /file shows file paths)
+        # Build model dict for completer
+        model_dict = {m: None for m in KNOWN_MODELS}
+
         self.completer = NestedCompleter.from_nested_dict({
             '/file': path_completer,
             '/f': path_completer,
@@ -295,10 +366,7 @@ class InputHandler:
             '/quit': None,
             '/exit': None,
             '/help': None,
-            '/model': {
-                'gemini-2.5-flash': None,
-                'gemini-3-pro-preview': None,
-            },
+            '/model': model_dict,
             '/reindex': None,
             '/system': None,
             '/thinking': None,
@@ -310,66 +378,50 @@ class InputHandler:
             '/search': None,
         })
 
-        # 2. Styling (Coloring the prompt elements)
         self.style = Style.from_dict({
             'prompt': 'ansicyan bold',
             'rprompt': 'bg:ansiblue ansiwhite',
             'files': 'ansiyellow',
         })
 
-        # 3. Persistent Input History (saved to disk, distinct from chat history)
         history_file = os.path.expanduser("~/.gemini_cli_input_history")
         
-        # 4. Key Bindings (Add shortcuts like Meta+Enter to submit)
         self.kb = KeyBindings()
         
         @self.kb.add('enter')
         def _(event):
-            """
-            Custom Enter behavior:
-            - If line starts with '/', submit immediately.
-            - Otherwise, insert a newline (multiline mode).
-            """
             buff = event.current_buffer
             text = buff.text.strip()
-
-            # Check if it looks like a command
             if text.startswith("/"):
                 buff.validate_and_handle()
             else:
-                # Standard multiline behavior: insert newline
                 buff.insert_text('\n')
 
         @self.kb.add('escape', 'enter')
         def _(event):
-            """Bind Meta+Enter (Esc+Enter) to submit input."""
             event.current_buffer.validate_and_handle()
 
-        # 5. The Session Object
         self.session = PromptSession(
             history=FileHistory(history_file),
             auto_suggest=AutoSuggestFromHistory(),
             completer=self.completer,
             style=self.style,
             key_bindings=self.kb,
-            multiline=True, # Enable true multiline editing
+            multiline=True, 
         )
 
     def get_input(self, session_name, staged_files):
-        # Dynamic Prompt Formatting
         files_text = ""
         if staged_files:
             f_names = ", ".join([f["display_name"] for f in staged_files])
             files_text = f" [Files: {f_names}]"
 
-        # HTML formatting for the prompt text
         message = HTML(
             f"<prompt>[{session_name}]</prompt>"
             f"<files>{files_text}</files> "
             f"<prompt>>>></prompt> "
         )
 
-        # Bottom toolbar for hints
         def bottom_toolbar():
             return HTML(' <b>[Meta+Enter]</b> or <b>[Esc] [Enter]</b> to submit | <b>/help</b> for commands')
 
@@ -385,7 +437,6 @@ class InputHandler:
             raise EOFError
 
     def _prompt_continuation(self, width, line_number, is_soft_wrap):
-        """Renders the dots (...) for multiline inputs."""
         return HTML(f'<prompt>{("." * (width - 1)) + " "}</prompt>')
 
 
@@ -393,8 +444,8 @@ class InputHandler:
 class SessionManager:
     def __init__(self):
         self.current_session_name = DEFAULT_SESSION_NAME
-        self.history = []  # THE FULL ARCHIVE
-        self.summary_anchor = 0  # Index in history covered by the summary
+        self.history = []  
+        self.summary_anchor = 0  
         self._load_session(DEFAULT_SESSION_NAME)
 
     def _get_filepath(self, name):
@@ -403,8 +454,6 @@ class SessionManager:
     def _load_session(self, name):
         filepath = self._get_filepath(name)
         self.current_session_name = name
-        
-        # Defaults
         self.history = []
         self.summary_anchor = 0
 
@@ -412,14 +461,11 @@ class SessionManager:
             try:
                 with open(filepath, "r") as f:
                     data = json.load(f)
-
-                # Handle new vs old format
                 if isinstance(data, list):
-                    self.history = data # Legacy migration
+                    self.history = data 
                 elif isinstance(data, dict):
                     self.history = data.get("history", [])
                     self.summary_anchor = data.get("summary_anchor", 0)
-
             except (json.JSONDecodeError, IOError):
                 self.history = []
 
@@ -436,22 +482,21 @@ class SessionManager:
             console.print(f"[red]Warning: Could not save chat history: {e}") 
 
     def switch_session(self, name):
-        self.save_history()  # Save current before switching
+        self.save_history() 
         self._load_session(name)
         console.print(f"[green]Switched to session: '{name}'")
         self.view_history()
 
     def new_session(self, name=None):
-        self.save_history() # Save the previous session first
+        self.save_history() 
         if not name:
             name = f"chat_{int(time.time())}"
         self.current_session_name = name
         self.history = []
-        self.save_history() # Create the file for the new session immediately
+        self.save_history() 
         console.print(f"[green]Started new session: '{name}'")
 
     def list_sessions(self):
-        # Ensure current session file exists before listing
         if not os.path.exists(self._get_filepath(self.current_session_name)):
             self.save_history()
 
@@ -460,13 +505,8 @@ class SessionManager:
         for f in files:
             name = os.path.basename(f).replace(".json", "")
             indicator = "*" if name == self.current_session_name else " "
-            # Get file mod time
-            mod_time = datetime.fromtimestamp(os.path.getmtime(f)).strftime(
-                "%Y-%m-%d %H:%M"
-            )
-            console.print(
-                f" [cyan]{indicator} {name:<20} [dim]({mod_time})"
-            )
+            mod_time = datetime.fromtimestamp(os.path.getmtime(f)).strftime("%Y-%m-%d %H:%M")
+            console.print(f" [cyan]{indicator} {name:<20} [dim]({mod_time})")
         print("")
 
     def delete_session(self, name):
@@ -483,7 +523,6 @@ class SessionManager:
 
     def clear_current_history(self):
         self.history = []
- 
         self.save_history()
         console.print("[green]Current chat history cleared.")
 
@@ -510,35 +549,9 @@ class SessionManager:
                     mime = part["file_data"].get("mime_type", "file")
                     console.print(f"[dim][Attached File: {mime}][/dim]", justify=align)
             
-            print("") # Spacer
+            print("") 
 
-# --- Smart Rendering Logic ---
-
-
-def print_markdown_text(text):
-    """Renders text using glow if available, otherwise plain print."""
-    if not text.strip():
-        return
-    try:
-        process = subprocess.Popen(
-            ["glow", "-w", "100", "-"], stdin=subprocess.PIPE, text=True
-        )
-        process.communicate(input=text)
-    except (FileNotFoundError, IOError):
-        print(text)
-
-
-def print_raw_code(language, code):
-    """Prints code raw for easy copying."""
-    lang_display = language if language else "text"
-    console.print(
-        f"[cyan][dim]┌──{lang_display}──────────────────────────────────────────────────────────"
-    )
-    print(code.rstrip())
-    print(
-        "[cyan][dim]└───────────────────────────────────────────────────────────────────"
-    )
-
+# --- Helpers ---
 
 def get_safe_mime_type(file_path):
     mime_type, _ = mimetypes.guess_type(file_path)
@@ -579,33 +592,6 @@ def upload_file(client, file_path):
         return None
 
 
-# --- Multi-line Input Logic ---
-def get_multiline_input(prompt_text):
-    """
-    Reads input. If line ends with '\', continues reading.
-    Also allows empty lines in between.
-    """
-    lines = []
-    try:
-        first_line = input(prompt_text)
-
-        # Check if user wants to enter multiline mode immediately or ended with \
-        if first_line.endswith("\\"):
-            lines.append(first_line[:-1])  # remove the backslash
-            while True:
-                line = console.input("[yellow]... ")
-                if line.endswith("\\"):
-                    lines.append(line[:-1])
-                else:
-                    lines.append(line)
-                    break
-            return "\n".join(lines)
-        else:
-            return first_line
-    except EOFError:
-        raise EOFError
-
-
 class Session:
 
     def __init__(self, client, model, thinking, system_instruction, session_manager, debug=False):
@@ -615,12 +601,10 @@ class Session:
         self.system_instruction = system_instruction
         self.session_manager = session_manager
         self.debug = debug
-        self.memory = MemoryEngine(session_manager.current_session_name)
-        self.active_context_window = 6 # Only keep last 6 messages (3 turns) in RAM
+        self.memory = SotaMemoryEngine(session_manager.current_session_name, debug)
+        self.active_context_window = 6 
         self.staged_files = []
-        
-        # Configuration for Optimization
-        self.rolling_window_size = 10  # Keep last 10 messages raw
+        self.rolling_window_size = 10 
 
     def add_file(self, file_path):
         uploaded = upload_file(self.client, file_path)
@@ -641,35 +625,38 @@ class Session:
         console.print("[green]Staged files cleared.")
 
     def send_message(self, text):
-        # 1. Archive User Message (Standard)
+        # 1. Archive User Message 
         parts = []
         parts.extend([{"file_data": f["file_data"]} for f in self.staged_files])
         if text: parts.append({"text": text})
         
         new_user_message = {"role": "user", "parts": parts}
         
-        # Display User Message nicely
         if text:
             console.print(Panel(text, title="User", style="blue", box=box.ROUNDED, title_align="right"))
-
-        # --- Memorize User Input ---
-        if text:
-            turn_idx = len(self.session_manager.history)
-            self.memory.memorize(text, "user", turn_idx)
 
         # 2. Retrieve Relevant Context
         context_snippets = []
         if text:
-            # Show a fleeting status for memory search
             with console.status("[dim]Searching memory...[/dim]", spinner="dots"):
                 context_snippets = self.memory.recall(text, n_results=3)
 
         # 3. Build Dynamic System Prompt
         dynamic_system_prompt = self.system_instruction
         if context_snippets:
-            memory_block = "\n".join([f"- {m}" for m in context_snippets])
-            dynamic_system_prompt += f"\n\nRELEVANT PAST CONTEXT RETRIEVED FROM VECTOR DB MEMORY:\n{memory_block}\n"
+            memory_block = "\n".join([f"<memory_fragment>{m}</memory_fragment>" for m in context_snippets])
+            dynamic_system_prompt += (
+                f"\n\n<relevant_memory>\n"
+                f"The following past conversation details may be relevant. "
+                f"Use them to answer but do not explicitly mention retrieving them unless asked.\n"
+                f"{memory_block}\n"
+                f"</relevant_memory>"
+            )
             console.print(f"[dim italic]✓ Injected {len(context_snippets)} past memories.[/dim italic]")
+
+        if text:
+            turn_idx = len(self.session_manager.history)
+            self.memory.memorize(text, "user", turn_idx)
 
         # 4. Build Strict Context Window
         recent_history = self.session_manager.history[-self.active_context_window:]
@@ -687,33 +674,65 @@ class Session:
         # 5. Generate with Spinner
         try:
             ai_text = ""
+            ai_parts_archive = [] # For history storage
+
             with console.status(f"[bold green]Generating response ({self.model})...[/bold green]", spinner="aesthetic"):
                 response = self.client.models.generate_content(
                     model=self.model, contents=contents_payload, config=gen_config
                 )
-                ai_text = response.text
 
-            # Render AI Response
+            # --- RENDER AI RESPONSE ---
             console.print(f"\n[bold green]Gemini ({self.model}):[/bold green]")
-            render_response(ai_text)
+            
+            # Handle mixed content (Text and Images)
+            if response.parts:
+                for part in response.parts:
+                    if part.text:
+                        ai_text += part.text
+                        render_response(part.text)
+                        ai_parts_archive.append({"text": part.text})
+                    
+                    # Gemini 3 generated images usually come as inline_data
+                    if hasattr(part, 'inline_data') and part.inline_data:
+                        display_image_in_terminal(part.inline_data.data, part.inline_data.mime_type)
+                        # We don't save binary blobs to JSON history to avoid bloat, 
+                        # but we can note it
+                        ai_parts_archive.append({"text": "[Image Generated and Saved locally]"})
+            
+            # Fallback for simple text responses
+            elif response.text:
+                ai_text = response.text
+                render_response(ai_text)
+                ai_parts_archive.append({"text": ai_text})
 
-            # --- TOKEN USAGE ---
+            # --- TOKEN USAGE & PRICING ---
             if response.usage_metadata:
                 u = response.usage_metadata
-                console.print(f"[dim]Tokens: Input {u.prompt_token_count} | Output {u.candidates_token_count} | Total {u.total_token_count}[/dim]", justify="right")
+                in_tok = u.prompt_token_count
+                out_tok = u.candidates_token_count
+                total_tok = u.total_token_count
+                
+                cost_str = ""
+                est_cost = calculate_cost(self.model, in_tok, out_tok)
+                if est_cost is not None:
+                    cost_str = f"| Est. Cost: [bold yellow]${est_cost:.5f}[/bold yellow]"
+
+                console.print(f"[dim]Tokens: In {in_tok} | Out {out_tok} | Total {total_tok} {cost_str}[/dim]", justify="right")
             
-            # --- Memorize AI Response ---
-            turn_idx = len(self.session_manager.history) 
-            self.memory.memorize(ai_text, "model", turn_idx)
+            # --- Memorize AI Response (Text Only) ---
+            if ai_text:
+                turn_idx = len(self.session_manager.history) 
+                self.memory.memorize(ai_text, "model", turn_idx)
 
             # Archive Model Response
             self.session_manager.history.append(
-                {"role": "model", "parts": [{"text": ai_text}]}
+                {"role": "model", "parts": ai_parts_archive}
             )
             self.session_manager.save_history()
             self.staged_files = []
 
         except Exception as e:
+            # If failed, remove the user message we just added to keep history clean
             if self.session_manager.history and self.session_manager.history[-1] == new_user_message:
                  self.session_manager.history.pop()
             self.session_manager.save_history()
@@ -724,7 +743,6 @@ def print_help():
     table.add_column("Command", style="cyan", no_wrap=True)
     table.add_column("Alias", style="magenta")
     table.add_column("Description", style="white")
-
 
     table.add_row("/clear", "", "Clear conversation history")
     table.add_row("/new [name]", "", "Start a new conversation")
@@ -740,7 +758,6 @@ def print_help():
     table.add_row("/thinking", "", "Toggle thinking mode")
     table.add_row("/tokens", "", "Show context token usage")
     table.add_row("/view", "", "View conversation history")
-
 
     console.print(table)
     console.print("[dim]Tip: End a line with '\\' to continue typing on the next line.[/dim]")
@@ -771,7 +788,7 @@ def print_splash(session_model, session_thinking, session_sys):
 def main():
     parser = argparse.ArgumentParser(description="Interactive Google Gemini CLI")
     parser.add_argument(
-        "--model", default="gemini-3-pro-preview", help="Default model"
+        "--model", default="gemini-3.1-pro-preview", help="Default model"
     )
     parser.add_argument(
         "--thinking", action="store_true", help="Start with thinking mode enabled"
@@ -799,7 +816,6 @@ def main():
     session_manager = SessionManager()
     session = Session(client, args.model, args.thinking, args.system, session_manager, debug=args.debug)
 
-    # --- Readline autocomplete --- #
     input_handler = InputHandler()
 
     sys_status = "SET" if session.system_instruction else "NONE"
@@ -815,7 +831,6 @@ def main():
             if not user_input:
                 continue
 
-            # Handle Commands
             if user_input.startswith("/"):
                 parts = user_input.split(" ", 1)
                 cmd = parts[0].lower()
@@ -836,7 +851,6 @@ def main():
                 elif cmd in ["/view", "/v"]:
                     session.session_manager.view_history()
 
-                # --- File Management ---
                 elif cmd in ["/file", "/f", "/add"]:
                     if arg:
                         session.add_file(arg.strip("'\""))
@@ -846,36 +860,33 @@ def main():
                 elif cmd in ["/clearfiles", "/cf"]:
                     session.clear_files()
 
-                # --- Session Management ---
                 elif cmd in ["/list", "/ls"]:
                     session.session_manager.list_sessions()
 
                 elif cmd in ["/new"]:
                     name = arg.strip() if arg else None
                     session.session_manager.new_session(name)
-                    session.memory = MemoryEngine(session.session_manager.current_session_name, debug=args.debug)
+                    session.memory = SotaMemoryEngine(session.session_manager.current_session_name, debug=args.debug)
                     session.staged_files = []
 
                 elif cmd in ["/load", "/open"]:
                     if arg:
                         session.session_manager.switch_session(arg.strip())
                         session.staged_files = []
-                        session.memory = MemoryEngine(session.session_manager.current_session_name, debug=args.debug)
+                        session.memory = SotaMemoryEngine(session.session_manager.current_session_name, debug=args.debug)
                     else:
                         console.print("[yellow]Usage: /load <session_name>")
                 elif cmd in ["/delete", "/rm"]:
                     if arg:
                         session.session_manager.delete_session(arg.strip())
-                        # Also wipe memory for that session
                         try:
                             session.memory.client.delete_collection(arg.strip())
                             console.print(f"[dim]Memory index for '{arg.strip()}' deleted.[/dim]")
                         except Exception:
-                            pass # Collection might not exist
+                            pass 
                     else:
                         console.print("[yellow]Usage: /delete <session_name>")
 
-                # --- Config ---
                 elif cmd in ["/system", "/sys"]:
                     if arg:
                         session.system_instruction = arg
@@ -900,10 +911,9 @@ def main():
                         console.print(f"Current model: {session.model}")
                 elif cmd == "/reindex":
                     console.print("[yellow]Building vector index from current history...")
-                    # Clear existing collection for this session
                     try:
                          session.memory.client.delete_collection(session.session_manager.current_session_name)
-                         session.memory = MemoryEngine(session.session_manager.current_session_name)
+                         session.memory = SotaMemoryEngine(session.session_manager.current_session_name)
                     except Exception:
                          pass
 
@@ -931,8 +941,6 @@ def main():
                     else:
                         console.print("[red]Usage: /search <query>[/red]")
                 elif cmd == "/tokens":
-                    # Calculate estimated tokens for current context
-                    # (This is an approximation based on list length, not actual tokenizer)
                     hist_len = len(session.session_manager.history)
                     anchor = session.session_manager.summary_anchor
                     
@@ -952,7 +960,6 @@ def main():
 
                 continue
 
-            # Handle Chat
             session.send_message(user_input)
 
         except KeyboardInterrupt:

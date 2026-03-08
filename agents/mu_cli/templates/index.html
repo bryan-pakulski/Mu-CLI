@@ -46,20 +46,30 @@
     .shell.sidebar-hidden .sidebar { display: none; }
 
     .glass {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
     }
 
-    .sidebar { min-height: 0; overflow: auto; padding: 12px; }
-    .panel {
+    .sidebar {
+      min-height: 0;
+      overflow: auto;
       padding: 14px;
-      border-radius: 14px;
       border: 1px solid var(--border);
-      background: var(--surface-2);
-      margin-bottom: 12px;
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
     }
+    .panel {
+      padding: 8px 0 12px;
+      border-radius: 0;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      background: transparent;
+      margin-bottom: 10px;
+    }
+    .panel:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
     .panel h3 {
       margin: 0 0 8px;
       font-size: 11px;
@@ -74,12 +84,12 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 12px 14px;
-      margin-bottom: 10px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      box-shadow: var(--shadow);
+      padding: 8px 2px 12px;
+      margin-bottom: 8px;
+      border-radius: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
     }
     .title { font-size: 15px; font-weight: 700; letter-spacing: .01em; }
     .pill {
@@ -97,9 +107,9 @@
       display: grid;
       grid-template-rows: minmax(0,1fr) auto auto;
       gap: 10px;
-      padding: 12px;
+      padding: 0;
       overflow: hidden;
-      background: var(--surface);
+      background: transparent;
     }
 
     .messages {
@@ -107,14 +117,15 @@
       overflow: auto;
       border: 1px solid var(--border);
       border-radius: 14px;
-      background: #fbfdff;
+      background: #ffffff;
       padding: 12px;
+      box-shadow: var(--shadow);
     }
 
     .trace-wrap {
       border: 1px solid var(--border);
-      border-radius: 12px;
-      background: #fafcff;
+      border-radius: 10px;
+      background: #ffffff;
       overflow: hidden;
     }
     .trace-wrap > summary {
@@ -291,10 +302,10 @@
     .upload-list {
       max-height: 120px;
       overflow: auto;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 8px;
-      background: #fff;
+      border: 0;
+      border-radius: 0;
+      padding: 2px 0;
+      background: transparent;
     }
 
     .modal-backdrop-custom {
@@ -364,7 +375,7 @@
 </head>
 <body>
   <div id="app" class="shell sidebar-hidden">
-    <aside id="sidebar" class="sidebar glass">
+    <aside id="sidebar" class="sidebar">
       <div class="panel">
         <h3>Runtime</h3>
         <div class="small-muted mb-2">Auto-applies</div>
@@ -433,7 +444,7 @@
         <span id="meta" class="pill">loading...</span>
       </div>
 
-      <div class="chat-layout glass">
+      <div class="chat-layout">
         <div id="messages" class="messages"></div>
 
         <details class="trace-wrap" id="traceWrap">

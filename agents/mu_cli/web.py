@@ -27,6 +27,7 @@ from mu_cli.tools.filesystem import (
     GitTool,
     FetchUrlContextTool,
     SearchWebContextTool,
+    CustomCommandTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
     ReadFileTool,
@@ -57,6 +58,10 @@ class WebRuntime:
     session_turns: list[dict]
     uploads: list[dict]
     uploads_dir: Path
+    base_tools: list[Tool]
+    enabled_tools: dict[str, bool]
+    custom_tool_specs: list[dict]
+    custom_tool_errors: list[str]
     approval_condition: threading.Condition = field(default_factory=threading.Condition)
     pending_approval: dict[str, Any] | None = None
 
@@ -152,6 +157,51 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         on_tool_run=on_tool_run,
         strict_tool_usage=True,
     )
+
+
+def _build_custom_tools(runtime: WebRuntime, specs: list[dict]) -> tuple[list[Tool], list[str]]:
+    built: list[Tool] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    builtin_names = {tool.name for tool in runtime.base_tools}
+    for idx, spec in enumerate(specs):
+        if not isinstance(spec, dict):
+            errors.append(f"custom_tools[{idx}] must be an object")
+            continue
+        name = str(spec.get("name", "")).strip()
+        description = str(spec.get("description", "")).strip() or "Custom command tool"
+        command = spec.get("command")
+        mutating = bool(spec.get("mutating", True))
+        if not name:
+            errors.append(f"custom_tools[{idx}] missing name")
+            continue
+        if name in seen:
+            errors.append(f"custom_tools[{idx}] duplicate name: {name}")
+            continue
+        if name in builtin_names:
+            errors.append(f"custom_tools[{idx}] name conflicts with built-in tool: {name}")
+            continue
+        seen.add(name)
+        if not isinstance(command, list) or not command or not all(isinstance(item, str) and item.strip() for item in command):
+            errors.append(f"custom_tools[{idx}] command must be a non-empty string array")
+            continue
+        built.append(
+            CustomCommandTool(
+                name=name,
+                description=description,
+                command=command,
+                mutating=mutating,
+                workspace_root_getter=lambda: Path(runtime.workspace_store.snapshot.root) if runtime.workspace_store.snapshot else None,
+            )
+        )
+    return built, errors
+
+
+def _refresh_tooling(runtime: WebRuntime) -> None:
+    active_base = [tool for tool in runtime.base_tools if runtime.enabled_tools.get(tool.name, True)]
+    custom_tools, errors = _build_custom_tools(runtime, runtime.custom_tool_specs)
+    runtime.custom_tool_errors = errors
+    runtime.tools = active_base + custom_tools
 
 
 def _iter_chunks(text: str, *, chunk_size: int = 48) -> list[str]:
@@ -294,7 +344,7 @@ def create_app():
 
     workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
     uploads_root = Path(".mu_cli/uploads")
-    tools: list[Tool] = [
+    base_tools: list[Tool] = [
         ReadFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         WriteFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         ApplyPatchTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
@@ -322,15 +372,20 @@ def create_app():
         workspace_store=workspace_store,
         session_store=session_store,
         pricing=PricingCatalog(Path(".mu_cli/pricing.json")),
-        tools=tools,
-        agent=Agent(provider=EchoProvider(), tools=tools),
+        tools=list(base_tools),
+        agent=Agent(provider=EchoProvider(), tools=list(base_tools)),
         traces=[],
         session_usage=_default_usage(),
         session_turns=[],
         uploads=[],
         uploads_dir=uploads_root,
+        base_tools=base_tools,
+        enabled_tools={tool.name: True for tool in base_tools},
+        custom_tool_specs=[],
+        custom_tool_errors=[],
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
+    _refresh_tooling(runtime)
     runtime.agent = _new_agent(runtime)
     runtime.agent.add_system_prompt(runtime.system_prompt)
     _inject_planning(runtime.agent)
@@ -360,6 +415,27 @@ def create_app():
                 "pricing": runtime.pricing.data,
                 "uploads": runtime.uploads,
                 "pending_approval": runtime.pending_approval,
+                "tools": [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "enabled": runtime.enabled_tools.get(tool.name, True),
+                        "source": "builtin",
+                    }
+                    for tool in runtime.base_tools
+                ]
+                + [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "enabled": True,
+                        "source": "custom",
+                    }
+                    for tool in runtime.tools
+                    if tool.name not in {base.name for base in runtime.base_tools}
+                ],
+                "custom_tool_specs": runtime.custom_tool_specs,
+                "custom_tool_errors": runtime.custom_tool_errors,
             }
         )
 
@@ -446,6 +522,16 @@ def create_app():
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
+        tool_visibility = payload.get("tool_visibility")
+        if isinstance(tool_visibility, dict):
+            for tool in runtime.base_tools:
+                value = tool_visibility.get(tool.name)
+                if isinstance(value, bool):
+                    runtime.enabled_tools[tool.name] = value
+
+        custom_tools = payload.get("custom_tools")
+        if isinstance(custom_tools, list):
+            runtime.custom_tool_specs = custom_tools
 
         workspace = payload.get("workspace")
         if workspace:
@@ -456,6 +542,7 @@ def create_app():
                 runtime.traces.append(f"workspace-attached: {snapshot.root} files={len(snapshot.files)}")
 
         previous_messages = list(runtime.agent.state.messages)
+        _refresh_tooling(runtime)
         runtime.agent = _new_agent(runtime)
         runtime.agent.state.messages = previous_messages
         if runtime.agentic_planning:

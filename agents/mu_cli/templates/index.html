@@ -286,6 +286,44 @@
       resize: vertical;
       font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 14px;
+      padding-right: 44px;
+    }
+
+    .prompt-wrap { position: relative; }
+    .prompt-attach {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      line-height: 1;
+      padding: 0;
+    }
+    .prompt-upload-status { min-height: 18px; }
+
+    .tool-visibility-list {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      padding: 8px;
+      max-height: 180px;
+      overflow: auto;
+    }
+    .tool-visibility-row { border-bottom: 1px solid var(--border); padding: 6px 0; }
+    .tool-visibility-row:last-child { border-bottom: 0; }
+    .custom-tools-hint { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+    #customToolErrors { color: #9d2f2f; }
+    body.dark-mode #customToolErrors { color: #ff9898; }
+
+    #customTools {
+      min-height: 130px;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
     }
 
     .usage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -504,7 +542,12 @@
         </details>
 
         <div>
-          <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
+          <div class="prompt-wrap">
+            <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
+            <button id="promptAttach" class="btn btn-soft prompt-attach" title="Attach file">+</button>
+            <input id="promptAttachInput" type="file" class="d-none" multiple />
+          </div>
+          <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
           <div class="d-flex align-items-center gap-2 mt-2">
             <button id="send" class="btn btn-accent btn-sm">Send</button>
             <div id="report" class="small-muted"></div>
@@ -536,6 +579,14 @@
         <input class="form-check-input" id="darkMode" type="checkbox" />
         <label class="form-check-label small-muted" for="darkMode">Dark mode</label>
       </div>
+
+      <h6 class="mb-2">Tool visibility</h6>
+      <div id="toolVisibilityList" class="tool-visibility-list mb-2 small-muted">Loading tools...</div>
+
+      <label class="small-muted mb-1">Custom tools (JSON array)</label>
+      <div class="small-muted custom-tools-hint mb-1">Format: [{"name":"run_tests","description":"Run tests","command":["make","test-verbose"],"mutating":false}]</div>
+      <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
+      <div id="customToolErrors" class="small-muted mb-3"></div>
 
       <h6 class="mb-2">Pricing (global JSON)</h6>
       <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
@@ -586,7 +637,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, uploads: [], pendingApproval: null };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, uploads: [], pendingApproval: null, tools: [], customToolErrors: [] };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -890,6 +941,55 @@ function renderUploads() {
   });
 }
 
+function renderToolSettings() {
+  const host = document.getElementById('toolVisibilityList');
+  const builtin = state.tools.filter((tool) => tool.source === 'builtin');
+  if (!builtin.length) {
+    host.textContent = 'No built-in tools available.';
+    return;
+  }
+  host.innerHTML = builtin.map((tool) => `
+    <label class="tool-visibility-row d-flex align-items-start gap-2">
+      <input type="checkbox" class="form-check-input mt-1" data-tool-visible="${escapeHtml(tool.name)}" ${tool.enabled ? 'checked' : ''} />
+      <span>
+        <strong>${escapeHtml(tool.name)}</strong><br/>
+        <span class="small-muted">${escapeHtml(tool.description || '')}</span>
+      </span>
+    </label>
+  `).join('');
+
+  host.querySelectorAll('[data-tool-visible]').forEach((el) => {
+    el.addEventListener('change', scheduleApplySettings);
+  });
+
+  const errorsEl = document.getElementById('customToolErrors');
+  if (state.customToolErrors.length) errorsEl.textContent = state.customToolErrors.join(' | ');
+  else errorsEl.textContent = '';
+}
+
+function buildToolVisibilityPayload() {
+  const payload = {};
+  document.querySelectorAll('[data-tool-visible]').forEach((el) => {
+    payload[el.getAttribute('data-tool-visible')] = !!el.checked;
+  });
+  return payload;
+}
+
+function parseCustomToolsInput() {
+  const raw = document.getElementById('customTools').value.trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Custom tools must be a JSON array.');
+    document.getElementById('customToolErrors').textContent = '';
+    return parsed;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Invalid custom tools JSON.';
+    document.getElementById('customToolErrors').textContent = message;
+    throw new Error(message);
+  }
+}
+
 function wireModels(provider) {
   const modelSel = document.getElementById('model');
   modelSel.innerHTML = '';
@@ -910,6 +1010,8 @@ function buildSettingsPayload() {
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
     agentic_planning: document.getElementById('agentic').checked,
+    tool_visibility: buildToolVisibilityPayload(),
+    custom_tools: parseCustomToolsInput(),
   };
 }
 
@@ -966,6 +1068,18 @@ async function uploadContextFiles() {
   const form = new FormData();
   for (const file of input.files) form.append('files', file);
   await apiForm('/api/uploads', form);
+  input.value = '';
+  await refreshState();
+}
+
+async function uploadPromptAttachmentFiles() {
+  const input = document.getElementById('promptAttachInput');
+  if (!input.files || !input.files.length) return;
+  const status = document.getElementById('promptUploadStatus');
+  const form = new FormData();
+  for (const file of input.files) form.append('files', file);
+  await apiForm('/api/uploads', form);
+  status.textContent = `${input.files.length} file(s) attached to context.`;
   input.value = '';
   await refreshState();
 }
@@ -1051,6 +1165,9 @@ async function refreshState() {
   state.sessionUsage = s.session_usage || {};
   state.uploads = s.uploads || [];
   state.pendingApproval = s.pending_approval || null;
+  state.tools = s.tools || [];
+  state.customToolErrors = s.custom_tool_errors || [];
+  const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
   providerSel.innerHTML = '';
@@ -1068,11 +1185,15 @@ async function refreshState() {
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
+  if (document.activeElement !== document.getElementById('customTools')) {
+    document.getElementById('customTools').value = JSON.stringify(customSpecs, null, 2);
+  }
 
   syncPricingEditor();
   updateUsagePanel(state.sessionUsage);
   renderSessions(s.sessions, s.session);
   renderUploads();
+  renderToolSettings();
   renderMessages();
   renderTraces();
 
@@ -1186,6 +1307,14 @@ for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug
     document.getElementById(id).addEventListener('blur', scheduleApplySettings);
   }
 }
+
+document.getElementById('customTools').addEventListener('blur', scheduleApplySettings);
+
+document.getElementById('promptAttach').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('promptAttachInput').click();
+});
+document.getElementById('promptAttachInput').addEventListener('change', () => uploadPromptAttachmentFiles().catch((e) => alert(e.message)));
 
 document.getElementById('send').addEventListener('click', () => sendPrompt().catch((e) => alert(e.message)));
 document.getElementById('newSession').addEventListener('click', () => sessionAction('new').catch((e) => alert(e.message)));

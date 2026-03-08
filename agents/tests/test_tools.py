@@ -9,6 +9,7 @@ from mu_cli.tools.filesystem import (
     ApplyPatchTool,
     ClearUploadedContextStoreTool,
     FetchUrlContextTool,
+    CustomCommandTool,
     GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
     ListUploadedContextFilesTool,
@@ -155,6 +156,17 @@ diff
             result = SearchWebContextTool().run({"query": "example", "provider": "duckduckgo"})
         self.assertTrue(result.ok)
         self.assertIn("https://example.com/1", result.output)
+
+    def test_custom_command_tool(self) -> None:
+        tool = CustomCommandTool(
+            name="echo_custom",
+            description="Echo custom arg",
+            command=["python", "-c", "print('tool:' + '{value}')"],
+            mutating=False,
+        )
+        result = tool.run({"args": {"value": "ok"}})
+        self.assertTrue(result.ok, result.output)
+        self.assertIn("tool:ok", result.output)
 
 
 if __name__ == "__main__":

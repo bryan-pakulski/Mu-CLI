@@ -146,6 +146,34 @@ class WebTests(unittest.TestCase):
         self.assertNotIn('a.txt', names)
         self.assertIn('b.txt', names)
 
+    def test_settings_tool_visibility_and_custom_tools(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={
+            'tool_visibility': {'read_file': False},
+            'custom_tools': [
+                {
+                    'name': 'say_hi',
+                    'description': 'Say hi',
+                    'command': ['python', '-c', "print('hi')"],
+                    'mutating': False,
+                }
+            ],
+        })
+        self.assertEqual(200, res.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        tools = {item['name']: item for item in state['tools']}
+        self.assertIn('read_file', tools)
+        self.assertFalse(tools['read_file']['enabled'])
+        self.assertIn('say_hi', tools)
+        self.assertEqual('custom', tools['say_hi']['source'])
+
 
 if __name__ == '__main__':
     unittest.main()

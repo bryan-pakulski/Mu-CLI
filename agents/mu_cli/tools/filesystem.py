@@ -481,3 +481,60 @@ class SearchWebContextTool:
         if duck.ok:
             return duck
         return ToolResult(ok=False, output=f"auto search failed; google={google.output}; duckduckgo={duck.output}")
+
+
+class CustomCommandTool:
+    """User-defined shell command tool with a fixed command template."""
+
+    mutating = True
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str,
+        command: list[str],
+        mutating: bool = True,
+        workspace_root_getter: Callable[[], Path | None] | None = None,
+    ) -> None:
+        self.name = name
+        self.description = description
+        self.command = command
+        self.mutating = mutating
+        self.workspace_root_getter = workspace_root_getter
+        self.schema = {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "description": "Optional key/value variables used in command placeholders like {path}",
+                }
+            },
+        }
+
+    def run(self, args: dict) -> ToolResult:
+        values = args.get("args", {})
+        if values is None:
+            values = {}
+        if not isinstance(values, dict):
+            return ToolResult(ok=False, output="args must be an object")
+
+        expanded: list[str] = []
+        for token in self.command:
+            try:
+                expanded.append(token.format_map({k: str(v) for k, v in values.items()}))
+            except KeyError as exc:
+                return ToolResult(ok=False, output=f"Missing placeholder value: {exc}")
+
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        proc = subprocess.run(
+            expanded,
+            text=True,
+            capture_output=True,
+            cwd=str(root) if root is not None else None,
+            timeout=30,
+        )
+        output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+        if proc.returncode != 0:
+            return ToolResult(ok=False, output=output.strip() or "command failed")
+        return ToolResult(ok=True, output=output.strip() or "ok")

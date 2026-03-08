@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from mu_cli.core.types import Message, ModelResponse, Role, ToolCall
+from mu_cli.core.types import Message, ModelResponse, Role, ToolCall, UsageStats
+from mu_cli.pricing import estimate_tokens
 
 
 class EchoProvider:
@@ -16,6 +17,7 @@ class EchoProvider:
     """
 
     name = "echo"
+    model = "echo"
 
     def generate(
         self,
@@ -30,11 +32,14 @@ class EchoProvider:
 
         last_message = messages[-1]
         if last_message.role is Role.TOOL_RESULT:
+            content = f"[echo:{self.name}] Tool `{last_message.name}` result: {last_message.content}"
             return ModelResponse(
-                message=Message(
-                    role=Role.ASSISTANT,
-                    content=f"[echo:{self.name}] Tool `{last_message.name}` result: {last_message.content}",
-                )
+                message=Message(role=Role.ASSISTANT, content=content),
+                usage=UsageStats(
+                    input_tokens=estimate_tokens(last_message.content),
+                    output_tokens=estimate_tokens(content),
+                    total_tokens=estimate_tokens(last_message.content) + estimate_tokens(content),
+                ),
             )
 
         last_user = next((m for m in reversed(messages) if m.role is Role.USER), None)
@@ -46,17 +51,23 @@ class EchoProvider:
             _, rest = text.split("/tool ", maxsplit=1)
             name, _, arg_blob = rest.partition(" ")
             args = json.loads(arg_blob) if arg_blob.strip() else {}
+            content = f"Requesting tool `{name}` with provided arguments."
             return ModelResponse(
-                message=Message(
-                    role=Role.ASSISTANT,
-                    content=f"Requesting tool `{name}` with provided arguments.",
-                ),
+                message=Message(role=Role.ASSISTANT, content=content),
                 tool_calls=[ToolCall(name=name, args=args)],
+                usage=UsageStats(
+                    input_tokens=estimate_tokens(text),
+                    output_tokens=estimate_tokens(content),
+                    total_tokens=estimate_tokens(text) + estimate_tokens(content),
+                ),
             )
 
+        content = f"[echo:{self.name}] I received: {last_user.content}"
         return ModelResponse(
-            message=Message(
-                role=Role.ASSISTANT,
-                content=f"[echo:{self.name}] I received: {last_user.content}",
-            )
+            message=Message(role=Role.ASSISTANT, content=content),
+            usage=UsageStats(
+                input_tokens=estimate_tokens(last_user.content),
+                output_tokens=estimate_tokens(content),
+                total_tokens=estimate_tokens(last_user.content) + estimate_tokens(content),
+            ),
         )

@@ -8,86 +8,70 @@ Provider-agnostic CLI scaffold intended for a **human-in-the-loop development wo
 - pluggable provider adapter interface
 - providers:
   - local `echo` provider (for development)
-  - `openai` provider via Chat Completions API
-  - `gemini` provider via Google Generative Language API
-- Tooling:
-  - (`read_file`) with structured schema
-- Minimal interactive CLI loop
+  - `openai` provider via Chat Completions API (with structured tool-calling)
+  - `gemini` provider via Google Generative Language API (with structured tool-calling)
+- tooling:
+  - `read_file`
+  - `write_file` (mutating; approval-gated)
+  - `apply_patch` (mutating; approval-gated)
+  - `git` (mutating; approval-gated)
+  - `list_workspace_files`
+  - `get_workspace_file_context`
+- workspace indexing + tool-run memory
+- per-turn token/cost report with JSON-configurable provider pricing
+- session persistence (resume conversations and workspace state)
 
-## Run
+## Makefile shortcuts
 
 From repo root:
 
 ```bash
-PYTHONPATH=agents python -m mu_cli.cli --provider echo
-```
-
-## Makefile shortcuts
-
-From repository root:
-
-```bash
 make test
 make test-verbose
+make models
 make run-echo
 make run-openai   # requires OPENAI_API_KEY
 make run-gemini   # requires GEMINI_API_KEY or GOOGLE_API_KEY
 ```
 
+## Workspace context and memory
+
+- Attach at startup with `--workspace <path>` or at runtime: `/workspace attach <path>`.
+- Indexing respects `.gitignore` and filters common secret-like files/content.
+- Tool runs are saved in `.mu_cli/workspaces/workspace_<hash>.json`.
+
+## Session persistence
+
+- Session state is saved in `.mu_cli/sessions/<session>.json`.
+- Resume is automatic by default; disable with `--no-resume`.
+
+## Approval policy
+
+- Approval mode controls mutating tools: `ask`, `auto`, `deny`.
+- Configure at startup with `--approval-mode`.
+- Change in app with `/approvals set <ask|auto|deny>`.
+
+## Model selection
+
+- List catalog: `--list-models` or `/models [provider]`.
+- Switch active model at runtime: `/model select <name>`.
+
+## Token usage + pricing report
+
+- Each prompt prints a turn report with token usage and estimated USD cost.
+- Pricing config is user-adjustable JSON at `.mu_cli/pricing.json` by default.
+
 ## Basic usage
 
-- Ask normal prompts.
-- Exit with `/quit`.
-- Discover commands and tool tips with `/help`, `/tools`, and `/tool-help read_file`.
-- Use **TAB autocomplete** for slash commands and tool names (when `readline` is available).
-- Trigger a tool call through the local echo provider:
-
-```text
-/tool read_file {"path":"agents/ReadMe.md"}
-```
-
-## Prioritized feature roadmap
-
-1. **Tool execution loop with post-tool model follow-up** (implemented): after a tool runs, ask the provider for a final assistant response, with a max-round safety cap.
-2. **Provider-native tool calling for OpenAI + Gemini**: map tool schemas into provider APIs and parse structured tool calls.
-3. **Provider error handling + retries**: normalize HTTP/timeouts/rate-limit errors into consistent user-facing failures.
-4. **Conversation persistence**: save/load session history (`jsonl` or sqlite) for resumable workflows.
-5. **Additional developer tools**: add safe `write_file`, `apply_patch`, and `git_status` tools with approval/policy hooks.
-
-## Real providers
-
-OpenAI:
-
 ```bash
-export OPENAI_API_KEY=...
-PYTHONPATH=agents python -m mu_cli.cli --provider openai --model gpt-4o-mini
+PYTHONPATH=agents python -m mu_cli.cli --provider echo
 ```
 
-Gemini:
+Useful commands:
 
-```bash
-export GEMINI_API_KEY=...
-PYTHONPATH=agents python -m mu_cli.cli --provider gemini --model gemini-2.0-flash
-```
+- `/help`, `/tools`, `/tool-help <tool_name>`
+- `/workspace attach <path>`, `/workspace status`
+- `/models`, `/models openai`, `/model select gpt-4o-mini`
+- `/approvals status`, `/approvals set auto`
+- `/quit`
 
-(You can also pass `--api-key` directly.)
-
-## Structure
-
-```text
-mu_cli/
-  core/types.py          # canonical message/tool/provider types
-  agent.py               # provider-neutral agent loop
-  providers/echo.py      # local development provider adapter
-  providers/openai.py    # OpenAI chat completions adapter
-  providers/gemini.py    # Gemini generateContent adapter
-  tools/base.py          # tool protocol + result type
-  tools/filesystem.py    # read_file tool
-  cli.py                 # interactive CLI entrypoint
-```
-
-## Next steps
-
-1. Add policy/approval checkpoints before tool execution.
-2. Add write/patch/git tools.
-3. Persist session history (e.g., sqlite/jsonl).

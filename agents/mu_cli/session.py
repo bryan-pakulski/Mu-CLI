@@ -20,7 +20,14 @@ class SessionStore:
     def __init__(self, root_dir: Path, session_name: str) -> None:
         self.root_dir = root_dir
         self.root_dir.mkdir(parents=True, exist_ok=True)
-        self.path = self.root_dir / f"{session_name}.json"
+        self.session_name = session_name
+
+    @property
+    def path(self) -> Path:
+        return self.root_dir / f"{self.session_name}.json"
+
+    def use(self, session_name: str) -> None:
+        self.session_name = session_name
 
     def load(self) -> SessionState | None:
         if not self.path.exists():
@@ -52,3 +59,13 @@ class SessionStore:
             "messages": [asdict(message) for message in state.messages],
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def list_sessions(self) -> list[str]:
+        return sorted(path.stem for path in self.root_dir.glob("*.json"))
+
+    def delete(self, session_name: str) -> bool:
+        target = self.root_dir / f"{session_name}.json"
+        if not target.exists():
+            return False
+        target.unlink()
+        return True

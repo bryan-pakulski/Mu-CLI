@@ -43,6 +43,8 @@ class CliTests(unittest.TestCase):
             session_store=SessionStore(root / "sessions", "test"),
             workspace_path=None,
             agentic_planning_enabled=True,
+            system_prompt="sys",
+            debug_enabled=False,
         )
 
     def tearDown(self) -> None:
@@ -71,6 +73,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("read_file", completer.matches("re", "/tool re"))
         self.assertIn("attach", completer.matches("a", "/workspace a"))
         self.assertIn("status", completer.matches("s", "/agentic s"))
+        self.assertIn("list", completer.matches("l", "/session l"))
 
     def test_planning_prompt_injected_once(self) -> None:
         dummy = _DummyAgent()
@@ -82,6 +85,17 @@ class CliTests(unittest.TestCase):
     def test_build_planning_prompt(self) -> None:
         text = _build_planning_prompt("x")
         self.assertIn("human-in-the-loop", text)
+
+    def test_debug_toggle_command(self) -> None:
+        handled, out, _ = _handle_local_command("/debug on", self.context, _DummyAgent())
+        self.assertTrue(handled)
+        self.assertIn("enabled", out)
+        self.assertTrue(self.context.debug_enabled)
+
+    def test_session_list_command(self) -> None:
+        handled, out, _ = _handle_local_command("/session list", self.context, _DummyAgent())
+        self.assertTrue(handled)
+        self.assertIn("Sessions:", out)
 
 
 if __name__ == "__main__":

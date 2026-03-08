@@ -48,6 +48,14 @@ make run-gemini   # requires GEMINI_API_KEY or GOOGLE_API_KEY
 - Session state is saved in `.mu_cli/sessions/<session>.json`.
 - Resume is automatic by default; disable with `--no-resume`.
 
+## Session management
+
+- `/session status`: show active session
+- `/session list`: list available sessions
+- `/session new <name>`: start fresh named session
+- `/session load <name>`: load existing session
+- `/session delete <name>`: delete a session (cannot delete active session)
+
 ## Agentic planning prompt
 
 - A planning-focused system prompt is auto-injected by default to keep the model transparent and tool-first.
@@ -70,10 +78,16 @@ make run-gemini   # requires GEMINI_API_KEY or GOOGLE_API_KEY
 - Each prompt prints a turn report with token usage and estimated USD cost.
 - Pricing config is user-adjustable JSON at `.mu_cli/pricing.json` by default.
 
+## Debug mode
+
+- Start with `--debug` or toggle in app with `/debug on|off`.
+- `/debug status` shows current debug mode.
+- When enabled, CLI prints model tool requests and tool execution traces.
+
 ## Basic usage
 
 ```bash
-PYTHONPATH=agents python -m mu_cli.cli --provider echo
+PYTHONPATH=agents python -m mu_cli.cli --provider echo --debug
 ```
 
 Useful commands:
@@ -83,5 +97,7 @@ Useful commands:
 - `/models`, `/models openai`, `/model select gpt-4o-mini`
 - `/approvals status`, `/approvals set auto`
 - `/agentic status`
+- `/debug status`, `/debug on`, `/debug off`
+- `/session status`, `/session list`, `/session new demo`, `/session load demo`
 - `/quit`
 

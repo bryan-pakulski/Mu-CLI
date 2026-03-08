@@ -15,6 +15,7 @@ class AgentState:
 
 ToolRunCallback = Callable[[str, dict, bool, str], None]
 ApprovalCallback = Callable[[str, dict], bool]
+ModelResponseCallback = Callable[[Message, list[ToolCall]], None]
 
 
 class Agent:
@@ -26,12 +27,14 @@ class Agent:
         max_tool_rounds: int = 3,
         on_tool_run: ToolRunCallback | None = None,
         on_approval: ApprovalCallback | None = None,
+        on_model_response: ModelResponseCallback | None = None,
     ) -> None:
         self.provider = provider
         self.tools = {tool.name: tool for tool in (tools or [])}
         self.max_tool_rounds = max_tool_rounds
         self.on_tool_run = on_tool_run
         self.on_approval = on_approval
+        self.on_model_response = on_model_response
         self.last_usage: UsageStats | None = None
         self.state = AgentState()
 
@@ -62,6 +65,8 @@ class Agent:
                 ]
 
             self.state.messages.append(assistant_message)
+            if self.on_model_response is not None:
+                self.on_model_response(assistant_message, response.tool_calls)
             final_response = assistant_message
 
             if not response.tool_calls:

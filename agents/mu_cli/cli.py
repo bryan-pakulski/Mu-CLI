@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 from mu_cli.agent import Agent
-from mu_cli.core.types import Message, Role, UsageStats
+from mu_cli.core.types import Message, Role, ToolCall, UsageStats
 from mu_cli.models import MODELS_BY_PROVIDER, get_models
 from mu_cli.policy import ApprovalPolicy
 from mu_cli.pricing import PricingCatalog, estimate_tokens
@@ -47,11 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-resume", action="store_true", help="Do not resume persisted session state")
     parser.add_argument("--approval-mode", choices=["ask", "auto", "deny"], default="ask")
     parser.add_argument("--list-models", action="store_true", help="Print supported model catalog and exit")
-    parser.add_argument(
-        "--no-agentic-planning",
-        action="store_true",
-        help="Disable automatic planning system prompt injection",
-    )
+    parser.add_argument("--no-agentic-planning", action="store_true")
+    parser.add_argument("--debug", action="store_true", help="Print debug traces of model/tool activity")
     return parser
 
 
@@ -101,6 +98,8 @@ def build_help_text(tools: Sequence[Tool]) -> str:
         "- /model select <name>: Switch active model for current provider.\n"
         "- /approvals status|set <ask|auto|deny>: Manage mutating-tool approval mode.\n"
         "- /agentic status: Show planning-prompt injection status.\n"
+        "- /debug status|on|off: Debug tracing mode.\n"
+        "- /session status|list|new <name>|load <name>|delete <name>: Session management.\n"
         "- /quit (or /q, exit): Exit the CLI.\n\n"
         f"Tools:\n{tool_lines}"
     )
@@ -144,6 +143,8 @@ class RuntimeContext:
         session_store: SessionStore,
         workspace_path: str | None,
         agentic_planning_enabled: bool,
+        system_prompt: str,
+        debug_enabled: bool,
     ) -> None:
         self.provider_name = provider_name
         self.model_name = model_name
@@ -155,6 +156,8 @@ class RuntimeContext:
         self.session_store = session_store
         self.workspace_path = workspace_path
         self.agentic_planning_enabled = agentic_planning_enabled
+        self.system_prompt = system_prompt
+        self.debug_enabled = debug_enabled
 
 
 class CommandCompleter:
@@ -169,6 +172,8 @@ class CommandCompleter:
             "/model",
             "/approvals",
             "/agentic",
+            "/debug",
+            "/session",
             "/quit",
             "/q",
             "exit",
@@ -188,6 +193,10 @@ class CommandCompleter:
             return [item for item in ["select"] if item.startswith(text)]
         if stripped.startswith("/agentic "):
             return [item for item in ["status"] if item.startswith(text)]
+        if stripped.startswith("/debug "):
+            return [item for item in ["status", "on", "off"] if item.startswith(text)]
+        if stripped.startswith("/session "):
+            return [item for item in ["status", "list", "new", "load", "delete"] if item.startswith(text)]
         return [command for command in self.commands if command.startswith(text)]
 
     def complete(self, text: str, state: int) -> str | None:
@@ -212,14 +221,102 @@ def setup_autocomplete(tools: Sequence[Tool]) -> None:
     readline.set_completer(completer.complete)
 
 
+def _debug_model_response(context: RuntimeContext, message: Message, tool_calls: list[ToolCall]) -> None:
+    if not context.debug_enabled:
+        return
+    print("\n[debug] model response")
+    print(f"[debug] assistant_content={message.content!r}")
+    if tool_calls:
+        print("[debug] tool_requests:")
+        for call in tool_calls:
+            print(f"  - id={call.call_id} name={call.name} args={call.args}")
+
+
+def _debug_tool_run(context: RuntimeContext, name: str, args: dict, ok: bool, output: str) -> None:
+    if not context.debug_enabled:
+        return
+    print("\n[debug] tool execution")
+    print(f"[debug] name={name} ok={ok} args={args}")
+    print(f"[debug] output_preview={output[:300]}")
+
+
 def _make_agent(context: RuntimeContext) -> Agent:
     provider = _build_provider(context.provider_name, context.model_name, context.api_key)
     return Agent(
         provider=provider,
         tools=context.tools,
         on_approval=context.approval_policy.should_approve,
-        on_tool_run=lambda name, args, ok, output: context.workspace_store.record_tool_run(name, args, output, ok),
+        on_model_response=lambda message, calls: _debug_model_response(context, message, calls),
+        on_tool_run=lambda name, args, ok, output: (
+            context.workspace_store.record_tool_run(name, args, output, ok),
+            _debug_tool_run(context, name, args, ok, output),
+        ),
     )
+
+
+def _initialize_fresh_agent(context: RuntimeContext, agent: Agent) -> None:
+    agent.state.messages = []
+    agent.add_system_prompt(context.system_prompt)
+    if context.workspace_path:
+        path = Path(context.workspace_path).expanduser()
+        if path.exists() and path.is_dir():
+            snapshot = context.workspace_store.attach(path)
+            agent.add_system_prompt(
+                "Workspace attached. Use list_workspace_files to discover relevant files, "
+                "then use get_workspace_file_context for specific files only. "
+                f"Indexed files: {len(snapshot.files)}."
+            )
+    if context.agentic_planning_enabled:
+        workspace_summary = context.workspace_store.summary() if context.workspace_store.snapshot else None
+        _inject_planning_prompt(agent, workspace_summary)
+
+
+def _handle_session_command(rest: str, context: RuntimeContext, agent: Agent) -> tuple[str, Agent | None]:
+    rest = rest.strip()
+    if rest == "status":
+        return f"Active session: {context.session_store.session_name}", None
+    if rest == "list":
+        sessions = context.session_store.list_sessions()
+        return "Sessions:\n" + ("\n".join(f"- {name}" for name in sessions) if sessions else "(none)"), None
+    if rest.startswith("new "):
+        name = rest[len("new ") :].strip()
+        if not name:
+            return "Usage: /session new <name>", None
+        context.session_store.use(name)
+        new_agent = _make_agent(context)
+        _initialize_fresh_agent(context, new_agent)
+        return f"Started new session: {name}", new_agent
+    if rest.startswith("load "):
+        name = rest[len("load ") :].strip()
+        if not name:
+            return "Usage: /session load <name>", None
+        context.session_store.use(name)
+        loaded = context.session_store.load()
+        if loaded is None:
+            return f"Session not found: {name}", None
+        context.provider_name = loaded.provider
+        context.model_name = loaded.model
+        context.workspace_path = loaded.workspace
+        context.approval_policy.mode = loaded.approval_mode
+        new_agent = _make_agent(context)
+        new_agent.state.messages = loaded.messages
+        if context.workspace_path:
+            path = Path(context.workspace_path).expanduser()
+            if path.exists() and path.is_dir():
+                context.workspace_store.attach(path)
+        if context.agentic_planning_enabled:
+            _inject_planning_prompt(new_agent, context.workspace_store.summary() if context.workspace_store.snapshot else None)
+        return f"Loaded session: {name}", new_agent
+    if rest.startswith("delete "):
+        name = rest[len("delete ") :].strip()
+        if not name:
+            return "Usage: /session delete <name>", None
+        if name == context.session_store.session_name:
+            return "Cannot delete active session.", None
+        deleted = context.session_store.delete(name)
+        return (f"Deleted session: {name}" if deleted else f"Session not found: {name}"), None
+
+    return "Usage: /session status|list|new <name>|load <name>|delete <name>", None
 
 
 def _handle_local_command(user_input: str, context: RuntimeContext, agent: Agent) -> tuple[bool, str | None, Agent | None]:
@@ -289,6 +386,24 @@ def _handle_local_command(user_input: str, context: RuntimeContext, agent: Agent
             f"Agentic planning prompt: {'enabled' if context.agentic_planning_enabled else 'disabled'}",
             None,
         )
+
+    if user_input.startswith("/debug"):
+        _, _, rest = user_input.partition(" ")
+        mode = rest.strip()
+        if mode in {"", "status"}:
+            return True, f"Debug mode: {'on' if context.debug_enabled else 'off'}", None
+        if mode == "on":
+            context.debug_enabled = True
+            return True, "Debug mode enabled", None
+        if mode == "off":
+            context.debug_enabled = False
+            return True, "Debug mode disabled", None
+        return True, "Usage: /debug status|on|off", None
+
+    if user_input.startswith("/session "):
+        _, _, rest = user_input.partition(" ")
+        output, replacement = _handle_session_command(rest, context, agent)
+        return True, output, replacement
 
     return False, None, None
 
@@ -363,6 +478,8 @@ def run() -> int:
         session_store=session_store,
         workspace_path=workspace_path,
         agentic_planning_enabled=not args.no_agentic_planning,
+        system_prompt=args.system,
+        debug_enabled=args.debug,
     )
 
     agent = _make_agent(context)

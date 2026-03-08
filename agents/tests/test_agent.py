@@ -74,6 +74,16 @@ class AgentTests(unittest.TestCase):
         self.assertIn("rejected", tool_result.content)
         self.assertEqual("call_1", tool_result.metadata["tool_call_id"])
 
+    def test_model_response_callback_runs(self) -> None:
+        seen = []
+        agent = Agent(
+            provider=EchoProvider(),
+            tools=[ReadFileTool()],
+            on_model_response=lambda message, calls: seen.append((message.content, len(calls))),
+        )
+        agent.step("hello")
+        self.assertTrue(seen)
+
 
 if __name__ == "__main__":
     unittest.main()

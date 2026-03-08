@@ -25,6 +25,25 @@ class SessionTests(unittest.TestCase):
             self.assertEqual("echo", loaded.provider)
             self.assertEqual("hello", loaded.messages[0].content)
 
+    def test_list_and_delete_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td), "one")
+            state = SessionState(
+                provider="echo",
+                model="echo",
+                workspace=None,
+                approval_mode="ask",
+                messages=[],
+            )
+            store.save(state)
+            store.use("two")
+            store.save(state)
+
+            sessions = store.list_sessions()
+            self.assertEqual(["one", "two"], sessions)
+            self.assertTrue(store.delete("one"))
+            self.assertFalse(store.delete("missing"))
+
 
 if __name__ == "__main__":
     unittest.main()

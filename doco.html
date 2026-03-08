@@ -144,6 +144,8 @@ make run-echo</pre>
         <tr><td><code>/models [provider]</code>, <code>/model select &lt;name&gt;</code></td><td>Inspect/switch model for current provider.</td></tr>
         <tr><td><code>/approvals status</code>, <code>/approvals set ask|auto|deny</code></td><td>Control mutating tool approval behavior.</td></tr>
         <tr><td><code>/agentic status</code></td><td>Check planning prompt mode status.</td></tr>
+        <tr><td><code>/debug status|on|off</code></td><td>Toggle debug traces for model tool-requests and tool executions.</td></tr>
+        <tr><td><code>/session status|list|new &lt;name&gt;|load &lt;name&gt;|delete &lt;name&gt;</code></td><td>Manage persistent sessions from inside the app.</td></tr>
       </tbody>
     </table>
 
@@ -187,6 +189,10 @@ make run-echo</pre>
     </div>
 
     <h2 id="sessions">Sessions, Pricing, and State</h2>
+    <div class="card">
+      <p><strong>Debug mode:</strong> start with <code>--debug</code> or toggle with <code>/debug on</code> and <code>/debug off</code>.</p>
+      <p>When enabled, you see model tool requests (name/args/id) and tool execution traces/output previews.</p>
+    </div>
     <div class="grid">
       <article class="card">
         <h3>Session persistence</h3>

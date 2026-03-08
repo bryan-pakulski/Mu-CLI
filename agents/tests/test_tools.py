@@ -96,6 +96,32 @@ diff
             updated = target.read_text(encoding="utf-8")
             self.assertIn("p=2.0", updated)
 
+    def test_write_file_tool_respects_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            tool = WriteFileTool(lambda: root)
+            result = tool.run({"path": "nested/file.txt", "content": "workspace"})
+            self.assertTrue(result.ok)
+            self.assertEqual("workspace", (root / "nested" / "file.txt").read_text(encoding="utf-8"))
+
+    def test_apply_patch_tool_respects_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True, text=True)
+            (root / "a.txt").write_text("old\n", encoding="utf-8")
+            patch = """--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-old
++new
+"""
+            tool = ApplyPatchTool(lambda: root)
+            result = tool.run({"patch": patch})
+            self.assertTrue(result.ok, result.output)
+            self.assertEqual("new\n", (root / "a.txt").read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

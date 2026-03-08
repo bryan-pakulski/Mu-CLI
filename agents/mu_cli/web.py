@@ -293,10 +293,10 @@ def create_app():
     workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
     uploads_root = Path(".mu_cli/uploads")
     tools: list[Tool] = [
-        ReadFileTool(),
-        WriteFileTool(),
-        ApplyPatchTool(),
-        GitTool(),
+        ReadFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
+        WriteFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
+        ApplyPatchTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
+        GitTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
         ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),

@@ -452,10 +452,10 @@ def run() -> int:
 
     workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
     tools: list[Tool] = [
-        ReadFileTool(),
-        WriteFileTool(),
-        ApplyPatchTool(),
-        GitTool(),
+        ReadFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
+        WriteFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
+        ApplyPatchTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
+        GitTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
     ]

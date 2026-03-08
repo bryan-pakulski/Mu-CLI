@@ -20,8 +20,24 @@ class ReadFileTool:
         "required": ["path"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
+    def _resolve(self, path_value: str) -> tuple[Path | None, str | None]:
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        raw = Path(path_value).expanduser()
+        target = (root / raw).resolve() if root is not None and not raw.is_absolute() else raw.resolve()
+        if root is not None:
+            root_resolved = root.resolve()
+            if target != root_resolved and root_resolved not in target.parents:
+                return None, f"Path is outside attached workspace: {target}"
+        return target, None
+
     def run(self, args: dict[str, str]) -> ToolResult:
-        path = Path(args["path"]).expanduser()
+        path, err = self._resolve(args["path"])
+        if err:
+            return ToolResult(ok=False, output=err)
+        assert path is not None
         if not path.exists():
             return ToolResult(ok=False, output=f"Path not found: {path}")
         if path.is_dir():
@@ -46,8 +62,24 @@ class WriteFileTool:
         "required": ["path", "content"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
+    def _resolve(self, path_value: str) -> tuple[Path | None, str | None]:
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        raw = Path(path_value).expanduser()
+        target = (root / raw).resolve() if root is not None and not raw.is_absolute() else raw.resolve()
+        if root is not None:
+            root_resolved = root.resolve()
+            if target != root_resolved and root_resolved not in target.parents:
+                return None, f"Path is outside attached workspace: {target}"
+        return target, None
+
     def run(self, args: dict[str, str]) -> ToolResult:
-        path = Path(args["path"]).expanduser()
+        path, err = self._resolve(args["path"])
+        if err:
+            return ToolResult(ok=False, output=err)
+        assert path is not None
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(args["content"], encoding="utf-8")
         return ToolResult(ok=True, output=f"Wrote file: {path}")
@@ -94,13 +126,18 @@ class ApplyPatchTool:
         "required": ["patch"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
     def run(self, args: dict[str, str]) -> ToolResult:
         patch = _normalize_patch_text(args["patch"])
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
         proc = subprocess.run(
             ["git", "apply", "--whitespace=nowarn", "-"],
             input=patch,
             text=True,
             capture_output=True,
+            cwd=str(root) if root is not None else None,
         )
         if proc.returncode != 0:
             return ToolResult(ok=False, output=proc.stderr.strip() or "git apply failed")
@@ -132,13 +169,17 @@ class GitTool:
         "commit": ["git", "commit"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
     def run(self, args: dict) -> ToolResult:
         op = str(args["operation"])
         extra = [str(item) for item in args.get("args", [])]
         if op not in self.SAFE_OPS:
             return ToolResult(ok=False, output=f"Unsupported operation: {op}")
         command = self.SAFE_OPS[op] + extra
-        proc = subprocess.run(command, text=True, capture_output=True)
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        proc = subprocess.run(command, text=True, capture_output=True, cwd=str(root) if root is not None else None)
         output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
         if proc.returncode != 0:
             return ToolResult(ok=False, output=output.strip() or "git command failed")

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from core.types import Message, ModelProvider, Role
-from tools.base import Tool
+from mu_cli.core.types import Message, ModelProvider, Role
+from mu_cli.tools.base import Tool
 
 
 @dataclass(slots=True)

@@ -11,28 +11,57 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" integrity="sha512-8YkYxry80vSWSfRb4P6A2wQMi6frg0zA6C31P4I4z6A06vR81A5jYx2J4SoK5A+h6g4Wf9D6NrV4A/6L8P1N5Q==" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <style>
     :root {
-      --bg: #f5f6ff;
-      --glass: rgba(255,255,255,0.72);
-      --glass-strong: rgba(255,255,255,0.88);
-      --border: rgba(130,120,200,0.28);
-      --text: #2a2342;
-      --muted: #6f6891;
-      --purple: #7a62e8;
-      --user-soft: rgba(122, 98, 232, 0.14);
-      --assistant-soft: rgba(151, 121, 245, 0.09);
-      --tool-soft: rgba(170, 140, 255, 0.14);
+      --bg: #dfe7ff;
+      --bg-2: #f6f9ff;
+      --glass: rgba(255, 255, 255, 0.52);
+      --glass-strong: rgba(255, 255, 255, 0.66);
+      --border: rgba(164, 178, 221, 0.42);
+      --text: #1d2238;
+      --muted: #5f6a88;
+      --purple: #5d6dff;
+      --user-soft: rgba(104, 125, 255, 0.14);
+      --assistant-soft: rgba(168, 124, 255, 0.12);
+      --tool-soft: rgba(148, 178, 255, 0.16);
+      --shine: rgba(255,255,255,0.78);
     }
 
     html, body {
       height: 100%;
       overflow: hidden;
-      background: linear-gradient(180deg, #fbfbff 0%, var(--bg) 100%);
+      background: radial-gradient(circle at 10% -10%, #ffffff 0%, transparent 42%),
+                  radial-gradient(circle at 88% 10%, #e5f0ff 0%, transparent 35%),
+                  linear-gradient(160deg, var(--bg-2) 0%, var(--bg) 100%);
       color: var(--text);
       font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 13px;
     }
 
+    body::before,
+    body::after {
+      content: '';
+      position: fixed;
+      width: 42vw;
+      height: 42vw;
+      border-radius: 999px;
+      pointer-events: none;
+      filter: blur(28px);
+      z-index: 0;
+      opacity: 0.42;
+    }
+    body::before {
+      top: -18vw;
+      left: -12vw;
+      background: radial-gradient(circle, rgba(151, 185, 255, 0.48), rgba(151,185,255,0));
+    }
+    body::after {
+      right: -12vw;
+      bottom: -20vw;
+      background: radial-gradient(circle, rgba(194, 157, 255, 0.4), rgba(194,157,255,0));
+    }
+
     .shell {
+      position: relative;
+      z-index: 1;
       height: 100vh;
       display: grid;
       grid-template-columns: 320px minmax(0,1fr);
@@ -44,21 +73,22 @@
     .shell.sidebar-hidden .sidebar { display: none; }
 
     .glass {
-      background: var(--glass);
+      background: linear-gradient(155deg, rgba(255,255,255,0.72), var(--glass));
       border: 1px solid var(--border);
-      border-radius: 12px;
-      backdrop-filter: blur(12px) saturate(120%);
-      -webkit-backdrop-filter: blur(12px) saturate(120%);
-      box-shadow: 0 10px 24px rgba(96, 83, 155, 0.08);
+      border-radius: 18px;
+      backdrop-filter: blur(24px) saturate(165%);
+      -webkit-backdrop-filter: blur(24px) saturate(165%);
+      box-shadow: inset 0 1px 0 var(--shine), 0 16px 34px rgba(88, 107, 170, 0.16);
     }
 
     .sidebar { min-height: 0; overflow: auto; padding: 10px; }
     .panel {
-      padding: 10px;
-      border-radius: 10px;
+      padding: 12px;
+      border-radius: 14px;
       border: 1px solid var(--border);
-      background: var(--glass-strong);
-      margin-bottom: 8px;
+      background: linear-gradient(160deg, rgba(255,255,255,0.76), var(--glass-strong));
+      margin-bottom: 10px;
+      box-shadow: inset 0 1px 0 var(--shine);
     }
     .panel h3 {
       margin: 0 0 6px;
@@ -73,11 +103,12 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 10px;
+      padding: 10px 12px;
       margin-bottom: 8px;
-      border-radius: 10px;
+      border-radius: 14px;
       border: 1px solid var(--border);
-      background: var(--glass-strong);
+      background: linear-gradient(160deg, rgba(255,255,255,0.8), var(--glass-strong));
+      box-shadow: inset 0 1px 0 var(--shine);
     }
 
     .title { font-size: 14px; font-weight: 600; color: #3c2f71; }
@@ -104,9 +135,10 @@
       min-height: 0;
       overflow: auto;
       border: 1px solid var(--border);
-      border-radius: 10px;
-      background: rgba(255,255,255,0.72);
-      padding: 8px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.58);
+      padding: 10px;
+      box-shadow: inset 0 1px 0 var(--shine);
     }
 
     .trace-wrap {
@@ -131,12 +163,13 @@
     .msg { margin-bottom: 8px; }
     .role { font-size: 10px; color: #8478b0; text-transform: uppercase; letter-spacing: .06em; }
     .bubble {
-      margin-top: 3px;
-      padding: 8px;
+      margin-top: 4px;
+      padding: 10px;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      line-height: 1.45;
-      background: #fff;
+      border-radius: 12px;
+      line-height: 1.5;
+      background: rgba(255,255,255,0.72);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
     }
     .msg.role-user .bubble { background: var(--user-soft); }
     .msg.role-assistant .bubble { background: var(--assistant-soft); }
@@ -260,17 +293,48 @@
     }
 
     .modal-card {
-      width: min(720px, 92vw);
-      max-height: 82vh;
+      width: min(760px, 92vw);
+      max-height: 84vh;
       overflow: auto;
-      background: rgba(255,255,255,0.95);
+      background: linear-gradient(160deg, rgba(255,255,255,0.84), rgba(245,250,255,0.72));
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-      box-shadow: 0 18px 35px rgba(83, 61, 160, 0.15);
+      border-radius: 18px;
+      padding: 14px;
+      backdrop-filter: blur(24px) saturate(170%);
+      -webkit-backdrop-filter: blur(24px) saturate(170%);
+      box-shadow: inset 0 1px 0 var(--shine), 0 22px 48px rgba(64, 80, 146, 0.24);
     }
 
     .dir-list button { text-align: left; width: 100%; margin-bottom: 4px; }
+
+    .approval-args {
+      max-height: 280px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.62);
+      padding: 8px;
+    }
+    .approval-row {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) 2fr;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      margin-bottom: 4px;
+      background: rgba(116, 143, 255, 0.08);
+    }
+    .approval-key {
+      color: #41508f;
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+    .approval-value {
+      color: #243157;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" integrity="sha512-oL6sM5heAQf95M2xAFD+a83H8XTur2qxGn8pY/+bexdFv+xo5jBqFaUG2yyglN6E466+vWXT14BMWrM8NTN4xA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
@@ -422,7 +486,7 @@
         <h5 class="m-0">Tool approval required</h5>
       </div>
       <div class="small-muted mb-2" id="approvalToolName"></div>
-      <pre id="approvalArgs" class="p-2 border rounded small" style="max-height:240px; overflow:auto"></pre>
+      <div id="approvalArgs" class="approval-args"></div>
       <div class="d-flex gap-2">
         <button id="approveYes" class="btn btn-accent btn-sm">Approve</button>
         <button id="approveNo" class="btn btn-soft btn-sm">Deny</button>
@@ -459,6 +523,36 @@ async function apiForm(path, formData) {
 function roleClass(role) {
   return String(role || '').replace(/[^a-zA-Z0-9_\-]/g, '_');
 }
+
+function renderApprovalArgs(args) {
+  const el = document.getElementById('approvalArgs');
+  const rows = [];
+
+  function walk(value, path='args') {
+    if (Array.isArray(value)) {
+      if (!value.length) rows.push([path, '[]']);
+      value.forEach((item, idx) => walk(item, `${path}[${idx}]`));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      const keys = Object.keys(value);
+      if (!keys.length) rows.push([path, '{}']);
+      keys.forEach((key) => walk(value[key], `${path}.${key}`));
+      return;
+    }
+    let display;
+    if (typeof value === 'string') display = value;
+    else display = JSON.stringify(value);
+    rows.push([path, display]);
+  }
+
+  walk(args || {});
+
+  el.innerHTML = rows.map(([key, value]) => (
+    `<div class="approval-row"><div class="approval-key">${escapeHtml(key)}</div><div class="approval-value">${escapeHtml(String(value ?? 'null'))}</div></div>`
+  )).join('');
+}
+
 
 function escapeHtml(value) {
   return String(value || '')
@@ -719,7 +813,7 @@ async function pollApproval() {
   }
 
   document.getElementById('approvalToolName').textContent = `Tool: ${pending.tool_name}`;
-  document.getElementById('approvalArgs').textContent = JSON.stringify(pending.args, null, 2);
+  renderApprovalArgs(pending.args);
   showModal('approvalModal', true);
 }
 
@@ -771,7 +865,7 @@ async function refreshState() {
 
   if (state.pendingApproval) {
     document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
-    document.getElementById('approvalArgs').textContent = JSON.stringify(state.pendingApproval.args, null, 2);
+    renderApprovalArgs(state.pendingApproval.args);
     showModal('approvalModal', true);
   } else {
     showModal('approvalModal', false);

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.types import Message, ModelResponse, Role, ToolCall
+from mu_cli.core.types import Message, ModelResponse, Role, ToolCall
 
 
 class EchoProvider:
@@ -11,6 +11,7 @@ class EchoProvider:
 
     Behavior:
     - If the user starts input with `/tool <name> {json_args}`, emits one tool call.
+    - If the latest message is a tool result, emits a plain assistant follow-up.
     - Otherwise, responds with a concise echo-style assistant message.
     """
 
@@ -24,6 +25,18 @@ class EchoProvider:
         stream: bool = False,
     ) -> ModelResponse:
         _ = (tools, stream)
+        if not messages:
+            return ModelResponse(message=Message(role=Role.ASSISTANT, content="Ready."))
+
+        last_message = messages[-1]
+        if last_message.role is Role.TOOL_RESULT:
+            return ModelResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content=f"[echo:{self.name}] Tool `{last_message.name}` result: {last_message.content}",
+                )
+            )
+
         last_user = next((m for m in reversed(messages) if m.role is Role.USER), None)
         if last_user is None:
             return ModelResponse(message=Message(role=Role.ASSISTANT, content="Ready."))

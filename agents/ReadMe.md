@@ -26,6 +26,8 @@ PYTHONPATH=agents python -m mu_cli.cli --provider echo
 
 - Ask normal prompts.
 - Exit with `/quit`.
+- Discover commands and tool tips with `/help`, `/tools`, and `/tool-help read_file`.
+- Use **TAB autocomplete** for slash commands and tool names (when `readline` is available).
 - Trigger a tool call through the local echo provider:
 
 ```text

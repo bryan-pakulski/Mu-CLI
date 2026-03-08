@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ai_cli.core.types import Message, ModelProvider, Role
-from ai_cli.tools.base import Tool
+from core.types import Message, ModelProvider, Role
+from tools.base import Tool
 
 
 @dataclass(slots=True)

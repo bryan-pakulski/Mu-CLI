@@ -1,26 +1,17 @@
-# AI CLI (Provider Agnostic Foundation)
+# Mu-CLI (Provider Agnostic Foundation)
 
-This directory now contains a fresh provider-agnostic CLI scaffold intended for a **human-in-the-loop development workflow**.
+Fresh provider-agnostic CLI scaffold intended for a **human-in-the-loop development workflow**.
 
-## What changed
-
-The previous Gemini-specific interactive implementation was replaced with:
+## What Included
 
 - a provider-neutral core message model
 - a pluggable provider adapter interface
 - a simple local `echo` provider (for development)
-- a first tool (`read_file`) with structured schema
-- a minimal interactive CLI loop
+- Tooling:
+    - (`read_file`) with structured schema
+- Minimal interactive CLI loop
 
 ## Run
-
-From this directory:
-
-```bash
-PYTHONPATH=. ./gemini_interactive
-```
-
-or:
 
 ```bash
 PYTHONPATH=. python -m ai_cli.cli

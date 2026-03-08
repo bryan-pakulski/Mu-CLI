@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ai_cli.tools.base import ToolResult
+from tools.base import ToolResult
 
 
 class ReadFileTool:

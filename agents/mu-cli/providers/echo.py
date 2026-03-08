@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ai_cli.core.types import Message, ModelResponse, Role, ToolCall
+from core.types import Message, ModelResponse, Role, ToolCall
 
 
 class EchoProvider:

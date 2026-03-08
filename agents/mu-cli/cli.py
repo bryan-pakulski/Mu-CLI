@@ -1,11 +1,17 @@
+#!/usr/bin/env python
 from __future__ import annotations
 
 import argparse
 
-from ai_cli.agent import Agent
-from ai_cli.providers.echo import EchoProvider
-from ai_cli.tools.filesystem import ReadFileTool
+# Set python path to current dir so no matter where this script is called from
+# we can run it
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 
+from agent import Agent
+from providers.echo import EchoProvider
+from tools.filesystem import ReadFileTool
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Provider-agnostic AI CLI (human-in-the-loop)")
@@ -21,7 +27,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Initial system instruction",
     )
     return parser
-
 
 def run() -> int:
     args = build_parser().parse_args()
@@ -51,10 +56,8 @@ def run() -> int:
         message = agent.step(user_input)
         print(f"\nassistant> {message.content}")
 
-
 def main() -> None:
     raise SystemExit(run())
-
 
 if __name__ == "__main__":
     main()

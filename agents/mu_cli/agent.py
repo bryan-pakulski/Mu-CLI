@@ -28,6 +28,7 @@ class Agent:
         on_tool_run: ToolRunCallback | None = None,
         on_approval: ApprovalCallback | None = None,
         on_model_response: ModelResponseCallback | None = None,
+        strict_tool_usage: bool = False,
     ) -> None:
         self.provider = provider
         self.tools = {tool.name: tool for tool in (tools or [])}
@@ -35,6 +36,7 @@ class Agent:
         self.on_tool_run = on_tool_run
         self.on_approval = on_approval
         self.on_model_response = on_model_response
+        self.strict_tool_usage = strict_tool_usage
         self.last_usage: UsageStats | None = None
         self.state = AgentState()
 
@@ -46,7 +48,9 @@ class Agent:
 
         final_response: Message | None = None
         self.last_usage = None
-        for _ in range(self.max_tool_rounds + 1):
+        strict_retry_used = False
+        rounds = 0
+        while rounds < self.max_tool_rounds + 1:
             response = self.provider.generate(
                 self.state.messages,
                 tools=[self._tool_schema(tool) for tool in self.tools.values()],
@@ -68,8 +72,23 @@ class Agent:
             if self.on_model_response is not None:
                 self.on_model_response(assistant_message, response.tool_calls)
             final_response = assistant_message
+            rounds += 1
 
             if not response.tool_calls:
+                if self._should_retry_with_tool_instruction(user_input, strict_retry_used):
+                    strict_retry_used = True
+                    self.state.messages.append(
+                        Message(
+                            role=Role.SYSTEM,
+                            content=(
+                                "Tooling requirement reminder: for repository or file-work requests, "
+                                "you must use the available workspace tools before answering definitively. "
+                                "Call the required tool(s) now."
+                            ),
+                            metadata={"kind": "tooling_enforcement"},
+                        )
+                    )
+                    continue
                 return assistant_message
 
             for call in response.tool_calls:
@@ -77,6 +96,31 @@ class Agent:
 
         assert final_response is not None
         return final_response
+
+    def _should_retry_with_tool_instruction(self, user_input: str, strict_retry_used: bool) -> bool:
+        if strict_retry_used or not self.strict_tool_usage or not self.tools:
+            return False
+
+        lowered = user_input.lower()
+        tool_hints = (
+            "file",
+            "repo",
+            "repository",
+            "codebase",
+            "directory",
+            "folder",
+            "search",
+            "find",
+            "read",
+            "edit",
+            "write",
+            "patch",
+            "refactor",
+            "implement",
+            "change",
+            "fix",
+        )
+        return any(hint in lowered for hint in tool_hints)
 
     def _run_tool_call(self, call: ToolCall) -> Message:
         tool = self.tools.get(call.name)

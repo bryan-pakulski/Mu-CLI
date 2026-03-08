@@ -222,6 +222,7 @@
 const state = { models: {}, messages: [], traces: [] };
 let syncing = false;
 let applyTimer = null;
+let sending = false;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -343,15 +344,62 @@ async function refreshState() {
 }
 
 async function sendPrompt() {
+  if (sending) return;
   const text = document.getElementById('prompt').value.trim();
   if (!text) return;
+  sending = true;
   document.getElementById('prompt').value = '';
-  const result = await api('/api/chat', 'POST', { text });
-  state.traces = result.traces;
-  const r = result.report;
-  document.getElementById('report').textContent =
-    `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
-  await refreshState();
+  const reportEl = document.getElementById('report');
+  reportEl.textContent = 'streaming...';
+
+  state.messages.push({ role: 'user', content: text });
+  const draft = { role: 'assistant', content: '' };
+  state.messages.push(draft);
+  renderMessages();
+
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok || !res.body) throw new Error('stream request failed');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'assistant_chunk') {
+          draft.content += event.chunk;
+          renderMessages();
+        } else if (event.type === 'trace') {
+          state.traces.push(event.line);
+          state.traces = state.traces.slice(-50);
+          renderTraces();
+        } else if (event.type === 'report') {
+          const r = event.report;
+          reportEl.textContent =
+            `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
+        } else if (event.type === 'error') {
+          throw new Error(event.error || 'streaming failed');
+        }
+      }
+    }
+
+    await refreshState();
+  } finally {
+    sending = false;
+  }
 }
 
 async function sessionAction(action) {

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import unittest
 
 
@@ -37,6 +38,22 @@ class WebTests(unittest.TestCase):
         assert payload is not None
         self.assertIn('reply', payload)
         self.assertIn('report', payload)
+
+    def test_chat_stream_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/chat/stream', json={'text': 'hello'})
+        self.assertEqual(200, res.status_code)
+
+        raw = b''.join(res.response).decode('utf-8')
+        events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        self.assertTrue(any(event.get('type') == 'assistant_chunk' for event in events))
+        self.assertTrue(any(event.get('type') == 'report' for event in events))
+        self.assertEqual('done', events[-1].get('type'))
 
 
 if __name__ == '__main__':

@@ -31,6 +31,7 @@ PLANNING_PROMPT_BASE = (
     "Prefer smallest safe changes and explain what tool(s) you need. "
     "For workspace tasks: first discover with list_workspace_files, then read only specific files with "
     "get_workspace_file_context. Do not request the whole codebase unless explicitly asked. "
+    "For any request involving repository state, files, diffs, or edits, tool usage is required before final claims. "
     "For mutating actions, clearly state intended edits before executing."
 )
 
@@ -251,6 +252,7 @@ def _make_agent(context: RuntimeContext) -> Agent:
             context.workspace_store.record_tool_run(name, args, output, ok),
             _debug_tool_run(context, name, args, ok, output),
         ),
+        strict_tool_usage=True,
     )
 
 

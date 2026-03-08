@@ -92,6 +92,24 @@ make run-web      # Flask GUI on http://localhost:5000
 - `/debug status` shows current debug mode.
 - When enabled, CLI prints model tool requests and tool execution traces.
 
+## Tooling and product roadmap
+
+1. **Tool-use reliability (near term)**
+   - Strengthen tool-first prompting and runtime enforcement so repository/file requests always route through tools.
+   - Add tool-selection feedback loops ("wrong tool" and "missing args") so models self-correct faster.
+2. **Streaming UX (near term)**
+   - Stream assistant output and trace events in the GUI for long-running turns.
+   - Add explicit progress indicators for model-inference vs tool-execution phases.
+3. **Developer ergonomics (mid term)**
+   - Add keyboard shortcuts, richer command history, and sticky workspace/session context in GUI.
+   - Add safer approval previews for mutating tools with diffs before apply.
+4. **Tooling depth (mid term)**
+   - Add high-signal read/search tools (symbol search, grep-like filtering, repo map summaries).
+   - Add optional test/lint execution tools with controlled allowlists.
+5. **Evaluation and guardrails (ongoing)**
+   - Expand regression tests for tool-calling behavior and streamed-turn correctness.
+   - Add benchmark prompts to track tool usage rate, turn latency, and successful edit completion.
+
 ## Basic usage
 
 ```bash
@@ -108,4 +126,3 @@ Useful commands:
 - `/debug status`, `/debug on`, `/debug off`
 - `/session status`, `/session list`, `/session new demo`, `/session load demo`
 - `/quit`
-

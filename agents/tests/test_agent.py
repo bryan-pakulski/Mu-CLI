@@ -84,6 +84,37 @@ class AgentTests(unittest.TestCase):
         agent.step("hello")
         self.assertTrue(seen)
 
+    def test_strict_tool_usage_retries_once_with_enforcement_prompt(self) -> None:
+        class StrictProvider:
+            name = "strict"
+            model = "strict"
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, messages, tools=None, *, stream=False):
+                _ = (tools, stream)
+                self.calls += 1
+                if self.calls == 1:
+                    return ModelResponse(
+                        message=Message(role=Role.ASSISTANT, content="I can do that"),
+                        tool_calls=[],
+                    )
+                return ModelResponse(
+                    message=Message(role=Role.ASSISTANT, content="using tool now"),
+                    tool_calls=[ToolCall(name="read_file", args={"path": "agents/ReadMe.md"})],
+                )
+
+        provider = StrictProvider()
+        agent = Agent(provider=provider, tools=[ReadFileTool()], strict_tool_usage=True, max_tool_rounds=1)
+
+        reply = agent.step("Please read this file and summarize it")
+
+        self.assertEqual("using tool now", reply.content)
+        self.assertEqual(2, provider.calls)
+        enforcement = [m for m in agent.state.messages if m.metadata.get("kind") == "tooling_enforcement"]
+        self.assertEqual(1, len(enforcement))
+
 
 if __name__ == "__main__":
     unittest.main()

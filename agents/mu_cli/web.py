@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import queue
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -98,7 +101,12 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         on_approval=ApprovalPolicy(mode=runtime.approval_mode).should_approve,
         on_model_response=on_model_response,
         on_tool_run=on_tool_run,
+        strict_tool_usage=True,
     )
+
+
+def _iter_chunks(text: str, *, chunk_size: int = 48) -> list[str]:
+    return [text[idx : idx + chunk_size] for idx in range(0, len(text), chunk_size)] or [""]
 
 
 def _turn_report(runtime: WebRuntime, user_text: str, assistant_text: str) -> dict:
@@ -158,7 +166,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
 
 
 def create_app():
-    from flask import Flask, jsonify, render_template, request
+    from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
     app = Flask(__name__, template_folder="templates")
 
@@ -228,6 +236,63 @@ def create_app():
         report = _turn_report(runtime, text, reply.content)
         _persist(runtime)
         return jsonify({"reply": asdict(reply), "report": report, "traces": runtime.traces[-50:]})
+
+    @app.post("/api/chat/stream")
+    def chat_stream():
+        payload = request.get_json(force=True)
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            return jsonify({"error": "text is required"}), 400
+
+        events: queue.Queue[dict] = queue.Queue()
+        done = threading.Event()
+
+        original_model_response = runtime.agent.on_model_response
+        original_tool_run = runtime.agent.on_tool_run
+
+        def stream_model_response(message: Message, calls: list[ToolCall]) -> None:
+            if original_model_response is not None:
+                original_model_response(message, calls)
+            for call in calls:
+                events.put({"type": "trace", "line": f"tool-request: id={call.call_id} name={call.name} args={call.args}"})
+            if message.content:
+                for chunk in _iter_chunks(message.content):
+                    events.put({"type": "assistant_chunk", "chunk": chunk})
+
+        def stream_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
+            if original_tool_run is not None:
+                original_tool_run(name, args, ok, output)
+            events.put({"type": "trace", "line": f"tool-run: name={name} ok={ok} args={args} output={output[:200]}"})
+
+        def run_turn() -> None:
+            runtime.agent.on_model_response = stream_model_response
+            runtime.agent.on_tool_run = stream_tool_run
+            try:
+                reply = runtime.agent.step(text)
+                report = _turn_report(runtime, text, reply.content)
+                _persist(runtime)
+                events.put({"type": "report", "report": report})
+                events.put({"type": "done", "reply": asdict(reply), "traces": runtime.traces[-50:]})
+            except Exception as exc:  # pragma: no cover - defensive for stream transport
+                events.put({"type": "error", "error": str(exc)})
+            finally:
+                runtime.agent.on_model_response = original_model_response
+                runtime.agent.on_tool_run = original_tool_run
+                done.set()
+
+        thread = threading.Thread(target=run_turn, daemon=True)
+        thread.start()
+
+        @stream_with_context
+        def generate():
+            while not done.is_set() or not events.empty():
+                try:
+                    item = events.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                yield json.dumps(item) + "\n"
+
+        return Response(generate(), mimetype="application/x-ndjson")
 
     @app.post("/api/settings")
     def update_settings():

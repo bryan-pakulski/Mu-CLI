@@ -95,6 +95,7 @@
         <li><a href="#tools">Tooling & Approval Model</a></li>
         <li><a href="#providers">Providers & Models</a></li>
         <li><a href="#sessions">Sessions, Pricing, and State</a></li>
+        <li><a href="#roadmap">Roadmap</a></li>
         <li><a href="#maintenance">Keeping this doc up to date</a></li>
       </ul>
     </section>
@@ -131,6 +132,7 @@ make run-web</pre>
       <article class="card">
         <h3>Agentic planning prompt</h3>
         <p>Planning guidance is auto-injected by default to make intent and tool choices explicit.</p>
+        <p>Tooling enforcement is stricter for file/repo/edit tasks: models are nudged to call tools before final claims.</p>
       </article>
       <article class="card">
         <h3>Selective context</h3>
@@ -158,6 +160,18 @@ make run-web</pre>
       <p>Run <code>make run-web</code> and open <code>http://localhost:5000</code>.</p>
       <p>The GUI provides a toggleable sidebar for provider/model/settings, inline session management (status/list/new/load/delete), workspace path, approval mode, and debug toggles.</p>
       <p>Chat, traces, and per-turn cost report are available in one view for developer-in-the-loop workflows.</p>
+      <p>Assistant output now streams incrementally in the GUI using a streaming chat endpoint, so long turns feel more responsive.</p>
+    </div>
+
+    <h2 id="roadmap">Roadmap</h2>
+    <div class="card">
+      <ol>
+        <li><strong>Tool-use reliability:</strong> keep improving enforcement and self-correction when models skip tools or provide incomplete arguments.</li>
+        <li><strong>Streaming UX:</strong> phase-level progress indicators for model time vs tool-execution time.</li>
+        <li><strong>Developer ergonomics:</strong> keyboard shortcuts, sticky context, and safer mutating-tool diff previews.</li>
+        <li><strong>Tooling depth:</strong> better repo navigation/search tools and controlled test/lint execution tools.</li>
+        <li><strong>Evaluation:</strong> regression suite for tool-use rates, latency, and end-to-end task completion.</li>
+      </ol>
     </div>
 
     <h2 id="workspace">Workspace Context Flow</h2>

@@ -39,6 +39,10 @@ class WebTests(unittest.TestCase):
         self.assertIn('reply', payload)
         self.assertIn('report', payload)
 
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertGreaterEqual(state['session_usage']['total_tokens'], payload['report']['total_tokens'])
+
     def test_chat_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 
@@ -68,6 +72,25 @@ class WebTests(unittest.TestCase):
         assert payload is not None
         self.assertIn('reply', payload)
         self.assertIn('rejected by approval policy', payload['reply']['content'])
+
+    def test_pricing_endpoint_updates_model_row(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/pricing', json={
+            'provider': 'echo',
+            'model': 'echo',
+            'input_per_1m': 1.23,
+            'output_per_1m': 4.56,
+        })
+        self.assertEqual(200, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertEqual(1.23, body['pricing']['echo']['echo']['input_per_1m'])
+        self.assertEqual(4.56, body['pricing']['echo']['echo']['output_per_1m'])
 
 
 if __name__ == '__main__':

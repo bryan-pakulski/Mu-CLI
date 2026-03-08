@@ -4,49 +4,53 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mu_cli GUI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <style>
     :root {
-      --bg-1: #0f1220;
-      --bg-2: #1b2542;
-      --glass: rgba(255, 255, 255, 0.05);
-      --glass-strong: rgba(255, 255, 255, 0.08);
-      --border: rgba(255, 255, 255, 0.14);
-      --text: #f3f6ff;
-      --muted: #c6d0ef;
-      --purple-soft: rgba(161, 133, 246, 0.17);
-      --assistant-soft: rgba(116, 174, 255, 0.12);
-      --orange-soft: rgba(255, 174, 90, 0.18);
+      --bg: #f5f6ff;
+      --bg-soft: #eef0ff;
+      --glass: rgba(255,255,255,0.7);
+      --glass-strong: rgba(255,255,255,0.84);
+      --border: rgba(130,120,200,0.28);
+      --text: #2a2342;
+      --muted: #6f6891;
+      --purple: #7a62e8;
+      --purple-soft: rgba(122, 98, 232, 0.12);
+      --user-soft: rgba(122, 98, 232, 0.14);
+      --assistant-soft: rgba(151, 121, 245, 0.09);
+      --tool-soft: rgba(170, 140, 255, 0.14);
     }
 
     html, body {
       height: 100%;
       overflow: hidden;
-      background: linear-gradient(180deg, var(--bg-2), var(--bg-1)) fixed;
+      background: linear-gradient(180deg, #fbfbff 0%, var(--bg) 100%);
       color: var(--text);
-      font-size: 14px;
+      font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
     }
 
-    .app-shell {
+    .shell {
       height: 100vh;
       display: grid;
-      grid-template-columns: 340px minmax(0, 1fr);
-      gap: 12px;
+      grid-template-columns: 320px minmax(0,1fr);
+      gap: 10px;
       padding: 10px;
-      transition: grid-template-columns .2s ease;
+      transition: grid-template-columns .18s ease;
     }
-
-    .app-shell.sidebar-hidden {
-      grid-template-columns: minmax(0, 1fr);
-    }
+    .shell.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
+    .shell.sidebar-hidden .sidebar { display: none; }
 
     .glass {
       background: var(--glass);
       border: 1px solid var(--border);
-      backdrop-filter: blur(14px) saturate(135%);
-      -webkit-backdrop-filter: blur(14px) saturate(135%);
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
-      border-radius: 14px;
+      border-radius: 12px;
+      backdrop-filter: blur(12px) saturate(120%);
+      -webkit-backdrop-filter: blur(12px) saturate(120%);
+      box-shadow: 0 10px 24px rgba(96, 83, 155, 0.08);
     }
 
     .sidebar {
@@ -55,64 +59,55 @@
       padding: 10px;
     }
 
-    .app-shell.sidebar-hidden .sidebar {
-      display: none;
-    }
-
     .panel {
-      padding: 12px;
-      border-radius: 12px;
-      margin-bottom: 8px;
-      background: rgba(9, 14, 33, 0.28);
+      padding: 10px;
+      border-radius: 10px;
       border: 1px solid var(--border);
+      background: var(--glass-strong);
+      margin-bottom: 8px;
     }
 
     .panel h3 {
-      font-size: 12px;
       margin: 0 0 6px;
-      letter-spacing: .05em;
+      font-size: 11px;
+      letter-spacing: .04em;
       text-transform: uppercase;
-      color: #f4f7ff;
+      color: #4d3f81;
     }
 
     .main {
       min-height: 0;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto minmax(0,1fr);
       overflow: hidden;
     }
 
     .topbar {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
+      gap: 8px;
+      padding: 8px 10px;
       margin-bottom: 8px;
-      border-radius: 12px;
-      background: var(--glass-strong);
-      border: 1px solid var(--border);
-      backdrop-filter: blur(16px);
-    }
-
-    .title {
-      font-weight: 600;
-      font-size: 16px;
-    }
-
-    .status-pill {
-      margin-left: auto;
       border-radius: 10px;
-      font-size: 11px;
-      padding: 2px 10px;
       border: 1px solid var(--border);
+      background: var(--glass-strong);
+    }
+
+    .title { font-size: 14px; font-weight: 600; color: #3c2f71; }
+    .pill {
+      margin-left: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2px 8px;
       color: var(--muted);
-      background: rgba(0, 0, 0, 0.2);
+      font-size: 11px;
+      background: rgba(255,255,255,0.68);
     }
 
     .chat-layout {
       min-height: 0;
       display: grid;
-      grid-template-rows: minmax(0, 1fr) auto auto;
+      grid-template-rows: minmax(0,1fr) auto auto;
       gap: 8px;
       padding: 10px;
       overflow: hidden;
@@ -121,172 +116,167 @@
     .messages {
       min-height: 0;
       overflow: auto;
-      padding: 10px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: rgba(8, 14, 34, 0.48);
-    }
-
-    .trace {
-      min-height: 0;
-      overflow: auto;
       border: 1px solid var(--border);
       border-radius: 10px;
-      background: rgba(8, 14, 34, 0.48);
+      background: rgba(255,255,255,0.72);
       padding: 8px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .trace-wrap {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.65);
+      overflow: hidden;
+    }
+
+    .trace-wrap > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 6px 10px;
+      color: var(--muted);
+      border-bottom: 1px solid transparent;
+      font-size: 11px;
+    }
+
+    .trace-wrap[open] > summary {
+      border-bottom-color: var(--border);
+      background: rgba(255,255,255,0.7);
+    }
+    .trace-wrap > summary::-webkit-details-marker { display: none; }
+
+    .trace {
+      max-height: 140px;
+      overflow: auto;
+      padding: 8px;
       font-size: 11px;
       white-space: pre-wrap;
     }
 
-    .msg { margin-bottom: 10px; }
-    .role {
-      font-size: 10px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: #aebbe4;
-    }
-
+    .msg { margin-bottom: 8px; }
+    .role { font-size: 10px; color: #8478b0; text-transform: uppercase; letter-spacing: .06em; }
     .bubble {
       margin-top: 3px;
-      padding: 9px;
-      border-radius: 10px;
+      padding: 8px;
       border: 1px solid var(--border);
+      border-radius: 8px;
       line-height: 1.45;
+      background: #fff;
     }
-    .msg.role-user .bubble { background: var(--purple-soft); }
+    .msg.role-user .bubble { background: var(--user-soft); }
     .msg.role-assistant .bubble { background: var(--assistant-soft); }
 
     .bubble p { margin: 0 0 8px; }
     .bubble p:last-child { margin-bottom: 0; }
     .bubble code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: rgba(0, 0, 0, 0.35);
+      background: rgba(122,98,232,0.12);
+      color: #533db0;
       padding: 1px 4px;
-      border-radius: 6px;
-      color: #ffe9ff;
+      border-radius: 4px;
     }
     .bubble pre {
-      margin: 7px 0;
-      padding: 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      background: rgba(0, 0, 0, 0.35);
+      margin: 6px 0;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #faf9ff;
       overflow-x: auto;
       white-space: pre;
       font-size: 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
     .tool-toggle {
-      margin-top: 4px;
+      margin-top: 3px;
       border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--orange-soft);
+      border-radius: 8px;
       overflow: hidden;
+      background: var(--tool-soft);
     }
-
     .tool-toggle > summary {
       list-style: none;
       cursor: pointer;
-      padding: 8px 10px;
+      padding: 7px 8px;
+      font-size: 10px;
       text-transform: uppercase;
       letter-spacing: .04em;
-      font-size: 10px;
-      color: #ffe5c3;
-      border-bottom: 1px solid transparent;
+      color: #6c52d2;
     }
-
-    .tool-toggle[open] > summary {
-      border-bottom-color: rgba(255, 255, 255, 0.2);
-      background: rgba(0, 0, 0, 0.18);
-    }
-
     .tool-toggle > summary::-webkit-details-marker { display: none; }
-    .tool-toggle > summary::before { content: '▸ '; }
-    .tool-toggle[open] > summary::before { content: '▾ '; }
 
     .trace-line { display: block; margin-bottom: 4px; }
-    .trace-model { color: #cabfff; }
-    .trace-request { color: #ffd09d; }
-    .trace-run { color: #b1f3d1; }
+    .trace-model { color: #7058d1; }
+    .trace-request { color: #8d6ff2; }
+    .trace-run { color: #5f5f9b; }
 
     .form-control, .form-select {
-      background: rgba(0, 0, 0, 0.25);
+      font-size: 12px;
+      border-radius: 8px;
       border-color: var(--border);
       color: var(--text);
-      font-size: 12px;
-      border-radius: 8px;
+      background: rgba(255,255,255,0.8);
     }
-
     .form-control:focus, .form-select:focus {
-      background: rgba(0, 0, 0, 0.34);
-      color: var(--text);
-      border-color: #8ca8ff;
-      box-shadow: 0 0 0 .2rem rgba(100, 140, 255, 0.15);
+      border-color: #a58df7;
+      box-shadow: 0 0 0 .2rem rgba(123,98,232,.12);
     }
 
-    .btn-glass {
+    .btn-soft {
       border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.08);
-      color: #edf2ff;
+      color: #4a3c81;
+      background: rgba(255,255,255,0.84);
       border-radius: 8px;
-    }
-
-    .btn-glass:hover {
-      background: rgba(255, 255, 255, 0.16);
-      color: #fff;
-    }
-
-    .btn-primary {
-      border: none;
-      background: linear-gradient(90deg, #5f85ff, #8674ff);
-      border-radius: 8px;
-    }
-
-    .small-muted { color: var(--muted); font-size: 12px; }
-    .approval-warning {
-      margin-top: 8px;
-      padding: 8px 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 188, 117, 0.45);
-      background: rgba(255, 188, 117, 0.15);
-      color: #ffe1b7;
       font-size: 12px;
+    }
+    .btn-soft:hover { background: #fff; }
+
+    .btn-accent {
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #7a62e8, #967bff);
+      color: #fff;
+      font-size: 12px;
+    }
+
+    .small-muted { color: var(--muted); font-size: 11px; }
+    .approval-warning {
+      margin-top: 6px;
+      padding: 7px 8px;
+      border: 1px solid rgba(172, 132, 255, 0.45);
+      background: rgba(172, 132, 255, 0.14);
+      border-radius: 8px;
+      color: #5a459e;
+      font-size: 11px;
       display: none;
     }
 
-    details.trace-wrap {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      background: rgba(8, 14, 34, 0.28);
-    }
-
-    details.trace-wrap > summary {
-      list-style: none;
-      cursor: pointer;
-      padding: 7px 10px;
-      color: var(--muted);
+    .thinking {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      color: #5f49bb;
       font-size: 11px;
-      border-bottom: 1px solid transparent;
     }
 
-    details.trace-wrap[open] > summary {
-      border-bottom-color: var(--border);
-      background: rgba(255, 255, 255, 0.04);
+    .usage-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 6px;
+      font-size: 11px;
     }
 
-    details.trace-wrap > summary::-webkit-details-marker { display: none; }
-    details.trace-wrap > summary::before { content: '▸ '; }
-    details.trace-wrap[open] > summary::before { content: '▾ '; }
+    .usage-chip {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px;
+      background: rgba(255,255,255,0.72);
+    }
   </style>
 </head>
 <body>
-  <div id="app" class="app-shell">
-    <aside class="sidebar glass" id="sidebar">
+  <div id="app" class="shell">
+    <aside id="sidebar" class="sidebar glass">
       <div class="panel">
-        <h3>Runtime settings</h3>
+        <h3>Runtime</h3>
         <div class="small-muted mb-2">Auto-applies</div>
 
         <label class="small-muted mb-1">Provider</label>
@@ -295,13 +285,11 @@
         <label class="small-muted mb-1">Model</label>
         <select id="model" class="form-select mb-2"></select>
 
-        <label class="small-muted mb-1">API key (optional)</label>
+        <label class="small-muted mb-1">API key</label>
         <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
 
         <label class="small-muted mb-1">Approval mode</label>
-        <select id="approval" class="form-select mb-2">
-          <option>ask</option><option>auto</option><option>deny</option>
-        </select>
+        <select id="approval" class="form-select mb-2"><option>ask</option><option>auto</option><option>deny</option></select>
 
         <label class="small-muted mb-1">Workspace path</label>
         <input id="workspace" class="form-control mb-2" placeholder="/path/to/repo" />
@@ -314,37 +302,64 @@
           <input class="form-check-input" id="agentic" type="checkbox" checked />
           <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
         </div>
-        <div id="approvalNote" class="approval-warning">Approval mode <strong>ask</strong> is not interactive in GUI and will deny mutating tools. Switch to <strong>auto</strong> or <strong>deny</strong>.</div>
+
+        <div id="approvalNote" class="approval-warning">`ask` is non-interactive in GUI; mutating tools are denied here.</div>
       </div>
 
       <div class="panel">
-        <h3>Session management</h3>
+        <h3>Sessions</h3>
         <div class="small-muted mb-2" id="activeSession">active: -</div>
 
         <div class="input-group input-group-sm mb-2">
           <input id="sessionName" class="form-control" placeholder="session name" />
-          <button id="newSession" class="btn btn-primary" type="button">New</button>
+          <button id="newSession" class="btn btn-accent" type="button">New</button>
         </div>
 
-        <select id="sessionList" class="form-select mb-2" size="6"></select>
+        <select id="sessionList" class="form-select mb-2" size="5"></select>
 
         <div class="d-flex gap-2">
-          <button id="loadSession" class="btn btn-glass btn-sm">Load</button>
-          <button id="deleteSession" class="btn btn-glass btn-sm">Delete</button>
-          <button id="refreshSessions" class="btn btn-glass btn-sm">Refresh</button>
+          <button id="loadSession" class="btn btn-soft btn-sm">Load</button>
+          <button id="deleteSession" class="btn btn-soft btn-sm">Delete</button>
+          <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Pricing (global)</h3>
+        <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
+        <label class="small-muted mb-1">Provider</label>
+        <input id="pricingProvider" class="form-control mb-2" />
+        <label class="small-muted mb-1">Model</label>
+        <input id="pricingModel" class="form-control mb-2" />
+        <label class="small-muted mb-1">Input per 1M (USD)</label>
+        <input id="pricingInput" type="number" step="0.000001" class="form-control mb-2" />
+        <label class="small-muted mb-1">Output per 1M (USD)</label>
+        <input id="pricingOutput" type="number" step="0.000001" class="form-control mb-2" />
+        <button id="savePricing" class="btn btn-soft btn-sm">Save pricing</button>
+      </div>
+
+      <div class="panel">
+        <h3>Session usage</h3>
+        <div class="usage-grid">
+          <div class="usage-chip"><div class="small-muted">Input</div><div id="usageIn">0</div></div>
+          <div class="usage-chip"><div class="small-muted">Output</div><div id="usageOut">0</div></div>
+          <div class="usage-chip"><div class="small-muted">Total</div><div id="usageTotal">0</div></div>
+          <div class="usage-chip"><div class="small-muted">Cost USD</div><div id="usageCost">0.000000</div></div>
         </div>
       </div>
     </aside>
 
     <section class="main">
       <div class="topbar">
-        <button id="toggleSidebar" class="btn btn-glass btn-sm">☰</button>
-        <div class="title">mu_cli GUI</div>
-        <span id="meta" class="status-pill">loading...</span>
+        <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
+        <div class="title">mu_cli</div>
+        <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
+        <span id="meta" class="pill">loading...</span>
       </div>
 
       <div class="chat-layout glass">
         <div id="messages" class="messages"></div>
+
         <details class="trace-wrap" id="traceWrap">
           <summary>Debug traces</summary>
           <div id="traces" class="trace">debug traces will appear here</div>
@@ -353,7 +368,7 @@
         <div>
           <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
           <div class="d-flex align-items-center gap-2 mt-2">
-            <button id="send" class="btn btn-primary btn-sm">Send</button>
+            <button id="send" class="btn btn-accent btn-sm">Send</button>
             <div id="report" class="small-muted"></div>
           </div>
         </div>
@@ -362,7 +377,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [] };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {} };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -401,18 +416,14 @@ function formatMessageContent(content) {
       const text = parts[idx];
       if (!text) continue;
       const escaped = escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
-      const paragraphs = escaped
+      html += escaped
         .split(/\n{2,}/)
         .map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`)
         .join('');
-      html += paragraphs;
       continue;
     }
-
     if (idx % 3 === 1) continue;
-
-    const code = parts[idx] || '';
-    html += `<pre><code>${escapeHtml(code)}</code></pre>`;
+    html += `<pre><code>${escapeHtml(parts[idx] || '')}</code></pre>`;
   }
 
   return html || '<p></p>';
@@ -438,23 +449,12 @@ function renderMessages() {
 
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
-
-    const roleEl = document.createElement('div');
-    roleEl.className = 'role';
-    roleEl.textContent = m.role;
-    row.appendChild(roleEl);
+    row.innerHTML = `<div class="role">${m.role}</div>`;
 
     if (isToolRole(m.role)) {
       const details = document.createElement('details');
       details.className = 'tool-toggle';
-      const summary = document.createElement('summary');
-      summary.textContent = `${m.role.replace('_', ' ')} (click to expand)`;
-      details.appendChild(summary);
-
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.innerHTML = formatMessageContent(m.content);
-      details.appendChild(bubble);
+      details.innerHTML = `<summary>${m.role.replace('_', ' ')} (expand)</summary><div class="bubble">${formatMessageContent(m.content)}</div>`;
       row.appendChild(details);
     } else {
       const bubble = document.createElement('div');
@@ -525,6 +525,28 @@ function updateApprovalNote() {
   document.getElementById('approvalNote').style.display = show ? 'block' : 'none';
 }
 
+function updateThinking(show) {
+  document.getElementById('thinking').style.display = show ? 'flex' : 'none';
+}
+
+function updateUsagePanel(usage) {
+  const u = usage || {};
+  document.getElementById('usageIn').textContent = String(Math.trunc(Number(u.input_tokens || 0)));
+  document.getElementById('usageOut').textContent = String(Math.trunc(Number(u.output_tokens || 0)));
+  document.getElementById('usageTotal').textContent = String(Math.trunc(Number(u.total_tokens || 0)));
+  document.getElementById('usageCost').textContent = Number(u.estimated_cost_usd || 0).toFixed(6);
+}
+
+function syncPricingEditor() {
+  const provider = document.getElementById('provider').value;
+  const model = document.getElementById('model').value;
+  document.getElementById('pricingProvider').value = provider;
+  document.getElementById('pricingModel').value = model;
+  const row = (((state.pricing || {})[provider] || {})[model]) || { input_per_1m: 0, output_per_1m: 0 };
+  document.getElementById('pricingInput').value = Number(row.input_per_1m || 0);
+  document.getElementById('pricingOutput').value = Number(row.output_per_1m || 0);
+}
+
 function scheduleApplySettings() {
   if (syncing) return;
   clearTimeout(applyTimer);
@@ -536,12 +558,24 @@ async function applySettings() {
   await refreshState();
 }
 
+async function savePricing() {
+  await api('/api/pricing', 'POST', {
+    provider: document.getElementById('pricingProvider').value.trim(),
+    model: document.getElementById('pricingModel').value.trim(),
+    input_per_1m: Number(document.getElementById('pricingInput').value || 0),
+    output_per_1m: Number(document.getElementById('pricingOutput').value || 0),
+  });
+  await refreshState();
+}
+
 async function refreshState() {
   syncing = true;
   const s = await api('/api/state');
   state.models = s.models;
   state.messages = s.messages;
   state.traces = s.traces;
+  state.pricing = s.pricing || {};
+  state.sessionUsage = s.session_usage || {};
 
   const providerSel = document.getElementById('provider');
   providerSel.innerHTML = '';
@@ -561,6 +595,8 @@ async function refreshState() {
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
 
   updateApprovalNote();
+  syncPricingEditor();
+  updateUsagePanel(state.sessionUsage);
   renderSessions(s.sessions, s.session);
   renderMessages();
   renderTraces();
@@ -571,8 +607,11 @@ async function sendPrompt() {
   if (sending) return;
   const text = document.getElementById('prompt').value.trim();
   if (!text) return;
+
   sending = true;
+  updateThinking(true);
   document.getElementById('prompt').value = '';
+
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
@@ -603,6 +642,7 @@ async function sendPrompt() {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
         if (event.type === 'assistant_chunk') {
+          updateThinking(false);
           if (!draft) {
             draft = { role: 'assistant', content: '' };
             state.messages.push(draft);
@@ -625,6 +665,7 @@ async function sendPrompt() {
 
     await refreshState();
   } finally {
+    updateThinking(false);
     sending = false;
   }
 }
@@ -647,6 +688,7 @@ for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'approval') updateApprovalNote();
     scheduleApplySettings();
+    syncPricingEditor();
   });
   if (id === 'workspace' || id === 'apiKey') {
     document.getElementById(id).addEventListener('blur', scheduleApplySettings);
@@ -658,14 +700,11 @@ document.getElementById('newSession').addEventListener('click', () => sessionAct
 document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
 document.getElementById('loadSession').addEventListener('click', () => sessionAction('load').catch((e) => alert(e.message)));
 document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
-document.getElementById('toggleSidebar').addEventListener('click', () => {
-  document.getElementById('app').classList.toggle('sidebar-hidden');
-});
+document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
+document.getElementById('toggleSidebar').addEventListener('click', () => document.getElementById('app').classList.toggle('sidebar-hidden'));
 
 document.getElementById('prompt').addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    sendPrompt().catch((err) => alert(err.message));
-  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
 });
 
 refreshState().catch((e) => alert(e.message));

@@ -40,6 +40,18 @@ class PricingCatalog:
             return DEFAULT_PRICING
         return json.loads(self.config_path.read_text(encoding="utf-8"))
 
+    def save(self) -> None:
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+
+    def update_model_pricing(self, provider: str, model: str, input_per_1m: float, output_per_1m: float) -> None:
+        provider_cfg = self.data.setdefault(provider, {})
+        provider_cfg[model] = {
+            "input_per_1m": float(input_per_1m),
+            "output_per_1m": float(output_per_1m),
+        }
+        self.save()
+
     def estimate_cost(self, provider: str, model: str, usage: UsageStats) -> TurnCostReport:
         provider_cfg = self.data.get(provider, {})
         model_cfg = provider_cfg.get(model, {"input_per_1m": 0.0, "output_per_1m": 0.0})

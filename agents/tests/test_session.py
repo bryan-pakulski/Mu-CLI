@@ -16,6 +16,8 @@ class SessionTests(unittest.TestCase):
                 workspace="/tmp/ws",
                 approval_mode="auto",
                 messages=[Message(role=Role.USER, content="hello")],
+                usage_totals={"total_tokens": 42.0},
+                turns=[{"session": "demo", "total_tokens": 42}],
             )
             store.save(state)
 
@@ -24,6 +26,8 @@ class SessionTests(unittest.TestCase):
             assert loaded is not None
             self.assertEqual("echo", loaded.provider)
             self.assertEqual("hello", loaded.messages[0].content)
+            self.assertEqual(42.0, loaded.usage_totals["total_tokens"])
+            self.assertEqual("demo", loaded.turns[0]["session"])
 
     def test_list_and_delete_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as td:

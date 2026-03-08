@@ -14,6 +14,8 @@ class SessionState:
     workspace: str | None
     approval_mode: str
     messages: list[Message]
+    usage_totals: dict[str, float] | None = None
+    turns: list[dict] | None = None
 
 
 class SessionStore:
@@ -48,6 +50,8 @@ class SessionStore:
             workspace=payload.get("workspace"),
             approval_mode=payload.get("approval_mode", "ask"),
             messages=messages,
+            usage_totals=payload.get("usage_totals"),
+            turns=payload.get("turns"),
         )
 
     def save(self, state: SessionState) -> None:
@@ -57,6 +61,8 @@ class SessionStore:
             "workspace": state.workspace,
             "approval_mode": state.approval_mode,
             "messages": [asdict(message) for message in state.messages],
+            "usage_totals": state.usage_totals or {},
+            "turns": state.turns or [],
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

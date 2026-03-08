@@ -4,6 +4,7 @@ import json
 import queue
 import threading
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -45,6 +46,8 @@ class WebRuntime:
     tools: list[Tool]
     agent: Agent
     traces: list[str]
+    session_usage: dict[str, float]
+    session_turns: list[dict]
 
 
 def _build_provider(name: str, model: str, api_key: str | None):
@@ -137,6 +140,26 @@ def _turn_report(runtime: WebRuntime, user_text: str, assistant_text: str) -> di
     }
 
 
+def _record_turn(runtime: WebRuntime, report: dict) -> None:
+    runtime.session_usage["input_tokens"] += int(report["input_tokens"])
+    runtime.session_usage["output_tokens"] += int(report["output_tokens"])
+    runtime.session_usage["total_tokens"] += int(report["total_tokens"])
+    runtime.session_usage["estimated_cost_usd"] += float(report["estimated_cost_usd"])
+
+    runtime.session_turns.append(
+        {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "session": runtime.session_name,
+            "provider": report["provider"],
+            "model": report["model"],
+            "input_tokens": int(report["input_tokens"]),
+            "output_tokens": int(report["output_tokens"]),
+            "total_tokens": int(report["total_tokens"]),
+            "estimated_cost_usd": float(report["estimated_cost_usd"]),
+        }
+    )
+
+
 def _persist(runtime: WebRuntime) -> None:
     runtime.session_store.use(runtime.session_name)
     runtime.session_store.save(
@@ -146,6 +169,8 @@ def _persist(runtime: WebRuntime) -> None:
             workspace=runtime.workspace_path,
             approval_mode=runtime.approval_mode,
             messages=runtime.agent.state.messages,
+            usage_totals=runtime.session_usage,
+            turns=runtime.session_turns,
         )
     )
 
@@ -163,6 +188,8 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.approval_mode = loaded.approval_mode
     runtime.agent = _new_agent(runtime)
     runtime.agent.state.messages = loaded.messages
+    runtime.session_usage = dict(loaded.usage_totals or {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0})
+    runtime.session_turns = list(loaded.turns or [])
 
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
@@ -208,6 +235,8 @@ def create_app():
         tools=tools,
         agent=Agent(provider=EchoProvider(), tools=tools),
         traces=[],
+        session_usage={"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0},
+        session_turns=[],
     )
     runtime.agent = _new_agent(runtime)
     runtime.agent.add_system_prompt(runtime.system_prompt)
@@ -233,6 +262,9 @@ def create_app():
                 "sessions": sessions,
                 "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
                 "traces": runtime.traces[-50:],
+                "session_usage": runtime.session_usage,
+                "session_turns": runtime.session_turns[-200:],
+                "pricing": runtime.pricing.data,
             }
         )
 
@@ -245,6 +277,7 @@ def create_app():
 
         reply = runtime.agent.step(text)
         report = _turn_report(runtime, text, reply.content)
+        _record_turn(runtime, report)
         _persist(runtime)
         return jsonify({"reply": asdict(reply), "report": report, "traces": runtime.traces[-50:]})
 
@@ -281,6 +314,7 @@ def create_app():
             try:
                 reply = runtime.agent.step(text)
                 report = _turn_report(runtime, text, reply.content)
+                _record_turn(runtime, report)
                 _persist(runtime)
                 events.put({"type": "report", "report": report})
                 events.put({"type": "done", "reply": asdict(reply), "traces": runtime.traces[-50:]})
@@ -336,6 +370,22 @@ def create_app():
         _persist(runtime)
         return jsonify({"ok": True})
 
+    @app.route("/api/pricing", methods=["GET", "POST"])
+    def pricing_settings():
+        if request.method == "GET":
+            return jsonify({"pricing": runtime.pricing.data})
+
+        payload = request.get_json(force=True)
+        provider = str(payload.get("provider", "")).strip()
+        model = str(payload.get("model", "")).strip()
+        if not provider or not model:
+            return jsonify({"error": "provider and model are required"}), 400
+
+        input_per_1m = float(payload.get("input_per_1m", 0.0))
+        output_per_1m = float(payload.get("output_per_1m", 0.0))
+        runtime.pricing.update_model_pricing(provider, model, input_per_1m, output_per_1m)
+        return jsonify({"ok": True, "pricing": runtime.pricing.data})
+
     @app.post("/api/session")
     def session_action():
         payload = request.get_json(force=True)
@@ -355,6 +405,8 @@ def create_app():
             runtime.session_store.use(name)
             runtime.agent = _new_agent(runtime)
             runtime.agent.add_system_prompt(runtime.system_prompt)
+            runtime.session_usage = {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0}
+            runtime.session_turns = []
             if runtime.agentic_planning:
                 summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
                 _inject_planning(runtime.agent, summary)

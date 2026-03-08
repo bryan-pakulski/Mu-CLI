@@ -1,8 +1,45 @@
 import unittest
 
 from mu_cli.agent import Agent
+from mu_cli.core.types import Message, ModelResponse, Role, ToolCall
 from mu_cli.providers.echo import EchoProvider
+from mu_cli.tools.base import ToolResult
 from mu_cli.tools.filesystem import ReadFileTool
+
+
+class LoopingProvider:
+    name = "looping"
+    model = "looping"
+
+    def generate(self, messages, tools=None, *, stream=False):
+        _ = (messages, tools, stream)
+        return ModelResponse(
+            message=Message(role=Role.ASSISTANT, content="calling tool"),
+            tool_calls=[ToolCall(name="missing_tool", args={})],
+        )
+
+
+class MutatingTool:
+    name = "write_file"
+    description = "mut"
+    mutating = True
+    schema = {"type": "object"}
+
+    def run(self, args):
+        _ = args
+        return ToolResult(ok=True, output="done")
+
+
+class ApprovalProvider:
+    name = "approval"
+    model = "approval"
+
+    def generate(self, messages, tools=None, *, stream=False):
+        _ = (messages, tools, stream)
+        return ModelResponse(
+            message=Message(role=Role.ASSISTANT, content="call mutating"),
+            tool_calls=[ToolCall(name="write_file", args={"path": "x"}, call_id="call_1")],
+        )
 
 
 class AgentTests(unittest.TestCase):
@@ -11,10 +48,32 @@ class AgentTests(unittest.TestCase):
         reply = agent.step("hello")
         self.assertIn("I received: hello", reply.content)
 
-    def test_tool_call_appends_tool_result(self) -> None:
+    def test_tool_call_appends_tool_result_and_followup(self) -> None:
         agent = Agent(provider=EchoProvider(), tools=[ReadFileTool()])
-        agent.step('/tool read_file {"path":"Mu-CLI/ReadMe.md"}')
+        reply = agent.step('/tool read_file {"path":"agents/ReadMe.md"}')
+
+        self.assertIn("Tool `read_file` result", reply.content)
         self.assertTrue(any(m.role.value == "tool_result" for m in agent.state.messages))
+
+    def test_tool_rounds_are_capped(self) -> None:
+        agent = Agent(provider=LoopingProvider(), tools=[], max_tool_rounds=2)
+        reply = agent.step("start")
+
+        self.assertEqual("calling tool", reply.content)
+        tool_results = [m for m in agent.state.messages if m.role is Role.TOOL_RESULT]
+        self.assertEqual(3, len(tool_results))
+
+    def test_mutating_tool_respects_approval_policy(self) -> None:
+        agent = Agent(
+            provider=ApprovalProvider(),
+            tools=[MutatingTool()],
+            on_approval=lambda _name, _args: False,
+        )
+        agent.step("go")
+        tool_result = next(m for m in agent.state.messages if m.role is Role.TOOL_RESULT)
+        self.assertIn("rejected", tool_result.content)
+        self.assertEqual("call_1", tool_result.metadata["tool_call_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

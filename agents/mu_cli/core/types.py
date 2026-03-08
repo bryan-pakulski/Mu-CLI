@@ -25,16 +25,26 @@ class Message:
 class ToolCall:
     name: str
     args: dict[str, Any]
+    call_id: str | None = None
+
+
+@dataclass(slots=True)
+class UsageStats:
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
 
 
 @dataclass(slots=True)
 class ModelResponse:
     message: Message
     tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: UsageStats | None = None
 
 
 class ModelProvider(Protocol):
     name: str
+    model: str
 
     def generate(
         self,

@@ -23,6 +23,32 @@
       --tool-soft: #eef3ff;
       --radius: 18px;
       --shadow: 0 12px 36px rgba(26, 45, 92, 0.08);
+      --diff-del: #ffeef0;
+      --diff-add: #eaf7ec;
+      --diff-ctx: #f8faff;
+      --code-bg: #f7faff;
+      --code-border: #dae3f6;
+      --code-text: #243761;
+    }
+
+    body.dark-mode {
+      --bg: #0f1628;
+      --surface: #121c31;
+      --surface-2: #16223b;
+      --border: #243150;
+      --text: #e2e9fb;
+      --muted: #9bacd8;
+      --primary: #7ea2ff;
+      --primary-soft: #1a2a4d;
+      --assistant-soft: #1a243d;
+      --tool-soft: #1b2b4d;
+      --shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+      --diff-del: #4a1f28;
+      --diff-add: #1b3f2d;
+      --diff-ctx: #15223c;
+      --code-bg: #101a2f;
+      --code-border: #2a3a5f;
+      --code-text: #d9e6ff;
     }
 
     html, body {
@@ -167,8 +193,8 @@
       margin: 8px 0;
       padding: 0;
       border-radius: 10px;
-      border: 1px solid #dae3f6;
-      background: #f7faff;
+      border: 1px solid var(--code-border);
+      background: var(--code-bg);
       overflow-x: auto;
       white-space: pre;
       font-size: 12px;
@@ -176,7 +202,7 @@
     .bubble pre code {
       display: block;
       background: transparent;
-      color: #243761;
+      color: var(--code-text);
       padding: 12px;
       border-radius: 0;
       font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -227,7 +253,7 @@
       font-size: 12px;
       font-weight: 500;
     }
-    .btn-soft:hover { background: #f7faff; border-color: #c8d4ef; }
+    .btn-soft:hover { background: var(--code-bg); border-color: #c8d4ef; }
 
     .btn-accent {
       border: none;
@@ -292,8 +318,8 @@
     .modal-backdrop-custom.show { display: flex; }
 
     .modal-card {
-      width: min(760px, 92vw);
-      max-height: 84vh;
+      width: min(1100px, 96vw);
+      max-height: 90vh;
       overflow: auto;
       background: #ffffff;
       border: 1px solid var(--border);
@@ -371,9 +397,9 @@
       white-space: pre;
       overflow-x: auto;
     }
-    .diff-del { background: #ffeef0; }
-    .diff-add { background: #eaf7ec; }
-    .diff-ctx { background: #f8faff; }
+    .diff-del { background: var(--diff-del); }
+    .diff-add { background: var(--diff-add); }
+    .diff-ctx { background: var(--diff-ctx); }
 
     @media (max-width: 1000px) {
       .shell { grid-template-columns: minmax(0,1fr); }
@@ -484,9 +510,13 @@
         <input class="form-check-input" id="debug" type="checkbox" />
         <label class="form-check-label small-muted" for="debug">Debug mode</label>
       </div>
-      <div class="form-check mb-3">
+      <div class="form-check">
         <input class="form-check-input" id="agentic" type="checkbox" checked />
         <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
+      </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" id="darkMode" type="checkbox" />
+        <label class="form-check-label small-muted" for="darkMode">Dark mode</label>
       </div>
 
       <h6 class="mb-2">Pricing (global JSON)</h6>
@@ -529,6 +559,7 @@
       </div>
       <div class="small-muted mb-2" id="approvalToolName"></div>
       <div id="approvalArgs" class="approval-args"></div>
+      <div id="approvalPatchPreview"></div>
       <div class="d-flex gap-2">
         <button id="approveYes" class="btn btn-accent btn-sm">Approve</button>
         <button id="approveNo" class="btn btn-soft btn-sm">Deny</button>
@@ -606,6 +637,50 @@ function escapeHtml(value) {
 }
 
 
+
+function applyThemePreference() {
+  const dark = document.getElementById('darkMode').checked;
+  document.body.classList.toggle('dark-mode', dark);
+  localStorage.setItem('mu_cli_dark_mode', dark ? '1' : '0');
+}
+
+function hydrateThemePreference() {
+  const saved = localStorage.getItem('mu_cli_dark_mode');
+  const dark = saved === '1';
+  const checkbox = document.getElementById('darkMode');
+  if (checkbox) checkbox.checked = dark;
+  document.body.classList.toggle('dark-mode', dark);
+}
+
+function extractPatchTextFromArgs(args) {
+  if (!args || typeof args !== 'object') return '';
+  if (typeof args.patch === 'string') return args.patch;
+  for (const [_, value] of Object.entries(args)) {
+    if (value && typeof value === 'object') {
+      const found = extractPatchTextFromArgs(value);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
+function renderApprovalPatchPreview(args) {
+  const host = document.getElementById('approvalPatchPreview');
+  const patchText = extractPatchTextFromArgs(args || {});
+  if (!patchText.trim()) {
+    host.innerHTML = '';
+    return;
+  }
+
+  const file = new File([patchText], 'proposed_change.patch', { type: 'text/x-diff' });
+  const reader = new FileReader();
+  reader.onload = () => {
+    const content = String(reader.result || '');
+    host.innerHTML = `<div class="small-muted mb-1">Patch preview (temporary file: ${escapeHtml(file.name)})</div>${renderSideBySideDiff(content)}`;
+  };
+  reader.readAsText(file);
+}
+
 function renderSideBySideDiff(diffText) {
   const lines = String(diffText || '').split('\n');
   const left = [];
@@ -651,6 +726,10 @@ function formatMessageContent(content) {
   const source = String(content || '');
   let html = '';
   const blockPattern = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
+  const trimmed = source.trim();
+  if (!trimmed.includes('```') && (/^diff --git/m.test(trimmed) || (/^---\s/m.test(trimmed) && /^\+\+\+\s/m.test(trimmed) && /^@@/m.test(trimmed)))) {
+    return renderSideBySideDiff(trimmed);
+  }
   let cursor = 0;
   let match;
 
@@ -905,12 +984,14 @@ async function pollApproval() {
   const pending = state.pendingApproval;
 
   if (!pending) {
+    document.getElementById('approvalPatchPreview').innerHTML = '';
     showModal('approvalModal', false);
     return;
   }
 
   document.getElementById('approvalToolName').textContent = `Tool: ${pending.tool_name}`;
   renderApprovalArgs(pending.args);
+  renderApprovalPatchPreview(pending.args);
   showModal('approvalModal', true);
 }
 
@@ -962,8 +1043,10 @@ async function refreshState() {
   if (state.pendingApproval) {
     document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
     renderApprovalArgs(state.pendingApproval.args);
+    renderApprovalPatchPreview(state.pendingApproval.args);
     showModal('approvalModal', true);
   } else {
+    document.getElementById('approvalPatchPreview').innerHTML = '';
     showModal('approvalModal', false);
   }
 
@@ -1056,9 +1139,10 @@ async function sessionAction(action) {
   await refreshState();
 }
 
-for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic']) {
+for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'darkMode']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
+    if (id === 'darkMode') applyThemePreference();
     scheduleApplySettings();
     syncPricingEditor();
   });
@@ -1100,6 +1184,7 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
 });
 
+hydrateThemePreference();
 refreshState().catch((e) => alert(e.message));
 </script>
 </body>

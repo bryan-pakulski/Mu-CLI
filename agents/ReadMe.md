@@ -36,7 +36,25 @@ make run-echo
 make run-openai   # requires OPENAI_API_KEY
 make run-gemini   # requires GEMINI_API_KEY or GOOGLE_API_KEY
 make run-web      # Flask GUI on http://localhost:5000
+make docker-build
+make docker-run-web
+make docker-run-cli
+make docker-models
 ```
+
+## Dockerized runtime
+
+- Build image: `make docker-build`
+- Run GUI: `make docker-run-web` then open `http://localhost:5000`
+- Run CLI: `make docker-run-cli`
+- List model catalog in container: `make docker-models`
+- Optional Compose paths:
+  - `docker compose up mu-cli-web`
+  - `docker compose run --rm mu-cli-cli`
+
+Notes:
+- Container persists app state via `./.mu_cli:/app/.mu_cli` volume.
+- Current repo is mounted at `/workspace` for tool access in containerized CLI runs.
 
 ## GUI (Flask)
 

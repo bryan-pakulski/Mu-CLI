@@ -88,6 +88,7 @@
       <h2>Contents</h2>
       <ul>
         <li><a href="#quickstart">Quick Start</a></li>
+        <li><a href="#docker">Docker</a></li>
         <li><a href="#core">Core Concepts</a></li>
         <li><a href="#commands">CLI Commands</a></li>
         <li><a href="#gui">Flask GUI</a></li>
@@ -121,6 +122,24 @@ make run-web</pre>
         <pre>/workspace attach /path/to/repo
 /workspace status</pre>
       </article>
+    </div>
+
+    <h2 id="docker">Docker</h2>
+    <div class="card">
+      <p>The project includes a self-contained runtime image for local development and reproducible execution.</p>
+      <pre>make docker-build
+make docker-run-web      # serves GUI on http://localhost:5000
+make docker-run-cli      # interactive CLI
+make docker-models       # list model catalog
+
+# compose variants
+docker compose up mu-cli-web
+docker compose run --rm mu-cli-cli</pre>
+      <p>Container defaults:</p>
+      <ul>
+        <li>Persistent state mounted at <code>./.mu_cli -&gt; /app/.mu_cli</code>.</li>
+        <li>Repository mounted at <code>/workspace</code> for tooling operations.</li>
+      </ul>
     </div>
 
     <h2 id="core">Core Concepts</h2>
@@ -171,6 +190,8 @@ make run-web</pre>
         <li><strong>Developer ergonomics:</strong> keyboard shortcuts, sticky context, and safer mutating-tool diff previews.</li>
         <li><strong>Tooling depth:</strong> better repo navigation/search tools and controlled test/lint execution tools.</li>
         <li><strong>Evaluation:</strong> regression suite for tool-use rates, latency, and end-to-end task completion.</li>
+        <li><strong>Container hardening:</strong> run as non-root, pin dependency hashes, and publish signed image tags for repeatable deployments.</li>
+        <li><strong>Ops observability:</strong> structured logs, request/turn metrics, and health/readiness endpoints for hosted usage.</li>
       </ol>
     </div>
 

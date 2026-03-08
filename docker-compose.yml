@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  mu-cli-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mu-cli:latest
+    ports:
+      - "5000:5000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    volumes:
+      - ./.mu_cli:/app/.mu_cli
+      - .:/workspace
+    command: ["web"]
+
+  mu-cli-cli:
+    image: mu-cli:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    stdin_open: true
+    tty: true
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    volumes:
+      - ./.mu_cli:/app/.mu_cli
+      - .:/workspace
+    command: ["cli", "--provider", "echo", "--model", "echo", "--workspace", "/workspace"]

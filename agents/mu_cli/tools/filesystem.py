@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import subprocess
+import textwrap
 from pathlib import Path
 from typing import Callable
 
@@ -51,6 +53,37 @@ class WriteFileTool:
         return ToolResult(ok=True, output=f"Wrote file: {path}")
 
 
+def _normalize_patch_text(raw_patch: str) -> str:
+    patch = textwrap.dedent(str(raw_patch or ""))
+
+    fenced = re.match(r"^```(?:diff|patch)?\s*\n([\s\S]*?)\n```\s*$", patch.strip())
+    if fenced:
+        patch = fenced.group(1)
+
+    lines = patch.splitlines()
+    if lines and lines[0].strip().lower() in {"diff", "patch"}:
+        patch = "\n".join(lines[1:])
+
+    expanded: list[str] = []
+    for line in patch.splitlines():
+        if line and line[0] in {"+", "-", " "} and "\\n" in line:
+            marker = line[0]
+            parts = line[1:].split("\\n")
+            expanded.extend(f"{marker}{part}" for part in parts)
+            continue
+        expanded.append(line)
+    patch = "\n".join(expanded)
+
+    if "\\n" in patch and patch.count("\\n") > patch.count("\n"):
+        patch = patch.replace("\\n", "\n")
+    if "\\t" in patch and patch.count("\\t") > patch.count("\t"):
+        patch = patch.replace("\\t", "\t")
+
+    if patch and not patch.endswith("\n"):
+        patch += "\n"
+    return patch
+
+
 class ApplyPatchTool:
     name = "apply_patch"
     description = "Apply a unified diff patch using git apply."
@@ -62,7 +95,7 @@ class ApplyPatchTool:
     }
 
     def run(self, args: dict[str, str]) -> ToolResult:
-        patch = args["patch"]
+        patch = _normalize_patch_text(args["patch"])
         proc = subprocess.run(
             ["git", "apply", "--whitespace=nowarn", "-"],
             input=patch,

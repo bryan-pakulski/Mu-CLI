@@ -1,8 +1,11 @@
 import tempfile
 import unittest
+import os
+import subprocess
 from pathlib import Path
 
 from mu_cli.tools.filesystem import (
+    ApplyPatchTool,
     ClearUploadedContextStoreTool,
     GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
@@ -62,6 +65,36 @@ class WorkspaceToolsTests(unittest.TestCase):
             cleared = ClearUploadedContextStoreTool(root, getter).run({})
             self.assertTrue(cleared.ok)
             self.assertIn("Removed 1", cleared.output)
+
+
+    def test_apply_patch_tool_accepts_fenced_and_escaped_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+            target = repo / "my_flow.py"
+            target.write_text("def remove_outlier(cpu_flow, p=1.5):\n\treturn cpu_flow\n", encoding="utf-8")
+
+            patch_text = r"""```diff
+diff
+--- a/my_flow.py
++++ b/my_flow.py
+@@ -1,2 +1,2 @@
+-def remove_outlier(cpu_flow, p=1.5):\n\treturn cpu_flow
++def remove_outlier(cpu_flow, p=2.0):\n\treturn cpu_flow
+```"""
+
+            tool = ApplyPatchTool()
+            prev = Path.cwd()
+            try:
+                os.chdir(repo)
+                result = tool.run({"patch": patch_text})
+            finally:
+                os.chdir(prev)
+
+            self.assertTrue(result.ok, result.output)
+            updated = target.read_text(encoding="utf-8")
+            self.assertIn("p=2.0", updated)
 
 
 if __name__ == "__main__":

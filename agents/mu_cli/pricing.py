@@ -19,6 +19,8 @@ DEFAULT_PRICING = {
     },
 }
 
+TEMPLATE_PATH = Path(__file__).with_name("pricing_template.json")
+
 
 @dataclass(slots=True)
 class TurnCostReport:
@@ -36,8 +38,11 @@ class PricingCatalog:
     def _load_or_create(self) -> dict:
         if not self.config_path.exists():
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            self.config_path.write_text(json.dumps(DEFAULT_PRICING, indent=2), encoding="utf-8")
-            return DEFAULT_PRICING
+            template = DEFAULT_PRICING
+            if TEMPLATE_PATH.exists():
+                template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+            self.config_path.write_text(json.dumps(template, indent=2), encoding="utf-8")
+            return template
         return json.loads(self.config_path.read_text(encoding="utf-8"))
 
     def save(self) -> None:

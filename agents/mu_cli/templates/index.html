@@ -11,14 +11,12 @@
   <style>
     :root {
       --bg: #f5f6ff;
-      --bg-soft: #eef0ff;
-      --glass: rgba(255,255,255,0.7);
-      --glass-strong: rgba(255,255,255,0.84);
+      --glass: rgba(255,255,255,0.72);
+      --glass-strong: rgba(255,255,255,0.88);
       --border: rgba(130,120,200,0.28);
       --text: #2a2342;
       --muted: #6f6891;
       --purple: #7a62e8;
-      --purple-soft: rgba(122, 98, 232, 0.12);
       --user-soft: rgba(122, 98, 232, 0.14);
       --assistant-soft: rgba(151, 121, 245, 0.09);
       --tool-soft: rgba(170, 140, 255, 0.14);
@@ -53,12 +51,7 @@
       box-shadow: 0 10px 24px rgba(96, 83, 155, 0.08);
     }
 
-    .sidebar {
-      min-height: 0;
-      overflow: auto;
-      padding: 10px;
-    }
-
+    .sidebar { min-height: 0; overflow: auto; padding: 10px; }
     .panel {
       padding: 10px;
       border-radius: 10px;
@@ -66,7 +59,6 @@
       background: var(--glass-strong);
       margin-bottom: 8px;
     }
-
     .panel h3 {
       margin: 0 0 6px;
       font-size: 11px;
@@ -75,13 +67,7 @@
       color: #4d3f81;
     }
 
-    .main {
-      min-height: 0;
-      display: grid;
-      grid-template-rows: auto minmax(0,1fr);
-      overflow: hidden;
-    }
-
+    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; }
     .topbar {
       display: flex;
       align-items: center;
@@ -128,7 +114,6 @@
       background: rgba(255,255,255,0.65);
       overflow: hidden;
     }
-
     .trace-wrap > summary {
       list-style: none;
       cursor: pointer;
@@ -137,20 +122,10 @@
       border-bottom: 1px solid transparent;
       font-size: 11px;
     }
-
-    .trace-wrap[open] > summary {
-      border-bottom-color: var(--border);
-      background: rgba(255,255,255,0.7);
-    }
+    .trace-wrap[open] > summary { border-bottom-color: var(--border); background: rgba(255,255,255,0.7); }
     .trace-wrap > summary::-webkit-details-marker { display: none; }
 
-    .trace {
-      max-height: 140px;
-      overflow: auto;
-      padding: 8px;
-      font-size: 11px;
-      white-space: pre-wrap;
-    }
+    .trace { max-height: 140px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
 
     .msg { margin-bottom: 8px; }
     .role { font-size: 10px; color: #8478b0; text-transform: uppercase; letter-spacing: .06em; }
@@ -167,12 +142,7 @@
 
     .bubble p { margin: 0 0 8px; }
     .bubble p:last-child { margin-bottom: 0; }
-    .bubble code {
-      background: rgba(122,98,232,0.12);
-      color: #533db0;
-      padding: 1px 4px;
-      border-radius: 4px;
-    }
+    .bubble code { background: rgba(122,98,232,0.12); color: #533db0; padding: 1px 4px; border-radius: 4px; }
     .bubble pre {
       margin: 6px 0;
       padding: 8px;
@@ -248,28 +218,35 @@
       display: none;
     }
 
-    .thinking {
+    .thinking { display: none; align-items: center; gap: 6px; color: #5f49bb; font-size: 11px; }
+
+    .usage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; font-size: 11px; }
+    .usage-chip { border: 1px solid var(--border); border-radius: 8px; padding: 6px; background: rgba(255,255,255,0.72); }
+
+    .upload-list { max-height: 120px; overflow: auto; font-size: 11px; }
+
+    .modal-backdrop-custom {
+      position: fixed;
+      inset: 0;
       display: none;
       align-items: center;
-      gap: 6px;
-      color: #5f49bb;
-      font-size: 11px;
+      justify-content: center;
+      background: rgba(60, 50, 98, 0.28);
+      z-index: 1000;
     }
 
-    .usage-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      margin-top: 6px;
-      font-size: 11px;
-    }
-
-    .usage-chip {
+    .modal-card {
+      width: min(720px, 92vw);
+      max-height: 82vh;
+      overflow: auto;
+      background: rgba(255,255,255,0.95);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px;
-      background: rgba(255,255,255,0.72);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 18px 35px rgba(83, 61, 160, 0.15);
     }
+
+    .dir-list button { text-align: left; width: 100%; margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -285,25 +262,21 @@
         <label class="small-muted mb-1">Model</label>
         <select id="model" class="form-select mb-2"></select>
 
-        <label class="small-muted mb-1">API key</label>
-        <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
-
         <label class="small-muted mb-1">Approval mode</label>
         <select id="approval" class="form-select mb-2"><option>ask</option><option>auto</option><option>deny</option></select>
 
         <label class="small-muted mb-1">Workspace path</label>
-        <input id="workspace" class="form-control mb-2" placeholder="/path/to/repo" />
-
-        <div class="form-check">
-          <input class="form-check-input" id="debug" type="checkbox" />
-          <label class="form-check-label small-muted" for="debug">Debug mode</label>
-        </div>
-        <div class="form-check mb-2">
-          <input class="form-check-input" id="agentic" type="checkbox" checked />
-          <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
+        <div class="input-group input-group-sm mb-2">
+          <input id="workspace" class="form-control" placeholder="/path/to/repo" />
+          <button id="browseWorkspace" class="btn btn-soft" type="button">Browse</button>
         </div>
 
-        <div id="approvalNote" class="approval-warning">`ask` is non-interactive in GUI; mutating tools are denied here.</div>
+        <div id="approvalNote" class="approval-warning">Approval mode `ask` now opens an approval dialog for mutating tool calls.</div>
+
+        <div class="small-muted mt-2 mb-1">Upload context files</div>
+        <input id="contextFiles" type="file" class="form-control mb-2" multiple />
+        <button id="uploadFiles" class="btn btn-soft btn-sm mb-2">Upload</button>
+        <div id="uploadList" class="upload-list small-muted"></div>
       </div>
 
       <div class="panel">
@@ -325,20 +298,6 @@
       </div>
 
       <div class="panel">
-        <h3>Pricing (global)</h3>
-        <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
-        <label class="small-muted mb-1">Provider</label>
-        <input id="pricingProvider" class="form-control mb-2" />
-        <label class="small-muted mb-1">Model</label>
-        <input id="pricingModel" class="form-control mb-2" />
-        <label class="small-muted mb-1">Input per 1M (USD)</label>
-        <input id="pricingInput" type="number" step="0.000001" class="form-control mb-2" />
-        <label class="small-muted mb-1">Output per 1M (USD)</label>
-        <input id="pricingOutput" type="number" step="0.000001" class="form-control mb-2" />
-        <button id="savePricing" class="btn btn-soft btn-sm">Save pricing</button>
-      </div>
-
-      <div class="panel">
         <h3>Session usage</h3>
         <div class="usage-grid">
           <div class="usage-chip"><div class="small-muted">Input</div><div id="usageIn">0</div></div>
@@ -353,6 +312,7 @@
       <div class="topbar">
         <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
         <div class="title">mu_cli</div>
+        <button id="openAdvanced" class="btn btn-soft btn-sm">Advanced</button>
         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
       </div>
@@ -376,11 +336,79 @@
     </section>
   </div>
 
+  <div id="advancedModal" class="modal-backdrop-custom">
+    <div class="modal-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Advanced settings</h5>
+        <button id="closeAdvanced" class="btn btn-soft btn-sm">Close</button>
+      </div>
+
+      <label class="small-muted mb-1">API key (global)</label>
+      <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+
+      <div class="form-check">
+        <input class="form-check-input" id="debug" type="checkbox" />
+        <label class="form-check-label small-muted" for="debug">Debug mode</label>
+      </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" id="agentic" type="checkbox" checked />
+        <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
+      </div>
+
+      <h6 class="mb-2">Pricing (global JSON)</h6>
+      <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
+
+      <label class="small-muted mb-1">Provider</label>
+      <input id="pricingProvider" class="form-control mb-2" />
+      <label class="small-muted mb-1">Model</label>
+      <input id="pricingModel" class="form-control mb-2" />
+      <label class="small-muted mb-1">Input per 1M (USD)</label>
+      <input id="pricingInput" type="number" step="0.000001" class="form-control mb-2" />
+      <label class="small-muted mb-1">Output per 1M (USD)</label>
+      <input id="pricingOutput" type="number" step="0.000001" class="form-control mb-2" />
+      <button id="savePricing" class="btn btn-accent btn-sm">Save pricing</button>
+    </div>
+  </div>
+
+  <div id="workspaceModal" class="modal-backdrop-custom">
+    <div class="modal-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Pick workspace folder</h5>
+        <button id="closeWorkspaceModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div class="input-group input-group-sm mb-2">
+        <input id="dirPath" class="form-control" />
+        <button id="loadDir" class="btn btn-soft" type="button">Go</button>
+      </div>
+      <div class="small-muted mb-2" id="dirCwd">cwd: -</div>
+      <div class="dir-list" id="dirList"></div>
+      <div class="d-flex gap-2 mt-2">
+        <button id="chooseDir" class="btn btn-accent btn-sm">Use selected</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="approvalModal" class="modal-backdrop-custom">
+    <div class="modal-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Tool approval required</h5>
+      </div>
+      <div class="small-muted mb-2" id="approvalToolName"></div>
+      <pre id="approvalArgs" class="p-2 border rounded small" style="max-height:240px; overflow:auto"></pre>
+      <div class="d-flex gap-2">
+        <button id="approveYes" class="btn btn-accent btn-sm">Approve</button>
+        <button id="approveNo" class="btn btn-soft btn-sm">Deny</button>
+      </div>
+    </div>
+  </div>
+
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {} };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, uploads: [], pendingApproval: null };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
+let approvalPoll = null;
+let selectedDir = null;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -388,6 +416,13 @@ async function api(path, method='GET', body=null) {
     headers: {'Content-Type': 'application/json'},
     body: body ? JSON.stringify(body) : null,
   });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'request failed');
+  return json;
+}
+
+async function apiForm(path, formData) {
+  const res = await fetch(path, { method: 'POST', body: formData });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'request failed');
   return json;
@@ -416,10 +451,7 @@ function formatMessageContent(content) {
       const text = parts[idx];
       if (!text) continue;
       const escaped = escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
-      html += escaped
-        .split(/\n{2,}/)
-        .map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`)
-        .join('');
+      html += escaped.split(/\n{2,}/).map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`).join('');
       continue;
     }
     if (idx % 3 === 1) continue;
@@ -497,6 +529,15 @@ function renderSessions(list, active) {
   document.getElementById('activeSession').textContent = `active: ${active}`;
 }
 
+function renderUploads() {
+  const el = document.getElementById('uploadList');
+  if (!state.uploads.length) {
+    el.textContent = 'No uploaded context files.';
+    return;
+  }
+  el.innerHTML = state.uploads.slice(-20).map((u) => `${escapeHtml(u.name)} (${u.kind}, ${u.size} bytes)`).join('<br/>');
+}
+
 function wireModels(provider) {
   const modelSel = document.getElementById('model');
   modelSel.innerHTML = '';
@@ -547,6 +588,10 @@ function syncPricingEditor() {
   document.getElementById('pricingOutput').value = Number(row.output_per_1m || 0);
 }
 
+function showModal(id, show) {
+  document.getElementById(id).style.display = show ? 'flex' : 'none';
+}
+
 function scheduleApplySettings() {
   if (syncing) return;
   clearTimeout(applyTimer);
@@ -568,6 +613,68 @@ async function savePricing() {
   await refreshState();
 }
 
+async function uploadContextFiles() {
+  const input = document.getElementById('contextFiles');
+  if (!input.files || !input.files.length) return;
+  const form = new FormData();
+  for (const file of input.files) form.append('files', file);
+  await apiForm('/api/uploads', form);
+  input.value = '';
+  await refreshState();
+}
+
+async function loadDirs(path='') {
+  const q = path ? `?path=${encodeURIComponent(path)}` : '';
+  const payload = await api(`/api/fs/dirs${q}`);
+  document.getElementById('dirPath').value = payload.cwd;
+  document.getElementById('dirCwd').textContent = `cwd: ${payload.cwd}`;
+  selectedDir = payload.cwd;
+
+  const list = document.getElementById('dirList');
+  list.innerHTML = '';
+
+  if (payload.parent) {
+    const up = document.createElement('button');
+    up.className = 'btn btn-soft btn-sm';
+    up.textContent = '..';
+    up.onclick = () => loadDirs(payload.parent).catch((e) => alert(e.message));
+    list.appendChild(up);
+  }
+
+  for (const child of payload.children) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-soft btn-sm';
+    btn.textContent = child.name;
+    btn.onclick = () => loadDirs(child.path).catch((e) => alert(e.message));
+    list.appendChild(btn);
+  }
+}
+
+async function pollApproval() {
+  const payload = await api('/api/approval');
+  state.pendingApproval = payload.pending;
+  const pending = state.pendingApproval;
+
+  if (!pending) {
+    showModal('approvalModal', false);
+    return;
+  }
+
+  document.getElementById('approvalToolName').textContent = `Tool: ${pending.tool_name}`;
+  document.getElementById('approvalArgs').textContent = JSON.stringify(pending.args, null, 2);
+  showModal('approvalModal', true);
+}
+
+async function sendApprovalDecision(decision) {
+  if (!state.pendingApproval) return;
+  await api('/api/approval', 'POST', {
+    id: state.pendingApproval.id,
+    decision,
+  });
+  state.pendingApproval = null;
+  showModal('approvalModal', false);
+}
+
 async function refreshState() {
   syncing = true;
   const s = await api('/api/state');
@@ -576,6 +683,8 @@ async function refreshState() {
   state.traces = s.traces;
   state.pricing = s.pricing || {};
   state.sessionUsage = s.session_usage || {};
+  state.uploads = s.uploads || [];
+  state.pendingApproval = s.pending_approval || null;
 
   const providerSel = document.getElementById('provider');
   providerSel.innerHTML = '';
@@ -598,8 +707,18 @@ async function refreshState() {
   syncPricingEditor();
   updateUsagePanel(state.sessionUsage);
   renderSessions(s.sessions, s.session);
+  renderUploads();
   renderMessages();
   renderTraces();
+
+  if (state.pendingApproval) {
+    document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
+    document.getElementById('approvalArgs').textContent = JSON.stringify(state.pendingApproval.args, null, 2);
+    showModal('approvalModal', true);
+  } else {
+    showModal('approvalModal', false);
+  }
+
   syncing = false;
 }
 
@@ -611,6 +730,9 @@ async function sendPrompt() {
   sending = true;
   updateThinking(true);
   document.getElementById('prompt').value = '';
+
+  if (approvalPoll) clearInterval(approvalPoll);
+  approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1000);
 
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
@@ -655,8 +777,7 @@ async function sendPrompt() {
           renderTraces();
         } else if (event.type === 'report') {
           const r = event.report;
-          reportEl.textContent =
-            `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
+          reportEl.textContent = `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
         } else if (event.type === 'error') {
           throw new Error(event.error || 'streaming failed');
         }
@@ -665,6 +786,10 @@ async function sendPrompt() {
 
     await refreshState();
   } finally {
+    if (approvalPoll) {
+      clearInterval(approvalPoll);
+      approvalPoll = null;
+    }
     updateThinking(false);
     sending = false;
   }
@@ -701,7 +826,27 @@ document.getElementById('refreshSessions').addEventListener('click', () => sessi
 document.getElementById('loadSession').addEventListener('click', () => sessionAction('load').catch((e) => alert(e.message)));
 document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
+document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
+
 document.getElementById('toggleSidebar').addEventListener('click', () => document.getElementById('app').classList.toggle('sidebar-hidden'));
+document.getElementById('openAdvanced').addEventListener('click', () => showModal('advancedModal', true));
+document.getElementById('closeAdvanced').addEventListener('click', () => showModal('advancedModal', false));
+
+document.getElementById('browseWorkspace').addEventListener('click', () => {
+  showModal('workspaceModal', true);
+  loadDirs(document.getElementById('workspace').value.trim()).catch((e) => alert(e.message));
+});
+document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
+document.getElementById('loadDir').addEventListener('click', () => loadDirs(document.getElementById('dirPath').value.trim()).catch((e) => alert(e.message)));
+document.getElementById('chooseDir').addEventListener('click', () => {
+  if (!selectedDir) return;
+  document.getElementById('workspace').value = selectedDir;
+  showModal('workspaceModal', false);
+  scheduleApplySettings();
+});
+
+document.getElementById('approveYes').addEventListener('click', () => sendApprovalDecision('approve').catch((e) => alert(e.message)));
+document.getElementById('approveNo').addEventListener('click', () => sendApprovalDecision('deny').catch((e) => alert(e.message)));
 
 document.getElementById('prompt').addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));

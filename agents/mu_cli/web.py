@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import queue
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 
 from mu_cli.agent import Agent
@@ -27,6 +28,7 @@ from mu_cli.tools.filesystem import (
     WriteFileTool,
 )
 from mu_cli.workspace import WorkspaceStore
+from werkzeug.utils import secure_filename
 
 
 @dataclass(slots=True)
@@ -48,6 +50,14 @@ class WebRuntime:
     traces: list[str]
     session_usage: dict[str, float]
     session_turns: list[dict]
+    uploads: list[dict]
+    uploads_dir: Path
+    approval_condition: threading.Condition = field(default_factory=threading.Condition)
+    pending_approval: dict[str, Any] | None = None
+
+
+def _default_usage() -> dict[str, float]:
+    return {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0}
 
 
 def _build_provider(name: str, model: str, api_key: str | None):
@@ -91,11 +101,31 @@ def _new_agent(runtime: WebRuntime) -> Agent:
             return True
         if mode == "deny":
             return False
+        request_id = f"approval_{datetime.now(UTC).timestamp()}"
+        with runtime.approval_condition:
+            runtime.pending_approval = {
+                "id": request_id,
+                "tool_name": tool_name,
+                "args": args,
+                "decision": None,
+            }
+            runtime.approval_condition.notify_all()
+            runtime.approval_condition.wait_for(
+                lambda: runtime.pending_approval is None
+                or runtime.pending_approval.get("decision") in {"approve", "deny"},
+                timeout=120,
+            )
+
+            decision = None
+            if runtime.pending_approval and runtime.pending_approval.get("id") == request_id:
+                decision = runtime.pending_approval.get("decision")
+                runtime.pending_approval = None
+
+        approved = decision == "approve"
         runtime.traces.append(
-            "approval: mode=ask is not interactive in GUI; mutating tool denied "
-            f"name={tool_name} args={args}"
+            f"approval: id={request_id} tool={tool_name} decision={'approve' if approved else 'deny'}"
         )
-        return False
+        return approved
 
     def on_model_response(message: Message, calls: list[ToolCall]) -> None:
         if not runtime.debug:
@@ -160,6 +190,37 @@ def _record_turn(runtime: WebRuntime, report: dict) -> None:
     )
 
 
+def _uploaded_system_message(upload: dict) -> Message:
+    name = str(upload.get("name", "file"))
+    path = str(upload.get("path", ""))
+    kind = str(upload.get("kind", "binary"))
+    size = int(upload.get("size", 0))
+    preview = str(upload.get("preview", ""))
+
+    if kind == "text" and preview:
+        content = (
+            f"Uploaded context file `{name}` ({size} bytes) at `{path}`. "
+            f"Use this as additional context:\n\n{preview}"
+        )
+    else:
+        content = (
+            f"Uploaded context file `{name}` ({kind}, {size} bytes) at `{path}`. "
+            "File content is not embedded; refer to it as supplemental context metadata."
+        )
+
+    return Message(
+        role=Role.SYSTEM,
+        content=content,
+        metadata={"kind": "uploaded_context", "upload_name": name, "upload_path": path},
+    )
+
+
+def _sync_uploaded_context_messages(runtime: WebRuntime) -> None:
+    keep = [m for m in runtime.agent.state.messages if m.metadata.get("kind") != "uploaded_context"]
+    uploaded = [_uploaded_system_message(item) for item in runtime.uploads]
+    runtime.agent.state.messages = keep + uploaded
+
+
 def _persist(runtime: WebRuntime) -> None:
     runtime.session_store.use(runtime.session_name)
     runtime.session_store.save(
@@ -171,6 +232,7 @@ def _persist(runtime: WebRuntime) -> None:
             messages=runtime.agent.state.messages,
             usage_totals=runtime.session_usage,
             turns=runtime.session_turns,
+            uploads=runtime.uploads,
         )
     )
 
@@ -188,8 +250,10 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.approval_mode = loaded.approval_mode
     runtime.agent = _new_agent(runtime)
     runtime.agent.state.messages = loaded.messages
-    runtime.session_usage = dict(loaded.usage_totals or {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0})
+    runtime.session_usage = dict(loaded.usage_totals or _default_usage())
     runtime.session_turns = list(loaded.turns or [])
+    runtime.uploads = list(loaded.uploads or [])
+    _sync_uploaded_context_messages(runtime)
 
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
@@ -235,9 +299,12 @@ def create_app():
         tools=tools,
         agent=Agent(provider=EchoProvider(), tools=tools),
         traces=[],
-        session_usage={"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0},
+        session_usage=_default_usage(),
         session_turns=[],
+        uploads=[],
+        uploads_dir=Path(".mu_cli/uploads"),
     )
+    runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     runtime.agent = _new_agent(runtime)
     runtime.agent.add_system_prompt(runtime.system_prompt)
     _inject_planning(runtime.agent)
@@ -265,6 +332,8 @@ def create_app():
                 "session_usage": runtime.session_usage,
                 "session_turns": runtime.session_turns[-200:],
                 "pricing": runtime.pricing.data,
+                "uploads": runtime.uploads,
+                "pending_approval": runtime.pending_approval,
             }
         )
 
@@ -386,6 +455,88 @@ def create_app():
         runtime.pricing.update_model_pricing(provider, model, input_per_1m, output_per_1m)
         return jsonify({"ok": True, "pricing": runtime.pricing.data})
 
+    @app.get("/api/fs/dirs")
+    def list_dirs():
+        raw = str(request.args.get("path", "") or "")
+        path = Path(raw).expanduser() if raw else Path.cwd()
+        if not path.exists() or not path.is_dir():
+            return jsonify({"error": "invalid directory"}), 400
+
+        children = []
+        for child in sorted(path.iterdir(), key=lambda x: x.name.lower()):
+            if child.is_dir() and not child.name.startswith('.'):
+                children.append({"name": child.name, "path": str(child)})
+
+        return jsonify(
+            {
+                "cwd": str(path),
+                "parent": str(path.parent) if path.parent != path else None,
+                "children": children,
+            }
+        )
+
+    @app.route("/api/approval", methods=["GET", "POST"])
+    def approval_actions():
+        if request.method == "GET":
+            return jsonify({"pending": runtime.pending_approval})
+
+        payload = request.get_json(force=True)
+        request_id = str(payload.get("id", "")).strip()
+        decision = str(payload.get("decision", "")).strip().lower()
+        if decision not in {"approve", "deny"}:
+            return jsonify({"error": "decision must be approve|deny"}), 400
+
+        with runtime.approval_condition:
+            if runtime.pending_approval is None or runtime.pending_approval.get("id") != request_id:
+                return jsonify({"error": "no matching pending approval"}), 404
+            runtime.pending_approval["decision"] = decision
+            runtime.approval_condition.notify_all()
+
+        return jsonify({"ok": True})
+
+    @app.post("/api/uploads")
+    def upload_files():
+        files = request.files.getlist("files")
+        if not files:
+            return jsonify({"error": "no files uploaded"}), 400
+
+        session_dir = runtime.uploads_dir / runtime.session_name
+        session_dir.mkdir(parents=True, exist_ok=True)
+        uploaded: list[dict] = []
+
+        for file in files:
+            filename = secure_filename(file.filename or "upload.bin")
+            if not filename:
+                continue
+            target = session_dir / filename
+            file.save(target)
+
+            raw = target.read_bytes()
+            kind = "binary"
+            preview = ""
+            try:
+                text = raw.decode("utf-8")
+                kind = "text"
+                preview = text[:8000]
+            except UnicodeDecodeError:
+                if target.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                    kind = "image"
+
+            item = {
+                "name": filename,
+                "path": str(target),
+                "size": len(raw),
+                "kind": kind,
+                "preview": preview,
+                "uploaded_at": datetime.now(UTC).isoformat(),
+            }
+            runtime.uploads.append(item)
+            uploaded.append(item)
+
+        _sync_uploaded_context_messages(runtime)
+        _persist(runtime)
+        return jsonify({"ok": True, "uploads": uploaded})
+
     @app.post("/api/session")
     def session_action():
         payload = request.get_json(force=True)
@@ -405,8 +556,9 @@ def create_app():
             runtime.session_store.use(name)
             runtime.agent = _new_agent(runtime)
             runtime.agent.add_system_prompt(runtime.system_prompt)
-            runtime.session_usage = {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0}
+            runtime.session_usage = _default_usage()
             runtime.session_turns = []
+            runtime.uploads = []
             if runtime.agentic_planning:
                 summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
                 _inject_planning(runtime.agent, summary)

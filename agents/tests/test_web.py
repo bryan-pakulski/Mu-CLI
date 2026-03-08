@@ -92,6 +92,30 @@ class WebTests(unittest.TestCase):
         self.assertEqual(1.23, body['pricing']['echo']['echo']['input_per_1m'])
         self.assertEqual(4.56, body['pricing']['echo']['echo']['output_per_1m'])
 
+    def test_approval_endpoint_rejects_without_pending(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/approval', json={'id': 'missing', 'decision': 'approve'})
+        self.assertEqual(404, res.status_code)
+
+    def test_fs_dirs_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.get('/api/fs/dirs')
+        self.assertEqual(200, res.status_code)
+        payload = res.get_json()
+        assert payload is not None
+        self.assertIn('cwd', payload)
+        self.assertIn('children', payload)
+
 
 if __name__ == '__main__':
     unittest.main()

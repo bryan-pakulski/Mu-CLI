@@ -18,6 +18,7 @@ class SessionTests(unittest.TestCase):
                 messages=[Message(role=Role.USER, content="hello")],
                 usage_totals={"total_tokens": 42.0},
                 turns=[{"session": "demo", "total_tokens": 42}],
+                uploads=[{"name": "notes.txt", "path": "/tmp/notes.txt"}],
             )
             store.save(state)
 
@@ -28,6 +29,7 @@ class SessionTests(unittest.TestCase):
             self.assertEqual("hello", loaded.messages[0].content)
             self.assertEqual(42.0, loaded.usage_totals["total_tokens"])
             self.assertEqual("demo", loaded.turns[0]["session"])
+            self.assertEqual("notes.txt", loaded.uploads[0]["name"])
 
     def test_list_and_delete_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as td:

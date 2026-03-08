@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import unittest
 
@@ -116,6 +117,34 @@ class WebTests(unittest.TestCase):
         assert payload is not None
         self.assertIn('cwd', payload)
         self.assertIn('children', payload)
+
+    def test_upload_delete_single_file(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post(
+            '/api/uploads',
+            data={
+                'files': [
+                    (io.BytesIO(b'alpha'), 'a.txt'),
+                    (io.BytesIO(b'beta'), 'b.txt'),
+                ]
+            },
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(200, res.status_code)
+
+        rm = client.delete('/api/uploads/a.txt')
+        self.assertEqual(200, rm.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        names = [item['name'] for item in state['uploads']]
+        self.assertNotIn('a.txt', names)
+        self.assertIn('b.txt', names)
 
 
 if __name__ == '__main__':

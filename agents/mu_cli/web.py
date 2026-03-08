@@ -232,6 +232,13 @@ def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
         ]
 
 
+
+
+def _remove_uploaded_entry(runtime: WebRuntime, name: str) -> bool:
+    before = len(runtime.uploads)
+    runtime.uploads = [item for item in runtime.uploads if str(item.get("name", "")) != name]
+    return len(runtime.uploads) != before
+
 def _persist(runtime: WebRuntime) -> None:
     runtime.session_store.use(runtime.session_name)
     runtime.session_store.save(
@@ -560,6 +567,20 @@ def create_app():
         runtime.uploads = []
         _persist(runtime)
         return jsonify({"ok": True, "removed": removed})
+
+    @app.delete("/api/uploads/<name>")
+    def delete_upload(name: str):
+        safe_name = Path(name).name
+        session_dir = runtime.uploads_dir / runtime.session_name
+        target = session_dir / safe_name
+        if not target.exists() or not target.is_file():
+            return jsonify({"error": "uploaded file not found"}), 404
+
+        target.unlink()
+        _remove_uploaded_entry(runtime, safe_name)
+        _persist(runtime)
+        return jsonify({"ok": True, "removed": safe_name})
+
 
     @app.post("/api/session")
     def session_action():

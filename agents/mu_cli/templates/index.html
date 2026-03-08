@@ -337,6 +337,44 @@
       font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
+    .upload-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid #edf1fa;
+    }
+    .upload-item:last-child { border-bottom: 0; }
+
+    .diff-wrap {
+      border: 1px solid #dbe3f6;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #fff;
+      margin: 8px 0;
+    }
+    .diff-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .diff-col {
+      min-width: 0;
+      border-right: 1px solid #e7ecf8;
+    }
+    .diff-col:last-child { border-right: 0; }
+    .diff-line {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 2px 10px;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .diff-del { background: #ffeef0; }
+    .diff-add { background: #eaf7ec; }
+    .diff-ctx { background: #f8faff; }
+
     @media (max-width: 1000px) {
       .shell { grid-template-columns: minmax(0,1fr); }
       .sidebar { display: none; }
@@ -567,6 +605,48 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+
+function renderSideBySideDiff(diffText) {
+  const lines = String(diffText || '').split('\n');
+  const left = [];
+  const right = [];
+
+  function pushPair(l, r) {
+    left.push(l);
+    right.push(r);
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('diff ') || line.startsWith('@@')) {
+      pushPair({ cls: 'diff-ctx', text: line }, { cls: 'diff-ctx', text: line });
+      continue;
+    }
+
+    if (line.startsWith('-')) {
+      const next = lines[i + 1] || '';
+      if (next.startsWith('+')) {
+        pushPair({ cls: 'diff-del', text: line }, { cls: 'diff-add', text: next });
+        i += 1;
+      } else {
+        pushPair({ cls: 'diff-del', text: line }, { cls: 'diff-ctx', text: '' });
+      }
+      continue;
+    }
+
+    if (line.startsWith('+')) {
+      pushPair({ cls: 'diff-ctx', text: '' }, { cls: 'diff-add', text: line });
+      continue;
+    }
+
+    pushPair({ cls: 'diff-ctx', text: line }, { cls: 'diff-ctx', text: line });
+  }
+
+  const leftHtml = left.map((row) => `<div class="diff-line ${row.cls}">${escapeHtml(row.text)}</div>`).join('');
+  const rightHtml = right.map((row) => `<div class="diff-line ${row.cls}">${escapeHtml(row.text)}</div>`).join('');
+  return `<div class="diff-wrap"><div class="diff-grid"><div class="diff-col">${leftHtml}</div><div class="diff-col">${rightHtml}</div></div></div>`;
+}
+
 function formatMessageContent(content) {
   const source = String(content || '');
   let html = '';
@@ -590,7 +670,8 @@ function formatMessageContent(content) {
     const lang = (match[1] || '').toLowerCase();
     const code = match[2] || '';
     const langClass = lang ? ` language-${lang}` : '';
-    html += `<pre><code class="hljs${langClass}">${escapeHtml(code)}</code></pre>`;
+    if (lang === 'diff' || lang === 'patch') html += renderSideBySideDiff(code);
+    else html += `<pre><code class="hljs${langClass}">${escapeHtml(code)}</code></pre>`;
     cursor = match.index + match[0].length;
   }
 
@@ -682,7 +763,16 @@ function renderUploads() {
     el.textContent = 'No uploaded context files.';
     return;
   }
-  el.innerHTML = state.uploads.slice(-20).map((u) => `${escapeHtml(u.name)} (${u.kind}, ${u.size} bytes)`).join('<br/>');
+  el.innerHTML = state.uploads.slice(-20).map((u) => `
+    <div class="upload-item">
+      <span>${escapeHtml(u.name)} (${escapeHtml(u.kind)}, ${escapeHtml(String(u.size))} bytes)</span>
+      <button class="btn btn-soft btn-sm" data-upload-remove="${encodeURIComponent(u.name)}">Remove</button>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('[data-upload-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => removeUploadedFile(decodeURIComponent(btn.getAttribute('data-upload-remove') || '')).catch((e) => alert(e.message)));
+  });
 }
 
 function wireModels(provider) {
@@ -767,6 +857,15 @@ async function uploadContextFiles() {
 
 async function clearUploadedStore() {
   await fetch('/api/uploads', { method: 'DELETE' }).then(async (res) => {
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'request failed');
+  });
+  await refreshState();
+}
+
+async function removeUploadedFile(name) {
+  if (!name) return;
+  await fetch(`/api/uploads/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(async (res) => {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || 'request failed');
   });

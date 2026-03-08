@@ -155,6 +155,7 @@ class WebTests(unittest.TestCase):
 
         res = client.post('/api/settings', json={
             'tool_visibility': {'read_file': False},
+            'research_mode': True,
             'custom_tools': [
                 {
                     'name': 'say_hi',
@@ -173,6 +174,7 @@ class WebTests(unittest.TestCase):
         self.assertFalse(tools['read_file']['enabled'])
         self.assertIn('say_hi', tools)
         self.assertEqual('custom', tools['say_hi']['source'])
+        self.assertTrue(state['research_mode'])
 
 
 if __name__ == '__main__':

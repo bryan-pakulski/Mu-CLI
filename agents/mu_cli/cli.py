@@ -17,9 +17,12 @@ from mu_cli.session import SessionState, SessionStore
 from mu_cli.tools.base import Tool
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
+    ExtractLinksContextTool,
+    FetchPdfContextTool,
     GetWorkspaceFileContextTool,
     GitTool,
     FetchUrlContextTool,
+    SearchArxivPapersTool,
     SearchWebContextTool,
     ListWorkspaceFilesTool,
     ReadFileTool,
@@ -33,6 +36,8 @@ PLANNING_PROMPT_BASE = (
     "Prefer smallest safe changes and explain what tool(s) you need. "
     "For workspace tasks: first discover with list_workspace_files, then read only specific files with "
     "get_workspace_file_context. Do not request the whole codebase unless explicitly asked. "
+    "When modifying existing files, prefer apply_patch for targeted edits; use write_file for new files or full rewrites only when explicitly requested. "
+    "Before and after mutating edits, use git diff (or equivalent) to verify minimal changes. "
     "For any request involving repository state, files, diffs, or edits, tool usage is required before final claims. "
     "For mutating actions, clearly state intended edits before executing."
 )
@@ -459,7 +464,10 @@ def run() -> int:
         ApplyPatchTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         GitTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         FetchUrlContextTool(),
+        FetchPdfContextTool(),
+        ExtractLinksContextTool(),
         SearchWebContextTool(),
+        SearchArxivPapersTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
     ]

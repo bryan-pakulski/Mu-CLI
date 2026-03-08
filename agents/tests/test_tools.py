@@ -10,11 +10,14 @@ from mu_cli.tools.filesystem import (
     ClearUploadedContextStoreTool,
     FetchUrlContextTool,
     CustomCommandTool,
+    ExtractLinksContextTool,
+    FetchPdfContextTool,
     GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
     SearchWebContextTool,
+    SearchArxivPapersTool,
     WriteFileTool,
 )
 from mu_cli.workspace import WorkspaceStore
@@ -167,6 +170,35 @@ diff
         result = tool.run({"args": {"value": "ok"}})
         self.assertTrue(result.ok, result.output)
         self.assertIn("tool:ok", result.output)
+
+    def test_extract_links_context_tool(self) -> None:
+        html = b'<html><body><a href="/a">A</a><a href="https://example.com/b">B</a></body></html>'
+        with patch('urllib.request.urlopen', return_value=_FakeResponse(html, 'text/html')):
+            result = ExtractLinksContextTool().run({"url": "https://example.com/root"})
+        self.assertTrue(result.ok)
+        self.assertIn("https://example.com/a", result.output)
+        self.assertIn("https://example.com/b", result.output)
+
+    def test_search_arxiv_papers_tool(self) -> None:
+        xml = b'''<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Sample Paper</title>
+    <summary>Summary text.</summary>
+    <link rel="alternate" href="https://arxiv.org/abs/1234.5678v1" />
+    <link title="pdf" href="https://arxiv.org/pdf/1234.5678v1" type="application/pdf" />
+  </entry>
+</feed>'''
+        with patch('urllib.request.urlopen', return_value=_FakeResponse(xml, 'application/atom+xml')):
+            result = SearchArxivPapersTool().run({"query": "sample"})
+        self.assertTrue(result.ok)
+        self.assertIn("Sample Paper", result.output)
+        self.assertIn("https://arxiv.org/abs/1234.5678v1", result.output)
+
+    def test_fetch_pdf_context_tool_validates_url(self) -> None:
+        result = FetchPdfContextTool().run({"url": "example.com/file.pdf"})
+        self.assertFalse(result.ok)
+        self.assertIn("url must start", result.output)
 
 
 if __name__ == "__main__":

@@ -575,6 +575,10 @@
         <input class="form-check-input" id="agentic" type="checkbox" checked />
         <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
       </div>
+      <div class="form-check">
+        <input class="form-check-input" id="researchMode" type="checkbox" />
+        <label class="form-check-label small-muted" for="researchMode">Research mode (web + papers + citations)</label>
+      </div>
       <div class="form-check mb-3">
         <input class="form-check-input" id="darkMode" type="checkbox" />
         <label class="form-check-label small-muted" for="darkMode">Dark mode</label>
@@ -643,6 +647,7 @@ let applyTimer = null;
 let sending = false;
 let approvalPoll = null;
 let selectedDir = null;
+let lastApprovalPatchFingerprint = null;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -745,8 +750,13 @@ function renderApprovalPatchPreview(args) {
   const patchText = extractPatchTextFromArgs(args || {});
   if (!patchText.trim()) {
     host.innerHTML = '';
+    lastApprovalPatchFingerprint = null;
     return;
   }
+
+  const fingerprint = patchText.trim();
+  if (lastApprovalPatchFingerprint === fingerprint) return;
+  lastApprovalPatchFingerprint = fingerprint;
 
   const file = new File([patchText], 'proposed_change.patch', { type: 'text/x-diff' });
   const reader = new FileReader();
@@ -1010,6 +1020,7 @@ function buildSettingsPayload() {
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
     agentic_planning: document.getElementById('agentic').checked,
+    research_mode: document.getElementById('researchMode').checked,
     tool_visibility: buildToolVisibilityPayload(),
     custom_tools: parseCustomToolsInput(),
   };
@@ -1135,6 +1146,7 @@ async function pollApproval() {
 
   if (!pending) {
     document.getElementById('approvalPatchPreview').innerHTML = '';
+    lastApprovalPatchFingerprint = null;
     showModal('approvalModal', false);
     return;
   }
@@ -1184,6 +1196,7 @@ async function refreshState() {
   document.getElementById('workspace').value = s.workspace || '';
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
+  document.getElementById('researchMode').checked = !!s.research_mode;
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
   if (document.activeElement !== document.getElementById('customTools')) {
     document.getElementById('customTools').value = JSON.stringify(customSpecs, null, 2);
@@ -1204,6 +1217,7 @@ async function refreshState() {
     showModal('approvalModal', true);
   } else {
     document.getElementById('approvalPatchPreview').innerHTML = '';
+    lastApprovalPatchFingerprint = null;
     showModal('approvalModal', false);
   }
 
@@ -1296,7 +1310,7 @@ async function sessionAction(action) {
   await refreshState();
 }
 
-for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'darkMode']) {
+for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'darkMode']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();

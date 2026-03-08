@@ -25,8 +25,11 @@ from mu_cli.tools.filesystem import (
     GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
     GitTool,
+    ExtractLinksContextTool,
+    FetchPdfContextTool,
     FetchUrlContextTool,
     SearchWebContextTool,
+    SearchArxivPapersTool,
     CustomCommandTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
@@ -48,6 +51,7 @@ class WebRuntime:
     workspace_path: str | None
     debug: bool
     agentic_planning: bool
+    research_mode: bool
     workspace_store: WorkspaceStore
     session_store: SessionStore
     pricing: PricingCatalog
@@ -84,6 +88,30 @@ def _planning_prompt(workspace_summary: str | None = None) -> str:
     if workspace_summary:
         return f"{PLANNING_PROMPT_BASE} Workspace context: {workspace_summary}"
     return PLANNING_PROMPT_BASE
+
+
+RESEARCH_PROMPT_BASE = (
+    "Research mode is enabled. For research requests, proactively use web and paper tools to gather evidence. "
+    "Prefer search_web_context/search_arxiv_papers for discovery, fetch_url_context/fetch_pdf_context for reading, "
+    "and extract_links_context to follow references. "
+    "In every research response, include a clear 'Citations' section with source links used."
+)
+
+
+def _inject_research_prompt(agent: Agent) -> None:
+    already = any(
+        message.role is Role.SYSTEM and message.metadata.get("kind") == "research_mode"
+        for message in agent.state.messages
+    )
+    if already:
+        return
+    agent.state.messages.append(
+        Message(
+            role=Role.SYSTEM,
+            content=RESEARCH_PROMPT_BASE,
+            metadata={"kind": "research_mode"},
+        )
+    )
 
 
 def _inject_planning(agent: Agent, workspace_summary: str | None = None) -> None:
@@ -333,6 +361,8 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     if runtime.agentic_planning:
         summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
         _inject_planning(runtime.agent, summary)
+    if runtime.research_mode:
+        _inject_research_prompt(runtime.agent)
 
     return True
 
@@ -350,7 +380,10 @@ def create_app():
         ApplyPatchTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         GitTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         FetchUrlContextTool(),
+        FetchPdfContextTool(),
+        ExtractLinksContextTool(),
         SearchWebContextTool(),
+        SearchArxivPapersTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
         ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),
@@ -369,6 +402,7 @@ def create_app():
         workspace_path=None,
         debug=False,
         agentic_planning=True,
+        research_mode=False,
         workspace_store=workspace_store,
         session_store=session_store,
         pricing=PricingCatalog(Path(".mu_cli/pricing.json")),
@@ -389,6 +423,8 @@ def create_app():
     runtime.agent = _new_agent(runtime)
     runtime.agent.add_system_prompt(runtime.system_prompt)
     _inject_planning(runtime.agent)
+    if runtime.research_mode:
+        _inject_research_prompt(runtime.agent)
 
     @app.get("/")
     def index():
@@ -406,6 +442,7 @@ def create_app():
                 "workspace": runtime.workspace_path,
                 "debug": runtime.debug,
                 "agentic_planning": runtime.agentic_planning,
+                "research_mode": runtime.research_mode,
                 "models": MODELS_BY_PROVIDER,
                 "sessions": sessions,
                 "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
@@ -522,6 +559,7 @@ def create_app():
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
+        runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
         tool_visibility = payload.get("tool_visibility")
         if isinstance(tool_visibility, dict):
             for tool in runtime.base_tools:
@@ -548,6 +586,8 @@ def create_app():
         if runtime.agentic_planning:
             summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
             _inject_planning(runtime.agent, summary)
+        if runtime.research_mode:
+            _inject_research_prompt(runtime.agent)
 
         _persist(runtime)
         return jsonify({"ok": True})
@@ -698,6 +738,8 @@ def create_app():
             if runtime.agentic_planning:
                 summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
                 _inject_planning(runtime.agent, summary)
+            if runtime.research_mode:
+                _inject_research_prompt(runtime.agent)
             _persist(runtime)
             return jsonify({"ok": True, "session": name})
 

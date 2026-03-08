@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import textwrap
+import xml.etree.ElementTree as ET
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -481,6 +484,156 @@ class SearchWebContextTool:
         if duck.ok:
             return duck
         return ToolResult(ok=False, output=f"auto search failed; google={google.output}; duckduckgo={duck.output}")
+
+
+class ExtractLinksContextTool:
+    name = "extract_links_context"
+    description = "Fetch a web page and return discovered links for research follow-up."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Absolute URL to inspect"},
+            "max_results": {"type": "integer", "description": "Maximum links to return", "default": 25},
+        },
+        "required": ["url"],
+    }
+
+    def run(self, args: dict) -> ToolResult:
+        url = str(args.get("url", "")).strip()
+        max_results = int(args.get("max_results", 25))
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return ToolResult(ok=False, output="url must start with http:// or https://")
+
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"URL fetch failed: {exc}")
+
+        hrefs = re.findall(r'href=["\']([^"\']+)["\']', body, flags=re.IGNORECASE)
+        links: list[str] = []
+        for href in hrefs:
+            absolute = urllib.parse.urljoin(url, href.strip())
+            if absolute.startswith("http://") or absolute.startswith("https://"):
+                links.append(absolute)
+
+        unique: list[str] = []
+        seen = set()
+        for link in links:
+            if link in seen:
+                continue
+            seen.add(link)
+            unique.append(link)
+        if not unique:
+            return ToolResult(ok=True, output="No links found.")
+        return ToolResult(ok=True, output="\n".join(f"- {item}" for item in unique[:max_results]))
+
+
+class SearchArxivPapersTool:
+    name = "search_arxiv_papers"
+    description = "Search arXiv papers and return titles, links, and summaries."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "arXiv query"},
+            "max_results": {"type": "integer", "description": "Maximum papers", "default": 5},
+        },
+        "required": ["query"],
+    }
+
+    def run(self, args: dict) -> ToolResult:
+        query = str(args.get("query", "")).strip()
+        max_results = int(args.get("max_results", 5))
+        if not query:
+            return ToolResult(ok=False, output="query is required")
+        limit = max(1, min(max_results, 20))
+        url = (
+            "http://export.arxiv.org/api/query?"
+            f"search_query=all:{urllib.parse.quote(query)}&start=0&max_results={limit}"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+research-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                xml_text = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"arXiv search failed: {exc}")
+
+        try:
+            root = ET.fromstring(xml_text)
+        except ET.ParseError as exc:
+            return ToolResult(ok=False, output=f"arXiv XML parse failed: {exc}")
+
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        rows: list[str] = []
+        for entry in root.findall("atom:entry", ns)[:limit]:
+            title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip().replace("\n", " ")
+            summary = (entry.findtext("atom:summary", default="", namespaces=ns) or "").strip().replace("\n", " ")
+            link = ""
+            pdf = ""
+            for link_node in entry.findall("atom:link", ns):
+                href = str(link_node.attrib.get("href", ""))
+                rel = str(link_node.attrib.get("rel", ""))
+                typ = str(link_node.attrib.get("type", ""))
+                if not link and rel == "alternate":
+                    link = href
+                if not pdf and ("pdf" in typ or link_node.attrib.get("title") == "pdf"):
+                    pdf = href
+            rows.append(f"- {title}\n  URL: {link}\n  PDF: {pdf}\n  Summary: {summary}")
+
+        if not rows:
+            return ToolResult(ok=True, output="No arXiv papers found.")
+        return ToolResult(ok=True, output="\n".join(rows))
+
+
+class FetchPdfContextTool:
+    name = "fetch_pdf_context"
+    description = "Fetch a PDF URL and extract text for research grounding."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Absolute PDF URL"},
+            "max_chars": {"type": "integer", "description": "Maximum text length", "default": 8000},
+        },
+        "required": ["url"],
+    }
+
+    def run(self, args: dict) -> ToolResult:
+        url = str(args.get("url", "")).strip()
+        max_chars = int(args.get("max_chars", 8000))
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return ToolResult(ok=False, output="url must start with http:// or https://")
+
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                raw = resp.read()
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"PDF fetch failed: {exc}")
+
+        module_name = "pypdf" if importlib.util.find_spec("pypdf") else "PyPDF2" if importlib.util.find_spec("PyPDF2") else ""
+        if not module_name:
+            return ToolResult(ok=False, output="PDF parsing unavailable: install pypdf or PyPDF2")
+        pdf_module = importlib.import_module(module_name)
+        PdfReader = getattr(pdf_module, "PdfReader", None)
+        if PdfReader is None:
+            return ToolResult(ok=False, output=f"PDF parsing unavailable: {module_name}.PdfReader not found")
+
+        import io
+
+        try:
+            reader = PdfReader(io.BytesIO(raw))
+            pages = [page.extract_text() or "" for page in reader.pages]
+        except Exception as exc:
+            return ToolResult(ok=False, output=f"PDF parse failed: {exc}")
+
+        text = "\n".join(pages).strip()
+        if not text:
+            return ToolResult(ok=False, output="PDF contained no extractable text")
+        return ToolResult(ok=True, output=text[:max_chars])
 
 
 class CustomCommandTool:

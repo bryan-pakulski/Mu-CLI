@@ -14,6 +14,7 @@ class Tool(Protocol):
     name: str
     description: str
     schema: dict[str, Any]
+    mutating: bool
 
     def run(self, args: dict[str, Any]) -> ToolResult:
         ...

@@ -1,47 +1,87 @@
 # Mu-CLI (Provider Agnostic Foundation)
 
-Fresh provider-agnostic CLI scaffold intended for a **human-in-the-loop development workflow**.
+Provider-agnostic CLI scaffold intended for a **human-in-the-loop development workflow**.
 
-## What Included
+## What is included
 
-- a provider-neutral core message model
-- a pluggable provider adapter interface
-- a simple local `echo` provider (for development)
-- Tooling:
-    - (`read_file`) with structured schema
-- Minimal interactive CLI loop
+- provider-neutral core message model
+- pluggable provider adapter interface
+- providers:
+  - local `echo` provider (for development)
+  - `openai` provider via Chat Completions API (with structured tool-calling)
+  - `gemini` provider via Google Generative Language API (with structured tool-calling)
+- tooling:
+  - `read_file`
+  - `write_file` (mutating; approval-gated)
+  - `apply_patch` (mutating; approval-gated)
+  - `git` (mutating; approval-gated)
+  - `list_workspace_files`
+  - `get_workspace_file_context`
+- workspace indexing + tool-run memory
+- per-turn token/cost report with JSON-configurable provider pricing
+- session persistence (resume conversations and workspace state)
 
-## Run
+## Full HTML documentation
+
+- Open the full guide at [`../doco.html`](../doco.html).
+- Developer workflow rule: when CLI commands/tools/provider behavior changes, update `doco.html` in the same PR.
+
+## Makefile shortcuts
 
 ```bash
-PYTHONPATH=. python -m ai_cli.cli
+make test
+make test-verbose
+make models
+make run-echo
+make run-openai   # requires OPENAI_API_KEY
+make run-gemini   # requires GEMINI_API_KEY or GOOGLE_API_KEY
 ```
+
+## Workspace context and memory
+
+- Attach at startup with `--workspace <path>` or at runtime: `/workspace attach <path>`.
+- Indexing respects `.gitignore` and filters common secret-like files/content.
+- Tool runs are saved in `.mu_cli/workspaces/workspace_<hash>.json`.
+
+## Session persistence
+
+- Session state is saved in `.mu_cli/sessions/<session>.json`.
+- Resume is automatic by default; disable with `--no-resume`.
+
+## Agentic planning prompt
+
+- A planning-focused system prompt is auto-injected by default to keep the model transparent and tool-first.
+- Check status with `/agentic status`.
+- Disable injection with `--no-agentic-planning`.
+
+## Approval policy
+
+- Approval mode controls mutating tools: `ask`, `auto`, `deny`.
+- Configure at startup with `--approval-mode`.
+- Change in app with `/approvals set <ask|auto|deny>`.
+
+## Model selection
+
+- List catalog: `--list-models` or `/models [provider]`.
+- Switch active model at runtime: `/model select <name>`.
+
+## Token usage + pricing report
+
+- Each prompt prints a turn report with token usage and estimated USD cost.
+- Pricing config is user-adjustable JSON at `.mu_cli/pricing.json` by default.
 
 ## Basic usage
 
-- Ask normal prompts.
-- Exit with `/quit`.
-- Trigger a tool call through the local echo provider:
-
-```text
-/tool read_file {"path":"ReadMe.md"}
+```bash
+PYTHONPATH=agents python -m mu_cli.cli --provider echo
 ```
 
-## Structure
+Useful commands:
 
-```text
-ai_cli/
-  core/types.py          # canonical message/tool/provider types
-  agent.py               # provider-neutral agent loop
-  providers/echo.py      # local development provider adapter
-  tools/base.py          # tool protocol + result type
-  tools/filesystem.py    # read_file tool
-  cli.py                 # interactive CLI entrypoint
-```
+- `/help`, `/tools`, `/tool-help <tool_name>`
+- `/workspace attach <path>`, `/workspace status`
+- `/models`, `/models openai`, `/model select gpt-4o-mini`
+- `/approvals status`, `/approvals set auto`
+- `/agentic status`
+- `/quit`
 
-## Next steps
-
-1. Add real provider adapters (`gemini`, `anthropic`, `openai`).
-2. Add policy/approval checkpoints before tool execution.
-3. Add write/patch/git tools.
-4. Persist session history (e.g., sqlite/jsonl).

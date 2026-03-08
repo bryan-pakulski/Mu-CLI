@@ -458,6 +458,32 @@ class SearchWebContextTool:
 
         rows = [row for row in rows if row[1] or row[2]]
         if not rows:
+            html_url = f"https://duckduckgo.com/html/?q={q}"
+            req = urllib.request.Request(html_url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    html = resp.read().decode("utf-8", errors="replace")
+            except urllib.error.URLError as exc:
+                return ToolResult(ok=False, output=f"DuckDuckGo HTML fallback failed: {exc}")
+
+            pattern = re.compile(
+                r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>[\s\S]*?'
+                r'<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
+                flags=re.IGNORECASE,
+            )
+            for match in pattern.finditer(html):
+                link = re.sub(r"\s+", " ", match.group(1)).strip()
+                title = re.sub(r"<[^>]+>", " ", match.group(2)).strip()
+                snippet = re.sub(r"<[^>]+>", " ", match.group(3)).strip()
+                link = urllib.parse.unquote(link)
+                if link.startswith("//duckduckgo.com/l/?"):
+                    parsed = urllib.parse.urlparse("https:" + link)
+                    params = urllib.parse.parse_qs(parsed.query)
+                    link = params.get("uddg", [link])[0]
+                if link.startswith("http://") or link.startswith("https://"):
+                    rows.append((title[:80], link, snippet))
+
+        if not rows:
             return ToolResult(ok=True, output="No DuckDuckGo results.")
 
         lines = []

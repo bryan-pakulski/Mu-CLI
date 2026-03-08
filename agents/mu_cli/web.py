@@ -94,7 +94,8 @@ RESEARCH_PROMPT_BASE = (
     "Research mode is enabled. For research requests, proactively use web and paper tools to gather evidence. "
     "Prefer search_web_context/search_arxiv_papers for discovery, fetch_url_context/fetch_pdf_context for reading, "
     "and extract_links_context to follow references. "
-    "In every research response, include a clear 'Citations' section with source links used."
+    "When writing findings, cite claims inline with numbered references like [1] [2]. "
+    "In every research response, include a clear 'Citations' section with numbered clickable URLs used."
 )
 
 

@@ -182,6 +182,8 @@
 
     .bubble p { margin: 0 0 8px; }
     .bubble p:last-child { margin-bottom: 0; }
+    .bubble a { color: #2f5fca; text-decoration: underline; }
+    body.dark-mode .bubble a { color: #9ec2ff; }
     .bubble code {
       background: #edf2ff;
       color: #30457c;
@@ -227,6 +229,26 @@
       font-weight: 600;
     }
     .tool-toggle > summary::-webkit-details-marker { display: none; }
+
+    .citation-panel {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      overflow: hidden;
+    }
+    .citation-panel > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 7px 9px;
+      color: var(--muted);
+      font-size: 11px;
+      border-bottom: 1px solid transparent;
+    }
+    .citation-panel > summary::-webkit-details-marker { display: none; }
+    .citation-panel[open] > summary { border-bottom-color: var(--border); }
+    .citation-list { padding: 8px 10px; font-size: 12px; }
+    .citation-list a { overflow-wrap: anywhere; }
 
     .trace-line { display: block; margin-bottom: 4px; }
     .trace-model { color: #445da2; }
@@ -832,7 +854,10 @@ function formatMessageContent(content) {
 
   function formatParagraphs(text) {
     if (!text) return '';
-    const escaped = escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+    const escaped = escapeHtml(text)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/(https?:\/\/[\w\-./?%&=+#:~;,]+[\w/#])/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
     return escaped
       .split(/\n{2,}/)
       .map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`)
@@ -854,6 +879,39 @@ function formatMessageContent(content) {
   html += formatParagraphs(source.slice(cursor));
 
   return html || '<p></p>';
+}
+
+function extractCitationLinks(content) {
+  const text = String(content || '');
+  const found = [];
+  const seen = new Set();
+  const regex = /https?:\/\/[\w\-./?%&=+#:~;,]+[\w/#]/g;
+  for (const match of text.matchAll(regex)) {
+    const url = String(match[0]);
+    if (seen.has(url)) continue;
+    seen.add(url);
+    found.push(url);
+  }
+  return found;
+}
+
+function buildCitationPanel(content) {
+  const links = extractCitationLinks(content);
+  if (!links.length) return '';
+  const items = links.map((url, idx) => `
+    <div id="citation-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a></div>
+  `).join('');
+  return `<details class="citation-panel"><summary>ℹ Citations & URLs (${links.length})</summary><div class="citation-list">${items}</div></details>`;
+}
+
+function formatAssistantContentWithCitations(content, links) {
+  let html = formatMessageContent(content);
+  html = html.replace(/\[(\d+)\]/g, (full, numText) => {
+    const idx = Number(numText);
+    if (!Number.isInteger(idx) || idx < 1 || idx > links.length) return full;
+    return `<a href="#citation-${idx}" title="Jump to citation [${idx}]">[${idx}]</a>`;
+  });
+  return html;
 }
 
 function highlightCodeBlocks(root) {
@@ -893,8 +951,19 @@ function renderMessages() {
     } else {
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-      bubble.innerHTML = formatMessageContent(m.content);
+      const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
+      bubble.innerHTML = m.role === 'assistant'
+        ? formatAssistantContentWithCitations(m.content, citationLinks)
+        : formatMessageContent(m.content);
       row.appendChild(bubble);
+      if (m.role === 'assistant') {
+        const citationHtml = buildCitationPanel(m.content);
+        if (citationHtml) {
+          const container = document.createElement('div');
+          container.innerHTML = citationHtml;
+          row.appendChild(container.firstElementChild);
+        }
+      }
     }
 
     box.appendChild(row);

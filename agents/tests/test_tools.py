@@ -160,6 +160,14 @@ diff
         self.assertTrue(result.ok)
         self.assertIn("https://example.com/1", result.output)
 
+    def test_search_web_context_tool_duckduckgo_html_fallback(self) -> None:
+        payload = b'{"Heading":"","RelatedTopics":[]}'
+        html = b'<a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpost">Post</a><a class="result__snippet">Snippet</a>'
+        with patch('urllib.request.urlopen', side_effect=[_FakeResponse(payload, 'application/json'), _FakeResponse(html, 'text/html')]):
+            result = SearchWebContextTool().run({"query": "example", "provider": "duckduckgo"})
+        self.assertTrue(result.ok)
+        self.assertIn("https://example.com/post", result.output)
+
     def test_custom_command_tool(self) -> None:
         tool = CustomCommandTool(
             name="echo_custom",

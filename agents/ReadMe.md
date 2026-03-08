@@ -23,6 +23,8 @@ Provider-agnostic CLI scaffold intended for a **human-in-the-loop development wo
 
 ## Makefile shortcuts
 
+From repo root:
+
 ```bash
 make test
 make test-verbose

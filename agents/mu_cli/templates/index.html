@@ -5,58 +5,214 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mu_cli GUI</title>
   <style>
-    :root { --bg:#0b1020; --panel:#121a33; --panel2:#1a2550; --text:#e8ecff; --muted:#b8c4f8; --border:#2a3a72; --accent:#7aa8ff; }
-    * { box-sizing:border-box; }
-    body { margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Arial; color:var(--text); background:var(--bg); }
-    .app { display:grid; grid-template-columns: 330px 1fr; min-height:100vh; }
-    .sidebar { background:var(--panel); border-right:1px solid var(--border); padding:1rem; overflow:auto; transition: all .2s; }
-    .sidebar.collapsed { width:0; padding:0; overflow:hidden; border-right:none; }
-    .main { display:flex; flex-direction:column; }
-    .topbar { display:flex; align-items:center; gap:.6rem; padding:.8rem 1rem; border-bottom:1px solid var(--border); background:var(--panel2); }
-    .title { font-weight:700; }
-    .content { padding:1rem; display:grid; grid-template-rows: 1fr auto auto; gap:.75rem; height:calc(100vh - 56px); }
-    .messages { border:1px solid var(--border); border-radius:10px; padding:1rem; overflow:auto; background:#101833; }
-    .msg { margin-bottom:.85rem; }
-    .role { font-size:.75rem; color:#a9b9f4; text-transform:uppercase; letter-spacing:.05em; }
-    .bubble { margin-top:.2rem; background:#1a2550; border:1px solid var(--border); border-radius:8px; padding:.6rem .7rem; white-space:pre-wrap; }
-    .inputrow { display:flex; gap:.5rem; }
-    textarea,input,select,button { background:#0f1730; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:.5rem .6rem; }
-    textarea { width:100%; min-height:88px; resize:vertical; }
-    button { cursor:pointer; }
-    .small { color:var(--muted); font-size:.85rem; }
-    .group { margin-bottom:1rem; }
-    .group h3 { margin:.2rem 0 .5rem; font-size:.95rem; }
-    .trace { border:1px solid var(--border); border-radius:8px; background:#0f1730; padding:.6rem; max-height:140px; overflow:auto; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.82rem; }
+    :root {
+      --bg: #120f1f;
+      --bg-soft: #1a1630;
+      --surface: #201b39;
+      --surface-2: #29224b;
+      --text: #f3ecff;
+      --muted: #c6b9e8;
+      --border: #3c3268;
+      --purple: #a78bfa;
+      --purple-soft: rgba(167, 139, 250, 0.18);
+      --orange: #f59e0b;
+      --orange-soft: rgba(245, 158, 11, 0.18);
+      --green-soft: rgba(52, 211, 153, 0.18);
+      --shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      color: var(--text);
+      background: radial-gradient(1200px 900px at 95% -20%, #3a2b66 0%, var(--bg) 43%) fixed;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      transition: grid-template-columns .18s ease;
+    }
+    .app.sidebar-hidden { grid-template-columns: minmax(0, 1fr); }
+    .app.sidebar-hidden .sidebar { display: none; }
+
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: linear-gradient(180deg, #221d3d 0%, #1a1630 100%);
+      padding: 14px;
+      overflow: auto;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow);
+    }
+    .panel h3 { margin: 4px 0 8px; font-size: 12px; letter-spacing: .03em; color: #e6dbff; text-transform: uppercase; }
+
+    .main { display: flex; flex-direction: column; min-width: 0; }
+    .topbar {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, #261f43 0%, #2d2450 100%);
+    }
+    .title { font-weight: 700; font-size: 15px; }
+    .small { color: var(--muted); font-size: 12px; }
+
+    .content {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) 120px auto;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .messages {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: linear-gradient(180deg, #1a1630, #17132a);
+      box-shadow: var(--shadow);
+    }
+
+    .msg { margin-bottom: 10px; }
+    .role { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #bcaee3; }
+    .bubble {
+      margin-top: 4px;
+      border-radius: 12px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      white-space: pre-wrap;
+    }
+    .msg.role-user .bubble { background: var(--purple-soft); border-color: #5d4e93; }
+    .msg.role-assistant .bubble { background: rgba(157, 126, 224, 0.12); border-color: #6c58a5; }
+    .msg.role-tool_result .bubble,
+    .msg.role-tool_call .bubble { background: var(--orange-soft); border-color: #8f6630; }
+
+    .trace {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #17132a;
+      padding: 8px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      box-shadow: var(--shadow);
+      white-space: pre-wrap;
+    }
+
+    .trace-line { display: block; margin-bottom: 4px; }
+    .trace-model { color: #c4b5fd; }
+    .trace-request { color: #fdba74; }
+    .trace-run { color: #a7f3d0; }
+
+    textarea, input, select, button {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      background: #19152d;
+      padding: 7px 9px;
+      font-size: 13px;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    button {
+      width: auto;
+      background: linear-gradient(90deg, #8b5cf6, #a855f7);
+      border-color: #7b52cf;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.secondary { background: #201b39; border-color: var(--border); }
+
+    .inputrow { display: flex; gap: 8px; align-items: center; }
+    .row { display: flex; gap: 6px; }
+
+    .status-pill {
+      display: inline-block;
+      border-radius: 999px;
+      font-size: 11px;
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      background: #1f1a36;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
-  <div class="app">
+  <div id="app" class="app">
     <aside id="sidebar" class="sidebar">
-      <div class="group"><h3>Provider</h3><select id="provider"></select></div>
-      <div class="group"><h3>Model</h3><select id="model"></select></div>
-      <div class="group"><h3>API key (optional)</h3><input id="apiKey" type="password" placeholder="sk-..." /></div>
-      <div class="group"><h3>Approval</h3><select id="approval"><option>ask</option><option>auto</option><option>deny</option></select></div>
-      <div class="group"><h3>Workspace path</h3><input id="workspace" placeholder="/path/to/repo" /></div>
-      <div class="group"><label><input id="debug" type="checkbox" /> Debug mode</label><br/><label><input id="agentic" type="checkbox" checked /> Agentic planning</label></div>
-      <div class="group"><button id="applySettings">Apply settings</button></div>
+      <div class="panel">
+        <h3>Runtime settings</h3>
+        <div class="small">Auto-applies on change</div>
+        <div style="height:8px"></div>
+        <label class="small">Provider</label>
+        <select id="provider"></select>
+        <div style="height:6px"></div>
+        <label class="small">Model</label>
+        <select id="model"></select>
+        <div style="height:6px"></div>
+        <label class="small">API key (optional)</label>
+        <input id="apiKey" type="password" placeholder="sk-..." />
+        <div style="height:6px"></div>
+        <label class="small">Approval mode</label>
+        <select id="approval"><option>ask</option><option>auto</option><option>deny</option></select>
+        <div style="height:6px"></div>
+        <label class="small">Workspace path</label>
+        <input id="workspace" placeholder="/path/to/repo" />
+        <div style="height:8px"></div>
+        <label class="small"><input id="debug" type="checkbox" /> Debug mode</label><br/>
+        <label class="small"><input id="agentic" type="checkbox" checked /> Agentic planning</label>
+      </div>
 
-      <div class="group"><h3>Session management</h3>
+      <div class="panel">
+        <h3>Session management</h3>
         <div class="small" id="activeSession">active: -</div>
-        <div style="display:flex; gap:.4rem; margin:.5rem 0;"><input id="sessionName" placeholder="session name" /><button id="newSession">New</button></div>
-        <div style="display:flex; gap:.4rem; margin:.5rem 0;"><button id="refreshSessions">Refresh</button></div>
-        <select id="sessionList" size="6" style="width:100%;"></select>
-        <div style="display:flex; gap:.4rem; margin-top:.5rem;"><button id="loadSession">Load</button><button id="deleteSession">Delete</button></div>
+        <div style="height:8px"></div>
+        <div class="row">
+          <input id="sessionName" placeholder="session name" />
+          <button id="newSession">New</button>
+        </div>
+        <div style="height:8px"></div>
+        <select id="sessionList" size="6"></select>
+        <div style="height:8px"></div>
+        <div class="row">
+          <button id="loadSession" class="secondary">Load</button>
+          <button id="deleteSession" class="secondary">Delete</button>
+          <button id="refreshSessions" class="secondary">Refresh</button>
+        </div>
       </div>
     </aside>
 
     <section class="main">
-      <div class="topbar"><button id="toggleSidebar">☰</button><div class="title">mu_cli GUI</div><div class="small" id="meta"></div></div>
+      <div class="topbar">
+        <button id="toggleSidebar" class="secondary">☰</button>
+        <div class="title">mu_cli GUI</div>
+        <span class="status-pill" id="meta">loading...</span>
+      </div>
+
       <div class="content">
         <div id="messages" class="messages"></div>
-        <div class="trace" id="traces"></div>
+        <div id="traces" class="trace">debug traces will appear here</div>
         <div>
-          <div class="inputrow"><textarea id="prompt" placeholder="Ask anything..."></textarea></div>
-          <div class="inputrow" style="margin-top:.5rem;"><button id="send">Send</button><div class="small" id="report"></div></div>
+          <div class="inputrow">
+            <textarea id="prompt" placeholder="Ask anything..."></textarea>
+          </div>
+          <div class="inputrow" style="margin-top:8px;">
+            <button id="send">Send</button>
+            <div class="small" id="report"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -64,19 +220,30 @@
 
 <script>
 const state = { models: {}, messages: [], traces: [] };
+let syncing = false;
+let applyTimer = null;
 
 async function api(path, method='GET', body=null) {
-  const res = await fetch(path, { method, headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):null });
+  const res = await fetch(path, {
+    method,
+    headers: {'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : null,
+  });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'request failed');
   return json;
+}
+
+function roleClass(role) {
+  return String(role || '').replace(/[^a-zA-Z0-9_\-]/g, '_');
 }
 
 function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
   for (const m of state.messages) {
-    const row = document.createElement('div'); row.className='msg';
+    const row = document.createElement('div');
+    row.className = `msg role-${roleClass(m.role)}`;
     row.innerHTML = `<div class="role">${m.role}</div><div class="bubble">${m.content}</div>`;
     box.appendChild(row);
   }
@@ -84,14 +251,27 @@ function renderMessages() {
 }
 
 function renderTraces() {
-  document.getElementById('traces').textContent = state.traces.join('\n') || 'debug traces will appear here';
+  const el = document.getElementById('traces');
+  if (!state.traces.length) {
+    el.textContent = 'debug traces will appear here';
+    return;
+  }
+  el.innerHTML = state.traces.map((line) => {
+    let cls = 'trace-line';
+    if (line.startsWith('model:')) cls += ' trace-model';
+    else if (line.startsWith('tool-request:')) cls += ' trace-request';
+    else if (line.startsWith('tool-run:')) cls += ' trace-run';
+    return `<span class="${cls}">${line.replace(/</g, '&lt;')}</span>`;
+  }).join('');
 }
 
 function renderSessions(list, active) {
   const sel = document.getElementById('sessionList');
   sel.innerHTML = '';
   for (const name of list) {
-    const opt = document.createElement('option'); opt.value=name; opt.textContent=name;
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
     if (name === active) opt.selected = true;
     sel.appendChild(opt);
   }
@@ -102,12 +282,38 @@ function wireModels(provider) {
   const modelSel = document.getElementById('model');
   modelSel.innerHTML = '';
   for (const model of (state.models[provider] || [])) {
-    const opt = document.createElement('option'); opt.value=model; opt.textContent=model;
+    const opt = document.createElement('option');
+    opt.value = model;
+    opt.textContent = model;
     modelSel.appendChild(opt);
   }
 }
 
+function buildSettingsPayload() {
+  return {
+    provider: document.getElementById('provider').value,
+    model: document.getElementById('model').value,
+    api_key: document.getElementById('apiKey').value || null,
+    approval_mode: document.getElementById('approval').value,
+    workspace: document.getElementById('workspace').value || null,
+    debug: document.getElementById('debug').checked,
+    agentic_planning: document.getElementById('agentic').checked,
+  };
+}
+
+function scheduleApplySettings() {
+  if (syncing) return;
+  clearTimeout(applyTimer);
+  applyTimer = setTimeout(() => applySettings().catch((e) => alert(e.message)), 250);
+}
+
+async function applySettings() {
+  await api('/api/settings', 'POST', buildSettingsPayload());
+  await refreshState();
+}
+
 async function refreshState() {
+  syncing = true;
   const s = await api('/api/state');
   state.models = s.models;
   state.messages = s.messages;
@@ -115,8 +321,11 @@ async function refreshState() {
 
   const providerSel = document.getElementById('provider');
   providerSel.innerHTML = '';
-  Object.keys(s.models).forEach(p => {
-    const o = document.createElement('option'); o.value=p; o.textContent=p; providerSel.appendChild(o);
+  Object.keys(s.models).forEach((p) => {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p;
+    providerSel.appendChild(o);
   });
   providerSel.value = s.provider;
   wireModels(s.provider);
@@ -126,33 +335,22 @@ async function refreshState() {
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
+
   renderSessions(s.sessions, s.session);
   renderMessages();
   renderTraces();
+  syncing = false;
 }
 
 async function sendPrompt() {
   const text = document.getElementById('prompt').value.trim();
   if (!text) return;
-  document.getElementById('prompt').value='';
-  const result = await api('/api/chat', 'POST', {text});
-  state.messages.push({role:'assistant', content:result.reply.content});
+  document.getElementById('prompt').value = '';
+  const result = await api('/api/chat', 'POST', { text });
   state.traces = result.traces;
   const r = result.report;
-  document.getElementById('report').textContent = `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
-  await refreshState();
-}
-
-async function applySettings() {
-  await api('/api/settings', 'POST', {
-    provider: document.getElementById('provider').value,
-    model: document.getElementById('model').value,
-    api_key: document.getElementById('apiKey').value || null,
-    approval_mode: document.getElementById('approval').value,
-    workspace: document.getElementById('workspace').value || null,
-    debug: document.getElementById('debug').checked,
-    agentic_planning: document.getElementById('agentic').checked,
-  });
+  document.getElementById('report').textContent =
+    `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
   await refreshState();
 }
 
@@ -160,20 +358,31 @@ async function sessionAction(action) {
   const selected = document.getElementById('sessionList').value;
   const typed = document.getElementById('sessionName').value.trim();
   const name = typed || selected;
-  await api('/api/session', 'POST', {action, name});
+  await api('/api/session', 'POST', { action, name });
   await refreshState();
 }
 
-document.getElementById('provider').addEventListener('change', (e)=> wireModels(e.target.value));
-document.getElementById('send').addEventListener('click', ()=>sendPrompt().catch(e=>alert(e.message)));
-document.getElementById('applySettings').addEventListener('click', ()=>applySettings().catch(e=>alert(e.message)));
-document.getElementById('newSession').addEventListener('click', ()=>sessionAction('new').catch(e=>alert(e.message)));
-document.getElementById('refreshSessions').addEventListener('click', ()=>sessionAction('list').catch(e=>alert(e.message)));
-document.getElementById('loadSession').addEventListener('click', ()=>sessionAction('load').catch(e=>alert(e.message)));
-document.getElementById('deleteSession').addEventListener('click', ()=>sessionAction('delete').catch(e=>alert(e.message)));
-document.getElementById('toggleSidebar').addEventListener('click', ()=>document.getElementById('sidebar').classList.toggle('collapsed'));
+for (const id of ['provider','model','apiKey','approval','workspace','debug','agentic']) {
+  document.getElementById(id).addEventListener('change', scheduleApplySettings);
+  if (id === 'workspace' || id === 'apiKey') {
+    document.getElementById(id).addEventListener('blur', scheduleApplySettings);
+  }
+}
 
-refreshState().catch(e=>alert(e.message));
+document.getElementById('provider').addEventListener('change', (e) => {
+  wireModels(e.target.value);
+  scheduleApplySettings();
+});
+document.getElementById('send').addEventListener('click', () => sendPrompt().catch((e) => alert(e.message)));
+document.getElementById('newSession').addEventListener('click', () => sessionAction('new').catch((e) => alert(e.message)));
+document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
+document.getElementById('loadSession').addEventListener('click', () => sessionAction('load').catch((e) => alert(e.message)));
+document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
+document.getElementById('toggleSidebar').addEventListener('click', () => {
+  document.getElementById('app').classList.toggle('sidebar-hidden');
+});
+
+refreshState().catch((e) => alert(e.message));
 </script>
 </body>
 </html>

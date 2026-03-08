@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
 import textwrap
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Callable
 
@@ -316,3 +321,163 @@ class ClearUploadedContextStoreTool:
                 item.unlink()
                 removed += 1
         return ToolResult(ok=True, output=f"Removed {removed} uploaded file(s).")
+
+
+class FetchUrlContextTool:
+    name = "fetch_url_context"
+    description = "Fetch a URL and return a clean text excerpt for grounding context."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Absolute URL to fetch"},
+            "max_chars": {"type": "integer", "description": "Maximum characters", "default": 6000},
+        },
+        "required": ["url"],
+    }
+
+    @staticmethod
+    def _html_to_text(html: str) -> str:
+        text = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
+        text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def run(self, args: dict) -> ToolResult:
+        url = str(args.get("url", "")).strip()
+        max_chars = int(args.get("max_chars", 6000))
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return ToolResult(ok=False, output="url must start with http:// or https://")
+
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=12) as resp:
+                raw = resp.read()
+                content_type = str(resp.headers.get("Content-Type", "")).lower()
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"URL fetch failed: {exc}")
+
+        try:
+            body = raw.decode("utf-8", errors="replace")
+        except Exception:
+            body = raw.decode(errors="replace")
+
+        text = self._html_to_text(body) if "html" in content_type or "<html" in body.lower() else body
+        return ToolResult(ok=True, output=text[:max_chars])
+
+
+class SearchWebContextTool:
+    name = "search_web_context"
+    description = "Search the web for supporting sources (DuckDuckGo or Google CSE grounding)."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "max_results": {"type": "integer", "description": "Maximum results", "default": 5},
+            "provider": {
+                "type": "string",
+                "enum": ["auto", "duckduckgo", "google"],
+                "default": "auto",
+                "description": "Search provider (auto prefers Google when configured).",
+            },
+        },
+        "required": ["query"],
+    }
+
+    @staticmethod
+    def _request_json(url: str) -> tuple[dict | None, str | None]:
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                payload = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.URLError as exc:
+            return None, str(exc)
+        try:
+            return json.loads(payload), None
+        except json.JSONDecodeError as exc:
+            return None, f"invalid JSON response: {exc}"
+
+    def _search_google(self, query: str, max_results: int) -> ToolResult:
+        api_key = os.environ.get("GOOGLE_CSE_API_KEY", "").strip()
+        cse_id = os.environ.get("GOOGLE_CSE_ID", "").strip()
+        if not api_key or not cse_id:
+            return ToolResult(ok=False, output="Google grounding unavailable: set GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID")
+
+        q = urllib.parse.quote(query)
+        url = (
+            "https://www.googleapis.com/customsearch/v1"
+            f"?key={urllib.parse.quote(api_key)}&cx={urllib.parse.quote(cse_id)}&q={q}&num={max(1, min(max_results, 10))}"
+        )
+        data, err = self._request_json(url)
+        if err or data is None:
+            return ToolResult(ok=False, output=f"Google search failed: {err}")
+        items = data.get("items", []) if isinstance(data, dict) else []
+        if not items:
+            return ToolResult(ok=True, output="No Google results.")
+        lines = []
+        for item in items[:max_results]:
+            title = str(item.get("title", "(untitled)"))
+            link = str(item.get("link", ""))
+            snippet = str(item.get("snippet", ""))
+            lines.append(f"- {title}\n  URL: {link}\n  Snippet: {snippet}")
+        return ToolResult(ok=True, output="\n".join(lines))
+
+    def _search_duckduckgo(self, query: str, max_results: int) -> ToolResult:
+        q = urllib.parse.quote(query)
+        url = f"https://api.duckduckgo.com/?q={q}&format=json&no_html=1&skip_disambig=1"
+        data, err = self._request_json(url)
+        if err or data is None:
+            return ToolResult(ok=False, output=f"DuckDuckGo search failed: {err}")
+
+        rows: list[tuple[str, str, str]] = []
+        if isinstance(data, dict):
+            abstract = str(data.get("AbstractText", "")).strip()
+            abstract_url = str(data.get("AbstractURL", "")).strip()
+            heading = str(data.get("Heading", "")).strip() or "DuckDuckGo instant answer"
+            if abstract or abstract_url:
+                rows.append((heading, abstract_url, abstract))
+
+            topics = data.get("RelatedTopics", [])
+            if isinstance(topics, list):
+                for topic in topics:
+                    if isinstance(topic, dict) and "Topics" in topic and isinstance(topic["Topics"], list):
+                        for nested in topic["Topics"]:
+                            if isinstance(nested, dict):
+                                rows.append((str(nested.get("Text", ""))[:80], str(nested.get("FirstURL", "")), str(nested.get("Text", ""))))
+                    elif isinstance(topic, dict):
+                        rows.append((str(topic.get("Text", ""))[:80], str(topic.get("FirstURL", "")), str(topic.get("Text", ""))))
+
+        rows = [row for row in rows if row[1] or row[2]]
+        if not rows:
+            return ToolResult(ok=True, output="No DuckDuckGo results.")
+
+        lines = []
+        for title, link, snippet in rows[:max_results]:
+            lines.append(f"- {title or '(result)'}\n  URL: {link}\n  Snippet: {snippet}")
+        return ToolResult(ok=True, output="\n".join(lines))
+
+    def run(self, args: dict) -> ToolResult:
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return ToolResult(ok=False, output="query is required")
+        max_results = int(args.get("max_results", 5))
+        provider = str(args.get("provider", "auto")).strip().lower() or "auto"
+
+        if provider == "google":
+            return self._search_google(query, max_results)
+        if provider == "duckduckgo":
+            return self._search_duckduckgo(query, max_results)
+
+        google = self._search_google(query, max_results)
+        if google.ok:
+            return google
+        duck = self._search_duckduckgo(query, max_results)
+        if duck.ok:
+            return duck
+        return ToolResult(ok=False, output=f"auto search failed; google={google.output}; duckduckgo={duck.output}")

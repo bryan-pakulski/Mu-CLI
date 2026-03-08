@@ -19,6 +19,8 @@ from mu_cli.tools.filesystem import (
     ApplyPatchTool,
     GetWorkspaceFileContextTool,
     GitTool,
+    FetchUrlContextTool,
+    SearchWebContextTool,
     ListWorkspaceFilesTool,
     ReadFileTool,
     WriteFileTool,
@@ -456,6 +458,8 @@ def run() -> int:
         WriteFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         ApplyPatchTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         GitTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
+        FetchUrlContextTool(),
+        SearchWebContextTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
     ]

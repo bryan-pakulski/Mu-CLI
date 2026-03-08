@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 import os
 import subprocess
 from pathlib import Path
@@ -7,13 +8,31 @@ from pathlib import Path
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
     ClearUploadedContextStoreTool,
+    FetchUrlContextTool,
     GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
+    SearchWebContextTool,
     WriteFileTool,
 )
 from mu_cli.workspace import WorkspaceStore
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes, content_type: str = "application/json") -> None:
+        self._body = body
+        self.headers = {"Content-Type": content_type}
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        _ = (exc_type, exc, tb)
+        return False
 
 
 class WorkspaceToolsTests(unittest.TestCase):
@@ -121,6 +140,21 @@ diff
             result = tool.run({"patch": patch})
             self.assertTrue(result.ok, result.output)
             self.assertEqual("new\n", (root / "a.txt").read_text(encoding="utf-8"))
+
+    def test_fetch_url_context_tool(self) -> None:
+        html = b"<html><body><h1>Hello</h1><p>World</p></body></html>"
+        with patch('urllib.request.urlopen', return_value=_FakeResponse(html, 'text/html')):
+            result = FetchUrlContextTool().run({"url": "https://example.com"})
+        self.assertTrue(result.ok)
+        self.assertIn("Hello", result.output)
+        self.assertIn("World", result.output)
+
+    def test_search_web_context_tool_duckduckgo(self) -> None:
+        payload = b'{"Heading":"Example","RelatedTopics":[{"Text":"Result one","FirstURL":"https://example.com/1"}]}'
+        with patch('urllib.request.urlopen', return_value=_FakeResponse(payload, 'application/json')):
+            result = SearchWebContextTool().run({"query": "example", "provider": "duckduckgo"})
+        self.assertTrue(result.ok)
+        self.assertIn("https://example.com/1", result.output)
 
 
 if __name__ == "__main__":

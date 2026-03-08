@@ -193,29 +193,43 @@ def _record_turn(runtime: WebRuntime, report: dict) -> None:
     )
 
 
-def _sync_uploaded_context_messages(runtime: WebRuntime) -> None:
-    keep = [m for m in runtime.agent.state.messages if m.metadata.get("kind") != "uploaded_context"]
+def _uploaded_context_prompt(runtime: WebRuntime) -> str | None:
     if not runtime.uploads:
-        runtime.agent.state.messages = keep
-        return
+        return None
 
-    sample_names = [str(item.get("name", ""))[:48] for item in runtime.uploads[:5]]
+    sample_names = [str(item.get("name", ""))[:48] for item in runtime.uploads[:8]]
     names = ", ".join(name for name in sample_names if name)
     extra = len(runtime.uploads) - len(sample_names)
     size_bytes = sum(int(item.get("size", 0) or 0) for item in runtime.uploads)
     if extra > 0:
         names = f"{names}, ... (+{extra} more)" if names else f"... (+{extra} more)"
-    preview = f" Preview: {names}." if names else ""
+    preview = f" Available: {names}." if names else ""
 
-    summary = Message(
-        role=Role.SYSTEM,
-        content=(
-            f"Uploaded context store has {len(runtime.uploads)} file(s) totaling {size_bytes} bytes.{preview}"
-            " Use tools `list_uploaded_context_files` and `get_uploaded_context_file` to fetch content on demand."
-        ),
-        metadata={"kind": "uploaded_context"},
+    return (
+        f"Uploaded file context store is available with {len(runtime.uploads)} file(s), total {size_bytes} bytes.{preview}"
+        " Do not request full contents unless needed. Use `list_uploaded_context_files` to inspect and"
+        " `get_uploaded_context_file` only for targeted retrieval."
     )
-    runtime.agent.state.messages = keep + [summary]
+
+
+def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
+    uploaded_prompt = _uploaded_context_prompt(runtime)
+    if not uploaded_prompt:
+        return runtime.agent.step(text)
+
+    runtime.agent.state.messages.append(
+        Message(
+            role=Role.SYSTEM,
+            content=uploaded_prompt,
+            metadata={"kind": "uploaded_context_ephemeral"},
+        )
+    )
+    try:
+        return runtime.agent.step(text)
+    finally:
+        runtime.agent.state.messages = [
+            m for m in runtime.agent.state.messages if m.metadata.get("kind") != "uploaded_context_ephemeral"
+        ]
 
 
 def _persist(runtime: WebRuntime) -> None:
@@ -246,12 +260,12 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.workspace_path = loaded.workspace
     runtime.approval_mode = loaded.approval_mode
     runtime.agent = _new_agent(runtime)
-    runtime.agent.state.messages = loaded.messages
+    runtime.agent.state.messages = [
+        m for m in loaded.messages if m.metadata.get("kind") != "uploaded_context"
+    ]
     runtime.session_usage = dict(loaded.usage_totals or _default_usage())
     runtime.session_turns = list(loaded.turns or [])
     runtime.uploads = list(loaded.uploads or [])
-    _sync_uploaded_context_messages(runtime)
-
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
         if path.exists() and path.is_dir():
@@ -345,7 +359,7 @@ def create_app():
         if not text:
             return jsonify({"error": "text is required"}), 400
 
-        reply = runtime.agent.step(text)
+        reply = _run_turn_with_uploaded_context(runtime, text)
         report = _turn_report(runtime, text, reply.content)
         _record_turn(runtime, report)
         _persist(runtime)
@@ -382,7 +396,7 @@ def create_app():
             runtime.agent.on_model_response = stream_model_response
             runtime.agent.on_tool_run = stream_tool_run
             try:
-                reply = runtime.agent.step(text)
+                reply = _run_turn_with_uploaded_context(runtime, text)
                 report = _turn_report(runtime, text, reply.content)
                 _record_turn(runtime, report)
                 _persist(runtime)
@@ -531,7 +545,6 @@ def create_app():
             runtime.uploads.append(item)
             uploaded.append(item)
 
-        _sync_uploaded_context_messages(runtime)
         _persist(runtime)
         return jsonify({"ok": True, "uploads": uploaded})
 
@@ -545,7 +558,6 @@ def create_app():
                     item.unlink()
                     removed += 1
         runtime.uploads = []
-        _sync_uploaded_context_messages(runtime)
         _persist(runtime)
         return jsonify({"ok": True, "removed": removed})
 

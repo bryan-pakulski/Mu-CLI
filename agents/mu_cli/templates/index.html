@@ -181,24 +181,6 @@
       border-radius: 0;
       font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
-    .code-block {
-      margin: 8px 0;
-      border-radius: 10px;
-      overflow: hidden;
-      border: 1px solid #dae3f6;
-      background: #f7faff;
-    }
-    .code-label {
-      display: block;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      color: #5f77a9;
-      background: #edf3ff;
-      border-bottom: 1px solid #dbe6fb;
-      padding: 5px 9px;
-      font-weight: 600;
-    }
 
     .tool-toggle {
       margin-top: 4px;
@@ -258,17 +240,6 @@
     }
 
     .small-muted { color: var(--muted); font-size: 11px; }
-    .approval-warning {
-      margin-top: 7px;
-      padding: 8px;
-      border: 1px solid #d8e1f8;
-      background: #eff4ff;
-      border-radius: 10px;
-      color: #405a9a;
-      font-size: 11px;
-      display: none;
-    }
-
     .thinking {
       display: inline-flex;
       align-items: center;
@@ -394,8 +365,6 @@
           <input id="workspace" class="form-control" placeholder="/path/to/repo" />
           <button id="browseWorkspace" class="btn btn-soft" type="button">Browse</button>
         </div>
-
-        <div id="approvalNote" class="approval-warning">Approval mode `ask` now opens an approval dialog for mutating tool calls.</div>
 
         <div class="small-muted mt-2 mb-1">Upload context files</div>
         <input id="contextFiles" type="file" class="form-control mb-2" multiple />
@@ -621,8 +590,7 @@ function formatMessageContent(content) {
     const lang = (match[1] || '').toLowerCase();
     const code = match[2] || '';
     const langClass = lang ? ` language-${lang}` : '';
-    const langLabel = lang ? `<span class="code-label">${escapeHtml(lang)}</span>` : '';
-    html += `<div class="code-block">${langLabel}<pre><code class="hljs${langClass}">${escapeHtml(code)}</code></pre></div>`;
+    html += `<pre><code class="hljs${langClass}">${escapeHtml(code)}</code></pre>`;
     cursor = match.index + match[0].length;
   }
 
@@ -738,11 +706,6 @@ function buildSettingsPayload() {
     debug: document.getElementById('debug').checked,
     agentic_planning: document.getElementById('agentic').checked,
   };
-}
-
-function updateApprovalNote() {
-  const show = document.getElementById('approval').value === 'ask';
-  document.getElementById('approvalNote').style.display = show ? 'block' : 'none';
 }
 
 function updateThinking(show) {
@@ -890,7 +853,6 @@ async function refreshState() {
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
 
-  updateApprovalNote();
   syncPricingEditor();
   updateUsagePanel(state.sessionUsage);
   renderSessions(s.sessions, s.session);
@@ -998,7 +960,6 @@ async function sessionAction(action) {
 for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
-    if (id === 'approval') updateApprovalNote();
     scheduleApplySettings();
     syncPricingEditor();
   });

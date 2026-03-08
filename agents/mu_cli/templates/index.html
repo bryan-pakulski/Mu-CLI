@@ -21,6 +21,10 @@
       --shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
     }
     * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
     body {
       margin: 0;
       font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -30,7 +34,7 @@
     }
 
     .app {
-      min-height: 100vh;
+      height: 100vh;
       display: grid;
       grid-template-columns: 320px minmax(0, 1fr);
       transition: grid-template-columns .18s ease;
@@ -94,6 +98,28 @@
       padding: 9px 10px;
       border: 1px solid var(--border);
       white-space: pre-wrap;
+      line-height: 1.45;
+    }
+    .bubble p { margin: 0 0 8px; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 1px 4px;
+      border-radius: 5px;
+      color: #f7e8ff;
+    }
+    .bubble pre {
+      margin: 6px 0;
+      padding: 10px;
+      background: #130f23;
+      border: 1px solid #4b3f76;
+      border-radius: 10px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre;
     }
     .msg.role-user .bubble { background: var(--purple-soft); border-color: #5d4e93; }
     .msg.role-assistant .bubble { background: rgba(157, 126, 224, 0.12); border-color: #6c58a5; }
@@ -138,6 +164,32 @@
 
     .inputrow { display: flex; gap: 8px; align-items: center; }
     .row { display: flex; gap: 6px; }
+
+
+    .tool-toggle {
+      margin-top: 4px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--orange-soft);
+      overflow: hidden;
+    }
+    .tool-toggle > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 10px;
+      font-size: 11px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #ffd9a1;
+      border-bottom: 1px solid transparent;
+    }
+    .tool-toggle[open] > summary {
+      border-bottom-color: #8f6630;
+      background: rgba(0, 0, 0, 0.15);
+    }
+    .tool-toggle > summary::-webkit-details-marker { display: none; }
+    .tool-toggle > summary::before { content: '▸ '; }
+    .tool-toggle[open] > summary::before { content: '▾ '; }
 
     .status-pill {
       display: inline-block;
@@ -239,13 +291,76 @@ function roleClass(role) {
   return String(role || '').replace(/[^a-zA-Z0-9_\-]/g, '_');
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatMessageContent(content) {
+  const source = String(content || '');
+  const parts = source.split(/```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g);
+  let html = '';
+
+  for (let idx = 0; idx < parts.length; idx += 1) {
+    if (idx % 3 === 0) {
+      const text = parts[idx];
+      if (!text) continue;
+      const escaped = escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+      const paragraphs = escaped.split(/\n{2,}/).map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`).join('');
+      html += paragraphs;
+      continue;
+    }
+
+    if (idx % 3 === 1) {
+      continue;
+    }
+
+    const code = parts[idx] || '';
+    html += `<pre><code>${escapeHtml(code)}</code></pre>`;
+  }
+
+  return html || '<p></p>';
+}
+
+function isToolRole(role) {
+  return role === 'tool_result' || role === 'tool_call';
+}
+
 function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
   for (const m of state.messages) {
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
-    row.innerHTML = `<div class="role">${m.role}</div><div class="bubble">${m.content}</div>`;
+
+    const roleEl = document.createElement('div');
+    roleEl.className = 'role';
+    roleEl.textContent = m.role;
+    row.appendChild(roleEl);
+
+    if (isToolRole(m.role)) {
+      const details = document.createElement('details');
+      details.className = 'tool-toggle';
+      const summary = document.createElement('summary');
+      summary.textContent = `${m.role.replace('_', ' ')} (click to expand)`;
+      details.appendChild(summary);
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.innerHTML = formatMessageContent(m.content);
+      details.appendChild(bubble);
+      row.appendChild(details);
+    } else {
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.innerHTML = formatMessageContent(m.content);
+      row.appendChild(bubble);
+    }
+
     box.appendChild(row);
   }
   box.scrollTop = box.scrollHeight;

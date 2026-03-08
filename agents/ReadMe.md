@@ -1,20 +1,25 @@
 # Mu-CLI (Provider Agnostic Foundation)
 
-Fresh provider-agnostic CLI scaffold intended for a **human-in-the-loop development workflow**.
+Provider-agnostic CLI scaffold intended for a **human-in-the-loop development workflow**.
 
-## What Included
+## What is included
 
-- a provider-neutral core message model
-- a pluggable provider adapter interface
-- a simple local `echo` provider (for development)
+- provider-neutral core message model
+- pluggable provider adapter interface
+- providers:
+  - local `echo` provider (for development)
+  - `openai` provider via Chat Completions API
+  - `gemini` provider via Google Generative Language API
 - Tooling:
-    - (`read_file`) with structured schema
+  - (`read_file`) with structured schema
 - Minimal interactive CLI loop
 
 ## Run
 
+From repo root:
+
 ```bash
-PYTHONPATH=. python -m ai_cli.cli
+PYTHONPATH=agents python -m mu_cli.cli --provider echo
 ```
 
 ## Basic usage
@@ -24,16 +29,36 @@ PYTHONPATH=. python -m ai_cli.cli
 - Trigger a tool call through the local echo provider:
 
 ```text
-/tool read_file {"path":"ReadMe.md"}
+/tool read_file {"path":"agents/ReadMe.md"}
 ```
+
+## Real providers
+
+OpenAI:
+
+```bash
+export OPENAI_API_KEY=...
+PYTHONPATH=agents python -m mu_cli.cli --provider openai --model gpt-4o-mini
+```
+
+Gemini:
+
+```bash
+export GEMINI_API_KEY=...
+PYTHONPATH=agents python -m mu_cli.cli --provider gemini --model gemini-2.0-flash
+```
+
+(You can also pass `--api-key` directly.)
 
 ## Structure
 
 ```text
-ai_cli/
+mu_cli/
   core/types.py          # canonical message/tool/provider types
   agent.py               # provider-neutral agent loop
   providers/echo.py      # local development provider adapter
+  providers/openai.py    # OpenAI chat completions adapter
+  providers/gemini.py    # Gemini generateContent adapter
   tools/base.py          # tool protocol + result type
   tools/filesystem.py    # read_file tool
   cli.py                 # interactive CLI entrypoint
@@ -41,7 +66,6 @@ ai_cli/
 
 ## Next steps
 
-1. Add real provider adapters (`gemini`, `anthropic`, `openai`).
-2. Add policy/approval checkpoints before tool execution.
-3. Add write/patch/git tools.
-4. Persist session history (e.g., sqlite/jsonl).
+1. Add policy/approval checkpoints before tool execution.
+2. Add write/patch/git tools.
+3. Persist session history (e.g., sqlite/jsonl).

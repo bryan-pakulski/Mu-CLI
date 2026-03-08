@@ -199,14 +199,19 @@ def _sync_uploaded_context_messages(runtime: WebRuntime) -> None:
         runtime.agent.state.messages = keep
         return
 
-    names = ", ".join(item["name"] for item in runtime.uploads[:20])
-    if len(runtime.uploads) > 20:
-        names += f", ... (+{len(runtime.uploads) - 20} more)"
+    sample_names = [str(item.get("name", ""))[:48] for item in runtime.uploads[:5]]
+    names = ", ".join(name for name in sample_names if name)
+    extra = len(runtime.uploads) - len(sample_names)
+    size_bytes = sum(int(item.get("size", 0) or 0) for item in runtime.uploads)
+    if extra > 0:
+        names = f"{names}, ... (+{extra} more)" if names else f"... (+{extra} more)"
+    preview = f" Preview: {names}." if names else ""
+
     summary = Message(
         role=Role.SYSTEM,
         content=(
-            f"Uploaded context store has {len(runtime.uploads)} file(s): {names}. "
-            "Use tools `list_uploaded_context_files` and `get_uploaded_context_file` to fetch content on demand."
+            f"Uploaded context store has {len(runtime.uploads)} file(s) totaling {size_bytes} bytes.{preview}"
+            " Use tools `list_uploaded_context_files` and `get_uploaded_context_file` to fetch content on demand."
         ),
         metadata={"kind": "uploaded_context"},
     )

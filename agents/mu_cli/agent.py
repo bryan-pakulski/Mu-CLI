@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -122,16 +123,63 @@ class Agent:
         )
         return any(hint in lowered for hint in tool_hints)
 
+    @staticmethod
+    def _summarize_touched_files(args: dict) -> str:
+        candidates: list[str] = []
+        for key in ("path", "name", "file", "target"):
+            value = args.get(key)
+            if isinstance(value, str) and value.strip():
+                candidates.append(value.strip())
+
+        for key in ("paths", "files"):
+            value = args.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and item.strip():
+                        candidates.append(item.strip())
+
+        patch = args.get("patch")
+        if isinstance(patch, str):
+            for line in patch.splitlines():
+                if line.startswith("+++ b/"):
+                    path = line[len("+++ b/") :].strip()
+                    if path and path != "/dev/null":
+                        candidates.append(path)
+
+        unique: list[str] = []
+        seen = set()
+        for item in candidates:
+            if item in seen:
+                continue
+            seen.add(item)
+            unique.append(item)
+
+        if not unique:
+            return "none"
+        preview = ", ".join(unique[:6])
+        if len(unique) > 6:
+            preview += f", ... (+{len(unique) - 6} more)"
+        return preview
+
+    @classmethod
+    def _audit_prefix(cls, tool_name: str, args: dict, mutating: bool) -> str:
+        access = "write" if mutating else "read"
+        touched = cls._summarize_touched_files(args)
+        ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return f"[tool={tool_name}] [timestamp={ts}] [access={access}] [files={touched}]"
+
     def _run_tool_call(self, call: ToolCall) -> Message:
         tool = self.tools.get(call.name)
         ok = False
+        mutating = bool(getattr(tool, "mutating", False)) if tool is not None else False
+        audit = self._audit_prefix(call.name, call.args, mutating)
         if tool is None:
-            result_text = f"Tool not found: {call.name}"
+            result_text = f"{audit}\n[error] Tool not found: {call.name}"
         else:
-            if getattr(tool, "mutating", False) and self.on_approval is not None:
+            if mutating and self.on_approval is not None:
                 approved = self.on_approval(call.name, call.args)
                 if not approved:
-                    result_text = "[error] Tool execution rejected by approval policy."
+                    result_text = f"{audit}\n[error] Tool execution rejected by approval policy."
                     message = Message(
                         role=Role.TOOL_RESULT,
                         name=call.name,
@@ -145,7 +193,7 @@ class Agent:
             result = tool.run(call.args)
             ok = result.ok
             status = "ok" if result.ok else "error"
-            result_text = f"[{status}] {result.output}"
+            result_text = f"{audit}\n[{status}] {result.output}"
 
         if self.on_tool_run is not None:
             self.on_tool_run(call.name, call.args, ok, result_text)

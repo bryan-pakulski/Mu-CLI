@@ -53,7 +53,9 @@ class AgentTests(unittest.TestCase):
         reply = agent.step('/tool read_file {"path":"agents/ReadMe.md"}')
 
         self.assertIn("Tool `read_file` result", reply.content)
-        self.assertTrue(any(m.role.value == "tool_result" for m in agent.state.messages))
+        tool_result = next(m for m in agent.state.messages if m.role is Role.TOOL_RESULT)
+        self.assertIn("[tool=read_file]", tool_result.content)
+        self.assertIn("[access=read]", tool_result.content)
 
     def test_tool_rounds_are_capped(self) -> None:
         agent = Agent(provider=LoopingProvider(), tools=[], max_tool_rounds=2)

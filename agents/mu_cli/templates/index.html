@@ -4,167 +4,179 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mu_cli GUI</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <style>
     :root {
-      --bg: #120f1f;
-      --bg-soft: #1a1630;
-      --surface: #201b39;
-      --surface-2: #29224b;
-      --text: #f3ecff;
-      --muted: #c6b9e8;
-      --border: #3c3268;
-      --purple: #a78bfa;
-      --purple-soft: rgba(167, 139, 250, 0.18);
-      --orange: #f59e0b;
-      --orange-soft: rgba(245, 158, 11, 0.18);
-      --green-soft: rgba(52, 211, 153, 0.18);
-      --shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+      --bg-1: #0d1227;
+      --bg-2: #1a2145;
+      --glass: rgba(255, 255, 255, 0.07);
+      --glass-strong: rgba(255, 255, 255, 0.12);
+      --border: rgba(255, 255, 255, 0.16);
+      --text: #f3f6ff;
+      --muted: #c6d0ef;
+      --purple-soft: rgba(161, 133, 246, 0.17);
+      --assistant-soft: rgba(116, 174, 255, 0.12);
+      --orange-soft: rgba(255, 174, 90, 0.18);
     }
-    * { box-sizing: border-box; }
+
     html, body {
       height: 100%;
       overflow: hidden;
-    }
-    body {
-      margin: 0;
-      font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      font-size: 14px;
+      background: radial-gradient(1200px 700px at 100% -10%, #394f8f 0%, var(--bg-1) 45%) fixed;
       color: var(--text);
-      background: radial-gradient(1200px 900px at 95% -20%, #3a2b66 0%, var(--bg) 43%) fixed;
+      font-size: 14px;
     }
 
-    .app {
+    .app-shell {
       height: 100vh;
       display: grid;
-      grid-template-columns: 320px minmax(0, 1fr);
-      transition: grid-template-columns .18s ease;
+      grid-template-columns: 340px minmax(0, 1fr);
+      gap: 14px;
+      padding: 12px;
+      transition: grid-template-columns .2s ease;
     }
-    .app.sidebar-hidden { grid-template-columns: minmax(0, 1fr); }
-    .app.sidebar-hidden .sidebar { display: none; }
+
+    .app-shell.sidebar-hidden {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .glass {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(14px) saturate(135%);
+      -webkit-backdrop-filter: blur(14px) saturate(135%);
+      box-shadow: 0 18px 35px rgba(0, 0, 0, 0.28);
+      border-radius: 18px;
+    }
 
     .sidebar {
-      border-right: 1px solid var(--border);
-      background: linear-gradient(180deg, #221d3d 0%, #1a1630 100%);
-      padding: 14px;
+      min-height: 0;
       overflow: auto;
+      padding: 12px;
     }
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 10px;
-      margin-bottom: 10px;
-      box-shadow: var(--shadow);
-    }
-    .panel h3 { margin: 4px 0 8px; font-size: 12px; letter-spacing: .03em; color: #e6dbff; text-transform: uppercase; }
 
-    .main { display: flex; flex-direction: column; min-width: 0; }
+    .app-shell.sidebar-hidden .sidebar {
+      display: none;
+    }
+
+    .panel {
+      padding: 12px;
+      border-radius: 14px;
+      margin-bottom: 10px;
+      background: rgba(9, 14, 33, 0.44);
+      border: 1px solid var(--border);
+    }
+
+    .panel h3 {
+      font-size: 12px;
+      margin: 0 0 8px;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: #f4f7ff;
+    }
+
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+
     .topbar {
-      height: 56px;
       display: flex;
       align-items: center;
       gap: 10px;
       padding: 10px 14px;
-      border-bottom: 1px solid var(--border);
-      background: linear-gradient(90deg, #261f43 0%, #2d2450 100%);
+      margin-bottom: 10px;
+      border-radius: 16px;
+      background: var(--glass-strong);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(16px);
     }
-    .title { font-weight: 700; font-size: 15px; }
-    .small { color: var(--muted); font-size: 12px; }
 
-    .content {
-      flex: 1;
+    .title {
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .status-pill {
+      margin-left: auto;
+      border-radius: 999px;
+      font-size: 11px;
+      padding: 2px 10px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .chat-layout {
       min-height: 0;
       display: grid;
       grid-template-rows: minmax(0, 1fr) 120px auto;
       gap: 10px;
       padding: 12px;
+      overflow: hidden;
     }
 
     .messages {
       min-height: 0;
       overflow: auto;
-      border: 1px solid var(--border);
+      padding: 10px;
       border-radius: 14px;
-      padding: 12px;
-      background: linear-gradient(180deg, #1a1630, #17132a);
-      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      background: rgba(8, 14, 34, 0.48);
+    }
+
+    .trace {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(8, 14, 34, 0.48);
+      padding: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
     }
 
     .msg { margin-bottom: 10px; }
-    .role { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #bcaee3; }
+    .role {
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #aebbe4;
+    }
+
     .bubble {
       margin-top: 4px;
+      padding: 10px;
       border-radius: 12px;
-      padding: 9px 10px;
       border: 1px solid var(--border);
-      white-space: pre-wrap;
       line-height: 1.45;
     }
+    .msg.role-user .bubble { background: var(--purple-soft); }
+    .msg.role-assistant .bubble { background: var(--assistant-soft); }
+
     .bubble p { margin: 0 0 8px; }
     .bubble p:last-child { margin-bottom: 0; }
     .bubble code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: rgba(0, 0, 0, 0.3);
+      background: rgba(0, 0, 0, 0.35);
       padding: 1px 4px;
-      border-radius: 5px;
-      color: #f7e8ff;
+      border-radius: 6px;
+      color: #ffe9ff;
     }
     .bubble pre {
-      margin: 6px 0;
+      margin: 7px 0;
       padding: 10px;
-      background: #130f23;
-      border: 1px solid #4b3f76;
       border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(0, 0, 0, 0.35);
       overflow-x: auto;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      line-height: 1.5;
       white-space: pre;
-    }
-    .msg.role-user .bubble { background: var(--purple-soft); border-color: #5d4e93; }
-    .msg.role-assistant .bubble { background: rgba(157, 126, 224, 0.12); border-color: #6c58a5; }
-    .msg.role-tool_result .bubble,
-    .msg.role-tool_call .bubble { background: var(--orange-soft); border-color: #8f6630; }
-
-    .trace {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: #17132a;
-      padding: 8px;
-      overflow: auto;
+      font-size: 12px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
-      box-shadow: var(--shadow);
-      white-space: pre-wrap;
     }
-
-    .trace-line { display: block; margin-bottom: 4px; }
-    .trace-model { color: #c4b5fd; }
-    .trace-request { color: #fdba74; }
-    .trace-run { color: #a7f3d0; }
-
-    textarea, input, select, button {
-      width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      color: var(--text);
-      background: #19152d;
-      padding: 7px 9px;
-      font-size: 13px;
-    }
-    textarea { min-height: 88px; resize: vertical; }
-    button {
-      width: auto;
-      background: linear-gradient(90deg, #8b5cf6, #a855f7);
-      border-color: #7b52cf;
-      cursor: pointer;
-      font-weight: 600;
-    }
-    button.secondary { background: #201b39; border-color: var(--border); }
-
-    .inputrow { display: flex; gap: 8px; align-items: center; }
-    .row { display: flex; gap: 6px; }
-
 
     .tool-toggle {
       margin-top: 4px;
@@ -173,97 +185,145 @@
       background: var(--orange-soft);
       overflow: hidden;
     }
+
     .tool-toggle > summary {
       list-style: none;
       cursor: pointer;
       padding: 8px 10px;
-      font-size: 11px;
-      letter-spacing: .04em;
       text-transform: uppercase;
-      color: #ffd9a1;
+      letter-spacing: .04em;
+      font-size: 11px;
+      color: #ffe5c3;
       border-bottom: 1px solid transparent;
     }
+
     .tool-toggle[open] > summary {
-      border-bottom-color: #8f6630;
-      background: rgba(0, 0, 0, 0.15);
+      border-bottom-color: rgba(255, 255, 255, 0.2);
+      background: rgba(0, 0, 0, 0.18);
     }
+
     .tool-toggle > summary::-webkit-details-marker { display: none; }
     .tool-toggle > summary::before { content: '▸ '; }
     .tool-toggle[open] > summary::before { content: '▾ '; }
 
-    .status-pill {
-      display: inline-block;
-      border-radius: 999px;
-      font-size: 11px;
-      padding: 2px 8px;
+    .trace-line { display: block; margin-bottom: 4px; }
+    .trace-model { color: #cabfff; }
+    .trace-request { color: #ffd09d; }
+    .trace-run { color: #b1f3d1; }
+
+    .form-control, .form-select {
+      background: rgba(0, 0, 0, 0.25);
+      border-color: var(--border);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .form-control:focus, .form-select:focus {
+      background: rgba(0, 0, 0, 0.34);
+      color: var(--text);
+      border-color: #8ca8ff;
+      box-shadow: 0 0 0 .2rem rgba(100, 140, 255, 0.15);
+    }
+
+    .btn-glass {
       border: 1px solid var(--border);
-      background: #1f1a36;
-      color: var(--muted);
+      background: rgba(255, 255, 255, 0.08);
+      color: #edf2ff;
+    }
+
+    .btn-glass:hover {
+      background: rgba(255, 255, 255, 0.16);
+      color: #fff;
+    }
+
+    .btn-primary {
+      border: none;
+      background: linear-gradient(90deg, #5f85ff, #8674ff);
+    }
+
+    .small-muted { color: var(--muted); font-size: 12px; }
+    .approval-warning {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 188, 117, 0.45);
+      background: rgba(255, 188, 117, 0.15);
+      color: #ffe1b7;
+      font-size: 12px;
+      display: none;
     }
   </style>
 </head>
 <body>
-  <div id="app" class="app">
-    <aside id="sidebar" class="sidebar">
+  <div id="app" class="app-shell">
+    <aside class="sidebar glass" id="sidebar">
       <div class="panel">
         <h3>Runtime settings</h3>
-        <div class="small">Auto-applies on change</div>
-        <div style="height:8px"></div>
-        <label class="small">Provider</label>
-        <select id="provider"></select>
-        <div style="height:6px"></div>
-        <label class="small">Model</label>
-        <select id="model"></select>
-        <div style="height:6px"></div>
-        <label class="small">API key (optional)</label>
-        <input id="apiKey" type="password" placeholder="sk-..." />
-        <div style="height:6px"></div>
-        <label class="small">Approval mode</label>
-        <select id="approval"><option>ask</option><option>auto</option><option>deny</option></select>
-        <div style="height:6px"></div>
-        <label class="small">Workspace path</label>
-        <input id="workspace" placeholder="/path/to/repo" />
-        <div style="height:8px"></div>
-        <label class="small"><input id="debug" type="checkbox" /> Debug mode</label><br/>
-        <label class="small"><input id="agentic" type="checkbox" checked /> Agentic planning</label>
+        <div class="small-muted mb-2">Auto-applies on change</div>
+
+        <label class="small-muted mb-1">Provider</label>
+        <select id="provider" class="form-select mb-2"></select>
+
+        <label class="small-muted mb-1">Model</label>
+        <select id="model" class="form-select mb-2"></select>
+
+        <label class="small-muted mb-1">API key (optional)</label>
+        <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+
+        <label class="small-muted mb-1">Approval mode</label>
+        <select id="approval" class="form-select mb-2">
+          <option>ask</option><option>auto</option><option>deny</option>
+        </select>
+
+        <label class="small-muted mb-1">Workspace path</label>
+        <input id="workspace" class="form-control mb-2" placeholder="/path/to/repo" />
+
+        <div class="form-check">
+          <input class="form-check-input" id="debug" type="checkbox" />
+          <label class="form-check-label small-muted" for="debug">Debug mode</label>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" id="agentic" type="checkbox" checked />
+          <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
+        </div>
+        <div id="approvalNote" class="approval-warning">Approval mode <strong>ask</strong> is not interactive in GUI and will deny mutating tools. Switch to <strong>auto</strong> or <strong>deny</strong>.</div>
       </div>
 
       <div class="panel">
         <h3>Session management</h3>
-        <div class="small" id="activeSession">active: -</div>
-        <div style="height:8px"></div>
-        <div class="row">
-          <input id="sessionName" placeholder="session name" />
-          <button id="newSession">New</button>
+        <div class="small-muted mb-2" id="activeSession">active: -</div>
+
+        <div class="input-group input-group-sm mb-2">
+          <input id="sessionName" class="form-control" placeholder="session name" />
+          <button id="newSession" class="btn btn-primary" type="button">New</button>
         </div>
-        <div style="height:8px"></div>
-        <select id="sessionList" size="6"></select>
-        <div style="height:8px"></div>
-        <div class="row">
-          <button id="loadSession" class="secondary">Load</button>
-          <button id="deleteSession" class="secondary">Delete</button>
-          <button id="refreshSessions" class="secondary">Refresh</button>
+
+        <select id="sessionList" class="form-select mb-2" size="6"></select>
+
+        <div class="d-flex gap-2">
+          <button id="loadSession" class="btn btn-glass btn-sm">Load</button>
+          <button id="deleteSession" class="btn btn-glass btn-sm">Delete</button>
+          <button id="refreshSessions" class="btn btn-glass btn-sm">Refresh</button>
         </div>
       </div>
     </aside>
 
     <section class="main">
       <div class="topbar">
-        <button id="toggleSidebar" class="secondary">☰</button>
+        <button id="toggleSidebar" class="btn btn-glass btn-sm">☰</button>
         <div class="title">mu_cli GUI</div>
-        <span class="status-pill" id="meta">loading...</span>
+        <span id="meta" class="status-pill">loading...</span>
       </div>
 
-      <div class="content">
+      <div class="chat-layout glass">
         <div id="messages" class="messages"></div>
         <div id="traces" class="trace">debug traces will appear here</div>
+
         <div>
-          <div class="inputrow">
-            <textarea id="prompt" placeholder="Ask anything..."></textarea>
-          </div>
-          <div class="inputrow" style="margin-top:8px;">
-            <button id="send">Send</button>
-            <div class="small" id="report"></div>
+          <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
+          <div class="d-flex align-items-center gap-2 mt-2">
+            <button id="send" class="btn btn-primary btn-sm">Send</button>
+            <div id="report" class="small-muted"></div>
           </div>
         </div>
       </div>
@@ -310,14 +370,15 @@ function formatMessageContent(content) {
       const text = parts[idx];
       if (!text) continue;
       const escaped = escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
-      const paragraphs = escaped.split(/\n{2,}/).map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`).join('');
+      const paragraphs = escaped
+        .split(/\n{2,}/)
+        .map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`)
+        .join('');
       html += paragraphs;
       continue;
     }
 
-    if (idx % 3 === 1) {
-      continue;
-    }
+    if (idx % 3 === 1) continue;
 
     const code = parts[idx] || '';
     html += `<pre><code>${escapeHtml(code)}</code></pre>`;
@@ -330,10 +391,20 @@ function isToolRole(role) {
   return role === 'tool_result' || role === 'tool_call';
 }
 
+function shouldRenderMessage(message) {
+  if (message.role !== 'assistant') return true;
+  const content = String(message.content || '').trim();
+  const toolCalls = (message.metadata && message.metadata.tool_calls) || [];
+  return content.length > 0 || toolCalls.length > 0;
+}
+
 function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
+
   for (const m of state.messages) {
+    if (!shouldRenderMessage(m)) continue;
+
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
 
@@ -363,6 +434,7 @@ function renderMessages() {
 
     box.appendChild(row);
   }
+
   box.scrollTop = box.scrollHeight;
 }
 
@@ -417,6 +489,11 @@ function buildSettingsPayload() {
   };
 }
 
+function updateApprovalNote() {
+  const show = document.getElementById('approval').value === 'ask';
+  document.getElementById('approvalNote').style.display = show ? 'block' : 'none';
+}
+
 function scheduleApplySettings() {
   if (syncing) return;
   clearTimeout(applyTimer);
@@ -452,6 +529,7 @@ async function refreshState() {
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
 
+  updateApprovalNote();
   renderSessions(s.sessions, s.session);
   renderMessages();
   renderTraces();
@@ -468,8 +546,7 @@ async function sendPrompt() {
   reportEl.textContent = 'streaming...';
 
   state.messages.push({ role: 'user', content: text });
-  const draft = { role: 'assistant', content: '' };
-  state.messages.push(draft);
+  let draft = null;
   renderMessages();
 
   try {
@@ -495,6 +572,10 @@ async function sendPrompt() {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
         if (event.type === 'assistant_chunk') {
+          if (!draft) {
+            draft = { role: 'assistant', content: '' };
+            state.messages.push(draft);
+          }
           draft.content += event.chunk;
           renderMessages();
         } else if (event.type === 'trace') {
@@ -517,25 +598,30 @@ async function sendPrompt() {
   }
 }
 
-async function sessionAction(action) {
+function resolveSessionName(action) {
   const selected = document.getElementById('sessionList').value;
   const typed = document.getElementById('sessionName').value.trim();
-  const name = typed || selected;
+  if (action === 'new') return typed;
+  return selected || typed;
+}
+
+async function sessionAction(action) {
+  const name = resolveSessionName(action);
   await api('/api/session', 'POST', { action, name });
   await refreshState();
 }
 
-for (const id of ['provider','model','apiKey','approval','workspace','debug','agentic']) {
-  document.getElementById(id).addEventListener('change', scheduleApplySettings);
+for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic']) {
+  document.getElementById(id).addEventListener('change', () => {
+    if (id === 'provider') wireModels(document.getElementById('provider').value);
+    if (id === 'approval') updateApprovalNote();
+    scheduleApplySettings();
+  });
   if (id === 'workspace' || id === 'apiKey') {
     document.getElementById(id).addEventListener('blur', scheduleApplySettings);
   }
 }
 
-document.getElementById('provider').addEventListener('change', (e) => {
-  wireModels(e.target.value);
-  scheduleApplySettings();
-});
 document.getElementById('send').addEventListener('click', () => sendPrompt().catch((e) => alert(e.message)));
 document.getElementById('newSession').addEventListener('click', () => sessionAction('new').catch((e) => alert(e.message)));
 document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
@@ -543,6 +629,12 @@ document.getElementById('loadSession').addEventListener('click', () => sessionAc
 document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
 document.getElementById('toggleSidebar').addEventListener('click', () => {
   document.getElementById('app').classList.toggle('sidebar-hidden');
+});
+
+document.getElementById('prompt').addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    sendPrompt().catch((err) => alert(err.message));
+  }
 });
 
 refreshState().catch((e) => alert(e.message));

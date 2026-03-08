@@ -11,7 +11,6 @@ from mu_cli.agent import Agent
 from mu_cli.cli import PLANNING_PROMPT_BASE
 from mu_cli.core.types import Message, Role, ToolCall, UsageStats
 from mu_cli.models import MODELS_BY_PROVIDER, get_models
-from mu_cli.policy import ApprovalPolicy
 from mu_cli.pricing import PricingCatalog, estimate_tokens
 from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
@@ -83,6 +82,18 @@ def _inject_planning(agent: Agent, workspace_summary: str | None = None) -> None
 def _new_agent(runtime: WebRuntime) -> Agent:
     provider = _build_provider(runtime.provider, runtime.model, runtime.api_key)
 
+    def on_approval(tool_name: str, args: dict) -> bool:
+        mode = runtime.approval_mode
+        if mode == "auto":
+            return True
+        if mode == "deny":
+            return False
+        runtime.traces.append(
+            "approval: mode=ask is not interactive in GUI; mutating tool denied "
+            f"name={tool_name} args={args}"
+        )
+        return False
+
     def on_model_response(message: Message, calls: list[ToolCall]) -> None:
         if not runtime.debug:
             return
@@ -98,7 +109,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
     return Agent(
         provider=provider,
         tools=runtime.tools,
-        on_approval=ApprovalPolicy(mode=runtime.approval_mode).should_approve,
+        on_approval=on_approval,
         on_model_response=on_model_response,
         on_tool_run=on_tool_run,
         strict_tool_usage=True,

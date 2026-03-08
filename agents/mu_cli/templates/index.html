@@ -400,6 +400,23 @@
     .diff-del { background: var(--diff-del); }
     .diff-add { background: var(--diff-add); }
     .diff-ctx { background: var(--diff-ctx); }
+    .diff-line code { background: transparent; padding: 0; border-radius: 0; display: block; }
+    .raw-diff-wrap {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--surface-2);
+    }
+    .raw-diff-wrap > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      border-bottom: 1px solid transparent;
+    }
+    .raw-diff-wrap[open] > summary { border-bottom-color: var(--border); }
 
     @media (max-width: 1000px) {
       .shell { grid-template-columns: minmax(0,1fr); }
@@ -676,9 +693,20 @@ function renderApprovalPatchPreview(args) {
   const reader = new FileReader();
   reader.onload = () => {
     const content = String(reader.result || '');
-    host.innerHTML = `<div class="small-muted mb-1">Patch preview (temporary file: ${escapeHtml(file.name)})</div>${renderSideBySideDiff(content)}`;
+    host.innerHTML = `<div class="small-muted mb-1">Patch preview (temporary file: ${escapeHtml(file.name)})</div>${renderSideBySideDiff(content)}<details class="raw-diff-wrap"><summary>Raw diff</summary><pre><code class="hljs language-diff">${escapeHtml(content)}</code></pre></details>`;
+    highlightCodeBlocks(host);
   };
   reader.readAsText(file);
+}
+
+
+function renderDiffLineHtml(line) {
+  if (!window.hljs) return escapeHtml(line);
+  try {
+    return window.hljs.highlight(line, { language: 'diff' }).value;
+  } catch (e) {
+    return escapeHtml(line);
+  }
 }
 
 function renderSideBySideDiff(diffText) {
@@ -717,8 +745,8 @@ function renderSideBySideDiff(diffText) {
     pushPair({ cls: 'diff-ctx', text: line }, { cls: 'diff-ctx', text: line });
   }
 
-  const leftHtml = left.map((row) => `<div class="diff-line ${row.cls}">${escapeHtml(row.text)}</div>`).join('');
-  const rightHtml = right.map((row) => `<div class="diff-line ${row.cls}">${escapeHtml(row.text)}</div>`).join('');
+  const leftHtml = left.map((row) => `<div class="diff-line ${row.cls}"><code class="hljs language-diff">${renderDiffLineHtml(row.text)}</code></div>`).join('');
+  const rightHtml = right.map((row) => `<div class="diff-line ${row.cls}"><code class="hljs language-diff">${renderDiffLineHtml(row.text)}</code></div>`).join('');
   return `<div class="diff-wrap"><div class="diff-grid"><div class="diff-col">${leftHtml}</div><div class="diff-col">${rightHtml}</div></div></div>`;
 }
 

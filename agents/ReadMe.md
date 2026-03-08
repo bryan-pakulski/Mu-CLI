@@ -34,14 +34,6 @@ PYTHONPATH=agents python -m mu_cli.cli --provider echo
 /tool read_file {"path":"agents/ReadMe.md"}
 ```
 
-## Prioritized feature roadmap
-
-1. **Tool execution loop with post-tool model follow-up** (implemented): after a tool runs, ask the provider for a final assistant response, with a max-round safety cap.
-2. **Provider-native tool calling for OpenAI + Gemini**: map tool schemas into provider APIs and parse structured tool calls.
-3. **Provider error handling + retries**: normalize HTTP/timeouts/rate-limit errors into consistent user-facing failures.
-4. **Conversation persistence**: save/load session history (`jsonl` or sqlite) for resumable workflows.
-5. **Additional developer tools**: add safe `write_file`, `apply_patch`, and `git_status` tools with approval/policy hooks.
-
 ## Real providers
 
 OpenAI:

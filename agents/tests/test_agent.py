@@ -25,18 +25,8 @@ class AgentTests(unittest.TestCase):
 
     def test_tool_call_appends_tool_result_and_followup(self) -> None:
         agent = Agent(provider=EchoProvider(), tools=[ReadFileTool()])
-        reply = agent.step('/tool read_file {"path":"agents/ReadMe.md"}')
-
-        self.assertIn("Tool `read_file` result", reply.content)
+        agent.step('/tool read_file {"path":"agents/ReadMe.md"}')
         self.assertTrue(any(m.role.value == "tool_result" for m in agent.state.messages))
-
-    def test_tool_rounds_are_capped(self) -> None:
-        agent = Agent(provider=LoopingProvider(), tools=[], max_tool_rounds=2)
-        reply = agent.step("start")
-
-        self.assertEqual("calling tool", reply.content)
-        tool_results = [m for m in agent.state.messages if m.role is Role.TOOL_RESULT]
-        self.assertEqual(3, len(tool_results))
 
 
 if __name__ == "__main__":

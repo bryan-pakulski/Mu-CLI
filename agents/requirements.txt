@@ -1,2 +1,2 @@
-# Minimal dependencies for provider-agnostic CLI foundation.
-# Add provider SDKs (openai/anthropic/google-genai/etc.) as adapters are implemented.
+# Dependencies for mu_cli runtime and GUI.
+flask>=3.0.0

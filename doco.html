@@ -90,6 +90,7 @@
         <li><a href="#quickstart">Quick Start</a></li>
         <li><a href="#core">Core Concepts</a></li>
         <li><a href="#commands">CLI Commands</a></li>
+        <li><a href="#gui">Flask GUI</a></li>
         <li><a href="#workspace">Workspace Context Flow</a></li>
         <li><a href="#tools">Tooling & Approval Model</a></li>
         <li><a href="#providers">Providers & Models</a></li>
@@ -110,7 +111,9 @@
 # or
 make run-gemini
 # or local
-make run-echo</pre>
+make run-echo
+# GUI
+make run-web</pre>
       </article>
       <article class="card">
         <h3>3) Attach workspace</h3>
@@ -148,6 +151,14 @@ make run-echo</pre>
         <tr><td><code>/session status|list|new &lt;name&gt;|load &lt;name&gt;|delete &lt;name&gt;</code></td><td>Manage persistent sessions from inside the app.</td></tr>
       </tbody>
     </table>
+
+    
+    <h2 id="gui">Flask GUI</h2>
+    <div class="card">
+      <p>Run <code>make run-web</code> and open <code>http://localhost:5000</code>.</p>
+      <p>The GUI provides a toggleable sidebar for provider/model/settings, inline session management (status/list/new/load/delete), workspace path, approval mode, and debug toggles.</p>
+      <p>Chat, traces, and per-turn cost report are available in one view for developer-in-the-loop workflows.</p>
+    </div>
 
     <h2 id="workspace">Workspace Context Flow</h2>
     <div class="card">

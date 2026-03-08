@@ -12,7 +12,7 @@ APPROVAL_MODE ?= ask
 AGENTIC_PLANNING ?= 1
 DEBUG ?= 0
 
-.PHONY: test test-verbose run run-echo run-openai run-gemini models help
+.PHONY: test test-verbose run run-web run-echo run-openai run-gemini models help
 
 help:
 	@echo "Targets:"
@@ -54,3 +54,6 @@ run-openai:
 
 run-gemini:
 	$(MAKE) run PROVIDER=gemini MODEL=$${MODEL:-gemini-2.0-flash}
+
+run-web:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mu_cli.web

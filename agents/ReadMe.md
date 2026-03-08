@@ -35,7 +35,15 @@ make models
 make run-echo
 make run-openai   # requires OPENAI_API_KEY
 make run-gemini   # requires GEMINI_API_KEY or GOOGLE_API_KEY
+make run-web      # Flask GUI on http://localhost:5000
 ```
+
+## GUI (Flask)
+
+- Start with `make run-web` then open `http://localhost:5000`.
+- Includes a toggleable settings sidebar (provider/model/approval/workspace/debug/agentic).
+- Includes built-in session management actions (new/load/delete/list/status).
+- Debug mode in GUI surfaces model tool requests and tool execution traces.
 
 ## Workspace context and memory
 

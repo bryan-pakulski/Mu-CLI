@@ -1,7 +1,10 @@
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
+    ClearUploadedContextStoreTool,
+    GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
     GitTool,
+    ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
     ReadFileTool,
     WriteFileTool,
@@ -14,4 +17,7 @@ __all__ = [
     "GitTool",
     "ListWorkspaceFilesTool",
     "GetWorkspaceFileContextTool",
+    "ListUploadedContextFilesTool",
+    "GetUploadedContextFileTool",
+    "ClearUploadedContextStoreTool",
 ]

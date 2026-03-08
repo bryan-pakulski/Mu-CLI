@@ -4,7 +4,7 @@ import json
 import queue
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +21,11 @@ from mu_cli.session import SessionState, SessionStore
 from mu_cli.tools.base import Tool
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
+    ClearUploadedContextStoreTool,
+    GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
     GitTool,
+    ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
     ReadFileTool,
     WriteFileTool,
@@ -101,7 +104,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
             return True
         if mode == "deny":
             return False
-        request_id = f"approval_{datetime.now(UTC).timestamp()}"
+        request_id = f"approval_{datetime.now(timezone.utc).timestamp()}"
         with runtime.approval_condition:
             runtime.pending_approval = {
                 "id": request_id,
@@ -178,7 +181,7 @@ def _record_turn(runtime: WebRuntime, report: dict) -> None:
 
     runtime.session_turns.append(
         {
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "session": runtime.session_name,
             "provider": report["provider"],
             "model": report["model"],
@@ -190,35 +193,24 @@ def _record_turn(runtime: WebRuntime, report: dict) -> None:
     )
 
 
-def _uploaded_system_message(upload: dict) -> Message:
-    name = str(upload.get("name", "file"))
-    path = str(upload.get("path", ""))
-    kind = str(upload.get("kind", "binary"))
-    size = int(upload.get("size", 0))
-    preview = str(upload.get("preview", ""))
-
-    if kind == "text" and preview:
-        content = (
-            f"Uploaded context file `{name}` ({size} bytes) at `{path}`. "
-            f"Use this as additional context:\n\n{preview}"
-        )
-    else:
-        content = (
-            f"Uploaded context file `{name}` ({kind}, {size} bytes) at `{path}`. "
-            "File content is not embedded; refer to it as supplemental context metadata."
-        )
-
-    return Message(
-        role=Role.SYSTEM,
-        content=content,
-        metadata={"kind": "uploaded_context", "upload_name": name, "upload_path": path},
-    )
-
-
 def _sync_uploaded_context_messages(runtime: WebRuntime) -> None:
     keep = [m for m in runtime.agent.state.messages if m.metadata.get("kind") != "uploaded_context"]
-    uploaded = [_uploaded_system_message(item) for item in runtime.uploads]
-    runtime.agent.state.messages = keep + uploaded
+    if not runtime.uploads:
+        runtime.agent.state.messages = keep
+        return
+
+    names = ", ".join(item["name"] for item in runtime.uploads[:20])
+    if len(runtime.uploads) > 20:
+        names += f", ... (+{len(runtime.uploads) - 20} more)"
+    summary = Message(
+        role=Role.SYSTEM,
+        content=(
+            f"Uploaded context store has {len(runtime.uploads)} file(s): {names}. "
+            "Use tools `list_uploaded_context_files` and `get_uploaded_context_file` to fetch content on demand."
+        ),
+        metadata={"kind": "uploaded_context"},
+    )
+    runtime.agent.state.messages = keep + [summary]
 
 
 def _persist(runtime: WebRuntime) -> None:
@@ -273,6 +265,7 @@ def create_app():
     app = Flask(__name__, template_folder="templates")
 
     workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
+    uploads_root = Path(".mu_cli/uploads")
     tools: list[Tool] = [
         ReadFileTool(),
         WriteFileTool(),
@@ -280,6 +273,9 @@ def create_app():
         GitTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
+        ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),
+        GetUploadedContextFileTool(uploads_root, lambda: runtime.session_name),
+        ClearUploadedContextStoreTool(uploads_root, lambda: runtime.session_name),
     ]
     session_store = SessionStore(Path(".mu_cli/sessions"), "default")
 
@@ -302,7 +298,7 @@ def create_app():
         session_usage=_default_usage(),
         session_turns=[],
         uploads=[],
-        uploads_dir=Path(".mu_cli/uploads"),
+        uploads_dir=uploads_root,
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     runtime.agent = _new_agent(runtime)
@@ -513,11 +509,9 @@ def create_app():
 
             raw = target.read_bytes()
             kind = "binary"
-            preview = ""
             try:
-                text = raw.decode("utf-8")
+                raw.decode("utf-8")
                 kind = "text"
-                preview = text[:8000]
             except UnicodeDecodeError:
                 if target.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
                     kind = "image"
@@ -527,8 +521,7 @@ def create_app():
                 "path": str(target),
                 "size": len(raw),
                 "kind": kind,
-                "preview": preview,
-                "uploaded_at": datetime.now(UTC).isoformat(),
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
             }
             runtime.uploads.append(item)
             uploaded.append(item)
@@ -536,6 +529,20 @@ def create_app():
         _sync_uploaded_context_messages(runtime)
         _persist(runtime)
         return jsonify({"ok": True, "uploads": uploaded})
+
+    @app.delete("/api/uploads")
+    def clear_uploads():
+        session_dir = runtime.uploads_dir / runtime.session_name
+        removed = 0
+        if session_dir.exists():
+            for item in session_dir.iterdir():
+                if item.is_file():
+                    item.unlink()
+                    removed += 1
+        runtime.uploads = []
+        _sync_uploaded_context_messages(runtime)
+        _persist(runtime)
+        return jsonify({"ok": True, "removed": removed})
 
     @app.post("/api/session")
     def session_action():

@@ -59,13 +59,14 @@ class WebTests(unittest.TestCase):
         self.assertTrue(any(event.get('type') == 'report' for event in events))
         self.assertEqual('done', events[-1].get('type'))
 
-    def test_web_approval_ask_mode_denies_without_prompting(self) -> None:
+    def test_web_approval_deny_mode_rejects_mutating_tool(self) -> None:
         from mu_cli.web import create_app
 
         app = create_app()
         app.testing = True
         client = app.test_client()
 
+        client.post('/api/settings', json={'approval_mode': 'deny'})
         res = client.post('/api/chat', json={'text': '/tool write_file {"path":"tmp.txt","content":"x"}'})
         self.assertEqual(200, res.status_code)
         payload = res.get_json()

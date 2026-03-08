@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from mu_cli.tools.base import ToolResult
 from mu_cli.workspace import WorkspaceStore
@@ -158,3 +159,86 @@ class GetWorkspaceFileContextTool:
         text = self.store.get_file_context(path=path, max_chars=max_chars)
         ok = not text.startswith("Path not indexed") and not text.startswith("Unable to read")
         return ToolResult(ok=ok, output=text)
+
+
+class ListUploadedContextFilesTool:
+    name = "list_uploaded_context_files"
+    description = "List files in uploaded context store for the active session."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "Maximum files to return", "default": 50},
+        },
+    }
+
+    def __init__(self, root_dir: Path, session_name_getter: Callable[[], str]) -> None:
+        self.root_dir = root_dir
+        self.session_name_getter = session_name_getter
+
+    def run(self, args: dict) -> ToolResult:
+        limit = int(args.get("limit", 50))
+        session_dir = self.root_dir / self.session_name_getter()
+        if not session_dir.exists():
+            return ToolResult(ok=True, output="No uploaded context files.")
+        files = [item for item in sorted(session_dir.iterdir(), key=lambda x: x.name.lower()) if item.is_file()]
+        if not files:
+            return ToolResult(ok=True, output="No uploaded context files.")
+        lines = [f"- {file.name} ({file.stat().st_size} bytes)" for file in files[:limit]]
+        return ToolResult(ok=True, output="\n".join(lines))
+
+
+class GetUploadedContextFileTool:
+    name = "get_uploaded_context_file"
+    description = "Read an uploaded UTF-8 context file by filename from the active session store."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Filename in uploaded context store"},
+            "max_chars": {"type": "integer", "description": "Maximum characters", "default": 8000},
+        },
+        "required": ["name"],
+    }
+
+    def __init__(self, root_dir: Path, session_name_getter: Callable[[], str]) -> None:
+        self.root_dir = root_dir
+        self.session_name_getter = session_name_getter
+
+    def run(self, args: dict) -> ToolResult:
+        name = Path(str(args["name"])).name
+        max_chars = int(args.get("max_chars", 8000))
+        session_dir = (self.root_dir / self.session_name_getter()).resolve()
+        target = (session_dir / name).resolve()
+        if session_dir not in target.parents and target != session_dir:
+            return ToolResult(ok=False, output="Invalid uploaded file path")
+        if not target.exists() or not target.is_file():
+            return ToolResult(ok=False, output=f"Uploaded file not found: {name}")
+        try:
+            text = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ToolResult(ok=False, output=f"Uploaded file is not UTF-8 text: {name}")
+        return ToolResult(ok=True, output=text[:max_chars])
+
+
+class ClearUploadedContextStoreTool:
+    name = "clear_uploaded_context_store"
+    description = "Clear all uploaded context files for the active session store."
+    mutating = True
+    schema = {"type": "object", "properties": {}}
+
+    def __init__(self, root_dir: Path, session_name_getter: Callable[[], str]) -> None:
+        self.root_dir = root_dir
+        self.session_name_getter = session_name_getter
+
+    def run(self, args: dict) -> ToolResult:
+        _ = args
+        session_dir = self.root_dir / self.session_name_getter()
+        if not session_dir.exists():
+            return ToolResult(ok=True, output="Uploaded context store already empty.")
+        removed = 0
+        for item in session_dir.iterdir():
+            if item.is_file():
+                item.unlink()
+                removed += 1
+        return ToolResult(ok=True, output=f"Removed {removed} uploaded file(s).")

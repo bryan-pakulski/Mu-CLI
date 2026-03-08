@@ -7,11 +7,11 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <style>
     :root {
-      --bg-1: #0d1227;
-      --bg-2: #1a2145;
-      --glass: rgba(255, 255, 255, 0.07);
-      --glass-strong: rgba(255, 255, 255, 0.12);
-      --border: rgba(255, 255, 255, 0.16);
+      --bg-1: #0f1220;
+      --bg-2: #1b2542;
+      --glass: rgba(255, 255, 255, 0.05);
+      --glass-strong: rgba(255, 255, 255, 0.08);
+      --border: rgba(255, 255, 255, 0.14);
       --text: #f3f6ff;
       --muted: #c6d0ef;
       --purple-soft: rgba(161, 133, 246, 0.17);
@@ -22,7 +22,7 @@
     html, body {
       height: 100%;
       overflow: hidden;
-      background: radial-gradient(1200px 700px at 100% -10%, #394f8f 0%, var(--bg-1) 45%) fixed;
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1)) fixed;
       color: var(--text);
       font-size: 14px;
     }
@@ -31,8 +31,8 @@
       height: 100vh;
       display: grid;
       grid-template-columns: 340px minmax(0, 1fr);
-      gap: 14px;
-      padding: 12px;
+      gap: 12px;
+      padding: 10px;
       transition: grid-template-columns .2s ease;
     }
 
@@ -45,14 +45,14 @@
       border: 1px solid var(--border);
       backdrop-filter: blur(14px) saturate(135%);
       -webkit-backdrop-filter: blur(14px) saturate(135%);
-      box-shadow: 0 18px 35px rgba(0, 0, 0, 0.28);
-      border-radius: 18px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+      border-radius: 14px;
     }
 
     .sidebar {
       min-height: 0;
       overflow: auto;
-      padding: 12px;
+      padding: 10px;
     }
 
     .app-shell.sidebar-hidden .sidebar {
@@ -61,15 +61,15 @@
 
     .panel {
       padding: 12px;
-      border-radius: 14px;
-      margin-bottom: 10px;
-      background: rgba(9, 14, 33, 0.44);
+      border-radius: 12px;
+      margin-bottom: 8px;
+      background: rgba(9, 14, 33, 0.28);
       border: 1px solid var(--border);
     }
 
     .panel h3 {
       font-size: 12px;
-      margin: 0 0 8px;
+      margin: 0 0 6px;
       letter-spacing: .05em;
       text-transform: uppercase;
       color: #f4f7ff;
@@ -87,8 +87,8 @@
       align-items: center;
       gap: 10px;
       padding: 10px 14px;
-      margin-bottom: 10px;
-      border-radius: 16px;
+      margin-bottom: 8px;
+      border-radius: 12px;
       background: var(--glass-strong);
       border: 1px solid var(--border);
       backdrop-filter: blur(16px);
@@ -101,7 +101,7 @@
 
     .status-pill {
       margin-left: auto;
-      border-radius: 999px;
+      border-radius: 10px;
       font-size: 11px;
       padding: 2px 10px;
       border: 1px solid var(--border);
@@ -112,9 +112,9 @@
     .chat-layout {
       min-height: 0;
       display: grid;
-      grid-template-rows: minmax(0, 1fr) 120px auto;
-      gap: 10px;
-      padding: 12px;
+      grid-template-rows: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      padding: 10px;
       overflow: hidden;
     }
 
@@ -122,7 +122,7 @@
       min-height: 0;
       overflow: auto;
       padding: 10px;
-      border-radius: 14px;
+      border-radius: 12px;
       border: 1px solid var(--border);
       background: rgba(8, 14, 34, 0.48);
     }
@@ -131,7 +131,7 @@
       min-height: 0;
       overflow: auto;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 10px;
       background: rgba(8, 14, 34, 0.48);
       padding: 8px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -148,9 +148,9 @@
     }
 
     .bubble {
-      margin-top: 4px;
-      padding: 10px;
-      border-radius: 12px;
+      margin-top: 3px;
+      padding: 9px;
+      border-radius: 10px;
       border: 1px solid var(--border);
       line-height: 1.45;
     }
@@ -181,7 +181,7 @@
     .tool-toggle {
       margin-top: 4px;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 10px;
       background: var(--orange-soft);
       overflow: hidden;
     }
@@ -192,7 +192,7 @@
       padding: 8px 10px;
       text-transform: uppercase;
       letter-spacing: .04em;
-      font-size: 11px;
+      font-size: 10px;
       color: #ffe5c3;
       border-bottom: 1px solid transparent;
     }
@@ -215,7 +215,8 @@
       background: rgba(0, 0, 0, 0.25);
       border-color: var(--border);
       color: var(--text);
-      font-size: 13px;
+      font-size: 12px;
+      border-radius: 8px;
     }
 
     .form-control:focus, .form-select:focus {
@@ -229,6 +230,7 @@
       border: 1px solid var(--border);
       background: rgba(255, 255, 255, 0.08);
       color: #edf2ff;
+      border-radius: 8px;
     }
 
     .btn-glass:hover {
@@ -239,6 +241,7 @@
     .btn-primary {
       border: none;
       background: linear-gradient(90deg, #5f85ff, #8674ff);
+      border-radius: 8px;
     }
 
     .small-muted { color: var(--muted); font-size: 12px; }
@@ -252,6 +255,31 @@
       font-size: 12px;
       display: none;
     }
+
+    details.trace-wrap {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(8, 14, 34, 0.28);
+    }
+
+    details.trace-wrap > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 7px 10px;
+      color: var(--muted);
+      font-size: 11px;
+      border-bottom: 1px solid transparent;
+    }
+
+    details.trace-wrap[open] > summary {
+      border-bottom-color: var(--border);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    details.trace-wrap > summary::-webkit-details-marker { display: none; }
+    details.trace-wrap > summary::before { content: '▸ '; }
+    details.trace-wrap[open] > summary::before { content: '▾ '; }
   </style>
 </head>
 <body>
@@ -259,7 +287,7 @@
     <aside class="sidebar glass" id="sidebar">
       <div class="panel">
         <h3>Runtime settings</h3>
-        <div class="small-muted mb-2">Auto-applies on change</div>
+        <div class="small-muted mb-2">Auto-applies</div>
 
         <label class="small-muted mb-1">Provider</label>
         <select id="provider" class="form-select mb-2"></select>
@@ -317,7 +345,10 @@
 
       <div class="chat-layout glass">
         <div id="messages" class="messages"></div>
-        <div id="traces" class="trace">debug traces will appear here</div>
+        <details class="trace-wrap" id="traceWrap">
+          <summary>Debug traces</summary>
+          <div id="traces" class="trace">debug traces will appear here</div>
+        </details>
 
         <div>
           <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>

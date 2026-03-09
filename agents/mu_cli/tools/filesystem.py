@@ -155,14 +155,24 @@ class ApplyPatchTool:
 
 class GitTool:
     name = "git"
-    description = "Run a constrained git operation (status, diff, log, add, commit)."
+    description = "Run a constrained git operation (status, diff, log, add, commit, branching, pull request)."
     mutating = True
     schema = {
         "type": "object",
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["status", "diff", "log", "add", "commit"],
+                "enum": [
+                    "status",
+                    "diff",
+                    "log",
+                    "add",
+                    "commit",
+                    "create_branch",
+                    "switch_branch",
+                    "branch_changes",
+                    "create_pr",
+                ],
                 "description": "Git operation",
             },
             "args": {"type": "array", "items": {"type": "string"}, "description": "Extra args"},
@@ -184,10 +194,68 @@ class GitTool:
     def run(self, args: dict) -> ToolResult:
         op = str(args["operation"])
         extra = [str(item) for item in args.get("args", [])]
-        if op not in self.SAFE_OPS:
-            return ToolResult(ok=False, output=f"Unsupported operation: {op}")
-        command = self.SAFE_OPS[op] + extra
         root = self.workspace_root_getter() if self.workspace_root_getter else None
+
+        command: list[str]
+        if op in self.SAFE_OPS:
+            command = self.SAFE_OPS[op] + extra
+        elif op == "create_branch":
+            if not extra:
+                return ToolResult(ok=False, output="create_branch requires branch name in args[0]")
+            branch_name = extra[0]
+            if len(extra) > 1:
+                base = extra[1]
+                command = ["git", "checkout", "-b", branch_name, base]
+            else:
+                command = ["git", "checkout", "-b", branch_name]
+        elif op == "switch_branch":
+            if not extra:
+                return ToolResult(ok=False, output="switch_branch requires branch name in args[0]")
+            command = ["git", "checkout", extra[0]]
+        elif op == "branch_changes":
+            base = extra[0] if extra else "main"
+            diff_proc = subprocess.run(
+                ["git", "diff", f"{base}...HEAD"],
+                text=True,
+                capture_output=True,
+                cwd=str(root) if root is not None else None,
+            )
+            log_proc = subprocess.run(
+                ["git", "log", "--oneline", f"{base}..HEAD"],
+                text=True,
+                capture_output=True,
+                cwd=str(root) if root is not None else None,
+            )
+            if diff_proc.returncode != 0 or log_proc.returncode != 0:
+                error = (diff_proc.stderr or "") + ("\n" + log_proc.stderr if log_proc.stderr else "")
+                return ToolResult(ok=False, output=error.strip() or "Unable to inspect branch changes")
+            output = "\n".join(
+                [
+                    f"Branch delta against '{base}':",
+                    "",
+                    "Commits:",
+                    log_proc.stdout.strip() or "(no commits)",
+                    "",
+                    "Diff:",
+                    diff_proc.stdout.strip() or "(no diff)",
+                ]
+            )
+            return ToolResult(ok=True, output=output)
+        elif op == "create_pr":
+            if len(extra) < 2:
+                return ToolResult(
+                    ok=False,
+                    output="create_pr requires at least title and body in args, optionally base and head",
+                )
+            title, body = extra[0], extra[1]
+            base = extra[2] if len(extra) > 2 else "main"
+            head = extra[3] if len(extra) > 3 else ""
+            command = ["gh", "pr", "create", "--title", title, "--body", body, "--base", base]
+            if head:
+                command.extend(["--head", head])
+        else:
+            return ToolResult(ok=False, output=f"Unsupported operation: {op}")
+
         proc = subprocess.run(command, text=True, capture_output=True, cwd=str(root) if root is not None else None)
         output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
         if proc.returncode != 0:

@@ -125,6 +125,7 @@
     .topbar {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 8px;
       padding: 4px 2px 8px;
       margin-bottom: 4px;
@@ -132,6 +133,20 @@
       border: 0;
       background: transparent;
       box-shadow: none;
+    }
+
+    .top-git-launch { display: none; }
+    .top-git-launch.show { display: inline-flex; }
+    .git-diff-box {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      padding: 8px;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
     }
     .title { font-size: 14px; font-weight: 700; letter-spacing: .01em; }
     .pill {
@@ -156,6 +171,44 @@
       padding: 0;
       overflow: hidden;
       background: transparent;
+      position: relative;
+    }
+
+    .plan-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      background: color-mix(in srgb, var(--bg) 78%, transparent);
+      border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+      border-radius: 12px;
+      display: none;
+      overflow: hidden;
+      backdrop-filter: blur(2px);
+    }
+    .plan-overlay.show { display: grid; grid-template-rows: auto minmax(0,1fr); }
+    .plan-overlay-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      background: color-mix(in srgb, var(--surface) 85%, transparent);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .plan-overlay-body {
+      overflow: auto;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .plan-stage {
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 8px;
+      padding: 8px;
+      background: color-mix(in srgb, var(--surface) 90%, transparent);
     }
 
     .messages {
@@ -984,12 +1037,21 @@
         <div class="title">mu_cli</div>
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
         <button id="openMetrics" class="btn btn-soft btn-sm">Metrics</button>
+        <button id="togglePlanOutput" class="btn btn-soft btn-sm">Plan output</button>
         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
+        <button id="openGitModal" class="btn btn-soft btn-sm top-git-launch">GIT</button>
       </div>
 
       <div class="chat-layout">
         <div id="messages" class="messages"></div>
+        <div id="planOverlay" class="plan-overlay">
+          <div class="plan-overlay-head">
+            <strong>Plan output</strong>
+            <span id="planOverlayStatus">Idle</span>
+          </div>
+          <div id="planOverlayBody" class="plan-overlay-body"></div>
+        </div>
 
         <details class="trace-wrap" id="traceWrap">
           <summary>Debug traces</summary>
@@ -1227,8 +1289,34 @@
     </div>
   </div>
 
+  <div id="gitModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(900px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">GIT</h5>
+        <button id="closeGitModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <label class="small-muted mb-1">Repository</label>
+      <select id="gitRepo" class="form-select mb-2"></select>
+      <label class="small-muted mb-1">Branch</label>
+      <div class="input-group input-group-sm mb-2">
+        <select id="gitBranch" class="form-select"></select>
+        <button id="switchBranch" class="btn btn-soft" type="button">Switch</button>
+      </div>
+      <label class="small-muted mb-1">Create branch</label>
+      <div class="input-group input-group-sm mb-2">
+        <input id="newBranchName" class="form-control" placeholder="feature/my-task" />
+        <button id="createBranch" class="btn btn-soft" type="button">Create</button>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mt-2 mb-1">
+        <div class="small-muted" id="gitStatus">Select workspace to load repositories.</div>
+        <button id="refreshGitDiff" class="btn btn-soft btn-sm" type="button">Refresh diff</button>
+      </div>
+      <div id="gitDiffBox" class="git-diff-box">No diff yet.</div>
+    </div>
+  </div>
+
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '' };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '' };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -1240,6 +1328,7 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
+let planOverlayUserVisible = false;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1257,6 +1346,129 @@ async function apiForm(path, formData) {
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'request failed');
   return json;
+}
+
+function renderGitControls() {
+  const launch = document.getElementById('openGitModal');
+  const repoSel = document.getElementById('gitRepo');
+  const branchSel = document.getElementById('gitBranch');
+  const status = document.getElementById('gitStatus');
+  const workspace = (document.getElementById('workspace').value || '').trim();
+  const repos = state.gitRepos || [];
+  const branches = state.gitBranches || [];
+
+  const hasGitWorkspace = !!workspace && repos.length > 0;
+  if (launch) launch.classList.toggle('show', hasGitWorkspace);
+
+  repoSel.innerHTML = '';
+  if (!repos.length) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'No git repositories found';
+    repoSel.appendChild(empty);
+  } else {
+    repos.forEach((repo) => {
+      const o = document.createElement('option');
+      o.value = repo;
+      o.textContent = repo;
+      repoSel.appendChild(o);
+    });
+  }
+  repoSel.value = state.gitCurrentRepo || '';
+
+  branchSel.innerHTML = '';
+  if (!branches.length) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'No branches';
+    branchSel.appendChild(empty);
+  } else {
+    branches.forEach((branch) => {
+      const o = document.createElement('option');
+      o.value = branch;
+      o.textContent = branch;
+      branchSel.appendChild(o);
+    });
+  }
+  branchSel.value = state.gitCurrentBranch || '';
+
+  if (!repos.length) status.textContent = 'Select a workspace containing a git repository.';
+  else status.textContent = `Repo: ${state.gitCurrentRepo || '-'} · Current branch: ${state.gitCurrentBranch || '-'}`;
+
+  const diffBox = document.getElementById('gitDiffBox');
+  if (diffBox) diffBox.textContent = state.gitDiff || 'No diff yet.';
+}
+
+async function refreshGitRepos() {
+  const workspace = document.getElementById('workspace').value.trim();
+  if (!workspace) {
+    state.gitRepos = [];
+    state.gitBranches = [];
+    state.gitCurrentRepo = null;
+    state.gitCurrentBranch = null;
+    renderGitControls();
+    return;
+  }
+  const payload = await api(`/api/git/repos?workspace=${encodeURIComponent(workspace)}`);
+  state.gitRepos = payload.repos || [];
+  if (!state.gitCurrentRepo || !state.gitRepos.includes(state.gitCurrentRepo)) {
+    state.gitCurrentRepo = state.gitRepos[0] || null;
+  }
+  await refreshGitBranches();
+}
+
+async function refreshGitBranches() {
+  if (!state.gitCurrentRepo) {
+    state.gitBranches = [];
+    state.gitCurrentBranch = null;
+    renderGitControls();
+    return;
+  }
+  const payload = await api(`/api/git/branches?repo=${encodeURIComponent(state.gitCurrentRepo)}`);
+  state.gitBranches = payload.branches || [];
+  state.gitCurrentBranch = payload.current_branch || null;
+  await refreshGitDiff();
+  renderGitControls();
+}
+
+async function refreshGitDiff() {
+  if (!state.gitCurrentRepo) {
+    state.gitDiff = '';
+    return;
+  }
+  const payload = await api(`/api/git/diff?repo=${encodeURIComponent(state.gitCurrentRepo)}`);
+  const status = String(payload.status || '').trim();
+  const diff = String(payload.diff || '').trim();
+  const staged = String(payload.cached_diff || '').trim();
+  state.gitDiff = [
+    'Status:',
+    status || '(clean)',
+    '',
+    'Unstaged diff:',
+    diff || '(none)',
+    '',
+    'Staged diff:',
+    staged || '(none)',
+  ].join('\n');
+}
+
+async function createBranchFromUI() {
+  const repo = document.getElementById('gitRepo').value;
+  const branch = document.getElementById('newBranchName').value.trim();
+  if (!repo || !branch) return;
+  await api('/api/git/branch', 'POST', { action: 'create', repo, branch, base: document.getElementById('gitBranch').value || '' });
+  document.getElementById('newBranchName').value = '';
+  await refreshGitBranches();
+  await refreshState();
+}
+
+async function switchBranchFromUI() {
+  const repo = document.getElementById('gitRepo').value;
+  const branch = document.getElementById('gitBranch').value;
+  if (!repo || !branch) return;
+  await api('/api/git/branch', 'POST', { action: 'switch', repo, branch });
+  await refreshGitBranches();
+  await refreshState();
 }
 
 
@@ -1301,6 +1513,41 @@ function renderBackgroundActivity(job) {
   panel.open = active;
 }
 
+function renderPlanOutput(job) {
+  const overlay = document.getElementById('planOverlay');
+  const body = document.getElementById('planOverlayBody');
+  const status = document.getElementById('planOverlayStatus');
+  if (!overlay || !body || !status) return;
+
+  const active = !!job && ['running', 'awaiting_plan_approval'].includes(job.status);
+  const shouldShow = active || planOverlayUserVisible;
+  overlay.classList.toggle('show', shouldShow);
+  document.getElementById('togglePlanOutput').textContent = shouldShow ? 'Hide plan output' : 'Plan output';
+
+  if (!shouldShow) return;
+  if (!job) {
+    status.textContent = 'Idle';
+    body.innerHTML = '<div class="plan-stage">No active session output.</div>';
+    return;
+  }
+
+  status.textContent = `${job.status || 'running'} · ${job.iterations || 0} step(s)`;
+  const sections = [];
+  if (job.plan) sections.push(`<div class="plan-stage"><strong>Plan</strong><div>${escapeHtml(String(job.plan))}</div></div>`);
+  if (job.last_step) sections.push(`<div class="plan-stage"><strong>Current step</strong><div>${escapeHtml(String(job.last_step))}</div></div>`);
+  if (Array.isArray(job.checkpoints) && job.checkpoints.length) {
+    const items = job.checkpoints.slice(-8).map((cp) => `
+      <li>#${Number(cp.iteration || 0)} · ${escapeHtml(String(cp.summary || cp.status || 'update'))}</li>
+    `).join('');
+    sections.push(`<div class="plan-stage"><strong>Recent checkpoints</strong><ul style="margin:6px 0 0 18px">${items}</ul></div>`);
+  }
+  if (Array.isArray(job.events) && job.events.length) {
+    const events = job.events.slice(-12).map((e) => `<li>${escapeHtml(String(e))}</li>`).join('');
+    sections.push(`<div class="plan-stage"><strong>Execution events</strong><ul style="margin:6px 0 0 18px">${events}</ul></div>`);
+  }
+  body.innerHTML = sections.join('') || '<div class="plan-stage">Waiting for execution updates…</div>';
+}
+
 function beginBackgroundPolling() {
   if (backgroundJobPoll) return;
   backgroundJobPoll = setInterval(async () => {
@@ -1312,6 +1559,7 @@ function beginBackgroundPolling() {
       }
       const latest = await api(`/api/jobs/${job.id}`);
       updateBackgroundJobInState(latest);
+      await pollApproval();
       if (latest.usage) updateUsagePanel(latest.usage);
       const reportEl = document.getElementById('report');
       if (reportEl) {
@@ -1319,6 +1567,7 @@ function beginBackgroundPolling() {
         else reportEl.textContent = `background ${latest.status}: ${latest.iterations || 0} iteration(s)`;
       }
       renderBackgroundActivity(latest);
+      renderPlanOutput(latest);
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
@@ -2038,8 +2287,10 @@ function updateChatBusyState() {
   if (prompt) prompt.disabled = busy;
   if (send) send.disabled = busy;
   if (sendBackground) sendBackground.disabled = busy;
+  updateThinking(busy || sending);
   updateQueryRuntime();
   renderBackgroundActivity(activeSearchingJob() || null);
+  renderPlanOutput(activeSearchingJob() || null);
 }
 
 
@@ -2217,7 +2468,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -2353,6 +2604,10 @@ async function refreshState() {
   state.tools = s.tools || [];
   state.customToolErrors = s.custom_tool_errors || [];
   state.backgroundJobs = s.background_jobs || [];
+  state.gitRepos = s.git_repos || [];
+  state.gitCurrentRepo = s.git_current_repo || null;
+  state.gitCurrentBranch = s.git_current_branch || null;
+  state.gitBranches = s.git_branches || [];
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -2385,6 +2640,7 @@ async function refreshState() {
   renderSessions(state.sessions, state.activeSession);
   renderUploads();
   renderToolSettings();
+  renderGitControls();
   renderMessages();
   renderTraces();
   updateChatBusyState();
@@ -2414,6 +2670,7 @@ function updateBackgroundJobInState(job) {
   renderSessions(state.sessions || [], state.activeSession || '');
   updateChatBusyState();
   if (job.session === state.activeSession) renderBackgroundActivity(job);
+  if (job.session === state.activeSession) renderPlanOutput(job);
 }
 
 
@@ -2614,6 +2871,7 @@ for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();
+    if (id === 'workspace') refreshGitRepos().catch((e) => alert(e.message));
     scheduleApplySettings();
     syncPricingEditor();
   });
@@ -2642,11 +2900,32 @@ document.getElementById('openAdvanced').addEventListener('click', () => showModa
 document.getElementById('closeAdvanced').addEventListener('click', () => showModal('advancedModal', false));
 document.getElementById('openMetrics').addEventListener('click', () => { renderMetrics(); showModal('metricsModal', true); });
 document.getElementById('closeMetrics').addEventListener('click', () => showModal('metricsModal', false));
+document.getElementById('openGitModal').addEventListener('click', async () => {
+  try {
+    await refreshGitBranches();
+  } catch (_) {
+    // ignore and still open modal with existing state
+  }
+  renderGitControls();
+  showModal('gitModal', true);
+});
+document.getElementById('closeGitModal').addEventListener('click', () => showModal('gitModal', false));
+document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
+document.getElementById('togglePlanOutput').addEventListener('click', () => {
+  planOverlayUserVisible = !planOverlayUserVisible;
+  renderPlanOutput(activeSearchingJob() || null);
+});
 
 document.getElementById('browseWorkspace').addEventListener('click', () => {
   showModal('workspaceModal', true);
   loadDirs(document.getElementById('workspace').value.trim()).catch((e) => alert(e.message));
 });
+document.getElementById('gitRepo').addEventListener('change', () => {
+  state.gitCurrentRepo = document.getElementById('gitRepo').value || null;
+  refreshGitBranches().catch((e) => alert(e.message));
+});
+document.getElementById('switchBranch').addEventListener('click', () => switchBranchFromUI().catch((e) => alert(e.message)));
+document.getElementById('createBranch').addEventListener('click', () => createBranchFromUI().catch((e) => alert(e.message)));
 document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
 document.getElementById('closeNewSessionModal').addEventListener('click', () => showModal('newSessionModal', false));
 document.getElementById('closeCondenseModal').addEventListener('click', () => showModal('condenseModal', false));
@@ -2659,6 +2938,7 @@ document.getElementById('chooseDir').addEventListener('click', () => {
   document.getElementById('workspace').value = selectedDir;
   showModal('workspaceModal', false);
   scheduleApplySettings();
+  refreshGitRepos().catch((e) => alert(e.message));
 });
 
 document.getElementById('approveYes').addEventListener('click', () => sendApprovalDecision('approve').catch((e) => alert(e.message)));

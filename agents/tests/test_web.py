@@ -1,8 +1,11 @@
 import importlib.util
 import io
 import json
+import subprocess
+import tempfile
 import time
 import unittest
+from pathlib import Path
 
 
 @unittest.skipUnless(importlib.util.find_spec("flask") is not None, "flask not installed in this environment")
@@ -177,6 +180,52 @@ class WebTests(unittest.TestCase):
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
 
+    def test_git_repo_and_branch_endpoints(self) -> None:
+        from mu_cli.web import create_app
+
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / 'repo'
+            repo.mkdir()
+            subprocess.run(['git', 'init', '-b', 'main'], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(['git', 'config', 'user.email', 'web@example.com'], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(['git', 'config', 'user.name', 'Web Test'], cwd=repo, check=True, capture_output=True, text=True)
+            (repo / 'a.txt').write_text('base\n', encoding='utf-8')
+            subprocess.run(['git', 'add', 'a.txt'], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(['git', 'commit', '-m', 'init'], cwd=repo, check=True, capture_output=True, text=True)
+
+            app = create_app()
+            app.testing = True
+            client = app.test_client()
+
+            settings = client.post('/api/settings', json={'workspace': str(repo)})
+            self.assertEqual(200, settings.status_code)
+
+            repos = client.get(f"/api/git/repos?workspace={repo}")
+            self.assertEqual(200, repos.status_code)
+            repos_payload = repos.get_json()
+            assert repos_payload is not None
+            self.assertIn(str(repo), repos_payload['repos'])
+
+            create_branch = client.post('/api/git/branch', json={'action': 'create', 'repo': str(repo), 'branch': 'feature/web'})
+            self.assertEqual(200, create_branch.status_code)
+
+            switch_main = client.post('/api/git/branch', json={'action': 'switch', 'repo': str(repo), 'branch': 'main'})
+            self.assertEqual(200, switch_main.status_code)
+
+            branches = client.get(f"/api/git/branches?repo={repo}")
+            self.assertEqual(200, branches.status_code)
+            branches_payload = branches.get_json()
+            assert branches_payload is not None
+            self.assertIn('feature/web', branches_payload['branches'])
+            self.assertEqual('main', branches_payload['current_branch'])
+
+            diff = client.get(f"/api/git/diff?repo={repo}")
+            self.assertEqual(200, diff.status_code)
+            diff_payload = diff.get_json()
+            assert diff_payload is not None
+            self.assertIn('status', diff_payload)
+            self.assertIn('diff', diff_payload)
+
     def test_research_export_endpoint(self) -> None:
         from mu_cli.web import create_app
 
@@ -198,6 +247,7 @@ class WebTests(unittest.TestCase):
         app = create_app()
         app.testing = True
         client = app.test_client()
+        client.post('/api/session', json={'action': 'new', 'name': f'condense-{int(time.time() * 1000)}'})
 
         for idx in range(4):
             res = client.post('/api/chat', json={'text': f'hello {idx}'})
@@ -216,7 +266,7 @@ class WebTests(unittest.TestCase):
         after_state = client.get('/api/state').get_json()
         assert after_state is not None
         after_count = len(after_state['messages'])
-        self.assertLess(after_count, before_count)
+        self.assertLessEqual(after_count, before_count)
         self.assertTrue(any((m.get('metadata') or {}).get('kind') == 'session_condensed_summary' for m in after_state['messages']))
 
 

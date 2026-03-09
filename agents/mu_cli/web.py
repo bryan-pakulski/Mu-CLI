@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
+import re
+import subprocess
 import threading
 import urllib.parse
 import uuid
@@ -215,9 +218,73 @@ def _build_provider(name: str, model: str, api_key: str | None):
     raise ValueError(f"Unsupported provider: {name}")
 
 
-def _planning_prompt(workspace_summary: str | None = None) -> str:
+def _is_git_repo(path: Path) -> bool:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return proc.returncode == 0 and (proc.stdout or "").strip() == "true"
+    except Exception:
+        return False
+
+
+def _git_branches(path: Path) -> list[str]:
+    proc = subprocess.run(
+        ["git", "-C", str(path), "branch", "--format", "%(refname:short)"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+
+
+def _git_current_branch(path: Path) -> str | None:
+    proc = subprocess.run(
+        ["git", "-C", str(path), "branch", "--show-current"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    branch = (proc.stdout or "").strip()
+    return branch or None
+
+
+def _discover_git_repos(root: Path, max_depth: int = 3) -> list[str]:
+    repos: list[str] = []
+    if not root.exists() or not root.is_dir():
+        return repos
+    if _is_git_repo(root):
+        repos.append(str(root))
+    root_depth = len(root.parts)
+    for dirpath, dirnames, _ in os.walk(root):
+        current = Path(dirpath)
+        if len(current.parts) - root_depth > max_depth:
+            dirnames[:] = []
+            continue
+        if ".git" in dirnames:
+            repos.append(str(current))
+            dirnames[:] = []
+            continue
+        dirnames[:] = [name for name in dirnames if not name.startswith('.')]
+    deduped = sorted(set(repos))
+    return deduped
+
+
+def _planning_prompt(workspace_summary: str | None = None, git_guidance: str | None = None) -> str:
+    extras: list[str] = []
     if workspace_summary:
-        return f"{PLANNING_PROMPT_BASE} Workspace context: {workspace_summary}"
+        extras.append(f"Workspace context: {workspace_summary}")
+    if git_guidance:
+        extras.append(git_guidance)
+    if extras:
+        return f"{PLANNING_PROMPT_BASE} {' '.join(extras)}"
     return PLANNING_PROMPT_BASE
 
 
@@ -247,7 +314,7 @@ def _inject_research_prompt(agent: Agent) -> None:
     )
 
 
-def _inject_planning(agent: Agent, workspace_summary: str | None = None) -> None:
+def _inject_planning(agent: Agent, workspace_summary: str | None = None, git_guidance: str | None = None) -> None:
     already = any(
         message.role is Role.SYSTEM and message.metadata.get("kind") == "agentic_planning"
         for message in agent.state.messages
@@ -257,9 +324,31 @@ def _inject_planning(agent: Agent, workspace_summary: str | None = None) -> None
     agent.state.messages.append(
         Message(
             role=Role.SYSTEM,
-            content=_planning_prompt(workspace_summary),
+            content=_planning_prompt(workspace_summary, git_guidance),
             metadata={"kind": "agentic_planning"},
         )
+    )
+
+
+def _runtime_git_context(runtime: WebRuntime) -> tuple[str | None, str | None]:
+    workspace = runtime.workspace_path
+    if not workspace:
+        return None, None
+    path = Path(workspace).expanduser()
+    if not path.exists() or not path.is_dir() or not _is_git_repo(path):
+        return None, None
+    return str(path), _git_current_branch(path)
+
+
+def _git_agent_instruction(runtime: WebRuntime) -> str | None:
+    repo, branch = _runtime_git_context(runtime)
+    if not repo:
+        return None
+    branch_label = branch or "(unknown branch)"
+    return (
+        f"Git workflow is active for repo '{repo}' on branch '{branch_label}'. "
+        "When task implementation is complete, propose raising a merge request/pull request using the git tool create_pr operation. "
+        "Because mutating tool calls are approval-gated, wait for user approval before finalizing; if denied, continue iterating instead of stopping."
     )
 
 
@@ -700,7 +789,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
 
     if runtime.agentic_planning:
         summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-        _inject_planning(runtime.agent, summary)
+        _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
 
@@ -748,7 +837,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         runtime.agent = _new_agent(runtime)
         runtime.agent.add_system_prompt(runtime.system_prompt)
         if runtime.agentic_planning:
-            _inject_planning(runtime.agent)
+            _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
         if runtime.research_mode:
             _inject_research_prompt(runtime.agent)
         _persist(runtime)
@@ -1090,7 +1179,7 @@ def create_app():
     _refresh_tooling(runtime)
     runtime.agent = _new_agent(runtime)
     runtime.agent.add_system_prompt(runtime.system_prompt)
-    _inject_planning(runtime.agent)
+    _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
     if not _load_session(runtime, runtime.session_name):
@@ -1103,6 +1192,21 @@ def create_app():
     @app.get("/api/state")
     def state():
         sessions = runtime.session_store.list_sessions()
+        git_repos: list[str] = []
+        git_current_repo: str | None = None
+        git_current_branch: str | None = None
+        git_branches: list[str] = []
+        if runtime.workspace_path:
+            workspace = Path(runtime.workspace_path).expanduser()
+            git_repos = _discover_git_repos(workspace)
+            if _is_git_repo(workspace):
+                git_current_repo = str(workspace)
+            elif git_repos:
+                git_current_repo = git_repos[0]
+            if git_current_repo:
+                repo_path = Path(git_current_repo)
+                git_current_branch = _git_current_branch(repo_path)
+                git_branches = _git_branches(repo_path)
         return jsonify(
             {
                 "provider": runtime.provider,
@@ -1148,6 +1252,10 @@ def create_app():
                 ],
                 "custom_tool_specs": runtime.custom_tool_specs,
                 "custom_tool_errors": runtime.custom_tool_errors,
+                "git_repos": git_repos,
+                "git_current_repo": git_current_repo,
+                "git_current_branch": git_current_branch,
+                "git_branches": git_branches,
             }
         )
 
@@ -1306,7 +1414,7 @@ def create_app():
         runtime.agent.state.messages = previous_messages
         if runtime.agentic_planning:
             summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-            _inject_planning(runtime.agent, summary)
+            _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
         if runtime.research_mode:
             _inject_research_prompt(runtime.agent)
 
@@ -1346,6 +1454,103 @@ def create_app():
                 "cwd": str(path),
                 "parent": str(path.parent) if path.parent != path else None,
                 "children": children,
+            }
+        )
+
+    @app.get("/api/git/repos")
+    def list_git_repos():
+        raw_workspace = str(request.args.get("workspace", "") or "").strip()
+        if not raw_workspace:
+            return jsonify({"repos": []})
+        workspace = Path(raw_workspace).expanduser()
+        return jsonify({"repos": _discover_git_repos(workspace)})
+
+    @app.get("/api/git/branches")
+    def list_git_branches():
+        raw_repo = str(request.args.get("repo", "") or "").strip()
+        if not raw_repo:
+            return jsonify({"error": "repo is required"}), 400
+        repo = Path(raw_repo).expanduser()
+        if not _is_git_repo(repo):
+            return jsonify({"error": "repo is not a git repository"}), 400
+        return jsonify({"repo": str(repo), "current_branch": _git_current_branch(repo), "branches": _git_branches(repo)})
+
+    @app.post("/api/git/branch")
+    def git_branch_action():
+        payload = request.get_json(force=True)
+        action = str(payload.get("action", "")).strip()
+        raw_repo = str(payload.get("repo", "")).strip()
+        if not raw_repo:
+            return jsonify({"error": "repo is required"}), 400
+        repo = Path(raw_repo).expanduser()
+        if not _is_git_repo(repo):
+            return jsonify({"error": "repo is not a git repository"}), 400
+
+        if action == "create":
+            branch = str(payload.get("branch", "")).strip()
+            base = str(payload.get("base", "")).strip()
+            if not branch:
+                return jsonify({"error": "branch is required"}), 400
+            cmd = ["git", "-C", str(repo), "checkout", "-b", branch]
+            if base:
+                cmd.append(base)
+            proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+        elif action == "switch":
+            branch = str(payload.get("branch", "")).strip()
+            if not branch:
+                return jsonify({"error": "branch is required"}), 400
+            proc = subprocess.run(["git", "-C", str(repo), "checkout", branch], text=True, capture_output=True, check=False)
+        else:
+            return jsonify({"error": "action must be create|switch"}), 400
+
+        if proc.returncode != 0:
+            return jsonify({"error": (proc.stderr or proc.stdout or "git command failed").strip()}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "repo": str(repo),
+                "current_branch": _git_current_branch(repo),
+                "branches": _git_branches(repo),
+                "output": (proc.stdout or "").strip(),
+            }
+        )
+
+    @app.get("/api/git/diff")
+    def git_diff_status():
+        raw_repo = str(request.args.get("repo", "") or "").strip()
+        if not raw_repo:
+            return jsonify({"error": "repo is required"}), 400
+        repo = Path(raw_repo).expanduser()
+        if not _is_git_repo(repo):
+            return jsonify({"error": "repo is not a git repository"}), 400
+
+        status_proc = subprocess.run(
+            ["git", "-C", str(repo), "status", "--short"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        diff_proc = subprocess.run(
+            ["git", "-C", str(repo), "diff"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        cached_diff_proc = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--cached"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if status_proc.returncode != 0 or diff_proc.returncode != 0 or cached_diff_proc.returncode != 0:
+            return jsonify({"error": "unable to read git diff/status"}), 400
+
+        return jsonify(
+            {
+                "repo": str(repo),
+                "status": (status_proc.stdout or "").strip(),
+                "diff": (diff_proc.stdout or "").strip(),
+                "cached_diff": (cached_diff_proc.stdout or "").strip(),
             }
         )
 
@@ -1502,7 +1707,7 @@ def create_app():
             runtime.research_artifacts = {}
             if runtime.agentic_planning:
                 summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-                _inject_planning(runtime.agent, summary)
+                _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
             if runtime.research_mode:
                 _inject_research_prompt(runtime.agent)
             _persist(runtime)

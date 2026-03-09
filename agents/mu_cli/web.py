@@ -442,14 +442,14 @@ def _repair_citations(runtime: WebRuntime, reason: str) -> Message:
     return runtime.agent.step(prompt)
 
 
-def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
+def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str, *, allow_citation_repair: bool = True) -> Message:
     uploaded_prompt = _uploaded_context_prompt(runtime)
     before = len(runtime.agent.state.messages)
     if not uploaded_prompt:
         reply = runtime.agent.step(text)
         turn_messages = runtime.agent.state.messages[before:]
         ok, reason = _validate_claim_citations(turn_messages)
-        if runtime.research_mode and not ok:
+        if runtime.research_mode and allow_citation_repair and not ok:
             runtime.traces.append(f"citation-validation-failed: {reason}; running repair")
             reply = _repair_citations(runtime, reason)
         runtime.research_artifacts = _build_research_artifacts(runtime)
@@ -466,7 +466,7 @@ def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
         reply = runtime.agent.step(text)
         turn_messages = runtime.agent.state.messages[before:]
         ok, reason = _validate_claim_citations(turn_messages)
-        if runtime.research_mode and not ok:
+        if runtime.research_mode and allow_citation_repair and not ok:
             runtime.traces.append(f"citation-validation-failed: {reason}; running repair")
             reply = _repair_citations(runtime, reason)
         runtime.research_artifacts = _build_research_artifacts(runtime)
@@ -638,7 +638,14 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             prompt = text
             while datetime.now(timezone.utc).timestamp() < deadline:
                 job["status"] = "running"
-                reply = _run_turn_with_uploaded_context(isolated, prompt)
+                before_len = len(isolated.agent.state.messages)
+                reply = _run_turn_with_uploaded_context(
+                    isolated,
+                    prompt,
+                    allow_citation_repair=(prompt == text),
+                )
+                turn_messages = isolated.agent.state.messages[before_len:]
+                had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
                 report = _turn_report(isolated, prompt, reply.content)
                 job["last_step"] = (reply.content or "").strip()[:240]
                 _record_turn(isolated, report)
@@ -658,6 +665,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if "PLAN_COMPLETE" in reply.content.upper() or "PLAN COMPLETE" in reply.content.upper():
                     break
                 if not isolated.agentic_planning:
+                    break
+                if not had_tool_activity:
+                    # Prevent repetitive continue loops when the model is already giving a final synthesis.
                     break
                 prompt = (
                     "Continue executing the approved plan. Use tools as needed. "

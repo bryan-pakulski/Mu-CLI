@@ -31,6 +31,23 @@ from mu_cli.tools.filesystem import (
 )
 from mu_cli.workspace import WorkspaceStore
 
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
+    "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\n"
+    "Your capabilities:\n\n"
+    "- Receive user prompts and other context provided by the harness, such as files in the workspace.\n"
+    "- Communicate with the user by streaming thinking and responses, and by making and updating plans.\n"
+    "- Emit function calls to run terminal commands and apply patches. Depending on how this run is configured, "
+    "you can request these calls be escalated for approval before running.\n\n"
+    "Within this context, Codex refers to the open-source agentic coding interface (not the old Codex language model).\n\n"
+    "How you work\n\n"
+    "Personality\n"
+    "- Keep responses concise, direct, and friendly.\n"
+    "- Communicate efficiently and keep the user informed about ongoing actions without unnecessary detail.\n"
+    "- Prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps.\n"
+    "- Unless explicitly asked, avoid excessively verbose explanations."
+)
+
 PLANNING_PROMPT_BASE = (
     "You are operating in human-in-the-loop developer mode. "
     "Before significant actions, provide a short plan and rationale. "
@@ -49,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", default="echo", choices=["echo", "openai", "gemini"])
     parser.add_argument("--model", default=None)
     parser.add_argument("--api-key", default=None)
-    parser.add_argument("--system", default="You are a helpful coding assistant. Keep responses concise.")
+    parser.add_argument("--system", default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--workspace", default=None, help="Optional workspace path to pre-attach")
     parser.add_argument("--pricing-config", default=".mu_cli/pricing.json")
     parser.add_argument("--session", default="default", help="Session name used for persistence")

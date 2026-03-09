@@ -683,12 +683,15 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "last_step": None,
         "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0},
         "completed_flash_until": None,
+        "events": [],
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
         try:
             isolated = _build_session_runtime(base_runtime, session_name)
+            isolated.debug = True
+            trace_cursor = len(isolated.traces)
             deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
 
             if isolated.agentic_planning:
@@ -712,6 +715,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     )
                 job["plan"] = plan_text
                 job["last_step"] = "Plan drafted; waiting for approval"
+                job["events"].append("plan: drafted")
                 _persist(isolated)
                 job["status"] = "awaiting_plan_approval"
                 while datetime.now(timezone.utc).timestamp() < deadline:
@@ -720,7 +724,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         break
                     threading.Event().wait(0.4)
                 if job.get("plan_approval") != "approve":
+                    job["events"].append("plan: denied_or_timed_out")
                     raise RuntimeError("Plan not approved before timeout or was denied.")
+                job["events"].append("plan: approved")
 
             total_input = 0
             total_output = 0
@@ -739,6 +745,11 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 turn_messages = isolated.agent.state.messages[before_len:]
                 had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
                 report = _turn_report(isolated, prompt, reply.content)
+                if len(isolated.traces) > trace_cursor:
+                    job["events"].extend(isolated.traces[trace_cursor:])
+                    trace_cursor = len(isolated.traces)
+                    if len(job["events"]) > 120:
+                        job["events"] = job["events"][-120:]
                 job["last_step"] = (reply.content or "").strip()[:240]
                 _record_turn(isolated, report)
                 _persist(isolated)
@@ -782,10 +793,12 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
+                job["events"].append("status: completed")
         except Exception as exc:
             job["error"] = str(exc)
             if job.get("status") != "timed_out":
                 job["status"] = "failed"
+            job["events"].append(f"status: failed ({exc})")
         finally:
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
 

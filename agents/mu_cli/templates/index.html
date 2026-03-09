@@ -261,6 +261,25 @@
       white-space: pre;
       font-size: 12px;
     }
+    .code-block-wrap {
+      position: relative;
+      margin: 8px 0;
+    }
+    .code-block-wrap pre { margin: 0; }
+    .copy-code-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+      color: var(--muted);
+      border-radius: 8px;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .copy-code-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--border) 80%, var(--muted)); }
+    body.dark-mode .copy-code-btn { background: color-mix(in srgb, var(--surface) 85%, var(--surface-2)); }
     .bubble pre code {
       display: block;
       background: transparent;
@@ -1153,7 +1172,7 @@ function formatMessageContent(content) {
     const code = match[2] || '';
     const langClass = lang ? ` language-${lang}` : '';
     if (lang === 'diff' || lang === 'patch') html += renderSideBySideDiff(code);
-    else html += `<pre><code class="hljs${langClass}">${escapeHtml(code)}</code></pre>`;
+    else html += `<div class="code-block-wrap"><button type="button" class="copy-code-btn" data-copy-code="${escapeHtml(code)}">Copy</button><pre><code class="hljs${langClass}">${escapeHtml(code)}</code></pre></div>`;
     cursor = match.index + match[0].length;
   }
 
@@ -1266,6 +1285,34 @@ function highlightCodeBlocks(root) {
   });
 }
 
+function wireCopyButtons(root) {
+  root.querySelectorAll('[data-copy-code]').forEach((btn) => {
+    if (btn.dataset.boundCopy === '1') return;
+    btn.dataset.boundCopy = '1';
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy-code') || '';
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        const old = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = old || 'Copy'; }, 1100);
+      } catch (_) {
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1100);
+      }
+    });
+  });
+}
+
 function isToolRole(role) {
   return role === 'tool_result' || role === 'tool_call';
 }
@@ -1351,6 +1398,7 @@ function renderMessages() {
   });
 
   highlightCodeBlocks(box);
+  wireCopyButtons(box);
 
   box.scrollTop = box.scrollHeight;
 }

@@ -27,14 +27,15 @@
     .title { font-size:14px; font-weight:700; }
     .pill { margin-left:auto; border:1px solid var(--border); border-radius:999px; padding:3px 8px; color:var(--muted); font-size:10px; background:var(--surface-2); }
     .chat-layout { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto auto auto; gap:7px; }
-    .messages { min-height:0; overflow:auto; padding:4px 0; }
-    .msg { margin:0 auto; max-width:900px; padding:5px 0 7px; border-bottom:1px solid color-mix(in srgb, var(--border) 35%, transparent); }
+    .messages { min-height:0; overflow:auto; padding:2px 0; }
+    .msg { margin:0 auto; max-width:900px; padding:4px 0 6px; }
     .msg-meta { display:inline-flex; align-items:center; gap:6px; margin:0 10px 4px; font-size:10px; color:var(--muted); text-transform:uppercase; }
-    .bubble { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:10px 12px; margin:0 10px; white-space:pre-wrap; }
-    .msg.role-user .bubble { background:var(--surface-2); }
-    .composer { padding-top:6px; }
+    .bubble { border:0; border-radius:10px; background:color-mix(in srgb, var(--surface-2) 62%, transparent); padding:9px 11px; margin:0 8px; white-space:pre-wrap; }
+    .msg.role-user .bubble { background:color-mix(in srgb, #dbe7ff 36%, var(--surface-2)); }
+    .composer { padding-top:4px; background:transparent; }
     textarea, input, select { width:100%; border:0; border-radius:10px; padding:8px 10px; background:var(--surface-2); color:var(--text); }
     textarea { padding:10px; }
+    textarea:focus, input:focus, select:focus { outline:none; box-shadow:0 0 0 2px color-mix(in srgb, #2f6fed 25%, transparent); }
     .actions { display:flex; gap:8px; align-items:center; margin-top:8px; }
     button { border:0; border-radius:10px; background:transparent; color:var(--text); padding:7px 10px; font-weight:600; cursor:pointer; transition:all .16s ease; }
     button:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,.05); }
@@ -42,11 +43,11 @@
     .send-btn { background:#2f6fed; color:#fff; }
     .send-btn:hover { box-shadow:0 6px 20px rgba(47,111,237,.24); }
     .muted { color:var(--muted); font-size:12px; }
-    .trace { max-height:120px; overflow:auto; padding:8px; font-size:11px; white-space:pre-wrap; color:var(--muted); }
+    .trace { max-height:120px; overflow:auto; padding:6px 8px; font-size:10.5px; white-space:pre-wrap; color:var(--muted); background:color-mix(in srgb, var(--surface-2) 45%, transparent); border-radius:8px; }
     .kv { display:grid; grid-template-columns:90px 1fr; gap:4px 8px; font-size:12px; }
     .mono { font-family:"JetBrains Mono", ui-monospace, monospace; }
 
-    .bottom-stats { padding:6px 8px; font-size:10px; color:var(--muted); }
+    .bottom-stats { padding:5px 8px; font-size:9.5px; color:var(--muted); }
 
     .session-main { width:100%; text-align:left; display:flex; align-items:center; gap:6px; padding:6px 8px; }
     .session-main.active { background:color-mix(in srgb, var(--surface-2) 75%, transparent); border-radius:8px; }

@@ -73,6 +73,7 @@ class WebRuntime:
     approval_condition: threading.Condition = field(default_factory=threading.Condition)
     pending_approval: dict[str, Any] | None = None
     background_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    max_runtime_seconds: int = 900
 
 
 def _default_usage() -> dict[str, float]:
@@ -496,6 +497,9 @@ def _persist(runtime: WebRuntime) -> None:
             turns=runtime.session_turns,
             uploads=runtime.uploads,
             research_artifacts=runtime.research_artifacts,
+            agentic_planning=runtime.agentic_planning,
+            research_mode=runtime.research_mode,
+            max_runtime_seconds=runtime.max_runtime_seconds,
         )
     )
 
@@ -519,6 +523,12 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.session_turns = list(loaded.turns or [])
     runtime.uploads = list(loaded.uploads or [])
     runtime.research_artifacts = dict(loaded.research_artifacts or {})
+    if loaded.agentic_planning is not None:
+        runtime.agentic_planning = bool(loaded.agentic_planning)
+    if loaded.research_mode is not None:
+        runtime.research_mode = bool(loaded.research_mode)
+    if loaded.max_runtime_seconds is not None:
+        runtime.max_runtime_seconds = int(loaded.max_runtime_seconds)
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
         if path.exists() and path.is_dir():
@@ -564,6 +574,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         custom_tool_specs=list(base.custom_tool_specs),
         custom_tool_errors=list(base.custom_tool_errors),
         research_artifacts={},
+        max_runtime_seconds=900,
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
@@ -587,21 +598,77 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "finished_at": None,
         "error": None,
         "report": None,
+        "iterations": 0,
+        "runtime_budget_seconds": int(base_runtime.max_runtime_seconds),
+        "plan": None,
+        "plan_approval": None,
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
         try:
             isolated = _build_session_runtime(base_runtime, session_name)
-            reply = _run_turn_with_uploaded_context(isolated, text)
-            report = _turn_report(isolated, text, reply.content)
-            _record_turn(isolated, report)
-            _persist(isolated)
-            job["report"] = report
-            job["status"] = "completed"
+            deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
+
+            if isolated.agentic_planning:
+                plan_reply = isolated.agent.step(
+                    "Create an execution plan for the task below. Keep it short and actionable as numbered steps. "
+                    "Start with 'PLAN:'.\n\nTask:\n" + text
+                )
+                job["plan"] = plan_reply.content
+                job["status"] = "awaiting_plan_approval"
+                while datetime.now(timezone.utc).timestamp() < deadline:
+                    decision = job.get("plan_approval")
+                    if decision in {"approve", "deny"}:
+                        break
+                    threading.Event().wait(0.4)
+                if job.get("plan_approval") != "approve":
+                    raise RuntimeError("Plan not approved before timeout or was denied.")
+
+            total_input = 0
+            total_output = 0
+            total_tokens = 0
+            total_cost = 0.0
+
+            prompt = text
+            while datetime.now(timezone.utc).timestamp() < deadline:
+                job["status"] = "running"
+                reply = _run_turn_with_uploaded_context(isolated, prompt)
+                report = _turn_report(isolated, prompt, reply.content)
+                _record_turn(isolated, report)
+                _persist(isolated)
+                total_input += int(report["input_tokens"])
+                total_output += int(report["output_tokens"])
+                total_tokens += int(report["total_tokens"])
+                total_cost += float(report["estimated_cost_usd"])
+                job["iterations"] = int(job["iterations"]) + 1
+
+                if "PLAN_COMPLETE" in reply.content.upper() or "PLAN COMPLETE" in reply.content.upper():
+                    break
+                if not isolated.agentic_planning:
+                    break
+                prompt = (
+                    "Continue executing the approved plan. Use tools as needed. "
+                    "When all tasks are complete, begin your response with 'PLAN_COMPLETE'."
+                )
+
+            if datetime.now(timezone.utc).timestamp() >= deadline:
+                job["status"] = "timed_out"
+
+            job["report"] = {
+                "provider": isolated.provider,
+                "model": isolated.model,
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "total_tokens": total_tokens,
+                "estimated_cost_usd": total_cost,
+            }
+            if job["status"] != "timed_out":
+                job["status"] = "completed"
         except Exception as exc:
             job["error"] = str(exc)
-            job["status"] = "failed"
+            if job.get("status") != "timed_out":
+                job["status"] = "failed"
         finally:
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -662,6 +729,7 @@ def create_app():
         custom_tool_specs=[],
         custom_tool_errors=[],
         research_artifacts={},
+        max_runtime_seconds=900,
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     _refresh_tooling(runtime)
@@ -701,6 +769,7 @@ def create_app():
                 "pending_approval": runtime.pending_approval,
                 "research_artifacts": runtime.research_artifacts,
                 "background_jobs": list(runtime.background_jobs.values())[-50:],
+                "max_runtime_seconds": runtime.max_runtime_seconds,
                 "tools": [
                     {
                         "name": tool.name,
@@ -758,6 +827,18 @@ def create_app():
         if job is None:
             return jsonify({"error": "job not found"}), 404
         return jsonify(job)
+
+    @app.post("/api/jobs/<job_id>/plan")
+    def decide_job_plan(job_id: str):
+        job = runtime.background_jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "job not found"}), 404
+        payload = request.get_json(force=True)
+        decision = str(payload.get("decision", "")).strip().lower()
+        if decision not in {"approve", "deny"}:
+            return jsonify({"error": "decision must be approve|deny"}), 400
+        job["plan_approval"] = decision
+        return jsonify({"ok": True, "job_id": job_id, "decision": decision})
 
     @app.post("/api/chat/stream")
     def chat_stream():
@@ -830,6 +911,7 @@ def create_app():
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
         runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
+        runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
         tool_visibility = payload.get("tool_visibility")
         if isinstance(tool_visibility, dict):
             for tool in runtime.base_tools:
@@ -1029,6 +1111,7 @@ def create_app():
             runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
             runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
             runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
+            runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
 
             workspace = payload.get("workspace")
             runtime.workspace_path = str(workspace).strip() if workspace else None

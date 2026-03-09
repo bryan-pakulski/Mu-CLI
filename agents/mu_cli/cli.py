@@ -466,6 +466,7 @@ def _persist_session(context: RuntimeContext, agent: Agent) -> None:
         workspace=context.workspace_path,
         approval_mode=context.approval_policy.mode,
         messages=agent.state.messages,
+        agentic_planning=context.agentic_planning_enabled,
     )
     context.session_store.save(state)
 

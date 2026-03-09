@@ -817,6 +817,8 @@
           <h6>General</h6>
           <label class="small-muted mb-1">API key (global)</label>
           <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+          <label class="small-muted mb-1">Max session runtime (seconds)</label>
+          <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
 
           <div class="toggles-grid">
             <div class="form-check">
@@ -882,6 +884,8 @@
       <select id="newSessionModel" class="form-select mb-2"></select>
       <label class="small-muted mb-1">Workspace (optional)</label>
       <input id="newSessionWorkspace" class="form-control mb-2" placeholder="/path/to/workspace" />
+      <label class="small-muted mb-1">Max runtime (seconds)</label>
+      <input id="newSessionMaxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
       <div class="d-flex gap-3 mb-3">
         <div class="form-check">
           <input class="form-check-input" id="newSessionAgentic" type="checkbox" checked />
@@ -932,7 +936,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [] };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [] };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -1746,6 +1750,7 @@ async function refreshState() {
   state.pendingApproval = s.pending_approval || null;
   state.tools = s.tools || [];
   state.customToolErrors = s.custom_tool_errors || [];
+  state.backgroundJobs = s.background_jobs || [];
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -1816,6 +1821,21 @@ async function sendPrompt(background = false) {
       const active = selectedSessionName();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
       reportEl.textContent = `background job started: ${bg.job_id}`;
+      const pollUntilDone = async () => {
+        for (let i = 0; i < 120; i += 1) {
+          const job = await api(`/api/jobs/${bg.job_id}`);
+          if (job.status === 'awaiting_plan_approval') {
+            const ok = confirm(`Plan ready for ${job.session}. Approve to continue?\n\n${job.plan || ''}`);
+            await api(`/api/jobs/${bg.job_id}/plan`, 'POST', { decision: ok ? 'approve' : 'deny' });
+          }
+          if (['completed', 'failed', 'timed_out'].includes(job.status)) {
+            reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      };
+      pollUntilDone().catch(() => {});
       await refreshState();
       return;
     }
@@ -1931,7 +1951,7 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
 
-for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'darkMode']) {
+for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'maxRuntime', 'darkMode']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();

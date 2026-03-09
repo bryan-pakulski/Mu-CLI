@@ -135,16 +135,19 @@
       box-shadow: none;
     }
 
-    .top-git-controls {
-      display: none;
-      width: 100%;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 0 0;
+    .top-git-launch { display: none; }
+    .top-git-launch.show { display: inline-flex; }
+    .git-diff-box {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      padding: 8px;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
     }
-    .top-git-controls.show { display: flex; }
-    .top-git-controls .form-select,
-    .top-git-controls .form-control { max-width: 220px; }
     .title { font-size: 14px; font-weight: 700; letter-spacing: .01em; }
     .pill {
       margin-left: auto;
@@ -1037,16 +1040,7 @@
         <button id="togglePlanOutput" class="btn btn-soft btn-sm">Plan output</button>
         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
-        <div id="topGitControls" class="top-git-controls">
-          <span class="small-muted">Repo</span>
-          <select id="gitRepo" class="form-select form-select-sm"></select>
-          <span class="small-muted">Branch</span>
-          <select id="gitBranch" class="form-select form-select-sm"></select>
-          <button id="switchBranch" class="btn btn-soft btn-sm" type="button">Switch</button>
-          <input id="newBranchName" class="form-control form-control-sm" placeholder="feature/my-task" />
-          <button id="createBranch" class="btn btn-soft btn-sm" type="button">Create</button>
-          <span class="small-muted" id="gitStatus">Select workspace to load repositories.</span>
-        </div>
+        <button id="openGitModal" class="btn btn-soft btn-sm top-git-launch">GIT</button>
       </div>
 
       <div class="chat-layout">
@@ -1295,8 +1289,34 @@
     </div>
   </div>
 
+  <div id="gitModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(900px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">GIT</h5>
+        <button id="closeGitModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <label class="small-muted mb-1">Repository</label>
+      <select id="gitRepo" class="form-select mb-2"></select>
+      <label class="small-muted mb-1">Branch</label>
+      <div class="input-group input-group-sm mb-2">
+        <select id="gitBranch" class="form-select"></select>
+        <button id="switchBranch" class="btn btn-soft" type="button">Switch</button>
+      </div>
+      <label class="small-muted mb-1">Create branch</label>
+      <div class="input-group input-group-sm mb-2">
+        <input id="newBranchName" class="form-control" placeholder="feature/my-task" />
+        <button id="createBranch" class="btn btn-soft" type="button">Create</button>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mt-2 mb-1">
+        <div class="small-muted" id="gitStatus">Select workspace to load repositories.</div>
+        <button id="refreshGitDiff" class="btn btn-soft btn-sm" type="button">Refresh diff</button>
+      </div>
+      <div id="gitDiffBox" class="git-diff-box">No diff yet.</div>
+    </div>
+  </div>
+
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '' };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -1329,7 +1349,7 @@ async function apiForm(path, formData) {
 }
 
 function renderGitControls() {
-  const controls = document.getElementById('topGitControls');
+  const launch = document.getElementById('openGitModal');
   const repoSel = document.getElementById('gitRepo');
   const branchSel = document.getElementById('gitBranch');
   const status = document.getElementById('gitStatus');
@@ -1337,7 +1357,8 @@ function renderGitControls() {
   const repos = state.gitRepos || [];
   const branches = state.gitBranches || [];
 
-  if (controls) controls.classList.toggle('show', !!workspace);
+  const hasGitWorkspace = !!workspace && repos.length > 0;
+  if (launch) launch.classList.toggle('show', hasGitWorkspace);
 
   repoSel.innerHTML = '';
   if (!repos.length) {
@@ -1373,6 +1394,9 @@ function renderGitControls() {
 
   if (!repos.length) status.textContent = 'Select a workspace containing a git repository.';
   else status.textContent = `Repo: ${state.gitCurrentRepo || '-'} · Current branch: ${state.gitCurrentBranch || '-'}`;
+
+  const diffBox = document.getElementById('gitDiffBox');
+  if (diffBox) diffBox.textContent = state.gitDiff || 'No diff yet.';
 }
 
 async function refreshGitRepos() {
@@ -1403,7 +1427,29 @@ async function refreshGitBranches() {
   const payload = await api(`/api/git/branches?repo=${encodeURIComponent(state.gitCurrentRepo)}`);
   state.gitBranches = payload.branches || [];
   state.gitCurrentBranch = payload.current_branch || null;
+  await refreshGitDiff();
   renderGitControls();
+}
+
+async function refreshGitDiff() {
+  if (!state.gitCurrentRepo) {
+    state.gitDiff = '';
+    return;
+  }
+  const payload = await api(`/api/git/diff?repo=${encodeURIComponent(state.gitCurrentRepo)}`);
+  const status = String(payload.status || '').trim();
+  const diff = String(payload.diff || '').trim();
+  const staged = String(payload.cached_diff || '').trim();
+  state.gitDiff = [
+    'Status:',
+    status || '(clean)',
+    '',
+    'Unstaged diff:',
+    diff || '(none)',
+    '',
+    'Staged diff:',
+    staged || '(none)',
+  ].join('\n');
 }
 
 async function createBranchFromUI() {
@@ -2422,7 +2468,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -2854,6 +2900,17 @@ document.getElementById('openAdvanced').addEventListener('click', () => showModa
 document.getElementById('closeAdvanced').addEventListener('click', () => showModal('advancedModal', false));
 document.getElementById('openMetrics').addEventListener('click', () => { renderMetrics(); showModal('metricsModal', true); });
 document.getElementById('closeMetrics').addEventListener('click', () => showModal('metricsModal', false));
+document.getElementById('openGitModal').addEventListener('click', async () => {
+  try {
+    await refreshGitBranches();
+  } catch (_) {
+    // ignore and still open modal with existing state
+  }
+  renderGitControls();
+  showModal('gitModal', true);
+});
+document.getElementById('closeGitModal').addEventListener('click', () => showModal('gitModal', false));
+document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
 document.getElementById('togglePlanOutput').addEventListener('click', () => {
   planOverlayUserVisible = !planOverlayUserVisible;
   renderPlanOutput(activeSearchingJob() || null);

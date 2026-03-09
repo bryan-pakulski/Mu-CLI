@@ -1515,6 +1515,45 @@ def create_app():
             }
         )
 
+    @app.get("/api/git/diff")
+    def git_diff_status():
+        raw_repo = str(request.args.get("repo", "") or "").strip()
+        if not raw_repo:
+            return jsonify({"error": "repo is required"}), 400
+        repo = Path(raw_repo).expanduser()
+        if not _is_git_repo(repo):
+            return jsonify({"error": "repo is not a git repository"}), 400
+
+        status_proc = subprocess.run(
+            ["git", "-C", str(repo), "status", "--short"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        diff_proc = subprocess.run(
+            ["git", "-C", str(repo), "diff"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        cached_diff_proc = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--cached"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if status_proc.returncode != 0 or diff_proc.returncode != 0 or cached_diff_proc.returncode != 0:
+            return jsonify({"error": "unable to read git diff/status"}), 400
+
+        return jsonify(
+            {
+                "repo": str(repo),
+                "status": (status_proc.stdout or "").strip(),
+                "diff": (diff_proc.stdout or "").strip(),
+                "cached_diff": (cached_diff_proc.stdout or "").strip(),
+            }
+        )
+
     @app.route("/api/approval", methods=["GET", "POST"])
     def approval_actions():
         if request.method == "GET":

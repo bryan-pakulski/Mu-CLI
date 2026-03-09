@@ -219,6 +219,13 @@ class WebTests(unittest.TestCase):
             self.assertIn('feature/web', branches_payload['branches'])
             self.assertEqual('main', branches_payload['current_branch'])
 
+            diff = client.get(f"/api/git/diff?repo={repo}")
+            self.assertEqual(200, diff.status_code)
+            diff_payload = diff.get_json()
+            assert diff_payload is not None
+            self.assertIn('status', diff_payload)
+            self.assertIn('diff', diff_payload)
+
     def test_research_export_endpoint(self) -> None:
         from mu_cli.web import create_app
 

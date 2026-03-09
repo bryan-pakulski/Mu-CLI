@@ -1229,19 +1229,37 @@ def create_app():
 
 
 
+    def _session_statuses() -> dict[str, str]:
+        statuses: dict[str, str] = {name: "idle" for name in runtime.session_store.list_sessions()}
+        statuses.setdefault(runtime.session_name, "idle")
+        for job in runtime.background_jobs.values():
+            if not isinstance(job, dict):
+                continue
+            sname = str(job.get("session", "")).strip()
+            if not sname:
+                continue
+            state = str(job.get("status", "")).strip().lower()
+            if state in {"running", "waiting_plan"}:
+                statuses[sname] = "running"
+            elif statuses.get(sname) != "running" and state in {"failed", "timed_out"}:
+                statuses[sname] = "attention"
+        return statuses
+
     @app.get("/ui/session")
     def ui_session():
         return render_template(
             "partials/session.html",
             active=runtime.session_name,
             sessions=runtime.session_store.list_sessions(),
+            statuses=_session_statuses(),
             message=request.args.get("message", ""),
         )
 
     @app.post("/ui/session")
     def ui_session_action():
         action = str(request.form.get("action", "")).strip()
-        name = str(request.form.get("name", "")).strip() or runtime.session_name
+        raw_name = str(request.form.get("name", "")).strip()
+        name = raw_name or runtime.session_name
         message = ""
         if action == "load":
             if _load_session(runtime, name):
@@ -1249,8 +1267,10 @@ def create_app():
             else:
                 message = "session not found"
         elif action == "new":
-            if not name:
+            if not raw_name:
                 name = f"session-{int(time.time())}"
+            else:
+                name = raw_name
             runtime.session_name = name
             runtime.session_store.use(name)
             runtime.agent = _new_agent(runtime)
@@ -1268,6 +1288,7 @@ def create_app():
             "partials/session.html",
             active=runtime.session_name,
             sessions=runtime.session_store.list_sessions(),
+            statuses=_session_statuses(),
             message=message,
         )
 

@@ -1,22 +1,35 @@
 <div class="panel">
-  <h3>Session</h3>
-  <form hx-post="/ui/session" hx-target="#session-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')">
-    <div class="kv">
-      <div>Active</div><div class="mono">{{ active }}</div>
-      <div>Load</div>
-      <div>
-        <select name="name">
-          {% for s in sessions %}
-          <option value="{{ s }}" {% if s==active %}selected{% endif %}>{{ s }}</option>
-          {% endfor %}
-        </select>
+  <h3>Sessions</h3>
+
+  <form hx-post="/ui/session" hx-target="#session-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')" class="actions" style="margin-top:0; margin-bottom:8px;">
+    <button name="action" value="new" type="submit">+ New session</button>
+    {% if message %}<span class="muted">{{ message }}</span>{% endif %}
+  </form>
+
+  <div style="display:grid; gap:4px;">
+    {% for s in sessions %}
+    <div x-data="{ menu:false }" class="session-row" style="display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:6px;">
+      <form hx-post="/ui/session" hx-target="#session-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')" style="margin:0;">
+        <input type="hidden" name="action" value="load" />
+        <input type="hidden" name="name" value="{{ s }}" />
+        <button type="submit" class="session-main {% if s==active %}active{% endif %}">
+          <span class="status-dot {{ statuses.get(s,'idle') }}"></span>
+          <span class="mono">{{ s }}</span>
+          {% if s == active %}<span class="muted">(active)</span>{% endif %}
+        </button>
+      </form>
+
+      <div style="position:relative;">
+        <button type="button" @click="menu=!menu" class="kebab" aria-label="Session options">⋮</button>
+        <div x-show="menu" @click.outside="menu=false" x-transition class="menu" style="position:absolute; right:0; top:100%; z-index:3; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:4px; min-width:118px;">
+          <form hx-post="/ui/session" hx-target="#session-panel" hx-swap="innerHTML" style="margin:0;">
+            <input type="hidden" name="action" value="delete" />
+            <input type="hidden" name="name" value="{{ s }}" />
+            <button type="submit" class="menu-item">Delete</button>
+          </form>
+        </div>
       </div>
     </div>
-    <div class="actions">
-      <button name="action" value="load" type="submit">Load</button>
-      <button name="action" value="new" type="submit">New</button>
-      <button name="action" value="delete" type="submit">Delete</button>
-      {% if message %}<span class="muted">{{ message }}</span>{% endif %}
-    </div>
-  </form>
+    {% endfor %}
+  </div>
 </div>

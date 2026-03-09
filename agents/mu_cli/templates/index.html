@@ -1257,6 +1257,7 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
+let reactiveStatePoll = null;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1433,6 +1434,33 @@ function beginBackgroundPolling() {
       // ignored to avoid breaking UI polling loop
     }
   }, 900);
+}
+
+function beginReactivePolling() {
+  if (reactiveStatePoll) return;
+  reactiveStatePoll = setInterval(async () => {
+    try {
+      const busy = !!activeSearchingJob() || !!state.pendingApproval;
+      if (!busy || syncing) return;
+      const s = await api('/api/state');
+      state.messages = s.messages || [];
+      state.traces = s.traces || [];
+      state.pendingApproval = s.pending_approval || null;
+      state.backgroundJobs = s.background_jobs || [];
+      state.sessionUsage = s.session_usage || state.sessionUsage;
+      renderMessages();
+      renderTraces();
+      updateChatBusyState();
+      if (state.pendingApproval) {
+        document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
+        renderApprovalArgs(state.pendingApproval.args);
+        renderApprovalPatchPreview(state.pendingApproval.args);
+        showModal('approvalModal', true);
+      }
+    } catch (_) {
+      // keep poller resilient
+    }
+  }, 1000);
 }
 
 
@@ -2148,6 +2176,7 @@ function updateChatBusyState() {
   if (prompt) prompt.disabled = busy;
   if (send) send.disabled = busy;
   if (sendBackground) sendBackground.disabled = busy;
+  updateThinking(busy || sending);
   updateQueryRuntime();
   renderBackgroundActivity(activeSearchingJob() || null);
 }
@@ -2839,6 +2868,7 @@ refreshState().catch((e) => alert(e.message));
 if (runtimeTick) clearInterval(runtimeTick);
 runtimeTick = setInterval(() => updateQueryRuntime(), 1000);
 beginBackgroundPolling();
+beginReactivePolling();
 </script>
 </body>
 </html>

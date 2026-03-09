@@ -1,0 +1,12 @@
+<div class="panel">
+  <h3>Background jobs</h3>
+  {% if jobs %}
+    <div class="muted" style="display:grid; gap:4px;">
+      {% for j in jobs %}
+      <div><span class="mono">{{ j.id }}</span> · {{ j.status }}{% if j.last_step %} · {{ j.last_step[:42] }}{% endif %}</div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="muted">No background jobs yet.</div>
+  {% endif %}
+</div>

@@ -1,0 +1,22 @@
+<div class="panel">
+  <h3>Session</h3>
+  <form hx-post="/ui/session" hx-target="#session-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')">
+    <div class="kv">
+      <div>Active</div><div class="mono">{{ active }}</div>
+      <div>Load</div>
+      <div>
+        <select name="name">
+          {% for s in sessions %}
+          <option value="{{ s }}" {% if s==active %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button name="action" value="load" type="submit">Load</button>
+      <button name="action" value="new" type="submit">New</button>
+      <button name="action" value="delete" type="submit">Delete</button>
+      {% if message %}<span class="muted">{{ message }}</span>{% endif %}
+    </div>
+  </form>
+</div>

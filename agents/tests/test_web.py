@@ -31,6 +31,13 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, state_panel.status_code)
         self.assertIn('session=', state_panel.get_data(as_text=True))
 
+        session_panel = client.get('/ui/session')
+        self.assertEqual(200, session_panel.status_code)
+        self.assertIn('Session', session_panel.get_data(as_text=True))
+
+        jobs_panel = client.get('/ui/jobs')
+        self.assertEqual(200, jobs_panel.status_code)
+
         settings = client.get('/ui/settings')
         self.assertEqual(200, settings.status_code)
         self.assertIn('Save settings', settings.get_data(as_text=True))
@@ -57,6 +64,10 @@ class WebTests(unittest.TestCase):
         posted = client.post('/ui/chat', data={'text': 'hello from form'})
         self.assertEqual(200, posted.status_code)
         self.assertIn('hello from form', posted.get_data(as_text=True))
+
+        bg = client.post('/ui/chat/background', data={'text': 'hello in background'})
+        self.assertEqual(200, bg.status_code)
+        self.assertIn('background', bg.get_data(as_text=True).lower())
 
     def test_web_state_and_session_endpoints(self) -> None:
         from mu_cli.web import create_app

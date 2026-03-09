@@ -55,7 +55,9 @@
 <body x-data="{ sending:false, sidebarOpen:true, settingsModal:false }" @keydown.escape.window="settingsModal=false" @htmx:afterRequest.window="sending=false" @htmx:responseError.window="sending=false" @htmx:sendError.window="sending=false">
   <div class="shell" :class="{ 'sidebar-hidden': !sidebarOpen, 'modal-active': settingsModal }">
     <aside class="sidebar">
+      <div id="session-panel" hx-get="/ui/session" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
       <div id="settings-panel" hx-get="/ui/settings?variant=quick" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
+      <div id="jobs-panel" hx-get="/ui/jobs" hx-trigger="load, every 3s, refresh from:body" hx-swap="innerHTML"></div>
     </aside>
 
     <main class="main">
@@ -73,8 +75,12 @@
           <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
           <div class="actions">
             <button type="submit" class="send-btn" :disabled="sending" x-text="sending ? 'Sending…' : 'Send message'">Send message</button>
+            <button type="button" class="primary" @click="$refs.bgform.querySelector('textarea[name=text]').value = $el.closest('form').querySelector('textarea[name=text]').value; $refs.bgform.requestSubmit()">Run in background</button>
             <span class="muted" x-show="sending">Running turn…</span>
           </div>
+        </form>
+        <form x-ref="bgform" style="display:none" hx-post="/ui/chat/background" hx-target="#jobs-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')">
+          <textarea name="text"></textarea>
         </form>
 
         <div id="trace" class="trace" hx-get="/ui/state" hx-trigger="load, every 3s" hx-select="#trace-lines" hx-swap="innerHTML"></div>

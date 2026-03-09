@@ -6,6 +6,7 @@ import queue
 import re
 import subprocess
 import threading
+import time
 import urllib.parse
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -1226,6 +1227,60 @@ def create_app():
             traces=runtime.traces[-20:],
         )
 
+
+
+    @app.get("/ui/session")
+    def ui_session():
+        return render_template(
+            "partials/session.html",
+            active=runtime.session_name,
+            sessions=runtime.session_store.list_sessions(),
+            message=request.args.get("message", ""),
+        )
+
+    @app.post("/ui/session")
+    def ui_session_action():
+        action = str(request.form.get("action", "")).strip()
+        name = str(request.form.get("name", "")).strip() or runtime.session_name
+        message = ""
+        if action == "load":
+            if _load_session(runtime, name):
+                message = f"loaded {name}"
+            else:
+                message = "session not found"
+        elif action == "new":
+            if not name:
+                name = f"session-{int(time.time())}"
+            runtime.session_name = name
+            runtime.session_store.use(name)
+            runtime.agent = _new_agent(runtime)
+            runtime.agent.add_system_prompt(runtime.system_prompt)
+            _persist(runtime)
+            message = f"created {name}"
+        elif action == "delete":
+            if name == runtime.session_name:
+                message = "cannot delete active"
+            elif runtime.session_store.delete(name):
+                message = f"deleted {name}"
+            else:
+                message = "session not found"
+        return render_template(
+            "partials/session.html",
+            active=runtime.session_name,
+            sessions=runtime.session_store.list_sessions(),
+            message=message,
+        )
+
+    @app.get("/ui/jobs")
+    def ui_jobs():
+        return render_template("partials/jobs.html", jobs=list(runtime.background_jobs.values())[-20:])
+
+    @app.post("/ui/chat/background")
+    def ui_chat_background():
+        text = str(request.form.get("text", "")).strip()
+        if text:
+            _start_background_turn(runtime, runtime.session_name, text)
+        return render_template("partials/jobs.html", jobs=list(runtime.background_jobs.values())[-20:])
 
     @app.get("/ui/settings")
     def ui_settings():

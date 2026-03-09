@@ -4,6 +4,7 @@ import json
 import queue
 import threading
 import urllib.parse
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,13 +14,13 @@ from typing import Any
 from mu_cli.agent import Agent
 from mu_cli.cli import PLANNING_PROMPT_BASE
 from mu_cli.core.types import Message, Role, ToolCall, UsageStats
-from mu_cli.models import MODELS_BY_PROVIDER, get_models
+from mu_cli.models import get_model_catalog, get_models
 from mu_cli.pricing import PricingCatalog, estimate_tokens
 from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
-from mu_cli.tools.base import Tool
+from mu_cli.tools.base import Tool, ToolResult
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
     ClearUploadedContextStoreTool,
@@ -71,11 +72,138 @@ class WebRuntime:
     research_artifacts: dict[str, Any]
     approval_condition: threading.Condition = field(default_factory=threading.Condition)
     pending_approval: dict[str, Any] | None = None
+    background_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    max_runtime_seconds: int = 900
+    condense_enabled: bool = False
+    condense_window: int = 12
+    summary_index: list[dict[str, Any]] = field(default_factory=list)
 
+
+
+
+class RetrieveConversationSummaryTool:
+    name = "retrieve_conversation_summary"
+    description = "Retrieve indexed condensed conversation summaries by topic/query."
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Topic or phrase to retrieve from summary index."},
+            "limit": {"type": "integer", "description": "Max summaries to return (default 3)."},
+        },
+        "required": ["query"],
+    }
+    mutating = False
+
+    def __init__(self, runtime_getter):
+        self._runtime_getter = runtime_getter
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        runtime = self._runtime_getter()
+        query = str(args.get("query", "")).strip().lower()
+        limit = max(1, min(10, int(args.get("limit", 3) or 3)))
+        if not query:
+            return ToolResult(ok=False, output="query is required")
+        matches = []
+        for item in runtime.summary_index:
+            hay = " ".join([str(item.get("topics", "")), str(item.get("summary", "")), str(item.get("id", ""))]).lower()
+            if query in hay:
+                matches.append(item)
+        if not matches:
+            return ToolResult(ok=True, output="No matching summary entries.")
+        lines = []
+        for item in matches[:limit]:
+            lines.append(f"- id={item.get('id')} topics={item.get('topics')}\n  summary={item.get('summary')}")
+        return ToolResult(ok=True, output="\n".join(lines))
 
 def _default_usage() -> dict[str, float]:
     return {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0}
 
+
+
+def _verification_policy_for_task(text: str) -> dict[str, Any]:
+    lowered = (text or "").lower()
+    checks: list[str] = []
+    task_type = "general"
+    if any(token in lowered for token in ("test", "bug", "fix", "failing")):
+        task_type = "bugfix"
+        checks.extend(["tests", "lint", "typecheck"])
+    if any(token in lowered for token in ("refactor", "cleanup", "rename")):
+        task_type = "refactor"
+        checks.extend(["tests", "lint"])
+    if any(token in lowered for token in ("security", "vuln", "dependency", "auth", "token", "secrets")):
+        task_type = "security"
+        checks.extend(["tests", "lint", "typecheck", "security_scan"])
+    if not checks:
+        checks.append("targeted_validation")
+    unique = []
+    seen = set()
+    for item in checks:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return {"task_type": task_type, "required_checks": unique}
+
+
+def _has_verification_evidence(events: list[str], required_checks: list[str]) -> tuple[bool, list[str]]:
+    haystack = "\n".join(events).lower()
+    evidence_map = {
+        "tests": ("tool-run: name=custom", "pytest", "unittest", "cargo test", "go test", "npm test"),
+        "lint": ("lint", "ruff", "eslint", "flake8", "golangci", "clippy"),
+        "typecheck": ("typecheck", "mypy", "pyright", "tsc", "microsoft/pyright"),
+        "security_scan": ("security", "bandit", "npm audit", "pip-audit", "trivy", "safety"),
+        "targeted_validation": ("tool-run:", "report", "status:"),
+    }
+    missing = []
+    for check in required_checks:
+        probes = evidence_map.get(check, (check,))
+        if not any(probe in haystack for probe in probes):
+            missing.append(check)
+    return (not missing), missing
+
+
+def _extract_latency_ms(output: str) -> int | None:
+    match = re.search(r"latency_ms=(\d+)", output or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _update_tool_reliability(runtime: WebRuntime, tool_name: str, ok: bool, latency_ms: int | None) -> None:
+    artifacts = runtime.research_artifacts
+    table = artifacts.setdefault("tool_reliability", {})
+    row = table.setdefault(tool_name, {"runs": 0, "success": 0, "fail": 0, "avg_latency_ms": 0.0, "score": 0.5})
+    row["runs"] = int(row.get("runs", 0)) + 1
+    if ok:
+        row["success"] = int(row.get("success", 0)) + 1
+    else:
+        row["fail"] = int(row.get("fail", 0)) + 1
+    if latency_ms is not None:
+        prev_avg = float(row.get("avg_latency_ms", 0.0))
+        n = max(1, int(row["runs"]))
+        row["avg_latency_ms"] = round(((prev_avg * (n - 1)) + latency_ms) / n, 2)
+    success_rate = float(row.get("success", 0)) / max(1, int(row.get("runs", 0)))
+    latency_penalty = min(0.25, (float(row.get("avg_latency_ms", 0.0)) / 4000.0))
+    row["score"] = round(max(0.0, min(1.0, success_rate - latency_penalty)), 3)
+
+
+def _tool_reliability_hint(runtime: WebRuntime) -> str:
+    table = (runtime.research_artifacts or {}).get("tool_reliability", {})
+    if not isinstance(table, dict) or not table:
+        return "No historical tool reliability data yet. Prefer targeted tools and verify outputs."
+    ranked = sorted(
+        ((name, data) for name, data in table.items() if isinstance(data, dict)),
+        key=lambda item: float(item[1].get("score", 0.0)),
+        reverse=True,
+    )
+    top = ranked[:3]
+    lines = []
+    for name, data in top:
+        lines.append(f"{name}: score={float(data.get('score', 0.0)):.2f}, runs={int(data.get('runs', 0))}")
+    return "Tool reliability preference (use higher-scored tools when equivalent): " + "; ".join(lines)
 
 def _build_provider(name: str, model: str, api_key: str | None):
     if name == "echo":
@@ -179,8 +307,11 @@ def _new_agent(runtime: WebRuntime) -> Agent:
 
     def on_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
         runtime.workspace_store.record_tool_run(name, args, output, ok)
+        latency_ms = _extract_latency_ms(output)
+        _update_tool_reliability(runtime, name, ok, latency_ms)
         if runtime.debug:
-            runtime.traces.append(f"tool-run: name={name} ok={ok} args={args} output={output[:200]}")
+            latency_suffix = f" latency_ms={latency_ms}" if latency_ms is not None else ""
+            runtime.traces.append(f"tool-run: name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
 
     return Agent(
         provider=provider,
@@ -297,53 +428,81 @@ def _uploaded_context_prompt(runtime: WebRuntime) -> str | None:
     )
 
 
-def _condense_session_context(runtime: WebRuntime) -> dict[str, Any]:
+def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = None) -> dict[str, Any]:
     non_system = [m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
-    if len(non_system) < 6:
+    raw_window = max(2, int(window_size or runtime.condense_window or 12))
+    if len(non_system) <= raw_window + 2:
         return {"ok": True, "unchanged": True, "message": "not enough history to condense"}
 
-    users = [m for m in non_system if m.role is Role.USER]
-    assistants = [m for m in non_system if m.role is Role.ASSISTANT]
-    tool_events = [m for m in non_system if m.role in {Role.TOOL_CALL, Role.TOOL_RESULT}]
-    recent = non_system[-8:]
+    cutoff = max(0, len(non_system) - raw_window)
+    older = non_system[:cutoff]
+    recent = non_system[cutoff:]
 
     highlights: list[str] = []
-    for m in non_system:
+    topics: list[str] = []
+    for m in older:
         text = " ".join(str(m.content or "").split())
         if not text:
             continue
-        if len(text) > 140:
-            text = f"{text[:137]}..."
+        if len(text) > 180:
+            text = f"{text[:177]}..."
         prefix = "user" if m.role is Role.USER else "assistant" if m.role is Role.ASSISTANT else "tool"
         highlights.append(f"- [{prefix}] {text}")
-        if len(highlights) >= 10:
+        if len(topics) < 6:
+            topics.append(text.split(" ")[0].strip(".,:;()[]{}\"'")[:24])
+        if len(highlights) >= 12:
             break
 
+    summary_prompt = (
+        "You are a conversation condensation engine. Capture key facts, decisions, constraints, and unresolved items "
+        "with compact bullet points suitable for later retrieval by topic."
+    )
     summary_lines = [
         "Session condensed summary:",
-        f"- total chat messages before condense: {len(non_system)}",
-        f"- user turns: {len(users)}",
-        f"- assistant turns: {len(assistants)}",
-        f"- tool events: {len(tool_events)}",
-        "- key highlights:",
+        f"- policy: {summary_prompt}",
+        f"- raw window preserved: last {raw_window} messages",
+        "- key details:",
         *(highlights or ["- (no textual highlights)"]),
-        "- note: recent messages are preserved below this summary.",
     ]
+    summary_text = "\n".join(summary_lines)
+
+    summary_id = f"sum_{len(runtime.summary_index)+1}"
+    summary_entry = {
+        "id": summary_id,
+        "topics": ", ".join(dict.fromkeys([t for t in topics if t])) or "general",
+        "summary": summary_text,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_count": len(older),
+    }
+    runtime.summary_index.append(summary_entry)
+
+    older_set = set(id(m) for m in older)
+    for msg in runtime.agent.state.messages:
+        if msg.role is Role.SYSTEM:
+            continue
+        if id(msg) in older_set:
+            msg.metadata["excluded_from_model"] = True
 
     summary_msg = Message(
-        role=Role.ASSISTANT,
-        content="\n".join(summary_lines),
-        metadata={"kind": "session_condensed_summary", "timestamp": datetime.now(timezone.utc).isoformat()},
+        role=Role.TOOL_RESULT,
+        name="conversation_condense",
+        content=summary_text,
+        metadata={
+            "kind": "session_condensed_summary",
+            "collapsed": True,
+            "summary_id": summary_id,
+            "topics": summary_entry["topics"],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
     )
-
-    system_messages = [m for m in runtime.agent.state.messages if m.role is Role.SYSTEM]
-    runtime.agent.state.messages = [*system_messages, summary_msg, *recent]
+    runtime.agent.state.messages.append(summary_msg)
 
     return {
         "ok": True,
         "condensed": True,
         "before": len(non_system),
-        "after": len([m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]),
+        "after_raw_window": raw_window,
+        "summary_id": summary_id,
     }
 
 
@@ -439,14 +598,14 @@ def _repair_citations(runtime: WebRuntime, reason: str) -> Message:
     return runtime.agent.step(prompt)
 
 
-def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
+def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str, *, allow_citation_repair: bool = True) -> Message:
     uploaded_prompt = _uploaded_context_prompt(runtime)
     before = len(runtime.agent.state.messages)
     if not uploaded_prompt:
         reply = runtime.agent.step(text)
         turn_messages = runtime.agent.state.messages[before:]
         ok, reason = _validate_claim_citations(turn_messages)
-        if runtime.research_mode and not ok:
+        if runtime.research_mode and allow_citation_repair and not ok:
             runtime.traces.append(f"citation-validation-failed: {reason}; running repair")
             reply = _repair_citations(runtime, reason)
         runtime.research_artifacts = _build_research_artifacts(runtime)
@@ -463,7 +622,7 @@ def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
         reply = runtime.agent.step(text)
         turn_messages = runtime.agent.state.messages[before:]
         ok, reason = _validate_claim_citations(turn_messages)
-        if runtime.research_mode and not ok:
+        if runtime.research_mode and allow_citation_repair and not ok:
             runtime.traces.append(f"citation-validation-failed: {reason}; running repair")
             reply = _repair_citations(runtime, reason)
         runtime.research_artifacts = _build_research_artifacts(runtime)
@@ -494,6 +653,12 @@ def _persist(runtime: WebRuntime) -> None:
             turns=runtime.session_turns,
             uploads=runtime.uploads,
             research_artifacts=runtime.research_artifacts,
+            agentic_planning=runtime.agentic_planning,
+            research_mode=runtime.research_mode,
+            max_runtime_seconds=runtime.max_runtime_seconds,
+            condense_enabled=runtime.condense_enabled,
+            condense_window=runtime.condense_window,
+            summary_index=runtime.summary_index,
         )
     )
 
@@ -517,6 +682,17 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.session_turns = list(loaded.turns or [])
     runtime.uploads = list(loaded.uploads or [])
     runtime.research_artifacts = dict(loaded.research_artifacts or {})
+    if loaded.agentic_planning is not None:
+        runtime.agentic_planning = bool(loaded.agentic_planning)
+    if loaded.research_mode is not None:
+        runtime.research_mode = bool(loaded.research_mode)
+    if loaded.max_runtime_seconds is not None:
+        runtime.max_runtime_seconds = int(loaded.max_runtime_seconds)
+    if loaded.condense_enabled is not None:
+        runtime.condense_enabled = bool(loaded.condense_enabled)
+    if loaded.condense_window is not None:
+        runtime.condense_window = int(loaded.condense_window)
+    runtime.summary_index = list(loaded.summary_index or [])
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
         if path.exists() and path.is_dir():
@@ -529,6 +705,327 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         _inject_research_prompt(runtime.agent)
 
     return True
+
+
+
+
+def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
+    session_store = SessionStore(Path(".mu_cli/sessions"), session_name)
+    workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
+    runtime = WebRuntime(
+        provider=base.provider,
+        model=base.model,
+        api_key=base.api_key,
+        approval_mode=base.approval_mode,
+        system_prompt=base.system_prompt,
+        session_name=session_name,
+        workspace_path=None,
+        debug=base.debug,
+        agentic_planning=base.agentic_planning,
+        research_mode=base.research_mode,
+        workspace_store=workspace_store,
+        session_store=session_store,
+        pricing=base.pricing,
+        tools=list(base.tools),
+        agent=Agent(provider=EchoProvider(), tools=list(base.tools)),
+        traces=[],
+        session_usage=_default_usage(),
+        session_turns=[],
+        uploads=[],
+        uploads_dir=base.uploads_dir,
+        base_tools=base.base_tools,
+        enabled_tools=dict(base.enabled_tools),
+        custom_tool_specs=list(base.custom_tool_specs),
+        custom_tool_errors=list(base.custom_tool_errors),
+        research_artifacts={},
+        max_runtime_seconds=900,
+        condense_enabled=False,
+        condense_window=12,
+        summary_index=[],
+    )
+    _refresh_tooling(runtime)
+    if not _load_session(runtime, session_name):
+        runtime.agent = _new_agent(runtime)
+        runtime.agent.add_system_prompt(runtime.system_prompt)
+        if runtime.agentic_planning:
+            _inject_planning(runtime.agent)
+        if runtime.research_mode:
+            _inject_research_prompt(runtime.agent)
+        _persist(runtime)
+    return runtime
+
+
+def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: str) -> str:
+    def _normalize_progress_text(value: str | None) -> str:
+        return " ".join((value or "").lower().split())
+
+    def _is_plan_complete(value: str | None) -> bool:
+        normalized = _normalize_progress_text(value)
+        return "plan_complete" in normalized or "plan complete" in normalized
+
+    def _is_stalled_response(previous: str | None, current: str | None) -> bool:
+        prev = _normalize_progress_text(previous)
+        cur = _normalize_progress_text(current)
+        if not cur:
+            return True
+        if prev and cur == prev:
+            return True
+        return cur in {"continue", "continuing", "working on it", "still working"}
+
+    job_id = uuid.uuid4().hex
+    base_runtime.background_jobs[job_id] = {
+        "id": job_id,
+        "session": session_name,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "error": None,
+        "report": None,
+        "iterations": 0,
+        "runtime_budget_seconds": int(base_runtime.max_runtime_seconds),
+        "plan": None,
+        "plan_approval": None,
+        "last_step": None,
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0},
+        "completed_flash_until": None,
+        "events": [],
+        "planner_critic": None,
+        "verification_policy": _verification_policy_for_task(text),
+        "checkpoints": [],
+        "answer_contract": None,
+    }
+
+    def runner() -> None:
+        job = base_runtime.background_jobs[job_id]
+        try:
+            isolated = _build_session_runtime(base_runtime, session_name)
+            isolated.debug = True
+            trace_cursor = len(isolated.traces)
+            deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
+            checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
+            restored_checkpoints = list(checkpoint_store.get(session_name, []))
+            if restored_checkpoints:
+                job["checkpoints"].extend(restored_checkpoints[-8:])
+                job["events"].append(f"checkpoint: restored {len(restored_checkpoints[-8:])}")
+
+            if isolated.agentic_planning:
+                plan_reply = isolated.agent.step(
+                    "Create an execution plan for the task below. Keep it short and actionable as numbered steps. "
+                    "Start with 'PLAN:'.\n\nTask:\n" + text
+                )
+                plan_text = (plan_reply.content or "").strip()
+                if not plan_text or plan_text.lower().startswith("calling tool"):
+                    fallback_reply = isolated.agent.step(
+                        "Provide ONLY a concise numbered execution plan for the same task. "
+                        "Do not call tools. Start with 'PLAN:'."
+                    )
+                    plan_text = (fallback_reply.content or "").strip()
+                if not plan_text:
+                    plan_text = (
+                        "PLAN:\n"
+                        "1) Investigate the request context.\n"
+                        "2) Execute required steps safely.\n"
+                        "3) Summarize outcomes and next actions."
+                    )
+                critic_prompt = (
+                    "Review the proposed plan for completeness, risk, and verification quality. "
+                    "Respond in exactly two lines: 'CRITIQUE: ...' and 'PLAN_OK: yes|no'.\n\n"
+                    f"Task:\n{text}\n\nProposed plan:\n{plan_text}"
+                )
+                critic_reply = isolated.agent.step(critic_prompt)
+                critic_text = (critic_reply.content or "").strip()
+                plan_ok = "plan_ok: yes" in critic_text.lower()
+                job["planner_critic"] = critic_text[:1200]
+                job["events"].append("plan: critic_passed" if plan_ok else "plan: critic_failed")
+                if not plan_ok:
+                    revise_reply = isolated.agent.step(
+                        "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'."
+                    )
+                    revised_text = (revise_reply.content or "").strip()
+                    if revised_text:
+                        plan_text = revised_text
+                        job["events"].append("plan: revised_after_critic")
+                job["plan"] = plan_text
+                job["last_step"] = "Plan drafted; waiting for approval"
+                job["events"].append("plan: drafted")
+                _persist(isolated)
+                job["status"] = "awaiting_plan_approval"
+                while datetime.now(timezone.utc).timestamp() < deadline:
+                    decision = job.get("plan_approval")
+                    if decision in {"approve", "deny"}:
+                        break
+                    threading.Event().wait(0.4)
+                if job.get("plan_approval") != "approve":
+                    job["events"].append("plan: denied_or_timed_out")
+                    raise RuntimeError("Plan not approved before timeout or was denied.")
+                job["events"].append("plan: approved")
+
+            total_input = 0
+            total_output = 0
+            total_tokens = 0
+            total_cost = 0.0
+            max_iterations = max(2, min(60, int(isolated.max_runtime_seconds // 25) or 24))
+            no_progress_streak = 0
+            previous_step = None
+            replan_count = 0
+            policy = job.get("verification_policy") or _verification_policy_for_task(text)
+            job["events"].append(
+                f"verification_policy: type={policy.get('task_type')} checks={','.join(policy.get('required_checks', []))}"
+            )
+            reliability_hint = _tool_reliability_hint(isolated)
+
+            approved_plan = str(job.get("plan") or "").strip()
+            plan_context = (
+                f"\n\nApproved plan (follow this unless tool evidence requires adaptation):\n{approved_plan}\n"
+                if approved_plan
+                else ""
+            )
+            prompt = (
+                text
+                + plan_context
+                + "\nExecution requirements:\n"
+                + f"- {reliability_hint}\n"
+                + "- Decompose work into checkpoints and report checkpoint completion as you progress.\n"
+                + "- Final answer must include: Confidence: <high|medium|low> and Evidence: bullets linked to tool outputs."
+            )
+            while datetime.now(timezone.utc).timestamp() < deadline:
+                if int(job["iterations"]) >= max_iterations:
+                    job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
+                    break
+                job["status"] = "running"
+                before_len = len(isolated.agent.state.messages)
+                reply = _run_turn_with_uploaded_context(
+                    isolated,
+                    prompt,
+                    allow_citation_repair=(prompt == text),
+                )
+                turn_messages = isolated.agent.state.messages[before_len:]
+                had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
+                report = _turn_report(isolated, prompt, reply.content)
+                if len(isolated.traces) > trace_cursor:
+                    job["events"].extend(isolated.traces[trace_cursor:])
+                    trace_cursor = len(isolated.traces)
+                    if len(job["events"]) > 120:
+                        job["events"] = job["events"][-120:]
+                job["last_step"] = (reply.content or "").strip()[:240]
+                stalled = _is_stalled_response(previous_step, job["last_step"])
+                previous_step = job["last_step"]
+                _record_turn(isolated, report)
+                _persist(isolated)
+                total_input += int(report["input_tokens"])
+                total_output += int(report["output_tokens"])
+                total_tokens += int(report["total_tokens"])
+                total_cost += float(report["estimated_cost_usd"])
+                job["iterations"] = int(job["iterations"]) + 1
+                job["usage"] = {
+                    "input_tokens": total_input,
+                    "output_tokens": total_output,
+                    "total_tokens": total_tokens,
+                    "estimated_cost_usd": total_cost,
+                }
+                checkpoint = {
+                    "iteration": int(job["iterations"]),
+                    "status": job.get("status"),
+                    "summary": (job.get("last_step") or "")[:240],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                job["checkpoints"].append(checkpoint)
+                if len(job["checkpoints"]) > 30:
+                    job["checkpoints"] = job["checkpoints"][-30:]
+
+                if _is_plan_complete(reply.content):
+                    break
+                if not isolated.agentic_planning:
+                    break
+                if not had_tool_activity:
+                    no_progress_streak = no_progress_streak + 1 if stalled else 0
+                    if no_progress_streak >= 2:
+                        job["events"].append("status: stalled_no_tool_progress")
+                        if replan_count < 2:
+                            replan_count += 1
+                            replan_reply = isolated.agent.step(
+                                "Generate REPLAN with 3-6 concise steps to recover from stall. "
+                                "Start with 'REPLAN:'. Include one immediate next tool call recommendation."
+                            )
+                            replanned = (replan_reply.content or "").strip()
+                            if replanned:
+                                job["plan"] = replanned
+                                job["events"].append(f"plan: replan_triggered #{replan_count}")
+                                prompt = (
+                                    "Execute the REPLAN. Complete the next concrete tool action now. "
+                                    "When done, return 'PLAN_COMPLETE' with Confidence and Evidence sections."
+                                )
+                                continue
+                        prompt = (
+                            "You appear stalled. Provide either: "
+                            "(1) one concrete next tool call with arguments, or "
+                            "(2) a final response starting with 'PLAN_COMPLETE' that summarizes completed work and blockers."
+                        )
+                        continue
+                    # Prevent repetitive continue loops when the model is already giving a final synthesis.
+                    break
+                no_progress_streak = 0
+                prompt = (
+                    "Continue executing the approved plan. Use tools as needed. "
+                    "When all tasks are complete, begin your response with 'PLAN_COMPLETE'."
+                )
+
+            if datetime.now(timezone.utc).timestamp() >= deadline:
+                job["status"] = "timed_out"
+
+            job["report"] = {
+                "provider": isolated.provider,
+                "model": isolated.model,
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "total_tokens": total_tokens,
+                "estimated_cost_usd": total_cost,
+            }
+            if job["status"] != "timed_out":
+                job["status"] = "completed"
+                job["completed_flash_until"] = (
+                    datetime.now(timezone.utc).timestamp() + 45
+                )
+                required_checks = list((policy or {}).get("required_checks", []))
+                verified, missing = _has_verification_evidence(job.get("events", []), required_checks)
+                answer_text = str(job.get("last_step") or "")
+                has_confidence = "confidence:" in answer_text.lower()
+                has_evidence = "evidence:" in answer_text.lower()
+                confidence = "medium" if verified else "low"
+                contract = {
+                    "confidence": confidence,
+                    "has_confidence_section": has_confidence,
+                    "has_evidence_section": has_evidence,
+                    "verified": verified,
+                    "missing_checks": missing,
+                }
+                job["answer_contract"] = contract
+                if verified:
+                    job["events"].append("verification: passed")
+                else:
+                    job["events"].append("verification: gaps=" + ",".join(missing))
+                if _is_plan_complete(job.get("last_step")):
+                    job["events"].append("status: completed")
+                else:
+                    job["events"].append("status: completed_without_explicit_plan_complete")
+        except Exception as exc:
+            job["error"] = str(exc)
+            if job.get("status") != "timed_out":
+                job["status"] = "failed"
+            job["events"].append(f"status: failed ({exc})")
+        finally:
+            try:
+                if "isolated" in locals():
+                    checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
+                    checkpoint_store[session_name] = list(job.get("checkpoints", []))[-20:]
+                    _persist(isolated)
+            except Exception:
+                pass
+            job["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    return job_id
 
 
 def create_app():
@@ -554,6 +1051,7 @@ def create_app():
         ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),
         GetUploadedContextFileTool(uploads_root, lambda: runtime.session_name),
         ClearUploadedContextStoreTool(uploads_root, lambda: runtime.session_name),
+        RetrieveConversationSummaryTool(lambda: runtime),
     ]
     session_store = SessionStore(Path(".mu_cli/sessions"), "default")
 
@@ -583,6 +1081,10 @@ def create_app():
         custom_tool_specs=[],
         custom_tool_errors=[],
         research_artifacts={},
+        max_runtime_seconds=900,
+        condense_enabled=False,
+        condense_window=12,
+        summary_index=[],
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     _refresh_tooling(runtime)
@@ -611,7 +1113,7 @@ def create_app():
                 "debug": runtime.debug,
                 "agentic_planning": runtime.agentic_planning,
                 "research_mode": runtime.research_mode,
-                "models": MODELS_BY_PROVIDER,
+                "models": get_model_catalog({"gemini": runtime.api_key}),
                 "sessions": sessions,
                 "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
                 "traces": runtime.traces[-50:],
@@ -621,6 +1123,10 @@ def create_app():
                 "uploads": runtime.uploads,
                 "pending_approval": runtime.pending_approval,
                 "research_artifacts": runtime.research_artifacts,
+                "background_jobs": list(runtime.background_jobs.values())[-50:],
+                "max_runtime_seconds": runtime.max_runtime_seconds,
+                "condense_enabled": runtime.condense_enabled,
+                "condense_window": runtime.condense_window,
                 "tools": [
                     {
                         "name": tool.name,
@@ -655,8 +1161,49 @@ def create_app():
         reply = _run_turn_with_uploaded_context(runtime, text)
         report = _turn_report(runtime, text, reply.content)
         _record_turn(runtime, report)
+        if runtime.condense_enabled:
+            _condense_session_context(runtime, window_size=runtime.condense_window)
         _persist(runtime)
         return jsonify({"reply": asdict(reply), "report": report, "traces": runtime.traces[-50:]})
+
+    @app.post("/api/chat/background")
+    def chat_background():
+        payload = request.get_json(force=True)
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            return jsonify({"error": "text is required"}), 400
+        session_name = str(payload.get("session", runtime.session_name)).strip() or runtime.session_name
+        job_id = _start_background_turn(runtime, session_name, text)
+        return jsonify({"ok": True, "job_id": job_id, "session": session_name})
+
+    @app.get("/api/jobs")
+    def list_jobs():
+        return jsonify({"jobs": list(runtime.background_jobs.values())})
+
+    @app.get("/api/jobs/<job_id>")
+    def get_job(job_id: str):
+        job = runtime.background_jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(job)
+
+    @app.post("/api/jobs/<job_id>/plan")
+    def decide_job_plan(job_id: str):
+        job = runtime.background_jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "job not found"}), 404
+        payload = request.get_json(force=True)
+        decision = str(payload.get("decision", "")).strip().lower()
+        if decision not in {"approve", "deny"}:
+            return jsonify({"error": "decision must be approve|deny"}), 400
+        revised_plan = str(payload.get("revised_plan", "")).strip()
+        if decision == "approve" and revised_plan:
+            job["plan"] = revised_plan
+            events = job.setdefault("events", [])
+            if isinstance(events, list):
+                events.append("plan: revised_by_user")
+        job["plan_approval"] = decision
+        return jsonify({"ok": True, "job_id": job_id, "decision": decision, "plan": job.get("plan")})
 
     @app.post("/api/chat/stream")
     def chat_stream():
@@ -692,6 +1239,8 @@ def create_app():
                 reply = _run_turn_with_uploaded_context(runtime, text)
                 report = _turn_report(runtime, text, reply.content)
                 _record_turn(runtime, report)
+                if runtime.condense_enabled:
+                    _condense_session_context(runtime, window_size=runtime.condense_window)
                 _persist(runtime)
                 events.put({"type": "report", "report": report})
                 events.put({"type": "done", "reply": asdict(reply), "traces": runtime.traces[-50:]})
@@ -722,13 +1271,16 @@ def create_app():
 
         runtime.provider = str(payload.get("provider", runtime.provider))
         selected_model = str(payload.get("model", runtime.model))
-        available = get_models(runtime.provider)
+        available = get_models(runtime.provider, runtime.api_key)
         runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
         runtime.api_key = payload.get("api_key", runtime.api_key)
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
         runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
+        runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
+        runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
+        runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
         tool_visibility = payload.get("tool_visibility")
         if isinstance(tool_visibility, dict):
             for tool in runtime.base_tools:
@@ -919,6 +1471,27 @@ def create_app():
         if action == "new":
             if not name:
                 return jsonify({"error": "name required"}), 400
+
+            runtime.provider = str(payload.get("provider", runtime.provider))
+            selected_model = str(payload.get("model", runtime.model))
+            runtime.api_key = payload.get("api_key", runtime.api_key)
+            available = get_models(runtime.provider, runtime.api_key)
+            runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
+            runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
+            runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
+            runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
+            runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
+            runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
+            runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
+
+            workspace = payload.get("workspace")
+            runtime.workspace_path = str(workspace).strip() if workspace else None
+            runtime.workspace_store.snapshot = None
+            if runtime.workspace_path:
+                path = Path(runtime.workspace_path).expanduser()
+                if path.exists() and path.is_dir():
+                    runtime.workspace_store.attach(path)
+
             runtime.session_name = name
             runtime.session_store.use(name)
             runtime.agent = _new_agent(runtime)
@@ -935,7 +1508,7 @@ def create_app():
             _persist(runtime)
             return jsonify({"ok": True, "session": name})
 
-        if action == "load":
+        if action in {"load", "switch"}:
             if not name:
                 return jsonify({"error": "name required"}), 400
             loaded = _load_session(runtime, name)
@@ -954,7 +1527,8 @@ def create_app():
             return jsonify({"ok": True})
 
         if action == "condense":
-            result = _condense_session_context(runtime)
+            w = payload.get("window")
+            result = _condense_session_context(runtime, window_size=int(w) if w is not None else runtime.condense_window)
             _persist(runtime)
             return jsonify(result)
 

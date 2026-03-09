@@ -18,6 +18,12 @@ class SessionState:
     turns: list[dict] | None = None
     uploads: list[dict] | None = None
     research_artifacts: dict | None = None
+    agentic_planning: bool | None = None
+    research_mode: bool | None = None
+    max_runtime_seconds: int | None = None
+    condense_enabled: bool | None = None
+    condense_window: int | None = None
+    summary_index: list[dict] | None = None
 
 
 class SessionStore:
@@ -56,6 +62,12 @@ class SessionStore:
             turns=payload.get("turns"),
             uploads=payload.get("uploads"),
             research_artifacts=payload.get("research_artifacts"),
+            agentic_planning=payload.get("agentic_planning"),
+            research_mode=payload.get("research_mode"),
+            max_runtime_seconds=payload.get("max_runtime_seconds"),
+            condense_enabled=payload.get("condense_enabled"),
+            condense_window=payload.get("condense_window"),
+            summary_index=payload.get("summary_index"),
         )
 
     def save(self, state: SessionState) -> None:
@@ -69,6 +81,12 @@ class SessionStore:
             "turns": state.turns or [],
             "uploads": state.uploads or [],
             "research_artifacts": state.research_artifacts or {},
+            "agentic_planning": state.agentic_planning,
+            "research_mode": state.research_mode,
+            "max_runtime_seconds": state.max_runtime_seconds,
+            "condense_enabled": state.condense_enabled,
+            "condense_window": state.condense_window,
+            "summary_index": state.summary_index or [],
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

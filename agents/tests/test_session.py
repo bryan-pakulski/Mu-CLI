@@ -20,6 +20,9 @@ class SessionTests(unittest.TestCase):
                 turns=[{"session": "demo", "total_tokens": 42}],
                 uploads=[{"name": "notes.txt", "path": "/tmp/notes.txt"}],
                 research_artifacts={"visited_urls": ["https://example.com"]},
+                agentic_planning=True,
+                research_mode=False,
+                max_runtime_seconds=1200,
             )
             store.save(state)
 
@@ -32,6 +35,9 @@ class SessionTests(unittest.TestCase):
             self.assertEqual("demo", loaded.turns[0]["session"])
             self.assertEqual("notes.txt", loaded.uploads[0]["name"])
             self.assertEqual("https://example.com", loaded.research_artifacts["visited_urls"][0])
+            self.assertTrue(loaded.agentic_planning)
+            self.assertFalse(loaded.research_mode)
+            self.assertEqual(1200, loaded.max_runtime_seconds)
 
     def test_list_and_delete_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as td:

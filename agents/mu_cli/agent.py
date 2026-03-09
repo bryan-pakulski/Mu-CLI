@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Callable
@@ -52,8 +53,9 @@ class Agent:
         strict_retry_used = False
         rounds = 0
         while rounds < self.max_tool_rounds + 1:
+            model_messages = [m for m in self.state.messages if not m.metadata.get("excluded_from_model")]
             response = self.provider.generate(
-                self.state.messages,
+                model_messages,
                 tools=[self._tool_schema(tool) for tool in self.tools.values()],
             )
             self.last_usage = response.usage
@@ -190,10 +192,12 @@ class Agent:
                         self.on_tool_run(call.name, call.args, False, result_text)
                     return message
 
+            started = time.perf_counter()
             result = tool.run(call.args)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
             ok = result.ok
             status = "ok" if result.ok else "error"
-            result_text = f"{audit}\n[{status}] {result.output}"
+            result_text = f"{audit} [latency_ms={elapsed_ms}]\n[{status}] {result.output}"
 
         if self.on_tool_run is not None:
             self.on_tool_run(call.name, call.args, ok, result_text)

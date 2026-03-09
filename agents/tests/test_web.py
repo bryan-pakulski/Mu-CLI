@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import time
 import unittest
 
 
@@ -217,6 +218,66 @@ class WebTests(unittest.TestCase):
         after_count = len(after_state['messages'])
         self.assertLess(after_count, before_count)
         self.assertTrue(any((m.get('metadata') or {}).get('kind') == 'session_condensed_summary' for m in after_state['messages']))
+
+
+    def test_job_plan_endpoint_accepts_revised_plan(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        # Seed a synthetic waiting job record
+        job_id = 'job-plan-edit'
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        # touch runtime through background endpoint for consistent app state
+        client.post('/api/chat/background', json={'text': 'hello plan edit', 'session': state['session']})
+        jobs = client.get('/api/jobs').get_json()['jobs']
+        assert jobs
+        target = jobs[-1]['id']
+
+        revised = 'PLAN:\n1) Validate constraints\n2) Run checks\n3) Summarize.'
+        res = client.post(f'/api/jobs/{target}/plan', json={'decision': 'approve', 'revised_plan': revised})
+        self.assertEqual(200, res.status_code)
+        payload = res.get_json()
+        assert payload is not None
+        self.assertEqual('approve', payload['decision'])
+
+        job = client.get(f'/api/jobs/{target}').get_json()
+        assert job is not None
+        self.assertEqual(revised, job['plan'])
+        self.assertTrue(any(evt == 'plan: revised_by_user' for evt in job.get('events', [])))
+
+    def test_background_job_tracks_terminal_event(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 45})
+        res = client.post('/api/chat/background', json={'text': 'hello background'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 5
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] in {'completed', 'failed', 'timed_out'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertIn(job['status'], {'completed', 'failed', 'timed_out'})
+        self.assertTrue(any(event.startswith('status: ') for event in job.get('events', [])))
+        self.assertIn('verification_policy', job)
+        self.assertIn('checkpoints', job)
+        self.assertIsInstance(job.get('checkpoints', []), list)
+        self.assertIn('answer_contract', job)
 
 
 if __name__ == '__main__':

@@ -19,13 +19,17 @@ class WebTests(unittest.TestCase):
 
         home = client.get('/')
         self.assertEqual(200, home.status_code)
-        self.assertIn('HTMX + Alpine UI', home.get_data(as_text=True))
+        self.assertIn('HTMX + Alpine', home.get_data(as_text=True))
 
         legacy = client.get('/legacy')
         self.assertEqual(200, legacy.status_code)
 
         messages = client.get('/ui/messages')
         self.assertEqual(200, messages.status_code)
+
+        state_panel = client.get('/ui/state')
+        self.assertEqual(200, state_panel.status_code)
+        self.assertIn('Session', state_panel.get_data(as_text=True))
 
         posted = client.post('/ui/chat', data={'text': 'hello from form'})
         self.assertEqual(200, posted.status_code)

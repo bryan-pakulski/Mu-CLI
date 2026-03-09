@@ -1212,6 +1212,20 @@ def create_app():
             _persist(runtime)
         return render_template("partials/messages.html", messages=_ui_messages())
 
+
+    @app.get("/ui/state")
+    def ui_state():
+        return render_template(
+            "partials/state.html",
+            provider=runtime.provider,
+            model=runtime.model,
+            approval_mode=runtime.approval_mode,
+            session=runtime.session_name,
+            workspace=runtime.workspace_path,
+            debug=runtime.debug,
+            traces=runtime.traces[-20:],
+        )
+
     @app.get("/api/state")
     def state():
         sessions = runtime.session_store.list_sessions()

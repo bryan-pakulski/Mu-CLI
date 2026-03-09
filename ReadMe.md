@@ -83,7 +83,7 @@ Notes:
 
 If we want a reactive UX without inheriting a heavy npm toolchain, these are the strongest options:
 
-1. **SvelteKit (recommended default)**
+1. **SvelteKit**
    - Why: compile-time reactivity, minimal runtime overhead, and fast local iteration.
    - Dependency profile: comparatively small for modern SPA/SSR workflows (typically Vite + Svelte tooling).
    - Fit for this project: good for a responsive chat surface, streaming traces, and session/state panels without complex state libraries.
@@ -107,9 +107,9 @@ If we want a reactive UX without inheriting a heavy npm toolchain, these are the
 
 ### Recommendation
 
-- **Primary recommendation:** SvelteKit for best balance of reactivity, developer speed, and low runtime bloat.
-- **Most conservative option:** HTMX + Alpine.js if we want to avoid a modern JS app stack almost entirely.
-- **Migration strategy:** start with a thin API contract (`/api/messages`, `/api/state`, `/api/jobs/:id/events`) so the new frontend can be swapped in without changing core CLI/agent runtime behavior.
+- **Chosen path:** HTMX + Alpine.js for reactive behavior with minimal dependencies and server-rendered templates.
+- **Alternative if requirements change:** SvelteKit remains a strong option for a fuller SPA architecture.
+- **Migration strategy:** incrementally port legacy controls into HTMX partials while preserving existing API contracts and fallback `/legacy`.
 
 ## Workspace context and memory
 

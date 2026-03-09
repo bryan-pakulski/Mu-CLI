@@ -18,5 +18,6 @@ Deliver a reactive, lightweight UI that keeps Python/Flask in control and avoids
    - Add focused web tests for new UI routes and partial rendering.
 
 ## Execution status
-- ✅ Phase 1 foundation is now implemented.
-- ⏳ Phases 2 and 3 remain planned follow-up work.
+- ✅ Phase 1 foundation is implemented.
+- ✅ Phase 2 started: state sidebar and trace feed now update via HTMX polling.
+- ⏳ Remaining Phase 2 controls (approvals/settings parity) and Phase 3 cleanup are planned follow-up work.

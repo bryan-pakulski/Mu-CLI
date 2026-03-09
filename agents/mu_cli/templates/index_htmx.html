@@ -3,51 +3,69 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>mu_cli lightweight UI</title>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <title>mu_cli GUI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-    body { font-family: Inter, system-ui, sans-serif; margin: 0; background:#0b1020; color:#e5e7eb; }
-    .wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
-    .card { background:#121a2f; border:1px solid #2a355b; border-radius:12px; padding:16px; }
-    .messages { height: 60vh; overflow:auto; margin-bottom: 12px; }
-    .msg { padding:10px 12px; border-radius:10px; margin:8px 0; white-space:pre-wrap; }
-    .user { background:#1f2a44; }
-    .assistant { background:#14203a; border:1px solid #243256; }
-    .role { font-size:11px; text-transform:uppercase; opacity:0.8; margin-bottom:4px; }
-    textarea { width:100%; border-radius:10px; background:#0d1529; color:#e5e7eb; border:1px solid #2a355b; padding:12px; }
-    button { margin-top:8px; border:0; border-radius:10px; background:#2f6fed; color:white; padding:10px 14px; font-weight:600; }
-    .row { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-    a { color:#93c5fd; }
+    :root { --bg:#f6f7f9; --surface:#fff; --surface-2:#f3f4f6; --border:#e4e7eb; --text:#20242b; --muted:#6b7280; }
+    html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:"Inter",sans-serif; font-size:14px; }
+    .shell { height:100vh; display:grid; grid-template-columns:340px minmax(0,1fr); }
+    .sidebar { overflow:auto; padding:10px 12px; border-right:1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+    .panel { padding:10px 0 12px; border-bottom:1px solid color-mix(in srgb, var(--border) 65%, transparent); margin-bottom:8px; }
+    .panel h3 { margin:0 0 8px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+    .main { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; padding:8px 12px; }
+    .topbar { display:flex; align-items:center; gap:8px; padding:4px 2px 8px; }
+    .title { font-size:14px; font-weight:700; }
+    .pill { margin-left:auto; border:1px solid var(--border); border-radius:999px; padding:3px 8px; color:var(--muted); font-size:10px; background:var(--surface-2); }
+    .chat-layout { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto auto; gap:7px; }
+    .messages { min-height:0; overflow:auto; padding:4px 0; }
+    .msg { margin:0 auto; max-width:900px; padding:5px 0 7px; border-bottom:1px solid color-mix(in srgb, var(--border) 35%, transparent); }
+    .msg-meta { display:inline-flex; align-items:center; gap:6px; margin:0 10px 4px; font-size:10px; color:var(--muted); text-transform:uppercase; }
+    .bubble { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:10px 12px; margin:0 10px; white-space:pre-wrap; }
+    .msg.role-user .bubble { background:var(--surface-2); }
+    .composer { border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); padding-top:8px; }
+    textarea { width:100%; border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--surface); }
+    .actions { display:flex; gap:8px; align-items:center; margin-top:8px; }
+    button { border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); padding:8px 12px; font-weight:600; }
+    .muted { color:var(--muted); font-size:12px; }
+    .trace { border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); max-height:120px; overflow:auto; padding:8px; font-size:11px; white-space:pre-wrap; color:var(--muted); }
+    .kv { display:grid; grid-template-columns:90px 1fr; gap:4px 8px; font-size:12px; }
+    .mono { font-family:"JetBrains Mono", ui-monospace, monospace; }
   </style>
 </head>
 <body x-data="{ sending:false }">
-  <div class="wrap">
-    <div class="row">
-      <h2>mu_cli · HTMX + Alpine UI</h2>
-      <a href="/legacy">Open legacy UI</a>
-    </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div id="state-panel" hx-get="/ui/state" hx-trigger="load, every 3s" hx-swap="innerHTML"></div>
+      <div class="panel">
+        <h3>Views</h3>
+        <div class="kv"><div>Primary</div><div>HTMX + Alpine</div><div>Fallback</div><div><a href="/legacy">Open legacy UI</a></div></div>
+      </div>
+    </aside>
 
-    <div class="card">
-      <div
-        id="messages"
-        class="messages"
-        hx-get="/ui/messages"
-        hx-trigger="load, every 5s"
-        hx-swap="innerHTML"
-      ></div>
+    <main class="main">
+      <div class="topbar">
+        <div class="title">mu_cli GUI</div>
+        <div class="pill">Reactive • Server-rendered</div>
+      </div>
 
-      <form
-        hx-post="/ui/chat"
-        hx-target="#messages"
-        hx-swap="innerHTML"
-        @submit="sending=true"
-        hx-on::after-request="this.reset(); sending=false; document.querySelector('#messages').scrollTop=999999;"
-      >
-        <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
-        <button type="submit" :disabled="sending" x-text="sending ? 'Sending…' : 'Send'"></button>
-      </form>
-    </div>
+      <section class="chat-layout">
+        <div id="messages" class="messages" hx-get="/ui/messages" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
+
+        <form class="composer" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); sending=false; document.querySelector('#messages').scrollTop=999999;">
+          <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
+          <div class="actions">
+            <button type="submit" :disabled="sending" x-text="sending ? 'Sending…' : 'Send'">Send</button>
+            <span class="muted" x-show="sending">Running turn…</span>
+          </div>
+        </form>
+
+        <div id="trace" class="trace" hx-get="/ui/state" hx-trigger="load, every 3s" hx-select="#trace-lines" hx-swap="innerHTML"></div>
+      </section>
+    </main>
   </div>
 </body>
 </html>

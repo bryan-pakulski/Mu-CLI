@@ -1,10 +1,13 @@
 {% if messages %}
   {% for m in messages %}
-    <div class="msg {{ 'user' if m.role == 'user' else 'assistant' }}">
-      <div class="role">{{ m.role }}</div>
-      <div>{{ m.content }}</div>
-    </div>
+    <article class="msg {{ 'role-user' if m.role == 'user' else 'role-assistant' }}">
+      <div class="msg-meta">{{ m.role }}</div>
+      <div class="bubble">{{ m.content }}</div>
+    </article>
   {% endfor %}
 {% else %}
-  <p>No messages yet. Start the conversation below.</p>
+  <article class="msg role-assistant">
+    <div class="msg-meta">assistant</div>
+    <div class="bubble">No messages yet. Start the conversation below.</div>
+  </article>
 {% endif %}

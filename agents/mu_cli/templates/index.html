@@ -482,6 +482,27 @@
       padding: 0;
     }
     .prompt-upload-status { min-height: 18px; }
+    .searching-indicator {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 6px;
+    }
+    .searching-indicator.show { display: inline-flex; }
+    .searching-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #34d399;
+      animation: sessionRunningPulse .8s ease-in-out infinite;
+    }
+    .composer-disabled {
+      opacity: .55;
+      pointer-events: none;
+      filter: grayscale(.15);
+    }
 
     .tool-visibility-list {
       border: 1px solid var(--border);
@@ -581,6 +602,11 @@
       background: #34d399;
       border-color: #34d399;
       box-shadow: 0 0 0 3px color-mix(in srgb, #34d399 20%, transparent);
+      animation: sessionRunningPulse .8s ease-in-out infinite;
+    }
+    @keyframes sessionRunningPulse {
+      0%,100% { opacity: .45; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.22); }
     }
     .session-dot.waiting {
       background: #f59e0b;
@@ -868,13 +894,14 @@
           <div id="traces" class="trace">debug traces will appear here</div>
         </details>
 
-        <div>
+        <div id="chatComposer">
           <div class="prompt-wrap">
             <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
             <button id="promptAttach" class="btn btn-soft prompt-attach" title="Attach file">+</button>
             <input id="promptAttachInput" type="file" class="d-none" multiple />
           </div>
           <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
+          <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>Session is searching…</span></div>
           <div class="d-flex align-items-center gap-2 mt-2">
             <button id="send" class="btn btn-accent btn-sm">Send</button>
             <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
@@ -1045,6 +1072,7 @@ let selectedDir = null;
 let lastApprovalPatchFingerprint = null;
 let openSessionMenuFor = null;
 let planApprovalResolver = null;
+const completedSeenSessions = new Set();
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1587,19 +1615,36 @@ function renderTraces() {
 
 function sessionStatusMap() {
   const map = {};
-  const now = Date.now() / 1000;
   for (const job of (state.backgroundJobs || [])) {
     const name = job.session;
     if (!name) continue;
     if (['running', 'awaiting_plan_approval'].includes(job.status)) {
-      map[name] = { status: job.status, job };
+      map[name] = { status: 'running', job };
       continue;
     }
-    if (job.status === 'completed' && Number(job.completed_flash_until || 0) > now) {
+    if (job.status === 'completed' && !completedSeenSessions.has(name)) {
       map[name] = { status: 'done', job };
     }
   }
   return map;
+}
+
+function activeSearchingJob() {
+  return (state.backgroundJobs || []).find((j) => j.session === state.activeSession && ['running', 'awaiting_plan_approval'].includes(j.status));
+}
+
+function updateChatBusyState() {
+  const busy = !!activeSearchingJob();
+  const composer = document.getElementById('chatComposer');
+  const indicator = document.getElementById('searchingIndicator');
+  const prompt = document.getElementById('prompt');
+  const send = document.getElementById('send');
+  const sendBackground = document.getElementById('sendBackground');
+  if (composer) composer.classList.toggle('composer-disabled', busy);
+  if (indicator) indicator.classList.toggle('show', busy);
+  if (prompt) prompt.disabled = busy;
+  if (send) send.disabled = busy;
+  if (sendBackground) sendBackground.disabled = busy;
 }
 
 function closeAllSessionMenus() {
@@ -1631,11 +1676,11 @@ function renderSessions(list, active) {
     btn.className = `session-item ${name === active ? 'active' : ''}`;
     const statusData = statuses[name] || null;
     const status = statusData ? statusData.status : '';
-    const dotClass = status === 'awaiting_plan_approval' ? 'waiting' : (status === 'running' ? 'running' : (status === 'done' ? 'done' : ''));
+    const dotClass = status === 'running' ? 'running' : (status === 'done' ? 'done' : '');
     const tip = statusData?.job?.last_step || status || 'idle';
     btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${escapeHtml(tip)}"></span><span class="session-name">${escapeHtml(name)}</span></span>`;
     btn.setAttribute('data-session-name', name);
-    btn.addEventListener('click', () => sessionAction('switch', name).catch((e) => alert(e.message)));
+    btn.addEventListener('click', () => { completedSeenSessions.add(name); sessionAction('switch', name).catch((e) => alert(e.message)); });
 
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
@@ -1944,6 +1989,7 @@ async function refreshState() {
   renderToolSettings();
   renderMessages();
   renderTraces();
+  updateChatBusyState();
 
   if (state.pendingApproval) {
     document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
@@ -1966,6 +2012,7 @@ function updateBackgroundJobInState(job) {
   if (idx >= 0) state.backgroundJobs[idx] = job;
   else state.backgroundJobs.push(job);
   renderSessions(state.sessions || [], state.activeSession || '');
+  updateChatBusyState();
 }
 
 function askPlanApproval(job) {
@@ -2058,6 +2105,7 @@ async function sendPrompt(background = false) {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);
           renderTraces();
+  updateChatBusyState();
         } else if (event.type === 'report') {
           const r = event.report;
           reportEl.textContent = `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
@@ -2128,6 +2176,7 @@ async function createSessionFromModal() {
 
 async function sessionAction(action, explicitName = null, extra = {}) {
   const name = explicitName || selectedSessionName();
+  if (action === "switch" && name) completedSeenSessions.add(name);
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
   await api('/api/session', 'POST', { action, name, ...extra });

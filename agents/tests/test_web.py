@@ -191,6 +191,33 @@ class WebTests(unittest.TestCase):
         self.assertIn('content', payload)
         self.assertIn('format', payload)
 
+    def test_session_condense_action(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        for idx in range(4):
+            res = client.post('/api/chat', json={'text': f'hello {idx}'})
+            self.assertEqual(200, res.status_code)
+
+        before_state = client.get('/api/state').get_json()
+        assert before_state is not None
+        before_count = len(before_state['messages'])
+
+        condense = client.post('/api/session', json={'action': 'condense'})
+        self.assertEqual(200, condense.status_code)
+        body = condense.get_json()
+        assert body is not None
+        self.assertTrue(body['ok'])
+
+        after_state = client.get('/api/state').get_json()
+        assert after_state is not None
+        after_count = len(after_state['messages'])
+        self.assertLess(after_count, before_count)
+        self.assertTrue(any((m.get('metadata') or {}).get('kind') == 'session_condensed_summary' for m in after_state['messages']))
+
 
 if __name__ == '__main__':
     unittest.main()

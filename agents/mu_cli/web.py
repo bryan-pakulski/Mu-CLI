@@ -297,6 +297,56 @@ def _uploaded_context_prompt(runtime: WebRuntime) -> str | None:
     )
 
 
+def _condense_session_context(runtime: WebRuntime) -> dict[str, Any]:
+    non_system = [m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
+    if len(non_system) < 6:
+        return {"ok": True, "unchanged": True, "message": "not enough history to condense"}
+
+    users = [m for m in non_system if m.role is Role.USER]
+    assistants = [m for m in non_system if m.role is Role.ASSISTANT]
+    tool_events = [m for m in non_system if m.role in {Role.TOOL_CALL, Role.TOOL_RESULT}]
+    recent = non_system[-8:]
+
+    highlights: list[str] = []
+    for m in non_system:
+        text = " ".join(str(m.content or "").split())
+        if not text:
+            continue
+        if len(text) > 140:
+            text = f"{text[:137]}..."
+        prefix = "user" if m.role is Role.USER else "assistant" if m.role is Role.ASSISTANT else "tool"
+        highlights.append(f"- [{prefix}] {text}")
+        if len(highlights) >= 10:
+            break
+
+    summary_lines = [
+        "Session condensed summary:",
+        f"- total chat messages before condense: {len(non_system)}",
+        f"- user turns: {len(users)}",
+        f"- assistant turns: {len(assistants)}",
+        f"- tool events: {len(tool_events)}",
+        "- key highlights:",
+        *(highlights or ["- (no textual highlights)"]),
+        "- note: recent messages are preserved below this summary.",
+    ]
+
+    summary_msg = Message(
+        role=Role.ASSISTANT,
+        content="\n".join(summary_lines),
+        metadata={"kind": "session_condensed_summary", "timestamp": datetime.now(timezone.utc).isoformat()},
+    )
+
+    system_messages = [m for m in runtime.agent.state.messages if m.role is Role.SYSTEM]
+    runtime.agent.state.messages = [*system_messages, summary_msg, *recent]
+
+    return {
+        "ok": True,
+        "condensed": True,
+        "before": len(non_system),
+        "after": len([m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]),
+    }
+
+
 def _extract_urls(text: str) -> list[str]:
     import re
 
@@ -902,6 +952,11 @@ def create_app():
             if not deleted:
                 return jsonify({"error": "session not found"}), 404
             return jsonify({"ok": True})
+
+        if action == "condense":
+            result = _condense_session_context(runtime)
+            _persist(runtime)
+            return jsonify(result)
 
         return jsonify({"error": "unsupported action"}), 400
 

@@ -69,6 +69,13 @@
       padding: 0;
       transition: grid-template-columns .2s ease;
     }
+    .shell.modal-active .sidebar,
+    .shell.modal-active .main {
+      filter: blur(3px);
+      transition: filter .16s ease;
+      pointer-events: none;
+      user-select: none;
+    }
     .shell.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
     .shell.sidebar-hidden .sidebar { display: none; }
 
@@ -423,7 +430,9 @@
       display: none;
       align-items: center;
       justify-content: center;
-      background: rgba(26, 31, 39, 0.24);
+      background: rgba(26, 31, 39, 0.22);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
       z-index: 50;
       padding: 14px;
     }
@@ -610,7 +619,9 @@
           <button id="loadSession" class="btn btn-soft btn-sm">Load</button>
           <button id="deleteSession" class="btn btn-soft btn-sm">Delete</button>
           <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
+          <button id="condenseSession" class="btn btn-soft btn-sm">Condense</button>
         </div>
+        <div id="sessionActionStatus" class="small-muted mt-2"></div>
       </div>
 
       <div class="panel">
@@ -786,7 +797,12 @@ function formatTimestamp(value) {
   if (!value) return '';
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return '';
-  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const day = String(dt.getDate()).padStart(2, '0');
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const year = String(dt.getFullYear());
+  const hours = String(dt.getHours()).padStart(2, '0');
+  const minutes = String(dt.getMinutes()).padStart(2, '0');
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
 function inferMessageTimestamps(messages, turns) {
@@ -1393,6 +1409,9 @@ function syncPricingEditor() {
 
 function showModal(id, show) {
   document.getElementById(id).style.display = show ? 'flex' : 'none';
+  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal']
+    .some((modalId) => document.getElementById(modalId).style.display === 'flex');
+  document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
 
 function scheduleApplySettings() {
@@ -1650,8 +1669,11 @@ function resolveSessionName(action) {
 
 async function sessionAction(action) {
   const name = resolveSessionName(action);
+  const status = document.getElementById('sessionActionStatus');
+  status.textContent = '';
   await api('/api/session', 'POST', { action, name });
   await refreshState();
+  if (action === 'condense') status.textContent = 'Session context condensed.';
 }
 
 for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'darkMode']) {
@@ -1679,6 +1701,7 @@ document.getElementById('newSession').addEventListener('click', () => sessionAct
 document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
 document.getElementById('loadSession').addEventListener('click', () => sessionAction('load').catch((e) => alert(e.message)));
 document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
+document.getElementById('condenseSession').addEventListener('click', () => sessionAction('condense').catch((e) => alert(e.message)));
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
 document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
 document.getElementById('clearUploads').addEventListener('click', () => clearUploadedStore().catch((e) => alert(e.message)));

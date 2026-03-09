@@ -20,6 +20,7 @@ class WebTests(unittest.TestCase):
         home = client.get('/')
         self.assertEqual(200, home.status_code)
         self.assertIn('Reactive', home.get_data(as_text=True))
+        self.assertNotIn('Advanced settings', home.get_data(as_text=True))
 
         legacy = client.get('/legacy')
         self.assertEqual(200, legacy.status_code)
@@ -41,10 +42,12 @@ class WebTests(unittest.TestCase):
         settings = client.get('/ui/settings')
         self.assertEqual(200, settings.status_code)
         self.assertIn('Save settings', settings.get_data(as_text=True))
+        self.assertIn('Runtime', settings.get_data(as_text=True))
+        self.assertIn('Behavior', settings.get_data(as_text=True))
 
         settings_full = client.get('/ui/settings?variant=full')
         self.assertEqual(200, settings_full.status_code)
-        self.assertIn('Advanced', settings_full.get_data(as_text=True))
+        self.assertIn('Behavior', settings_full.get_data(as_text=True))
 
         settings_save = client.post('/ui/settings', data={
             'provider': 'echo',

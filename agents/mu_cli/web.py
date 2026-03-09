@@ -1284,7 +1284,7 @@ def create_app():
 
     @app.get("/ui/settings")
     def ui_settings():
-        variant = str(request.args.get("variant", "quick")).strip().lower()
+        variant = str(request.args.get("variant", "full")).strip().lower()
         target_id = "#settings-modal-content" if variant == "full" else "#settings-panel"
         provider = str(request.args.get("provider", runtime.provider)).strip() or runtime.provider
         provider_models = get_models(provider, runtime.api_key)
@@ -1311,7 +1311,7 @@ def create_app():
     @app.post("/ui/settings")
     def ui_update_settings():
         form = request.form
-        variant = str(form.get("variant", "quick")).strip().lower()
+        variant = str(form.get("variant", "full")).strip().lower()
         target_id = "#settings-modal-content" if variant == "full" else "#settings-panel"
 
         runtime.provider = str(form.get("provider", runtime.provider)).strip() or runtime.provider
@@ -1328,19 +1328,18 @@ def create_app():
                 runtime.workspace_path = str(path)
                 runtime.traces.append(f"workspace-attached: {snapshot.root} files={len(snapshot.files)}")
 
-        if variant != "quick":
-            runtime.debug = str(form.get("debug", "")).lower() in {"on", "true", "1", "yes"}
-            runtime.agentic_planning = str(form.get("agentic_planning", "")).lower() in {"on", "true", "1", "yes"}
-            runtime.research_mode = str(form.get("research_mode", "")).lower() in {"on", "true", "1", "yes"}
+        runtime.debug = str(form.get("debug", "")).lower() in {"on", "true", "1", "yes"}
+        runtime.agentic_planning = str(form.get("agentic_planning", "")).lower() in {"on", "true", "1", "yes"}
+        runtime.research_mode = str(form.get("research_mode", "")).lower() in {"on", "true", "1", "yes"}
 
-            max_runtime_val = str(form.get("max_runtime_seconds", runtime.max_runtime_seconds)).strip()
-            if max_runtime_val:
-                runtime.max_runtime_seconds = int(max_runtime_val)
+        max_runtime_val = str(form.get("max_runtime_seconds", runtime.max_runtime_seconds)).strip()
+        if max_runtime_val:
+            runtime.max_runtime_seconds = int(max_runtime_val)
 
-            runtime.condense_enabled = str(form.get("condense_enabled", "")).lower() in {"on", "true", "1", "yes"}
-            condense_window_val = str(form.get("condense_window", runtime.condense_window)).strip()
-            if condense_window_val:
-                runtime.condense_window = int(condense_window_val)
+        runtime.condense_enabled = str(form.get("condense_enabled", "")).lower() in {"on", "true", "1", "yes"}
+        condense_window_val = str(form.get("condense_window", runtime.condense_window)).strip()
+        if condense_window_val:
+            runtime.condense_window = int(condense_window_val)
 
         previous_messages = list(runtime.agent.state.messages)
         _refresh_tooling(runtime)

@@ -23,6 +23,7 @@ from mu_cli.tools.filesystem import (
     GitTool,
     FetchUrlContextTool,
     SearchArxivPapersTool,
+    ScoreSourcesTool,
     SearchWebContextTool,
     ListWorkspaceFilesTool,
     ReadFileTool,
@@ -468,6 +469,7 @@ def run() -> int:
         ExtractLinksContextTool(),
         SearchWebContextTool(),
         SearchArxivPapersTool(),
+        ScoreSourcesTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
     ]

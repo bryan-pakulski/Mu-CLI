@@ -224,24 +224,15 @@
       font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
-    .tool-toggle {
-      margin-top: 4px;
-      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
-      border-radius: 8px;
-      overflow: hidden;
-      background: transparent;
-    }
-    .tool-toggle > summary {
-      list-style: none;
-      cursor: pointer;
-      padding: 6px 9px;
+    .tool-inline {
       font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .07em;
-      color: #4060a8;
-      font-weight: 600;
+      color: var(--muted);
+      margin: 2px 0 0 8px;
+      white-space: pre-wrap;
+      opacity: .9;
     }
-    .tool-toggle > summary::-webkit-details-marker { display: none; }
+    .tool-inline.call { color: #6a7fb5; }
+    .tool-inline.result { color: var(--muted); }
 
     .citation-panel {
       margin-top: 8px;
@@ -929,11 +920,37 @@ function extractCitationLinks(content) {
   return found;
 }
 
-function buildCitationPanel(content) {
+function scoreReasonsByUrl(messages, assistantIndex) {
+  const reasons = {};
+  for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === 'user') break;
+    if (m.role !== 'tool_result') continue;
+    const text = String(m.content || '');
+    if (!text.includes('[tool=score_sources]')) continue;
+    const jsonStart = text.indexOf('{');
+    if (jsonStart < 0) continue;
+    try {
+      const payload = JSON.parse(text.slice(jsonStart));
+      const rows = (payload && payload.sources) || [];
+      for (const row of rows) {
+        const url = String((row && row.url) || '');
+        const reason = String((row && row.reason) || '');
+        if (url && reason) reasons[url] = reason;
+      }
+    } catch (_) {
+      // ignore parse issues
+    }
+  }
+  return reasons;
+}
+
+function buildCitationPanel(content, reasonsByUrl={}) {
   const links = extractCitationLinks(content);
   if (!links.length) return '';
   const items = links.map((url, idx) => `
-    <div id="citation-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a></div>
+    <div id="citation-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${reasonsByUrl[url] ? `<div class="small-muted">why chosen: ${escapeHtml(reasonsByUrl[url])}</div>` : ''}</div>
   `).join('');
   return `<details class="citation-panel"><summary>ℹ Citations & URLs (${links.length})</summary><div class="citation-list">${items}</div></details>`;
 }
@@ -1008,43 +1025,60 @@ function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
 
+  let anchor = null;
   state.messages.forEach((m, idx) => {
     if (!shouldRenderMessage(m)) return;
+
+    if (m.role === 'assistant' && !String(m.content || '').trim() && ((m.metadata && m.metadata.tool_calls) || []).length) {
+      const calls = (m.metadata && m.metadata.tool_calls) || [];
+      const line = calls.map((call) => `calling ${call.name || 'tool'}...`).join(' | ');
+      if (anchor) {
+        const el = document.createElement('div');
+        el.className = 'tool-inline call';
+        el.textContent = line;
+        anchor.appendChild(el);
+      }
+      return;
+    }
+
+    if (m.role === 'tool_result') {
+      if (anchor) {
+        const el = document.createElement('div');
+        el.className = 'tool-inline result';
+        el.textContent = summarizeToolResult(m.content);
+        anchor.appendChild(el);
+      }
+      return;
+    }
 
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
     row.innerHTML = `<div class="role">${m.role}</div>`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
+    bubble.innerHTML = m.role === 'assistant'
+      ? formatAssistantContentWithCitations(m.content, citationLinks)
+      : formatMessageContent(m.content);
+    row.appendChild(bubble);
+    box.appendChild(row);
+    anchor = row;
 
-    if (isToolRole(m.role)) {
-      const details = document.createElement('details');
-      details.className = 'tool-toggle';
-      details.innerHTML = `<summary>${m.role.replace('_', ' ')} (expand)</summary><div class="bubble">${formatMessageContent(m.content)}</div>`;
-      row.appendChild(details);
-    } else {
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
-      bubble.innerHTML = m.role === 'assistant'
-        ? formatAssistantContentWithCitations(m.content, citationLinks)
-        : formatMessageContent(m.content);
-      row.appendChild(bubble);
-      if (m.role === 'assistant') {
-        const citationHtml = buildCitationPanel(m.content);
-        if (citationHtml) {
-          const container = document.createElement('div');
-          container.innerHTML = citationHtml;
-          row.appendChild(container.firstElementChild);
-        }
-        const trailHtml = buildResearchTrailPanel(state.messages, idx);
-        if (trailHtml) {
-          const trailContainer = document.createElement('div');
-          trailContainer.innerHTML = trailHtml;
-          row.appendChild(trailContainer.firstElementChild);
-        }
+    if (m.role === 'assistant') {
+      const reasons = scoreReasonsByUrl(state.messages, idx);
+      const citationHtml = buildCitationPanel(m.content, reasons);
+      if (citationHtml) {
+        const container = document.createElement('div');
+        container.innerHTML = citationHtml;
+        row.appendChild(container.firstElementChild);
+      }
+      const trailHtml = buildResearchTrailPanel(state.messages, idx);
+      if (trailHtml) {
+        const trailContainer = document.createElement('div');
+        trailContainer.innerHTML = trailHtml;
+        row.appendChild(trailContainer.firstElementChild);
       }
     }
-
-    box.appendChild(row);
   });
 
   highlightCodeBlocks(box);

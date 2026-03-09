@@ -17,6 +17,7 @@ class SessionState:
     usage_totals: dict[str, float] | None = None
     turns: list[dict] | None = None
     uploads: list[dict] | None = None
+    research_artifacts: dict | None = None
 
 
 class SessionStore:
@@ -54,6 +55,7 @@ class SessionStore:
             usage_totals=payload.get("usage_totals"),
             turns=payload.get("turns"),
             uploads=payload.get("uploads"),
+            research_artifacts=payload.get("research_artifacts"),
         )
 
     def save(self, state: SessionState) -> None:
@@ -66,6 +68,7 @@ class SessionStore:
             "usage_totals": state.usage_totals or {},
             "turns": state.turns or [],
             "uploads": state.uploads or [],
+            "research_artifacts": state.research_artifacts or {},
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

@@ -176,6 +176,21 @@ class WebTests(unittest.TestCase):
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
 
+    def test_research_export_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/chat', json={'text': 'hello'})
+        res = client.get('/api/research/export?format=json')
+        self.assertEqual(200, res.status_code)
+        payload = res.get_json()
+        assert payload is not None
+        self.assertIn('content', payload)
+        self.assertIn('format', payload)
+
 
 if __name__ == '__main__':
     unittest.main()

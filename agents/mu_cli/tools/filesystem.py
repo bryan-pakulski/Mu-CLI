@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import textwrap
+from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import urllib.error
 import urllib.parse
@@ -660,6 +661,139 @@ class FetchPdfContextTool:
         if not text:
             return ToolResult(ok=False, output="PDF contained no extractable text")
         return ToolResult(ok=True, output=text[:max_chars])
+
+
+class ScoreSourcesTool:
+    name = "score_sources"
+    description = "Score research sources for reputation, recency, primary/secondary signal, and duplication." 
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "sources": {
+                "type": "array",
+                "description": "List of source objects with url/title/snippet/date",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "title": {"type": "string"},
+                        "snippet": {"type": "string"},
+                        "date": {"type": "string"},
+                    },
+                    "required": ["url"],
+                },
+            }
+        },
+        "required": ["sources"],
+    }
+
+    HIGH_REPUTATION = {
+        "arxiv.org": 0.86,
+        "nature.com": 0.95,
+        "science.org": 0.95,
+        "acm.org": 0.9,
+        "ieee.org": 0.9,
+        "openai.com": 0.85,
+        "github.com": 0.8,
+        "wikipedia.org": 0.72,
+    }
+
+    @staticmethod
+    def _domain(url: str) -> str:
+        parsed = urllib.parse.urlparse(url)
+        host = (parsed.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    @staticmethod
+    def _recency_score(date_text: str | None) -> float:
+        if not date_text:
+            return 0.45
+        text = str(date_text).strip()
+        year_match = re.search(r"(20\d{2})", text)
+        if not year_match:
+            return 0.45
+        year = int(year_match.group(1))
+        now_year = datetime.now(timezone.utc).year
+        age = max(0, now_year - year)
+        if age <= 1:
+            return 0.95
+        if age <= 3:
+            return 0.85
+        if age <= 6:
+            return 0.7
+        if age <= 10:
+            return 0.55
+        return 0.35
+
+    @staticmethod
+    def _primary_secondary_score(title: str, snippet: str, url: str) -> tuple[str, float]:
+        text = f"{title} {snippet}".lower()
+        domain = ScoreSourcesTool._domain(url)
+        if any(token in text for token in ["survey", "review", "overview", "blog", "news", "opinion"]):
+            return "secondary", 0.55
+        if any(token in domain for token in ["nature.com", "science.org", "arxiv.org", "acm.org", "ieee.org"]):
+            return "primary", 0.9
+        if any(token in text for token in ["paper", "dataset", "benchmark", "official"]):
+            return "primary", 0.82
+        return "secondary", 0.65
+
+    def run(self, args: dict) -> ToolResult:
+        raw_sources = args.get("sources")
+        if not isinstance(raw_sources, list) or not raw_sources:
+            return ToolResult(ok=False, output="sources must be a non-empty array")
+
+        domains: dict[str, int] = {}
+        normalized: list[dict] = []
+        for item in raw_sources:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url", "")).strip()
+            if not url.startswith("http://") and not url.startswith("https://"):
+                continue
+            title = str(item.get("title", "")).strip()
+            snippet = str(item.get("snippet", "")).strip()
+            date = str(item.get("date", "")).strip() or None
+            domain = self._domain(url)
+            domains[domain] = domains.get(domain, 0) + 1
+            normalized.append({"url": url, "title": title, "snippet": snippet, "date": date, "domain": domain})
+
+        if not normalized:
+            return ToolResult(ok=False, output="No valid source URLs provided")
+
+        scored = []
+        for source in normalized:
+            domain = source["domain"]
+            reputation = self.HIGH_REPUTATION.get(domain)
+            if reputation is None:
+                reputation = 0.62 if ".edu" in domain or ".gov" in domain else 0.5
+            recency = self._recency_score(source["date"])
+            source_type, source_type_score = self._primary_secondary_score(source["title"], source["snippet"], source["url"])
+            duplicate_count = domains.get(domain, 0)
+            duplication_penalty = 0.0 if duplicate_count <= 1 else min(0.25, 0.08 * (duplicate_count - 1))
+            score = max(0.0, min(1.0, (0.45 * reputation) + (0.3 * recency) + (0.25 * source_type_score) - duplication_penalty))
+            reason = (
+                f"Selected for {source_type} source signal, reputation≈{reputation:.2f}, "
+                f"recency≈{recency:.2f}, duplicate-domain-count={duplicate_count}."
+            )
+            scored.append(
+                {
+                    "url": source["url"],
+                    "domain": domain,
+                    "title": source["title"],
+                    "source_type": source_type,
+                    "reputation": round(reputation, 3),
+                    "recency": round(recency, 3),
+                    "duplicate_domain_count": duplicate_count,
+                    "score": round(score, 3),
+                    "reason": reason,
+                }
+            )
+
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return ToolResult(ok=True, output=json.dumps({"sources": scored}, indent=2))
 
 
 class CustomCommandTool:

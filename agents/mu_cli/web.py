@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import urllib.parse
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ from mu_cli.tools.filesystem import (
     FetchUrlContextTool,
     SearchWebContextTool,
     SearchArxivPapersTool,
+    ScoreSourcesTool,
     CustomCommandTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
@@ -66,6 +68,7 @@ class WebRuntime:
     enabled_tools: dict[str, bool]
     custom_tool_specs: list[dict]
     custom_tool_errors: list[str]
+    research_artifacts: dict[str, Any]
     approval_condition: threading.Condition = field(default_factory=threading.Condition)
     pending_approval: dict[str, Any] | None = None
 
@@ -95,7 +98,8 @@ RESEARCH_PROMPT_BASE = (
     "Prefer search_web_context/search_arxiv_papers for discovery, fetch_url_context/fetch_pdf_context for reading, "
     "and extract_links_context to follow references. "
     "When writing findings, cite claims inline with numbered references like [1] [2]. "
-    "In every research response, include a clear 'Citations' section with numbered clickable URLs used."
+    "In every research response, include a clear 'Citations' section with numbered clickable URLs used. "
+    "For each key claim, include a short confidence line (high/medium/low) with a reason."
 )
 
 
@@ -293,10 +297,110 @@ def _uploaded_context_prompt(runtime: WebRuntime) -> str | None:
     )
 
 
+def _extract_urls(text: str) -> list[str]:
+    import re
+
+    urls = re.findall(r"https?://[\w\-./?%&=+#:~;,]+[\w/#]", text or "")
+    out: list[str] = []
+    seen = set()
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
+    return out
+
+
+def _build_research_artifacts(runtime: WebRuntime) -> dict[str, Any]:
+    visited: list[str] = []
+    snippets: list[dict[str, str]] = []
+    dedup: dict[str, dict[str, Any]] = {}
+    claim_graph: dict[str, list[str]] = {}
+
+    assistant_messages = [m for m in runtime.agent.state.messages if m.role is Role.ASSISTANT]
+    tool_results = [m for m in runtime.agent.state.messages if m.role is Role.TOOL_RESULT]
+
+    for msg in tool_results:
+        urls = _extract_urls(msg.content)
+        visited.extend(urls)
+        snippet = msg.content.splitlines()[-1][:240] if msg.content else ""
+        for url in urls:
+            snippets.append({"url": url, "snippet": snippet})
+            domain = urllib.parse.urlparse(url).netloc.lower()
+            node = dedup.setdefault(url, {"url": url, "domain": domain, "count": 0})
+            node["count"] = int(node.get("count", 0)) + 1
+
+    for msg in assistant_messages:
+        text = msg.content or ""
+        if "Citations:" not in text:
+            continue
+        claims = [line.strip() for line in text.splitlines() if line.strip() and "[" in line and "]" in line and "http" not in line]
+        citations = _extract_urls(text)
+        for claim in claims[:12]:
+            claim_graph[claim] = citations
+
+    unique_visited = []
+    seen = set()
+    for url in visited:
+        if url in seen:
+            continue
+        seen.add(url)
+        unique_visited.append(url)
+
+    return {
+        "visited_urls": unique_visited,
+        "snippets": snippets[-120:],
+        "deduped_sources": list(dedup.values())[:200],
+        "claim_graph": claim_graph,
+    }
+
+
+def _validate_claim_citations(turn_messages: list[Message]) -> tuple[bool, str]:
+    import re
+
+    assistant = next((m for m in reversed(turn_messages) if m.role is Role.ASSISTANT and (m.content or "").strip()), None)
+    if assistant is None:
+        return True, "no assistant content"
+
+    text = assistant.content or ""
+    refs = [int(x) for x in re.findall(r"\[(\d+)\]", text)]
+    urls = _extract_urls(text)
+    if refs:
+        max_ref = max(refs)
+        if max_ref > len(urls):
+            return False, f"citation index [{max_ref}] has no URL mapping"
+
+    tool_text = "\n".join(m.content for m in turn_messages if m.role is Role.TOOL_RESULT)
+    missing = [url for url in urls if url not in tool_text]
+    if missing:
+        return False, f"citation URL not present in tool results: {missing[0]}"
+    if refs and "confidence per claim" not in text.lower():
+        return False, "missing 'Confidence per claim' section"
+    return True, "ok"
+
+
+def _repair_citations(runtime: WebRuntime, reason: str) -> Message:
+    prompt = (
+        "Repair your previous response to satisfy citation validation. "
+        "Rules: every [n] must map to a URL in the Citations list, each cited URL must come from tool outputs in this turn. "
+        f"Validation failure: {reason}. "
+        "Rewrite answer with a 'Confidence per claim' section and concise rationale."
+    )
+    return runtime.agent.step(prompt)
+
+
 def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
     uploaded_prompt = _uploaded_context_prompt(runtime)
+    before = len(runtime.agent.state.messages)
     if not uploaded_prompt:
-        return runtime.agent.step(text)
+        reply = runtime.agent.step(text)
+        turn_messages = runtime.agent.state.messages[before:]
+        ok, reason = _validate_claim_citations(turn_messages)
+        if runtime.research_mode and not ok:
+            runtime.traces.append(f"citation-validation-failed: {reason}; running repair")
+            reply = _repair_citations(runtime, reason)
+        runtime.research_artifacts = _build_research_artifacts(runtime)
+        return reply
 
     runtime.agent.state.messages.append(
         Message(
@@ -306,7 +410,14 @@ def _run_turn_with_uploaded_context(runtime: WebRuntime, text: str) -> Message:
         )
     )
     try:
-        return runtime.agent.step(text)
+        reply = runtime.agent.step(text)
+        turn_messages = runtime.agent.state.messages[before:]
+        ok, reason = _validate_claim_citations(turn_messages)
+        if runtime.research_mode and not ok:
+            runtime.traces.append(f"citation-validation-failed: {reason}; running repair")
+            reply = _repair_citations(runtime, reason)
+        runtime.research_artifacts = _build_research_artifacts(runtime)
+        return reply
     finally:
         runtime.agent.state.messages = [
             m for m in runtime.agent.state.messages if m.metadata.get("kind") != "uploaded_context_ephemeral"
@@ -332,6 +443,7 @@ def _persist(runtime: WebRuntime) -> None:
             usage_totals=runtime.session_usage,
             turns=runtime.session_turns,
             uploads=runtime.uploads,
+            research_artifacts=runtime.research_artifacts,
         )
     )
 
@@ -354,6 +466,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.session_usage = dict(loaded.usage_totals or _default_usage())
     runtime.session_turns = list(loaded.turns or [])
     runtime.uploads = list(loaded.uploads or [])
+    runtime.research_artifacts = dict(loaded.research_artifacts or {})
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
         if path.exists() and path.is_dir():
@@ -385,6 +498,7 @@ def create_app():
         ExtractLinksContextTool(),
         SearchWebContextTool(),
         SearchArxivPapersTool(),
+        ScoreSourcesTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
         ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),
@@ -418,6 +532,7 @@ def create_app():
         enabled_tools={tool.name: True for tool in base_tools},
         custom_tool_specs=[],
         custom_tool_errors=[],
+        research_artifacts={},
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     _refresh_tooling(runtime)
@@ -453,6 +568,7 @@ def create_app():
                 "pricing": runtime.pricing.data,
                 "uploads": runtime.uploads,
                 "pending_approval": runtime.pending_approval,
+                "research_artifacts": runtime.research_artifacts,
                 "tools": [
                     {
                         "name": tool.name,
@@ -713,6 +829,28 @@ def create_app():
         _persist(runtime)
         return jsonify({"ok": True, "removed": safe_name})
 
+    @app.get("/api/research/export")
+    def export_research():
+        fmt = str(request.args.get("format", "json")).strip().lower()
+        artifacts = runtime.research_artifacts or {}
+        if fmt == "markdown" or fmt == "md":
+            lines = ["# Research Artifacts", ""]
+            lines.append("## Visited URLs")
+            for url in artifacts.get("visited_urls", []):
+                lines.append(f"- {url}")
+            lines.append("")
+            lines.append("## Deduped Sources")
+            for item in artifacts.get("deduped_sources", []):
+                lines.append(f"- {item.get('url','')} (count={item.get('count', 0)})")
+            lines.append("")
+            lines.append("## Claim Graph")
+            for claim, urls in artifacts.get("claim_graph", {}).items():
+                lines.append(f"- {claim}")
+                for url in urls:
+                    lines.append(f"  - {url}")
+            return jsonify({"format": "markdown", "content": "\n".join(lines)})
+        return jsonify({"format": "json", "content": artifacts})
+
 
     @app.post("/api/session")
     def session_action():
@@ -736,6 +874,7 @@ def create_app():
             runtime.session_usage = _default_usage()
             runtime.session_turns = []
             runtime.uploads = []
+            runtime.research_artifacts = {}
             if runtime.agentic_planning:
                 summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
                 _inject_planning(runtime.agent, summary)

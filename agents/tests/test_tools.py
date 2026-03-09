@@ -18,6 +18,7 @@ from mu_cli.tools.filesystem import (
     ListWorkspaceFilesTool,
     SearchWebContextTool,
     SearchArxivPapersTool,
+    ScoreSourcesTool,
     WriteFileTool,
 )
 from mu_cli.workspace import WorkspaceStore
@@ -207,6 +208,17 @@ diff
         result = FetchPdfContextTool().run({"url": "example.com/file.pdf"})
         self.assertFalse(result.ok)
         self.assertIn("url must start", result.output)
+
+    def test_score_sources_tool(self) -> None:
+        result = ScoreSourcesTool().run({
+            "sources": [
+                {"url": "https://arxiv.org/abs/1234.5678", "title": "Paper", "snippet": "benchmark results", "date": "2025"},
+                {"url": "https://example.com/blog", "title": "Blog review", "snippet": "overview", "date": "2018"},
+            ]
+        })
+        self.assertTrue(result.ok, result.output)
+        self.assertIn('"sources"', result.output)
+        self.assertIn('"reason"', result.output)
 
 
 if __name__ == "__main__":

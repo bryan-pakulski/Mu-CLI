@@ -4,6 +4,7 @@ import json
 import queue
 import threading
 import urllib.parse
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,7 @@ class WebRuntime:
     research_artifacts: dict[str, Any]
     approval_condition: threading.Condition = field(default_factory=threading.Condition)
     pending_approval: dict[str, Any] | None = None
+    background_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _default_usage() -> dict[str, float]:
@@ -531,6 +533,83 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     return True
 
 
+
+
+def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
+    session_store = SessionStore(Path(".mu_cli/sessions"), session_name)
+    workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
+    runtime = WebRuntime(
+        provider=base.provider,
+        model=base.model,
+        api_key=base.api_key,
+        approval_mode=base.approval_mode,
+        system_prompt=base.system_prompt,
+        session_name=session_name,
+        workspace_path=None,
+        debug=base.debug,
+        agentic_planning=base.agentic_planning,
+        research_mode=base.research_mode,
+        workspace_store=workspace_store,
+        session_store=session_store,
+        pricing=base.pricing,
+        tools=list(base.tools),
+        agent=Agent(provider=EchoProvider(), tools=list(base.tools)),
+        traces=[],
+        session_usage=_default_usage(),
+        session_turns=[],
+        uploads=[],
+        uploads_dir=base.uploads_dir,
+        base_tools=base.base_tools,
+        enabled_tools=dict(base.enabled_tools),
+        custom_tool_specs=list(base.custom_tool_specs),
+        custom_tool_errors=list(base.custom_tool_errors),
+        research_artifacts={},
+    )
+    _refresh_tooling(runtime)
+    if not _load_session(runtime, session_name):
+        runtime.agent = _new_agent(runtime)
+        runtime.agent.add_system_prompt(runtime.system_prompt)
+        if runtime.agentic_planning:
+            _inject_planning(runtime.agent)
+        if runtime.research_mode:
+            _inject_research_prompt(runtime.agent)
+        _persist(runtime)
+    return runtime
+
+
+def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: str) -> str:
+    job_id = uuid.uuid4().hex
+    base_runtime.background_jobs[job_id] = {
+        "id": job_id,
+        "session": session_name,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "error": None,
+        "report": None,
+    }
+
+    def runner() -> None:
+        job = base_runtime.background_jobs[job_id]
+        try:
+            isolated = _build_session_runtime(base_runtime, session_name)
+            reply = _run_turn_with_uploaded_context(isolated, text)
+            report = _turn_report(isolated, text, reply.content)
+            _record_turn(isolated, report)
+            _persist(isolated)
+            job["report"] = report
+            job["status"] = "completed"
+        except Exception as exc:
+            job["error"] = str(exc)
+            job["status"] = "failed"
+        finally:
+            job["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    return job_id
+
+
 def create_app():
     from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
@@ -621,6 +700,7 @@ def create_app():
                 "uploads": runtime.uploads,
                 "pending_approval": runtime.pending_approval,
                 "research_artifacts": runtime.research_artifacts,
+                "background_jobs": list(runtime.background_jobs.values())[-50:],
                 "tools": [
                     {
                         "name": tool.name,
@@ -657,6 +737,27 @@ def create_app():
         _record_turn(runtime, report)
         _persist(runtime)
         return jsonify({"reply": asdict(reply), "report": report, "traces": runtime.traces[-50:]})
+
+    @app.post("/api/chat/background")
+    def chat_background():
+        payload = request.get_json(force=True)
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            return jsonify({"error": "text is required"}), 400
+        session_name = str(payload.get("session", runtime.session_name)).strip() or runtime.session_name
+        job_id = _start_background_turn(runtime, session_name, text)
+        return jsonify({"ok": True, "job_id": job_id, "session": session_name})
+
+    @app.get("/api/jobs")
+    def list_jobs():
+        return jsonify({"jobs": list(runtime.background_jobs.values())})
+
+    @app.get("/api/jobs/<job_id>")
+    def get_job(job_id: str):
+        job = runtime.background_jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(job)
 
     @app.post("/api/chat/stream")
     def chat_stream():
@@ -935,7 +1036,7 @@ def create_app():
             _persist(runtime)
             return jsonify({"ok": True, "session": name})
 
-        if action == "load":
+        if action in {"load", "switch"}:
             if not name:
                 return jsonify({"error": "name required"}), 400
             loaded = _load_session(runtime, name)

@@ -724,7 +724,6 @@
         <select id="sessionList" class="form-select mb-2" size="5"></select>
 
         <div class="d-flex gap-2">
-          <button id="loadSession" class="btn btn-soft btn-sm">Load</button>
           <button id="deleteSession" class="btn btn-soft btn-sm">Delete</button>
           <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
           <button id="condenseSession" class="btn btn-soft btn-sm">Condense</button>
@@ -769,6 +768,7 @@
           <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
           <div class="d-flex align-items-center gap-2 mt-2">
             <button id="send" class="btn btn-accent btn-sm">Send</button>
+            <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
             <div id="report" class="small-muted"></div>
           </div>
         </div>
@@ -1728,7 +1728,7 @@ async function refreshState() {
   syncing = false;
 }
 
-async function sendPrompt() {
+async function sendPrompt(background = false) {
   if (sending) return;
   const text = document.getElementById('prompt').value.trim();
   if (!text) return;
@@ -1749,6 +1749,14 @@ async function sendPrompt() {
   renderMessages();
 
   try {
+    if (background) {
+      const active = document.getElementById('sessionList').value || document.getElementById('sessionName').value.trim();
+      const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
+      reportEl.textContent = `background job started: ${bg.job_id}`;
+      await refreshState();
+      return;
+    }
+
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1839,12 +1847,13 @@ document.getElementById('promptAttach').addEventListener('click', (e) => {
 });
 document.getElementById('promptAttachInput').addEventListener('change', () => uploadPromptAttachmentFiles().catch((e) => alert(e.message)));
 
-document.getElementById('send').addEventListener('click', () => sendPrompt().catch((e) => alert(e.message)));
+document.getElementById('send').addEventListener('click', () => sendPrompt(false).catch((e) => alert(e.message)));
+document.getElementById('sendBackground').addEventListener('click', () => sendPrompt(true).catch((e) => alert(e.message)));
 document.getElementById('newSession').addEventListener('click', () => sessionAction('new').catch((e) => alert(e.message)));
 document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
-document.getElementById('loadSession').addEventListener('click', () => sessionAction('load').catch((e) => alert(e.message)));
 document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
 document.getElementById('condenseSession').addEventListener('click', () => sessionAction('condense').catch((e) => alert(e.message)));
+document.getElementById('sessionList').addEventListener('change', () => sessionAction('switch').catch((e) => alert(e.message)));
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
 document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
 document.getElementById('clearUploads').addEventListener('click', () => clearUploadedStore().catch((e) => alert(e.message)));
@@ -1874,13 +1883,7 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
 });
 
 hydrateThemePreference();
-refreshState().then(async () => {
-  const activeSession = document.getElementById('sessionList').value;
-  if (!state.messages.length && activeSession) {
-    await api('/api/session', 'POST', { action: 'load', name: activeSession });
-    await refreshState();
-  }
-}).catch((e) => alert(e.message));
+refreshState().catch((e) => alert(e.message));
 </script>
 </body>
 </html>

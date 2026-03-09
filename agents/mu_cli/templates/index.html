@@ -491,6 +491,8 @@
       margin-top: 6px;
     }
     .searching-indicator.show { display: inline-flex; }
+    .query-runtime { display:none; color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .query-runtime.show { display:block; }
     .searching-dot {
       width: 7px;
       height: 7px;
@@ -902,6 +904,7 @@
           </div>
           <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
           <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>Session is searching…</span></div>
+          <div id="queryRuntime" class="query-runtime">Runtime: 00:00</div>
           <div class="d-flex align-items-center gap-2 mt-2">
             <button id="send" class="btn btn-accent btn-sm">Send</button>
             <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
@@ -1073,6 +1076,7 @@ let lastApprovalPatchFingerprint = null;
 let openSessionMenuFor = null;
 let planApprovalResolver = null;
 const completedSeenSessions = new Set();
+let runtimeTick = null;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1633,6 +1637,33 @@ function activeSearchingJob() {
   return (state.backgroundJobs || []).find((j) => j.session === state.activeSession && ['running', 'awaiting_plan_approval'].includes(j.status));
 }
 
+
+function _formatRuntime(seconds) {
+  const s = Math.max(0, Math.trunc(Number(seconds || 0)));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function updateQueryRuntime() {
+  const runtimeEl = document.getElementById('queryRuntime');
+  const job = activeSearchingJob();
+  if (!runtimeEl || !job || !job.started_at) {
+    if (runtimeEl) runtimeEl.classList.remove('show');
+    return;
+  }
+  const started = Date.parse(job.started_at);
+  if (Number.isNaN(started)) {
+    runtimeEl.classList.remove('show');
+    return;
+  }
+  const seconds = (Date.now() - started) / 1000;
+  runtimeEl.textContent = `Runtime: ${_formatRuntime(seconds)}`;
+  runtimeEl.classList.add('show');
+}
+
 function updateChatBusyState() {
   const busy = !!activeSearchingJob();
   const composer = document.getElementById('chatComposer');
@@ -1645,6 +1676,7 @@ function updateChatBusyState() {
   if (prompt) prompt.disabled = busy;
   if (send) send.disabled = busy;
   if (sendBackground) sendBackground.disabled = busy;
+  updateQueryRuntime();
 }
 
 function closeAllSessionMenus() {
@@ -2054,6 +2086,7 @@ async function sendPrompt(background = false) {
           const job = await api(`/api/jobs/${bg.job_id}`);
           updateBackgroundJobInState(job);
           if (job.usage) updateUsagePanel(job.usage);
+          updateQueryRuntime();
           if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
           if (job.status === 'awaiting_plan_approval') {
             const ok = await askPlanApproval(job);
@@ -2280,6 +2313,8 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
 document.addEventListener('click', () => closeAllSessionMenus());
 hydrateThemePreference();
 refreshState().catch((e) => alert(e.message));
+if (runtimeTick) clearInterval(runtimeTick);
+runtimeTick = setInterval(() => updateQueryRuntime(), 1000);
 </script>
 </body>
 </html>

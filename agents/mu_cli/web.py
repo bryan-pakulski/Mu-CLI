@@ -541,6 +541,8 @@ def create_app():
     _inject_planning(runtime.agent)
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
+    if not _load_session(runtime, runtime.session_name):
+        _persist(runtime)
 
     @app.get("/")
     def index():

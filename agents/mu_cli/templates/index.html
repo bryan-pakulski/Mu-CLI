@@ -177,6 +177,33 @@
     }
     .msg:last-child { border-bottom: 0; }
     .role { display: none; }
+    .msg-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 10px 4px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .msg-tag {
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 999px;
+      padding: 1px 6px;
+      font-weight: 600;
+      background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+    }
+    .msg-time { opacity: .85; }
+    .msg.role-user .msg-tag {
+      border-color: color-mix(in srgb, #8ca8ff 60%, var(--border));
+      color: #3b5dc4;
+    }
+    body.dark-mode .msg.role-user .msg-tag { color: #9ab8ff; }
+    .msg.role-assistant .msg-tag {
+      border-color: color-mix(in srgb, #9aa7c5 50%, var(--border));
+      color: var(--muted);
+    }
     .bubble {
       margin-top: 0;
       padding: 8px 10px;
@@ -412,6 +439,33 @@
       padding: 16px;
       box-shadow: 0 18px 44px rgba(35, 52, 95, 0.16);
     }
+    .settings-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .settings-section {
+      border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+      border-radius: 12px;
+      padding: 10px;
+      background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+    }
+    .settings-section h6 {
+      margin: 0 0 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #4f5f85;
+    }
+    .toggles-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 10px;
+    }
+    @media (max-width: 960px) {
+      .settings-layout { grid-template-columns: 1fr; }
+      .toggles-grid { grid-template-columns: 1fr; }
+    }
 
     .dir-list button { text-align: left; width: 100%; margin-bottom: 4px; }
 
@@ -609,47 +663,58 @@
         <h5 class="m-0">Advanced settings</h5>
         <button id="closeAdvanced" class="btn btn-soft btn-sm">Close</button>
       </div>
+      <div class="settings-layout">
+        <section class="settings-section">
+          <h6>General</h6>
+          <label class="small-muted mb-1">API key (global)</label>
+          <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
 
-      <label class="small-muted mb-1">API key (global)</label>
-      <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+          <div class="toggles-grid">
+            <div class="form-check">
+              <input class="form-check-input" id="debug" type="checkbox" />
+              <label class="form-check-label small-muted" for="debug">Debug mode</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" id="agentic" type="checkbox" checked />
+              <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" id="researchMode" type="checkbox" />
+              <label class="form-check-label small-muted" for="researchMode">Research mode</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" id="darkMode" type="checkbox" />
+              <label class="form-check-label small-muted" for="darkMode">Dark mode</label>
+            </div>
+          </div>
+        </section>
 
-      <div class="form-check">
-        <input class="form-check-input" id="debug" type="checkbox" />
-        <label class="form-check-label small-muted" for="debug">Debug mode</label>
+        <section class="settings-section">
+          <h6>Pricing</h6>
+          <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
+          <label class="small-muted mb-1">Provider</label>
+          <input id="pricingProvider" class="form-control mb-2" />
+          <label class="small-muted mb-1">Model</label>
+          <input id="pricingModel" class="form-control mb-2" />
+          <label class="small-muted mb-1">Input per 1M (USD)</label>
+          <input id="pricingInput" type="number" step="0.000001" class="form-control mb-2" />
+          <label class="small-muted mb-1">Output per 1M (USD)</label>
+          <input id="pricingOutput" type="number" step="0.000001" class="form-control mb-2" />
+          <button id="savePricing" class="btn btn-accent btn-sm">Save pricing</button>
+        </section>
+
+        <section class="settings-section">
+          <h6>Tool visibility</h6>
+          <div id="toolVisibilityList" class="tool-visibility-list small-muted">Loading tools...</div>
+        </section>
+
+        <section class="settings-section">
+          <h6>Custom tools</h6>
+          <div class="small-muted custom-tools-hint mb-1">Format: [{"name":"run_tests","description":"Run tests","command":["make","test-verbose"],"mutating":false}]</div>
+          <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
+          <div id="customToolErrors" class="small-muted"></div>
+        </section>
       </div>
-      <div class="form-check">
-        <input class="form-check-input" id="agentic" type="checkbox" checked />
-        <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="researchMode" type="checkbox" />
-        <label class="form-check-label small-muted" for="researchMode">Research mode (web + papers + citations)</label>
-      </div>
-      <div class="form-check mb-3">
-        <input class="form-check-input" id="darkMode" type="checkbox" />
-        <label class="form-check-label small-muted" for="darkMode">Dark mode</label>
-      </div>
-
-      <h6 class="mb-2">Tool visibility</h6>
-      <div id="toolVisibilityList" class="tool-visibility-list mb-2 small-muted">Loading tools...</div>
-
-      <label class="small-muted mb-1">Custom tools (JSON array)</label>
-      <div class="small-muted custom-tools-hint mb-1">Format: [{"name":"run_tests","description":"Run tests","command":["make","test-verbose"],"mutating":false}]</div>
-      <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
-      <div id="customToolErrors" class="small-muted mb-3"></div>
-
-      <h6 class="mb-2">Pricing (global JSON)</h6>
-      <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
-
-      <label class="small-muted mb-1">Provider</label>
-      <input id="pricingProvider" class="form-control mb-2" />
-      <label class="small-muted mb-1">Model</label>
-      <input id="pricingModel" class="form-control mb-2" />
-      <label class="small-muted mb-1">Input per 1M (USD)</label>
-      <input id="pricingInput" type="number" step="0.000001" class="form-control mb-2" />
-      <label class="small-muted mb-1">Output per 1M (USD)</label>
-      <input id="pricingOutput" type="number" step="0.000001" class="form-control mb-2" />
-      <button id="savePricing" class="btn btn-accent btn-sm">Save pricing</button>
     </div>
   </div>
 
@@ -687,7 +752,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, uploads: [], pendingApproval: null, tools: [], customToolErrors: [] };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [] };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -715,6 +780,45 @@ async function apiForm(path, formData) {
 
 function roleClass(role) {
   return String(role || '').replace(/[^a-zA-Z0-9_\-]/g, '_');
+}
+
+function formatTimestamp(value) {
+  if (!value) return '';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function inferMessageTimestamps(messages, turns) {
+  const out = new Map();
+  const rows = Array.isArray(turns) ? turns : [];
+  let turnIdx = 0;
+  let activeTs = rows[0] ? rows[0].timestamp : '';
+
+  messages.forEach((m, idx) => {
+    const metaTs = m && m.metadata && (m.metadata.timestamp || m.metadata.ts);
+    if (metaTs) {
+      out.set(idx, String(metaTs));
+      return;
+    }
+
+    if (m.role === 'user') {
+      if (rows[turnIdx] && rows[turnIdx].timestamp) activeTs = rows[turnIdx].timestamp;
+      if (activeTs) out.set(idx, activeTs);
+      return;
+    }
+
+    if (m.role === 'assistant') {
+      if (!activeTs && rows[turnIdx] && rows[turnIdx].timestamp) activeTs = rows[turnIdx].timestamp;
+      if (activeTs) out.set(idx, activeTs);
+      if (turnIdx < rows.length - 1) {
+        turnIdx += 1;
+        activeTs = rows[turnIdx] ? rows[turnIdx].timestamp : activeTs;
+      }
+    }
+  });
+
+  return out;
 }
 
 function renderApprovalArgs(args) {
@@ -1071,6 +1175,7 @@ function shouldRenderMessage(message) {
 function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
+  const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
 
   let anchor = null;
   state.messages.forEach((m, idx) => {
@@ -1101,6 +1206,16 @@ function renderMessages() {
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
     row.innerHTML = `<div class="role">${m.role}</div>`;
+
+    if (m.role === 'user' || m.role === 'assistant') {
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      const tag = m.role === 'user' ? 'You' : 'AI';
+      const stamp = formatTimestamp(messageTimes.get(idx));
+      meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
+      row.appendChild(meta);
+    }
+
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
@@ -1403,6 +1518,7 @@ async function refreshState() {
   state.traces = s.traces;
   state.pricing = s.pricing || {};
   state.sessionUsage = s.session_usage || {};
+  state.sessionTurns = s.session_turns || [];
   state.uploads = s.uploads || [];
   state.pendingApproval = s.pending_approval || null;
   state.tools = s.tools || [];
@@ -1592,7 +1708,13 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
 });
 
 hydrateThemePreference();
-refreshState().catch((e) => alert(e.message));
+refreshState().then(async () => {
+  const activeSession = document.getElementById('sessionList').value;
+  if (!state.messages.length && activeSession) {
+    await api('/api/session', 'POST', { action: 'load', name: activeSession });
+    await refreshState();
+  }
+}).catch((e) => alert(e.message));
 </script>
 </body>
 </html>

@@ -22,7 +22,7 @@
       --assistant-soft: #f5f7ff;
       --tool-soft: #eef3ff;
       --radius: 18px;
-      --shadow: 0 12px 36px rgba(26, 45, 92, 0.08);
+      --shadow: none;
       --diff-del: #ffeef0;
       --diff-add: #eaf7ec;
       --diff-ctx: #f8faff;
@@ -42,20 +42,20 @@
       --primary-soft: #1a2a4d;
       --assistant-soft: #1a243d;
       --tool-soft: #1b2b4d;
-      --shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+      --shadow: none;
       --diff-del: #4a1f28;
       --diff-add: #1b3f2d;
       --diff-ctx: #15223c;
       --code-bg: #101a2f;
       --code-border: #2a3a5f;
       --code-text: #d9e6ff;
-      background: radial-gradient(circle at 15% -10%, #202e4d 0%, transparent 40%), linear-gradient(180deg, #111a2f 0%, var(--bg) 100%);
+      background: var(--bg);
     }
 
     html, body {
       height: 100%;
       overflow: hidden;
-      background: radial-gradient(circle at 15% -10%, #ffffff 0%, transparent 40%), linear-gradient(180deg, #f8faff 0%, var(--bg) 100%);
+      background: var(--bg);
       color: var(--text);
       font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 14px;
@@ -65,8 +65,8 @@
       height: 100vh;
       display: grid;
       grid-template-columns: 340px minmax(0,1fr);
-      gap: 12px;
-      padding: 10px;
+      gap: 0;
+      padding: 0;
       transition: grid-template-columns .2s ease;
     }
     .shell.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
@@ -82,17 +82,18 @@
     .sidebar {
       min-height: 0;
       overflow: auto;
-      padding: 14px;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: var(--surface);
-      box-shadow: var(--shadow);
+      padding: 10px 12px;
+      border: 0;
+      border-right: 1px solid var(--border);
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
     }
     .panel {
       padding: 8px 0 12px;
       border-radius: 0;
       border: 0;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 0;
       background: transparent;
       margin-bottom: 10px;
     }
@@ -106,7 +107,7 @@
       font-weight: 600;
     }
 
-    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; }
+    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: 8px 12px; }
     .topbar {
       display: flex;
       align-items: center;
@@ -142,17 +143,18 @@
     .messages {
       min-height: 0;
       overflow: auto;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--surface);
-      padding: 8px;
-      box-shadow: var(--shadow);
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 4px 0;
+      box-shadow: none;
     }
 
     .trace-wrap {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--surface);
+      border: 0;
+      border-top: 1px solid var(--border);
+      border-radius: 0;
+      background: transparent;
       overflow: hidden;
     }
     .trace-wrap > summary {
@@ -224,10 +226,10 @@
 
     .tool-toggle {
       margin-top: 4px;
-      border: 1px solid #dbe5fb;
-      border-radius: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
       overflow: hidden;
-      background: var(--tool-soft);
+      background: transparent;
     }
     .tool-toggle > summary {
       list-style: none;
@@ -244,8 +246,8 @@
     .citation-panel {
       margin-top: 8px;
       border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--surface-2);
+      border-radius: 8px;
+      background: transparent;
       overflow: hidden;
     }
     .citation-panel > summary {
@@ -264,8 +266,8 @@
     .research-trail {
       margin-top: 8px;
       border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--surface-2);
+      border-radius: 8px;
+      background: transparent;
       overflow: hidden;
     }
     .research-trail > summary {

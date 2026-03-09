@@ -13,7 +13,7 @@ from typing import Any
 from mu_cli.agent import Agent
 from mu_cli.cli import PLANNING_PROMPT_BASE
 from mu_cli.core.types import Message, Role, ToolCall, UsageStats
-from mu_cli.models import MODELS_BY_PROVIDER, get_models
+from mu_cli.models import get_model_catalog, get_models
 from mu_cli.pricing import PricingCatalog, estimate_tokens
 from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
@@ -611,7 +611,7 @@ def create_app():
                 "debug": runtime.debug,
                 "agentic_planning": runtime.agentic_planning,
                 "research_mode": runtime.research_mode,
-                "models": MODELS_BY_PROVIDER,
+                "models": get_model_catalog({"gemini": runtime.api_key}),
                 "sessions": sessions,
                 "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
                 "traces": runtime.traces[-50:],
@@ -722,7 +722,7 @@ def create_app():
 
         runtime.provider = str(payload.get("provider", runtime.provider))
         selected_model = str(payload.get("model", runtime.model))
-        available = get_models(runtime.provider)
+        available = get_models(runtime.provider, runtime.api_key)
         runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
         runtime.api_key = payload.get("api_key", runtime.api_key)
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))

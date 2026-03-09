@@ -752,7 +752,23 @@
         <h3>Session usage</h3>
         <div class="usage-grid">
           <div class="usage-chip"><div class="small-muted">Input</div><div id="usageIn">0</div></div>
-          <div class="usage-chip"><div class="small-muted">Output</div><div id="usageOut">0</div></div>
+      .sidebar {
+        display: block;
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: min(84vw, 360px);
+        z-index: 45;
+        background: var(--bg);
+        border-right: 1px solid var(--border);
+      }
+      .shell.sidebar-hidden .sidebar {
+        transform: translateX(-100%);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .main { padding: 8px 10px; }
           <div class="usage-chip"><div class="small-muted">Total</div><div id="usageTotal">0</div></div>
           <div class="usage-chip"><div class="small-muted">Cost USD</div><div id="usageCost">0.000000</div></div>
         </div>

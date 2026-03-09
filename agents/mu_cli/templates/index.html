@@ -14,7 +14,7 @@
       --bg: #f3f6fb;
       --surface: #ffffff;
       --surface-2: #f8fafd;
-      --border: #dfe5f1;
+      --border: #e9eef7;
       --text: #1b2538;
       --muted: #667089;
       --primary: #3563ff;
@@ -32,23 +32,23 @@
     }
 
     body.dark-mode {
-      --bg: #0f1628;
-      --surface: #121c31;
-      --surface-2: #16223b;
-      --border: #243150;
-      --text: #e2e9fb;
-      --muted: #9bacd8;
-      --primary: #7ea2ff;
-      --primary-soft: #1a2a4d;
-      --assistant-soft: #1a243d;
-      --tool-soft: #1b2b4d;
+      --bg: #151922;
+      --surface: #1a202b;
+      --surface-2: #1d2430;
+      --border: #2a3240;
+      --text: #e6ebf7;
+      --muted: #a8b2c9;
+      --primary: #8aa7ff;
+      --primary-soft: #212b3f;
+      --assistant-soft: #202633;
+      --tool-soft: #222b38;
       --shadow: none;
-      --diff-del: #4a1f28;
-      --diff-add: #1b3f2d;
-      --diff-ctx: #15223c;
-      --code-bg: #101a2f;
-      --code-border: #2a3a5f;
-      --code-text: #d9e6ff;
+      --diff-del: #472730;
+      --diff-add: #1f3a2c;
+      --diff-ctx: #222c3a;
+      --code-bg: #171d28;
+      --code-border: #2a3342;
+      --code-text: #dbe5fb;
       background: var(--bg);
     }
 
@@ -84,7 +84,7 @@
       overflow: auto;
       padding: 10px 12px;
       border: 0;
-      border-right: 1px solid var(--border);
+      border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
       border-radius: 0;
       background: transparent;
       box-shadow: none;
@@ -152,7 +152,7 @@
 
     .trace-wrap {
       border: 0;
-      border-top: 1px solid var(--border);
+      border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
       border-radius: 0;
       background: transparent;
       overflow: hidden;
@@ -185,7 +185,7 @@
     .bubble {
       margin-top: 0;
       padding: 8px 10px;
-      border: 1px solid var(--border);
+      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
       border-radius: 10px;
       line-height: 1.42;
       background: var(--surface);
@@ -226,7 +226,7 @@
 
     .tool-toggle {
       margin-top: 4px;
-      border: 1px solid var(--border);
+      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
       border-radius: 8px;
       overflow: hidden;
       background: transparent;
@@ -245,7 +245,7 @@
 
     .citation-panel {
       margin-top: 8px;
-      border: 1px solid var(--border);
+      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
       border-radius: 8px;
       background: transparent;
       overflow: hidden;
@@ -265,7 +265,7 @@
 
     .research-trail {
       margin-top: 8px;
-      border: 1px solid var(--border);
+      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
       border-radius: 8px;
       background: transparent;
       overflow: hidden;

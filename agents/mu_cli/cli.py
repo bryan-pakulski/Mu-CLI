@@ -7,7 +7,7 @@ from typing import Sequence
 
 from mu_cli.agent import Agent
 from mu_cli.core.types import Message, Role, ToolCall, UsageStats
-from mu_cli.models import MODELS_BY_PROVIDER, get_models
+from mu_cli.models import get_model_catalog, get_models
 from mu_cli.policy import ApprovalPolicy
 from mu_cli.pricing import PricingCatalog, estimate_tokens
 from mu_cli.providers.echo import EchoProvider
@@ -88,12 +88,14 @@ def _build_provider(name: str, model: str | None, api_key: str | None):
     raise ValueError(f"Unsupported provider: {name}")
 
 
-def _format_models(provider: str | None = None) -> str:
+def _format_models(provider: str | None = None, api_keys: dict[str, str | None] | None = None) -> str:
     if provider:
-        models = get_models(provider)
+        key = (api_keys or {}).get(provider)
+        models = get_models(provider, key)
         return f"{provider}:\n" + "\n".join(f"- {model}" for model in models)
+    catalog = get_model_catalog(api_keys)
     chunks = []
-    for key, values in MODELS_BY_PROVIDER.items():
+    for key, values in catalog.items():
         chunks.append(f"{key}:\n" + "\n".join(f"- {item}" for item in values))
     return "\n\n".join(chunks)
 
@@ -381,13 +383,13 @@ def _handle_local_command(user_input: str, context: RuntimeContext, agent: Agent
     if user_input.startswith("/models"):
         _, _, provider = user_input.partition(" ")
         provider = provider.strip() or None
-        return True, _format_models(provider), None
+        return True, _format_models(provider, {context.provider_name: context.api_key}), None
 
     if user_input.startswith("/model "):
         _, _, rest = user_input.partition(" ")
         if rest.startswith("select "):
             selected = rest[len("select ") :].strip()
-            if selected not in get_models(context.provider_name):
+            if selected not in get_models(context.provider_name, context.api_key):
                 return True, f"Unsupported model `{selected}` for provider `{context.provider_name}`", None
             context.model_name = selected
             new_agent = _make_agent(context)
@@ -464,6 +466,7 @@ def _persist_session(context: RuntimeContext, agent: Agent) -> None:
         workspace=context.workspace_path,
         approval_mode=context.approval_policy.mode,
         messages=agent.state.messages,
+        agentic_planning=context.agentic_planning_enabled,
     )
     context.session_store.save(state)
 
@@ -472,7 +475,7 @@ def run() -> int:
     args = build_parser().parse_args()
 
     if args.list_models:
-        print(_format_models())
+        print(_format_models(args.provider if args.provider else None, {"gemini": args.api_key}))
         return 0
 
     workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
@@ -496,7 +499,7 @@ def run() -> int:
     resumed = None if args.no_resume else session_store.load()
 
     provider_name = resumed.provider if resumed else args.provider
-    model_name = resumed.model if resumed else (args.model or get_models(args.provider)[0])
+    model_name = resumed.model if resumed else (args.model or get_models(provider_name, args.api_key)[0])
     workspace_path = resumed.workspace if resumed else args.workspace
     approval_mode = resumed.approval_mode if resumed else args.approval_mode
 

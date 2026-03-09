@@ -521,6 +521,122 @@
       background: transparent;
     }
 
+
+    .session-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .session-item {
+      width: 100%;
+      text-align: left;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--text);
+      padding: 7px 9px;
+      font-size: 12px;
+      transition: background .15s ease, border-color .15s ease;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-item:hover {
+      background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+      border-color: color-mix(in srgb, var(--border) 80%, transparent);
+    }
+    .session-item.active {
+      background: color-mix(in srgb, var(--surface-2) 85%, var(--primary-soft));
+      border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+    }
+    .session-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 4px;
+    }
+    .session-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+    .session-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: transparent;
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      flex: 0 0 auto;
+    }
+    .session-dot.running {
+      background: #34d399;
+      border-color: #34d399;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #34d399 20%, transparent);
+    }
+    .session-dot.waiting {
+      background: #f59e0b;
+      border-color: #f59e0b;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #f59e0b 20%, transparent);
+    }
+    .session-dot.done {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #3b82f6 20%, transparent);
+      animation: sessionDonePulse .8s ease-in-out infinite;
+    }
+    @keyframes sessionDonePulse {
+      0%,100% { opacity: .45; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.25); }
+    }
+    .session-menu-btn {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      width: 26px;
+      height: 24px;
+      line-height: 1;
+      padding: 0;
+      font-size: 15px;
+    }
+    .session-menu-btn:hover {
+      background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+      border-color: color-mix(in srgb, var(--border) 75%, transparent);
+      color: var(--text);
+    }
+    .session-menu {
+      position: fixed;
+      min-width: 136px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: 0 8px 24px rgba(0,0,0,.08);
+      padding: 4px;
+      z-index: 120;
+      display: none;
+    }
+    .session-menu.show { display: block; }
+    .session-menu button {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      border-radius: 8px;
+      font-size: 12px;
+      padding: 6px 8px;
+    }
+    .session-menu button:hover { background: var(--surface-2); }
+
     .modal-backdrop-custom {
       position: fixed;
       inset: 0;
@@ -716,19 +832,11 @@
         <h3>Sessions</h3>
         <div class="small-muted mb-2" id="activeSession">active: -</div>
 
-        <div class="input-group input-group-sm mb-2">
-          <input id="sessionName" class="form-control" placeholder="session name" />
-          <button id="newSession" class="btn btn-soft" type="button">New</button>
+        <div class="d-flex gap-2 mb-2">
+          <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
         </div>
 
-        <select id="sessionList" class="form-select mb-2" size="5"></select>
-
-        <div class="d-flex gap-2">
-          <button id="loadSession" class="btn btn-soft btn-sm">Load</button>
-          <button id="deleteSession" class="btn btn-soft btn-sm">Delete</button>
-          <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
-          <button id="condenseSession" class="btn btn-soft btn-sm">Condense</button>
-        </div>
+        <div id="sessionList" class="session-list mb-2"></div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
       </div>
 
@@ -769,11 +877,33 @@
           <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
           <div class="d-flex align-items-center gap-2 mt-2">
             <button id="send" class="btn btn-accent btn-sm">Send</button>
+            <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
             <div id="report" class="small-muted"></div>
           </div>
         </div>
       </div>
     </section>
+  </div>
+
+  <div id="planApprovalModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(760px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Approve execution plan</h5>
+        <button id="closePlanApprovalModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="planApprovalMeta" class="small-muted mb-2"></div>
+      <pre id="planApprovalContent" class="approval-value" style="max-height:360px;overflow:auto;white-space:pre-wrap;"></pre>
+      <div class="d-flex gap-2 justify-content-end mt-3">
+        <button id="planApprovalDeny" class="btn btn-soft btn-sm">Deny</button>
+        <button id="planApprovalApprove" class="btn btn-accent btn-sm">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sessionMenuOverlay" class="session-menu">
+    <button type="button" data-session-cmd="refresh">Refresh</button>
+    <button type="button" data-session-cmd="condense">Condense</button>
+    <button type="button" data-session-cmd="delete">Delete</button>
   </div>
 
   <div id="advancedModal" class="modal-backdrop-custom">
@@ -787,6 +917,8 @@
           <h6>General</h6>
           <label class="small-muted mb-1">API key (global)</label>
           <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+          <label class="small-muted mb-1">Max session runtime (seconds)</label>
+          <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
 
           <div class="toggles-grid">
             <div class="form-check">
@@ -837,6 +969,39 @@
     </div>
   </div>
 
+
+  <div id="newSessionModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(560px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Create session</h5>
+        <button id="closeNewSessionModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <label class="small-muted mb-1">Session name</label>
+      <input id="newSessionName" class="form-control mb-2" placeholder="feature-investigation" />
+      <label class="small-muted mb-1">Provider</label>
+      <select id="newSessionProvider" class="form-select mb-2"></select>
+      <label class="small-muted mb-1">Model</label>
+      <select id="newSessionModel" class="form-select mb-2"></select>
+      <label class="small-muted mb-1">Workspace (optional)</label>
+      <input id="newSessionWorkspace" class="form-control mb-2" placeholder="/path/to/workspace" />
+      <label class="small-muted mb-1">Max runtime (seconds)</label>
+      <input id="newSessionMaxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
+      <div class="d-flex gap-3 mb-3">
+        <div class="form-check">
+          <input class="form-check-input" id="newSessionAgentic" type="checkbox" checked />
+          <label class="form-check-label small-muted" for="newSessionAgentic">Agentic planning</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" id="newSessionResearch" type="checkbox" />
+          <label class="form-check-label small-muted" for="newSessionResearch">Research mode</label>
+        </div>
+      </div>
+      <div class="d-flex gap-2 justify-content-end">
+        <button id="createSessionConfirm" class="btn btn-accent btn-sm">Create session</button>
+      </div>
+    </div>
+  </div>
+
   <div id="workspaceModal" class="modal-backdrop-custom">
     <div class="modal-card">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -871,13 +1036,15 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [] };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [] };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
 let approvalPoll = null;
 let selectedDir = null;
 let lastApprovalPatchFingerprint = null;
+let openSessionMenuFor = null;
+let planApprovalResolver = null;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1418,16 +1585,75 @@ function renderTraces() {
   }).join('');
 }
 
-function renderSessions(list, active) {
-  const sel = document.getElementById('sessionList');
-  sel.innerHTML = '';
-  for (const name of list) {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    if (name === active) opt.selected = true;
-    sel.appendChild(opt);
+function sessionStatusMap() {
+  const map = {};
+  const now = Date.now() / 1000;
+  for (const job of (state.backgroundJobs || [])) {
+    const name = job.session;
+    if (!name) continue;
+    if (['running', 'awaiting_plan_approval'].includes(job.status)) {
+      map[name] = { status: job.status, job };
+      continue;
+    }
+    if (job.status === 'completed' && Number(job.completed_flash_until || 0) > now) {
+      map[name] = { status: 'done', job };
+    }
   }
+  return map;
+}
+
+function closeAllSessionMenus() {
+  const overlay = document.getElementById('sessionMenuOverlay');
+  overlay.classList.remove('show');
+  openSessionMenuFor = null;
+}
+
+function openSessionMenu(anchorBtn, sessionName) {
+  const overlay = document.getElementById('sessionMenuOverlay');
+  const rect = anchorBtn.getBoundingClientRect();
+  overlay.style.top = `${rect.bottom + 6}px`;
+  overlay.style.left = `${Math.max(8, rect.right - 136)}px`;
+  overlay.classList.add('show');
+  openSessionMenuFor = sessionName;
+}
+
+function renderSessions(list, active) {
+  const host = document.getElementById('sessionList');
+  host.innerHTML = '';
+  const statuses = sessionStatusMap();
+
+  for (const name of list) {
+    const row = document.createElement('div');
+    row.className = 'session-row';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `session-item ${name === active ? 'active' : ''}`;
+    const statusData = statuses[name] || null;
+    const status = statusData ? statusData.status : '';
+    const dotClass = status === 'awaiting_plan_approval' ? 'waiting' : (status === 'running' ? 'running' : (status === 'done' ? 'done' : ''));
+    const tip = statusData?.job?.last_step || status || 'idle';
+    btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${escapeHtml(tip)}"></span><span class="session-name">${escapeHtml(name)}</span></span>`;
+    btn.setAttribute('data-session-name', name);
+    btn.addEventListener('click', () => sessionAction('switch', name).catch((e) => alert(e.message)));
+
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'session-menu-btn';
+    menuBtn.textContent = '⋯';
+
+    menuBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const isOpen = document.getElementById('sessionMenuOverlay').classList.contains('show') && openSessionMenuFor === name;
+      closeAllSessionMenus();
+      if (!isOpen) openSessionMenu(menuBtn, name);
+    });
+
+    row.appendChild(btn);
+    row.appendChild(menuBtn);
+    host.appendChild(row);
+  }
+
   document.getElementById('activeSession').textContent = `active: ${active}`;
 }
 
@@ -1550,7 +1776,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal']
+  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -1683,6 +1909,7 @@ async function refreshState() {
   state.pendingApproval = s.pending_approval || null;
   state.tools = s.tools || [];
   state.customToolErrors = s.custom_tool_errors || [];
+  state.backgroundJobs = s.background_jobs || [];
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -1707,7 +1934,9 @@ async function refreshState() {
   }
 
   syncPricingEditor();
-  updateUsagePanel(state.sessionUsage);
+  const activeJob = (state.backgroundJobs || []).find((j) => j.session === s.session && ['running', 'awaiting_plan_approval'].includes(j.status));
+  if (activeJob && activeJob.usage) updateUsagePanel(activeJob.usage);
+  else updateUsagePanel(state.sessionUsage);
   renderSessions(s.sessions, s.session);
   renderUploads();
   renderToolSettings();
@@ -1728,7 +1957,17 @@ async function refreshState() {
   syncing = false;
 }
 
-async function sendPrompt() {
+
+function askPlanApproval(job) {
+  return new Promise((resolve) => {
+    planApprovalResolver = resolve;
+    document.getElementById('planApprovalMeta').textContent = `Session: ${job.session} · Job: ${job.id}`;
+    document.getElementById('planApprovalContent').textContent = job.plan || '(No plan text returned)';
+    showModal('planApprovalModal', true);
+  });
+}
+
+async function sendPrompt(background = false) {
   if (sending) return;
   const text = document.getElementById('prompt').value.trim();
   if (!text) return;
@@ -1749,6 +1988,32 @@ async function sendPrompt() {
   renderMessages();
 
   try {
+    if (background) {
+      const active = selectedSessionName();
+      const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
+      reportEl.textContent = `background job started: ${bg.job_id}`;
+      const pollUntilDone = async () => {
+        for (let i = 0; i < 120; i += 1) {
+          const job = await api(`/api/jobs/${bg.job_id}`);
+          if (job.usage) updateUsagePanel(job.usage);
+          if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
+          await refreshState();
+          if (job.status === 'awaiting_plan_approval') {
+            const ok = await askPlanApproval(job);
+            await api(`/api/jobs/${bg.job_id}/plan`, 'POST', { decision: ok ? 'approve' : 'deny' });
+          }
+          if (['completed', 'failed', 'timed_out'].includes(job.status)) {
+            reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      };
+      pollUntilDone().catch(() => {});
+      await refreshState();
+      return;
+    }
+
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1803,23 +2068,64 @@ async function sendPrompt() {
   }
 }
 
-function resolveSessionName(action) {
-  const selected = document.getElementById('sessionList').value;
-  const typed = document.getElementById('sessionName').value.trim();
-  if (action === 'new') return typed;
-  return selected || typed;
+function selectedSessionName() {
+  const active = document.querySelector('#sessionList .session-item.active');
+  return active ? (active.getAttribute('data-session-name') || '') : '';
 }
 
-async function sessionAction(action) {
-  const name = resolveSessionName(action);
+function wireNewSessionModels(provider) {
+  const modelSel = document.getElementById('newSessionModel');
+  modelSel.innerHTML = '';
+  for (const model of (state.models[provider] || [])) {
+    const opt = document.createElement('option');
+    opt.value = model;
+    opt.textContent = model;
+    modelSel.appendChild(opt);
+  }
+}
+
+function openNewSessionModal() {
+  const providerSel = document.getElementById('newSessionProvider');
+  providerSel.innerHTML = '';
+  Object.keys(state.models || {}).forEach((p) => {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p;
+    providerSel.appendChild(o);
+  });
+  providerSel.value = document.getElementById('provider').value || providerSel.value;
+  wireNewSessionModels(providerSel.value);
+  document.getElementById('newSessionModel').value = document.getElementById('model').value;
+  document.getElementById('newSessionWorkspace').value = document.getElementById('workspace').value || '';
+  document.getElementById('newSessionAgentic').checked = document.getElementById('agentic').checked;
+  document.getElementById('newSessionResearch').checked = document.getElementById('researchMode').checked;
+  document.getElementById('newSessionName').value = '';
+  showModal('newSessionModal', true);
+}
+
+async function createSessionFromModal() {
+  const name = document.getElementById('newSessionName').value.trim();
+  if (!name) throw new Error('Session name is required.');
+  await sessionAction('new', name, {
+    provider: document.getElementById('newSessionProvider').value,
+    model: document.getElementById('newSessionModel').value,
+    workspace: document.getElementById('newSessionWorkspace').value.trim() || null,
+    agentic_planning: document.getElementById('newSessionAgentic').checked,
+    research_mode: document.getElementById('newSessionResearch').checked,
+  });
+  showModal('newSessionModal', false);
+}
+
+async function sessionAction(action, explicitName = null, extra = {}) {
+  const name = explicitName || selectedSessionName();
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
-  await api('/api/session', 'POST', { action, name });
+  await api('/api/session', 'POST', { action, name, ...extra });
   await refreshState();
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
 
-for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'darkMode']) {
+for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'maxRuntime', 'darkMode']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();
@@ -1839,12 +2145,9 @@ document.getElementById('promptAttach').addEventListener('click', (e) => {
 });
 document.getElementById('promptAttachInput').addEventListener('change', () => uploadPromptAttachmentFiles().catch((e) => alert(e.message)));
 
-document.getElementById('send').addEventListener('click', () => sendPrompt().catch((e) => alert(e.message)));
-document.getElementById('newSession').addEventListener('click', () => sessionAction('new').catch((e) => alert(e.message)));
-document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
-document.getElementById('loadSession').addEventListener('click', () => sessionAction('load').catch((e) => alert(e.message)));
-document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
-document.getElementById('condenseSession').addEventListener('click', () => sessionAction('condense').catch((e) => alert(e.message)));
+document.getElementById('send').addEventListener('click', () => sendPrompt(false).catch((e) => alert(e.message)));
+document.getElementById('sendBackground').addEventListener('click', () => sendPrompt(true).catch((e) => alert(e.message)));
+document.getElementById('newSession').addEventListener('click', () => openNewSessionModal());
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
 document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
 document.getElementById('clearUploads').addEventListener('click', () => clearUploadedStore().catch((e) => alert(e.message)));
@@ -1858,6 +2161,9 @@ document.getElementById('browseWorkspace').addEventListener('click', () => {
   loadDirs(document.getElementById('workspace').value.trim()).catch((e) => alert(e.message));
 });
 document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
+document.getElementById('closeNewSessionModal').addEventListener('click', () => showModal('newSessionModal', false));
+document.getElementById('createSessionConfirm').addEventListener('click', () => createSessionFromModal().catch((e) => alert(e.message)));
+document.getElementById('newSessionProvider').addEventListener('change', () => wireNewSessionModels(document.getElementById('newSessionProvider').value));
 document.getElementById('loadDir').addEventListener('click', () => loadDirs(document.getElementById('dirPath').value.trim()).catch((e) => alert(e.message)));
 document.getElementById('chooseDir').addEventListener('click', () => {
   if (!selectedDir) return;
@@ -1869,18 +2175,52 @@ document.getElementById('chooseDir').addEventListener('click', () => {
 document.getElementById('approveYes').addEventListener('click', () => sendApprovalDecision('approve').catch((e) => alert(e.message)));
 document.getElementById('approveNo').addEventListener('click', () => sendApprovalDecision('deny').catch((e) => alert(e.message)));
 
+
+document.getElementById('closePlanApprovalModal').addEventListener('click', () => {
+  showModal('planApprovalModal', false);
+  if (planApprovalResolver) {
+    const resolve = planApprovalResolver;
+    planApprovalResolver = null;
+    resolve(false);
+  }
+});
+document.getElementById('planApprovalDeny').addEventListener('click', () => {
+  showModal('planApprovalModal', false);
+  if (planApprovalResolver) {
+    const resolve = planApprovalResolver;
+    planApprovalResolver = null;
+    resolve(false);
+  }
+});
+document.getElementById('planApprovalApprove').addEventListener('click', () => {
+  showModal('planApprovalModal', false);
+  if (planApprovalResolver) {
+    const resolve = planApprovalResolver;
+    planApprovalResolver = null;
+    resolve(true);
+  }
+});
+
+document.getElementById('sessionMenuOverlay').querySelectorAll('[data-session-cmd]').forEach((el) => {
+  el.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    const cmd = el.getAttribute('data-session-cmd');
+    const name = openSessionMenuFor;
+    closeAllSessionMenus();
+    if (!name) return;
+    if (cmd === 'refresh') await sessionAction('switch', name);
+    if (cmd === 'condense') await sessionAction('condense', name);
+    if (cmd === 'delete') await sessionAction('delete', name);
+  });
+});
+
 document.getElementById('prompt').addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
 });
 
+document.addEventListener('click', () => closeAllSessionMenus());
 hydrateThemePreference();
-refreshState().then(async () => {
-  const activeSession = document.getElementById('sessionList').value;
-  if (!state.messages.length && activeSession) {
-    await api('/api/session', 'POST', { action: 'load', name: activeSession });
-    await refreshState();
-  }
-}).catch((e) => alert(e.message));
+refreshState().catch((e) => alert(e.message));
 </script>
 </body>
 </html>

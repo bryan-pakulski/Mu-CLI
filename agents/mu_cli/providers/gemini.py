@@ -10,6 +10,10 @@ from mu_cli.core.types import Message, ModelResponse, Role, ToolCall, UsageStats
 
 class GeminiProvider:
     name = "gemini"
+    MODEL_ALIASES = {
+        "gemini-3.1-pro-preview": "gemini-2.5-pro",
+        "gemini-3-flash-preview": "gemini-2.5-flash",
+    }
 
     def __init__(
         self,
@@ -73,6 +77,9 @@ class GeminiProvider:
 
         return system_prompt, contents
 
+    def _resolved_model(self) -> str:
+        return self.MODEL_ALIASES.get(self.model, self.model)
+
     def generate(
         self,
         messages: list[Message],
@@ -91,8 +98,9 @@ class GeminiProvider:
             payload["tools"] = api_tools
 
         query = parse.urlencode({"key": self.api_key})
+        resolved_model = self._resolved_model()
         url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+            f"https://generativelanguage.googleapis.com/v1beta/models/{resolved_model}:generateContent"
             f"?{query}"
         )
         req = request.Request(

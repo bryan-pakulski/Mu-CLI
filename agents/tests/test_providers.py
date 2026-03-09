@@ -53,6 +53,23 @@ class ProvidersTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GeminiProvider(api_key=None)
 
+
+    @mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"}, clear=True)
+    @mock.patch("mu_cli.providers.gemini.request.urlopen")
+    def test_gemini_provider_preview_alias_uses_supported_model(self, mock_urlopen: mock.Mock) -> None:
+        mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+                "usageMetadata": {},
+            }
+        ).encode("utf-8")
+
+        provider = GeminiProvider(model="gemini-3.1-pro-preview")
+        provider.generate([Message(role=Role.USER, content="ping")])
+
+        req = mock_urlopen.call_args.args[0]
+        self.assertIn("/models/gemini-2.5-pro:generateContent", req.full_url)
+
     @mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-gemini-key"}, clear=True)
     @mock.patch("mu_cli.providers.gemini.request.urlopen")
     def test_gemini_provider_generate_parses_function_call(self, mock_urlopen: mock.Mock) -> None:

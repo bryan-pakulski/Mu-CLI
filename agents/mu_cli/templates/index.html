@@ -1573,25 +1573,50 @@ function wireModels(provider) {
     const opt = document.createElement('option');
     opt.value = model;
     opt.textContent = model;
-    modelSel.appendChild(opt);
-  }
-}
+  el.innerHTML = '';
+  state.uploads.slice(-20).forEach((upload) => {
+    const row = document.createElement('div');
+    row.className = 'upload-item';
 
-function buildSettingsPayload() {
-  return {
-    provider: document.getElementById('provider').value,
-    model: document.getElementById('model').value,
-    api_key: document.getElementById('apiKey').value || null,
-    approval_mode: document.getElementById('approval').value,
-    workspace: document.getElementById('workspace').value || null,
-    debug: document.getElementById('debug').checked,
-    agentic_planning: document.getElementById('agentic').checked,
-    research_mode: document.getElementById('researchMode').checked,
-    tool_visibility: buildToolVisibilityPayload(),
-    custom_tools: parseCustomToolsInput(),
-  };
-}
+    const info = document.createElement('span');
+    info.textContent = `${upload.name} (${upload.kind}, ${String(upload.size)} bytes)`;
 
+    const button = document.createElement('button');
+    button.className = 'btn btn-soft btn-sm';
+    button.type = 'button';
+    button.textContent = 'Remove';
+    button.addEventListener('click', () => removeUploadedFile(String(upload.name || '')).catch((e) => alert(e.message)));
+
+    row.appendChild(info);
+    row.appendChild(button);
+    el.appendChild(row);
+  host.innerHTML = '';
+  builtin.forEach((tool) => {
+    const label = document.createElement('label');
+    label.className = 'tool-visibility-row d-flex align-items-start gap-2';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'form-check-input mt-1';
+    input.setAttribute('data-tool-visible', String(tool.name || ''));
+    input.checked = !!tool.enabled;
+    input.addEventListener('change', scheduleApplySettings);
+
+    const details = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = String(tool.name || '');
+    const lineBreak = document.createElement('br');
+    const desc = document.createElement('span');
+    desc.className = 'small-muted';
+    desc.textContent = String(tool.description || '');
+
+    details.appendChild(title);
+    details.appendChild(lineBreak);
+    details.appendChild(desc);
+
+    label.appendChild(input);
+    label.appendChild(details);
+    host.appendChild(label);
 function updateThinking(show) {
   document.getElementById('thinking').style.display = show ? 'flex' : 'none';
 }

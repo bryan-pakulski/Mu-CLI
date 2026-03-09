@@ -250,6 +250,27 @@
     .citation-list { padding: 8px 10px; font-size: 12px; }
     .citation-list a { overflow-wrap: anywhere; }
 
+    .research-trail {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      overflow: hidden;
+    }
+    .research-trail > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 7px 9px;
+      color: var(--muted);
+      font-size: 11px;
+      border-bottom: 1px solid transparent;
+    }
+    .research-trail > summary::-webkit-details-marker { display: none; }
+    .research-trail[open] > summary { border-bottom-color: var(--border); }
+    .research-trail-list { padding: 8px 10px; font-size: 12px; }
+    .research-trail-item { margin-bottom: 5px; }
+    .research-trail-item:last-child { margin-bottom: 0; }
+
     .trace-line { display: block; margin-bottom: 4px; }
     .trace-model { color: #445da2; }
     .trace-request { color: #446ebb; }
@@ -914,6 +935,44 @@ function formatAssistantContentWithCitations(content, links) {
   return html;
 }
 
+function summarizeToolResult(content) {
+  const text = String(content || '');
+  const toolMatch = text.match(/\[tool=([^\]]+)\]/);
+  const statusMatch = text.match(/\[(ok|error)\]\s*([\s\S]*)$/m);
+  const toolName = toolMatch ? toolMatch[1] : 'tool';
+  const status = statusMatch ? statusMatch[1] : 'ok';
+  const detail = statusMatch ? statusMatch[2].trim() : text.trim();
+  const short = detail.length > 220 ? `${detail.slice(0, 217)}...` : detail;
+  return `${toolName}: ${status.toUpperCase()} — ${short}`;
+}
+
+function buildResearchTrailPanel(messages, assistantIndex) {
+  const steps = [];
+  for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === 'user') break;
+    if (m.role === 'tool_result') {
+      steps.push(summarizeToolResult(m.content));
+      continue;
+    }
+    if (m.role === 'assistant') {
+      const calls = (m.metadata && m.metadata.tool_calls) || [];
+      for (const call of calls) {
+        const name = String(call.name || 'tool');
+        const args = String(call.arguments || '').trim();
+        const shortArgs = args.length > 180 ? `${args.slice(0, 177)}...` : args;
+        steps.push(`requested ${name}${shortArgs ? ` with args ${shortArgs}` : ''}`);
+      }
+    }
+  }
+
+  if (!steps.length) return '';
+  const ordered = steps.reverse();
+  const items = ordered.map((step, idx) => `<div class="research-trail-item">${idx + 1}. ${escapeHtml(step)}</div>`).join('');
+  return `<details class="research-trail"><summary>🧭 Research activity log (${ordered.length} steps)</summary><div class="research-trail-list">${items}</div></details>`;
+}
+
 function highlightCodeBlocks(root) {
   if (!window.hljs) return;
   root.querySelectorAll('pre code.hljs').forEach((node) => {
@@ -936,8 +995,8 @@ function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
 
-  for (const m of state.messages) {
-    if (!shouldRenderMessage(m)) continue;
+  state.messages.forEach((m, idx) => {
+    if (!shouldRenderMessage(m)) return;
 
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
@@ -963,11 +1022,17 @@ function renderMessages() {
           container.innerHTML = citationHtml;
           row.appendChild(container.firstElementChild);
         }
+        const trailHtml = buildResearchTrailPanel(state.messages, idx);
+        if (trailHtml) {
+          const trailContainer = document.createElement('div');
+          trailContainer.innerHTML = trailHtml;
+          row.appendChild(trailContainer.firstElementChild);
+        }
       }
     }
 
     box.appendChild(row);
-  }
+  });
 
   highlightCodeBlocks(box);
 

@@ -244,6 +244,10 @@ class WebTests(unittest.TestCase):
         assert job is not None
         self.assertIn(job['status'], {'completed', 'failed', 'timed_out'})
         self.assertTrue(any(event.startswith('status: ') for event in job.get('events', [])))
+        self.assertIn('verification_policy', job)
+        self.assertIn('checkpoints', job)
+        self.assertIsInstance(job.get('checkpoints', []), list)
+        self.assertIn('answer_contract', job)
 
 
 if __name__ == '__main__':

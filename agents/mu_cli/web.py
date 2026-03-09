@@ -119,6 +119,92 @@ def _default_usage() -> dict[str, float]:
     return {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0}
 
 
+
+def _verification_policy_for_task(text: str) -> dict[str, Any]:
+    lowered = (text or "").lower()
+    checks: list[str] = []
+    task_type = "general"
+    if any(token in lowered for token in ("test", "bug", "fix", "failing")):
+        task_type = "bugfix"
+        checks.extend(["tests", "lint", "typecheck"])
+    if any(token in lowered for token in ("refactor", "cleanup", "rename")):
+        task_type = "refactor"
+        checks.extend(["tests", "lint"])
+    if any(token in lowered for token in ("security", "vuln", "dependency", "auth", "token", "secrets")):
+        task_type = "security"
+        checks.extend(["tests", "lint", "typecheck", "security_scan"])
+    if not checks:
+        checks.append("targeted_validation")
+    unique = []
+    seen = set()
+    for item in checks:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return {"task_type": task_type, "required_checks": unique}
+
+
+def _has_verification_evidence(events: list[str], required_checks: list[str]) -> tuple[bool, list[str]]:
+    haystack = "\n".join(events).lower()
+    evidence_map = {
+        "tests": ("tool-run: name=custom", "pytest", "unittest", "cargo test", "go test", "npm test"),
+        "lint": ("lint", "ruff", "eslint", "flake8", "golangci", "clippy"),
+        "typecheck": ("typecheck", "mypy", "pyright", "tsc", "microsoft/pyright"),
+        "security_scan": ("security", "bandit", "npm audit", "pip-audit", "trivy", "safety"),
+        "targeted_validation": ("tool-run:", "report", "status:"),
+    }
+    missing = []
+    for check in required_checks:
+        probes = evidence_map.get(check, (check,))
+        if not any(probe in haystack for probe in probes):
+            missing.append(check)
+    return (not missing), missing
+
+
+def _extract_latency_ms(output: str) -> int | None:
+    match = re.search(r"latency_ms=(\d+)", output or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _update_tool_reliability(runtime: WebRuntime, tool_name: str, ok: bool, latency_ms: int | None) -> None:
+    artifacts = runtime.research_artifacts
+    table = artifacts.setdefault("tool_reliability", {})
+    row = table.setdefault(tool_name, {"runs": 0, "success": 0, "fail": 0, "avg_latency_ms": 0.0, "score": 0.5})
+    row["runs"] = int(row.get("runs", 0)) + 1
+    if ok:
+        row["success"] = int(row.get("success", 0)) + 1
+    else:
+        row["fail"] = int(row.get("fail", 0)) + 1
+    if latency_ms is not None:
+        prev_avg = float(row.get("avg_latency_ms", 0.0))
+        n = max(1, int(row["runs"]))
+        row["avg_latency_ms"] = round(((prev_avg * (n - 1)) + latency_ms) / n, 2)
+    success_rate = float(row.get("success", 0)) / max(1, int(row.get("runs", 0)))
+    latency_penalty = min(0.25, (float(row.get("avg_latency_ms", 0.0)) / 4000.0))
+    row["score"] = round(max(0.0, min(1.0, success_rate - latency_penalty)), 3)
+
+
+def _tool_reliability_hint(runtime: WebRuntime) -> str:
+    table = (runtime.research_artifacts or {}).get("tool_reliability", {})
+    if not isinstance(table, dict) or not table:
+        return "No historical tool reliability data yet. Prefer targeted tools and verify outputs."
+    ranked = sorted(
+        ((name, data) for name, data in table.items() if isinstance(data, dict)),
+        key=lambda item: float(item[1].get("score", 0.0)),
+        reverse=True,
+    )
+    top = ranked[:3]
+    lines = []
+    for name, data in top:
+        lines.append(f"{name}: score={float(data.get('score', 0.0)):.2f}, runs={int(data.get('runs', 0))}")
+    return "Tool reliability preference (use higher-scored tools when equivalent): " + "; ".join(lines)
+
 def _build_provider(name: str, model: str, api_key: str | None):
     if name == "echo":
         return EchoProvider()
@@ -221,8 +307,11 @@ def _new_agent(runtime: WebRuntime) -> Agent:
 
     def on_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
         runtime.workspace_store.record_tool_run(name, args, output, ok)
+        latency_ms = _extract_latency_ms(output)
+        _update_tool_reliability(runtime, name, ok, latency_ms)
         if runtime.debug:
-            runtime.traces.append(f"tool-run: name={name} ok={ok} args={args} output={output[:200]}")
+            latency_suffix = f" latency_ms={latency_ms}" if latency_ms is not None else ""
+            runtime.traces.append(f"tool-run: name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
 
     return Agent(
         provider=provider,
@@ -700,6 +789,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0},
         "completed_flash_until": None,
         "events": [],
+        "planner_critic": None,
+        "verification_policy": _verification_policy_for_task(text),
+        "checkpoints": [],
+        "answer_contract": None,
     }
 
     def runner() -> None:
@@ -709,6 +802,11 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             isolated.debug = True
             trace_cursor = len(isolated.traces)
             deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
+            checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
+            restored_checkpoints = list(checkpoint_store.get(session_name, []))
+            if restored_checkpoints:
+                job["checkpoints"].extend(restored_checkpoints[-8:])
+                job["events"].append(f"checkpoint: restored {len(restored_checkpoints[-8:])}")
 
             if isolated.agentic_planning:
                 plan_reply = isolated.agent.step(
@@ -729,6 +827,24 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         "2) Execute required steps safely.\n"
                         "3) Summarize outcomes and next actions."
                     )
+                critic_prompt = (
+                    "Review the proposed plan for completeness, risk, and verification quality. "
+                    "Respond in exactly two lines: 'CRITIQUE: ...' and 'PLAN_OK: yes|no'.\n\n"
+                    f"Task:\n{text}\n\nProposed plan:\n{plan_text}"
+                )
+                critic_reply = isolated.agent.step(critic_prompt)
+                critic_text = (critic_reply.content or "").strip()
+                plan_ok = "plan_ok: yes" in critic_text.lower()
+                job["planner_critic"] = critic_text[:1200]
+                job["events"].append("plan: critic_passed" if plan_ok else "plan: critic_failed")
+                if not plan_ok:
+                    revise_reply = isolated.agent.step(
+                        "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'."
+                    )
+                    revised_text = (revise_reply.content or "").strip()
+                    if revised_text:
+                        plan_text = revised_text
+                        job["events"].append("plan: revised_after_critic")
                 job["plan"] = plan_text
                 job["last_step"] = "Plan drafted; waiting for approval"
                 job["events"].append("plan: drafted")
@@ -751,8 +867,20 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             max_iterations = max(2, min(60, int(isolated.max_runtime_seconds // 25) or 24))
             no_progress_streak = 0
             previous_step = None
+            replan_count = 0
+            policy = job.get("verification_policy") or _verification_policy_for_task(text)
+            job["events"].append(
+                f"verification_policy: type={policy.get('task_type')} checks={','.join(policy.get('required_checks', []))}"
+            )
+            reliability_hint = _tool_reliability_hint(isolated)
 
-            prompt = text
+            prompt = (
+                text
+                + "\n\nExecution requirements:\n"
+                + f"- {reliability_hint}\n"
+                + "- Decompose work into checkpoints and report checkpoint completion as you progress.\n"
+                + "- Final answer must include: Confidence: <high|medium|low> and Evidence: bullets linked to tool outputs."
+            )
             while datetime.now(timezone.utc).timestamp() < deadline:
                 if int(job["iterations"]) >= max_iterations:
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
@@ -788,6 +916,15 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "total_tokens": total_tokens,
                     "estimated_cost_usd": total_cost,
                 }
+                checkpoint = {
+                    "iteration": int(job["iterations"]),
+                    "status": job.get("status"),
+                    "summary": (job.get("last_step") or "")[:240],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                job["checkpoints"].append(checkpoint)
+                if len(job["checkpoints"]) > 30:
+                    job["checkpoints"] = job["checkpoints"][-30:]
 
                 if _is_plan_complete(reply.content):
                     break
@@ -797,6 +934,21 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     no_progress_streak = no_progress_streak + 1 if stalled else 0
                     if no_progress_streak >= 2:
                         job["events"].append("status: stalled_no_tool_progress")
+                        if replan_count < 2:
+                            replan_count += 1
+                            replan_reply = isolated.agent.step(
+                                "Generate REPLAN with 3-6 concise steps to recover from stall. "
+                                "Start with 'REPLAN:'. Include one immediate next tool call recommendation."
+                            )
+                            replanned = (replan_reply.content or "").strip()
+                            if replanned:
+                                job["plan"] = replanned
+                                job["events"].append(f"plan: replan_triggered #{replan_count}")
+                                prompt = (
+                                    "Execute the REPLAN. Complete the next concrete tool action now. "
+                                    "When done, return 'PLAN_COMPLETE' with Confidence and Evidence sections."
+                                )
+                                continue
                         prompt = (
                             "You appear stalled. Provide either: "
                             "(1) one concrete next tool call with arguments, or "
@@ -827,6 +979,24 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
+                required_checks = list((policy or {}).get("required_checks", []))
+                verified, missing = _has_verification_evidence(job.get("events", []), required_checks)
+                answer_text = str(job.get("last_step") or "")
+                has_confidence = "confidence:" in answer_text.lower()
+                has_evidence = "evidence:" in answer_text.lower()
+                confidence = "medium" if verified else "low"
+                contract = {
+                    "confidence": confidence,
+                    "has_confidence_section": has_confidence,
+                    "has_evidence_section": has_evidence,
+                    "verified": verified,
+                    "missing_checks": missing,
+                }
+                job["answer_contract"] = contract
+                if verified:
+                    job["events"].append("verification: passed")
+                else:
+                    job["events"].append("verification: gaps=" + ",".join(missing))
                 if _is_plan_complete(job.get("last_step")):
                     job["events"].append("status: completed")
                 else:
@@ -837,6 +1007,13 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["status"] = "failed"
             job["events"].append(f"status: failed ({exc})")
         finally:
+            try:
+                if "isolated" in locals():
+                    checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
+                    checkpoint_store[session_name] = list(job.get("checkpoints", []))[-20:]
+                    _persist(isolated)
+            except Exception:
+                pass
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
 
     thread = threading.Thread(target=runner, daemon=True)

@@ -1036,7 +1036,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [] };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '' };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -1904,6 +1904,8 @@ async function refreshState() {
   state.traces = s.traces;
   state.pricing = s.pricing || {};
   state.sessionUsage = s.session_usage || {};
+  state.sessions = s.sessions || [];
+  state.activeSession = s.session || '';
   state.sessionTurns = s.session_turns || [];
   state.uploads = s.uploads || [];
   state.pendingApproval = s.pending_approval || null;
@@ -1937,7 +1939,7 @@ async function refreshState() {
   const activeJob = (state.backgroundJobs || []).find((j) => j.session === s.session && ['running', 'awaiting_plan_approval'].includes(j.status));
   if (activeJob && activeJob.usage) updateUsagePanel(activeJob.usage);
   else updateUsagePanel(state.sessionUsage);
-  renderSessions(s.sessions, s.session);
+  renderSessions(state.sessions, state.activeSession);
   renderUploads();
   renderToolSettings();
   renderMessages();
@@ -1957,6 +1959,14 @@ async function refreshState() {
   syncing = false;
 }
 
+
+
+function updateBackgroundJobInState(job) {
+  const idx = (state.backgroundJobs || []).findIndex((item) => item.id === job.id);
+  if (idx >= 0) state.backgroundJobs[idx] = job;
+  else state.backgroundJobs.push(job);
+  renderSessions(state.sessions || [], state.activeSession || '');
+}
 
 function askPlanApproval(job) {
   return new Promise((resolve) => {
@@ -1995,9 +2005,9 @@ async function sendPrompt(background = false) {
       const pollUntilDone = async () => {
         for (let i = 0; i < 120; i += 1) {
           const job = await api(`/api/jobs/${bg.job_id}`);
+          updateBackgroundJobInState(job);
           if (job.usage) updateUsagePanel(job.usage);
           if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
-          await refreshState();
           if (job.status === 'awaiting_plan_approval') {
             const ok = await askPlanApproval(job);
             await api(`/api/jobs/${bg.job_id}/plan`, 'POST', { decision: ok ? 'approve' : 'deny' });

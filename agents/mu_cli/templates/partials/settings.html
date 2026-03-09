@@ -16,7 +16,14 @@
     <div class="kv" x-show="tab==='general'" x-transition>
       <div>Provider</div>
       <div>
-        <select name="provider">
+        <select
+          name="provider"
+          hx-get="/ui/settings"
+          hx-trigger="change"
+          hx-target="{{ target_id or '#settings-panel' }}"
+          hx-include="closest form"
+          hx-swap="innerHTML"
+        >
           {% for p in ['echo','openai','gemini'] %}
           <option value="{{ p }}" {% if p == provider %}selected{% endif %}>{{ p }}</option>
           {% endfor %}
@@ -25,12 +32,11 @@
 
       <div>Model</div>
       <div>
-        <input name="model" value="{{ model }}" list="models-list" class="mono" />
-        <datalist id="models-list">
+        <select name="model" class="mono">
           {% for m in models %}
-          <option value="{{ m }}"></option>
+          <option value="{{ m }}" {% if m == model %}selected{% endif %}>{{ m }}</option>
           {% endfor %}
-        </datalist>
+        </select>
       </div>
 
       <div>Approvals</div>
@@ -67,9 +73,9 @@
     </div>
 
     <div class="actions">
-      <button type="submit">Save settings</button>
+      <button type="submit" class="primary">Save settings</button>
       {% if saved %}<span class="muted">Saved.</span>{% endif %}
-      {% if variant == 'quick' %}<span class="muted">Use “Advanced settings” for less-used options.</span>{% endif %}
+      {% if variant == 'quick' %}<span class="muted">Advanced settings are in the modal.</span>{% endif %}
     </div>
   </form>
 </div>

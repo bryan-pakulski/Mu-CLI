@@ -19,7 +19,7 @@ class WebTests(unittest.TestCase):
 
         home = client.get('/')
         self.assertEqual(200, home.status_code)
-        self.assertIn('HTMX + Alpine', home.get_data(as_text=True))
+        self.assertIn('Reactive', home.get_data(as_text=True))
 
         legacy = client.get('/legacy')
         self.assertEqual(200, legacy.status_code)
@@ -29,7 +29,7 @@ class WebTests(unittest.TestCase):
 
         state_panel = client.get('/ui/state')
         self.assertEqual(200, state_panel.status_code)
-        self.assertIn('Session', state_panel.get_data(as_text=True))
+        self.assertIn('session=', state_panel.get_data(as_text=True))
 
         settings = client.get('/ui/settings')
         self.assertEqual(200, settings.status_code)

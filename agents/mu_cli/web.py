@@ -1231,13 +1231,15 @@ def create_app():
     def ui_settings():
         variant = str(request.args.get("variant", "quick")).strip().lower()
         target_id = "#settings-modal-content" if variant == "full" else "#settings-panel"
-        provider_models = get_models(runtime.provider, runtime.api_key)
-        if runtime.model not in provider_models and provider_models:
-            provider_models = [runtime.model] + provider_models
+        provider = str(request.args.get("provider", runtime.provider)).strip() or runtime.provider
+        provider_models = get_models(provider, runtime.api_key)
+        selected_model = str(request.args.get("model", runtime.model)).strip() or runtime.model
+        if selected_model not in provider_models and provider_models:
+            selected_model = provider_models[0]
         return render_template(
             "partials/settings.html",
-            provider=runtime.provider,
-            model=runtime.model,
+            provider=provider,
+            model=selected_model,
             models=provider_models,
             approval_mode=runtime.approval_mode,
             workspace=runtime.workspace_path or "",

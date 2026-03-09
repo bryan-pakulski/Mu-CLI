@@ -667,6 +667,22 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
 
 
 def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: str) -> str:
+    def _normalize_progress_text(value: str | None) -> str:
+        return " ".join((value or "").lower().split())
+
+    def _is_plan_complete(value: str | None) -> bool:
+        normalized = _normalize_progress_text(value)
+        return "plan_complete" in normalized or "plan complete" in normalized
+
+    def _is_stalled_response(previous: str | None, current: str | None) -> bool:
+        prev = _normalize_progress_text(previous)
+        cur = _normalize_progress_text(current)
+        if not cur:
+            return True
+        if prev and cur == prev:
+            return True
+        return cur in {"continue", "continuing", "working on it", "still working"}
+
     job_id = uuid.uuid4().hex
     base_runtime.background_jobs[job_id] = {
         "id": job_id,
@@ -732,9 +748,15 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             total_output = 0
             total_tokens = 0
             total_cost = 0.0
+            max_iterations = max(2, min(60, int(isolated.max_runtime_seconds // 25) or 24))
+            no_progress_streak = 0
+            previous_step = None
 
             prompt = text
             while datetime.now(timezone.utc).timestamp() < deadline:
+                if int(job["iterations"]) >= max_iterations:
+                    job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
+                    break
                 job["status"] = "running"
                 before_len = len(isolated.agent.state.messages)
                 reply = _run_turn_with_uploaded_context(
@@ -751,6 +773,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     if len(job["events"]) > 120:
                         job["events"] = job["events"][-120:]
                 job["last_step"] = (reply.content or "").strip()[:240]
+                stalled = _is_stalled_response(previous_step, job["last_step"])
+                previous_step = job["last_step"]
                 _record_turn(isolated, report)
                 _persist(isolated)
                 total_input += int(report["input_tokens"])
@@ -765,13 +789,23 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "estimated_cost_usd": total_cost,
                 }
 
-                if "PLAN_COMPLETE" in reply.content.upper() or "PLAN COMPLETE" in reply.content.upper():
+                if _is_plan_complete(reply.content):
                     break
                 if not isolated.agentic_planning:
                     break
                 if not had_tool_activity:
+                    no_progress_streak = no_progress_streak + 1 if stalled else 0
+                    if no_progress_streak >= 2:
+                        job["events"].append("status: stalled_no_tool_progress")
+                        prompt = (
+                            "You appear stalled. Provide either: "
+                            "(1) one concrete next tool call with arguments, or "
+                            "(2) a final response starting with 'PLAN_COMPLETE' that summarizes completed work and blockers."
+                        )
+                        continue
                     # Prevent repetitive continue loops when the model is already giving a final synthesis.
                     break
+                no_progress_streak = 0
                 prompt = (
                     "Continue executing the approved plan. Use tools as needed. "
                     "When all tasks are complete, begin your response with 'PLAN_COMPLETE'."
@@ -793,7 +827,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
-                job["events"].append("status: completed")
+                if _is_plan_complete(job.get("last_step")):
+                    job["events"].append("status: completed")
+                else:
+                    job["events"].append("status: completed_without_explicit_plan_complete")
         except Exception as exc:
             job["error"] = str(exc)
             if job.get("status") != "timed_out":

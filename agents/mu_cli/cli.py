@@ -57,7 +57,10 @@ PLANNING_PROMPT_BASE = (
     "When modifying existing files, prefer apply_patch for targeted edits; use write_file for new files or full rewrites only when explicitly requested. "
     "Before and after mutating edits, use git diff (or equivalent) to verify minimal changes. "
     "For any request involving repository state, files, diffs, or edits, tool usage is required before final claims. "
-    "For mutating actions, clearly state intended edits before executing."
+    "For mutating actions, clearly state intended edits before executing. "
+    "Use an execution loop: plan -> act -> verify -> reflect -> finish. "
+    "Do not mark tasks done until you run at least one direct verification command when possible (tests, lint, type-check, or targeted checks). "
+    "If progress stalls, explicitly surface blockers, propose a fallback, and request approval before risky recovery actions."
 )
 
 

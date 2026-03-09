@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import time
 import unittest
 
 
@@ -217,6 +218,32 @@ class WebTests(unittest.TestCase):
         after_count = len(after_state['messages'])
         self.assertLess(after_count, before_count)
         self.assertTrue(any((m.get('metadata') or {}).get('kind') == 'session_condensed_summary' for m in after_state['messages']))
+
+    def test_background_job_tracks_terminal_event(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 45})
+        res = client.post('/api/chat/background', json={'text': 'hello background'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 5
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] in {'completed', 'failed', 'timed_out'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertIn(job['status'], {'completed', 'failed', 'timed_out'})
+        self.assertTrue(any(event.startswith('status: ') for event in job.get('events', [])))
 
 
 if __name__ == '__main__':

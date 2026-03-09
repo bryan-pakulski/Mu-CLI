@@ -771,7 +771,6 @@
       .main { padding: 8px 10px; }
           <div class="usage-chip"><div class="small-muted">Total</div><div id="usageTotal">0</div></div>
           <div class="usage-chip"><div class="small-muted">Cost USD</div><div id="usageCost">0.000000</div></div>
-        </div>
       </div>
     </aside>
 
@@ -974,6 +973,22 @@ function showNotice(message) {
   showNotice._timer = setTimeout(() => el.classList.remove('show'), 3600);
 }
 
+const highlightScriptCandidates = [
+  'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js',
+  'https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/highlight.min.js',
+];
+
+function loadHighlightScript(index = 0) {
+  if (window.hljs || index >= highlightScriptCandidates.length) return;
+  const script = document.createElement('script');
+  script.src = highlightScriptCandidates[index];
+  script.async = true;
+  script.crossOrigin = 'anonymous';
+  script.onerror = () => loadHighlightScript(index + 1);
+  document.head.appendChild(script);
+}
+
+loadHighlightScript();
     }
 
     if (m.role === 'assistant') {

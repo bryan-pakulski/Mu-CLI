@@ -20,5 +20,5 @@ Deliver a reactive, lightweight UI that keeps Python/Flask in control and avoids
 ## Execution status
 - ✅ Phase 1 foundation is implemented.
 - ✅ Phase 2 started: state sidebar and trace feed now update via HTMX polling.
-- ✅ Settings port in progress: provider/model/approval/workspace/runtime/condense/debug/agentic/research settings now editable in HTMX sidebar.
-- ⏳ Remaining Phase 2 controls (approval modal and deeper parity) and Phase 3 cleanup are planned follow-up work.
+- ✅ Settings UX upgraded: quick settings remain in sidebar; less-used options moved into a tabbed advanced settings modal.
+- ⏳ Remaining Phase 2 controls (approval modal + parity polish) and Phase 3 cleanup are planned follow-up work.

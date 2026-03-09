@@ -1,12 +1,19 @@
-<div class="panel">
+<div class="panel" x-data="{ tab: 'general' }">
   <h3>Settings</h3>
+  <div class="actions" style="margin-top:0; margin-bottom:8px;">
+    <button type="button" @click="tab='general'" :class="tab==='general' ? 'primary' : ''">General</button>
+    <button type="button" @click="tab='advanced'" :class="tab==='advanced' ? 'primary' : ''">Advanced</button>
+  </div>
+
   <form
     hx-post="/ui/settings"
-    hx-target="#settings-panel"
+    hx-target="{{ target_id or '#settings-panel' }}"
     hx-swap="innerHTML"
-    hx-on::after-request="setTimeout(()=>{ const el=document.querySelector('#state-panel'); if (el) htmx.trigger(el,'refresh'); }, 50)"
+    hx-on::after-request="htmx.trigger(document.body,'refresh')"
   >
-    <div class="kv">
+    <input type="hidden" name="variant" value="{{ variant or 'quick' }}" />
+
+    <div class="kv" x-show="tab==='general'" x-transition>
       <div>Provider</div>
       <div>
         <select name="provider">
@@ -37,7 +44,9 @@
 
       <div>Workspace</div>
       <div><input name="workspace" value="{{ workspace }}" class="mono" /></div>
+    </div>
 
+    <div class="kv" x-show="tab==='advanced'" x-transition>
       <div>Runtime sec</div>
       <div><input type="number" min="60" step="30" name="max_runtime_seconds" value="{{ max_runtime_seconds }}" /></div>
 
@@ -60,6 +69,7 @@
     <div class="actions">
       <button type="submit">Save settings</button>
       {% if saved %}<span class="muted">Saved.</span>{% endif %}
+      {% if variant == 'quick' %}<span class="muted">Use “Advanced settings” for less-used options.</span>{% endif %}
     </div>
   </form>
 </div>

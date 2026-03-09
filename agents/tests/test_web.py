@@ -35,6 +35,10 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, settings.status_code)
         self.assertIn('Save settings', settings.get_data(as_text=True))
 
+        settings_full = client.get('/ui/settings?variant=full')
+        self.assertEqual(200, settings_full.status_code)
+        self.assertIn('Advanced', settings_full.get_data(as_text=True))
+
         settings_save = client.post('/ui/settings', data={
             'provider': 'echo',
             'model': 'echo',
@@ -45,6 +49,7 @@ class WebTests(unittest.TestCase):
             'max_runtime_seconds': '600',
             'condense_enabled': 'on',
             'condense_window': '10',
+            'variant': 'quick',
         })
         self.assertEqual(200, settings_save.status_code)
         self.assertIn('Saved.', settings_save.get_data(as_text=True))

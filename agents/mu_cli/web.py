@@ -1229,6 +1229,8 @@ def create_app():
 
     @app.get("/ui/settings")
     def ui_settings():
+        variant = str(request.args.get("variant", "quick")).strip().lower()
+        target_id = "#settings-modal-content" if variant == "full" else "#settings-panel"
         provider_models = get_models(runtime.provider, runtime.api_key)
         if runtime.model not in provider_models and provider_models:
             provider_models = [runtime.model] + provider_models
@@ -1245,11 +1247,15 @@ def create_app():
             max_runtime_seconds=runtime.max_runtime_seconds,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
+            variant=variant,
+            target_id=target_id,
         )
 
     @app.post("/ui/settings")
     def ui_update_settings():
         form = request.form
+        variant = str(form.get("variant", "quick")).strip().lower()
+        target_id = "#settings-modal-content" if variant == "full" else "#settings-panel"
 
         runtime.provider = str(form.get("provider", runtime.provider)).strip() or runtime.provider
         selected_model = str(form.get("model", runtime.model)).strip() or runtime.model
@@ -1304,6 +1310,8 @@ def create_app():
             max_runtime_seconds=runtime.max_runtime_seconds,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
+            variant=variant,
+            target_id=target_id,
             saved=True,
         )
 

@@ -1,7 +1,19 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
+import json
+import os
+import re
 import subprocess
+import textwrap
+from datetime import datetime, timezone
+import xml.etree.ElementTree as ET
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
+from typing import Callable
 
 from mu_cli.tools.base import ToolResult
 from mu_cli.workspace import WorkspaceStore
@@ -17,8 +29,24 @@ class ReadFileTool:
         "required": ["path"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
+    def _resolve(self, path_value: str) -> tuple[Path | None, str | None]:
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        raw = Path(path_value).expanduser()
+        target = (root / raw).resolve() if root is not None and not raw.is_absolute() else raw.resolve()
+        if root is not None:
+            root_resolved = root.resolve()
+            if target != root_resolved and root_resolved not in target.parents:
+                return None, f"Path is outside attached workspace: {target}"
+        return target, None
+
     def run(self, args: dict[str, str]) -> ToolResult:
-        path = Path(args["path"]).expanduser()
+        path, err = self._resolve(args["path"])
+        if err:
+            return ToolResult(ok=False, output=err)
+        assert path is not None
         if not path.exists():
             return ToolResult(ok=False, output=f"Path not found: {path}")
         if path.is_dir():
@@ -43,11 +71,58 @@ class WriteFileTool:
         "required": ["path", "content"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
+    def _resolve(self, path_value: str) -> tuple[Path | None, str | None]:
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        raw = Path(path_value).expanduser()
+        target = (root / raw).resolve() if root is not None and not raw.is_absolute() else raw.resolve()
+        if root is not None:
+            root_resolved = root.resolve()
+            if target != root_resolved and root_resolved not in target.parents:
+                return None, f"Path is outside attached workspace: {target}"
+        return target, None
+
     def run(self, args: dict[str, str]) -> ToolResult:
-        path = Path(args["path"]).expanduser()
+        path, err = self._resolve(args["path"])
+        if err:
+            return ToolResult(ok=False, output=err)
+        assert path is not None
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(args["content"], encoding="utf-8")
         return ToolResult(ok=True, output=f"Wrote file: {path}")
+
+
+def _normalize_patch_text(raw_patch: str) -> str:
+    patch = textwrap.dedent(str(raw_patch or ""))
+
+    fenced = re.match(r"^```(?:diff|patch)?\s*\n([\s\S]*?)\n```\s*$", patch.strip())
+    if fenced:
+        patch = fenced.group(1)
+
+    lines = patch.splitlines()
+    if lines and lines[0].strip().lower() in {"diff", "patch"}:
+        patch = "\n".join(lines[1:])
+
+    expanded: list[str] = []
+    for line in patch.splitlines():
+        if line and line[0] in {"+", "-", " "} and "\\n" in line:
+            marker = line[0]
+            parts = line[1:].split("\\n")
+            expanded.extend(f"{marker}{part}" for part in parts)
+            continue
+        expanded.append(line)
+    patch = "\n".join(expanded)
+
+    if "\\n" in patch and patch.count("\\n") > patch.count("\n"):
+        patch = patch.replace("\\n", "\n")
+    if "\\t" in patch and patch.count("\\t") > patch.count("\t"):
+        patch = patch.replace("\\t", "\t")
+
+    if patch and not patch.endswith("\n"):
+        patch += "\n"
+    return patch
 
 
 class ApplyPatchTool:
@@ -60,13 +135,18 @@ class ApplyPatchTool:
         "required": ["patch"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
     def run(self, args: dict[str, str]) -> ToolResult:
-        patch = args["patch"]
+        patch = _normalize_patch_text(args["patch"])
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
         proc = subprocess.run(
             ["git", "apply", "--whitespace=nowarn", "-"],
             input=patch,
             text=True,
             capture_output=True,
+            cwd=str(root) if root is not None else None,
         )
         if proc.returncode != 0:
             return ToolResult(ok=False, output=proc.stderr.strip() or "git apply failed")
@@ -98,13 +178,17 @@ class GitTool:
         "commit": ["git", "commit"],
     }
 
+    def __init__(self, workspace_root_getter: Callable[[], Path | None] | None = None) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
     def run(self, args: dict) -> ToolResult:
         op = str(args["operation"])
         extra = [str(item) for item in args.get("args", [])]
         if op not in self.SAFE_OPS:
             return ToolResult(ok=False, output=f"Unsupported operation: {op}")
         command = self.SAFE_OPS[op] + extra
-        proc = subprocess.run(command, text=True, capture_output=True)
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        proc = subprocess.run(command, text=True, capture_output=True, cwd=str(root) if root is not None else None)
         output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
         if proc.returncode != 0:
             return ToolResult(ok=False, output=output.strip() or "git command failed")
@@ -158,3 +242,612 @@ class GetWorkspaceFileContextTool:
         text = self.store.get_file_context(path=path, max_chars=max_chars)
         ok = not text.startswith("Path not indexed") and not text.startswith("Unable to read")
         return ToolResult(ok=ok, output=text)
+
+
+class ListUploadedContextFilesTool:
+    name = "list_uploaded_context_files"
+    description = "List files in uploaded context store for the active session."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "Maximum files to return", "default": 50},
+        },
+    }
+
+    def __init__(self, root_dir: Path, session_name_getter: Callable[[], str]) -> None:
+        self.root_dir = root_dir
+        self.session_name_getter = session_name_getter
+
+    def run(self, args: dict) -> ToolResult:
+        limit = int(args.get("limit", 50))
+        session_dir = self.root_dir / self.session_name_getter()
+        if not session_dir.exists():
+            return ToolResult(ok=True, output="No uploaded context files.")
+        files = [item for item in sorted(session_dir.iterdir(), key=lambda x: x.name.lower()) if item.is_file()]
+        if not files:
+            return ToolResult(ok=True, output="No uploaded context files.")
+        lines = [f"- {file.name} ({file.stat().st_size} bytes)" for file in files[:limit]]
+        return ToolResult(ok=True, output="\n".join(lines))
+
+
+class GetUploadedContextFileTool:
+    name = "get_uploaded_context_file"
+    description = "Read an uploaded UTF-8 context file by filename from the active session store."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Filename in uploaded context store"},
+            "max_chars": {"type": "integer", "description": "Maximum characters", "default": 8000},
+        },
+        "required": ["name"],
+    }
+
+    def __init__(self, root_dir: Path, session_name_getter: Callable[[], str]) -> None:
+        self.root_dir = root_dir
+        self.session_name_getter = session_name_getter
+
+    def run(self, args: dict) -> ToolResult:
+        name = Path(str(args["name"])).name
+        max_chars = int(args.get("max_chars", 8000))
+        session_dir = (self.root_dir / self.session_name_getter()).resolve()
+        target = (session_dir / name).resolve()
+        if session_dir not in target.parents and target != session_dir:
+            return ToolResult(ok=False, output="Invalid uploaded file path")
+        if not target.exists() or not target.is_file():
+            return ToolResult(ok=False, output=f"Uploaded file not found: {name}")
+        try:
+            text = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ToolResult(ok=False, output=f"Uploaded file is not UTF-8 text: {name}")
+        return ToolResult(ok=True, output=text[:max_chars])
+
+
+class ClearUploadedContextStoreTool:
+    name = "clear_uploaded_context_store"
+    description = "Clear all uploaded context files for the active session store."
+    mutating = True
+    schema = {"type": "object", "properties": {}}
+
+    def __init__(self, root_dir: Path, session_name_getter: Callable[[], str]) -> None:
+        self.root_dir = root_dir
+        self.session_name_getter = session_name_getter
+
+    def run(self, args: dict) -> ToolResult:
+        _ = args
+        session_dir = self.root_dir / self.session_name_getter()
+        if not session_dir.exists():
+            return ToolResult(ok=True, output="Uploaded context store already empty.")
+        removed = 0
+        for item in session_dir.iterdir():
+            if item.is_file():
+                item.unlink()
+                removed += 1
+        return ToolResult(ok=True, output=f"Removed {removed} uploaded file(s).")
+
+
+class FetchUrlContextTool:
+    name = "fetch_url_context"
+    description = "Fetch a URL and return a clean text excerpt for grounding context."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Absolute URL to fetch"},
+            "max_chars": {"type": "integer", "description": "Maximum characters", "default": 6000},
+        },
+        "required": ["url"],
+    }
+
+    @staticmethod
+    def _html_to_text(html: str) -> str:
+        text = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
+        text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def run(self, args: dict) -> ToolResult:
+        url = str(args.get("url", "")).strip()
+        max_chars = int(args.get("max_chars", 6000))
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return ToolResult(ok=False, output="url must start with http:// or https://")
+
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=12) as resp:
+                raw = resp.read()
+                content_type = str(resp.headers.get("Content-Type", "")).lower()
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"URL fetch failed: {exc}")
+
+        try:
+            body = raw.decode("utf-8", errors="replace")
+        except Exception:
+            body = raw.decode(errors="replace")
+
+        text = self._html_to_text(body) if "html" in content_type or "<html" in body.lower() else body
+        return ToolResult(ok=True, output=text[:max_chars])
+
+
+class SearchWebContextTool:
+    name = "search_web_context"
+    description = "Search the web for supporting sources (DuckDuckGo or Google CSE grounding)."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "max_results": {"type": "integer", "description": "Maximum results", "default": 5},
+            "provider": {
+                "type": "string",
+                "enum": ["auto", "duckduckgo", "google"],
+                "default": "auto",
+                "description": "Search provider (auto prefers Google when configured).",
+            },
+        },
+        "required": ["query"],
+    }
+
+    @staticmethod
+    def _request_json(url: str) -> tuple[dict | None, str | None]:
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                payload = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.URLError as exc:
+            return None, str(exc)
+        try:
+            return json.loads(payload), None
+        except json.JSONDecodeError as exc:
+            return None, f"invalid JSON response: {exc}"
+
+    def _search_google(self, query: str, max_results: int) -> ToolResult:
+        api_key = os.environ.get("GOOGLE_CSE_API_KEY", "").strip()
+        cse_id = os.environ.get("GOOGLE_CSE_ID", "").strip()
+        if not api_key or not cse_id:
+            return ToolResult(ok=False, output="Google grounding unavailable: set GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID")
+
+        q = urllib.parse.quote(query)
+        url = (
+            "https://www.googleapis.com/customsearch/v1"
+            f"?key={urllib.parse.quote(api_key)}&cx={urllib.parse.quote(cse_id)}&q={q}&num={max(1, min(max_results, 10))}"
+        )
+        data, err = self._request_json(url)
+        if err or data is None:
+            return ToolResult(ok=False, output=f"Google search failed: {err}")
+        items = data.get("items", []) if isinstance(data, dict) else []
+        if not items:
+            return ToolResult(ok=True, output="No Google results.")
+        lines = []
+        for item in items[:max_results]:
+            title = str(item.get("title", "(untitled)"))
+            link = str(item.get("link", ""))
+            snippet = str(item.get("snippet", ""))
+            lines.append(f"- {title}\n  URL: {link}\n  Snippet: {snippet}")
+        return ToolResult(ok=True, output="\n".join(lines))
+
+    def _search_duckduckgo(self, query: str, max_results: int) -> ToolResult:
+        q = urllib.parse.quote(query)
+        url = f"https://api.duckduckgo.com/?q={q}&format=json&no_html=1&skip_disambig=1"
+        data, err = self._request_json(url)
+        if err or data is None:
+            return ToolResult(ok=False, output=f"DuckDuckGo search failed: {err}")
+
+        rows: list[tuple[str, str, str]] = []
+        if isinstance(data, dict):
+            abstract = str(data.get("AbstractText", "")).strip()
+            abstract_url = str(data.get("AbstractURL", "")).strip()
+            heading = str(data.get("Heading", "")).strip() or "DuckDuckGo instant answer"
+            if abstract or abstract_url:
+                rows.append((heading, abstract_url, abstract))
+
+            topics = data.get("RelatedTopics", [])
+            if isinstance(topics, list):
+                for topic in topics:
+                    if isinstance(topic, dict) and "Topics" in topic and isinstance(topic["Topics"], list):
+                        for nested in topic["Topics"]:
+                            if isinstance(nested, dict):
+                                rows.append((str(nested.get("Text", ""))[:80], str(nested.get("FirstURL", "")), str(nested.get("Text", ""))))
+                    elif isinstance(topic, dict):
+                        rows.append((str(topic.get("Text", ""))[:80], str(topic.get("FirstURL", "")), str(topic.get("Text", ""))))
+
+        rows = [row for row in rows if row[1] or row[2]]
+        if not rows:
+            html_url = f"https://duckduckgo.com/html/?q={q}"
+            req = urllib.request.Request(html_url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    html = resp.read().decode("utf-8", errors="replace")
+            except urllib.error.URLError as exc:
+                return ToolResult(ok=False, output=f"DuckDuckGo HTML fallback failed: {exc}")
+
+            pattern = re.compile(
+                r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>[\s\S]*?'
+                r'<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
+                flags=re.IGNORECASE,
+            )
+            for match in pattern.finditer(html):
+                link = re.sub(r"\s+", " ", match.group(1)).strip()
+                title = re.sub(r"<[^>]+>", " ", match.group(2)).strip()
+                snippet = re.sub(r"<[^>]+>", " ", match.group(3)).strip()
+                link = urllib.parse.unquote(link)
+                if link.startswith("//duckduckgo.com/l/?"):
+                    parsed = urllib.parse.urlparse("https:" + link)
+                    params = urllib.parse.parse_qs(parsed.query)
+                    link = params.get("uddg", [link])[0]
+                if link.startswith("http://") or link.startswith("https://"):
+                    rows.append((title[:80], link, snippet))
+
+        if not rows:
+            return ToolResult(ok=True, output="No DuckDuckGo results.")
+
+        lines = []
+        for title, link, snippet in rows[:max_results]:
+            lines.append(f"- {title or '(result)'}\n  URL: {link}\n  Snippet: {snippet}")
+        return ToolResult(ok=True, output="\n".join(lines))
+
+    def run(self, args: dict) -> ToolResult:
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return ToolResult(ok=False, output="query is required")
+        max_results = int(args.get("max_results", 5))
+        provider = str(args.get("provider", "auto")).strip().lower() or "auto"
+
+        if provider == "google":
+            return self._search_google(query, max_results)
+        if provider == "duckduckgo":
+            return self._search_duckduckgo(query, max_results)
+
+        google = self._search_google(query, max_results)
+        if google.ok:
+            return google
+        duck = self._search_duckduckgo(query, max_results)
+        if duck.ok:
+            return duck
+        return ToolResult(ok=False, output=f"auto search failed; google={google.output}; duckduckgo={duck.output}")
+
+
+class ExtractLinksContextTool:
+    name = "extract_links_context"
+    description = "Fetch a web page and return discovered links for research follow-up."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Absolute URL to inspect"},
+            "max_results": {"type": "integer", "description": "Maximum links to return", "default": 25},
+        },
+        "required": ["url"],
+    }
+
+    def run(self, args: dict) -> ToolResult:
+        url = str(args.get("url", "")).strip()
+        max_results = int(args.get("max_results", 25))
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return ToolResult(ok=False, output="url must start with http:// or https://")
+
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"URL fetch failed: {exc}")
+
+        hrefs = re.findall(r'href=["\']([^"\']+)["\']', body, flags=re.IGNORECASE)
+        links: list[str] = []
+        for href in hrefs:
+            absolute = urllib.parse.urljoin(url, href.strip())
+            if absolute.startswith("http://") or absolute.startswith("https://"):
+                links.append(absolute)
+
+        unique: list[str] = []
+        seen = set()
+        for link in links:
+            if link in seen:
+                continue
+            seen.add(link)
+            unique.append(link)
+        if not unique:
+            return ToolResult(ok=True, output="No links found.")
+        return ToolResult(ok=True, output="\n".join(f"- {item}" for item in unique[:max_results]))
+
+
+class SearchArxivPapersTool:
+    name = "search_arxiv_papers"
+    description = "Search arXiv papers and return titles, links, and summaries."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "arXiv query"},
+            "max_results": {"type": "integer", "description": "Maximum papers", "default": 5},
+        },
+        "required": ["query"],
+    }
+
+    def run(self, args: dict) -> ToolResult:
+        query = str(args.get("query", "")).strip()
+        max_results = int(args.get("max_results", 5))
+        if not query:
+            return ToolResult(ok=False, output="query is required")
+        limit = max(1, min(max_results, 20))
+        url = (
+            "http://export.arxiv.org/api/query?"
+            f"search_query=all:{urllib.parse.quote(query)}&start=0&max_results={limit}"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+research-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                xml_text = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"arXiv search failed: {exc}")
+
+        try:
+            root = ET.fromstring(xml_text)
+        except ET.ParseError as exc:
+            return ToolResult(ok=False, output=f"arXiv XML parse failed: {exc}")
+
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        rows: list[str] = []
+        for entry in root.findall("atom:entry", ns)[:limit]:
+            title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip().replace("\n", " ")
+            summary = (entry.findtext("atom:summary", default="", namespaces=ns) or "").strip().replace("\n", " ")
+            link = ""
+            pdf = ""
+            for link_node in entry.findall("atom:link", ns):
+                href = str(link_node.attrib.get("href", ""))
+                rel = str(link_node.attrib.get("rel", ""))
+                typ = str(link_node.attrib.get("type", ""))
+                if not link and rel == "alternate":
+                    link = href
+                if not pdf and ("pdf" in typ or link_node.attrib.get("title") == "pdf"):
+                    pdf = href
+            rows.append(f"- {title}\n  URL: {link}\n  PDF: {pdf}\n  Summary: {summary}")
+
+        if not rows:
+            return ToolResult(ok=True, output="No arXiv papers found.")
+        return ToolResult(ok=True, output="\n".join(rows))
+
+
+class FetchPdfContextTool:
+    name = "fetch_pdf_context"
+    description = "Fetch a PDF URL and extract text for research grounding."
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Absolute PDF URL"},
+            "max_chars": {"type": "integer", "description": "Maximum text length", "default": 8000},
+        },
+        "required": ["url"],
+    }
+
+    def run(self, args: dict) -> ToolResult:
+        url = str(args.get("url", "")).strip()
+        max_chars = int(args.get("max_chars", 8000))
+        if not url.startswith("http://") and not url.startswith("https://"):
+            return ToolResult(ok=False, output="url must start with http:// or https://")
+
+        req = urllib.request.Request(url, headers={"User-Agent": "mu_cli/1.0 (+grounding-tool)"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                raw = resp.read()
+        except urllib.error.URLError as exc:
+            return ToolResult(ok=False, output=f"PDF fetch failed: {exc}")
+
+        module_name = "pypdf" if importlib.util.find_spec("pypdf") else "PyPDF2" if importlib.util.find_spec("PyPDF2") else ""
+        if not module_name:
+            return ToolResult(ok=False, output="PDF parsing unavailable: install pypdf or PyPDF2")
+        pdf_module = importlib.import_module(module_name)
+        PdfReader = getattr(pdf_module, "PdfReader", None)
+        if PdfReader is None:
+            return ToolResult(ok=False, output=f"PDF parsing unavailable: {module_name}.PdfReader not found")
+
+        import io
+
+        try:
+            reader = PdfReader(io.BytesIO(raw))
+            pages = [page.extract_text() or "" for page in reader.pages]
+        except Exception as exc:
+            return ToolResult(ok=False, output=f"PDF parse failed: {exc}")
+
+        text = "\n".join(pages).strip()
+        if not text:
+            return ToolResult(ok=False, output="PDF contained no extractable text")
+        return ToolResult(ok=True, output=text[:max_chars])
+
+
+class ScoreSourcesTool:
+    name = "score_sources"
+    description = "Score research sources for reputation, recency, primary/secondary signal, and duplication." 
+    mutating = False
+    schema = {
+        "type": "object",
+        "properties": {
+            "sources": {
+                "type": "array",
+                "description": "List of source objects with url/title/snippet/date",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "title": {"type": "string"},
+                        "snippet": {"type": "string"},
+                        "date": {"type": "string"},
+                    },
+                    "required": ["url"],
+                },
+            }
+        },
+        "required": ["sources"],
+    }
+
+    HIGH_REPUTATION = {
+        "arxiv.org": 0.86,
+        "nature.com": 0.95,
+        "science.org": 0.95,
+        "acm.org": 0.9,
+        "ieee.org": 0.9,
+        "openai.com": 0.85,
+        "github.com": 0.8,
+        "wikipedia.org": 0.72,
+    }
+
+    @staticmethod
+    def _domain(url: str) -> str:
+        parsed = urllib.parse.urlparse(url)
+        host = (parsed.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    @staticmethod
+    def _recency_score(date_text: str | None) -> float:
+        if not date_text:
+            return 0.45
+        text = str(date_text).strip()
+        year_match = re.search(r"(20\d{2})", text)
+        if not year_match:
+            return 0.45
+        year = int(year_match.group(1))
+        now_year = datetime.now(timezone.utc).year
+        age = max(0, now_year - year)
+        if age <= 1:
+            return 0.95
+        if age <= 3:
+            return 0.85
+        if age <= 6:
+            return 0.7
+        if age <= 10:
+            return 0.55
+        return 0.35
+
+    @staticmethod
+    def _primary_secondary_score(title: str, snippet: str, url: str) -> tuple[str, float]:
+        text = f"{title} {snippet}".lower()
+        domain = ScoreSourcesTool._domain(url)
+        if any(token in text for token in ["survey", "review", "overview", "blog", "news", "opinion"]):
+            return "secondary", 0.55
+        if any(token in domain for token in ["nature.com", "science.org", "arxiv.org", "acm.org", "ieee.org"]):
+            return "primary", 0.9
+        if any(token in text for token in ["paper", "dataset", "benchmark", "official"]):
+            return "primary", 0.82
+        return "secondary", 0.65
+
+    def run(self, args: dict) -> ToolResult:
+        raw_sources = args.get("sources")
+        if not isinstance(raw_sources, list) or not raw_sources:
+            return ToolResult(ok=False, output="sources must be a non-empty array")
+
+        domains: dict[str, int] = {}
+        normalized: list[dict] = []
+        for item in raw_sources:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url", "")).strip()
+            if not url.startswith("http://") and not url.startswith("https://"):
+                continue
+            title = str(item.get("title", "")).strip()
+            snippet = str(item.get("snippet", "")).strip()
+            date = str(item.get("date", "")).strip() or None
+            domain = self._domain(url)
+            domains[domain] = domains.get(domain, 0) + 1
+            normalized.append({"url": url, "title": title, "snippet": snippet, "date": date, "domain": domain})
+
+        if not normalized:
+            return ToolResult(ok=False, output="No valid source URLs provided")
+
+        scored = []
+        for source in normalized:
+            domain = source["domain"]
+            reputation = self.HIGH_REPUTATION.get(domain)
+            if reputation is None:
+                reputation = 0.62 if ".edu" in domain or ".gov" in domain else 0.5
+            recency = self._recency_score(source["date"])
+            source_type, source_type_score = self._primary_secondary_score(source["title"], source["snippet"], source["url"])
+            duplicate_count = domains.get(domain, 0)
+            duplication_penalty = 0.0 if duplicate_count <= 1 else min(0.25, 0.08 * (duplicate_count - 1))
+            score = max(0.0, min(1.0, (0.45 * reputation) + (0.3 * recency) + (0.25 * source_type_score) - duplication_penalty))
+            reason = (
+                f"Selected for {source_type} source signal, reputation≈{reputation:.2f}, "
+                f"recency≈{recency:.2f}, duplicate-domain-count={duplicate_count}."
+            )
+            scored.append(
+                {
+                    "url": source["url"],
+                    "domain": domain,
+                    "title": source["title"],
+                    "source_type": source_type,
+                    "reputation": round(reputation, 3),
+                    "recency": round(recency, 3),
+                    "duplicate_domain_count": duplicate_count,
+                    "score": round(score, 3),
+                    "reason": reason,
+                }
+            )
+
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return ToolResult(ok=True, output=json.dumps({"sources": scored}, indent=2))
+
+
+class CustomCommandTool:
+    """User-defined shell command tool with a fixed command template."""
+
+    mutating = True
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str,
+        command: list[str],
+        mutating: bool = True,
+        workspace_root_getter: Callable[[], Path | None] | None = None,
+    ) -> None:
+        self.name = name
+        self.description = description
+        self.command = command
+        self.mutating = mutating
+        self.workspace_root_getter = workspace_root_getter
+        self.schema = {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "description": "Optional key/value variables used in command placeholders like {path}",
+                }
+            },
+        }
+
+    def run(self, args: dict) -> ToolResult:
+        values = args.get("args", {})
+        if values is None:
+            values = {}
+        if not isinstance(values, dict):
+            return ToolResult(ok=False, output="args must be an object")
+
+        expanded: list[str] = []
+        for token in self.command:
+            try:
+                expanded.append(token.format_map({k: str(v) for k, v in values.items()}))
+            except KeyError as exc:
+                return ToolResult(ok=False, output=f"Missing placeholder value: {exc}")
+
+        root = self.workspace_root_getter() if self.workspace_root_getter else None
+        proc = subprocess.run(
+            expanded,
+            text=True,
+            capture_output=True,
+            cwd=str(root) if root is not None else None,
+            timeout=30,
+        )
+        output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+        if proc.returncode != 0:
+            return ToolResult(ok=False, output=output.strip() or "command failed")
+        return ToolResult(ok=True, output=output.strip() or "ok")

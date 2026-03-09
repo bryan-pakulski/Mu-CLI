@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mu_cli — Developer Guide</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121a33;
+      --panel-2: #182242;
+      --text: #e8ecff;
+      --muted: #b5c0f6;
+      --accent: #76a9ff;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --danger: #fb7185;
+      --code: #0f1730;
+      --border: #2a3a72;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color: var(--text);
+      background: radial-gradient(1200px 900px at 80% -10%, #1e2e65 0%, var(--bg) 42%) fixed;
+      line-height: 1.6;
+    }
+    .wrap { max-width: 1050px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+    .hero {
+      background: linear-gradient(160deg, rgba(118,169,255,.17), rgba(118,169,255,.04));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    h1, h2, h3 { line-height: 1.25; margin: 0 0 .75rem; }
+    h1 { font-size: clamp(1.4rem, 4vw, 2rem); }
+    h2 { margin-top: 2rem; font-size: 1.3rem; }
+    p, li { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem;
+    }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    code { background: rgba(255,255,255,.06); padding: .1rem .35rem; border-radius: 5px; color: #dbe6ff; }
+    pre {
+      background: var(--code);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: .9rem;
+      overflow-x: auto;
+      color: #d6e1ff;
+    }
+    .kpi { display: inline-block; border-radius: 999px; padding: .18rem .55rem; font-size: .78rem; }
+    .kpi.ok { background: rgba(74,222,128,.18); color: #bbf7d0; }
+    .kpi.warn { background: rgba(251,191,36,.2); color: #fde68a; }
+    .kpi.info { background: rgba(118,169,255,.2); color: #cfe0ff; }
+    .toc a { color: #c8d9ff; text-decoration: none; }
+    .toc a:hover { color: white; }
+    .footer { margin-top: 2rem; font-size: .9rem; color: #9eb0eb; }
+    .callout { border-left: 4px solid var(--accent); padding-left: .75rem; }
+    table {
+      width: 100%; border-collapse: collapse; margin-top: .75rem; font-size: .95rem;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    th, td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--border); }
+    th { color: #d9e4ff; background: var(--panel-2); }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <span class="kpi info">mu_cli docs</span>
+      <h1>mu_cli — Developer-in-the-Loop Assistant</h1>
+      <p>A practical guide to running, configuring, and safely using <code>mu_cli</code> with OpenAI/Gemini providers, workspace-aware context tools, approval gates, pricing reports, and session persistence.</p>
+    </section>
+
+    <section class="card toc">
+      <h2>Contents</h2>
+      <ul>
+        <li><a href="#quickstart">Quick Start</a></li>
+        <li><a href="#docker">Docker</a></li>
+        <li><a href="#core">Core Concepts</a></li>
+        <li><a href="#commands">CLI Commands</a></li>
+        <li><a href="#gui">Flask GUI</a></li>
+        <li><a href="#workspace">Workspace Context Flow</a></li>
+        <li><a href="#tools">Tooling & Approval Model</a></li>
+        <li><a href="#providers">Providers & Models</a></li>
+        <li><a href="#sessions">Sessions, Pricing, and State</a></li>
+        <li><a href="#roadmap">Roadmap</a></li>
+        <li><a href="#maintenance">Keeping this doc up to date</a></li>
+      </ul>
+    </section>
+
+    <h2 id="quickstart">Quick Start</h2>
+    <div class="grid">
+      <article class="card">
+        <h3>1) List models</h3>
+        <pre>make models</pre>
+      </article>
+      <article class="card">
+        <h3>2) Start a provider</h3>
+        <pre>make run-openai
+# or
+make run-gemini
+# or local
+make run-echo
+# GUI
+make run-web</pre>
+      </article>
+      <article class="card">
+        <h3>3) Attach workspace</h3>
+        <pre>/workspace attach /path/to/repo
+/workspace status</pre>
+      </article>
+    </div>
+
+    <h2 id="docker">Docker</h2>
+    <div class="card">
+      <p>The project includes a self-contained runtime image for local development and reproducible execution.</p>
+      <pre>make docker-build
+make docker-run-web      # serves GUI on http://localhost:5000
+make docker-run-cli      # interactive CLI
+make docker-models       # list model catalog
+
+# compose variants
+docker compose up mu-cli-web
+docker compose run --rm mu-cli-cli</pre>
+      <p>Container defaults:</p>
+      <ul>
+        <li>Persistent state mounted at <code>./.mu_cli -&gt; /app/.mu_cli</code>.</li>
+        <li>Repository mounted at <code>/workspace</code> for tooling operations.</li>
+      </ul>
+    </div>
+
+    <h2 id="core">Core Concepts</h2>
+    <div class="grid">
+      <article class="card">
+        <h3>Human-in-the-loop by design</h3>
+        <p>Mutating tools are approval-gated and transparent. The assistant is optimized for collaboration, not hidden automation.</p>
+      </article>
+      <article class="card">
+        <h3>Agentic planning prompt</h3>
+        <p>Planning guidance is auto-injected by default to make intent and tool choices explicit.</p>
+        <p>Tooling enforcement is stricter for file/repo/edit tasks: models are nudged to call tools before final claims.</p>
+      </article>
+      <article class="card">
+        <h3>Selective context</h3>
+        <p>The app indexes workspace files, but tools pull only targeted files into context on demand.</p>
+      </article>
+    </div>
+
+    <h2 id="commands">CLI Commands</h2>
+    <table>
+      <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>/help</code>, <code>/tools</code>, <code>/tool-help &lt;name&gt;</code></td><td>Discover available tools and args.</td></tr>
+        <tr><td><code>/workspace attach &lt;path&gt;</code>, <code>/workspace status</code></td><td>Attach/index repo and inspect status.</td></tr>
+        <tr><td><code>/models [provider]</code>, <code>/model select &lt;name&gt;</code></td><td>Inspect/switch model for current provider.</td></tr>
+        <tr><td><code>/approvals status</code>, <code>/approvals set ask|auto|deny</code></td><td>Control mutating tool approval behavior.</td></tr>
+        <tr><td><code>/agentic status</code></td><td>Check planning prompt mode status.</td></tr>
+        <tr><td><code>/debug status|on|off</code></td><td>Toggle debug traces for model tool-requests and tool executions.</td></tr>
+        <tr><td><code>/session status|list|new &lt;name&gt;|load &lt;name&gt;|delete &lt;name&gt;</code></td><td>Manage persistent sessions from inside the app.</td></tr>
+      </tbody>
+    </table>
+
+    
+    <h2 id="gui">Flask GUI</h2>
+    <div class="card">
+      <p>Run <code>make run-web</code> and open <code>http://localhost:5000</code>.</p>
+      <p>The GUI provides a toggleable sidebar for provider/model/settings, inline session management (status/list/new/load/delete), workspace path, approval mode, and debug toggles.</p>
+      <p>Chat, traces, and per-turn cost report are available in one view for developer-in-the-loop workflows.</p>
+      <p>Assistant output now streams incrementally in the GUI using a streaming chat endpoint, so long turns feel more responsive.</p>
+    </div>
+
+    <h2 id="roadmap">Roadmap</h2>
+    <div class="card">
+      <ol>
+        <li><strong>Tool-use reliability:</strong> keep improving enforcement and self-correction when models skip tools or provide incomplete arguments.</li>
+        <li><strong>Streaming UX:</strong> phase-level progress indicators for model time vs tool-execution time.</li>
+        <li><strong>Developer ergonomics:</strong> keyboard shortcuts, sticky context, and safer mutating-tool diff previews.</li>
+        <li><strong>Tooling depth:</strong> better repo navigation/search tools and controlled test/lint execution tools.</li>
+        <li><strong>Evaluation:</strong> regression suite for tool-use rates, latency, and end-to-end task completion.</li>
+        <li><strong>Container hardening:</strong> run as non-root, pin dependency hashes, and publish signed image tags for repeatable deployments.</li>
+        <li><strong>Ops observability:</strong> structured logs, request/turn metrics, and health/readiness endpoints for hosted usage.</li>
+      </ol>
+    </div>
+
+    <h2 id="workspace">Workspace Context Flow</h2>
+    <div class="card">
+      <p class="callout">Recommended prompt pattern:</p>
+      <pre>1) list_workspace_files(query="auth")
+2) get_workspace_file_context(path="src/auth/service.py")
+3) propose change plan
+4) (optional) apply write/patch tools with approval</pre>
+      <p>The index respects <code>.gitignore</code> and applies simple secret filtering for safer defaults.</p>
+    </div>
+
+    <h2 id="tools">Tooling & Approval Model</h2>
+    <div class="grid">
+      <article class="card">
+        <h3>Read-only tools <span class="kpi ok">safe</span></h3>
+        <ul>
+          <li><code>read_file</code></li>
+          <li><code>list_workspace_files</code></li>
+          <li><code>get_workspace_file_context</code></li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>Mutating tools <span class="kpi warn">approval-gated</span></h3>
+        <ul>
+          <li><code>write_file</code></li>
+          <li><code>apply_patch</code></li>
+          <li><code>git</code> (constrained operations)</li>
+        </ul>
+      </article>
+    </div>
+
+    <h2 id="providers">Providers & Models</h2>
+    <div class="card">
+      <p>Supported providers: <code>echo</code>, <code>openai</code>, <code>gemini</code>.</p>
+      <p>Use runtime flags:</p>
+      <pre>--provider openai --model gpt-4o-mini
+--provider gemini --model gemini-2.0-flash</pre>
+      <p>Tool-calling is native for OpenAI/Gemini where supported.</p>
+    </div>
+
+    <h2 id="sessions">Sessions, Pricing, and State</h2>
+    <div class="card">
+      <p><strong>Debug mode:</strong> start with <code>--debug</code> or toggle with <code>/debug on</code> and <code>/debug off</code>.</p>
+      <p>When enabled, you see model tool requests (name/args/id) and tool execution traces/output previews.</p>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <h3>Session persistence</h3>
+        <p>Stored in <code>.mu_cli/sessions/&lt;session&gt;.json</code>. Resume is on by default. Disable with <code>--no-resume</code>.</p>
+      </article>
+      <article class="card">
+        <h3>Workspace memory</h3>
+        <p>Workspace index + tool-run history are saved under <code>.mu_cli/workspaces/</code>.</p>
+      </article>
+      <article class="card">
+        <h3>Cost report</h3>
+        <p>Each turn prints input/output/total token usage with estimated cost from <code>.mu_cli/pricing.json</code>.</p>
+      </article>
+    </div>
+
+    <h2 id="maintenance">Keeping this doc up to date</h2>
+    <div class="card">
+      <p><strong>Rule:</strong> Any change to CLI commands, tools, provider behavior, session/pricing/workspace flow must update this <code>doco.html</code> in the same PR.</p>
+      <ul>
+        <li>Update command table and quickstart snippets.</li>
+        <li>Update tool list and approval behavior section.</li>
+        <li>Update provider/model notes when catalog changes.</li>
+      </ul>
+      <p class="footer">Last refreshed for current implementation baseline.</p>
+    </div>
+  </main>
+</body>
+</html>

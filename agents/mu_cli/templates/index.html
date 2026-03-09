@@ -1,0 +1,1886 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mu_cli GUI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+  <link id="hljsTheme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" />
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-2: #f3f4f6;
+      --border: #e4e7eb;
+      --text: #20242b;
+      --muted: #6b7280;
+      --primary: #4b5563;
+      --primary-soft: #eef1f4;
+      --assistant-soft: #f4f5f7;
+      --tool-soft: #f0f2f5;
+      --radius: 18px;
+      --shadow: none;
+      --diff-del: #f2eded;
+      --diff-add: #edf3ef;
+      --diff-ctx: #f4f6f8;
+      --code-bg: #f3f5f7;
+      --code-border: #dde2e8;
+      --code-text: #3b4250;
+    }
+
+    body.dark-mode {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface-2: #252525;
+      --border: #343434;
+      --text: #e6e1e5;
+      --muted: #b0a9b5;
+      --primary: #bb86fc;
+      --primary-soft: #2d2437;
+      --assistant-soft: #2a2432;
+      --tool-soft: #223133;
+      --shadow: none;
+      --diff-del: #3a2a31;
+      --diff-add: #263a33;
+      --diff-ctx: #2a2a2a;
+      --code-bg: #202124;
+      --code-border: #3a3a3a;
+      --code-text: #ddd8dd;
+      background: var(--bg);
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    .shell {
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 340px minmax(0,1fr);
+      gap: 0;
+      padding: 0;
+      transition: grid-template-columns .2s ease;
+    }
+    .shell.modal-active .sidebar,
+    .shell.modal-active .main {
+      filter: blur(3px);
+      transition: filter .16s ease;
+      pointer-events: none;
+      user-select: none;
+    }
+    .shell.sidebar-hidden { grid-template-columns: 0 minmax(0,1fr); }
+    .shell.sidebar-hidden .sidebar {
+      transform: translateX(-16px);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .glass {
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    .sidebar {
+      min-height: 0;
+      overflow: auto;
+      padding: 10px 12px;
+      border: 0;
+      border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      transform: translateX(0);
+      opacity: 1;
+      transition: transform .22s ease, opacity .22s ease;
+    }
+    .panel {
+      padding: 10px 0 12px;
+      border-radius: 0;
+      border: 0;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+      background: transparent;
+      margin-bottom: 8px;
+    }
+    .panel:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: 8px 12px; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 2px 8px;
+      margin-bottom: 4px;
+      border-radius: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .title { font-size: 14px; font-weight: 700; letter-spacing: .01em; }
+    .pill {
+      margin-left: auto;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 8px;
+      color: var(--muted);
+      font-size: 10px;
+      background: var(--surface-2);
+    }
+    body.dark-mode .pill {
+      border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+      color: color-mix(in srgb, var(--text) 88%, var(--muted));
+    }
+
+    .chat-layout {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: minmax(0,1fr) auto auto;
+      gap: 7px;
+      padding: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    .messages {
+      min-height: 0;
+      overflow: auto;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 4px 0;
+      box-shadow: none;
+    }
+
+    .trace-wrap {
+      border: 0;
+      border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      border-radius: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+    .trace-wrap > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 6px 10px;
+      color: var(--muted);
+      border-bottom: 1px solid transparent;
+      font-size: 11px;
+    }
+    .trace-wrap[open] > summary { border-bottom-color: var(--border); }
+    .trace-wrap > summary::-webkit-details-marker { display: none; }
+    .trace { max-height: 120px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
+
+    .msg {
+      margin: 0 auto;
+      max-width: 900px;
+      padding: 5px 0 7px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+    }
+    .msg:last-child { border-bottom: 0; }
+    .role { display: none; }
+    .msg-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 10px 4px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .msg-tag {
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 999px;
+      padding: 1px 6px;
+      font-weight: 600;
+      background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+    }
+    .msg-time { opacity: .85; }
+    .msg.role-user .msg-tag {
+      border-color: color-mix(in srgb, var(--border) 85%, var(--muted));
+      color: var(--muted);
+    }
+    body.dark-mode .msg.role-user .msg-tag { color: var(--muted); }
+    .msg.role-assistant .msg-tag {
+      border-color: color-mix(in srgb, var(--border) 80%, var(--muted));
+      color: var(--muted);
+    }
+    .bubble {
+      margin-top: 0;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 0;
+      line-height: 1.42;
+      background: transparent;
+      animation: bubbleIn .18s ease-out;
+    }
+    @keyframes bubbleIn { from { opacity: .0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .msg.role-user .bubble { background: transparent; }
+    .msg.role-assistant .bubble { background: transparent; }
+
+    .bubble p { margin: 0 0 8px; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble ul, .bubble ol { margin: 0 0 8px 22px; padding: 0; }
+    .bubble li { margin: 0 0 4px; }
+    .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 0 0 8px; font-size: 1em; font-weight: 700; }
+    .bubble blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid var(--border); color: var(--muted); }
+    .bubble a { color: color-mix(in srgb, var(--text) 72%, var(--muted)); text-decoration: underline; }
+    body.dark-mode .bubble a { color: color-mix(in srgb, var(--text) 78%, var(--muted)); }
+    .bubble code {
+      background: var(--surface-2);
+      color: color-mix(in srgb, var(--text) 80%, var(--muted));
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .bubble pre {
+      margin: 8px 0;
+      padding: 0;
+      border-radius: 10px;
+      border: 1px solid var(--code-border);
+      background: var(--code-bg);
+      overflow-x: auto;
+      white-space: pre;
+      font-size: 12px;
+    }
+    .code-block-wrap {
+      position: relative;
+      margin: 8px 0;
+    }
+    .code-block-wrap pre { margin: 0; }
+    .copy-code-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+      color: var(--muted);
+      border-radius: 8px;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .copy-code-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--border) 80%, var(--muted)); }
+    body.dark-mode .copy-code-btn { background: color-mix(in srgb, var(--surface) 85%, var(--surface-2)); }
+    .bubble pre code {
+      display: block;
+      background: transparent;
+      color: var(--code-text);
+      padding: 12px;
+      border-radius: 0;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .tool-inline {
+      font-size: 10px;
+      color: var(--muted);
+      margin: 1px 0 0 10px;
+      white-space: pre-wrap;
+      opacity: .9;
+    }
+    .tool-inline.call { color: var(--muted); }
+    .tool-inline.result { color: var(--muted); }
+    .typing-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 16px;
+      margin: 0;
+    }
+    .typing-dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--muted) 85%, transparent);
+      animation: typingPulse 1s infinite ease-in-out;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .14s; }
+    .typing-dots span:nth-child(3) { animation-delay: .28s; }
+    @keyframes typingPulse {
+      0%, 80%, 100% { transform: translateY(0); opacity: .35; }
+      40% { transform: translateY(-2px); opacity: .95; }
+    }
+
+    .citation-panel {
+      margin-top: 8px;
+      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+      border-radius: 8px;
+      background: transparent;
+      overflow: hidden;
+    }
+    .citation-panel > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 6px 9px;
+      color: var(--muted);
+      font-size: 10px;
+      border-bottom: 1px solid transparent;
+    }
+    .citation-panel > summary::-webkit-details-marker { display: none; }
+    .citation-panel[open] > summary { border-bottom-color: var(--border); }
+    .citation-list { padding: 7px 9px; font-size: 11px; }
+    .citation-list a { overflow-wrap: anywhere; }
+
+    .research-trail {
+      margin-top: 8px;
+      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+      border-radius: 8px;
+      background: transparent;
+      overflow: hidden;
+    }
+    .research-trail > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 6px 9px;
+      color: var(--muted);
+      font-size: 10px;
+      border-bottom: 1px solid transparent;
+    }
+    .research-trail > summary::-webkit-details-marker { display: none; }
+    .research-trail[open] > summary { border-bottom-color: var(--border); }
+    .research-trail-list { padding: 7px 9px; font-size: 11px; }
+    .research-trail-item { margin-bottom: 5px; }
+    .research-trail-item:last-child { margin-bottom: 0; }
+
+    .trace-line { display: block; margin-bottom: 4px; }
+    .trace-model { color: var(--muted); }
+    .trace-request { color: var(--muted); }
+    .trace-run { color: var(--muted); }
+
+    .form-control, .form-select {
+      font-size: 13px;
+      border-radius: 10px;
+      border-color: var(--border);
+      color: var(--text);
+      background: var(--surface);
+      box-shadow: none;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: color-mix(in srgb, var(--text) 24%, var(--border));
+      box-shadow: 0 0 0 .18rem color-mix(in srgb, var(--primary) 14%, transparent);
+    }
+
+    body.dark-mode .form-control,
+    body.dark-mode .form-select,
+    body.dark-mode textarea,
+    body.dark-mode input,
+    body.dark-mode select {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border);
+      caret-color: var(--text);
+    }
+    body.dark-mode .form-control:focus,
+    body.dark-mode .form-select:focus,
+    body.dark-mode textarea:focus,
+    body.dark-mode input:focus,
+    body.dark-mode select:focus {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+      box-shadow: 0 0 0 .18rem color-mix(in srgb, var(--primary) 20%, transparent);
+    }
+    body.dark-mode .form-control::placeholder,
+    body.dark-mode textarea::placeholder,
+    body.dark-mode input::placeholder {
+      color: color-mix(in srgb, var(--muted) 88%, transparent);
+    }
+    body.dark-mode input:-webkit-autofill,
+    body.dark-mode input:-webkit-autofill:hover,
+    body.dark-mode input:-webkit-autofill:focus,
+    body.dark-mode textarea:-webkit-autofill,
+    body.dark-mode select:-webkit-autofill {
+      -webkit-box-shadow: 0 0 0 1000px var(--surface-2) inset;
+      -webkit-text-fill-color: var(--text);
+      caret-color: var(--text);
+      transition: background-color 99999s ease-in-out 0s;
+    }
+
+    .btn-soft {
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: var(--surface);
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .btn-soft:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--border) 85%, var(--muted)); }
+
+    .btn-accent {
+      border: 1px solid color-mix(in srgb, var(--border) 70%, var(--muted));
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: none;
+    }
+    body.dark-mode .btn-accent {
+      border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+      background: color-mix(in srgb, var(--surface) 86%, var(--primary-soft));
+      color: color-mix(in srgb, var(--text) 94%, var(--primary));
+    }
+
+    .small-muted { color: var(--muted); font-size: 11px; }
+    .thinking {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 11px;
+      visibility: hidden;
+    }
+    body.dark-mode .thinking {
+      border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+      color: color-mix(in srgb, var(--text) 86%, var(--muted));
+    }
+    .thinking.show { visibility: visible; }
+
+    textarea#prompt {
+      min-height: 70px;
+      resize: vertical;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      padding-right: 44px;
+    }
+
+    .prompt-wrap { position: relative; }
+    .prompt-attach {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      line-height: 1;
+      padding: 0;
+    }
+    .prompt-upload-status { min-height: 18px; }
+
+    .tool-visibility-list {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-2);
+      padding: 8px;
+      max-height: 180px;
+      overflow: auto;
+    }
+    .tool-visibility-row { border-bottom: 1px solid var(--border); padding: 6px 0; }
+    .tool-visibility-row:last-child { border-bottom: 0; }
+    .custom-tools-hint { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+    #customToolErrors { color: var(--muted); }
+    body.dark-mode #customToolErrors { color: var(--muted); }
+
+    #customTools {
+      min-height: 130px;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .usage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .usage-chip {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px;
+      background: var(--surface);
+      min-height: 52px;
+    }
+
+    .upload-list {
+      max-height: 120px;
+      overflow: auto;
+      border: 0;
+      border-radius: 0;
+      padding: 2px 0;
+      background: transparent;
+    }
+
+    .modal-backdrop-custom {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(26, 31, 39, 0.22);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+      z-index: 50;
+      padding: 14px;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity .18s ease, visibility .18s ease;
+    }
+    .modal-backdrop-custom.show { opacity: 1; visibility: visible; pointer-events: auto; }
+
+    .modal-card {
+      width: min(1100px, 96vw);
+      max-height: 90vh;
+      overflow: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: none;
+      transform: translateY(10px) scale(0.985);
+      opacity: .92;
+      transition: transform .2s ease, opacity .2s ease;
+    }
+    .modal-backdrop-custom.show .modal-card {
+      transform: translateY(0) scale(1);
+      opacity: 1;
+    }
+    .settings-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .settings-section {
+      border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+      border-radius: 12px;
+      padding: 10px;
+      background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+    }
+    .settings-section h6 {
+      margin: 0 0 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+    }
+    .toggles-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 10px;
+    }
+    @media (max-width: 960px) {
+      .settings-layout { grid-template-columns: 1fr; }
+      .toggles-grid { grid-template-columns: 1fr; }
+    }
+
+    .dir-list button { text-align: left; width: 100%; margin-bottom: 4px; }
+
+    .approval-args {
+      max-height: 300px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-2);
+      padding: 8px;
+      margin-bottom: 8px;
+    }
+    .approval-row {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) 2fr;
+      gap: 10px;
+      padding: 7px 8px;
+      border-radius: 8px;
+      margin-bottom: 5px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    .approval-key {
+      color: var(--muted);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+      font-weight: 600;
+    }
+    .approval-value {
+      color: var(--text);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .upload-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .upload-item:last-child { border-bottom: 0; }
+
+    .diff-wrap {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--surface);
+      margin: 8px 0;
+    }
+    .diff-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .diff-col {
+      min-width: 0;
+      border-right: 1px solid var(--border);
+    }
+    .diff-col:last-child { border-right: 0; }
+    .diff-line {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 2px 10px;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .diff-del { background: var(--diff-del); }
+    .diff-add { background: var(--diff-add); }
+    .diff-ctx { background: var(--diff-ctx); }
+    .diff-line code { background: transparent; padding: 0; border-radius: 0; display: block; }
+    .raw-diff-wrap {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--surface-2);
+    }
+    .raw-diff-wrap > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      border-bottom: 1px solid transparent;
+    }
+    .raw-diff-wrap[open] > summary { border-bottom-color: var(--border); }
+
+    @media (max-width: 1000px) {
+      .shell { grid-template-columns: minmax(0,1fr); }
+      .sidebar { display: none; }
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+</head>
+<body>
+  <div id="app" class="shell sidebar-hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="panel">
+        <h3>Runtime</h3>
+        <div class="small-muted mb-2">Applied automatically</div>
+
+        <label class="small-muted mb-1">Provider</label>
+        <select id="provider" class="form-select mb-2"></select>
+
+        <label class="small-muted mb-1">Model</label>
+        <select id="model" class="form-select mb-2"></select>
+
+        <label class="small-muted mb-1">Approval mode</label>
+        <select id="approval" class="form-select mb-2"><option>ask</option><option>auto</option><option>deny</option></select>
+
+        <label class="small-muted mb-1">Workspace path</label>
+        <div class="input-group input-group-sm mb-2">
+          <input id="workspace" class="form-control" placeholder="/path/to/repo" />
+          <button id="browseWorkspace" class="btn btn-soft" type="button">Browse</button>
+        </div>
+
+        <div class="small-muted mt-2 mb-1">Upload context files</div>
+        <input id="contextFiles" type="file" class="form-control mb-2" multiple />
+        <div class="d-flex gap-2 mb-2">
+          <button id="uploadFiles" class="btn btn-soft btn-sm">Upload</button>
+          <button id="clearUploads" class="btn btn-soft btn-sm">Clear store</button>
+        </div>
+        <div id="uploadList" class="upload-list small-muted"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Sessions</h3>
+        <div class="small-muted mb-2" id="activeSession">active: -</div>
+
+        <div class="input-group input-group-sm mb-2">
+          <input id="sessionName" class="form-control" placeholder="session name" />
+          <button id="newSession" class="btn btn-soft" type="button">New</button>
+        </div>
+
+        <select id="sessionList" class="form-select mb-2" size="5"></select>
+
+        <div class="d-flex gap-2">
+          <button id="loadSession" class="btn btn-soft btn-sm">Load</button>
+          <button id="deleteSession" class="btn btn-soft btn-sm">Delete</button>
+          <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
+          <button id="condenseSession" class="btn btn-soft btn-sm">Condense</button>
+        </div>
+        <div id="sessionActionStatus" class="small-muted mt-2"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Session usage</h3>
+        <div class="usage-grid">
+          <div class="usage-chip"><div class="small-muted">Input</div><div id="usageIn">0</div></div>
+          <div class="usage-chip"><div class="small-muted">Output</div><div id="usageOut">0</div></div>
+          <div class="usage-chip"><div class="small-muted">Total</div><div id="usageTotal">0</div></div>
+          <div class="usage-chip"><div class="small-muted">Cost USD</div><div id="usageCost">0.000000</div></div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <div class="topbar">
+        <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
+        <div class="title">mu_cli</div>
+        <button id="openAdvanced" class="btn btn-soft btn-sm">Advanced</button>
+        <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
+        <span id="meta" class="pill">loading...</span>
+      </div>
+
+      <div class="chat-layout">
+        <div id="messages" class="messages"></div>
+
+        <details class="trace-wrap" id="traceWrap">
+          <summary>Debug traces</summary>
+          <div id="traces" class="trace">debug traces will appear here</div>
+        </details>
+
+        <div>
+          <div class="prompt-wrap">
+            <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
+            <button id="promptAttach" class="btn btn-soft prompt-attach" title="Attach file">+</button>
+            <input id="promptAttachInput" type="file" class="d-none" multiple />
+          </div>
+          <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
+          <div class="d-flex align-items-center gap-2 mt-2">
+            <button id="send" class="btn btn-accent btn-sm">Send</button>
+            <div id="report" class="small-muted"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="advancedModal" class="modal-backdrop-custom">
+    <div class="modal-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Advanced settings</h5>
+        <button id="closeAdvanced" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div class="settings-layout">
+        <section class="settings-section">
+          <h6>General</h6>
+          <label class="small-muted mb-1">API key (global)</label>
+          <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+
+          <div class="toggles-grid">
+            <div class="form-check">
+              <input class="form-check-input" id="debug" type="checkbox" />
+              <label class="form-check-label small-muted" for="debug">Debug mode</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" id="agentic" type="checkbox" checked />
+              <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" id="researchMode" type="checkbox" />
+              <label class="form-check-label small-muted" for="researchMode">Research mode</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" id="darkMode" type="checkbox" />
+              <label class="form-check-label small-muted" for="darkMode">Dark mode</label>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h6>Pricing</h6>
+          <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
+          <label class="small-muted mb-1">Provider</label>
+          <input id="pricingProvider" class="form-control mb-2" />
+          <label class="small-muted mb-1">Model</label>
+          <input id="pricingModel" class="form-control mb-2" />
+          <label class="small-muted mb-1">Input per 1M (USD)</label>
+          <input id="pricingInput" type="number" step="0.000001" class="form-control mb-2" />
+          <label class="small-muted mb-1">Output per 1M (USD)</label>
+          <input id="pricingOutput" type="number" step="0.000001" class="form-control mb-2" />
+          <button id="savePricing" class="btn btn-accent btn-sm">Save pricing</button>
+        </section>
+
+        <section class="settings-section">
+          <h6>Tool visibility</h6>
+          <div id="toolVisibilityList" class="tool-visibility-list small-muted">Loading tools...</div>
+        </section>
+
+        <section class="settings-section">
+          <h6>Custom tools</h6>
+          <div class="small-muted custom-tools-hint mb-1">Format: [{"name":"run_tests","description":"Run tests","command":["make","test-verbose"],"mutating":false}]</div>
+          <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
+          <div id="customToolErrors" class="small-muted"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="workspaceModal" class="modal-backdrop-custom">
+    <div class="modal-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Pick workspace folder</h5>
+        <button id="closeWorkspaceModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div class="input-group input-group-sm mb-2">
+        <input id="dirPath" class="form-control" />
+        <button id="loadDir" class="btn btn-soft" type="button">Go</button>
+      </div>
+      <div class="small-muted mb-2" id="dirCwd">cwd: -</div>
+      <div class="dir-list" id="dirList"></div>
+      <div class="d-flex gap-2 mt-2">
+        <button id="chooseDir" class="btn btn-accent btn-sm">Use selected</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="approvalModal" class="modal-backdrop-custom">
+    <div class="modal-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Tool approval required</h5>
+      </div>
+      <div class="small-muted mb-2" id="approvalToolName"></div>
+      <div id="approvalPatchPreview"></div>
+      <details class="raw-diff-wrap" id="approvalArgsWrap"><summary>Tool args</summary><div id="approvalArgs" class="approval-args" style="margin:0"></div></details>
+      <div class="d-flex gap-2">
+        <button id="approveYes" class="btn btn-accent btn-sm">Approve</button>
+        <button id="approveNo" class="btn btn-soft btn-sm">Deny</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionUsage: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [] };
+let syncing = false;
+let applyTimer = null;
+let sending = false;
+let approvalPoll = null;
+let selectedDir = null;
+let lastApprovalPatchFingerprint = null;
+
+async function api(path, method='GET', body=null) {
+  const res = await fetch(path, {
+    method,
+    headers: {'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : null,
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'request failed');
+  return json;
+}
+
+async function apiForm(path, formData) {
+  const res = await fetch(path, { method: 'POST', body: formData });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'request failed');
+  return json;
+}
+
+function roleClass(role) {
+  return String(role || '').replace(/[^a-zA-Z0-9_\-]/g, '_');
+}
+
+function formatTimestamp(value) {
+  if (!value) return '';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '';
+  const day = String(dt.getDate()).padStart(2, '0');
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const year = String(dt.getFullYear());
+  const hours = String(dt.getHours()).padStart(2, '0');
+  const minutes = String(dt.getMinutes()).padStart(2, '0');
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
+function inferMessageTimestamps(messages, turns) {
+  const out = new Map();
+  const rows = Array.isArray(turns) ? turns : [];
+  let turnIdx = 0;
+  let activeTs = rows[0] ? rows[0].timestamp : '';
+
+  messages.forEach((m, idx) => {
+    const metaTs = m && m.metadata && (m.metadata.timestamp || m.metadata.ts);
+    if (metaTs) {
+      out.set(idx, String(metaTs));
+      return;
+    }
+
+    if (m.role === 'user') {
+      if (rows[turnIdx] && rows[turnIdx].timestamp) activeTs = rows[turnIdx].timestamp;
+      if (activeTs) out.set(idx, activeTs);
+      return;
+    }
+
+    if (m.role === 'assistant') {
+      if (!activeTs && rows[turnIdx] && rows[turnIdx].timestamp) activeTs = rows[turnIdx].timestamp;
+      if (activeTs) out.set(idx, activeTs);
+      if (turnIdx < rows.length - 1) {
+        turnIdx += 1;
+        activeTs = rows[turnIdx] ? rows[turnIdx].timestamp : activeTs;
+      }
+    }
+  });
+
+  return out;
+}
+
+function renderApprovalArgs(args) {
+  const el = document.getElementById('approvalArgs');
+  const rows = [];
+
+  function walk(value, path='args') {
+    if (Array.isArray(value)) {
+      if (!value.length) rows.push([path, '[]']);
+      value.forEach((item, idx) => walk(item, `${path}[${idx}]`));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      const keys = Object.keys(value);
+      if (!keys.length) rows.push([path, '{}']);
+      keys.forEach((key) => walk(value[key], `${path}.${key}`));
+      return;
+    }
+    let display;
+    if (typeof value === 'string') display = value;
+    else display = JSON.stringify(value);
+    rows.push([path, display]);
+  }
+
+  walk(args || {});
+
+  el.innerHTML = rows.map(([key, value]) => (
+    `<div class="approval-row"><div class="approval-key">${escapeHtml(key)}</div><div class="approval-value">${escapeHtml(String(value ?? 'null'))}</div></div>`
+  )).join('');
+}
+
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+
+
+function applyThemePreference() {
+  const dark = document.getElementById('darkMode').checked;
+  document.body.classList.toggle('dark-mode', dark);
+  const theme = document.getElementById('hljsTheme');
+  if (theme) {
+    theme.href = dark
+      ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css'
+      : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css';
+  }
+  localStorage.setItem('mu_cli_dark_mode', dark ? '1' : '0');
+}
+
+function hydrateThemePreference() {
+  const saved = localStorage.getItem('mu_cli_dark_mode');
+  const dark = saved === '1';
+  const checkbox = document.getElementById('darkMode');
+  if (checkbox) checkbox.checked = dark;
+  document.body.classList.toggle('dark-mode', dark);
+  applyThemePreference();
+}
+
+function extractPatchTextFromArgs(args) {
+  if (!args || typeof args !== 'object') return '';
+  if (typeof args.patch === 'string') return args.patch;
+  for (const [_, value] of Object.entries(args)) {
+    if (value && typeof value === 'object') {
+      const found = extractPatchTextFromArgs(value);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
+function renderApprovalPatchPreview(args) {
+  const host = document.getElementById('approvalPatchPreview');
+  const patchText = extractPatchTextFromArgs(args || {});
+  if (!patchText.trim()) {
+    host.innerHTML = '';
+    lastApprovalPatchFingerprint = null;
+    return;
+  }
+
+  const fingerprint = patchText.trim();
+  if (lastApprovalPatchFingerprint === fingerprint) return;
+  lastApprovalPatchFingerprint = fingerprint;
+
+  const file = new File([patchText], 'proposed_change.patch', { type: 'text/x-diff' });
+  const reader = new FileReader();
+  reader.onload = () => {
+    const content = String(reader.result || '');
+    host.innerHTML = `<div class="small-muted mb-1">Patch preview (temporary file: ${escapeHtml(file.name)})</div>${renderSideBySideDiff(content)}<details class="raw-diff-wrap"><summary>Raw diff</summary><pre><code class="hljs language-diff">${escapeHtml(content)}</code></pre></details>`;
+    highlightCodeBlocks(host);
+  };
+  reader.readAsText(file);
+}
+
+
+function renderDiffLineHtml(line) {
+  if (!window.hljs) return escapeHtml(line);
+  try {
+    return window.hljs.highlight(line, { language: 'diff' }).value;
+  } catch (e) {
+    return escapeHtml(line);
+  }
+}
+
+function renderSideBySideDiff(diffText) {
+  const lines = String(diffText || '').split('\n');
+  const left = [];
+  const right = [];
+
+  function pushPair(l, r) {
+    left.push(l);
+    right.push(r);
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('diff ') || line.startsWith('@@')) {
+      pushPair({ cls: 'diff-ctx', text: line }, { cls: 'diff-ctx', text: line });
+      continue;
+    }
+
+    if (line.startsWith('-')) {
+      const next = lines[i + 1] || '';
+      if (next.startsWith('+')) {
+        pushPair({ cls: 'diff-del', text: line }, { cls: 'diff-add', text: next });
+        i += 1;
+      } else {
+        pushPair({ cls: 'diff-del', text: line }, { cls: 'diff-ctx', text: '' });
+      }
+      continue;
+    }
+
+    if (line.startsWith('+')) {
+      pushPair({ cls: 'diff-ctx', text: '' }, { cls: 'diff-add', text: line });
+      continue;
+    }
+
+    pushPair({ cls: 'diff-ctx', text: line }, { cls: 'diff-ctx', text: line });
+  }
+
+  const leftHtml = left.map((row) => `<div class="diff-line ${row.cls}"><code class="hljs language-diff">${renderDiffLineHtml(row.text)}</code></div>`).join('');
+  const rightHtml = right.map((row) => `<div class="diff-line ${row.cls}"><code class="hljs language-diff">${renderDiffLineHtml(row.text)}</code></div>`).join('');
+  return `<div class="diff-wrap"><div class="diff-grid"><div class="diff-col">${leftHtml}</div><div class="diff-col">${rightHtml}</div></div></div>`;
+}
+
+function formatMessageContent(content) {
+  const source = String(content || '');
+  let html = '';
+  const blockPattern = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
+  const trimmed = source.trim();
+  if (!trimmed.includes('```') && (/^diff --git/m.test(trimmed) || (/^---\s/m.test(trimmed) && /^\+\+\+\s/m.test(trimmed) && /^@@/m.test(trimmed)))) {
+    return renderSideBySideDiff(trimmed);
+  }
+  let cursor = 0;
+  let match;
+
+  function formatParagraphs(text) {
+    if (!text) return '';
+
+    function formatInline(input) {
+      const linkTokens = [];
+      const tokenized = String(input || '')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) => {
+          const token = `@@LINK_${linkTokens.length}@@`;
+          linkTokens.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+          return token;
+        })
+        .replace(/(https?:\/\/[\w\-./?%&=+#:~;,]+[\w/#])/g, (url) => {
+          const token = `@@LINK_${linkTokens.length}@@`;
+          const safe = escapeHtml(url);
+          linkTokens.push(`<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`);
+          return token;
+        });
+
+      let html = escapeHtml(tokenized)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*]+)\*(?=[^*]|$)/g, '$1<em>$2</em>');
+
+      html = html.replace(/@@LINK_(\d+)@@/g, (_m, idxText) => {
+        const idx = Number(idxText);
+        return Number.isInteger(idx) && linkTokens[idx] ? linkTokens[idx] : '';
+      });
+
+      return html;
+    }
+
+    function renderBlock(segment) {
+      const lines = segment.split('\n');
+      const listMatch = lines.every((line) => /^\s*([-*]|\d+\.)\s+/.test(line));
+      if (listMatch) {
+        const ordered = lines.every((line) => /^\s*\d+\.\s+/.test(line));
+        const items = lines.map((line) => line.replace(/^\s*([-*]|\d+\.)\s+/, '').trim());
+        const tag = ordered ? 'ol' : 'ul';
+        return `<${tag}>${items.map((item) => `<li>${formatInline(item)}</li>`).join('')}</${tag}>`;
+      }
+
+      if (lines.length === 1) {
+        const heading = lines[0].match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          const level = heading[1].length;
+          return `<h${level}>${formatInline(heading[2])}</h${level}>`;
+        }
+        const quote = lines[0].match(/^>\s?(.+)$/);
+        if (quote) return `<blockquote>${formatInline(quote[1])}</blockquote>`;
+      }
+
+      return `<p>${lines.map((line) => formatInline(line)).join('<br/>')}</p>`;
+    }
+
+    return text
+      .split(/\n{2,}/)
+      .map((segment) => renderBlock(segment))
+      .join('');
+  }
+
+  while ((match = blockPattern.exec(source)) !== null) {
+    const plainText = source.slice(cursor, match.index);
+    html += formatParagraphs(plainText);
+
+    const lang = (match[1] || '').toLowerCase();
+    const code = match[2] || '';
+    const langClass = lang ? ` language-${lang}` : '';
+    if (lang === 'diff' || lang === 'patch') html += renderSideBySideDiff(code);
+    else html += `<div class="code-block-wrap"><button type="button" class="copy-code-btn" data-copy-code="${escapeHtml(code)}">Copy</button><pre><code class="hljs${langClass}">${escapeHtml(code)}</code></pre></div>`;
+    cursor = match.index + match[0].length;
+  }
+
+  html += formatParagraphs(source.slice(cursor));
+
+  return html || '<p></p>';
+}
+
+function extractCitationLinks(content) {
+  const text = String(content || '');
+  const found = [];
+  const seen = new Set();
+  const regex = /https?:\/\/[\w\-./?%&=+#:~;,]+[\w/#]/g;
+  for (const match of text.matchAll(regex)) {
+    const url = String(match[0]);
+    if (seen.has(url)) continue;
+    seen.add(url);
+    found.push(url);
+  }
+  return found;
+}
+
+function scoreReasonsByUrl(messages, assistantIndex) {
+  const reasons = {};
+  for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === 'user') break;
+    if (m.role !== 'tool_result') continue;
+    const text = String(m.content || '');
+    if (!text.includes('[tool=score_sources]')) continue;
+    const jsonStart = text.indexOf('{');
+    if (jsonStart < 0) continue;
+    try {
+      const payload = JSON.parse(text.slice(jsonStart));
+      const rows = (payload && payload.sources) || [];
+      for (const row of rows) {
+        const url = String((row && row.url) || '');
+        const reason = String((row && row.reason) || '');
+        if (url && reason) reasons[url] = reason;
+      }
+    } catch (_) {
+      // ignore parse issues
+    }
+  }
+  return reasons;
+}
+
+function buildCitationPanel(content, reasonsByUrl={}) {
+  const links = extractCitationLinks(content);
+  if (!links.length) return '';
+  const items = links.map((url, idx) => `
+    <div id="citation-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${reasonsByUrl[url] ? `<div class="small-muted">why chosen: ${escapeHtml(reasonsByUrl[url])}</div>` : ''}</div>
+  `).join('');
+  return `<details class="citation-panel"><summary>ℹ Citations & URLs (${links.length})</summary><div class="citation-list">${items}</div></details>`;
+}
+
+function formatAssistantContentWithCitations(content, links) {
+  let html = formatMessageContent(content);
+  html = html.replace(/\[(\d+)\]/g, (full, numText) => {
+    const idx = Number(numText);
+    if (!Number.isInteger(idx) || idx < 1 || idx > links.length) return full;
+    return `<a href="#citation-${idx}" title="Jump to citation [${idx}]">[${idx}]</a>`;
+  });
+  return html;
+}
+
+function summarizeToolResult(content) {
+  const text = String(content || '');
+  const toolMatch = text.match(/\[tool=([^\]]+)\]/);
+  const statusMatch = text.match(/\[(ok|error)\]\s*([\s\S]*)$/m);
+  const toolName = toolMatch ? toolMatch[1] : 'tool';
+  const status = statusMatch ? statusMatch[1] : 'ok';
+  const detail = statusMatch ? statusMatch[2].trim() : text.trim();
+  const short = detail.length > 220 ? `${detail.slice(0, 217)}...` : detail;
+  return `${toolName}: ${status.toUpperCase()} — ${short}`;
+}
+
+function buildResearchTrailPanel(messages, assistantIndex) {
+  const steps = [];
+  for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === 'user') break;
+    if (m.role === 'tool_result') {
+      steps.push(summarizeToolResult(m.content));
+      continue;
+    }
+    if (m.role === 'assistant') {
+      const calls = (m.metadata && m.metadata.tool_calls) || [];
+      for (const call of calls) {
+        const name = String(call.name || 'tool');
+        const args = String(call.arguments || '').trim();
+        const shortArgs = args.length > 180 ? `${args.slice(0, 177)}...` : args;
+        steps.push(`requested ${name}${shortArgs ? ` with args ${shortArgs}` : ''}`);
+      }
+    }
+  }
+
+  if (!steps.length) return '';
+  const ordered = steps.reverse();
+  const items = ordered.map((step, idx) => `<div class="research-trail-item">${idx + 1}. ${escapeHtml(step)}</div>`).join('');
+  return `<details class="research-trail"><summary>🧭 Research activity log (${ordered.length} steps)</summary><div class="research-trail-list">${items}</div></details>`;
+}
+
+function highlightCodeBlocks(root) {
+  if (!window.hljs) return;
+  root.querySelectorAll('pre code.hljs').forEach((node) => {
+    window.hljs.highlightElement(node);
+  });
+}
+
+function wireCopyButtons(root) {
+  root.querySelectorAll('[data-copy-code]').forEach((btn) => {
+    if (btn.dataset.boundCopy === '1') return;
+    btn.dataset.boundCopy = '1';
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy-code') || '';
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        const old = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = old || 'Copy'; }, 1100);
+      } catch (_) {
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1100);
+      }
+    });
+  });
+}
+
+function isToolRole(role) {
+  return role === 'tool_result' || role === 'tool_call';
+}
+
+function shouldRenderMessage(message) {
+  if (message.role !== 'assistant') return true;
+  const content = String(message.content || '').trim();
+  const toolCalls = (message.metadata && message.metadata.tool_calls) || [];
+  const typing = !!(message.metadata && message.metadata.typing);
+  return content.length > 0 || toolCalls.length > 0 || typing;
+}
+
+function renderMessages() {
+  const box = document.getElementById('messages');
+  box.innerHTML = '';
+  const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
+
+  let anchor = null;
+  state.messages.forEach((m, idx) => {
+    if (!shouldRenderMessage(m)) return;
+
+    if (m.role === 'assistant' && !String(m.content || '').trim() && ((m.metadata && m.metadata.tool_calls) || []).length) {
+      const calls = (m.metadata && m.metadata.tool_calls) || [];
+      const line = calls.map((call) => `calling ${call.name || 'tool'}...`).join(' | ');
+      if (anchor) {
+        const el = document.createElement('div');
+        el.className = 'tool-inline call';
+        el.textContent = line;
+        anchor.appendChild(el);
+      }
+      return;
+    }
+
+    if (m.role === 'tool_result') {
+      if (anchor) {
+        const el = document.createElement('div');
+        el.className = 'tool-inline result';
+        el.textContent = summarizeToolResult(m.content);
+        anchor.appendChild(el);
+      }
+      return;
+    }
+
+    const row = document.createElement('div');
+    row.className = `msg role-${roleClass(m.role)}`;
+    row.innerHTML = `<div class="role">${m.role}</div>`;
+
+    if (m.role === 'user' || m.role === 'assistant') {
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      const tag = m.role === 'user' ? 'You' : 'AI';
+      const stamp = formatTimestamp(messageTimes.get(idx));
+      meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
+      row.appendChild(meta);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
+    if (m.role === 'assistant' && m.metadata && m.metadata.typing) bubble.innerHTML = '<p class="typing-dots"><span></span><span></span><span></span></p>';
+    else bubble.innerHTML = m.role === 'assistant'
+      ? formatAssistantContentWithCitations(m.content, citationLinks)
+      : formatMessageContent(m.content);
+    row.appendChild(bubble);
+    box.appendChild(row);
+    anchor = row;
+
+    if (m.role === 'assistant') {
+      const reasons = scoreReasonsByUrl(state.messages, idx);
+      const citationHtml = buildCitationPanel(m.content, reasons);
+      if (citationHtml) {
+        const container = document.createElement('div');
+        container.innerHTML = citationHtml;
+        row.appendChild(container.firstElementChild);
+      }
+      const trailHtml = buildResearchTrailPanel(state.messages, idx);
+      if (trailHtml) {
+        const trailContainer = document.createElement('div');
+        trailContainer.innerHTML = trailHtml;
+        row.appendChild(trailContainer.firstElementChild);
+      }
+    }
+  });
+
+  highlightCodeBlocks(box);
+  wireCopyButtons(box);
+
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderTraces() {
+  const el = document.getElementById('traces');
+  if (!state.traces.length) {
+    el.textContent = 'debug traces will appear here';
+    return;
+  }
+  el.innerHTML = state.traces.map((line) => {
+    let cls = 'trace-line';
+    if (line.startsWith('model:')) cls += ' trace-model';
+    else if (line.startsWith('tool-request:')) cls += ' trace-request';
+    else if (line.startsWith('tool-run:')) cls += ' trace-run';
+    return `<span class="${cls}">${line.replace(/</g, '&lt;')}</span>`;
+  }).join('');
+}
+
+function renderSessions(list, active) {
+  const sel = document.getElementById('sessionList');
+  sel.innerHTML = '';
+  for (const name of list) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === active) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  document.getElementById('activeSession').textContent = `active: ${active}`;
+}
+
+function renderUploads() {
+  const el = document.getElementById('uploadList');
+  if (!state.uploads.length) {
+    el.textContent = 'No uploaded context files.';
+    return;
+  }
+  el.innerHTML = state.uploads.slice(-20).map((u) => `
+    <div class="upload-item">
+      <span>${escapeHtml(u.name)} (${escapeHtml(u.kind)}, ${escapeHtml(String(u.size))} bytes)</span>
+      <button class="btn btn-soft btn-sm" data-upload-remove="${encodeURIComponent(u.name)}">Remove</button>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('[data-upload-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => removeUploadedFile(decodeURIComponent(btn.getAttribute('data-upload-remove') || '')).catch((e) => alert(e.message)));
+  });
+}
+
+function renderToolSettings() {
+  const host = document.getElementById('toolVisibilityList');
+  const builtin = state.tools.filter((tool) => tool.source === 'builtin');
+  if (!builtin.length) {
+    host.textContent = 'No built-in tools available.';
+    return;
+  }
+  host.innerHTML = builtin.map((tool) => `
+    <label class="tool-visibility-row d-flex align-items-start gap-2">
+      <input type="checkbox" class="form-check-input mt-1" data-tool-visible="${escapeHtml(tool.name)}" ${tool.enabled ? 'checked' : ''} />
+      <span>
+        <strong>${escapeHtml(tool.name)}</strong><br/>
+        <span class="small-muted">${escapeHtml(tool.description || '')}</span>
+      </span>
+    </label>
+  `).join('');
+
+  host.querySelectorAll('[data-tool-visible]').forEach((el) => {
+    el.addEventListener('change', scheduleApplySettings);
+  });
+
+  const errorsEl = document.getElementById('customToolErrors');
+  if (state.customToolErrors.length) errorsEl.textContent = state.customToolErrors.join(' | ');
+  else errorsEl.textContent = '';
+}
+
+function buildToolVisibilityPayload() {
+  const payload = {};
+  document.querySelectorAll('[data-tool-visible]').forEach((el) => {
+    payload[el.getAttribute('data-tool-visible')] = !!el.checked;
+  });
+  return payload;
+}
+
+function parseCustomToolsInput() {
+  const raw = document.getElementById('customTools').value.trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Custom tools must be a JSON array.');
+    document.getElementById('customToolErrors').textContent = '';
+    return parsed;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Invalid custom tools JSON.';
+    document.getElementById('customToolErrors').textContent = message;
+    throw new Error(message);
+  }
+}
+
+function wireModels(provider) {
+  const modelSel = document.getElementById('model');
+  modelSel.innerHTML = '';
+  for (const model of (state.models[provider] || [])) {
+    const opt = document.createElement('option');
+    opt.value = model;
+    opt.textContent = model;
+    modelSel.appendChild(opt);
+  }
+}
+
+function buildSettingsPayload() {
+  return {
+    provider: document.getElementById('provider').value,
+    model: document.getElementById('model').value,
+    api_key: document.getElementById('apiKey').value || null,
+    approval_mode: document.getElementById('approval').value,
+    workspace: document.getElementById('workspace').value || null,
+    debug: document.getElementById('debug').checked,
+    agentic_planning: document.getElementById('agentic').checked,
+    research_mode: document.getElementById('researchMode').checked,
+    tool_visibility: buildToolVisibilityPayload(),
+    custom_tools: parseCustomToolsInput(),
+  };
+}
+
+function updateThinking(show) {
+  document.getElementById('thinking').style.display = show ? 'flex' : 'none';
+}
+
+function updateUsagePanel(usage) {
+  const u = usage || {};
+  document.getElementById('usageIn').textContent = String(Math.trunc(Number(u.input_tokens || 0)));
+  document.getElementById('usageOut').textContent = String(Math.trunc(Number(u.output_tokens || 0)));
+  document.getElementById('usageTotal').textContent = String(Math.trunc(Number(u.total_tokens || 0)));
+  document.getElementById('usageCost').textContent = Number(u.estimated_cost_usd || 0).toFixed(6);
+}
+
+function syncPricingEditor() {
+  const provider = document.getElementById('provider').value;
+  const model = document.getElementById('model').value;
+  document.getElementById('pricingProvider').value = provider;
+  document.getElementById('pricingModel').value = model;
+  const row = (((state.pricing || {})[provider] || {})[model]) || { input_per_1m: 0, output_per_1m: 0 };
+  document.getElementById('pricingInput').value = Number(row.input_per_1m || 0);
+  document.getElementById('pricingOutput').value = Number(row.output_per_1m || 0);
+}
+
+function showModal(id, show) {
+  const modal = document.getElementById(id);
+  if (show) modal.classList.add('show');
+  else modal.classList.remove('show');
+  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal']
+    .some((modalId) => document.getElementById(modalId).classList.contains('show'));
+  document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
+}
+
+function scheduleApplySettings() {
+  if (syncing) return;
+  clearTimeout(applyTimer);
+  applyTimer = setTimeout(() => applySettings().catch((e) => alert(e.message)), 250);
+}
+
+async function applySettings() {
+  await api('/api/settings', 'POST', buildSettingsPayload());
+  await refreshState();
+}
+
+async function savePricing() {
+  await api('/api/pricing', 'POST', {
+    provider: document.getElementById('pricingProvider').value.trim(),
+    model: document.getElementById('pricingModel').value.trim(),
+    input_per_1m: Number(document.getElementById('pricingInput').value || 0),
+    output_per_1m: Number(document.getElementById('pricingOutput').value || 0),
+  });
+  await refreshState();
+}
+
+async function uploadContextFiles() {
+  const input = document.getElementById('contextFiles');
+  if (!input.files || !input.files.length) return;
+  const form = new FormData();
+  for (const file of input.files) form.append('files', file);
+  await apiForm('/api/uploads', form);
+  input.value = '';
+  await refreshState();
+}
+
+async function uploadPromptAttachmentFiles() {
+  const input = document.getElementById('promptAttachInput');
+  if (!input.files || !input.files.length) return;
+  const status = document.getElementById('promptUploadStatus');
+  const form = new FormData();
+  for (const file of input.files) form.append('files', file);
+  await apiForm('/api/uploads', form);
+  status.textContent = `${input.files.length} file(s) attached to context.`;
+  input.value = '';
+  await refreshState();
+}
+
+async function clearUploadedStore() {
+  await fetch('/api/uploads', { method: 'DELETE' }).then(async (res) => {
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'request failed');
+  });
+  await refreshState();
+}
+
+async function removeUploadedFile(name) {
+  if (!name) return;
+  await fetch(`/api/uploads/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(async (res) => {
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'request failed');
+  });
+  await refreshState();
+}
+
+async function loadDirs(path='') {
+  const q = path ? `?path=${encodeURIComponent(path)}` : '';
+  const payload = await api(`/api/fs/dirs${q}`);
+  document.getElementById('dirPath').value = payload.cwd;
+  document.getElementById('dirCwd').textContent = `cwd: ${payload.cwd}`;
+  selectedDir = payload.cwd;
+
+  const list = document.getElementById('dirList');
+  list.innerHTML = '';
+
+  if (payload.parent) {
+    const up = document.createElement('button');
+    up.className = 'btn btn-soft btn-sm';
+    up.textContent = '..';
+    up.onclick = () => loadDirs(payload.parent).catch((e) => alert(e.message));
+    list.appendChild(up);
+  }
+
+  for (const child of payload.children) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-soft btn-sm';
+    btn.textContent = child.name;
+    btn.onclick = () => loadDirs(child.path).catch((e) => alert(e.message));
+    list.appendChild(btn);
+  }
+}
+
+async function pollApproval() {
+  const payload = await api('/api/approval');
+  state.pendingApproval = payload.pending;
+  const pending = state.pendingApproval;
+
+  if (!pending) {
+    document.getElementById('approvalPatchPreview').innerHTML = '';
+    lastApprovalPatchFingerprint = null;
+    showModal('approvalModal', false);
+    return;
+  }
+
+  document.getElementById('approvalToolName').textContent = `Tool: ${pending.tool_name}`;
+  renderApprovalArgs(pending.args);
+  renderApprovalPatchPreview(pending.args);
+  showModal('approvalModal', true);
+}
+
+async function sendApprovalDecision(decision) {
+  if (!state.pendingApproval) return;
+  await api('/api/approval', 'POST', {
+    id: state.pendingApproval.id,
+    decision,
+  });
+  state.pendingApproval = null;
+  showModal('approvalModal', false);
+}
+
+async function refreshState() {
+  syncing = true;
+  const s = await api('/api/state');
+  state.models = s.models;
+  state.messages = s.messages;
+  state.traces = s.traces;
+  state.pricing = s.pricing || {};
+  state.sessionUsage = s.session_usage || {};
+  state.sessionTurns = s.session_turns || [];
+  state.uploads = s.uploads || [];
+  state.pendingApproval = s.pending_approval || null;
+  state.tools = s.tools || [];
+  state.customToolErrors = s.custom_tool_errors || [];
+  const customSpecs = s.custom_tool_specs || [];
+
+  const providerSel = document.getElementById('provider');
+  providerSel.innerHTML = '';
+  Object.keys(s.models).forEach((p) => {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p;
+    providerSel.appendChild(o);
+  });
+  providerSel.value = s.provider;
+  wireModels(s.provider);
+  document.getElementById('model').value = s.model;
+  document.getElementById('approval').value = s.approval_mode;
+  document.getElementById('workspace').value = s.workspace || '';
+  document.getElementById('debug').checked = !!s.debug;
+  document.getElementById('agentic').checked = !!s.agentic_planning;
+  document.getElementById('researchMode').checked = !!s.research_mode;
+  document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
+  if (document.activeElement !== document.getElementById('customTools')) {
+    document.getElementById('customTools').value = JSON.stringify(customSpecs, null, 2);
+  }
+
+  syncPricingEditor();
+  updateUsagePanel(state.sessionUsage);
+  renderSessions(s.sessions, s.session);
+  renderUploads();
+  renderToolSettings();
+  renderMessages();
+  renderTraces();
+
+  if (state.pendingApproval) {
+    document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
+    renderApprovalArgs(state.pendingApproval.args);
+    renderApprovalPatchPreview(state.pendingApproval.args);
+    showModal('approvalModal', true);
+  } else {
+    document.getElementById('approvalPatchPreview').innerHTML = '';
+    lastApprovalPatchFingerprint = null;
+    showModal('approvalModal', false);
+  }
+
+  syncing = false;
+}
+
+async function sendPrompt() {
+  if (sending) return;
+  const text = document.getElementById('prompt').value.trim();
+  if (!text) return;
+
+  sending = true;
+  updateThinking(true);
+  document.getElementById('prompt').value = '';
+
+  if (approvalPoll) clearInterval(approvalPoll);
+  approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1000);
+
+  const reportEl = document.getElementById('report');
+  reportEl.textContent = 'streaming...';
+
+  state.messages.push({ role: 'user', content: text });
+  let draft = { role: 'assistant', content: '', metadata: { typing: true } };
+  state.messages.push(draft);
+  renderMessages();
+
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok || !res.body) throw new Error('stream request failed');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'assistant_chunk') {
+          updateThinking(false);
+          if (!draft) {
+            draft = { role: 'assistant', content: '' };
+            state.messages.push(draft);
+          }
+          if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
+          draft.content += event.chunk;
+          renderMessages();
+        } else if (event.type === 'trace') {
+          state.traces.push(event.line);
+          state.traces = state.traces.slice(-50);
+          renderTraces();
+        } else if (event.type === 'report') {
+          const r = event.report;
+          reportEl.textContent = `in=${r.input_tokens} out=${r.output_tokens} total=${r.total_tokens} est=$${Number(r.estimated_cost_usd).toFixed(6)}`;
+        } else if (event.type === 'error') {
+          throw new Error(event.error || 'streaming failed');
+        }
+      }
+    }
+
+    await refreshState();
+  } finally {
+    if (approvalPoll) {
+      clearInterval(approvalPoll);
+      approvalPoll = null;
+    }
+    updateThinking(false);
+    sending = false;
+  }
+}
+
+function resolveSessionName(action) {
+  const selected = document.getElementById('sessionList').value;
+  const typed = document.getElementById('sessionName').value.trim();
+  if (action === 'new') return typed;
+  return selected || typed;
+}
+
+async function sessionAction(action) {
+  const name = resolveSessionName(action);
+  const status = document.getElementById('sessionActionStatus');
+  status.textContent = '';
+  await api('/api/session', 'POST', { action, name });
+  await refreshState();
+  if (action === 'condense') status.textContent = 'Session context condensed.';
+}
+
+for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'darkMode']) {
+  document.getElementById(id).addEventListener('change', () => {
+    if (id === 'provider') wireModels(document.getElementById('provider').value);
+    if (id === 'darkMode') applyThemePreference();
+    scheduleApplySettings();
+    syncPricingEditor();
+  });
+  if (id === 'workspace' || id === 'apiKey') {
+    document.getElementById(id).addEventListener('blur', scheduleApplySettings);
+  }
+}
+
+document.getElementById('customTools').addEventListener('blur', scheduleApplySettings);
+
+document.getElementById('promptAttach').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('promptAttachInput').click();
+});
+document.getElementById('promptAttachInput').addEventListener('change', () => uploadPromptAttachmentFiles().catch((e) => alert(e.message)));
+
+document.getElementById('send').addEventListener('click', () => sendPrompt().catch((e) => alert(e.message)));
+document.getElementById('newSession').addEventListener('click', () => sessionAction('new').catch((e) => alert(e.message)));
+document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
+document.getElementById('loadSession').addEventListener('click', () => sessionAction('load').catch((e) => alert(e.message)));
+document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
+document.getElementById('condenseSession').addEventListener('click', () => sessionAction('condense').catch((e) => alert(e.message)));
+document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
+document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
+document.getElementById('clearUploads').addEventListener('click', () => clearUploadedStore().catch((e) => alert(e.message)));
+
+document.getElementById('toggleSidebar').addEventListener('click', () => document.getElementById('app').classList.toggle('sidebar-hidden'));
+document.getElementById('openAdvanced').addEventListener('click', () => showModal('advancedModal', true));
+document.getElementById('closeAdvanced').addEventListener('click', () => showModal('advancedModal', false));
+
+document.getElementById('browseWorkspace').addEventListener('click', () => {
+  showModal('workspaceModal', true);
+  loadDirs(document.getElementById('workspace').value.trim()).catch((e) => alert(e.message));
+});
+document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
+document.getElementById('loadDir').addEventListener('click', () => loadDirs(document.getElementById('dirPath').value.trim()).catch((e) => alert(e.message)));
+document.getElementById('chooseDir').addEventListener('click', () => {
+  if (!selectedDir) return;
+  document.getElementById('workspace').value = selectedDir;
+  showModal('workspaceModal', false);
+  scheduleApplySettings();
+});
+
+document.getElementById('approveYes').addEventListener('click', () => sendApprovalDecision('approve').catch((e) => alert(e.message)));
+document.getElementById('approveNo').addEventListener('click', () => sendApprovalDecision('deny').catch((e) => alert(e.message)));
+
+document.getElementById('prompt').addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
+});
+
+hydrateThemePreference();
+refreshState().then(async () => {
+  const activeSession = document.getElementById('sessionList').value;
+  if (!state.messages.length && activeSession) {
+    await api('/api/session', 'POST', { action: 'load', name: activeSession });
+    await refreshState();
+  }
+}).catch((e) => alert(e.message));
+</script>
+</body>
+</html>

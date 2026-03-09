@@ -12,12 +12,17 @@ DEFAULT_PRICING = {
         "gpt-4o-mini": {"input_per_1m": 0.15, "output_per_1m": 0.60},
     },
     "gemini": {
+        "gemini-3.1-pro-preview": {"input_per_1m": 2.0, "output_per_1m": 12.0},
+        "gemini-3-flash-preview": {"input_per_1m": 0.5, "output_per_1m": 3.0},
+        "gemini-2.5-flash": {"input_per_1m": 0.3, "output_per_1m": 2.50},
         "gemini-2.0-flash": {"input_per_1m": 0.10, "output_per_1m": 0.40},
     },
     "echo": {
         "echo": {"input_per_1m": 0.0, "output_per_1m": 0.0},
     },
 }
+
+TEMPLATE_PATH = Path(__file__).with_name("pricing_template.json")
 
 
 @dataclass(slots=True)
@@ -36,9 +41,24 @@ class PricingCatalog:
     def _load_or_create(self) -> dict:
         if not self.config_path.exists():
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            self.config_path.write_text(json.dumps(DEFAULT_PRICING, indent=2), encoding="utf-8")
-            return DEFAULT_PRICING
+            template = DEFAULT_PRICING
+            if TEMPLATE_PATH.exists():
+                template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+            self.config_path.write_text(json.dumps(template, indent=2), encoding="utf-8")
+            return template
         return json.loads(self.config_path.read_text(encoding="utf-8"))
+
+    def save(self) -> None:
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+
+    def update_model_pricing(self, provider: str, model: str, input_per_1m: float, output_per_1m: float) -> None:
+        provider_cfg = self.data.setdefault(provider, {})
+        provider_cfg[model] = {
+            "input_per_1m": float(input_per_1m),
+            "output_per_1m": float(output_per_1m),
+        }
+        self.save()
 
     def estimate_cost(self, provider: str, model: str, usage: UsageStats) -> TurnCostReport:
         provider_cfg = self.data.get(provider, {})

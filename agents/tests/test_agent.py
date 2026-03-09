@@ -53,7 +53,70 @@ class AgentTests(unittest.TestCase):
         reply = agent.step('/tool read_file {"path":"agents/ReadMe.md"}')
 
         self.assertIn("Tool `read_file` result", reply.content)
-        self.assertTrue(any(m.role.value == "tool_result" for m in agent.state.messages))
+        tool_result = next(m for m in agent.state.messages if m.role is Role.TOOL_RESULT)
+        self.assertIn("[tool=read_file]", tool_result.content)
+        self.assertIn("[access=read]", tool_result.content)
+
+    def test_tool_rounds_are_capped(self) -> None:
+        agent = Agent(provider=LoopingProvider(), tools=[], max_tool_rounds=2)
+        reply = agent.step("start")
+
+        self.assertEqual("calling tool", reply.content)
+        tool_results = [m for m in agent.state.messages if m.role is Role.TOOL_RESULT]
+        self.assertEqual(3, len(tool_results))
+
+    def test_mutating_tool_respects_approval_policy(self) -> None:
+        agent = Agent(
+            provider=ApprovalProvider(),
+            tools=[MutatingTool()],
+            on_approval=lambda _name, _args: False,
+        )
+        agent.step("go")
+        tool_result = next(m for m in agent.state.messages if m.role is Role.TOOL_RESULT)
+        self.assertIn("rejected", tool_result.content)
+        self.assertEqual("call_1", tool_result.metadata["tool_call_id"])
+
+    def test_model_response_callback_runs(self) -> None:
+        seen = []
+        agent = Agent(
+            provider=EchoProvider(),
+            tools=[ReadFileTool()],
+            on_model_response=lambda message, calls: seen.append((message.content, len(calls))),
+        )
+        agent.step("hello")
+        self.assertTrue(seen)
+
+    def test_strict_tool_usage_retries_once_with_enforcement_prompt(self) -> None:
+        class StrictProvider:
+            name = "strict"
+            model = "strict"
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, messages, tools=None, *, stream=False):
+                _ = (tools, stream)
+                self.calls += 1
+                if self.calls == 1:
+                    return ModelResponse(
+                        message=Message(role=Role.ASSISTANT, content="I can do that"),
+                        tool_calls=[],
+                    )
+                return ModelResponse(
+                    message=Message(role=Role.ASSISTANT, content="using tool now"),
+                    tool_calls=[ToolCall(name="read_file", args={"path": "agents/ReadMe.md"})],
+                )
+
+        provider = StrictProvider()
+        agent = Agent(provider=provider, tools=[ReadFileTool()], strict_tool_usage=True, max_tool_rounds=1)
+
+        reply = agent.step("Please read this file and summarize it")
+
+        self.assertEqual("using tool now", reply.content)
+        self.assertEqual(2, provider.calls)
+        enforcement = [m for m in agent.state.messages if m.metadata.get("kind") == "tooling_enforcement"]
+        self.assertEqual(1, len(enforcement))
+
 
     def test_tool_rounds_are_capped(self) -> None:
         agent = Agent(provider=LoopingProvider(), tools=[], max_tool_rounds=2)

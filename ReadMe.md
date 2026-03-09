@@ -72,7 +72,7 @@ Notes:
 
 - Start with `make run-web` then open `http://localhost:5000`.
 - Includes a toggleable settings sidebar (provider/model/approval/workspace/debug/agentic).
-- Includes git workflow controls in the sidebar to detect/select repository, create/switch branches, and guide MR/PR completion.
+- Includes git workflow controls in the top panel (visible after workspace selection) to detect/select repository and create/switch branches.
 - During background agent sessions, a dedicated “Plan output” overlay shows plan, checkpoints, and execution stages without reloading chat messages.
 - Includes built-in session management actions (new/load/delete/list/status).
 - Debug mode in GUI surfaces model tool requests and tool execution traces.

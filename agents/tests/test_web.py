@@ -44,6 +44,7 @@ class WebTests(unittest.TestCase):
         self.assertIn('Save settings', settings.get_data(as_text=True))
         self.assertIn('Runtime', settings.get_data(as_text=True))
         self.assertIn('Behavior', settings.get_data(as_text=True))
+        self.assertIn('Advanced', settings.get_data(as_text=True))
 
         settings_full = client.get('/ui/settings?variant=full')
         self.assertEqual(200, settings_full.status_code)

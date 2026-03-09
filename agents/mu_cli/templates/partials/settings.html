@@ -4,6 +4,7 @@
     <button type="button" @click="tab='general'" :class="tab==='general' ? 'primary' : ''">General</button>
     <button type="button" @click="tab='runtime'" :class="tab==='runtime' ? 'primary' : ''">Runtime</button>
     <button type="button" @click="tab='behavior'" :class="tab==='behavior' ? 'primary' : ''">Behavior</button>
+    <button type="button" @click="tab='advanced'" :class="tab==='advanced' ? 'primary' : ''">Advanced</button>
   </div>
 
   <form
@@ -73,6 +74,16 @@
 
       <div>Research</div>
       <div><input type="checkbox" name="research_mode" {% if research_mode %}checked{% endif %} /></div>
+    </div>
+
+    <div class="kv" x-show="tab==='advanced'" x-transition>
+      <div>System prompt</div>
+      <div><textarea name="system_prompt" rows="4">{{ system_prompt }}</textarea></div>
+
+      <div>Custom tools</div>
+      <div>
+        <textarea name="custom_tools_json" rows="8" class="mono" placeholder='[{"name":"my_tool","command":["bash","-lc","echo hi"],"mutating":false}]'>{{ custom_tools_json }}</textarea>
+      </div>
     </div>
 
     <div class="actions">

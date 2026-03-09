@@ -1,9 +1,20 @@
 {% if messages %}
   {% for m in messages %}
+    {% set ts = m.ui_timestamp or '' %}
+    {% if m.role == 'tool' %}
+    <article class="msg role-tool">
+      <div class="msg-meta">tool {% if ts %}· {{ ts }}{% endif %}</div>
+      <details class="tool-details">
+        <summary>Tool response</summary>
+        <div class="tool-content">{{ m.content }}</div>
+      </details>
+    </article>
+    {% else %}
     <article class="msg {{ 'role-user' if m.role == 'user' else 'role-assistant' }}">
-      <div class="msg-meta">{{ m.role }}</div>
+      <div class="msg-meta">{{ m.role }} {% if ts %}· {{ ts }}{% endif %}</div>
       <div class="bubble">{{ m.content }}</div>
     </article>
+    {% endif %}
   {% endfor %}
 {% else %}
   <article class="msg role-assistant">

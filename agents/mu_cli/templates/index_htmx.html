@@ -44,6 +44,10 @@
     .send-btn:hover { box-shadow:0 6px 20px rgba(47,111,237,.24); }
     .muted { color:var(--muted); font-size:12px; }
     .trace { max-height:120px; overflow:auto; padding:6px 8px; font-size:10.5px; white-space:pre-wrap; color:var(--muted); background:color-mix(in srgb, var(--surface-2) 45%, transparent); border-radius:8px; }
+    .role-tool .msg-meta { color: color-mix(in srgb, var(--muted) 80%, #94a3b8); font-size:10px; }
+    .tool-details { margin:0 8px; }
+    .tool-details summary { cursor:pointer; color:color-mix(in srgb, var(--muted) 85%, #94a3b8); font-size:11px; }
+    .tool-content { color:color-mix(in srgb, var(--muted) 82%, #94a3b8); font-size:11px; padding:6px 0 0; white-space:pre-wrap; }
     .kv { display:grid; grid-template-columns:90px 1fr; gap:4px 8px; font-size:12px; }
     .mono { font-family:"JetBrains Mono", ui-monospace, monospace; }
 
@@ -61,7 +65,7 @@
     .modal-card { width:min(860px, 92vw); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.10); padding:12px; transform:translateY(0); transition:all .2s ease; }
   </style>
 </head>
-<body x-data="{ sending:false, sidebarOpen:true }" @htmx:afterRequest.window="sending=false" @htmx:responseError.window="sending=false" @htmx:sendError.window="sending=false">
+<body x-data="{ sending:false, sidebarOpen:true, sessionRunning:false }" @htmx:afterRequest.window="sending=false" @htmx:responseError.window="sending=false" @htmx:sendError.window="sending=false" @htmx:afterSwap.window="sessionRunning = ((document.getElementById('session-runtime-state')?.textContent || '').trim() === 'running')">
   <div class="shell" :class="{ 'sidebar-hidden': !sidebarOpen }">
     <aside class="sidebar">
       <div id="session-panel" hx-get="/ui/session" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
@@ -79,18 +83,20 @@
       <section class="chat-layout">
         <div id="messages" class="messages" hx-get="/ui/messages" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
 
-        <form class="composer" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); document.querySelector('#messages').scrollTop=999999; htmx.trigger(document.body,'refresh');">
+        <form class="composer" :style="sessionRunning ? 'opacity:.55; pointer-events:none;' : ''" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); document.querySelector('#messages').scrollTop=999999; htmx.trigger(document.body,'refresh');">
           <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
           <div class="actions">
-            <button type="submit" class="send-btn" :disabled="sending" x-text="sending ? 'Sending…' : 'Send message'">Send message</button>
+            <button type="submit" class="send-btn" :disabled="sending || sessionRunning" x-text="sending ? 'Sending…' : 'Send message'">Send message</button>
             <button type="button" class="primary" @click="$refs.bgform.querySelector('textarea[name=text]').value = $el.closest('form').querySelector('textarea[name=text]').value; $refs.bgform.requestSubmit()">Run in background</button>
             <span class="muted" x-show="sending">Running turn…</span>
+            <span class="muted" x-show="sessionRunning">Waiting for background job to finish…</span>
           </div>
         </form>
         <form x-ref="bgform" style="display:none" hx-post="/ui/chat/background" hx-target="#jobs-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')">
           <textarea name="text"></textarea>
         </form>
 
+        <div id="session-runtime-state" style="display:none">idle</div>
         <div id="trace" class="trace" hx-get="/ui/state" hx-trigger="load, every 3s" hx-select="#trace-lines" hx-swap="innerHTML"></div>
         <div id="session-stats" class="bottom-stats" hx-get="/ui/state" hx-trigger="load, every 4s, refresh from:body" hx-select="#session-stats" hx-swap="innerHTML"></div>
       </section>

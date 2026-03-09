@@ -16,3 +16,5 @@ approvals={{ approval_mode }} ·
 debug={{ 'on' if debug else 'off' }} ·
 workspace={{ workspace or 'none' }}
 </div>
+
+<div id="session-runtime-state" hx-swap-oob="true">{{ 'running' if session_running else 'idle' }}</div>

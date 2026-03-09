@@ -1187,7 +1187,17 @@ def create_app():
         _persist(runtime)
 
     def _ui_messages() -> list[dict]:
-        return [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
+        msgs = [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
+        turns = list(runtime.session_turns)
+        idx = 0
+        current_ts = turns[idx]["timestamp"] if idx < len(turns) and isinstance(turns[idx], dict) else None
+        for item in msgs:
+            item["ui_timestamp"] = current_ts
+            role = str(item.get("role", ""))
+            if role == "assistant" and idx < len(turns):
+                idx += 1
+                current_ts = turns[idx]["timestamp"] if idx < len(turns) and isinstance(turns[idx], dict) else current_ts
+        return msgs
 
     @app.get("/")
     def index():
@@ -1225,9 +1235,20 @@ def create_app():
             workspace=runtime.workspace_path,
             debug=runtime.debug,
             traces=runtime.traces[-20:],
+            session_running=_is_session_running(runtime.session_name),
         )
 
 
+
+    def _is_session_running(session_name: str) -> bool:
+        for job in runtime.background_jobs.values():
+            if not isinstance(job, dict):
+                continue
+            if str(job.get("session", "")).strip() != session_name:
+                continue
+            if str(job.get("status", "")).strip().lower() in {"running", "waiting_plan"}:
+                return True
+        return False
 
     def _session_statuses() -> dict[str, str]:
         statuses: dict[str, str] = {name: "idle" for name in runtime.session_store.list_sessions()}
@@ -1325,6 +1346,8 @@ def create_app():
             max_runtime_seconds=runtime.max_runtime_seconds,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
+            system_prompt=runtime.system_prompt,
+            custom_tools_json=json.dumps(runtime.custom_tool_specs, indent=2),
             variant=variant,
             target_id=target_id,
         )
@@ -1362,6 +1385,20 @@ def create_app():
         if condense_window_val:
             runtime.condense_window = int(condense_window_val)
 
+
+        system_prompt = str(form.get("system_prompt", "")).strip()
+        if system_prompt:
+            runtime.system_prompt = system_prompt
+
+        custom_tools_json = str(form.get("custom_tools_json", "")).strip()
+        if custom_tools_json:
+            try:
+                parsed = json.loads(custom_tools_json)
+                if isinstance(parsed, list):
+                    runtime.custom_tool_specs = parsed
+            except json.JSONDecodeError:
+                runtime.traces.append("ui-settings: invalid custom_tools_json ignored")
+
         previous_messages = list(runtime.agent.state.messages)
         _refresh_tooling(runtime)
         runtime.agent = _new_agent(runtime)
@@ -1389,6 +1426,8 @@ def create_app():
             max_runtime_seconds=runtime.max_runtime_seconds,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
+            system_prompt=runtime.system_prompt,
+            custom_tools_json=json.dumps(runtime.custom_tool_specs, indent=2),
             variant=variant,
             target_id=target_id,
             saved=True,

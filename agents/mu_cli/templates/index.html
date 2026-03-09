@@ -414,6 +414,27 @@
       transition: background-color 99999s ease-in-out 0s;
     }
 
+    .form-check-input {
+      cursor: pointer;
+      border-color: var(--border);
+      background-color: var(--surface);
+    }
+    .form-check-input:checked {
+      background-color: color-mix(in srgb, var(--primary) 78%, #3b82f6);
+      border-color: color-mix(in srgb, var(--primary) 78%, #3b82f6);
+    }
+    .form-check-input:focus {
+      box-shadow: 0 0 0 .15rem color-mix(in srgb, var(--primary) 22%, transparent);
+    }
+    body.dark-mode .form-check-input {
+      background-color: var(--surface-2);
+      border-color: color-mix(in srgb, var(--border) 80%, var(--muted));
+    }
+    body.dark-mode .form-check-input:checked {
+      background-color: color-mix(in srgb, var(--primary) 72%, #60a5fa);
+      border-color: color-mix(in srgb, var(--primary) 72%, #60a5fa);
+    }
+
     .btn-soft {
       border: 1px solid var(--border);
       color: var(--text);
@@ -1005,7 +1026,8 @@
         <button id="closePlanApprovalModal" class="btn btn-soft btn-sm">Close</button>
       </div>
       <div id="planApprovalMeta" class="small-muted mb-2"></div>
-      <pre id="planApprovalContent" class="approval-value" style="max-height:360px;overflow:auto;white-space:pre-wrap;"></pre>
+      <label class="small-muted mb-1">Proposed plan (editable before approval)</label>
+      <textarea id="planApprovalContent" class="form-control approval-value" style="max-height:360px;min-height:220px;overflow:auto;white-space:pre-wrap;"></textarea>
       <div class="d-flex gap-2 justify-content-end mt-3">
         <button id="planApprovalDeny" class="btn btn-soft btn-sm">Deny</button>
         <button id="planApprovalApprove" class="btn btn-accent btn-sm">Approve</button>
@@ -2399,7 +2421,7 @@ function askPlanApproval(job) {
   return new Promise((resolve) => {
     planApprovalResolver = resolve;
     document.getElementById('planApprovalMeta').textContent = `Session: ${job.session} · Job: ${job.id}`;
-    document.getElementById('planApprovalContent').textContent = job.plan || '(No plan text returned)';
+    document.getElementById('planApprovalContent').value = job.plan || '(No plan text returned)';
     showModal('planApprovalModal', true);
   });
 }
@@ -2438,8 +2460,11 @@ async function sendPrompt(background = false) {
           updateQueryRuntime();
           if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
           if (job.status === 'awaiting_plan_approval') {
-            const ok = await askPlanApproval(job);
-            await api(`/api/jobs/${bg.job_id}/plan`, 'POST', { decision: ok ? 'approve' : 'deny' });
+            const approval = await askPlanApproval(job);
+            await api(`/api/jobs/${bg.job_id}/plan`, 'POST', {
+              decision: approval.ok ? 'approve' : 'deny',
+              revised_plan: approval.revisedPlan || undefined,
+            });
           }
           if (['completed', 'failed', 'timed_out'].includes(job.status)) {
             reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
@@ -2645,7 +2670,7 @@ document.getElementById('closePlanApprovalModal').addEventListener('click', () =
   if (planApprovalResolver) {
     const resolve = planApprovalResolver;
     planApprovalResolver = null;
-    resolve(false);
+    resolve({ ok: false, revisedPlan: '' });
   }
 });
 document.getElementById('planApprovalDeny').addEventListener('click', () => {
@@ -2653,7 +2678,7 @@ document.getElementById('planApprovalDeny').addEventListener('click', () => {
   if (planApprovalResolver) {
     const resolve = planApprovalResolver;
     planApprovalResolver = null;
-    resolve(false);
+    resolve({ ok: false, revisedPlan: '' });
   }
 });
 document.getElementById('planApprovalApprove').addEventListener('click', () => {
@@ -2661,7 +2686,10 @@ document.getElementById('planApprovalApprove').addEventListener('click', () => {
   if (planApprovalResolver) {
     const resolve = planApprovalResolver;
     planApprovalResolver = null;
-    resolve(true);
+    resolve({
+      ok: true,
+      revisedPlan: String(document.getElementById('planApprovalContent').value || '').trim(),
+    });
   }
 });
 

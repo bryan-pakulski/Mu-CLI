@@ -874,9 +874,16 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             )
             reliability_hint = _tool_reliability_hint(isolated)
 
+            approved_plan = str(job.get("plan") or "").strip()
+            plan_context = (
+                f"\n\nApproved plan (follow this unless tool evidence requires adaptation):\n{approved_plan}\n"
+                if approved_plan
+                else ""
+            )
             prompt = (
                 text
-                + "\n\nExecution requirements:\n"
+                + plan_context
+                + "\nExecution requirements:\n"
                 + f"- {reliability_hint}\n"
                 + "- Decompose work into checkpoints and report checkpoint completion as you progress.\n"
                 + "- Final answer must include: Confidence: <high|medium|low> and Evidence: bullets linked to tool outputs."
@@ -1189,8 +1196,14 @@ def create_app():
         decision = str(payload.get("decision", "")).strip().lower()
         if decision not in {"approve", "deny"}:
             return jsonify({"error": "decision must be approve|deny"}), 400
+        revised_plan = str(payload.get("revised_plan", "")).strip()
+        if decision == "approve" and revised_plan:
+            job["plan"] = revised_plan
+            events = job.setdefault("events", [])
+            if isinstance(events, list):
+                events.append("plan: revised_by_user")
         job["plan_approval"] = decision
-        return jsonify({"ok": True, "job_id": job_id, "decision": decision})
+        return jsonify({"ok": True, "job_id": job_id, "decision": decision, "plan": job.get("plan")})
 
     @app.post("/api/chat/stream")
     def chat_stream():

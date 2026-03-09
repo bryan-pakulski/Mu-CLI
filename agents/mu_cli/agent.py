@@ -52,8 +52,9 @@ class Agent:
         strict_retry_used = False
         rounds = 0
         while rounds < self.max_tool_rounds + 1:
+            model_messages = [m for m in self.state.messages if not m.metadata.get("excluded_from_model")]
             response = self.provider.generate(
-                self.state.messages,
+                model_messages,
                 tools=[self._tool_schema(tool) for tool in self.tools.values()],
             )
             self.last_usage = response.usage

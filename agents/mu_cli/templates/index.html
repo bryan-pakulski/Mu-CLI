@@ -932,7 +932,7 @@
 
   <div id="sessionMenuOverlay" class="session-menu">
     <button type="button" data-session-cmd="refresh">Refresh</button>
-    <button type="button" data-session-cmd="condense">Condense</button>
+    <button type="button" data-session-cmd="condense">Condense settings</button>
     <button type="button" data-session-cmd="delete">Delete</button>
   </div>
 
@@ -949,6 +949,8 @@
           <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
           <label class="small-muted mb-1">Max session runtime (seconds)</label>
           <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
+          <label class="small-muted mb-1">Condense window (raw messages)</label>
+          <input id="condenseWindow" type="number" min="2" step="1" class="form-control mb-2" value="12" />
 
           <div class="toggles-grid">
             <div class="form-check">
@@ -962,6 +964,10 @@
             <div class="form-check">
               <input class="form-check-input" id="researchMode" type="checkbox" />
               <label class="form-check-label small-muted" for="researchMode">Research mode</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" id="condenseEnabled" type="checkbox" />
+              <label class="form-check-label small-muted" for="condenseEnabled">Auto condense</label>
             </div>
             <div class="form-check">
               <input class="form-check-input" id="darkMode" type="checkbox" />
@@ -1032,7 +1038,26 @@
     </div>
   </div>
 
-  <div id="workspaceModal" class="modal-backdrop-custom">
+  
+  <div id="condenseModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(520px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Condense settings</h5>
+        <button id="closeCondenseModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div class="form-check mb-2">
+        <input class="form-check-input" id="condenseModalEnabled" type="checkbox" />
+        <label class="form-check-label small-muted" for="condenseModalEnabled">Enable auto condensing for this session</label>
+      </div>
+      <label class="small-muted mb-1">Sliding window (raw messages kept for model)</label>
+      <input id="condenseModalWindow" type="number" min="2" step="1" class="form-control mb-3" value="12" />
+      <div class="d-flex gap-2 justify-content-end">
+        <button id="runCondenseNow" class="btn btn-accent btn-sm">Condense now</button>
+      </div>
+    </div>
+  </div>
+
+<div id="workspaceModal" class="modal-backdrop-custom">
     <div class="modal-card">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h5 class="m-0">Pick workspace folder</h5>
@@ -1571,7 +1596,9 @@ function renderMessages() {
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
-    if (m.role === 'assistant' && m.metadata && m.metadata.typing) bubble.innerHTML = '<p class="typing-dots"><span></span><span></span><span></span></p>';
+    if (m.role === 'tool_result' && m.metadata && m.metadata.kind === 'session_condensed_summary') {
+      bubble.innerHTML = `<details><summary>Condensed summary (${escapeHtml(m.metadata.summary_id || '')})</summary><div class="small-muted mt-1">${formatMessageContent(m.content)}</div></details>`;
+    } else if (m.role === 'assistant' && m.metadata && m.metadata.typing) bubble.innerHTML = '<p class="typing-dots"><span></span><span></span><span></span></p>';
     else bubble.innerHTML = m.role === 'assistant'
       ? formatAssistantContentWithCitations(m.content, citationLinks)
       : formatMessageContent(m.content);
@@ -1853,7 +1880,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal']
+  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -2007,6 +2034,8 @@ async function refreshState() {
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
+  document.getElementById('condenseEnabled').checked = !!s.condense_enabled;
+  document.getElementById('condenseWindow').value = Number(s.condense_window || 12);
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
   if (document.activeElement !== document.getElementById('customTools')) {
     document.getElementById('customTools').value = JSON.stringify(customSpecs, null, 2);
@@ -2207,6 +2236,25 @@ async function createSessionFromModal() {
   showModal('newSessionModal', false);
 }
 
+
+function openCondenseModal(sessionName) {
+  document.getElementById('condenseModalEnabled').checked = document.getElementById('condenseEnabled').checked;
+  document.getElementById('condenseModalWindow').value = document.getElementById('condenseWindow').value || 12;
+  document.getElementById('condenseModal').setAttribute('data-session', sessionName || state.activeSession || '');
+  showModal('condenseModal', true);
+}
+
+async function runCondenseFromModal() {
+  const sessionName = document.getElementById('condenseModal').getAttribute('data-session') || state.activeSession || '';
+  const enabled = document.getElementById('condenseModalEnabled').checked;
+  const window = Number(document.getElementById('condenseModalWindow').value || 12);
+  await api('/api/session', 'POST', { action: 'switch', name: sessionName });
+  await api('/api/settings', 'POST', { ...buildSettingsPayload(), condense_enabled: enabled, condense_window: window });
+  await api('/api/session', 'POST', { action: 'condense', name: sessionName, window });
+  showModal('condenseModal', false);
+  await refreshState();
+}
+
 async function sessionAction(action, explicitName = null, extra = {}) {
   const name = explicitName || selectedSessionName();
   if (action === "switch" && name) completedSeenSessions.add(name);
@@ -2217,7 +2265,7 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
 
-for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();
@@ -2254,6 +2302,8 @@ document.getElementById('browseWorkspace').addEventListener('click', () => {
 });
 document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
 document.getElementById('closeNewSessionModal').addEventListener('click', () => showModal('newSessionModal', false));
+document.getElementById('closeCondenseModal').addEventListener('click', () => showModal('condenseModal', false));
+document.getElementById('runCondenseNow').addEventListener('click', () => runCondenseFromModal().catch((e) => alert(e.message)));
 document.getElementById('createSessionConfirm').addEventListener('click', () => createSessionFromModal().catch((e) => alert(e.message)));
 document.getElementById('newSessionProvider').addEventListener('change', () => wireNewSessionModels(document.getElementById('newSessionProvider').value));
 document.getElementById('loadDir').addEventListener('click', () => loadDirs(document.getElementById('dirPath').value.trim()).catch((e) => alert(e.message)));
@@ -2301,7 +2351,7 @@ document.getElementById('sessionMenuOverlay').querySelectorAll('[data-session-cm
     closeAllSessionMenus();
     if (!name) return;
     if (cmd === 'refresh') await sessionAction('switch', name);
-    if (cmd === 'condense') await sessionAction('condense', name);
+    if (cmd === 'condense') { openCondenseModal(name); return; }
     if (cmd === 'delete') await sessionAction('delete', name);
   });
 });

@@ -20,7 +20,7 @@ from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
-from mu_cli.tools.base import Tool
+from mu_cli.tools.base import Tool, ToolResult
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
     ClearUploadedContextStoreTool,
@@ -74,7 +74,46 @@ class WebRuntime:
     pending_approval: dict[str, Any] | None = None
     background_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_runtime_seconds: int = 900
+    condense_enabled: bool = False
+    condense_window: int = 12
+    summary_index: list[dict[str, Any]] = field(default_factory=list)
 
+
+
+
+class RetrieveConversationSummaryTool:
+    name = "retrieve_conversation_summary"
+    description = "Retrieve indexed condensed conversation summaries by topic/query."
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Topic or phrase to retrieve from summary index."},
+            "limit": {"type": "integer", "description": "Max summaries to return (default 3)."},
+        },
+        "required": ["query"],
+    }
+    mutating = False
+
+    def __init__(self, runtime_getter):
+        self._runtime_getter = runtime_getter
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        runtime = self._runtime_getter()
+        query = str(args.get("query", "")).strip().lower()
+        limit = max(1, min(10, int(args.get("limit", 3) or 3)))
+        if not query:
+            return ToolResult(ok=False, output="query is required")
+        matches = []
+        for item in runtime.summary_index:
+            hay = " ".join([str(item.get("topics", "")), str(item.get("summary", "")), str(item.get("id", ""))]).lower()
+            if query in hay:
+                matches.append(item)
+        if not matches:
+            return ToolResult(ok=True, output="No matching summary entries.")
+        lines = []
+        for item in matches[:limit]:
+            lines.append(f"- id={item.get('id')} topics={item.get('topics')}\n  summary={item.get('summary')}")
+        return ToolResult(ok=True, output="\n".join(lines))
 
 def _default_usage() -> dict[str, float]:
     return {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0}
@@ -300,53 +339,81 @@ def _uploaded_context_prompt(runtime: WebRuntime) -> str | None:
     )
 
 
-def _condense_session_context(runtime: WebRuntime) -> dict[str, Any]:
+def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = None) -> dict[str, Any]:
     non_system = [m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
-    if len(non_system) < 6:
+    raw_window = max(2, int(window_size or runtime.condense_window or 12))
+    if len(non_system) <= raw_window + 2:
         return {"ok": True, "unchanged": True, "message": "not enough history to condense"}
 
-    users = [m for m in non_system if m.role is Role.USER]
-    assistants = [m for m in non_system if m.role is Role.ASSISTANT]
-    tool_events = [m for m in non_system if m.role in {Role.TOOL_CALL, Role.TOOL_RESULT}]
-    recent = non_system[-8:]
+    cutoff = max(0, len(non_system) - raw_window)
+    older = non_system[:cutoff]
+    recent = non_system[cutoff:]
 
     highlights: list[str] = []
-    for m in non_system:
+    topics: list[str] = []
+    for m in older:
         text = " ".join(str(m.content or "").split())
         if not text:
             continue
-        if len(text) > 140:
-            text = f"{text[:137]}..."
+        if len(text) > 180:
+            text = f"{text[:177]}..."
         prefix = "user" if m.role is Role.USER else "assistant" if m.role is Role.ASSISTANT else "tool"
         highlights.append(f"- [{prefix}] {text}")
-        if len(highlights) >= 10:
+        if len(topics) < 6:
+            topics.append(text.split(" ")[0].strip(".,:;()[]{}\"'")[:24])
+        if len(highlights) >= 12:
             break
 
+    summary_prompt = (
+        "You are a conversation condensation engine. Capture key facts, decisions, constraints, and unresolved items "
+        "with compact bullet points suitable for later retrieval by topic."
+    )
     summary_lines = [
         "Session condensed summary:",
-        f"- total chat messages before condense: {len(non_system)}",
-        f"- user turns: {len(users)}",
-        f"- assistant turns: {len(assistants)}",
-        f"- tool events: {len(tool_events)}",
-        "- key highlights:",
+        f"- policy: {summary_prompt}",
+        f"- raw window preserved: last {raw_window} messages",
+        "- key details:",
         *(highlights or ["- (no textual highlights)"]),
-        "- note: recent messages are preserved below this summary.",
     ]
+    summary_text = "\n".join(summary_lines)
+
+    summary_id = f"sum_{len(runtime.summary_index)+1}"
+    summary_entry = {
+        "id": summary_id,
+        "topics": ", ".join(dict.fromkeys([t for t in topics if t])) or "general",
+        "summary": summary_text,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_count": len(older),
+    }
+    runtime.summary_index.append(summary_entry)
+
+    older_set = set(id(m) for m in older)
+    for msg in runtime.agent.state.messages:
+        if msg.role is Role.SYSTEM:
+            continue
+        if id(msg) in older_set:
+            msg.metadata["excluded_from_model"] = True
 
     summary_msg = Message(
-        role=Role.ASSISTANT,
-        content="\n".join(summary_lines),
-        metadata={"kind": "session_condensed_summary", "timestamp": datetime.now(timezone.utc).isoformat()},
+        role=Role.TOOL_RESULT,
+        name="conversation_condense",
+        content=summary_text,
+        metadata={
+            "kind": "session_condensed_summary",
+            "collapsed": True,
+            "summary_id": summary_id,
+            "topics": summary_entry["topics"],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
     )
-
-    system_messages = [m for m in runtime.agent.state.messages if m.role is Role.SYSTEM]
-    runtime.agent.state.messages = [*system_messages, summary_msg, *recent]
+    runtime.agent.state.messages.append(summary_msg)
 
     return {
         "ok": True,
         "condensed": True,
         "before": len(non_system),
-        "after": len([m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]),
+        "after_raw_window": raw_window,
+        "summary_id": summary_id,
     }
 
 
@@ -500,6 +567,9 @@ def _persist(runtime: WebRuntime) -> None:
             agentic_planning=runtime.agentic_planning,
             research_mode=runtime.research_mode,
             max_runtime_seconds=runtime.max_runtime_seconds,
+            condense_enabled=runtime.condense_enabled,
+            condense_window=runtime.condense_window,
+            summary_index=runtime.summary_index,
         )
     )
 
@@ -529,6 +599,11 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.research_mode = bool(loaded.research_mode)
     if loaded.max_runtime_seconds is not None:
         runtime.max_runtime_seconds = int(loaded.max_runtime_seconds)
+    if loaded.condense_enabled is not None:
+        runtime.condense_enabled = bool(loaded.condense_enabled)
+    if loaded.condense_window is not None:
+        runtime.condense_window = int(loaded.condense_window)
+    runtime.summary_index = list(loaded.summary_index or [])
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
         if path.exists() and path.is_dir():
@@ -575,6 +650,9 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         custom_tool_errors=list(base.custom_tool_errors),
         research_artifacts={},
         max_runtime_seconds=900,
+        condense_enabled=False,
+        condense_window=12,
+        summary_index=[],
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
@@ -739,6 +817,7 @@ def create_app():
         ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),
         GetUploadedContextFileTool(uploads_root, lambda: runtime.session_name),
         ClearUploadedContextStoreTool(uploads_root, lambda: runtime.session_name),
+        RetrieveConversationSummaryTool(lambda: runtime),
     ]
     session_store = SessionStore(Path(".mu_cli/sessions"), "default")
 
@@ -769,6 +848,9 @@ def create_app():
         custom_tool_errors=[],
         research_artifacts={},
         max_runtime_seconds=900,
+        condense_enabled=False,
+        condense_window=12,
+        summary_index=[],
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     _refresh_tooling(runtime)
@@ -809,6 +891,8 @@ def create_app():
                 "research_artifacts": runtime.research_artifacts,
                 "background_jobs": list(runtime.background_jobs.values())[-50:],
                 "max_runtime_seconds": runtime.max_runtime_seconds,
+                "condense_enabled": runtime.condense_enabled,
+                "condense_window": runtime.condense_window,
                 "tools": [
                     {
                         "name": tool.name,
@@ -843,6 +927,8 @@ def create_app():
         reply = _run_turn_with_uploaded_context(runtime, text)
         report = _turn_report(runtime, text, reply.content)
         _record_turn(runtime, report)
+        if runtime.condense_enabled:
+            _condense_session_context(runtime, window_size=runtime.condense_window)
         _persist(runtime)
         return jsonify({"reply": asdict(reply), "report": report, "traces": runtime.traces[-50:]})
 
@@ -913,6 +999,8 @@ def create_app():
                 reply = _run_turn_with_uploaded_context(runtime, text)
                 report = _turn_report(runtime, text, reply.content)
                 _record_turn(runtime, report)
+                if runtime.condense_enabled:
+                    _condense_session_context(runtime, window_size=runtime.condense_window)
                 _persist(runtime)
                 events.put({"type": "report", "report": report})
                 events.put({"type": "done", "reply": asdict(reply), "traces": runtime.traces[-50:]})
@@ -951,6 +1039,8 @@ def create_app():
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
         runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
         runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
+        runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
+        runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
         tool_visibility = payload.get("tool_visibility")
         if isinstance(tool_visibility, dict):
             for tool in runtime.base_tools:
@@ -1151,6 +1241,8 @@ def create_app():
             runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
             runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
             runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
+            runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
+            runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
 
             workspace = payload.get("workspace")
             runtime.workspace_path = str(workspace).strip() if workspace else None
@@ -1195,7 +1287,8 @@ def create_app():
             return jsonify({"ok": True})
 
         if action == "condense":
-            result = _condense_session_context(runtime)
+            w = payload.get("window")
+            result = _condense_session_context(runtime, window_size=int(w) if w is not None else runtime.condense_window)
             _persist(runtime)
             return jsonify(result)
 

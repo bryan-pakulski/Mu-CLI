@@ -179,7 +179,7 @@ docker compose run --rm mu-cli-cli</pre>
       <p>Run <code>make run-web</code> and open <code>http://localhost:5000</code>.</p>
       <p>The GUI provides a toggleable sidebar for provider/model/settings, inline session management (status/list/new/load/delete), workspace path, approval mode, and debug toggles.</p>
       <p>Git workflow controls let you discover repositories under the selected workspace, create/switch branches, and keep agent work on an explicit branch before proposing a merge request.</p>
-      <p>The GUI is reactive during agent-mode background runs: it continuously refreshes state so live thinking/progress, traces, and approval prompts remain visible without manual refresh.</p>
+      <p>During agent-mode background runs, a dedicated Plan output overlay presents plan stages/checkpoints/events so progress remains visible without chat content constantly re-rendering.</p>
       <p>Chat, traces, and per-turn cost report are available in one view for developer-in-the-loop workflows.</p>
       <p>Assistant output now streams incrementally in the GUI using a streaming chat endpoint, so long turns feel more responsive.</p>
     </div>

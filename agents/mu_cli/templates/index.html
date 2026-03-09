@@ -521,6 +521,37 @@
       background: transparent;
     }
 
+
+    .session-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .session-item {
+      width: 100%;
+      text-align: left;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--text);
+      padding: 7px 9px;
+      font-size: 12px;
+      transition: background .15s ease, border-color .15s ease;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-item:hover {
+      background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+      border-color: color-mix(in srgb, var(--border) 80%, transparent);
+    }
+    .session-item.active {
+      background: color-mix(in srgb, var(--surface-2) 85%, var(--primary-soft));
+      border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+    }
+
     .modal-backdrop-custom {
       position: fixed;
       inset: 0;
@@ -716,16 +747,15 @@
         <h3>Sessions</h3>
         <div class="small-muted mb-2" id="activeSession">active: -</div>
 
-        <div class="input-group input-group-sm mb-2">
-          <input id="sessionName" class="form-control" placeholder="session name" />
-          <button id="newSession" class="btn btn-soft" type="button">New</button>
+        <div class="d-flex gap-2 mb-2">
+          <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
+          <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
         </div>
 
-        <select id="sessionList" class="form-select mb-2" size="5"></select>
+        <div id="sessionList" class="session-list mb-2"></div>
 
         <div class="d-flex gap-2">
           <button id="deleteSession" class="btn btn-soft btn-sm">Delete</button>
-          <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
           <button id="condenseSession" class="btn btn-soft btn-sm">Condense</button>
         </div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
@@ -833,6 +863,37 @@
           <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
           <div id="customToolErrors" class="small-muted"></div>
         </section>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="newSessionModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(560px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Create session</h5>
+        <button id="closeNewSessionModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <label class="small-muted mb-1">Session name</label>
+      <input id="newSessionName" class="form-control mb-2" placeholder="feature-investigation" />
+      <label class="small-muted mb-1">Provider</label>
+      <select id="newSessionProvider" class="form-select mb-2"></select>
+      <label class="small-muted mb-1">Model</label>
+      <select id="newSessionModel" class="form-select mb-2"></select>
+      <label class="small-muted mb-1">Workspace (optional)</label>
+      <input id="newSessionWorkspace" class="form-control mb-2" placeholder="/path/to/workspace" />
+      <div class="d-flex gap-3 mb-3">
+        <div class="form-check">
+          <input class="form-check-input" id="newSessionAgentic" type="checkbox" checked />
+          <label class="form-check-label small-muted" for="newSessionAgentic">Agentic planning</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" id="newSessionResearch" type="checkbox" />
+          <label class="form-check-label small-muted" for="newSessionResearch">Research mode</label>
+        </div>
+      </div>
+      <div class="d-flex gap-2 justify-content-end">
+        <button id="createSessionConfirm" class="btn btn-accent btn-sm">Create session</button>
       </div>
     </div>
   </div>
@@ -1419,14 +1480,16 @@ function renderTraces() {
 }
 
 function renderSessions(list, active) {
-  const sel = document.getElementById('sessionList');
-  sel.innerHTML = '';
+  const host = document.getElementById('sessionList');
+  host.innerHTML = '';
   for (const name of list) {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    if (name === active) opt.selected = true;
-    sel.appendChild(opt);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `session-item ${name === active ? 'active' : ''}`;
+    btn.textContent = name;
+    btn.setAttribute('data-session-name', name);
+    btn.addEventListener('click', () => sessionAction('switch', name).catch((e) => alert(e.message)));
+    host.appendChild(btn);
   }
   document.getElementById('activeSession').textContent = `active: ${active}`;
 }
@@ -1750,7 +1813,7 @@ async function sendPrompt(background = false) {
 
   try {
     if (background) {
-      const active = document.getElementById('sessionList').value || document.getElementById('sessionName').value.trim();
+      const active = selectedSessionName();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
       reportEl.textContent = `background job started: ${bg.job_id}`;
       await refreshState();
@@ -1811,18 +1874,59 @@ async function sendPrompt(background = false) {
   }
 }
 
-function resolveSessionName(action) {
-  const selected = document.getElementById('sessionList').value;
-  const typed = document.getElementById('sessionName').value.trim();
-  if (action === 'new') return typed;
-  return selected || typed;
+function selectedSessionName() {
+  const active = document.querySelector('#sessionList .session-item.active');
+  return active ? (active.getAttribute('data-session-name') || '') : '';
 }
 
-async function sessionAction(action) {
-  const name = resolveSessionName(action);
+function wireNewSessionModels(provider) {
+  const modelSel = document.getElementById('newSessionModel');
+  modelSel.innerHTML = '';
+  for (const model of (state.models[provider] || [])) {
+    const opt = document.createElement('option');
+    opt.value = model;
+    opt.textContent = model;
+    modelSel.appendChild(opt);
+  }
+}
+
+function openNewSessionModal() {
+  const providerSel = document.getElementById('newSessionProvider');
+  providerSel.innerHTML = '';
+  Object.keys(state.models || {}).forEach((p) => {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p;
+    providerSel.appendChild(o);
+  });
+  providerSel.value = document.getElementById('provider').value || providerSel.value;
+  wireNewSessionModels(providerSel.value);
+  document.getElementById('newSessionModel').value = document.getElementById('model').value;
+  document.getElementById('newSessionWorkspace').value = document.getElementById('workspace').value || '';
+  document.getElementById('newSessionAgentic').checked = document.getElementById('agentic').checked;
+  document.getElementById('newSessionResearch').checked = document.getElementById('researchMode').checked;
+  document.getElementById('newSessionName').value = '';
+  showModal('newSessionModal', true);
+}
+
+async function createSessionFromModal() {
+  const name = document.getElementById('newSessionName').value.trim();
+  if (!name) throw new Error('Session name is required.');
+  await sessionAction('new', name, {
+    provider: document.getElementById('newSessionProvider').value,
+    model: document.getElementById('newSessionModel').value,
+    workspace: document.getElementById('newSessionWorkspace').value.trim() || null,
+    agentic_planning: document.getElementById('newSessionAgentic').checked,
+    research_mode: document.getElementById('newSessionResearch').checked,
+  });
+  showModal('newSessionModal', false);
+}
+
+async function sessionAction(action, explicitName = null, extra = {}) {
+  const name = explicitName || selectedSessionName();
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
-  await api('/api/session', 'POST', { action, name });
+  await api('/api/session', 'POST', { action, name, ...extra });
   await refreshState();
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
@@ -1849,11 +1953,10 @@ document.getElementById('promptAttachInput').addEventListener('change', () => up
 
 document.getElementById('send').addEventListener('click', () => sendPrompt(false).catch((e) => alert(e.message)));
 document.getElementById('sendBackground').addEventListener('click', () => sendPrompt(true).catch((e) => alert(e.message)));
-document.getElementById('newSession').addEventListener('click', () => sessionAction('new').catch((e) => alert(e.message)));
+document.getElementById('newSession').addEventListener('click', () => openNewSessionModal());
 document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
 document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
 document.getElementById('condenseSession').addEventListener('click', () => sessionAction('condense').catch((e) => alert(e.message)));
-document.getElementById('sessionList').addEventListener('change', () => sessionAction('switch').catch((e) => alert(e.message)));
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
 document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
 document.getElementById('clearUploads').addEventListener('click', () => clearUploadedStore().catch((e) => alert(e.message)));
@@ -1867,6 +1970,9 @@ document.getElementById('browseWorkspace').addEventListener('click', () => {
   loadDirs(document.getElementById('workspace').value.trim()).catch((e) => alert(e.message));
 });
 document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
+document.getElementById('closeNewSessionModal').addEventListener('click', () => showModal('newSessionModal', false));
+document.getElementById('createSessionConfirm').addEventListener('click', () => createSessionFromModal().catch((e) => alert(e.message)));
+document.getElementById('newSessionProvider').addEventListener('change', () => wireNewSessionModels(document.getElementById('newSessionProvider').value));
 document.getElementById('loadDir').addEventListener('click', () => loadDirs(document.getElementById('dirPath').value.trim()).catch((e) => alert(e.message)));
 document.getElementById('chooseDir').addEventListener('click', () => {
   if (!selectedDir) return;

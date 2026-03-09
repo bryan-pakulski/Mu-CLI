@@ -1020,6 +1020,24 @@ def create_app():
         if action == "new":
             if not name:
                 return jsonify({"error": "name required"}), 400
+
+            runtime.provider = str(payload.get("provider", runtime.provider))
+            selected_model = str(payload.get("model", runtime.model))
+            runtime.api_key = payload.get("api_key", runtime.api_key)
+            available = get_models(runtime.provider, runtime.api_key)
+            runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
+            runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
+            runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
+            runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
+
+            workspace = payload.get("workspace")
+            runtime.workspace_path = str(workspace).strip() if workspace else None
+            runtime.workspace_store.snapshot = None
+            if runtime.workspace_path:
+                path = Path(runtime.workspace_path).expanduser()
+                if path.exists() and path.is_dir():
+                    runtime.workspace_store.attach(path)
+
             runtime.session_name = name
             runtime.session_store.use(name)
             runtime.agent = _new_agent(runtime)

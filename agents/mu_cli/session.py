@@ -14,6 +14,7 @@ class SessionState:
     workspace: str | None
     approval_mode: str
     messages: list[Message]
+    api_keys: dict[str, str | None] | None = None
     usage_totals: dict[str, float] | None = None
     turns: list[dict] | None = None
     uploads: list[dict] | None = None
@@ -52,6 +53,7 @@ class SessionStore:
             workspace=payload.get("workspace"),
             approval_mode=payload.get("approval_mode", "ask"),
             messages=messages,
+            api_keys=payload.get("api_keys"),
             usage_totals=payload.get("usage_totals"),
             turns=payload.get("turns"),
             uploads=payload.get("uploads"),
@@ -65,6 +67,7 @@ class SessionStore:
             "workspace": state.workspace,
             "approval_mode": state.approval_mode,
             "messages": [asdict(message) for message in state.messages],
+            "api_keys": state.api_keys or {},
             "usage_totals": state.usage_totals or {},
             "turns": state.turns or [],
             "uploads": state.uploads or [],

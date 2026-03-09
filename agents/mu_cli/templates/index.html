@@ -440,6 +440,22 @@
     }
 
     .small-muted { color: var(--muted); font-size: 11px; }
+    .notice {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      max-width: 360px;
+      background: var(--surface);
+      border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border));
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--text);
+      box-shadow: none;
+      display: none;
+      z-index: 80;
+    }
+    .notice.show { display: block; }
     .thinking {
       display: inline-flex;
       align-items: center;
@@ -845,8 +861,10 @@
       </div>
       <div class="input-group input-group-sm mb-2">
         <input id="dirPath" class="form-control" />
-        <button id="loadDir" class="btn btn-soft" type="button">Go</button>
-      </div>
+          <label class="small-muted mb-1">OpenAI API key</label>
+          <input id="apiKeyOpenAI" type="password" class="form-control mb-2" placeholder="sk-..." />
+          <label class="small-muted mb-1">Gemini API key</label>
+          <input id="apiKeyGemini" type="password" class="form-control mb-2" placeholder="AIza..." />
       <div class="small-muted mb-2" id="dirCwd">cwd: -</div>
       <div class="dir-list" id="dirList"></div>
       <div class="d-flex gap-2 mt-2">
@@ -930,6 +948,16 @@ function inferMessageTimestamps(messages, turns) {
       if (rows[turnIdx] && rows[turnIdx].timestamp) activeTs = rows[turnIdx].timestamp;
       if (activeTs) out.set(idx, activeTs);
       return;
+  <div id="notice" class="notice" role="status" aria-live="polite"></div>
+
+function showNotice(message) {
+  const el = document.getElementById('notice');
+  el.textContent = String(message || '');
+  el.classList.add('show');
+  clearTimeout(showNotice._timer);
+  showNotice._timer = setTimeout(() => el.classList.remove('show'), 3600);
+}
+
     }
 
     if (m.role === 'assistant') {
@@ -1581,8 +1609,12 @@ async function uploadContextFiles() {
   if (!input.files || !input.files.length) return;
   const form = new FormData();
   for (const file of input.files) form.append('files', file);
-  await apiForm('/api/uploads', form);
-  input.value = '';
+    api_keys: {
+      openai: document.getElementById('apiKeyOpenAI').value || null,
+      gemini: document.getElementById('apiKeyGemini').value || null,
+      echo: null,
+    },
+  applyTimer = setTimeout(() => applySettings().catch((e) => showNotice(e.message)), 250);
   await refreshState();
 }
 
@@ -1767,6 +1799,9 @@ async function sendPrompt() {
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
+  const keys = s.api_keys || {};
+  document.getElementById('apiKeyOpenAI').value = keys.openai || '';
+  document.getElementById('apiKeyGemini').value = keys.gemini || '';
       for (const line of lines) {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
@@ -1884,3 +1919,5 @@ refreshState().then(async () => {
 </script>
 </body>
 </html>
+for (const id of ['provider', 'model', 'apiKeyOpenAI', 'apiKeyGemini', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'darkMode']) {
+  if (id === 'workspace' || id === 'apiKeyOpenAI' || id === 'apiKeyGemini') {

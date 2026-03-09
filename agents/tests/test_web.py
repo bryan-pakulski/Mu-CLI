@@ -176,6 +176,23 @@ class WebTests(unittest.TestCase):
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
 
+    def test_settings_requires_provider_api_key_for_keyed_models(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={
+            'provider': 'gemini',
+            'model': 'gemini-2.0-flash',
+            'api_keys': {'gemini': ''},
+        })
+        self.assertEqual(400, res.status_code)
+        payload = res.get_json()
+        assert payload is not None
+        self.assertIn('API key required', payload['error'])
+
     def test_research_export_endpoint(self) -> None:
         from mu_cli.web import create_app
 

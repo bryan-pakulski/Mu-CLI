@@ -47,6 +47,7 @@ class WebRuntime:
     provider: str
     model: str
     api_key: str | None
+    api_keys: dict[str, str | None]
     approval_mode: str
     system_prompt: str
     session_name: str
@@ -85,6 +86,15 @@ def _build_provider(name: str, model: str, api_key: str | None):
     if name == "gemini":
         return GeminiProvider(model=model, api_key=api_key)
     raise ValueError(f"Unsupported provider: {name}")
+
+
+def _provider_api_key(runtime: WebRuntime, provider: str | None = None) -> str | None:
+    current = provider or runtime.provider
+    keys = runtime.api_keys or {}
+    scoped = keys.get(current)
+    if isinstance(scoped, str) and scoped.strip():
+        return scoped.strip()
+    return runtime.api_key
 
 
 def _planning_prompt(workspace_summary: str | None = None) -> str:
@@ -136,7 +146,7 @@ def _inject_planning(agent: Agent, workspace_summary: str | None = None) -> None
 
 
 def _new_agent(runtime: WebRuntime) -> Agent:
-    provider = _build_provider(runtime.provider, runtime.model, runtime.api_key)
+    provider = _build_provider(runtime.provider, runtime.model, _provider_api_key(runtime, runtime.provider))
 
     def on_approval(tool_name: str, args: dict) -> bool:
         mode = runtime.approval_mode
@@ -490,6 +500,7 @@ def _persist(runtime: WebRuntime) -> None:
             workspace=runtime.workspace_path,
             approval_mode=runtime.approval_mode,
             messages=runtime.agent.state.messages,
+            api_keys=runtime.api_keys,
             usage_totals=runtime.session_usage,
             turns=runtime.session_turns,
             uploads=runtime.uploads,
@@ -507,6 +518,8 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.session_name = session_name
     runtime.provider = loaded.provider
     runtime.model = loaded.model
+    runtime.api_keys = dict(loaded.api_keys or runtime.api_keys or {})
+    runtime.api_key = _provider_api_key(runtime, runtime.provider)
     runtime.workspace_path = loaded.workspace
     runtime.approval_mode = loaded.approval_mode
     runtime.agent = _new_agent(runtime)
@@ -561,6 +574,7 @@ def create_app():
         provider="echo",
         model="echo",
         api_key=None,
+        api_keys={"openai": None, "gemini": None, "echo": None},
         approval_mode="ask",
         system_prompt="You are a helpful coding assistant. Keep responses concise.",
         session_name="default",
@@ -606,6 +620,7 @@ def create_app():
                 "provider": runtime.provider,
                 "model": runtime.model,
                 "approval_mode": runtime.approval_mode,
+                "api_keys": runtime.api_keys,
                 "session": runtime.session_name,
                 "workspace": runtime.workspace_path,
                 "debug": runtime.debug,
@@ -724,7 +739,24 @@ def create_app():
         selected_model = str(payload.get("model", runtime.model))
         available = get_models(runtime.provider)
         runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
-        runtime.api_key = payload.get("api_key", runtime.api_key)
+        api_keys_payload = payload.get("api_keys")
+        if isinstance(api_keys_payload, dict):
+            merged = dict(runtime.api_keys or {})
+            for key in ("openai", "gemini", "echo"):
+                value = api_keys_payload.get(key, merged.get(key))
+                if isinstance(value, str):
+                    merged[key] = value.strip() or None
+                elif value is None:
+                    merged[key] = None
+            runtime.api_keys = merged
+        elif "api_key" in payload:
+            current = runtime.provider
+            value = payload.get("api_key")
+            if value is None:
+                runtime.api_keys[current] = None
+            else:
+                runtime.api_keys[current] = str(value).strip() or None
+        runtime.api_key = _provider_api_key(runtime, runtime.provider)
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
@@ -750,7 +782,15 @@ def create_app():
 
         previous_messages = list(runtime.agent.state.messages)
         _refresh_tooling(runtime)
-        runtime.agent = _new_agent(runtime)
+        try:
+            runtime.agent = _new_agent(runtime)
+        except ValueError as exc:
+            return jsonify({
+                "error": (
+                    f"API key required for {runtime.provider}:{runtime.model}. "
+                    "Please update the provider API key in Advanced settings."
+                ) if "API_KEY" in str(exc) or "api key" in str(exc).lower() else str(exc)
+            }), 400
         runtime.agent.state.messages = previous_messages
         if runtime.agentic_planning:
             summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None

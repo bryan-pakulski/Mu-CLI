@@ -604,16 +604,14 @@
       color: var(--text);
     }
     .session-menu {
-      position: absolute;
-      right: 0;
-      top: 28px;
-      min-width: 130px;
+      position: fixed;
+      min-width: 136px;
       border: 1px solid var(--border);
       border-radius: 10px;
       background: var(--surface);
       box-shadow: 0 8px 24px rgba(0,0,0,.08);
       padding: 4px;
-      z-index: 4;
+      z-index: 120;
       display: none;
     }
     .session-menu.show { display: block; }
@@ -877,6 +875,27 @@
     </section>
   </div>
 
+  <div id="planApprovalModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(760px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Approve execution plan</h5>
+        <button id="closePlanApprovalModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="planApprovalMeta" class="small-muted mb-2"></div>
+      <pre id="planApprovalContent" class="approval-value" style="max-height:360px;overflow:auto;white-space:pre-wrap;"></pre>
+      <div class="d-flex gap-2 justify-content-end mt-3">
+        <button id="planApprovalDeny" class="btn btn-soft btn-sm">Deny</button>
+        <button id="planApprovalApprove" class="btn btn-accent btn-sm">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sessionMenuOverlay" class="session-menu">
+    <button type="button" data-session-cmd="refresh">Refresh</button>
+    <button type="button" data-session-cmd="condense">Condense</button>
+    <button type="button" data-session-cmd="delete">Delete</button>
+  </div>
+
   <div id="advancedModal" class="modal-backdrop-custom">
     <div class="modal-card">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1014,6 +1033,8 @@ let sending = false;
 let approvalPoll = null;
 let selectedDir = null;
 let lastApprovalPatchFingerprint = null;
+let openSessionMenuFor = null;
+let planApprovalResolver = null;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1567,7 +1588,18 @@ function sessionStatusMap() {
 }
 
 function closeAllSessionMenus() {
-  document.querySelectorAll('.session-menu.show').forEach((el) => el.classList.remove('show'));
+  const overlay = document.getElementById('sessionMenuOverlay');
+  overlay.classList.remove('show');
+  openSessionMenuFor = null;
+}
+
+function openSessionMenu(anchorBtn, sessionName) {
+  const overlay = document.getElementById('sessionMenuOverlay');
+  const rect = anchorBtn.getBoundingClientRect();
+  overlay.style.top = `${rect.bottom + 6}px`;
+  overlay.style.left = `${Math.max(8, rect.right - 136)}px`;
+  overlay.classList.add('show');
+  openSessionMenuFor = sessionName;
 }
 
 function renderSessions(list, active) {
@@ -1593,35 +1625,15 @@ function renderSessions(list, active) {
     menuBtn.className = 'session-menu-btn';
     menuBtn.textContent = '⋯';
 
-    const menu = document.createElement('div');
-    menu.className = 'session-menu';
-    menu.innerHTML = `
-      <button type="button" data-session-cmd="refresh">Refresh</button>
-      <button type="button" data-session-cmd="condense">Condense</button>
-      <button type="button" data-session-cmd="delete">Delete</button>
-    `;
-
     menuBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      const open = menu.classList.contains('show');
+      const isOpen = document.getElementById('sessionMenuOverlay').classList.contains('show') && openSessionMenuFor === name;
       closeAllSessionMenus();
-      if (!open) menu.classList.add('show');
-    });
-
-    menu.querySelectorAll('[data-session-cmd]').forEach((el) => {
-      el.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        closeAllSessionMenus();
-        const cmd = el.getAttribute('data-session-cmd');
-        if (cmd === 'refresh') await sessionAction('switch', name);
-        if (cmd === 'condense') await sessionAction('condense', name);
-        if (cmd === 'delete') await sessionAction('delete', name);
-      });
+      if (!isOpen) openSessionMenu(menuBtn, name);
     });
 
     row.appendChild(btn);
     row.appendChild(menuBtn);
-    row.appendChild(menu);
     host.appendChild(row);
   }
 
@@ -1747,7 +1759,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal']
+  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -1926,6 +1938,16 @@ async function refreshState() {
   syncing = false;
 }
 
+
+function askPlanApproval(job) {
+  return new Promise((resolve) => {
+    planApprovalResolver = resolve;
+    document.getElementById('planApprovalMeta').textContent = `Session: ${job.session} · Job: ${job.id}`;
+    document.getElementById('planApprovalContent').textContent = job.plan || '(No plan text returned)';
+    showModal('planApprovalModal', true);
+  });
+}
+
 async function sendPrompt(background = false) {
   if (sending) return;
   const text = document.getElementById('prompt').value.trim();
@@ -1955,7 +1977,7 @@ async function sendPrompt(background = false) {
         for (let i = 0; i < 120; i += 1) {
           const job = await api(`/api/jobs/${bg.job_id}`);
           if (job.status === 'awaiting_plan_approval') {
-            const ok = confirm(`Plan ready for ${job.session}. Approve to continue?\n\n${job.plan || ''}`);
+            const ok = await askPlanApproval(job);
             await api(`/api/jobs/${bg.job_id}/plan`, 'POST', { decision: ok ? 'approve' : 'deny' });
           }
           if (['completed', 'failed', 'timed_out'].includes(job.status)) {
@@ -2130,6 +2152,45 @@ document.getElementById('chooseDir').addEventListener('click', () => {
 
 document.getElementById('approveYes').addEventListener('click', () => sendApprovalDecision('approve').catch((e) => alert(e.message)));
 document.getElementById('approveNo').addEventListener('click', () => sendApprovalDecision('deny').catch((e) => alert(e.message)));
+
+
+document.getElementById('closePlanApprovalModal').addEventListener('click', () => {
+  showModal('planApprovalModal', false);
+  if (planApprovalResolver) {
+    const resolve = planApprovalResolver;
+    planApprovalResolver = null;
+    resolve(false);
+  }
+});
+document.getElementById('planApprovalDeny').addEventListener('click', () => {
+  showModal('planApprovalModal', false);
+  if (planApprovalResolver) {
+    const resolve = planApprovalResolver;
+    planApprovalResolver = null;
+    resolve(false);
+  }
+});
+document.getElementById('planApprovalApprove').addEventListener('click', () => {
+  showModal('planApprovalModal', false);
+  if (planApprovalResolver) {
+    const resolve = planApprovalResolver;
+    planApprovalResolver = null;
+    resolve(true);
+  }
+});
+
+document.getElementById('sessionMenuOverlay').querySelectorAll('[data-session-cmd]').forEach((el) => {
+  el.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    const cmd = el.getAttribute('data-session-cmd');
+    const name = openSessionMenuFor;
+    closeAllSessionMenus();
+    if (!name) return;
+    if (cmd === 'refresh') await sessionAction('switch', name);
+    if (cmd === 'condense') await sessionAction('condense', name);
+    if (cmd === 'delete') await sessionAction('delete', name);
+  });
+});
 
 document.getElementById('prompt').addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));

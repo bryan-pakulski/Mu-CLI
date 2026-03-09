@@ -31,6 +31,24 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, state_panel.status_code)
         self.assertIn('Session', state_panel.get_data(as_text=True))
 
+        settings = client.get('/ui/settings')
+        self.assertEqual(200, settings.status_code)
+        self.assertIn('Save settings', settings.get_data(as_text=True))
+
+        settings_save = client.post('/ui/settings', data={
+            'provider': 'echo',
+            'model': 'echo',
+            'approval_mode': 'auto',
+            'debug': 'on',
+            'agentic_planning': 'on',
+            'research_mode': 'on',
+            'max_runtime_seconds': '600',
+            'condense_enabled': 'on',
+            'condense_window': '10',
+        })
+        self.assertEqual(200, settings_save.status_code)
+        self.assertIn('Saved.', settings_save.get_data(as_text=True))
+
         posted = client.post('/ui/chat', data={'text': 'hello from form'})
         self.assertEqual(200, posted.status_code)
         self.assertIn('hello from form', posted.get_data(as_text=True))

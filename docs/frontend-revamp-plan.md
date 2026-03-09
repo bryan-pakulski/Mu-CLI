@@ -10,7 +10,7 @@ Deliver a reactive, lightweight UI that keeps Python/Flask in control and avoids
    - Create server-rendered message partials and form-based chat posting.
 2. **Progressive enhancement**
    - Add approval modal interactions via HTMX swaps.
-   - Add settings panels (provider/model/approval/workspace) as server-rendered partials.
+   - Add settings panels (provider/model/approval/workspace + runtime/debug/research toggles) as server-rendered partials.
    - Add background job/plan status polling with lightweight polling intervals.
 3. **Parity + cleanup**
    - Reach functional parity with the legacy single-page template.
@@ -20,4 +20,5 @@ Deliver a reactive, lightweight UI that keeps Python/Flask in control and avoids
 ## Execution status
 - ✅ Phase 1 foundation is implemented.
 - ✅ Phase 2 started: state sidebar and trace feed now update via HTMX polling.
-- ⏳ Remaining Phase 2 controls (approvals/settings parity) and Phase 3 cleanup are planned follow-up work.
+- ✅ Settings port in progress: provider/model/approval/workspace/runtime/condense/debug/agentic/research settings now editable in HTMX sidebar.
+- ⏳ Remaining Phase 2 controls (approval modal and deeper parity) and Phase 3 cleanup are planned follow-up work.

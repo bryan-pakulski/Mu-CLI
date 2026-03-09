@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -42,7 +43,10 @@ class SessionStore:
     def load(self) -> SessionState | None:
         if not self.path.exists():
             return None
-        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except JSONDecodeError:
+            return None
         messages = [
             Message(
                 role=Role(item["role"]),

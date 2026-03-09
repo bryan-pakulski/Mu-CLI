@@ -1226,6 +1226,87 @@ def create_app():
             traces=runtime.traces[-20:],
         )
 
+
+    @app.get("/ui/settings")
+    def ui_settings():
+        provider_models = get_models(runtime.provider, runtime.api_key)
+        if runtime.model not in provider_models and provider_models:
+            provider_models = [runtime.model] + provider_models
+        return render_template(
+            "partials/settings.html",
+            provider=runtime.provider,
+            model=runtime.model,
+            models=provider_models,
+            approval_mode=runtime.approval_mode,
+            workspace=runtime.workspace_path or "",
+            debug=runtime.debug,
+            agentic_planning=runtime.agentic_planning,
+            research_mode=runtime.research_mode,
+            max_runtime_seconds=runtime.max_runtime_seconds,
+            condense_enabled=runtime.condense_enabled,
+            condense_window=runtime.condense_window,
+        )
+
+    @app.post("/ui/settings")
+    def ui_update_settings():
+        form = request.form
+
+        runtime.provider = str(form.get("provider", runtime.provider)).strip() or runtime.provider
+        selected_model = str(form.get("model", runtime.model)).strip() or runtime.model
+        available = get_models(runtime.provider, runtime.api_key)
+        runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
+        runtime.approval_mode = str(form.get("approval_mode", runtime.approval_mode)).strip() or runtime.approval_mode
+        runtime.debug = str(form.get("debug", "")).lower() in {"on", "true", "1", "yes"}
+        runtime.agentic_planning = str(form.get("agentic_planning", "")).lower() in {"on", "true", "1", "yes"}
+        runtime.research_mode = str(form.get("research_mode", "")).lower() in {"on", "true", "1", "yes"}
+
+        max_runtime_val = str(form.get("max_runtime_seconds", runtime.max_runtime_seconds)).strip()
+        if max_runtime_val:
+            runtime.max_runtime_seconds = int(max_runtime_val)
+
+        runtime.condense_enabled = str(form.get("condense_enabled", "")).lower() in {"on", "true", "1", "yes"}
+        condense_window_val = str(form.get("condense_window", runtime.condense_window)).strip()
+        if condense_window_val:
+            runtime.condense_window = int(condense_window_val)
+
+        workspace = str(form.get("workspace", "")).strip()
+        if workspace:
+            path = Path(workspace).expanduser()
+            if path.exists() and path.is_dir():
+                snapshot = runtime.workspace_store.attach(path)
+                runtime.workspace_path = str(path)
+                runtime.traces.append(f"workspace-attached: {snapshot.root} files={len(snapshot.files)}")
+
+        previous_messages = list(runtime.agent.state.messages)
+        _refresh_tooling(runtime)
+        runtime.agent = _new_agent(runtime)
+        runtime.agent.state.messages = previous_messages
+        if runtime.agentic_planning:
+            summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
+            _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
+        if runtime.research_mode:
+            _inject_research_prompt(runtime.agent)
+        _persist(runtime)
+
+        provider_models = get_models(runtime.provider, runtime.api_key)
+        if runtime.model not in provider_models and provider_models:
+            provider_models = [runtime.model] + provider_models
+        return render_template(
+            "partials/settings.html",
+            provider=runtime.provider,
+            model=runtime.model,
+            models=provider_models,
+            approval_mode=runtime.approval_mode,
+            workspace=runtime.workspace_path or "",
+            debug=runtime.debug,
+            agentic_planning=runtime.agentic_planning,
+            research_mode=runtime.research_mode,
+            max_runtime_seconds=runtime.max_runtime_seconds,
+            condense_enabled=runtime.condense_enabled,
+            condense_window=runtime.condense_window,
+            saved=True,
+        )
+
     @app.get("/api/state")
     def state():
         sessions = runtime.session_store.list_sessions()

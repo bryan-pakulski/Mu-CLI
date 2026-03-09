@@ -72,7 +72,7 @@ Notes:
 
 - Start with `make run-web` then open `http://localhost:5000` (new HTMX + Alpine UI).
 - Legacy single-file interface remains available at `http://localhost:5000/legacy` during migration.
-- Includes a toggleable settings sidebar (provider/model/approval/workspace/debug/agentic).
+- HTMX sidebar now supports live settings edits for provider/model/approval/workspace/runtime/condense/debug/agentic/research.
 - Includes a top-panel `GIT` button (visible for git workspaces) that opens a modal for repository/branch actions and current workspace diff view.
 - During background agent sessions, a dedicated “Plan output” overlay shows plan, checkpoints, and execution stages without reloading chat messages.
 - Includes built-in session management actions (new/load/delete/list/status).

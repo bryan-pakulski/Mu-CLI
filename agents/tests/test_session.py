@@ -39,6 +39,12 @@ class SessionTests(unittest.TestCase):
             self.assertFalse(loaded.research_mode)
             self.assertEqual(1200, loaded.max_runtime_seconds)
 
+    def test_load_invalid_json_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td), "broken")
+            store.path.write_text("", encoding="utf-8")
+            self.assertIsNone(store.load())
+
     def test_list_and_delete_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             store = SessionStore(Path(td), "one")

@@ -27,7 +27,8 @@
     .bubble { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:10px 12px; margin:0 10px; white-space:pre-wrap; }
     .msg.role-user .bubble { background:var(--surface-2); }
     .composer { border-top:1px solid color-mix(in srgb, var(--border) 55%, transparent); padding-top:8px; }
-    textarea { width:100%; border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--surface); }
+    textarea, input, select { width:100%; border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--surface); color:var(--text); }
+    textarea { padding:10px; }
     .actions { display:flex; gap:8px; align-items:center; margin-top:8px; }
     button { border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); padding:8px 12px; font-weight:600; }
     .muted { color:var(--muted); font-size:12px; }
@@ -39,7 +40,8 @@
 <body x-data="{ sending:false }">
   <div class="shell">
     <aside class="sidebar">
-      <div id="state-panel" hx-get="/ui/state" hx-trigger="load, every 3s" hx-swap="innerHTML"></div>
+      <div id="settings-panel" hx-get="/ui/settings" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
+      <div id="state-panel" hx-get="/ui/state" hx-trigger="load, every 3s, refresh from:body" hx-swap="innerHTML"></div>
       <div class="panel">
         <h3>Views</h3>
         <div class="kv"><div>Primary</div><div>HTMX + Alpine</div><div>Fallback</div><div><a href="/legacy">Open legacy UI</a></div></div>
@@ -55,7 +57,7 @@
       <section class="chat-layout">
         <div id="messages" class="messages" hx-get="/ui/messages" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
 
-        <form class="composer" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); sending=false; document.querySelector('#messages').scrollTop=999999;">
+        <form class="composer" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); sending=false; document.querySelector('#messages').scrollTop=999999; htmx.trigger(document.body,'refresh');">
           <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
           <div class="actions">
             <button type="submit" :disabled="sending" x-text="sending ? 'Sending…' : 'Send'">Send</button>

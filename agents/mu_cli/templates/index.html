@@ -76,8 +76,12 @@
       pointer-events: none;
       user-select: none;
     }
-    .shell.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
-    .shell.sidebar-hidden .sidebar { display: none; }
+    .shell.sidebar-hidden { grid-template-columns: 0 minmax(0,1fr); }
+    .shell.sidebar-hidden .sidebar {
+      transform: translateX(-16px);
+      opacity: 0;
+      pointer-events: none;
+    }
 
     .glass {
       background: transparent;
@@ -95,6 +99,9 @@
       border-radius: 0;
       background: transparent;
       box-shadow: none;
+      transform: translateX(0);
+      opacity: 1;
+      transition: transform .22s ease, opacity .22s ease;
     }
     .panel {
       padding: 10px 0 12px;
@@ -222,7 +229,9 @@
       border-radius: 0;
       line-height: 1.42;
       background: transparent;
+      animation: bubbleIn .18s ease-out;
     }
+    @keyframes bubbleIn { from { opacity: .0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     .msg.role-user .bubble { background: transparent; }
     .msg.role-assistant .bubble { background: transparent; }
 
@@ -270,6 +279,26 @@
     }
     .tool-inline.call { color: var(--muted); }
     .tool-inline.result { color: var(--muted); }
+    .typing-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 16px;
+      margin: 0;
+    }
+    .typing-dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--muted) 85%, transparent);
+      animation: typingPulse 1s infinite ease-in-out;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .14s; }
+    .typing-dots span:nth-child(3) { animation-delay: .28s; }
+    @keyframes typingPulse {
+      0%, 80%, 100% { transform: translateY(0); opacity: .35; }
+      40% { transform: translateY(-2px); opacity: .95; }
+    }
 
     .citation-panel {
       margin-top: 8px;
@@ -476,7 +505,7 @@
     .modal-backdrop-custom {
       position: fixed;
       inset: 0;
-      display: none;
+      display: flex;
       align-items: center;
       justify-content: center;
       background: rgba(26, 31, 39, 0.22);
@@ -484,8 +513,12 @@
       -webkit-backdrop-filter: blur(3px);
       z-index: 50;
       padding: 14px;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity .18s ease, visibility .18s ease;
     }
-    .modal-backdrop-custom.show { display: flex; }
+    .modal-backdrop-custom.show { opacity: 1; visibility: visible; pointer-events: auto; }
 
     .modal-card {
       width: min(1100px, 96vw);
@@ -496,6 +529,13 @@
       border-radius: 16px;
       padding: 16px;
       box-shadow: none;
+      transform: translateY(10px) scale(0.985);
+      opacity: .92;
+      transition: transform .2s ease, opacity .2s ease;
+    }
+    .modal-backdrop-custom.show .modal-card {
+      transform: translateY(0) scale(1);
+      opacity: 1;
     }
     .settings-layout {
       display: grid;
@@ -1234,7 +1274,8 @@ function shouldRenderMessage(message) {
   if (message.role !== 'assistant') return true;
   const content = String(message.content || '').trim();
   const toolCalls = (message.metadata && message.metadata.tool_calls) || [];
-  return content.length > 0 || toolCalls.length > 0;
+  const typing = !!(message.metadata && message.metadata.typing);
+  return content.length > 0 || toolCalls.length > 0 || typing;
 }
 
 function renderMessages() {
@@ -1284,7 +1325,8 @@ function renderMessages() {
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
-    bubble.innerHTML = m.role === 'assistant'
+    if (m.role === 'assistant' && m.metadata && m.metadata.typing) bubble.innerHTML = '<p class="typing-dots"><span></span><span></span><span></span></p>';
+    else bubble.innerHTML = m.role === 'assistant'
       ? formatAssistantContentWithCitations(m.content, citationLinks)
       : formatMessageContent(m.content);
     row.appendChild(bubble);
@@ -1457,9 +1499,11 @@ function syncPricingEditor() {
 }
 
 function showModal(id, show) {
-  document.getElementById(id).style.display = show ? 'flex' : 'none';
+  const modal = document.getElementById(id);
+  if (show) modal.classList.add('show');
+  else modal.classList.remove('show');
   const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal']
-    .some((modalId) => document.getElementById(modalId).style.display === 'flex');
+    .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
 
@@ -1652,7 +1696,8 @@ async function sendPrompt() {
   reportEl.textContent = 'streaming...';
 
   state.messages.push({ role: 'user', content: text });
-  let draft = null;
+  let draft = { role: 'assistant', content: '', metadata: { typing: true } };
+  state.messages.push(draft);
   renderMessages();
 
   try {
@@ -1683,6 +1728,7 @@ async function sendPrompt() {
             draft = { role: 'assistant', content: '' };
             state.messages.push(draft);
           }
+          if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
           renderMessages();
         } else if (event.type === 'trace') {

@@ -52,7 +52,7 @@
     .modal-card { width:min(860px, 92vw); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.10); padding:12px; transform:translateY(0); transition:all .2s ease; }
   </style>
 </head>
-<body x-data="{ sending:false, sidebarOpen:true, settingsModal:false }" @keydown.escape.window="settingsModal=false">
+<body x-data="{ sending:false, sidebarOpen:true, settingsModal:false }" @keydown.escape.window="settingsModal=false" @htmx:afterRequest.window="sending=false" @htmx:responseError.window="sending=false" @htmx:sendError.window="sending=false">
   <div class="shell" :class="{ 'sidebar-hidden': !sidebarOpen, 'modal-active': settingsModal }">
     <aside class="sidebar">
       <div id="settings-panel" hx-get="/ui/settings?variant=quick" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
@@ -69,7 +69,7 @@
       <section class="chat-layout">
         <div id="messages" class="messages" hx-get="/ui/messages" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
 
-        <form class="composer" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); sending=false; document.querySelector('#messages').scrollTop=999999; htmx.trigger(document.body,'refresh');">
+        <form class="composer" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); document.querySelector('#messages').scrollTop=999999; htmx.trigger(document.body,'refresh');">
           <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
           <div class="actions">
             <button type="submit" class="send-btn" :disabled="sending" x-text="sending ? 'Sending…' : 'Send message'">Send message</button>

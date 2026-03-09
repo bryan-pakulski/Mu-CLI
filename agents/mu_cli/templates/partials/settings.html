@@ -1,9 +1,12 @@
-<div class="panel" x-data="{ tab: 'general' }">
-  <h3>Settings</h3>
+<div class="panel" {% if variant != 'quick' %}x-data="{ tab: 'general' }"{% endif %}>
+  <h3>{% if variant == 'quick' %}Quick controls{% else %}Settings{% endif %}</h3>
+
+  {% if variant != 'quick' %}
   <div class="actions" style="margin-top:0; margin-bottom:8px;">
     <button type="button" @click="tab='general'" :class="tab==='general' ? 'primary' : ''">General</button>
     <button type="button" @click="tab='advanced'" :class="tab==='advanced' ? 'primary' : ''">Advanced</button>
   </div>
+  {% endif %}
 
   <form
     hx-post="/ui/settings"
@@ -13,7 +16,7 @@
   >
     <input type="hidden" name="variant" value="{{ variant or 'quick' }}" />
 
-    <div class="kv" x-show="tab==='general'" x-transition>
+    <div class="kv" {% if variant != 'quick' %}x-show="tab==='general'" x-transition{% endif %}>
       <div>Provider</div>
       <div>
         <select
@@ -48,10 +51,13 @@
         </select>
       </div>
 
+      {% if variant != 'quick' %}
       <div>Workspace</div>
       <div><input name="workspace" value="{{ workspace }}" class="mono" /></div>
+      {% endif %}
     </div>
 
+    {% if variant != 'quick' %}
     <div class="kv" x-show="tab==='advanced'" x-transition>
       <div>Runtime sec</div>
       <div><input type="number" min="60" step="30" name="max_runtime_seconds" value="{{ max_runtime_seconds }}" /></div>
@@ -71,11 +77,12 @@
       <div>Research</div>
       <div><input type="checkbox" name="research_mode" {% if research_mode %}checked{% endif %} /></div>
     </div>
+    {% endif %}
 
     <div class="actions">
       <button type="submit" class="primary">Save settings</button>
       {% if saved %}<span class="muted">Saved.</span>{% endif %}
-      {% if variant == 'quick' %}<span class="muted">Advanced settings are in the modal.</span>{% endif %}
+      {% if variant == 'quick' %}<span class="muted">Open modal for all settings.</span>{% endif %}
     </div>
   </form>
 </div>

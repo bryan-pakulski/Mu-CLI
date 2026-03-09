@@ -1264,18 +1264,6 @@ def create_app():
         available = get_models(runtime.provider, runtime.api_key)
         runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
         runtime.approval_mode = str(form.get("approval_mode", runtime.approval_mode)).strip() or runtime.approval_mode
-        runtime.debug = str(form.get("debug", "")).lower() in {"on", "true", "1", "yes"}
-        runtime.agentic_planning = str(form.get("agentic_planning", "")).lower() in {"on", "true", "1", "yes"}
-        runtime.research_mode = str(form.get("research_mode", "")).lower() in {"on", "true", "1", "yes"}
-
-        max_runtime_val = str(form.get("max_runtime_seconds", runtime.max_runtime_seconds)).strip()
-        if max_runtime_val:
-            runtime.max_runtime_seconds = int(max_runtime_val)
-
-        runtime.condense_enabled = str(form.get("condense_enabled", "")).lower() in {"on", "true", "1", "yes"}
-        condense_window_val = str(form.get("condense_window", runtime.condense_window)).strip()
-        if condense_window_val:
-            runtime.condense_window = int(condense_window_val)
 
         workspace = str(form.get("workspace", "")).strip()
         if workspace:
@@ -1284,6 +1272,20 @@ def create_app():
                 snapshot = runtime.workspace_store.attach(path)
                 runtime.workspace_path = str(path)
                 runtime.traces.append(f"workspace-attached: {snapshot.root} files={len(snapshot.files)}")
+
+        if variant != "quick":
+            runtime.debug = str(form.get("debug", "")).lower() in {"on", "true", "1", "yes"}
+            runtime.agentic_planning = str(form.get("agentic_planning", "")).lower() in {"on", "true", "1", "yes"}
+            runtime.research_mode = str(form.get("research_mode", "")).lower() in {"on", "true", "1", "yes"}
+
+            max_runtime_val = str(form.get("max_runtime_seconds", runtime.max_runtime_seconds)).strip()
+            if max_runtime_val:
+                runtime.max_runtime_seconds = int(max_runtime_val)
+
+            runtime.condense_enabled = str(form.get("condense_enabled", "")).lower() in {"on", "true", "1", "yes"}
+            condense_window_val = str(form.get("condense_window", runtime.condense_window)).strip()
+            if condense_window_val:
+                runtime.condense_window = int(condense_window_val)
 
         previous_messages = list(runtime.agent.state.messages)
         _refresh_tooling(runtime)

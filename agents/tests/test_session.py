@@ -13,6 +13,7 @@ class SessionTests(unittest.TestCase):
             state = SessionState(
                 provider="echo",
                 model="echo",
+                system_prompt="sys",
                 workspace="/tmp/ws",
                 approval_mode="auto",
                 messages=[Message(role=Role.USER, content="hello")],
@@ -39,6 +40,7 @@ class SessionTests(unittest.TestCase):
             state = SessionState(
                 provider="echo",
                 model="echo",
+                system_prompt="sys",
                 workspace=None,
                 approval_mode="ask",
                 messages=[],

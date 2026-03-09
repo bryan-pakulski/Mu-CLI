@@ -11,6 +11,7 @@ from mu_cli.core.types import Message, Role
 class SessionState:
     provider: str
     model: str
+    system_prompt: str | None
     workspace: str | None
     approval_mode: str
     messages: list[Message]
@@ -50,6 +51,7 @@ class SessionStore:
         return SessionState(
             provider=payload.get("provider", "echo"),
             model=payload.get("model", "echo"),
+            system_prompt=payload.get("system_prompt"),
             workspace=payload.get("workspace"),
             approval_mode=payload.get("approval_mode", "ask"),
             messages=messages,
@@ -64,6 +66,7 @@ class SessionStore:
         payload = {
             "provider": state.provider,
             "model": state.model,
+            "system_prompt": state.system_prompt,
             "workspace": state.workspace,
             "approval_mode": state.approval_mode,
             "messages": [asdict(message) for message in state.messages],

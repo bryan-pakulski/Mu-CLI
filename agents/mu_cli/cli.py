@@ -43,13 +43,30 @@ PLANNING_PROMPT_BASE = (
     "For mutating actions, clearly state intended edits before executing."
 )
 
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. "
+    "Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\n"
+    "Your capabilities:\n\n"
+    "- Receive user prompts and other context provided by the harness, such as files in the workspace.\n"
+    "- Communicate with the user by streaming thinking and responses, and by making and updating plans.\n"
+    "- Emit function calls to run terminal commands and apply patches. Depending on how this run is configured, "
+    "you can request these calls be escalated for approval before running.\n\n"
+    "Within this context, Codex refers to the open-source agentic coding interface (not the old Codex language model).\n\n"
+    "How you work\n\n"
+    "Personality\n"
+    "- Keep responses concise, direct, and friendly.\n"
+    "- Communicate efficiently and keep the user informed about ongoing actions without unnecessary detail.\n"
+    "- Prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps.\n"
+    "- Unless explicitly asked, avoid excessively verbose explanations."
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Provider-agnostic AI CLI (human-in-the-loop)")
     parser.add_argument("--provider", default="echo", choices=["echo", "openai", "gemini"])
     parser.add_argument("--model", default=None)
     parser.add_argument("--api-key", default=None)
-    parser.add_argument("--system", default="You are a helpful coding assistant. Keep responses concise.")
+    parser.add_argument("--system", default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--workspace", default=None, help="Optional workspace path to pre-attach")
     parser.add_argument("--pricing-config", default=".mu_cli/pricing.json")
     parser.add_argument("--session", default="default", help="Session name used for persistence")
@@ -444,6 +461,7 @@ def _persist_session(context: RuntimeContext, agent: Agent) -> None:
     state = SessionState(
         provider=context.provider_name,
         model=context.model_name,
+        system_prompt=context.system_prompt,
         workspace=context.workspace_path,
         approval_mode=context.approval_policy.mode,
         messages=agent.state.messages,
@@ -482,6 +500,7 @@ def run() -> int:
     model_name = resumed.model if resumed else (args.model or get_models(args.provider)[0])
     workspace_path = resumed.workspace if resumed else args.workspace
     approval_mode = resumed.approval_mode if resumed else args.approval_mode
+    system_prompt = resumed.system_prompt if (resumed and resumed.system_prompt) else args.system
 
     context = RuntimeContext(
         provider_name=provider_name,
@@ -494,7 +513,7 @@ def run() -> int:
         session_store=session_store,
         workspace_path=workspace_path,
         agentic_planning_enabled=not args.no_agentic_planning,
-        system_prompt=args.system,
+        system_prompt=system_prompt,
         debug_enabled=args.debug,
     )
 
@@ -502,7 +521,7 @@ def run() -> int:
     if resumed and resumed.messages:
         agent.state.messages = resumed.messages
     else:
-        agent.add_system_prompt(args.system)
+        agent.add_system_prompt(context.system_prompt)
 
     if context.workspace_path:
         path = Path(context.workspace_path).expanduser()

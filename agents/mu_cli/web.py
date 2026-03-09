@@ -11,7 +11,7 @@ from typing import Any
 
 
 from mu_cli.agent import Agent
-from mu_cli.cli import PLANNING_PROMPT_BASE
+from mu_cli.cli import DEFAULT_SYSTEM_PROMPT, PLANNING_PROMPT_BASE
 from mu_cli.core.types import Message, Role, ToolCall, UsageStats
 from mu_cli.models import MODELS_BY_PROVIDER, get_models
 from mu_cli.pricing import PricingCatalog, estimate_tokens
@@ -141,6 +141,21 @@ def _inject_planning(agent: Agent, workspace_summary: str | None = None) -> None
             role=Role.SYSTEM,
             content=_planning_prompt(workspace_summary),
             metadata={"kind": "agentic_planning"},
+        )
+    )
+
+
+def _inject_system_prompt(agent: Agent, prompt: str) -> None:
+    agent.state.messages = [
+        message
+        for message in agent.state.messages
+        if not (message.role is Role.SYSTEM and message.metadata.get("kind") == "runtime_system_prompt")
+    ]
+    agent.state.messages.append(
+        Message(
+            role=Role.SYSTEM,
+            content=prompt,
+            metadata={"kind": "runtime_system_prompt"},
         )
     )
 
@@ -497,6 +512,7 @@ def _persist(runtime: WebRuntime) -> None:
         SessionState(
             provider=runtime.provider,
             model=runtime.model,
+            system_prompt=runtime.system_prompt,
             workspace=runtime.workspace_path,
             approval_mode=runtime.approval_mode,
             messages=runtime.agent.state.messages,
@@ -518,6 +534,8 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.session_name = session_name
     runtime.provider = loaded.provider
     runtime.model = loaded.model
+    if isinstance(loaded.system_prompt, str) and loaded.system_prompt.strip():
+        runtime.system_prompt = loaded.system_prompt.strip()
     runtime.api_keys = dict(loaded.api_keys or runtime.api_keys or {})
     runtime.api_key = _provider_api_key(runtime, runtime.provider)
     runtime.workspace_path = loaded.workspace
@@ -576,7 +594,7 @@ def create_app():
         api_key=None,
         api_keys={"openai": None, "gemini": None, "echo": None},
         approval_mode="ask",
-        system_prompt="You are a helpful coding assistant. Keep responses concise.",
+        system_prompt=DEFAULT_SYSTEM_PROMPT,
         session_name="default",
         workspace_path=None,
         debug=False,
@@ -601,7 +619,7 @@ def create_app():
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     _refresh_tooling(runtime)
     runtime.agent = _new_agent(runtime)
-    runtime.agent.add_system_prompt(runtime.system_prompt)
+    _inject_system_prompt(runtime.agent, runtime.system_prompt)
     _inject_planning(runtime.agent)
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
@@ -620,6 +638,7 @@ def create_app():
                 "provider": runtime.provider,
                 "model": runtime.model,
                 "approval_mode": runtime.approval_mode,
+                "system_prompt": runtime.system_prompt,
                 "api_keys": runtime.api_keys,
                 "session": runtime.session_name,
                 "workspace": runtime.workspace_path,
@@ -758,6 +777,10 @@ def create_app():
                 runtime.api_keys[current] = str(value).strip() or None
         runtime.api_key = _provider_api_key(runtime, runtime.provider)
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
+        if "system_prompt" in payload:
+            candidate = str(payload.get("system_prompt", "")).strip()
+            if candidate:
+                runtime.system_prompt = candidate
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
         runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
@@ -792,6 +815,7 @@ def create_app():
                 ) if "API_KEY" in str(exc) or "api key" in str(exc).lower() else str(exc)
             }), 400
         runtime.agent.state.messages = previous_messages
+        _inject_system_prompt(runtime.agent, runtime.system_prompt)
         if runtime.agentic_planning:
             summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
             _inject_planning(runtime.agent, summary)
@@ -962,7 +986,7 @@ def create_app():
             runtime.session_name = name
             runtime.session_store.use(name)
             runtime.agent = _new_agent(runtime)
-            runtime.agent.add_system_prompt(runtime.system_prompt)
+            _inject_system_prompt(runtime.agent, runtime.system_prompt)
             runtime.session_usage = _default_usage()
             runtime.session_turns = []
             runtime.uploads = []

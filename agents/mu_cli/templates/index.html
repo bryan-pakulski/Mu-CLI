@@ -632,10 +632,29 @@
       font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
-    .upload-item {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .settings-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .settings-tab {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .settings-tab.active {
+      background: var(--primary-soft);
+      border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    .settings-panel { display: none; }
+    .settings-panel.active { display: block; }
       gap: 8px;
       padding: 6px 0;
       border-bottom: 1px solid var(--border);
@@ -872,14 +891,22 @@
         <h5 class="m-0">Pick workspace folder</h5>
         <button id="closeWorkspaceModal" class="btn btn-soft btn-sm">Close</button>
       </div>
-      <div class="input-group input-group-sm mb-2">
-        <input id="dirPath" class="form-control" />
-          <label class="small-muted mb-1">OpenAI API key</label>
-          <input id="apiKeyOpenAI" type="password" class="form-control mb-2" placeholder="sk-..." />
-          <label class="small-muted mb-1">Gemini API key</label>
-          <input id="apiKeyGemini" type="password" class="form-control mb-2" placeholder="AIza..." />
-      <div class="small-muted mb-2" id="dirCwd">cwd: -</div>
-      <div class="dir-list" id="dirList"></div>
+        <div class="settings-tabs" role="tablist" aria-label="Advanced settings sections">
+          <button class="settings-tab active" data-settings-tab="general" type="button">General</button>
+          <button class="settings-tab" data-settings-tab="prompt" type="button">System prompt</button>
+          <button class="settings-tab" data-settings-tab="pricing" type="button">Pricing</button>
+          <button class="settings-tab" data-settings-tab="tools" type="button">Tools</button>
+        </div>
+
+        <section class="settings-section settings-panel active" data-settings-panel="general">
+        <section class="settings-section settings-panel" data-settings-panel="prompt">
+          <h6>System prompt</h6>
+          <div class="small-muted mb-1">Used as the persistent base instruction for this session.</div>
+          <textarea id="systemPrompt" class="form-control mb-1" placeholder="Enter system prompt..."></textarea>
+        </section>
+
+        <section class="settings-section settings-panel" data-settings-panel="pricing">
+        <section class="settings-section settings-panel" data-settings-panel="tools">
       <div class="d-flex gap-2 mt-2">
         <button id="chooseDir" class="btn btn-accent btn-sm">Use selected</button>
       </div>
@@ -1622,11 +1649,24 @@ async function uploadContextFiles() {
   if (!input.files || !input.files.length) return;
   const form = new FormData();
   for (const file of input.files) form.append('files', file);
+    system_prompt: document.getElementById('systemPrompt').value.trim(),
     api_keys: {
       openai: document.getElementById('apiKeyOpenAI').value || null,
       gemini: document.getElementById('apiKeyGemini').value || null,
       echo: null,
     },
+function setupSettingsTabs() {
+  const tabs = Array.from(document.querySelectorAll('[data-settings-tab]'));
+  const panels = Array.from(document.querySelectorAll('[data-settings-panel]'));
+  const activate = (name) => {
+    tabs.forEach((tab) => tab.classList.toggle('active', tab.getAttribute('data-settings-tab') === name));
+    panels.forEach((panel) => panel.classList.toggle('active', panel.getAttribute('data-settings-panel') === name));
+  };
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => activate(tab.getAttribute('data-settings-tab')));
+  });
+}
+
   applyTimer = setTimeout(() => applySettings().catch((e) => showNotice(e.message)), 250);
   await refreshState();
 }
@@ -1818,6 +1858,7 @@ async function sendPrompt() {
       for (const line of lines) {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
+  document.getElementById('systemPrompt').value = s.system_prompt || '';
         if (event.type === 'assistant_chunk') {
           updateThinking(false);
           if (!draft) {
@@ -1934,3 +1975,6 @@ refreshState().then(async () => {
 </html>
 for (const id of ['provider', 'model', 'apiKeyOpenAI', 'apiKeyGemini', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'darkMode']) {
   if (id === 'workspace' || id === 'apiKeyOpenAI' || id === 'apiKeyGemini') {
+document.getElementById('systemPrompt').addEventListener('blur', scheduleApplySettings);
+
+setupSettingsTabs();

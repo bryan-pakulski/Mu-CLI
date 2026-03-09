@@ -18,6 +18,7 @@ class WebTests(unittest.TestCase):
         data = res.get_json()
         assert data is not None
         self.assertIn('provider', data)
+        self.assertIn('system_prompt', data)
 
         res2 = client.post('/api/session', json={'action': 'new', 'name': 'webtest'})
         self.assertEqual(200, res2.status_code)
@@ -175,6 +176,21 @@ class WebTests(unittest.TestCase):
         self.assertIn('say_hi', tools)
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
+
+    def test_settings_updates_system_prompt(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        prompt = 'You are concise and safety-first.'
+        res = client.post('/api/settings', json={'system_prompt': prompt})
+        self.assertEqual(200, res.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertEqual(prompt, state['system_prompt'])
 
     def test_settings_requires_provider_api_key_for_keyed_models(self) -> None:
         from mu_cli.web import create_app

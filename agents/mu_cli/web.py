@@ -618,7 +618,21 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "Create an execution plan for the task below. Keep it short and actionable as numbered steps. "
                     "Start with 'PLAN:'.\n\nTask:\n" + text
                 )
-                job["plan"] = plan_reply.content
+                plan_text = (plan_reply.content or "").strip()
+                if not plan_text or plan_text.lower().startswith("calling tool"):
+                    fallback_reply = isolated.agent.step(
+                        "Provide ONLY a concise numbered execution plan for the same task. "
+                        "Do not call tools. Start with 'PLAN:'."
+                    )
+                    plan_text = (fallback_reply.content or "").strip()
+                if not plan_text:
+                    plan_text = (
+                        "PLAN:\n"
+                        "1) Investigate the request context.\n"
+                        "2) Execute required steps safely.\n"
+                        "3) Summarize outcomes and next actions."
+                    )
+                job["plan"] = plan_text
                 job["last_step"] = "Plan drafted; waiting for approval"
                 _persist(isolated)
                 job["status"] = "awaiting_plan_approval"

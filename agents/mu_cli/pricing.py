@@ -12,12 +12,10 @@ DEFAULT_PRICING = {
         "gpt-4o-mini": {"input_per_1m": 0.15, "output_per_1m": 0.60},
     },
     "gemini": {
-        "gemini-2.5-pro": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-        "gemini-2.5-flash": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+        "gemini-3.1-pro-preview": {"input_per_1m": 2.0, "output_per_1m": 12.0},
+        "gemini-3-flash-preview": {"input_per_1m": 0.5, "output_per_1m": 3.0},
+        "gemini-2.5-flash": {"input_per_1m": 0.3, "output_per_1m": 2.50},
         "gemini-2.0-flash": {"input_per_1m": 0.10, "output_per_1m": 0.40},
-        "gemini-2.0-flash-lite": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-        "gemini-1.5-pro": {"input_per_1m": 0.0, "output_per_1m": 0.0},
-        "gemini-1.5-flash": {"input_per_1m": 0.0, "output_per_1m": 0.0},
     },
     "echo": {
         "echo": {"input_per_1m": 0.0, "output_per_1m": 0.0},

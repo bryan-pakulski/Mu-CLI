@@ -118,5 +118,25 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(1, len(enforcement))
 
 
+    def test_tool_rounds_are_capped(self) -> None:
+        agent = Agent(provider=LoopingProvider(), tools=[], max_tool_rounds=2)
+        reply = agent.step("start")
+
+        self.assertEqual("calling tool", reply.content)
+        tool_results = [m for m in agent.state.messages if m.role is Role.TOOL_RESULT]
+        self.assertEqual(3, len(tool_results))
+
+    def test_mutating_tool_respects_approval_policy(self) -> None:
+        agent = Agent(
+            provider=ApprovalProvider(),
+            tools=[MutatingTool()],
+            on_approval=lambda _name, _args: False,
+        )
+        agent.step("go")
+        tool_result = next(m for m in agent.state.messages if m.role is Role.TOOL_RESULT)
+        self.assertIn("rejected", tool_result.content)
+        self.assertEqual("call_1", tool_result.metadata["tool_call_id"])
+
+
 if __name__ == "__main__":
     unittest.main()

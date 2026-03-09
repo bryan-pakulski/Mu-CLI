@@ -551,6 +551,83 @@
       background: color-mix(in srgb, var(--surface-2) 85%, var(--primary-soft));
       border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
     }
+    .session-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 4px;
+    }
+    .session-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+    .session-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: transparent;
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      flex: 0 0 auto;
+    }
+    .session-dot.running {
+      background: #34d399;
+      border-color: #34d399;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #34d399 20%, transparent);
+    }
+    .session-dot.waiting {
+      background: #f59e0b;
+      border-color: #f59e0b;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #f59e0b 20%, transparent);
+    }
+    .session-menu-btn {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      width: 26px;
+      height: 24px;
+      line-height: 1;
+      padding: 0;
+      font-size: 15px;
+    }
+    .session-menu-btn:hover {
+      background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+      border-color: color-mix(in srgb, var(--border) 75%, transparent);
+      color: var(--text);
+    }
+    .session-menu {
+      position: absolute;
+      right: 0;
+      top: 28px;
+      min-width: 130px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: 0 8px 24px rgba(0,0,0,.08);
+      padding: 4px;
+      z-index: 4;
+      display: none;
+    }
+    .session-menu.show { display: block; }
+    .session-menu button {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      border-radius: 8px;
+      font-size: 12px;
+      padding: 6px 8px;
+    }
+    .session-menu button:hover { background: var(--surface-2); }
 
     .modal-backdrop-custom {
       position: fixed;
@@ -749,15 +826,9 @@
 
         <div class="d-flex gap-2 mb-2">
           <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
-          <button id="refreshSessions" class="btn btn-soft btn-sm">Refresh</button>
         </div>
 
         <div id="sessionList" class="session-list mb-2"></div>
-
-        <div class="d-flex gap-2">
-          <button id="deleteSession" class="btn btn-soft btn-sm">Delete</button>
-          <button id="condenseSession" class="btn btn-soft btn-sm">Condense</button>
-        </div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
       </div>
 
@@ -1483,18 +1554,77 @@ function renderTraces() {
   }).join('');
 }
 
+function sessionStatusMap() {
+  const map = {};
+  for (const job of (state.backgroundJobs || [])) {
+    const name = job.session;
+    if (!name) continue;
+    if (['running', 'awaiting_plan_approval'].includes(job.status)) {
+      map[name] = job.status;
+    }
+  }
+  return map;
+}
+
+function closeAllSessionMenus() {
+  document.querySelectorAll('.session-menu.show').forEach((el) => el.classList.remove('show'));
+}
+
 function renderSessions(list, active) {
   const host = document.getElementById('sessionList');
   host.innerHTML = '';
+  const statuses = sessionStatusMap();
+
   for (const name of list) {
+    const row = document.createElement('div');
+    row.className = 'session-row';
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `session-item ${name === active ? 'active' : ''}`;
-    btn.textContent = name;
+    const status = statuses[name] || '';
+    const dotClass = status === 'awaiting_plan_approval' ? 'waiting' : (status === 'running' ? 'running' : '');
+    btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${status || 'idle'}"></span><span class="session-name">${escapeHtml(name)}</span></span>`;
     btn.setAttribute('data-session-name', name);
     btn.addEventListener('click', () => sessionAction('switch', name).catch((e) => alert(e.message)));
-    host.appendChild(btn);
+
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'session-menu-btn';
+    menuBtn.textContent = '⋯';
+
+    const menu = document.createElement('div');
+    menu.className = 'session-menu';
+    menu.innerHTML = `
+      <button type="button" data-session-cmd="refresh">Refresh</button>
+      <button type="button" data-session-cmd="condense">Condense</button>
+      <button type="button" data-session-cmd="delete">Delete</button>
+    `;
+
+    menuBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const open = menu.classList.contains('show');
+      closeAllSessionMenus();
+      if (!open) menu.classList.add('show');
+    });
+
+    menu.querySelectorAll('[data-session-cmd]').forEach((el) => {
+      el.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        closeAllSessionMenus();
+        const cmd = el.getAttribute('data-session-cmd');
+        if (cmd === 'refresh') await sessionAction('switch', name);
+        if (cmd === 'condense') await sessionAction('condense', name);
+        if (cmd === 'delete') await sessionAction('delete', name);
+      });
+    });
+
+    row.appendChild(btn);
+    row.appendChild(menuBtn);
+    row.appendChild(menu);
+    host.appendChild(row);
   }
+
   document.getElementById('activeSession').textContent = `active: ${active}`;
 }
 
@@ -1974,9 +2104,6 @@ document.getElementById('promptAttachInput').addEventListener('change', () => up
 document.getElementById('send').addEventListener('click', () => sendPrompt(false).catch((e) => alert(e.message)));
 document.getElementById('sendBackground').addEventListener('click', () => sendPrompt(true).catch((e) => alert(e.message)));
 document.getElementById('newSession').addEventListener('click', () => openNewSessionModal());
-document.getElementById('refreshSessions').addEventListener('click', () => sessionAction('list').catch((e) => alert(e.message)));
-document.getElementById('deleteSession').addEventListener('click', () => sessionAction('delete').catch((e) => alert(e.message)));
-document.getElementById('condenseSession').addEventListener('click', () => sessionAction('condense').catch((e) => alert(e.message)));
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
 document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
 document.getElementById('clearUploads').addEventListener('click', () => clearUploadedStore().catch((e) => alert(e.message)));
@@ -2008,6 +2135,7 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
 });
 
+document.addEventListener('click', () => closeAllSessionMenus());
 hydrateThemePreference();
 refreshState().catch((e) => alert(e.message));
 </script>

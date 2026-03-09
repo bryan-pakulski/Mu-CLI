@@ -32,23 +32,23 @@
     }
 
     body.dark-mode {
-      --bg: #171a1f;
-      --surface: #1d2128;
-      --surface-2: #222730;
-      --border: #313743;
-      --text: #e5e7eb;
-      --muted: #a1a8b3;
-      --primary: #9ca3af;
-      --primary-soft: #2a303a;
-      --assistant-soft: #242a33;
-      --tool-soft: #262d38;
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface-2: #252525;
+      --border: #343434;
+      --text: #e6e1e5;
+      --muted: #b0a9b5;
+      --primary: #bb86fc;
+      --primary-soft: #2d2437;
+      --assistant-soft: #2a2432;
+      --tool-soft: #223133;
       --shadow: none;
-      --diff-del: #3b2d31;
-      --diff-add: #27352e;
-      --diff-ctx: #272e39;
-      --code-bg: #1a202a;
-      --code-border: #323b48;
-      --code-text: #d7dce6;
+      --diff-del: #3a2a31;
+      --diff-add: #263a33;
+      --diff-ctx: #2a2a2a;
+      --code-bg: #202124;
+      --code-border: #3a3a3a;
+      --code-text: #ddd8dd;
       background: var(--bg);
     }
 
@@ -135,6 +135,10 @@
       color: var(--muted);
       font-size: 10px;
       background: var(--surface-2);
+    }
+    body.dark-mode .pill {
+      border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+      color: color-mix(in srgb, var(--text) 88%, var(--muted));
     }
 
     .chat-layout {
@@ -326,6 +330,42 @@
       box-shadow: 0 0 0 .18rem color-mix(in srgb, var(--primary) 14%, transparent);
     }
 
+    body.dark-mode .form-control,
+    body.dark-mode .form-select,
+    body.dark-mode textarea,
+    body.dark-mode input,
+    body.dark-mode select {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border);
+      caret-color: var(--text);
+    }
+    body.dark-mode .form-control:focus,
+    body.dark-mode .form-select:focus,
+    body.dark-mode textarea:focus,
+    body.dark-mode input:focus,
+    body.dark-mode select:focus {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+      box-shadow: 0 0 0 .18rem color-mix(in srgb, var(--primary) 20%, transparent);
+    }
+    body.dark-mode .form-control::placeholder,
+    body.dark-mode textarea::placeholder,
+    body.dark-mode input::placeholder {
+      color: color-mix(in srgb, var(--muted) 88%, transparent);
+    }
+    body.dark-mode input:-webkit-autofill,
+    body.dark-mode input:-webkit-autofill:hover,
+    body.dark-mode input:-webkit-autofill:focus,
+    body.dark-mode textarea:-webkit-autofill,
+    body.dark-mode select:-webkit-autofill {
+      -webkit-box-shadow: 0 0 0 1000px var(--surface-2) inset;
+      -webkit-text-fill-color: var(--text);
+      caret-color: var(--text);
+      transition: background-color 99999s ease-in-out 0s;
+    }
+
     .btn-soft {
       border: 1px solid var(--border);
       color: var(--text);
@@ -345,6 +385,11 @@
       font-weight: 600;
       box-shadow: none;
     }
+    body.dark-mode .btn-accent {
+      border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+      background: color-mix(in srgb, var(--surface) 86%, var(--primary-soft));
+      color: color-mix(in srgb, var(--text) 94%, var(--primary));
+    }
 
     .small-muted { color: var(--muted); font-size: 11px; }
     .thinking {
@@ -358,6 +403,10 @@
       color: var(--muted);
       font-size: 11px;
       visibility: hidden;
+    }
+    body.dark-mode .thinking {
+      border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+      color: color-mix(in srgb, var(--text) 86%, var(--muted));
     }
     .thinking.show { visibility: visible; }
 

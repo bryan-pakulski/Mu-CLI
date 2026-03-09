@@ -190,6 +190,10 @@
 
     .bubble p { margin: 0 0 8px; }
     .bubble p:last-child { margin-bottom: 0; }
+    .bubble ul, .bubble ol { margin: 0 0 8px 22px; padding: 0; }
+    .bubble li { margin: 0 0 4px; }
+    .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 0 0 8px; font-size: 1em; font-weight: 700; }
+    .bubble blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid var(--border); color: var(--muted); }
     .bubble a { color: #2f5fca; text-decoration: underline; }
     body.dark-mode .bubble a { color: #9ec2ff; }
     .bubble code {
@@ -874,13 +878,61 @@ function formatMessageContent(content) {
 
   function formatParagraphs(text) {
     if (!text) return '';
-    const escaped = escapeHtml(text)
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-      .replace(/(https?:\/\/[\w\-./?%&=+#:~;,]+[\w/#])/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
-    return escaped
+
+    function formatInline(input) {
+      const linkTokens = [];
+      const tokenized = String(input || '')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) => {
+          const token = `@@LINK_${linkTokens.length}@@`;
+          linkTokens.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+          return token;
+        })
+        .replace(/(https?:\/\/[\w\-./?%&=+#:~;,]+[\w/#])/g, (url) => {
+          const token = `@@LINK_${linkTokens.length}@@`;
+          const safe = escapeHtml(url);
+          linkTokens.push(`<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`);
+          return token;
+        });
+
+      let html = escapeHtml(tokenized)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*]+)\*(?=[^*]|$)/g, '$1<em>$2</em>');
+
+      html = html.replace(/@@LINK_(\d+)@@/g, (_m, idxText) => {
+        const idx = Number(idxText);
+        return Number.isInteger(idx) && linkTokens[idx] ? linkTokens[idx] : '';
+      });
+
+      return html;
+    }
+
+    function renderBlock(segment) {
+      const lines = segment.split('\n');
+      const listMatch = lines.every((line) => /^\s*([-*]|\d+\.)\s+/.test(line));
+      if (listMatch) {
+        const ordered = lines.every((line) => /^\s*\d+\.\s+/.test(line));
+        const items = lines.map((line) => line.replace(/^\s*([-*]|\d+\.)\s+/, '').trim());
+        const tag = ordered ? 'ol' : 'ul';
+        return `<${tag}>${items.map((item) => `<li>${formatInline(item)}</li>`).join('')}</${tag}>`;
+      }
+
+      if (lines.length === 1) {
+        const heading = lines[0].match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          const level = heading[1].length;
+          return `<h${level}>${formatInline(heading[2])}</h${level}>`;
+        }
+        const quote = lines[0].match(/^>\s?(.+)$/);
+        if (quote) return `<blockquote>${formatInline(quote[1])}</blockquote>`;
+      }
+
+      return `<p>${lines.map((line) => formatInline(line)).join('<br/>')}</p>`;
+    }
+
+    return text
       .split(/\n{2,}/)
-      .map((segment) => `<p>${segment.replaceAll('\n', '<br/>')}</p>`)
+      .map((segment) => renderBlock(segment))
       .join('');
   }
 

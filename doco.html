@@ -178,6 +178,7 @@ docker compose run --rm mu-cli-cli</pre>
     <div class="card">
       <p>Run <code>make run-web</code> and open <code>http://localhost:5000</code>.</p>
       <p>The GUI provides a toggleable sidebar for provider/model/settings, inline session management (status/list/new/load/delete), workspace path, approval mode, and debug toggles.</p>
+      <p>Git workflow controls let you discover repositories under the selected workspace, create/switch branches, and keep agent work on an explicit branch before proposing a merge request.</p>
       <p>Chat, traces, and per-turn cost report are available in one view for developer-in-the-loop workflows.</p>
       <p>Assistant output now streams incrementally in the GUI using a streaming chat endpoint, so long turns feel more responsive.</p>
     </div>
@@ -220,7 +221,7 @@ docker compose run --rm mu-cli-cli</pre>
         <ul>
           <li><code>write_file</code></li>
           <li><code>apply_patch</code></li>
-          <li><code>git</code> (constrained operations)</li>
+          <li><code>git</code> (constrained operations including branch create/switch, branch delta checks, and PR creation)</li>
         </ul>
       </article>
     </div>

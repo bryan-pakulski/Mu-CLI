@@ -21,6 +21,18 @@ Provider-agnostic CLI scaffold intended for a **human-in-the-loop development wo
 - per-turn token/cost report with JSON-configurable provider pricing
 - session persistence (resume conversations and workspace state)
 
+### Git workflow support
+
+The `git` tool supports agent-friendly workflow actions in addition to basic status/diff/add/commit:
+
+- create a branch: `create_branch`
+- switch branches (e.g., back to `main`): `switch_branch`
+- monitor branch delta vs base branch: `branch_changes`
+- raise a pull request through GitHub CLI: `create_pr`
+
+This enables iterative agent mode flows where the agent can plan, make changes on a feature branch,
+inspect progress, and either open a PR when complete or continue iterating.
+
 ## Full HTML documentation
 
 - Open the full guide at [`../doco.html`](../doco.html).
@@ -60,6 +72,7 @@ Notes:
 
 - Start with `make run-web` then open `http://localhost:5000`.
 - Includes a toggleable settings sidebar (provider/model/approval/workspace/debug/agentic).
+- Includes git workflow controls in the sidebar to detect/select repository, create/switch branches, and guide MR/PR completion.
 - Includes built-in session management actions (new/load/delete/list/status).
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
 

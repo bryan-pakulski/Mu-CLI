@@ -12,6 +12,7 @@ from mu_cli.tools.filesystem import (
     CustomCommandTool,
     ExtractLinksContextTool,
     FetchPdfContextTool,
+    GitTool,
     GetUploadedContextFileTool,
     GetWorkspaceFileContextTool,
     ListUploadedContextFilesTool,
@@ -41,6 +42,39 @@ class _FakeResponse:
 
 
 class WorkspaceToolsTests(unittest.TestCase):
+    def test_git_tool_branch_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "config", "user.email", "tool@example.com"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "config", "user.name", "Tool Test"], cwd=repo, check=True, capture_output=True, text=True)
+            (repo / "a.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True, text=True)
+
+            tool = GitTool(lambda: repo)
+
+            create_branch = tool.run({"operation": "create_branch", "args": ["feature/git-flow"]})
+            self.assertTrue(create_branch.ok, create_branch.output)
+
+            (repo / "a.txt").write_text("base\nchange\n", encoding="utf-8")
+            subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True, capture_output=True, text=True)
+            subprocess.run(["git", "commit", "-m", "change"], cwd=repo, check=True, capture_output=True, text=True)
+
+            branch_changes = tool.run({"operation": "branch_changes", "args": ["main"]})
+            self.assertTrue(branch_changes.ok, branch_changes.output)
+            self.assertIn("change", branch_changes.output)
+            self.assertIn("+change", branch_changes.output)
+
+            switch_main = tool.run({"operation": "switch_branch", "args": ["main"]})
+            self.assertTrue(switch_main.ok, switch_main.output)
+
+            current_branch = subprocess.run(
+                ["git", "branch", "--show-current"], cwd=repo, check=True, capture_output=True, text=True
+            ).stdout.strip()
+            self.assertEqual("main", current_branch)
+
     def test_workspace_tools(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "repo"

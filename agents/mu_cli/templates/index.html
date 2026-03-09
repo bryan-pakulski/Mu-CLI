@@ -946,6 +946,23 @@
           <button id="browseWorkspace" class="btn btn-soft" type="button">Browse</button>
         </div>
 
+        <label class="small-muted mb-1">Git repository</label>
+        <select id="gitRepo" class="form-select mb-2"></select>
+
+        <label class="small-muted mb-1">Git branch</label>
+        <div class="input-group input-group-sm mb-2">
+          <select id="gitBranch" class="form-select"></select>
+          <button id="switchBranch" class="btn btn-soft" type="button">Switch</button>
+        </div>
+
+        <label class="small-muted mb-1">Create branch</label>
+        <div class="input-group input-group-sm mb-2">
+          <input id="newBranchName" class="form-control" placeholder="feature/my-task" />
+          <button id="createBranch" class="btn btn-soft" type="button">Create</button>
+        </div>
+        <div class="small-muted mb-2" id="gitStatus">Select workspace to load repositories.</div>
+        <div class="small-muted mb-2">When the agent finishes, it should propose creating an MR/PR. You can approve or deny the tool call to finish or continue.</div>
+
         <div class="small-muted mt-2 mb-1">Upload context files</div>
         <input id="contextFiles" type="file" class="form-control mb-2" multiple />
         <div class="d-flex gap-2 mb-2">
@@ -1228,7 +1245,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '' };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -1257,6 +1274,99 @@ async function apiForm(path, formData) {
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'request failed');
   return json;
+}
+
+function renderGitControls() {
+  const repoSel = document.getElementById('gitRepo');
+  const branchSel = document.getElementById('gitBranch');
+  const status = document.getElementById('gitStatus');
+  const repos = state.gitRepos || [];
+  const branches = state.gitBranches || [];
+
+  repoSel.innerHTML = '';
+  if (!repos.length) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'No git repositories found';
+    repoSel.appendChild(empty);
+  } else {
+    repos.forEach((repo) => {
+      const o = document.createElement('option');
+      o.value = repo;
+      o.textContent = repo;
+      repoSel.appendChild(o);
+    });
+  }
+  repoSel.value = state.gitCurrentRepo || '';
+
+  branchSel.innerHTML = '';
+  if (!branches.length) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'No branches';
+    branchSel.appendChild(empty);
+  } else {
+    branches.forEach((branch) => {
+      const o = document.createElement('option');
+      o.value = branch;
+      o.textContent = branch;
+      branchSel.appendChild(o);
+    });
+  }
+  branchSel.value = state.gitCurrentBranch || '';
+
+  if (!repos.length) status.textContent = 'Select a workspace containing a git repository.';
+  else status.textContent = `Repo: ${state.gitCurrentRepo || '-'} · Current branch: ${state.gitCurrentBranch || '-'}`;
+}
+
+async function refreshGitRepos() {
+  const workspace = document.getElementById('workspace').value.trim();
+  if (!workspace) {
+    state.gitRepos = [];
+    state.gitBranches = [];
+    state.gitCurrentRepo = null;
+    state.gitCurrentBranch = null;
+    renderGitControls();
+    return;
+  }
+  const payload = await api(`/api/git/repos?workspace=${encodeURIComponent(workspace)}`);
+  state.gitRepos = payload.repos || [];
+  if (!state.gitCurrentRepo || !state.gitRepos.includes(state.gitCurrentRepo)) {
+    state.gitCurrentRepo = state.gitRepos[0] || null;
+  }
+  await refreshGitBranches();
+}
+
+async function refreshGitBranches() {
+  if (!state.gitCurrentRepo) {
+    state.gitBranches = [];
+    state.gitCurrentBranch = null;
+    renderGitControls();
+    return;
+  }
+  const payload = await api(`/api/git/branches?repo=${encodeURIComponent(state.gitCurrentRepo)}`);
+  state.gitBranches = payload.branches || [];
+  state.gitCurrentBranch = payload.current_branch || null;
+  renderGitControls();
+}
+
+async function createBranchFromUI() {
+  const repo = document.getElementById('gitRepo').value;
+  const branch = document.getElementById('newBranchName').value.trim();
+  if (!repo || !branch) return;
+  await api('/api/git/branch', 'POST', { action: 'create', repo, branch, base: document.getElementById('gitBranch').value || '' });
+  document.getElementById('newBranchName').value = '';
+  await refreshGitBranches();
+  await refreshState();
+}
+
+async function switchBranchFromUI() {
+  const repo = document.getElementById('gitRepo').value;
+  const branch = document.getElementById('gitBranch').value;
+  if (!repo || !branch) return;
+  await api('/api/git/branch', 'POST', { action: 'switch', repo, branch });
+  await refreshGitBranches();
+  await refreshState();
 }
 
 
@@ -2353,6 +2463,10 @@ async function refreshState() {
   state.tools = s.tools || [];
   state.customToolErrors = s.custom_tool_errors || [];
   state.backgroundJobs = s.background_jobs || [];
+  state.gitRepos = s.git_repos || [];
+  state.gitCurrentRepo = s.git_current_repo || null;
+  state.gitCurrentBranch = s.git_current_branch || null;
+  state.gitBranches = s.git_branches || [];
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -2385,6 +2499,7 @@ async function refreshState() {
   renderSessions(state.sessions, state.activeSession);
   renderUploads();
   renderToolSettings();
+  renderGitControls();
   renderMessages();
   renderTraces();
   updateChatBusyState();
@@ -2614,6 +2729,7 @@ for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();
+    if (id === 'workspace') refreshGitRepos().catch((e) => alert(e.message));
     scheduleApplySettings();
     syncPricingEditor();
   });
@@ -2647,6 +2763,12 @@ document.getElementById('browseWorkspace').addEventListener('click', () => {
   showModal('workspaceModal', true);
   loadDirs(document.getElementById('workspace').value.trim()).catch((e) => alert(e.message));
 });
+document.getElementById('gitRepo').addEventListener('change', () => {
+  state.gitCurrentRepo = document.getElementById('gitRepo').value || null;
+  refreshGitBranches().catch((e) => alert(e.message));
+});
+document.getElementById('switchBranch').addEventListener('click', () => switchBranchFromUI().catch((e) => alert(e.message)));
+document.getElementById('createBranch').addEventListener('click', () => createBranchFromUI().catch((e) => alert(e.message)));
 document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
 document.getElementById('closeNewSessionModal').addEventListener('click', () => showModal('newSessionModal', false));
 document.getElementById('closeCondenseModal').addEventListener('click', () => showModal('condenseModal', false));
@@ -2659,6 +2781,7 @@ document.getElementById('chooseDir').addEventListener('click', () => {
   document.getElementById('workspace').value = selectedDir;
   showModal('workspaceModal', false);
   scheduleApplySettings();
+  refreshGitRepos().catch((e) => alert(e.message));
 });
 
 document.getElementById('approveYes').addEventListener('click', () => sendApprovalDecision('approve').catch((e) => alert(e.message)));

@@ -70,12 +70,46 @@ Notes:
 
 ## GUI (Flask)
 
-- Start with `make run-web` then open `http://localhost:5000`.
+- Start with `make run-web` then open `http://localhost:5000` (new HTMX + Alpine UI).
+- Legacy single-file interface remains available at `http://localhost:5000/legacy` during migration.
 - Includes a toggleable settings sidebar (provider/model/approval/workspace/debug/agentic).
 - Includes a top-panel `GIT` button (visible for git workspaces) that opens a modal for repository/branch actions and current workspace diff view.
 - During background agent sessions, a dedicated “Plan output” overlay shows plan, checkpoints, and execution stages without reloading chat messages.
 - Includes built-in session management actions (new/load/delete/list/status).
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
+
+
+## Lightweight frontend options for a next-gen UI
+
+If we want a reactive UX without inheriting a heavy npm toolchain, these are the strongest options:
+
+1. **SvelteKit (recommended default)**
+   - Why: compile-time reactivity, minimal runtime overhead, and fast local iteration.
+   - Dependency profile: comparatively small for modern SPA/SSR workflows (typically Vite + Svelte tooling).
+   - Fit for this project: good for a responsive chat surface, streaming traces, and session/state panels without complex state libraries.
+   - Launch model: bundle static assets and have `mu_cli` serve them from the existing web process, or run a dev server behind a `make run-web-next` style command.
+
+2. **Preact + Vite**
+   - Why: React-like mental model with much smaller runtime and API surface.
+   - Dependency profile: lighter than React ecosystems while preserving JSX/component familiarity.
+   - Fit for this project: great if contributors already think in React patterns and want minimal migration friction.
+   - Launch model: produce a static build consumed by Flask (or a thin Python ASGI layer), keeping CLI launch ergonomics intact.
+
+3. **SolidStart / SolidJS**
+   - Why: fine-grained reactivity with excellent runtime performance and very small updates.
+   - Dependency profile: modest, but ecosystem is smaller than Svelte/React-style stacks.
+   - Fit for this project: strong candidate if realtime token/tool event streaming and low re-render cost are top priorities.
+
+4. **HTMX + Alpine.js (minimal-JS path)**
+   - Why: hypermedia-first UX with tiny client payload and mostly server-rendered behavior.
+   - Dependency profile: extremely low, no large SPA framework required.
+   - Fit for this project: ideal when we want to keep Python-centric rendering and progressively enhance only interactive zones.
+
+### Recommendation
+
+- **Primary recommendation:** SvelteKit for best balance of reactivity, developer speed, and low runtime bloat.
+- **Most conservative option:** HTMX + Alpine.js if we want to avoid a modern JS app stack almost entirely.
+- **Migration strategy:** start with a thin API contract (`/api/messages`, `/api/state`, `/api/jobs/:id/events`) so the new frontend can be swapped in without changing core CLI/agent runtime behavior.
 
 ## Workspace context and memory
 

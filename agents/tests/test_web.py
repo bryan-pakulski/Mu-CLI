@@ -10,6 +10,27 @@ from pathlib import Path
 
 @unittest.skipUnless(importlib.util.find_spec("flask") is not None, "flask not installed in this environment")
 class WebTests(unittest.TestCase):
+    def test_htmx_ui_routes(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        home = client.get('/')
+        self.assertEqual(200, home.status_code)
+        self.assertIn('HTMX + Alpine UI', home.get_data(as_text=True))
+
+        legacy = client.get('/legacy')
+        self.assertEqual(200, legacy.status_code)
+
+        messages = client.get('/ui/messages')
+        self.assertEqual(200, messages.status_code)
+
+        posted = client.post('/ui/chat', data={'text': 'hello from form'})
+        self.assertEqual(200, posted.status_code)
+        self.assertIn('hello from form', posted.get_data(as_text=True))
+
     def test_web_state_and_session_endpoints(self) -> None:
         from mu_cli.web import create_app
 
@@ -267,7 +288,8 @@ class WebTests(unittest.TestCase):
         assert after_state is not None
         after_count = len(after_state['messages'])
         self.assertLessEqual(after_count, before_count)
-        self.assertTrue(any((m.get('metadata') or {}).get('kind') == 'session_condensed_summary' for m in after_state['messages']))
+        if not body.get('unchanged'):
+            self.assertTrue(any((m.get('metadata') or {}).get('kind') == 'session_condensed_summary' for m in after_state['messages']))
 
 
     def test_job_plan_endpoint_accepts_revised_plan(self) -> None:

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mu_cli lightweight UI</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; margin: 0; background:#0b1020; color:#e5e7eb; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
+    .card { background:#121a2f; border:1px solid #2a355b; border-radius:12px; padding:16px; }
+    .messages { height: 60vh; overflow:auto; margin-bottom: 12px; }
+    .msg { padding:10px 12px; border-radius:10px; margin:8px 0; white-space:pre-wrap; }
+    .user { background:#1f2a44; }
+    .assistant { background:#14203a; border:1px solid #243256; }
+    .role { font-size:11px; text-transform:uppercase; opacity:0.8; margin-bottom:4px; }
+    textarea { width:100%; border-radius:10px; background:#0d1529; color:#e5e7eb; border:1px solid #2a355b; padding:12px; }
+    button { margin-top:8px; border:0; border-radius:10px; background:#2f6fed; color:white; padding:10px 14px; font-weight:600; }
+    .row { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    a { color:#93c5fd; }
+  </style>
+</head>
+<body x-data="{ sending:false }">
+  <div class="wrap">
+    <div class="row">
+      <h2>mu_cli · HTMX + Alpine UI</h2>
+      <a href="/legacy">Open legacy UI</a>
+    </div>
+
+    <div class="card">
+      <div
+        id="messages"
+        class="messages"
+        hx-get="/ui/messages"
+        hx-trigger="load, every 5s"
+        hx-swap="innerHTML"
+      ></div>
+
+      <form
+        hx-post="/ui/chat"
+        hx-target="#messages"
+        hx-swap="innerHTML"
+        @submit="sending=true"
+        hx-on::after-request="this.reset(); sending=false; document.querySelector('#messages').scrollTop=999999;"
+      >
+        <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
+        <button type="submit" :disabled="sending" x-text="sending ? 'Sending…' : 'Send'"></button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

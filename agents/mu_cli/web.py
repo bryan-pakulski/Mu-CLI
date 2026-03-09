@@ -1185,9 +1185,32 @@ def create_app():
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
 
+    def _ui_messages() -> list[dict]:
+        return [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
+
     @app.get("/")
     def index():
+        return render_template("index_htmx.html")
+
+    @app.get("/legacy")
+    def index_legacy():
         return render_template("index.html")
+
+    @app.get("/ui/messages")
+    def ui_messages():
+        return render_template("partials/messages.html", messages=_ui_messages())
+
+    @app.post("/ui/chat")
+    def ui_chat():
+        text = str(request.form.get("text", "")).strip()
+        if text:
+            reply = _run_turn_with_uploaded_context(runtime, text)
+            report = _turn_report(runtime, text, reply.content)
+            _record_turn(runtime, report)
+            if runtime.condense_enabled:
+                _condense_session_context(runtime, window_size=runtime.condense_window)
+            _persist(runtime)
+        return render_template("partials/messages.html", messages=_ui_messages())
 
     @app.get("/api/state")
     def state():

@@ -1,0 +1,5 @@
+.hljs { display:block; overflow-x:auto; padding:.5rem; color:#e6edf3; background:#0d1117; }
+.hljs-comment,.hljs-quote{color:#8b949e}
+.hljs-keyword,.hljs-selector-tag,.hljs-subst{color:#ff7b72}
+.hljs-string,.hljs-doctag{color:#a5d6ff}
+.hljs-title,.hljs-section,.hljs-selector-id{color:#d2a8ff}

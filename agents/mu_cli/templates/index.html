@@ -169,29 +169,24 @@
     .trace-wrap > summary::-webkit-details-marker { display: none; }
     .trace { max-height: 120px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
 
-    .msg { margin: 0 auto 6px; max-width: 900px; }
-    .role {
-      font-size: 9px;
-      color: #8090b2;
-      text-transform: uppercase;
-      letter-spacing: .09em;
-      font-weight: 600;
-      opacity: 0;
-      max-height: 0;
-      overflow: hidden;
-      transition: opacity .15s ease;
+    .msg {
+      margin: 0 auto;
+      max-width: 900px;
+      padding: 5px 0 7px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
     }
-    .msg:hover .role { opacity: .7; max-height: 12px; margin-bottom: 2px; }
+    .msg:last-child { border-bottom: 0; }
+    .role { display: none; }
     .bubble {
       margin-top: 0;
       padding: 8px 10px;
-      border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
-      border-radius: 10px;
+      border: 0;
+      border-radius: 0;
       line-height: 1.42;
-      background: var(--surface);
+      background: transparent;
     }
-    .msg.role-user .bubble { background: var(--primary-soft); border-color: #d7e2ff; }
-    .msg.role-assistant .bubble { background: var(--assistant-soft); }
+    .msg.role-user .bubble { background: transparent; }
+    .msg.role-assistant .bubble { background: transparent; }
 
     .bubble p { margin: 0 0 8px; }
     .bubble p:last-child { margin-bottom: 0; }
@@ -227,7 +222,7 @@
     .tool-inline {
       font-size: 10px;
       color: var(--muted);
-      margin: 2px 0 0 8px;
+      margin: 1px 0 0 10px;
       white-space: pre-wrap;
       opacity: .9;
     }

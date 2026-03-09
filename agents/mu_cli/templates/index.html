@@ -765,6 +765,49 @@
 
     .dir-list button { text-align: left; width: 100%; margin-bottom: 4px; }
 
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .metric-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+    }
+    .metric-card .label { color: var(--muted); font-size: 11px; }
+    .metric-card .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+    .metrics-charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .chart-wrap {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px;
+      background: var(--surface);
+    }
+    .chart-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .chart-canvas { width: 100%; height: 180px; border: 1px solid color-mix(in srgb, var(--border) 80%, transparent); border-radius: 8px; }
+    .metrics-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .metrics-table th, .metrics-table td {
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+      padding: 6px;
+      text-align: left;
+    }
+    @media (max-width: 960px) {
+      .metrics-grid { grid-template-columns: 1fr 1fr; }
+      .metrics-charts { grid-template-columns: 1fr; }
+    }
+
     .approval-args {
       max-height: 300px;
       overflow: auto;
@@ -918,7 +961,8 @@
       <div class="topbar">
         <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
         <div class="title">mu_cli</div>
-        <button id="openAdvanced" class="btn btn-soft btn-sm">Advanced</button>
+        <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
+        <button id="openMetrics" class="btn btn-soft btn-sm">Metrics</button>
         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
       </div>
@@ -978,7 +1022,7 @@
   <div id="advancedModal" class="modal-backdrop-custom">
     <div class="modal-card">
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <h5 class="m-0">Advanced settings</h5>
+        <h5 class="m-0">Settings</h5>
         <button id="closeAdvanced" class="btn btn-soft btn-sm">Close</button>
       </div>
       <div class="settings-layout">
@@ -1040,6 +1084,38 @@
           <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
           <div id="customToolErrors" class="small-muted"></div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="metricsModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(1100px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Metrics</h5>
+        <button id="closeMetrics" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="label">Total tokens</div><div id="metricTotalTokens" class="value">0</div></div>
+        <div class="metric-card"><div class="label">Money used (USD)</div><div id="metricTotalCost" class="value">0.000000</div></div>
+        <div class="metric-card"><div class="label">LOC generated (assistant)</div><div id="metricLocGenerated" class="value">0</div></div>
+        <div class="metric-card"><div class="label">Turns</div><div id="metricTurns" class="value">0</div></div>
+      </div>
+      <div class="metrics-charts">
+        <div class="chart-wrap">
+          <div class="chart-title">Token usage vs time (by model)</div>
+          <canvas id="metricsTokenChart" class="chart-canvas" width="520" height="180"></canvas>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-title">Cost vs time (USD)</div>
+          <canvas id="metricsCostChart" class="chart-canvas" width="520" height="180"></canvas>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-title">Model breakdown</div>
+        <table class="metrics-table">
+          <thead><tr><th>Provider</th><th>Model</th><th>Turns</th><th>Tokens</th><th>Cost (USD)</th></tr></thead>
+          <tbody id="metricsModelBreakdown"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -1225,6 +1301,137 @@ function beginBackgroundPolling() {
       // ignored to avoid breaking UI polling loop
     }
   }, 900);
+}
+
+
+function _locGenerated(messages) {
+  let loc = 0;
+  for (const m of (messages || [])) {
+    if (m.role !== 'assistant') continue;
+    const text = String(m.content || '');
+    const lines = text.split('\n').filter((line) => line.trim().length > 0);
+    loc += lines.length;
+  }
+  return loc;
+}
+
+function _drawLineChart(canvas, seriesMap) {
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const keys = Object.keys(seriesMap || {});
+  if (!keys.length) {
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('No data yet', 12, 20);
+    return;
+  }
+
+  const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7'];
+  let maxLen = 0;
+  let maxY = 0;
+  keys.forEach((k) => {
+    const arr = seriesMap[k] || [];
+    maxLen = Math.max(maxLen, arr.length);
+    arr.forEach((v) => { maxY = Math.max(maxY, Number(v || 0)); });
+  });
+  maxLen = Math.max(2, maxLen);
+  maxY = Math.max(1, maxY);
+
+  const pad = 28;
+  const plotW = w - pad * 2;
+  const plotH = h - pad * 2;
+
+  ctx.strokeStyle = '#9ca3af';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad, pad);
+  ctx.lineTo(pad, h - pad);
+  ctx.lineTo(w - pad, h - pad);
+  ctx.stroke();
+
+  keys.forEach((key, idx) => {
+    const arr = seriesMap[key] || [];
+    ctx.strokeStyle = colors[idx % colors.length];
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    arr.forEach((v, i) => {
+      const x = pad + (i / (maxLen - 1)) * plotW;
+      const y = h - pad - (Number(v || 0) / maxY) * plotH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // legend
+  keys.slice(0, 4).forEach((key, idx) => {
+    ctx.fillStyle = colors[idx % colors.length];
+    ctx.fillRect(pad + idx * 120, 8, 10, 10);
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '11px sans-serif';
+    ctx.fillText(key.slice(0, 18), pad + idx * 120 + 14, 17);
+  });
+}
+
+function renderMetrics() {
+  const turns = Array.isArray(state.sessionTurns) ? state.sessionTurns.slice() : [];
+  const messages = Array.isArray(state.messages) ? state.messages : [];
+  const usage = state.sessionUsage || {};
+
+  const totalTokens = Math.trunc(Number(usage.total_tokens || 0));
+  const totalCost = Number(usage.estimated_cost_usd || 0);
+  const loc = _locGenerated(messages);
+
+  const tokEl = document.getElementById('metricTotalTokens');
+  const costEl = document.getElementById('metricTotalCost');
+  const locEl = document.getElementById('metricLocGenerated');
+  const turnsEl = document.getElementById('metricTurns');
+  if (tokEl) tokEl.textContent = String(totalTokens);
+  if (costEl) costEl.textContent = totalCost.toFixed(6);
+  if (locEl) locEl.textContent = String(loc);
+  if (turnsEl) turnsEl.textContent = String(turns.length);
+
+  const byModelTokens = {};
+  const byModelCost = {};
+  const breakdown = {};
+
+  for (const turn of turns) {
+    const provider = String(turn.provider || 'unknown');
+    const model = String(turn.model || 'unknown');
+    const key = `${provider}:${model}`;
+
+    if (!byModelTokens[key]) byModelTokens[key] = [];
+    if (!byModelCost[key]) byModelCost[key] = [];
+
+    const prevTok = byModelTokens[key].length ? byModelTokens[key][byModelTokens[key].length - 1] : 0;
+    const prevCost = byModelCost[key].length ? byModelCost[key][byModelCost[key].length - 1] : 0;
+    byModelTokens[key].push(prevTok + Number(turn.total_tokens || 0));
+    byModelCost[key].push(prevCost + Number(turn.estimated_cost_usd || 0));
+
+    const row = breakdown[key] || { provider, model, turns: 0, tokens: 0, cost: 0 };
+    row.turns += 1;
+    row.tokens += Number(turn.total_tokens || 0);
+    row.cost += Number(turn.estimated_cost_usd || 0);
+    breakdown[key] = row;
+  }
+
+  _drawLineChart(document.getElementById('metricsTokenChart'), byModelTokens);
+  _drawLineChart(document.getElementById('metricsCostChart'), byModelCost);
+
+  const body = document.getElementById('metricsModelBreakdown');
+  if (body) {
+    const rows = Object.values(breakdown).sort((a, b) => b.tokens - a.tokens);
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="5" class="small-muted">No turns yet.</td></tr>';
+    } else {
+      body.innerHTML = rows.map((row) => (
+        `<tr><td>${escapeHtml(row.provider)}</td><td>${escapeHtml(row.model)}</td><td>${row.turns}</td><td>${Math.trunc(row.tokens)}</td><td>${row.cost.toFixed(6)}</td></tr>`
+      )).join('');
+    }
+  }
 }
 
 function roleClass(role) {
@@ -1988,7 +2195,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -2160,6 +2367,7 @@ async function refreshState() {
   renderTraces();
   updateChatBusyState();
   renderBackgroundActivity(activeJob || activeSearchingJob() || null);
+  renderMetrics();
 
   if (state.pendingApproval) {
     document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
@@ -2407,6 +2615,8 @@ document.getElementById('clearUploads').addEventListener('click', () => clearUpl
 document.getElementById('toggleSidebar').addEventListener('click', () => document.getElementById('app').classList.toggle('sidebar-hidden'));
 document.getElementById('openAdvanced').addEventListener('click', () => showModal('advancedModal', true));
 document.getElementById('closeAdvanced').addEventListener('click', () => showModal('advancedModal', false));
+document.getElementById('openMetrics').addEventListener('click', () => { renderMetrics(); showModal('metricsModal', true); });
+document.getElementById('closeMetrics').addEventListener('click', () => showModal('metricsModal', false));
 
 document.getElementById('browseWorkspace').addEventListener('click', () => {
   showModal('workspaceModal', true);

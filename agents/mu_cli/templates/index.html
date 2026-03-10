@@ -146,6 +146,8 @@
       grid-template-columns: minmax(0,1fr) auto;
       gap: 10px;
     }
+    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr); }
+    .workspace-layout.meta-hidden .meta-sidebar { display: none; }
     .topbar {
       display: flex;
       align-items: center;
@@ -277,13 +279,6 @@
       grid-template-rows: auto minmax(0,1fr);
       gap: 8px;
     }
-    .meta-sidebar.collapsed {
-      width: 42px;
-      min-width: 42px;
-      resize: none;
-      overflow: hidden;
-      padding-left: 0;
-    }
     .meta-sidebar h4 {
       margin: 0;
       font-size: 11px;
@@ -294,19 +289,9 @@
       padding: 4px 2px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+      justify-content: flex-start;
+      gap: 6px;
     }
-    .meta-toggle {
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: var(--surface-2);
-      color: var(--muted);
-      font-size: 10px;
-      line-height: 1;
-      padding: 2px 6px;
-    }
-    .meta-sidebar.collapsed .meta-feed { display: none; }
     .meta-feed {
       min-height: 0;
       overflow: auto;
@@ -338,6 +323,51 @@
       padding-left: 7px;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+    .meta-item { border-left-width: 3px; padding-left: 8px; }
+    .meta-tag {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 10px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+    }
+    .meta-item.tool-call { border-left-color: #8b5cf6; }
+    .meta-item.tool-call .meta-tag { color: #a78bfa; border-color: color-mix(in srgb, #8b5cf6 55%, var(--border)); }
+    .meta-item.tool-result { border-left-color: #0ea5e9; }
+    .meta-item.tool-result .meta-tag { color: #38bdf8; border-color: color-mix(in srgb, #0ea5e9 55%, var(--border)); }
+    .meta-item.citation { border-left-color: #22c55e; }
+    .meta-item.citation .meta-tag { color: #22c55e; border-color: color-mix(in srgb, #22c55e 55%, var(--border)); }
+    .meta-item.research { border-left-color: #f59e0b; }
+    .meta-item.research .meta-tag { color: #f59e0b; border-color: color-mix(in srgb, #f59e0b 55%, var(--border)); }
+    .meta-item.workspace { border-left-color: #06b6d4; }
+    .meta-item.workspace .meta-tag { color: #06b6d4; border-color: color-mix(in srgb, #06b6d4 55%, var(--border)); }
+    .meta-item.automation { border-left-color: #ec4899; }
+    .meta-item.automation .meta-tag { color: #ec4899; border-color: color-mix(in srgb, #ec4899 55%, var(--border)); }
+    .meta-content { white-space: normal; }
+    .meta-content pre {
+      margin: 0;
+      background: color-mix(in srgb, var(--surface) 75%, transparent);
+      border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+      border-radius: 8px;
+      padding: 8px;
+      max-height: 180px;
+      overflow: auto;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .meta-content code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .meta-link {
+      color: var(--primary);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      word-break: break-all;
     }
     .meta-empty {
       color: var(--muted);
@@ -1169,6 +1199,7 @@
         <div class="title">mu_cli</div>
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
         <button id="togglePlanOutput" class="btn btn-soft btn-sm">Plan output</button>
+        <button id="toggleMetaSidebar" class="btn btn-soft btn-sm">Metadata panel</button>
         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
         <button id="openGitModal" class="btn btn-soft btn-sm top-git-launch">GIT</button>
@@ -1207,7 +1238,7 @@
         </div>
 
         <aside class="meta-sidebar">
-          <h4>Run metadata <button id="toggleMetaPanel" class="meta-toggle" type="button">Collapse</button></h4>
+          <h4>Run metadata</h4>
           <div class="meta-feed">
             <details class="trace-wrap" id="traceWrap" open>
               <summary>Debug traces</summary>
@@ -2350,6 +2381,63 @@ function collectAutomationMetadata(messages) {
   return items;
 }
 
+function _metaRow(kind, label, value) {
+  const row = document.createElement('div');
+  row.className = `meta-line meta-item ${kind}`;
+
+  const tag = document.createElement('span');
+  tag.className = 'meta-tag';
+  tag.textContent = label;
+  row.appendChild(tag);
+
+  const body = document.createElement('div');
+  body.className = 'meta-content';
+
+  const raw = String(value || '').trim();
+  const firstUrl = raw.match(/https?:\/\/[^\s]+/);
+  if (kind === 'citation' && firstUrl) {
+    const link = document.createElement('a');
+    link.className = 'meta-link';
+    link.href = firstUrl[0];
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = firstUrl[0];
+    body.appendChild(link);
+    const remainder = raw.replace(firstUrl[0], '').trim();
+    if (remainder) {
+      const extra = document.createElement('pre');
+      const code = document.createElement('code');
+      code.className = 'language-text';
+      code.textContent = remainder;
+      extra.appendChild(code);
+      body.appendChild(extra);
+      if (window.hljs) window.hljs.highlightElement(code);
+    }
+    row.appendChild(body);
+    return row;
+  }
+
+  const pre = document.createElement('pre');
+  const code = document.createElement('code');
+  let lang = 'language-text';
+  let output = raw || '(empty)';
+  if ((output.startsWith('{') && output.endsWith('}')) || (output.startsWith('[') && output.endsWith(']'))) {
+    try {
+      output = JSON.stringify(JSON.parse(output), null, 2);
+      lang = 'language-json';
+    } catch (_) {
+      // keep plain text
+    }
+  }
+  code.className = lang;
+  code.textContent = output;
+  pre.appendChild(code);
+  body.appendChild(pre);
+  row.appendChild(body);
+  if (window.hljs) window.hljs.highlightElement(code);
+  return row;
+}
+
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
   host.innerHTML = '';
@@ -2360,24 +2448,22 @@ function renderMetadataPanel() {
   if (Object.keys(ws).length) {
     const card = document.createElement('div');
     card.className = 'meta-card';
-    card.innerHTML = '<div class="meta-head"><span>Workspace indexing</span><span>debug</span></div>';
+    card.innerHTML = '<div class="meta-head"><span>Workspace indexing</span><span>stats</span></div>';
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
     for (const [key, value] of Object.entries(ws)) {
-      const row = document.createElement('div');
-      row.className = 'meta-line';
-      row.textContent = `${key}: ${value}`;
-      lines.appendChild(row);
+      lines.appendChild(_metaRow('workspace', 'Workspace stat', `${key}: ${value}`));
     }
     card.appendChild(lines);
     host.appendChild(card);
     cards += 1;
   }
 
-  state.messages.forEach((m, idx) => {
-    if (m.role !== 'assistant') return;
+  for (let idx = state.messages.length - 1; idx >= 0; idx -= 1) {
+    const m = state.messages[idx];
+    if (!m || m.role !== 'assistant') continue;
     const meta = collectAssistantMetadata(state.messages, idx);
-    if (!meta.toolRequests.length && !meta.toolResults.length && !meta.citationItems.length && !meta.researchSteps.length) return;
+    if (!meta.toolRequests.length && !meta.toolResults.length && !meta.citationItems.length && !meta.researchSteps.length) continue;
 
     const card = document.createElement('div');
     card.className = 'meta-card';
@@ -2386,35 +2472,15 @@ function renderMetadataPanel() {
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
 
-    for (const item of meta.toolRequests) {
-      const row = document.createElement('div');
-      row.className = 'meta-line';
-      row.textContent = `Tool call: ${item}`;
-      lines.appendChild(row);
-    }
-    for (const item of meta.toolResults) {
-      const row = document.createElement('div');
-      row.className = 'meta-line';
-      row.textContent = `Tool result: ${item}`;
-      lines.appendChild(row);
-    }
-    for (const item of meta.citationItems) {
-      const row = document.createElement('div');
-      row.className = 'meta-line';
-      row.textContent = `Citation: ${item}`;
-      lines.appendChild(row);
-    }
-    for (const item of meta.researchSteps) {
-      const row = document.createElement('div');
-      row.className = 'meta-line';
-      row.textContent = `Research: ${item}`;
-      lines.appendChild(row);
-    }
+    for (const item of meta.toolRequests) lines.appendChild(_metaRow('tool-call', 'Tool call', item));
+    for (const item of meta.toolResults) lines.appendChild(_metaRow('tool-result', 'Tool result', item));
+    for (const item of meta.citationItems) lines.appendChild(_metaRow('citation', 'Citation', item));
+    for (const item of meta.researchSteps) lines.appendChild(_metaRow('research', 'Research step', item));
 
     card.appendChild(lines);
     host.appendChild(card);
     cards += 1;
-  });
+  }
 
   const automation = collectAutomationMetadata(state.messages);
   if (automation.length) {
@@ -2423,11 +2489,8 @@ function renderMetadataPanel() {
     card.innerHTML = `<div class="meta-head"><span>Agent/Plan automation</span><span>${automation.length} items</span></div>`;
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
-    for (const item of automation.slice(-20)) {
-      const row = document.createElement('div');
-      row.className = 'meta-line';
-      row.textContent = `${item.kind} · ${item.role}: ${item.text}`;
-      lines.appendChild(row);
+    for (const item of automation.slice(-20).reverse()) {
+      lines.appendChild(_metaRow('automation', `${item.kind} · ${item.role}`, item.text));
     }
     card.appendChild(lines);
     host.appendChild(card);
@@ -2436,6 +2499,7 @@ function renderMetadataPanel() {
 
   if (!cards) host.innerHTML = '<div class="meta-empty">No tool/research metadata yet.</div>';
 }
+
 
 function renderMessages() {
   const box = document.getElementById('messages');
@@ -3245,12 +3309,14 @@ document.getElementById('openGitModal').addEventListener('click', async () => {
 });
 document.getElementById('closeGitModal').addEventListener('click', () => showModal('gitModal', false));
 document.getElementById('closeSkillViewModal').addEventListener('click', () => showModal('skillViewModal', false));
-document.getElementById('toggleMetaPanel').addEventListener('click', () => {
-  const panel = document.querySelector('.meta-sidebar');
-  if (!panel) return;
-  panel.classList.toggle('collapsed');
-  const btn = document.getElementById('toggleMetaPanel');
-  btn.textContent = panel.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+document.getElementById('toggleMetaSidebar').addEventListener('click', () => {
+  const layout = document.querySelector('.workspace-layout');
+  if (!layout) return;
+  layout.classList.toggle('meta-hidden');
+  const btn = document.getElementById('toggleMetaSidebar');
+  btn.classList.toggle('btn-accent', !layout.classList.contains('meta-hidden'));
+  btn.classList.toggle('btn-soft', layout.classList.contains('meta-hidden'));
+  btn.textContent = layout.classList.contains('meta-hidden') ? 'Show metadata' : 'Hide metadata';
 });
 document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
 document.getElementById('togglePlanOutput').addEventListener('click', () => {
@@ -3334,6 +3400,12 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('click', () => closeAllSessionMenus());
+const metaToggleBtn = document.getElementById('toggleMetaSidebar');
+if (metaToggleBtn) {
+  metaToggleBtn.classList.add('btn-accent');
+  metaToggleBtn.classList.remove('btn-soft');
+  metaToggleBtn.textContent = 'Hide metadata';
+}
 hydrateThemePreference();
 refreshState().catch((e) => alert(e.message));
 if (runtimeTick) clearInterval(runtimeTick);

@@ -482,10 +482,7 @@ function renderGitDiffWorkbench() {
 function renderExecutionTimeline() {
   const host = document.getElementById('executionTimeline');
   if (!host) return;
-  const active = activeSearchingJob();
-  const jobEvents = Array.isArray(active && active.events) ? active.events : [];
-  const traceEvents = (state.traces || []).slice(-20);
-  const merged = traceEvents.concat(jobEvents).slice(-64);
+  const merged = timelineEventsForActiveSession();
   const filter = state.timelineFilter || 'all';
   const map = { all: 'timelineFilterAll', model: 'timelineFilterModel', tool: 'timelineFilterTool', status: 'timelineFilterStatus' };
   Object.entries(map).forEach(([key, id]) => {
@@ -653,6 +650,15 @@ function classifyBackgroundEvent(line) {
   if (txt.startsWith('tool-run:')) return 'tool-run';
   if (txt.startsWith('status:')) return 'status';
   return '';
+}
+
+function timelineEventsForActiveSession() {
+  const traces = (state.traces || []).map((line) => String(line || '')).filter(Boolean);
+  const jobs = (state.backgroundJobs || []).filter((j) => j && j.session === state.activeSession);
+  const active = jobs.find((j) => ['running', 'awaiting_plan_approval'].includes(j.status));
+  const recentJob = active || jobs.slice().reverse().find((j) => Array.isArray(j.events) && j.events.length);
+  const jobEvents = Array.isArray(recentJob && recentJob.events) ? recentJob.events.map((line) => String(line || '')).filter(Boolean) : [];
+  return traces.concat(jobEvents).slice(-64);
 }
 
 let _lastBackgroundActivityKey = null;
@@ -1688,11 +1694,12 @@ function renderMessages() {
 
 function renderTraces() {
   const el = document.getElementById('traces');
-  if (!state.traces.length) {
+  const lines = timelineEventsForActiveSession();
+  if (!lines.length) {
     el.textContent = 'debug traces will appear here';
     return;
   }
-  el.innerHTML = state.traces.map((line) => {
+  el.innerHTML = lines.map((line) => {
     let cls = 'trace-line';
     if (line.startsWith('model:')) cls += ' trace-model';
     else if (line.startsWith('tool-request:')) cls += ' trace-request';

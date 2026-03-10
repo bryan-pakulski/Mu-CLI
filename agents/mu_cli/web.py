@@ -1785,6 +1785,33 @@ def create_app():
                 return jsonify({"error": "session not found"}), 404
             return jsonify({"ok": True})
 
+        if action == "clear":
+            target = name or runtime.session_name
+            if target != runtime.session_name:
+                loaded = _load_session(runtime, target)
+                if not loaded:
+                    return jsonify({"error": "session not found"}), 404
+
+            runtime.agent = _new_agent(runtime)
+            runtime.agent.add_system_prompt(runtime.system_prompt)
+            if runtime.workspace_path:
+                path = Path(runtime.workspace_path).expanduser()
+                if path.exists() and path.is_dir():
+                    runtime.workspace_store.attach(path)
+            if runtime.agentic_planning:
+                summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
+                _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
+            if runtime.research_mode:
+                _inject_research_prompt(runtime.agent)
+            _sync_skill_prompts(runtime)
+            runtime.session_usage = _default_usage()
+            runtime.session_turns = []
+            runtime.uploads = []
+            runtime.research_artifacts = {}
+            runtime.summary_index = []
+            _persist(runtime)
+            return jsonify({"ok": True, "session": runtime.session_name})
+
         if action == "condense":
             w = payload.get("window")
             result = _condense_session_context(runtime, window_size=int(w) if w is not None else runtime.condense_window)

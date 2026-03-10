@@ -120,6 +120,24 @@
       color: var(--muted);
       font-weight: 600;
     }
+    .collapsible-panel > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 8px;
+    }
+    .collapsible-panel > summary::-webkit-details-marker { display: none; }
+    .collapsible-panel > summary::after {
+      content: '▾';
+      color: var(--muted);
+      font-size: 11px;
+      transition: transform .18s ease;
+    }
+    .collapsible-panel:not([open]) > summary::after { transform: rotate(-90deg); }
+    .collapsible-panel > summary h3 { margin: 0; }
+    .panel-body { min-height: 0; }
 
     .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: 8px 12px; }
     .workspace-layout {
@@ -1052,8 +1070,9 @@
 <body>
   <div id="app" class="shell sidebar-hidden">
     <aside id="sidebar" class="sidebar">
-      <div class="panel">
-        <h3>Runtime</h3>
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Runtime</h3></summary>
+        <div class="panel-body">
         <div class="small-muted mb-2">Applied automatically</div>
 
         <label class="small-muted mb-1">Provider</label>
@@ -1078,10 +1097,12 @@
           <button id="clearUploads" class="btn btn-soft btn-sm">Clear store</button>
         </div>
         <div id="uploadList" class="upload-list small-muted"></div>
-      </div>
+        </div>
+      </details>
 
-      <div class="panel">
-        <h3>Sessions</h3>
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Sessions</h3></summary>
+        <div class="panel-body">
         <div class="small-muted mb-2" id="activeSession">active: -</div>
 
         <div class="d-flex gap-2 mb-2">
@@ -1090,17 +1111,27 @@
 
         <div id="sessionList" class="session-list mb-2"></div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
-      </div>
+        </div>
+      </details>
 
-      <div class="panel">
-        <h3>Session usage</h3>
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Skills</h3></summary>
+        <div class="panel-body">
+          <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
+        </div>
+      </details>
+
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Session usage</h3></summary>
+        <div class="panel-body">
         <div class="usage-grid">
           <div class="usage-chip"><div class="small-muted">Input</div><div id="usageIn">0</div></div>
           <div class="usage-chip"><div class="small-muted">Output</div><div id="usageOut">0</div></div>
           <div class="usage-chip"><div class="small-muted">Total</div><div id="usageTotal">0</div></div>
           <div class="usage-chip"><div class="small-muted">Cost USD</div><div id="usageCost">0.000000</div></div>
         </div>
-      </div>
+        </div>
+      </details>
     </aside>
 
     <section class="main">
@@ -1179,6 +1210,7 @@
 
   <div id="sessionMenuOverlay" class="session-menu">
     <button type="button" data-session-cmd="refresh">Refresh</button>
+    <button type="button" data-session-cmd="clear">Clear session context</button>
     <button type="button" data-session-cmd="condense">Condense settings</button>
     <button type="button" data-session-cmd="delete">Delete</button>
   </div>
@@ -1240,11 +1272,6 @@
         <section class="settings-section">
           <h6>Tool visibility</h6>
           <div id="toolVisibilityList" class="tool-visibility-list small-muted">Loading tools...</div>
-        </section>
-
-        <section class="settings-section">
-          <h6>Skills</h6>
-          <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
         </section>
 
         <section class="settings-section">
@@ -3159,6 +3186,7 @@ document.getElementById('sessionMenuOverlay').querySelectorAll('[data-session-cm
     closeAllSessionMenus();
     if (!name) return;
     if (cmd === 'refresh') await sessionAction('switch', name);
+    if (cmd === 'clear') await sessionAction('clear', name);
     if (cmd === 'condense') { openCondenseModal(name); return; }
     if (cmd === 'delete') await sessionAction('delete', name);
   });

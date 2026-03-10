@@ -48,6 +48,27 @@ class WebTests(unittest.TestCase):
         assert state is not None
         self.assertGreaterEqual(state['session_usage']['total_tokens'], payload['report']['total_tokens'])
 
+    def test_session_clear_action_resets_context(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/chat', json={'text': 'hello'})
+        self.assertEqual(200, res.status_code)
+
+        cleared = client.post('/api/session', json={'action': 'clear'})
+        self.assertEqual(200, cleared.status_code)
+        body = cleared.get_json()
+        assert body is not None
+        self.assertTrue(body['ok'])
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertEqual([], state['messages'])
+        self.assertEqual(0.0, float(state['session_usage']['total_tokens']))
+
     def test_chat_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 

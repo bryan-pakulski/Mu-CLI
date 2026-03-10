@@ -63,6 +63,7 @@ for (const [buttonId, modalId] of [
   ['closeWorkspaceModal', 'workspaceModal'],
   ['closeNewSessionModal', 'newSessionModal'],
   ['closeCondenseModal', 'condenseModal'],
+  ['closeSessionOverridesModal', 'sessionOverridesModal'],
 ]) {
   bindClick(buttonId, () => showModal(modalId, false));
 }
@@ -191,6 +192,8 @@ bindClick('switchBranch', () => switchBranchFromUI());
 bindClick('createBranch', () => createBranchFromUI());
 bindClick('runCondenseNow', () => runCondenseFromModal());
 bindClick('createSessionConfirm', () => createSessionFromModal());
+bindClick('saveSessionOverrides', () => saveSessionOverridesFromModal());
+bindClick('resetSessionOverrides', () => resetSessionOverridesFromModal());
 bindChange('newSessionProvider', () => wireNewSessionModels(byId('newSessionProvider').value));
 bindClick('loadDir', () => loadDirs(byId('dirPath').value.trim()));
 
@@ -221,6 +224,7 @@ if (sessionMenuOverlay) {
       if (cmd === 'refresh') await sessionAction('switch', name);
       if (cmd === 'clear') await sessionAction('clear', name);
       if (cmd === 'condense') { openCondenseModal(name); return; }
+      if (cmd === 'overrides') { await openSessionOverridesModal(name); return; }
       if (cmd === 'delete') await sessionAction('delete', name);
     }));
   });

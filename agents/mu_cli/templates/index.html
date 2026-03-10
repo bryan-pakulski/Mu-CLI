@@ -284,6 +284,10 @@
     .control-grid { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; margin-bottom:6px; }
     .control-grid input[type="range"] { width:100%; }
 
+    .override-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .override-grid .full { grid-column: 1 / -1; }
+    @media (max-width: 900px) { .override-grid { grid-template-columns: 1fr; } }
+
     .sidebar-resize-handle {
       width: 8px;
       cursor: col-resize;
@@ -1486,10 +1490,61 @@
     </div>
   </div>
 
+
+  <div id="sessionOverridesModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(880px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Session overrides</h5>
+        <button id="closeSessionOverridesModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="sessionOverridesMeta" class="small-muted mb-2">Session: -</div>
+      <div class="override-grid">
+        <div>
+          <label class="small-muted mb-1">Provider</label>
+          <select id="sessionOverrideProvider" class="form-select mb-2"></select>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Model</label>
+          <select id="sessionOverrideModel" class="form-select mb-2"></select>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Approval mode</label>
+          <select id="sessionOverrideApproval" class="form-select mb-2"><option>ask</option><option>auto</option><option>deny</option></select>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Workspace</label>
+          <input id="sessionOverrideWorkspace" class="form-control mb-2" placeholder="/path/to/repo" />
+        </div>
+        <div>
+          <div class="form-check mb-1"><input id="sessionOverrideAgentic" class="form-check-input" type="checkbox" /><label class="form-check-label small-muted" for="sessionOverrideAgentic">Agentic planning</label></div>
+          <div class="form-check mb-1"><input id="sessionOverrideResearch" class="form-check-input" type="checkbox" /><label class="form-check-label small-muted" for="sessionOverrideResearch">Research mode</label></div>
+          <div class="form-check"><input id="sessionOverrideCondense" class="form-check-input" type="checkbox" /><label class="form-check-label small-muted" for="sessionOverrideCondense">Auto condense</label></div>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Condense window</label>
+          <input id="sessionOverrideCondenseWindow" type="number" min="2" step="1" class="form-control mb-2" value="12" />
+          <label class="small-muted mb-1">Max runtime (s)</label>
+          <input id="sessionOverrideMaxRuntime" type="number" min="30" step="30" class="form-control" value="900" />
+        </div>
+        <div class="full">
+          <label class="small-muted mb-1">System prompt override (session)</label>
+          <textarea id="sessionOverrideSystemPrompt" class="form-control mb-2" style="min-height:90px"></textarea>
+          <label class="small-muted mb-1">Rules checklist (session)</label>
+          <textarea id="sessionOverrideRules" class="form-control" style="min-height:80px"></textarea>
+        </div>
+      </div>
+      <div class="d-flex justify-content-end gap-2 mt-3">
+        <button id="resetSessionOverrides" class="btn btn-soft btn-sm">Reset session overrides</button>
+        <button id="saveSessionOverrides" class="btn btn-accent btn-sm">Save overrides</button>
+      </div>
+    </div>
+  </div>
+
   <div id="sessionMenuOverlay" class="session-menu">
     <button type="button" data-session-cmd="refresh">Refresh</button>
     <button type="button" data-session-cmd="clear">Clear session context</button>
     <button type="button" data-session-cmd="condense">Condense settings</button>
+    <button type="button" data-session-cmd="overrides">Session overrides</button>
     <button type="button" data-session-cmd="delete">Delete</button>
   </div>
 

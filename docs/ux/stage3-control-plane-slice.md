@@ -21,3 +21,11 @@ This slice begins Stage 3 by introducing practical control-plane surfaces in the
 
 - This slice is intentionally backend-safe: control-plane values are persisted client-side and do not alter existing backend contracts.
 - Next slice can map selected controls to backend/runtime settings where API support exists.
+
+
+## Per-session overrides (new)
+
+- Added Session Overrides editor in session options menu.
+- Supports per-session runtime settings overrides (provider/model/approval/workspace/agentic/research/condense/runtime).
+- Supports per-session control-plane text overrides (system prompt + rules) layered over global defaults.
+- Global defaults remain lowest-priority and are editable from main Settings.

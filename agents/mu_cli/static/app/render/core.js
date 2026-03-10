@@ -1,10 +1,142 @@
 // --- render functions -------------------------------------------------------
 
 
+
+function _readSessionOverrideStore() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_session_override_store') || '{}');
+    return {
+      global: raw.global || {},
+      sessions: raw.sessions || {},
+    };
+  } catch (_) {
+    return { global: {}, sessions: {} };
+  }
+}
+
+function _writeSessionOverrideStore(store) {
+  localStorage.setItem('mu_session_override_store', JSON.stringify(store));
+}
+
+function _effectiveControlPrefsForSession(sessionName) {
+  const store = _readSessionOverrideStore();
+  const base = {
+    systemPromptOverride: '', rulesChecklist: '', knobTemperature: 0.2, knobTopP: 0.95,
+    knobToolBias: 0.7, knobVerbosity: 0.5, contextBudgetTarget: 16000,
+  };
+  const global = store.global || {};
+  const sess = (store.sessions || {})[sessionName || ''] || {};
+  return { ...base, ...global, ...sess };
+}
+
+async function openSessionOverridesModal(sessionName) {
+  const name = String(sessionName || state.activeSession || '').trim();
+  if (!name) throw new Error('No session selected');
+  const currentSession = state.activeSession || '';
+  if (currentSession !== name) {
+    await api('/api/session', 'POST', { action: 'switch', name });
+    await refreshState();
+  }
+
+  document.getElementById('sessionOverridesMeta').textContent = `Session: ${name}`;
+  const providerSel = document.getElementById('sessionOverrideProvider');
+  providerSel.innerHTML = '';
+  Object.keys(state.models || {}).forEach((provider) => {
+    const opt = document.createElement('option');
+    opt.value = provider;
+    opt.textContent = provider;
+    providerSel.appendChild(opt);
+  });
+  providerSel.value = document.getElementById('provider').value || providerSel.value;
+
+  const modelSel = document.getElementById('sessionOverrideModel');
+  const wireOverrideModels = () => {
+    modelSel.innerHTML = '';
+    (state.models[providerSel.value] || []).forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      modelSel.appendChild(opt);
+    });
+  };
+  wireOverrideModels();
+  modelSel.value = document.getElementById('model').value || modelSel.value;
+
+  document.getElementById('sessionOverrideApproval').value = document.getElementById('approval').value || 'ask';
+  document.getElementById('sessionOverrideWorkspace').value = document.getElementById('workspace').value || '';
+  document.getElementById('sessionOverrideAgentic').checked = !!document.getElementById('agentic').checked;
+  document.getElementById('sessionOverrideResearch').checked = !!document.getElementById('researchMode').checked;
+  document.getElementById('sessionOverrideCondense').checked = !!document.getElementById('condenseEnabled').checked;
+  document.getElementById('sessionOverrideCondenseWindow').value = document.getElementById('condenseWindow').value || 12;
+  document.getElementById('sessionOverrideMaxRuntime').value = document.getElementById('maxRuntime').value || 900;
+
+  const prefs = _effectiveControlPrefsForSession(name);
+  document.getElementById('sessionOverrideSystemPrompt').value = prefs.systemPromptOverride || '';
+  document.getElementById('sessionOverrideRules').value = prefs.rulesChecklist || '';
+
+  providerSel.onchange = () => wireOverrideModels();
+  document.getElementById('sessionOverridesModal').setAttribute('data-session', name);
+  showModal('sessionOverridesModal', true);
+
+  if (currentSession !== name) {
+    await api('/api/session', 'POST', { action: 'switch', name: currentSession });
+    await refreshState();
+  }
+}
+
+async function saveSessionOverridesFromModal() {
+  const target = document.getElementById('sessionOverridesModal').getAttribute('data-session') || '';
+  if (!target) throw new Error('No session set for overrides');
+  const currentSession = state.activeSession || '';
+
+  await api('/api/session', 'POST', { action: 'switch', name: target });
+  await refreshState();
+
+  const payload = {
+    ...buildSettingsPayload(),
+    provider: document.getElementById('sessionOverrideProvider').value,
+    model: document.getElementById('sessionOverrideModel').value,
+    approval_mode: document.getElementById('sessionOverrideApproval').value,
+    workspace: document.getElementById('sessionOverrideWorkspace').value || null,
+    agentic_planning: !!document.getElementById('sessionOverrideAgentic').checked,
+    research_mode: !!document.getElementById('sessionOverrideResearch').checked,
+    condense_enabled: !!document.getElementById('sessionOverrideCondense').checked,
+    condense_window: Number(document.getElementById('sessionOverrideCondenseWindow').value || 12),
+    max_runtime_seconds: Number(document.getElementById('sessionOverrideMaxRuntime').value || 900),
+  };
+  await api('/api/settings', 'POST', payload);
+
+  const store = _readSessionOverrideStore();
+  store.sessions = store.sessions || {};
+  store.sessions[target] = {
+    ...(_effectiveControlPrefsForSession(target) || {}),
+    systemPromptOverride: document.getElementById('sessionOverrideSystemPrompt').value || '',
+    rulesChecklist: document.getElementById('sessionOverrideRules').value || '',
+  };
+  _writeSessionOverrideStore(store);
+
+  if (currentSession && currentSession !== target) {
+    await api('/api/session', 'POST', { action: 'switch', name: currentSession });
+  }
+  await refreshState();
+  showModal('sessionOverridesModal', false);
+}
+
+function resetSessionOverridesFromModal() {
+  const target = document.getElementById('sessionOverridesModal').getAttribute('data-session') || '';
+  if (!target) return;
+  const store = _readSessionOverrideStore();
+  if (store.sessions && store.sessions[target]) {
+    delete store.sessions[target];
+    _writeSessionOverrideStore(store);
+  }
+  showModal('sessionOverridesModal', false);
+}
+
 function _readControlPlanePrefs() {
   try {
     const raw = JSON.parse(localStorage.getItem('mu_control_plane_prefs') || '{}');
-    return {
+    const legacy = {
       systemPromptOverride: String(raw.systemPromptOverride || ''),
       rulesChecklist: String(raw.rulesChecklist || ''),
       knobTemperature: Number(raw.knobTemperature ?? 0.2),
@@ -13,6 +145,8 @@ function _readControlPlanePrefs() {
       knobVerbosity: Number(raw.knobVerbosity ?? 0.5),
       contextBudgetTarget: Number(raw.contextBudgetTarget ?? 16000),
     };
+    const active = (state && state.activeSession) ? state.activeSession : '';
+    return { ...legacy, ..._effectiveControlPrefsForSession(active) };
   } catch (_) {
     return {
       systemPromptOverride: '', rulesChecklist: '', knobTemperature: 0.2, knobTopP: 0.95,
@@ -56,6 +190,9 @@ function persistControlPlaneFromUI() {
     knobVerbosity: Number(getVal('knobVerbosity', '0.5')),
     contextBudgetTarget: Number((_readControlPlanePrefs().contextBudgetTarget) || 16000),
   };
+  const store = _readSessionOverrideStore();
+  store.global = prefs;
+  _writeSessionOverrideStore(store);
   _writeControlPlanePrefs(prefs);
   syncControlPlaneUIFromPrefs();
   renderContextBudgetPanel();
@@ -1734,7 +1871,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal', 'runDetailsModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal', 'runDetailsModal', 'sessionOverridesModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }

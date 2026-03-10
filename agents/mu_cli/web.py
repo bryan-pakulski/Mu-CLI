@@ -959,10 +959,23 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "verification_policy": _verification_policy_for_task(text),
         "checkpoints": [],
         "answer_contract": None,
+        "cancel_requested": False,
+        "cancel_reason": None,
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
+
+        def _cancelled() -> bool:
+            return bool(job.get("cancel_requested"))
+
+        def _mark_cancelled(reason: str) -> None:
+            if job.get("status") in {"killed", "completed", "failed", "timed_out"}:
+                return
+            job["status"] = "killed"
+            job["cancel_reason"] = reason
+            job["events"].append(f"status: killed ({reason})")
+
         try:
             isolated = _build_session_runtime(base_runtime, session_name)
             isolated.debug = True
@@ -1023,10 +1036,16 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 _persist(isolated)
                 job["status"] = "awaiting_plan_approval"
                 while datetime.now(timezone.utc).timestamp() < deadline:
+                    if _cancelled():
+                        _mark_cancelled("user requested stop")
+                        return
                     decision = job.get("plan_approval")
                     if decision in {"approve", "deny"}:
                         break
                     threading.Event().wait(0.4)
+                if _cancelled():
+                    _mark_cancelled("user requested stop")
+                    return
                 if job.get("plan_approval") != "approve":
                     job["events"].append("plan: denied_or_timed_out")
                     raise RuntimeError("Plan not approved before timeout or was denied.")
@@ -1061,6 +1080,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 + "- Final answer must include: Confidence: <high|medium|low> and Evidence: bullets linked to tool outputs."
             )
             while datetime.now(timezone.utc).timestamp() < deadline:
+                if _cancelled():
+                    _mark_cancelled("user requested stop")
+                    break
                 if int(job["iterations"]) >= max_iterations:
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
                     break
@@ -1146,7 +1168,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "When all tasks are complete, begin your response with 'PLAN_COMPLETE'."
                 )
 
-            if datetime.now(timezone.utc).timestamp() >= deadline:
+            if job.get("status") == "killed":
+                pass
+            elif datetime.now(timezone.utc).timestamp() >= deadline:
                 job["status"] = "timed_out"
 
             job["report"] = {
@@ -1157,7 +1181,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 "total_tokens": total_tokens,
                 "estimated_cost_usd": total_cost,
             }
-            if job["status"] != "timed_out":
+            if job["status"] not in {"timed_out", "killed"}:
                 job["status"] = "completed"
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
@@ -1186,7 +1210,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["events"].append("status: completed_without_explicit_plan_complete")
         except Exception as exc:
             job["error"] = str(exc)
-            if job.get("status") != "timed_out":
+            if job.get("status") not in {"timed_out", "killed"}:
                 job["status"] = "failed"
             job["events"].append(f"status: failed ({exc})")
         finally:
@@ -1403,6 +1427,22 @@ def create_app():
         if job is None:
             return jsonify({"error": "job not found"}), 404
         return jsonify(job)
+
+    @app.post("/api/jobs/<job_id>/kill")
+    def kill_job(job_id: str):
+        job = runtime.background_jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "job not found"}), 404
+        status = str(job.get("status") or "")
+        if status in {"completed", "failed", "timed_out", "killed"}:
+            return jsonify({"ok": False, "job_id": job_id, "status": status, "message": "job is not running"}), 409
+        reason = str((request.get_json(silent=True) or {}).get("reason", "")).strip() or "user requested stop"
+        job["cancel_requested"] = True
+        job["cancel_reason"] = reason
+        events = job.setdefault("events", [])
+        if isinstance(events, list):
+            events.append(f"cancel_requested: {reason}")
+        return jsonify({"ok": True, "job_id": job_id, "status": job.get("status"), "cancel_requested": True})
 
     @app.post("/api/jobs/<job_id>/plan")
     def decide_job_plan(job_id: str):

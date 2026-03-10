@@ -635,6 +635,14 @@
       font-weight: 500;
     }
     .btn-soft:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--border) 85%, var(--muted)); }
+    .btn-kill {
+      background: #dc2626;
+      border-color: #dc2626;
+      color: #fff;
+      font-weight: 700;
+    }
+    .btn-kill:hover { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+    .btn-kill:disabled { opacity: 0.7; }
 
     .btn-accent {
       border: 1px solid color-mix(in srgb, var(--border) 70%, var(--muted));
@@ -1253,6 +1261,7 @@
             <div class="d-flex align-items-center gap-2 mt-2">
               <button id="send" class="btn btn-accent btn-sm">Send</button>
               <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
+              <button id="killJob" class="btn btn-kill btn-sm d-none">⛔ Kill running job</button>
               <div id="report" class="small-muted"></div>
             </div>
           </div>
@@ -2704,6 +2713,34 @@ function updateQueryRuntime() {
   runtimeEl.classList.add('show');
 }
 
+async function killActiveJob() {
+  const job = activeSearchingJob();
+  if (!job) return;
+  const killBtn = document.getElementById('killJob');
+  if (killBtn) killBtn.disabled = true;
+  try {
+    await api(`/api/jobs/${job.id}/kill`, 'POST', { reason: 'killed from UI' });
+    const latest = await api(`/api/jobs/${job.id}`);
+    updateBackgroundJobInState(latest);
+    const reportEl = document.getElementById('report');
+    if (reportEl) reportEl.textContent = `kill signal sent: ${job.id}`;
+    updateChatBusyState();
+  } catch (err) {
+    alert(err.message || 'Unable to kill running job');
+  } finally {
+    if (killBtn) killBtn.disabled = false;
+  }
+}
+
+function updateKillButton() {
+  const killBtn = document.getElementById('killJob');
+  if (!killBtn) return;
+  const active = activeSearchingJob();
+  const show = !!active;
+  killBtn.classList.toggle('d-none', !show);
+  killBtn.disabled = !show;
+}
+
 function updateChatBusyState() {
   const searching = !!activeSearchingJob();
   const sendingForSession = !!sending && (!sendingSession || sendingSession === state.activeSession);
@@ -2723,6 +2760,7 @@ function updateChatBusyState() {
   updateThinking(busy);
   updateQueryRuntime();
   renderBackgroundActivity(activeSearchingJob() || null);
+  updateKillButton();
 }
 
 
@@ -3388,6 +3426,7 @@ document.getElementById('promptAttachInput').addEventListener('change', () => up
 
 document.getElementById('send').addEventListener('click', () => sendPrompt(false).catch((e) => alert(e.message)));
 document.getElementById('sendBackground').addEventListener('click', () => sendPrompt(true).catch((e) => alert(e.message)));
+document.getElementById('killJob').addEventListener('click', () => killActiveJob().catch((e) => alert(e.message)));
 document.getElementById('newSession').addEventListener('click', () => openNewSessionModal());
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
 document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));

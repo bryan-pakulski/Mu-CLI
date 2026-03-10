@@ -432,6 +432,36 @@ class WebTests(unittest.TestCase):
         self.assertEqual(revised, job['plan'])
         self.assertTrue(any(evt == 'plan: revised_by_user' for evt in job.get('events', [])))
 
+    def test_background_job_can_be_killed(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'max_runtime_seconds': 60})
+        started = client.post('/api/chat/background', json={'text': 'long running task for kill switch'})
+        self.assertEqual(200, started.status_code)
+        job_id = started.get_json()['job_id']
+
+        kill = client.post(f'/api/jobs/{job_id}/kill', json={'reason': 'test kill'})
+        self.assertEqual(200, kill.status_code)
+
+        deadline = time.time() + 5
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] == 'killed':
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertEqual('killed', job['status'])
+        self.assertTrue(job.get('cancel_requested'))
+        self.assertTrue(any('killed' in event for event in job.get('events', [])))
+
     def test_background_job_tracks_terminal_event(self) -> None:
         from mu_cli.web import create_app
 

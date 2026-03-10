@@ -143,7 +143,7 @@
     .workspace-layout {
       min-height: 0;
       display: grid;
-      grid-template-columns: minmax(0,1fr) 360px;
+      grid-template-columns: minmax(0,1fr) auto;
       gap: 10px;
     }
     .topbar {
@@ -265,6 +265,10 @@
     .trace { max-height: 120px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
 
     .meta-sidebar {
+      width: 360px;
+      min-width: 260px;
+      max-width: 60vw;
+      resize: horizontal;
       min-height: 0;
       overflow: auto;
       border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
@@ -272,6 +276,13 @@
       display: grid;
       grid-template-rows: auto minmax(0,1fr);
       gap: 8px;
+    }
+    .meta-sidebar.collapsed {
+      width: 42px;
+      min-width: 42px;
+      resize: none;
+      overflow: hidden;
+      padding-left: 0;
     }
     .meta-sidebar h4 {
       margin: 0;
@@ -281,7 +292,21 @@
       color: var(--muted);
       font-weight: 600;
       padding: 4px 2px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
     }
+    .meta-toggle {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1;
+      padding: 2px 6px;
+    }
+    .meta-sidebar.collapsed .meta-feed { display: none; }
     .meta-feed {
       min-height: 0;
       overflow: auto;
@@ -1179,7 +1204,7 @@
         </div>
 
         <aside class="meta-sidebar">
-          <h4>Run metadata</h4>
+          <h4>Run metadata <button id="toggleMetaPanel" class="meta-toggle" type="button">Collapse</button></h4>
           <div class="meta-feed">
             <details class="trace-wrap" id="traceWrap" open>
               <summary>Debug traces</summary>
@@ -1213,6 +1238,16 @@
     <button type="button" data-session-cmd="clear">Clear session context</button>
     <button type="button" data-session-cmd="condense">Condense settings</button>
     <button type="button" data-session-cmd="delete">Delete</button>
+  </div>
+
+  <div id="skillViewModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(900px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 id="skillViewTitle" class="m-0">Skill</h5>
+        <button id="closeSkillViewModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="skillViewBody" class="trace" style="max-height:70vh;white-space:normal;line-height:1.45">Loading…</div>
+    </div>
   </div>
 
   <div id="advancedModal" class="modal-backdrop-custom">
@@ -1428,7 +1463,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [] };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {} };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -2238,6 +2273,7 @@ function isToolRole(role) {
 }
 
 function shouldRenderMessage(message) {
+  if (message && message.metadata && message.metadata.show_in_main === false) return false;
   if (message.role !== 'assistant') return true;
   const content = String(message.content || '').trim();
   const toolCalls = (message.metadata && message.metadata.tool_calls) || [];
@@ -2253,15 +2289,20 @@ function collectAssistantMetadata(messages, assistantIndex) {
   for (const call of directCalls) {
     const name = String(call.name || 'tool');
     const args = String(call.arguments || '').trim();
-    const shortArgs = args.length > 180 ? `${args.slice(0, 177)}...` : args;
-    toolRequests.push(`requested ${name}${shortArgs ? ` with args ${shortArgs}` : ''}`);
+    const shortArgs = args.length > 420 ? `${args.slice(0, 417)}...` : args;
+    toolRequests.push(`name=${name}${shortArgs ? ` args=${shortArgs}` : ''}`);
   }
 
   for (let i = assistantIndex + 1; i < messages.length; i += 1) {
     const current = messages[i];
     if (!current) continue;
     if (current.role === 'assistant' || current.role === 'user') break;
-    if (current.role === 'tool_result') toolResults.push(summarizeToolResult(current.content));
+    if (current.role === 'tool_result') {
+      const summary = summarizeToolResult(current.content);
+      const raw = String(current.content || '').trim();
+      const snippet = raw.length > 700 ? `${raw.slice(0, 697)}...` : raw;
+      toolResults.push(`${summary}\nmodel_received=${snippet}`);
+    }
   }
 
   const reasons = scoreReasonsByUrl(messages, assistantIndex);
@@ -2286,11 +2327,42 @@ function collectAssistantMetadata(messages, assistantIndex) {
   return { toolRequests, toolResults, citationItems, researchSteps };
 }
 
+function collectAutomationMetadata(messages) {
+  const items = [];
+  for (const message of (messages || [])) {
+    if (!message || !message.metadata || message.metadata.show_in_main !== false) continue;
+    const kind = String(message.metadata.automation_kind || 'automation');
+    const role = String(message.role || 'message');
+    const text = String(message.content || '').trim();
+    if (!text) continue;
+    items.push({ kind, role, text: text.length > 900 ? `${text.slice(0, 897)}...` : text });
+  }
+  return items;
+}
+
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
+
+  const ws = state.workspaceIndexStats || {};
+  if (Object.keys(ws).length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = '<div class="meta-head"><span>Workspace indexing</span><span>debug</span></div>';
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const [key, value] of Object.entries(ws)) {
+      const row = document.createElement('div');
+      row.className = 'meta-line';
+      row.textContent = `${key}: ${value}`;
+      lines.appendChild(row);
+    }
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
 
   state.messages.forEach((m, idx) => {
     if (m.role !== 'assistant') return;
@@ -2333,6 +2405,24 @@ function renderMetadataPanel() {
     host.appendChild(card);
     cards += 1;
   });
+
+  const automation = collectAutomationMetadata(state.messages);
+  if (automation.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Agent/Plan automation</span><span>${automation.length} items</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const item of automation.slice(-20)) {
+      const row = document.createElement('div');
+      row.className = 'meta-line';
+      row.textContent = `${item.kind} · ${item.role}: ${item.text}`;
+      lines.appendChild(row);
+    }
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
 
   if (!cards) host.innerHTML = '<div class="meta-empty">No tool/research metadata yet.</div>';
 }
@@ -2588,14 +2678,29 @@ function renderSkillSettings() {
     return;
   }
   host.innerHTML = skills.map((skillName) => `
-    <label class="tool-visibility-row d-flex align-items-center gap-2">
-      <input type="checkbox" class="form-check-input" data-skill-enabled="${escapeHtml(skillName)}" ${enabled.has(skillName) ? 'checked' : ''} />
-      <span class="small-muted">${escapeHtml(skillName)}</span>
-    </label>
+    <div class="tool-visibility-row d-flex align-items-center gap-2 justify-content-between">
+      <label class="d-flex align-items-center gap-2 m-0" style="min-width:0">
+        <input type="checkbox" class="form-check-input" data-skill-enabled="${escapeHtml(skillName)}" ${enabled.has(skillName) ? 'checked' : ''} />
+        <span class="small-muted text-truncate">${escapeHtml(skillName)}</span>
+      </label>
+      <button type="button" class="btn btn-soft btn-sm" data-skill-view="${escapeHtml(skillName)}">View</button>
+    </div>
   `).join('');
   host.querySelectorAll('[data-skill-enabled]').forEach((el) => {
     el.addEventListener('change', scheduleApplySettings);
   });
+  host.querySelectorAll('[data-skill-view]').forEach((el) => {
+    el.addEventListener('click', () => openSkillView(el.getAttribute('data-skill-view') || '').catch((e) => alert(e.message)));
+  });
+}
+
+async function openSkillView(name) {
+  if (!name) return;
+  document.getElementById('skillViewTitle').textContent = `Skill: ${name}`;
+  document.getElementById('skillViewBody').textContent = 'Loading…';
+  showModal('skillViewModal', true);
+  const payload = await api(`/api/skills/${encodeURIComponent(name)}`);
+  document.getElementById('skillViewBody').innerHTML = formatMessageContent(payload.content || '');
 }
 
 function parseCustomToolsInput() {
@@ -2808,6 +2913,7 @@ async function refreshState() {
   state.gitBranches = s.git_branches || [];
   state.skills = s.skills || [];
   state.enabledSkills = s.enabled_skills || [];
+  state.workspaceIndexStats = s.workspace_index_stats || {};
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -3115,6 +3221,14 @@ document.getElementById('openGitModal').addEventListener('click', async () => {
   showModal('gitModal', true);
 });
 document.getElementById('closeGitModal').addEventListener('click', () => showModal('gitModal', false));
+document.getElementById('closeSkillViewModal').addEventListener('click', () => showModal('skillViewModal', false));
+document.getElementById('toggleMetaPanel').addEventListener('click', () => {
+  const panel = document.querySelector('.meta-sidebar');
+  if (!panel) return;
+  panel.classList.toggle('collapsed');
+  const btn = document.getElementById('toggleMetaPanel');
+  btn.textContent = panel.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+});
 document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
 document.getElementById('togglePlanOutput').addEventListener('click', () => {
   planOverlayUserVisible = !planOverlayUserVisible;

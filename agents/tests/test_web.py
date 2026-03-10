@@ -222,6 +222,26 @@ class WebTests(unittest.TestCase):
         self.assertIn('web-ui-skill', state['skills'])
         self.assertIn('web-ui-skill', state['enabled_skills'])
 
+    def test_skill_content_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        skills_dir = Path("skills")
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        skill_path = skills_dir / "viewer-skill.md"
+        skill_path.write_text("# Viewer\n\ncontent", encoding="utf-8")
+        self.addCleanup(lambda: skill_path.unlink(missing_ok=True))
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.get('/api/skills/viewer-skill')
+        self.assertEqual(200, res.status_code)
+        payload = res.get_json()
+        assert payload is not None
+        self.assertEqual('viewer-skill', payload['name'])
+        self.assertIn('Viewer', payload['content'])
+
     def test_git_repo_and_branch_endpoints(self) -> None:
         from mu_cli.web import create_app
 

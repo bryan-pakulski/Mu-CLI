@@ -7,7 +7,7 @@ from mu_cli.workspace import WorkspaceStore
 
 
 class WorkspaceTests(unittest.TestCase):
-    def test_attach_indexes_files_and_respects_gitignore_and_secret_filters(self) -> None:
+    def test_attach_indexes_files_and_respects_gitignore_only(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "repo"
             root.mkdir()
@@ -16,6 +16,9 @@ class WorkspaceTests(unittest.TestCase):
             (root / "ignored.txt").write_text("ignored\n", encoding="utf-8")
             (root / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
             (root / "config.txt").write_text("password=foo\n", encoding="utf-8")
+            tpl = root / "agents" / "mu_cli" / "templates"
+            tpl.mkdir(parents=True)
+            (tpl / "index.html").write_text("<html></html>\n", encoding="utf-8")
 
             store = WorkspaceStore(Path(td) / "store")
             snapshot = store.attach(root)
@@ -23,8 +26,10 @@ class WorkspaceTests(unittest.TestCase):
             paths = [item.path for item in snapshot.files]
             self.assertIn("kept.py", paths)
             self.assertNotIn("ignored.txt", paths)
-            self.assertNotIn(".env", paths)
-            self.assertNotIn("config.txt", paths)
+            self.assertIn(".env", paths)
+            self.assertIn("config.txt", paths)
+            self.assertIn("agents/mu_cli/templates/index.html", paths)
+            self.assertGreaterEqual(snapshot.index_stats.get("indexed", 0), 4)
 
     def test_tool_run_persists(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -282,10 +282,19 @@ class ListWorkspaceFilesTool:
         query = args.get("query")
         limit = int(args.get("limit", 25))
         items = self.store.list_files(query=str(query) if query else None, limit=limit)
+        stats = (self.store.snapshot.index_stats if self.store.snapshot else {})
+        prefix = (
+            f"[workspace-index] indexed={stats.get('indexed', 0)} seen={stats.get('seen', 0)} "
+            f"gitignored={stats.get('ignored_by_gitignore', 0)} "
+            f"non_utf8_or_unreadable={stats.get('non_utf8_or_unreadable', 0)}"
+        )
         if not items:
-            return ToolResult(ok=True, output="No indexed files matched.")
+            suffix = ""
+            if query:
+                suffix = " Try a broader query or call list_workspace_files without query."
+            return ToolResult(ok=True, output=f"{prefix}\nNo indexed files matched.{suffix}")
         lines = [f"- {item.path} ({item.size_bytes} bytes)" for item in items]
-        return ToolResult(ok=True, output="\n".join(lines))
+        return ToolResult(ok=True, output=f"{prefix}\n" + "\n".join(lines))
 
 
 class GetWorkspaceFileContextTool:

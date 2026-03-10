@@ -77,8 +77,10 @@ Notes:
 - During background agent sessions, a dedicated “Plan output” overlay shows plan, checkpoints, and execution stages without reloading chat messages.
 - Includes built-in session management actions (new/load/delete/list/status).
 - Includes settings controls to enable/disable available skills per session.
+- Skills list in the left sidebar includes a `View` action to inspect skill markdown content.
 - Session row menu includes a clear action to wipe context and restart that session.
 - Left runtime panels are collapsible (runtime, sessions, skills, usage).
+- Right metadata panel is collapsible/resizable and groups compact debug/tool/research metadata.
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
 
 ## Workspace context and memory

@@ -881,6 +881,18 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
     return runtime
 
 
+def _step_internal(runtime: WebRuntime, prompt: str, kind: str) -> Message:
+    before = len(runtime.agent.state.messages)
+    reply = runtime.agent.step(prompt)
+    for message in runtime.agent.state.messages[before:]:
+        if message.role not in {Role.USER, Role.ASSISTANT}:
+            continue
+        message.metadata["show_in_main"] = False
+        message.metadata["metadata_group"] = "automation"
+        message.metadata["automation_kind"] = kind
+    return reply
+
+
 def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: str) -> str:
     def _normalize_progress_text(value: str | None) -> str:
         return " ".join((value or "").lower().split())
@@ -935,15 +947,19 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["events"].append(f"checkpoint: restored {len(restored_checkpoints[-8:])}")
 
             if isolated.agentic_planning:
-                plan_reply = isolated.agent.step(
+                plan_reply = _step_internal(
+                    isolated,
                     "Create an execution plan for the task below. Keep it short and actionable as numbered steps. "
-                    "Start with 'PLAN:'.\n\nTask:\n" + text
+                    "Start with 'PLAN:'.\n\nTask:\n" + text,
+                    kind="plan_draft",
                 )
                 plan_text = (plan_reply.content or "").strip()
                 if not plan_text or plan_text.lower().startswith("calling tool"):
-                    fallback_reply = isolated.agent.step(
+                    fallback_reply = _step_internal(
+                        isolated,
                         "Provide ONLY a concise numbered execution plan for the same task. "
-                        "Do not call tools. Start with 'PLAN:'."
+                        "Do not call tools. Start with 'PLAN:'.",
+                        kind="plan_fallback",
                     )
                     plan_text = (fallback_reply.content or "").strip()
                 if not plan_text:
@@ -958,14 +974,16 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "Respond in exactly two lines: 'CRITIQUE: ...' and 'PLAN_OK: yes|no'.\n\n"
                     f"Task:\n{text}\n\nProposed plan:\n{plan_text}"
                 )
-                critic_reply = isolated.agent.step(critic_prompt)
+                critic_reply = _step_internal(isolated, critic_prompt, kind="plan_critic")
                 critic_text = (critic_reply.content or "").strip()
                 plan_ok = "plan_ok: yes" in critic_text.lower()
                 job["planner_critic"] = critic_text[:1200]
                 job["events"].append("plan: critic_passed" if plan_ok else "plan: critic_failed")
                 if not plan_ok:
-                    revise_reply = isolated.agent.step(
-                        "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'."
+                    revise_reply = _step_internal(
+                        isolated,
+                        "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'.",
+                        kind="plan_revise",
                     )
                     revised_text = (revise_reply.content or "").strip()
                     if revised_text:
@@ -1069,9 +1087,11 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         job["events"].append("status: stalled_no_tool_progress")
                         if replan_count < 2:
                             replan_count += 1
-                            replan_reply = isolated.agent.step(
+                            replan_reply = _step_internal(
+                                isolated,
                                 "Generate REPLAN with 3-6 concise steps to recover from stall. "
-                                "Start with 'REPLAN:'. Include one immediate next tool call recommendation."
+                                "Start with 'REPLAN:'. Include one immediate next tool call recommendation.",
+                                kind="replan",
                             )
                             replanned = (replan_reply.content or "").strip()
                             if replanned:
@@ -1299,8 +1319,20 @@ def create_app():
                 "git_branches": git_branches,
                 "skills": runtime.skill_store.list_skills() if runtime.skill_store else [],
                 "enabled_skills": runtime.enabled_skills,
+                "workspace_index_stats": (
+                    runtime.workspace_store.snapshot.index_stats if runtime.workspace_store.snapshot else {}
+                ),
             }
         )
+
+    @app.get("/api/skills/<name>")
+    def skill_content(name: str):
+        if runtime.skill_store is None:
+            return jsonify({"error": "skills not configured"}), 404
+        skill = runtime.skill_store.load_skill(name)
+        if skill is None:
+            return jsonify({"error": "skill not found"}), 404
+        return jsonify({"name": skill.name, "content": skill.content})
 
     @app.post("/api/chat")
     def chat():

@@ -42,11 +42,11 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 
 ### Stage 3 — Control plane surfaces (weeks 8-10)
 
-- [ ] Skills management v2 (details, presets, lifecycle visibility).
-- [ ] Tools management console (enablement, risk, latency/failure signal, session overrides).
-- [ ] Context budget manager (token allocation meter, pin/summarize/exclude controls).
-- [ ] System prompt/rules manager (versioning, diff, rollback, conflict checks).
-- [ ] Model behavior controls (knobs/sliders + saved profiles).
+- [~] Skills management v2 (details, presets, lifecycle visibility).
+- [~] Tools management console (enablement, risk, latency/failure signal, session overrides).
+- [~] Context budget manager (token allocation meter, pin/summarize/exclude controls).
+- [~] System prompt/rules manager (versioning, diff, rollback, conflict checks).
+- [~] Model behavior controls (knobs/sliders + saved profiles).
 
 ### Stage 4 — Analytics + hardening + rollout (weeks 11-12)
 
@@ -108,6 +108,7 @@ Use this section as the baseline in-product help content so users can discover c
 - Design guideline: [`docs/ux/design-guidelines.md`](docs/ux/design-guidelines.md)
 - Stage 1 slice artifact: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
 - Stage 2 progress artifact: [`docs/ux/stage2-operational-workflows.md`](docs/ux/stage2-operational-workflows.md)
+- Stage 3 control-plane slice: [`docs/ux/stage3-control-plane-slice.md`](docs/ux/stage3-control-plane-slice.md)
 
 ## Immediate next actions
 

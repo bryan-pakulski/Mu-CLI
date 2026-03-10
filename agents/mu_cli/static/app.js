@@ -54,6 +54,87 @@ async function parseJsonResponse(res) {
 // >>> app/render/core.js
 // --- render functions -------------------------------------------------------
 
+
+function _readControlPlanePrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_control_plane_prefs') || '{}');
+    return {
+      systemPromptOverride: String(raw.systemPromptOverride || ''),
+      rulesChecklist: String(raw.rulesChecklist || ''),
+      knobTemperature: Number(raw.knobTemperature ?? 0.2),
+      knobTopP: Number(raw.knobTopP ?? 0.95),
+      knobToolBias: Number(raw.knobToolBias ?? 0.7),
+      knobVerbosity: Number(raw.knobVerbosity ?? 0.5),
+      contextBudgetTarget: Number(raw.contextBudgetTarget ?? 16000),
+    };
+  } catch (_) {
+    return {
+      systemPromptOverride: '', rulesChecklist: '', knobTemperature: 0.2, knobTopP: 0.95,
+      knobToolBias: 0.7, knobVerbosity: 0.5, contextBudgetTarget: 16000,
+    };
+  }
+}
+
+function _writeControlPlanePrefs(next) {
+  localStorage.setItem('mu_control_plane_prefs', JSON.stringify(next));
+}
+
+function syncControlPlaneUIFromPrefs() {
+  const prefs = _readControlPlanePrefs();
+  const setVal = (id, value) => { const el = document.getElementById(id); if (el) el.value = String(value); };
+  setVal('systemPromptOverride', prefs.systemPromptOverride);
+  setVal('rulesChecklist', prefs.rulesChecklist);
+  setVal('knobTemperature', prefs.knobTemperature);
+  setVal('knobTopP', prefs.knobTopP);
+  setVal('knobToolBias', prefs.knobToolBias);
+  setVal('knobVerbosity', prefs.knobVerbosity);
+  const setTxt = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+  setTxt('knobTemperatureVal', Number(prefs.knobTemperature).toFixed(2));
+  setTxt('knobTopPVal', Number(prefs.knobTopP).toFixed(2));
+  setTxt('knobToolBiasVal', Number(prefs.knobToolBias).toFixed(2));
+  setTxt('knobVerbosityVal', Number(prefs.knobVerbosity).toFixed(2));
+  setTxt('contextBudgetTargetLabel', String(Math.trunc(prefs.contextBudgetTarget || 16000)));
+}
+
+function persistControlPlaneFromUI() {
+  const getVal = (id, fallback='') => {
+    const el = document.getElementById(id);
+    return el ? el.value : fallback;
+  };
+  const prefs = {
+    systemPromptOverride: String(getVal('systemPromptOverride', '')),
+    rulesChecklist: String(getVal('rulesChecklist', '')),
+    knobTemperature: Number(getVal('knobTemperature', '0.2')),
+    knobTopP: Number(getVal('knobTopP', '0.95')),
+    knobToolBias: Number(getVal('knobToolBias', '0.7')),
+    knobVerbosity: Number(getVal('knobVerbosity', '0.5')),
+    contextBudgetTarget: Number((_readControlPlanePrefs().contextBudgetTarget) || 16000),
+  };
+  _writeControlPlanePrefs(prefs);
+  syncControlPlaneUIFromPrefs();
+  renderContextBudgetPanel();
+}
+
+function renderContextBudgetPanel() {
+  const host = document.getElementById('contextBudgetRows');
+  const fill = document.getElementById('contextBudgetFill');
+  if (!host || !fill) return;
+  const prefs = _readControlPlanePrefs();
+  const target = Math.max(1, Number(prefs.contextBudgetTarget || 16000));
+  const segments = [
+    ['messages', JSON.stringify(state.messages || []).length],
+    ['traces', JSON.stringify(state.traces || []).length],
+    ['uploads', JSON.stringify(state.uploads || []).length],
+    ['tool specs', JSON.stringify(state.tools || []).length],
+    ['rules/system', String(prefs.systemPromptOverride || '').length + String(prefs.rulesChecklist || '').length],
+  ];
+  const total = segments.reduce((acc, [, n]) => acc + Number(n || 0), 0);
+  const pct = Math.min(100, (total / target) * 100);
+  fill.style.width = `${pct.toFixed(1)}%`;
+  host.innerHTML = segments.map(([label, value]) => `<div class="context-budget-row"><span>${escapeHtml(label)}</span><span>${Number(value).toLocaleString()}</span></div>`).join('') +
+    `<div class="context-budget-row"><strong>Total</strong><strong>${total.toLocaleString()} / ${target.toLocaleString()} (${pct.toFixed(1)}%)</strong></div>`;
+}
+
 function _readSessionPrefs() {
   try {
     const raw = JSON.parse(localStorage.getItem('mu_session_prefs') || '{}');
@@ -1901,6 +1982,8 @@ async function refreshState() {
   updateChatBusyState();
   renderMetrics();
   renderExecutionTimeline();
+  syncControlPlaneUIFromPrefs();
+  renderContextBudgetPanel();
 
   if (state.pendingApproval) {
     document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
@@ -2194,6 +2277,14 @@ bindClick('newSession', () => openNewSessionModal());
 bindClick('savePricing', () => savePricing());
 bindClick('uploadFiles', () => uploadContextFiles());
 bindClick('clearUploads', () => clearUploadedStore());
+
+
+for (const id of ['systemPromptOverride', 'rulesChecklist', 'knobTemperature', 'knobTopP', 'knobToolBias', 'knobVerbosity']) {
+  const el = byId(id);
+  if (!el) continue;
+  const evt = (id === 'systemPromptOverride' || id === 'rulesChecklist') ? 'blur' : 'input';
+  el.addEventListener(evt, () => persistControlPlaneFromUI());
+}
 
 bindClick('toggleSidebar', () => { byId('app').classList.toggle('sidebar-hidden'); closeAllSessionMenus(); });
 bindClick('openAdvanced', () => showModal('advancedModal', true));

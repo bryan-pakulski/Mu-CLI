@@ -31,6 +31,14 @@ bindClick('savePricing', () => savePricing());
 bindClick('uploadFiles', () => uploadContextFiles());
 bindClick('clearUploads', () => clearUploadedStore());
 
+
+for (const id of ['systemPromptOverride', 'rulesChecklist', 'knobTemperature', 'knobTopP', 'knobToolBias', 'knobVerbosity']) {
+  const el = byId(id);
+  if (!el) continue;
+  const evt = (id === 'systemPromptOverride' || id === 'rulesChecklist') ? 'blur' : 'input';
+  el.addEventListener(evt, () => persistControlPlaneFromUI());
+}
+
 bindClick('toggleSidebar', () => { byId('app').classList.toggle('sidebar-hidden'); closeAllSessionMenus(); });
 bindClick('openAdvanced', () => showModal('advancedModal', true));
 bindClick('openHelp', () => showModal('helpModal', true));

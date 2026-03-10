@@ -40,3 +40,16 @@
 - Added git diff stats summary (`files/+/-`) for clearer change scope in review flows.
 - Added timeline filter controls (`all/model/tool/status`) to improve live run readability for long traces.
 - Preserved minimalist container styling while expanding operational capabilities.
+
+
+## Completion status
+
+- [x] Multi-session management v2
+- [x] Git management v2
+- [x] Diff and code management v2
+- [x] Real-time execution timeline
+
+
+## Bugfixes
+
+- Fixed sidebar minimized mode so hidden sidebar no longer leaves an interaction-blocking overlay footprint.

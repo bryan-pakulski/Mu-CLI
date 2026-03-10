@@ -2195,7 +2195,7 @@ bindClick('savePricing', () => savePricing());
 bindClick('uploadFiles', () => uploadContextFiles());
 bindClick('clearUploads', () => clearUploadedStore());
 
-bindClick('toggleSidebar', () => byId('app').classList.toggle('sidebar-hidden'));
+bindClick('toggleSidebar', () => { byId('app').classList.toggle('sidebar-hidden'); closeAllSessionMenus(); });
 bindClick('openAdvanced', () => showModal('advancedModal', true));
 bindClick('openHelp', () => showModal('helpModal', true));
 bindClick('closeAdvanced', () => showModal('advancedModal', false));
@@ -2285,6 +2285,7 @@ function setSurface(surface) {
     el.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   if (next === 'control') app.classList.remove('sidebar-hidden');
+  closeAllSessionMenus();
   if (next === 'review') {
     const layout = document.querySelector('.workspace-layout');
     if (layout) layout.classList.remove('meta-hidden');
@@ -2393,6 +2394,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 'b') {
     e.preventDefault();
     byId('app').classList.toggle('sidebar-hidden');
+    closeAllSessionMenus();
   }
   if (e.key === '\\') {
     e.preventDefault();

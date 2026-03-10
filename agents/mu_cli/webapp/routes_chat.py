@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-import json
-import queue
-import threading
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import Response, jsonify, request, stream_with_context
-
-from mu_cli.core.types import Message, ToolCall
+from flask import jsonify, request
 from mu_cli.webapp.jobs import JobDeps, decide_plan, get_job, list_jobs, request_kill, start_job
 from mu_cli.webapp.contracts import (
     ContractValidationError,
@@ -16,6 +11,7 @@ from mu_cli.webapp.contracts import (
     parse_job_kill_request,
     parse_job_plan_request,
 )
+from mu_cli.webapp.services_chat import ChatStreamDeps, ChatStreamingService, ChatTurnDeps, execute_chat_turn
 
 
 @dataclass(slots=True)
@@ -40,13 +36,18 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
 
-        reply = deps.run_turn_with_uploaded_context(runtime, req.text)
-        report = deps.turn_report(runtime, req.text, reply.content)
-        deps.record_turn(runtime, report)
-        if runtime.condense_enabled:
-            deps.condense_session_context(runtime, window_size=runtime.condense_window)
-        deps.persist(runtime)
-        return jsonify({"reply": asdict(reply), "report": report, "traces": runtime.traces[-50:]})
+        result = execute_chat_turn(
+            runtime,
+            req.text,
+            ChatTurnDeps(
+                run_turn_with_uploaded_context=deps.run_turn_with_uploaded_context,
+                turn_report=deps.turn_report,
+                record_turn=deps.record_turn,
+                condense_session_context=deps.condense_session_context,
+                persist=deps.persist,
+            ),
+        )
+        return jsonify({"reply": result.reply, "report": result.report, "traces": result.traces})
 
     @app.post("/api/chat/background")
     def chat_background():
@@ -94,58 +95,14 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
         session_name = req.session or runtime.session_name
-
-        events: queue.Queue[dict] = queue.Queue()
-        done = threading.Event()
-
-        original_model_response = runtime.agent.on_model_response
-        original_tool_run = runtime.agent.on_tool_run
-
-        def stream_model_response(message: Message, calls: list[ToolCall]) -> None:
-            if original_model_response is not None:
-                original_model_response(message, calls)
-            for call in calls:
-                events.put({"type": "trace", "line": f"tool-request: id={call.call_id} name={call.name} args={call.args}"})
-            if message.content:
-                for chunk in deps.iter_chunks(message.content):
-                    events.put({"type": "assistant_chunk", "chunk": chunk})
-
-        def stream_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
-            if original_tool_run is not None:
-                original_tool_run(name, args, ok, output)
-            events.put({"type": "trace", "line": f"tool-run: name={name} ok={ok} args={args} output={output[:200]}"})
-
-        def run_turn() -> None:
-            runtime.agent.on_model_response = stream_model_response
-            runtime.agent.on_tool_run = stream_tool_run
-            try:
-                if runtime.session_name != session_name:
-                    deps.load_session(runtime, session_name)
-                reply = deps.run_turn_with_uploaded_context(runtime, req.text)
-                report = deps.turn_report(runtime, req.text, reply.content)
-                deps.record_turn(runtime, report)
-                if runtime.condense_enabled:
-                    deps.condense_session_context(runtime, window_size=runtime.condense_window)
-                deps.persist(runtime)
-                events.put({"type": "report", "report": report})
-                events.put({"type": "done", "reply": asdict(reply), "traces": runtime.traces[-50:]})
-            except Exception as exc:  # pragma: no cover
-                events.put({"type": "error", "error": str(exc)})
-            finally:
-                runtime.agent.on_model_response = original_model_response
-                runtime.agent.on_tool_run = original_tool_run
-                done.set()
-
-        thread = threading.Thread(target=run_turn, daemon=True)
-        thread.start()
-
-        @stream_with_context
-        def generate():
-            while not done.is_set() or not events.empty():
-                try:
-                    item = events.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                yield json.dumps(item) + "\n"
-
-        return Response(generate(), mimetype="application/x-ndjson")
+        service = ChatStreamingService(
+            turn_deps=ChatTurnDeps(
+                run_turn_with_uploaded_context=deps.run_turn_with_uploaded_context,
+                turn_report=deps.turn_report,
+                record_turn=deps.record_turn,
+                condense_session_context=deps.condense_session_context,
+                persist=deps.persist,
+            ),
+            stream_deps=ChatStreamDeps(iter_chunks=deps.iter_chunks, load_session=deps.load_session),
+        )
+        return service.stream_chat(runtime, req.text, session_name)

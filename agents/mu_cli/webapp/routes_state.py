@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from flask import jsonify, render_template, request
-from werkzeug.utils import secure_filename
 
 from mu_cli.core.types import Role
 from mu_cli.webapp.contracts import (
@@ -17,6 +15,7 @@ from mu_cli.webapp.contracts import (
     parse_upload_delete_name,
     parse_uploads_request,
 )
+from mu_cli.webapp.services_uploads import UploadService, UploadServiceDeps
 
 
 @dataclass(slots=True)
@@ -32,6 +31,8 @@ class StateRouteDeps:
 
 
 def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
+    upload_service = UploadService(UploadServiceDeps(persist=deps.persist, remove_uploaded_entry=deps.remove_uploaded_entry))
+
     @app.get("/")
     def index():
         return render_template("index.html")
@@ -262,50 +263,12 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
 
-        session_dir = runtime.uploads_dir / runtime.session_name
-        session_dir.mkdir(parents=True, exist_ok=True)
-        uploaded: list[dict] = []
-
-        for file in files:
-            filename = secure_filename(file.filename or "upload.bin")
-            if not filename:
-                continue
-            target = session_dir / filename
-            file.save(target)
-
-            raw = target.read_bytes()
-            kind = "binary"
-            try:
-                raw.decode("utf-8")
-                kind = "text"
-            except UnicodeDecodeError:
-                if target.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-                    kind = "image"
-
-            item = {
-                "name": filename,
-                "path": str(target),
-                "size": len(raw),
-                "kind": kind,
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            }
-            runtime.uploads.append(item)
-            uploaded.append(item)
-
-        deps.persist(runtime)
+        uploaded = upload_service.upload_files(runtime, files)
         return jsonify({"ok": True, "uploads": uploaded})
 
     @app.delete("/api/uploads")
     def clear_uploads():
-        session_dir = runtime.uploads_dir / runtime.session_name
-        removed = 0
-        if session_dir.exists():
-            for item in session_dir.iterdir():
-                if item.is_file():
-                    item.unlink()
-                    removed += 1
-        runtime.uploads = []
-        deps.persist(runtime)
+        removed = upload_service.clear_uploads(runtime)
         return jsonify({"ok": True, "removed": removed})
 
     @app.delete("/api/uploads/<name>")
@@ -314,15 +277,10 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
             safe_name = parse_upload_delete_name(name)
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
-        session_dir = runtime.uploads_dir / runtime.session_name
-        target = session_dir / safe_name
-        if not target.exists() or not target.is_file():
+        ok, removed = upload_service.delete_upload(runtime, safe_name)
+        if not ok:
             return jsonify({"error": "uploaded file not found"}), 404
-
-        target.unlink()
-        deps.remove_uploaded_entry(runtime, safe_name)
-        deps.persist(runtime)
-        return jsonify({"ok": True, "removed": safe_name})
+        return jsonify({"ok": True, "removed": removed})
 
     @app.get("/api/research/export")
     def export_research():

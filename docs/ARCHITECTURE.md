@@ -31,6 +31,7 @@ This creates high cognitive load for onboarding and raises regression risk when 
 - ✅ Stage 4 complete: added explicit typed API contracts for high-churn POST routes (`/api/session`, `/api/settings`, `/api/chat/*`) with predictable 400 error responses and regression tests.
 - ✅ Contract Expansion Stage 3 complete: extended contract validation to additional mutable routes (`/api/jobs/<id>/plan`, `/api/jobs/<id>/kill`, `/api/pricing`, and uploads payload checks).
 - ✅ Frontend Stage 2 complete: split frontend source into real modules under `static/app/` (`network.js`, `store.js`, `render/core.js`, `main.js`, `events.js`) with a tiny bundle build step.
+- ✅ Service Layer Stage 4 complete: extracted thin application services for chat turn execution lifecycle (including condense + persist), stream orchestration, and uploads lifecycle so routes primarily validate/delegate/respond.
 
 
 ### 1) Split web backend by responsibility
@@ -85,5 +86,6 @@ Status: ✅ Stage 1 complete — ADRs added:
 4. Add request schema validation helpers for top 3 mutable endpoints. *(done)*
 5. Add initial ADR set for key architecture decisions. *(done)*
 6. Expand contracts to remaining mutable routes (`jobs/*`, `pricing`, uploads assumptions). *(done)*
+7. Extract application services for chat/stream/upload flows and keep route modules as validation + delegation layers. *(done)*
 
 This keeps each PR focused and minimizes behavior change risk.

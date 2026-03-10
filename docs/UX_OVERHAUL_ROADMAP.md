@@ -28,10 +28,10 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 
 ### Stage 1 — Shell + design system foundations (weeks 2-3)
 
-- [ ] Add design tokens (spacing, typography, color roles, radii, shadows, interaction states).
-- [ ] Implement core UI primitives (cards, tabs, split panes, badges, empty/error/loading states).
-- [~] Introduce global layout shell and panel-resize/collapse patterns. *(slice 01 in progress: surface tabs + IA zone labels + shortcuts)*
-- [ ] Add keyboard shortcut infrastructure and focus conventions.
+- [x] Add design tokens (spacing, typography, color roles, radii, shadows, interaction states).
+- [x] Implement core UI primitives (cards, tabs, split panes, badges, empty/error/loading states).
+- [x] Introduce global layout shell and panel-resize/collapse patterns.
+- [x] Add keyboard shortcut infrastructure and focus conventions.
 
 ### Stage 2 — Core operational workflows (weeks 4-7)
 
@@ -54,6 +54,34 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 - [ ] Add feature flags and phased rollout path.
 - [ ] Add regression test expansions for new flows.
 - [ ] Run UX sign-off with performance + reliability targets.
+
+## HELP (user quickstart)
+
+Use this section as the baseline in-product help content so users can discover core behavior quickly.
+
+### Shortcuts
+
+- `Ctrl/Cmd + Enter`: send prompt
+- `Ctrl/Cmd + B`: toggle left sidebar
+- `Ctrl/Cmd + \`: toggle metadata panel
+- `Ctrl/Cmd + ,`: open settings
+
+### Tooltips and guidance
+
+- Keep concise tooltip copy for controls with non-obvious side effects (agentic planning, research mode, condense).
+- Tooltips should answer: **what this does**, **when to use it**, and **risk/tradeoff** in one sentence.
+
+### Effective workflows
+
+1. **Operate flow**: choose session + workspace, then run prompts from the main composer.
+2. **Control flow**: adjust settings/skills/tools before long autonomous runs.
+3. **Review flow**: inspect metadata/diffs and validate outputs before commit/PR actions.
+
+### Troubleshooting
+
+- If output looks stale, refresh session state and metadata panel before retrying.
+- If context is noisy, condense and re-run with a tighter workspace/path scope.
+- If tool calls fail repeatedly, switch to Control surface and review approval/runtime settings.
 
 ## Live tracker (update each PR)
 

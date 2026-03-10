@@ -1969,6 +1969,7 @@ bindClick('clearUploads', () => clearUploadedStore());
 
 bindClick('toggleSidebar', () => byId('app').classList.toggle('sidebar-hidden'));
 bindClick('openAdvanced', () => showModal('advancedModal', true));
+bindClick('openHelp', () => showModal('helpModal', true));
 bindClick('closeAdvanced', () => showModal('advancedModal', false));
 bindClick('openMetrics', () => { renderMetrics(); showModal('metricsModal', true); });
 bindClick('closeMetrics', () => showModal('metricsModal', false));
@@ -1984,6 +1985,7 @@ bindClick('openGitModal', async () => {
 
 for (const [buttonId, modalId] of [
   ['closeGitModal', 'gitModal'],
+  ['closeHelpModal', 'helpModal'],
   ['closeSkillViewModal', 'skillViewModal'],
   ['closeRunDetailsModal', 'runDetailsModal'],
   ['closeWorkspaceModal', 'workspaceModal'],
@@ -2003,6 +2005,44 @@ bindClick('toggleMetaSidebar', () => {
   btn.title = hidden ? 'Show metadata panel' : 'Hide metadata panel';
   btn.setAttribute('aria-label', btn.title);
 });
+
+
+function initShellResize() {
+  const app = byId('app');
+  const handle = byId('sidebarResizeHandle');
+  const sidebar = byId('sidebar');
+  if (!app || !handle || !sidebar) return;
+
+  const stored = Number(localStorage.getItem('mu_sidebar_width') || 0);
+  if (stored >= 260 && stored <= 560) app.style.setProperty('--sidebar-width', `${stored}px`);
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    const next = Math.min(560, Math.max(260, startWidth + (e.clientX - startX)));
+    app.style.setProperty('--sidebar-width', `${next}px`);
+    localStorage.setItem('mu_sidebar_width', String(next));
+  };
+  const onUp = () => {
+    dragging = false;
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  };
+
+  handle.addEventListener('mousedown', (e) => {
+    if (app.classList.contains('sidebar-hidden')) return;
+    dragging = true;
+    startX = e.clientX;
+    startWidth = sidebar.getBoundingClientRect().width;
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+}
 
 function setSurface(surface) {
   const app = byId('app');
@@ -2129,6 +2169,7 @@ if (metaToggleBtn) {
   metaToggleBtn.setAttribute('aria-label', 'Hide metadata panel');
 }
 hydrateThemePreference();
+initShellResize();
 setSurface(localStorage.getItem('mu_ui_surface') || 'operate');
 refreshState().catch((e) => alert(e.message));
 if (runtimeTick) clearInterval(runtimeTick);

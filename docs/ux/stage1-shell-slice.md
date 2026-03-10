@@ -30,3 +30,20 @@ This slice starts Stage 1 with low-risk, UI-only changes that improve informatio
 - Introduce tokenized component primitives (cards/tabs/states) across remaining controls.
 - Add panel resize persistence and per-surface layout memory.
 - Add dedicated review drawer patterns for diff/code workflows.
+
+
+## HELP content baseline
+
+The in-product HELP surface should include:
+
+- Keyboard shortcuts cheat sheet.
+- Tooltip guidance for higher-risk toggles and controls.
+- Recommended workflow path (`Operate` -> `Control` -> `Review`).
+- Basic troubleshooting for stale state, noisy context, and tool failures.
+
+
+## Completion status
+
+- [x] Scope delivered
+- [x] Behaviors delivered
+- [x] Documented for handoff

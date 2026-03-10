@@ -14,6 +14,7 @@ from mu_cli.cli import (
 from mu_cli.policy import ApprovalPolicy
 from mu_cli.pricing import PricingCatalog
 from mu_cli.session import SessionStore
+from mu_cli.skills import SkillStore
 from mu_cli.tools.filesystem import ReadFileTool
 from mu_cli.workspace import WorkspaceStore
 
@@ -45,6 +46,7 @@ class CliTests(unittest.TestCase):
             agentic_planning_enabled=True,
             system_prompt="sys",
             debug_enabled=False,
+            skill_store=SkillStore(root / "skills"),
         )
 
     def tearDown(self) -> None:
@@ -74,6 +76,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("attach", completer.matches("a", "/workspace a"))
         self.assertIn("status", completer.matches("s", "/agentic s"))
         self.assertIn("list", completer.matches("l", "/session l"))
+        self.assertIn("enable", completer.matches("e", "/skills e"))
 
     def test_planning_prompt_injected_once(self) -> None:
         dummy = _DummyAgent()
@@ -96,6 +99,21 @@ class CliTests(unittest.TestCase):
         handled, out, _ = _handle_local_command("/session list", self.context, _DummyAgent())
         self.assertTrue(handled)
         self.assertIn("Sessions:", out)
+
+    def test_skills_enable_disable_commands(self) -> None:
+        (self.context.skill_store.root / "code-review.md").write_text("Always check tests.", encoding="utf-8")
+        dummy = _DummyAgent()
+
+        handled, out, _ = _handle_local_command("/skills enable code-review", self.context, dummy)
+        self.assertTrue(handled)
+        self.assertIn("Enabled skill", out)
+        self.assertEqual(["code-review"], self.context.enabled_skills)
+        self.assertTrue(any(msg.metadata.get("kind") == "skill:code-review" for msg in dummy.state.messages))
+
+        handled, out, _ = _handle_local_command("/skills disable code-review", self.context, dummy)
+        self.assertTrue(handled)
+        self.assertIn("Disabled skill", out)
+        self.assertEqual([], self.context.enabled_skills)
 
 
 if __name__ == "__main__":

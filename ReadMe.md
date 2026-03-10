@@ -17,9 +17,11 @@ Provider-agnostic CLI scaffold intended for a **human-in-the-loop development wo
   - `git` (mutating; approval-gated)
   - `list_workspace_files`
   - `get_workspace_file_context`
+  - `run_make_agent_job` (runs jobs from read-only `Makefile.agent`)
 - workspace indexing + tool-run memory
 - per-turn token/cost report with JSON-configurable provider pricing
 - session persistence (resume conversations and workspace state)
+- session-scoped model skills loaded from Markdown files
 
 ### Git workflow support
 
@@ -75,6 +77,13 @@ Notes:
 - Includes a top-panel `GIT` button (visible for git workspaces) that opens a modal for repository/branch actions and current workspace diff view.
 - During background agent sessions, a dedicated “Plan output” overlay shows plan, checkpoints, and execution stages without reloading chat messages.
 - Includes built-in session management actions (new/load/delete/list/status).
+- Includes settings controls to enable/disable available skills per session.
+- Skills list in the left sidebar includes a `View` action to inspect skill markdown content.
+- Settings include provider-specific API key overrides (`OpenAI`, `Google/Gemini`) instead of a single global key.
+- Session row menu includes a clear action to wipe context and restart that session.
+- Left runtime panels are collapsible (runtime, sessions, skills, usage).
+- Right metadata panel is collapsible/resizable and groups compact debug/tool/research metadata.
+- Session usage panel includes `Metrics` and `Detailed stats` actions for per-session analytics.
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
 
 ## Workspace context and memory
@@ -95,6 +104,17 @@ Notes:
 - `/session new <name>`: start fresh named session
 - `/session load <name>`: load existing session
 - `/session delete <name>`: delete a session (cannot delete active session)
+
+## Skills
+
+- Skills are Markdown files loaded from `./skills` by default.
+- Configure a different folder with `--skills-dir <path>`.
+- Skills are enabled per session and persisted in session state.
+- Commands:
+  - `/skills list`
+  - `/skills status`
+  - `/skills enable <name>`
+  - `/skills disable <name>`
 
 ## Agentic planning prompt
 
@@ -157,4 +177,5 @@ Useful commands:
 - `/agentic status`
 - `/debug status`, `/debug on`, `/debug off`
 - `/session status`, `/session list`, `/session new demo`, `/session load demo`
+- `/skills list`, `/skills enable code-review`, `/skills status`
 - `/quit`

@@ -48,6 +48,27 @@ class WebTests(unittest.TestCase):
         assert state is not None
         self.assertGreaterEqual(state['session_usage']['total_tokens'], payload['report']['total_tokens'])
 
+    def test_session_clear_action_resets_context(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/chat', json={'text': 'hello'})
+        self.assertEqual(200, res.status_code)
+
+        cleared = client.post('/api/session', json={'action': 'clear'})
+        self.assertEqual(200, cleared.status_code)
+        body = cleared.get_json()
+        assert body is not None
+        self.assertTrue(body['ok'])
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertEqual([], state['messages'])
+        self.assertEqual(0.0, float(state['session_usage']['total_tokens']))
+
     def test_chat_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 
@@ -78,6 +99,27 @@ class WebTests(unittest.TestCase):
         assert payload is not None
         self.assertIn('reply', payload)
         self.assertIn('rejected by approval policy', payload['reply']['content'])
+
+
+    def test_pricing_endpoint_replaces_full_document(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        payload = {
+            'pricing': {
+                'openai': {
+                    'gpt-test': {'input_per_1m': 1.0, 'output_per_1m': 2.0},
+                },
+            },
+        }
+        res = client.post('/api/pricing', json=payload)
+        self.assertEqual(200, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertEqual(payload['pricing'], body['pricing'])
 
     def test_pricing_endpoint_updates_model_row(self) -> None:
         from mu_cli.web import create_app
@@ -180,6 +222,78 @@ class WebTests(unittest.TestCase):
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
 
+
+    def test_state_includes_makefile_agent_tool(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        tool_names = {item['name'] for item in state.get('tools', [])}
+        self.assertIn('run_make_agent_job', tool_names)
+
+    def test_settings_provider_api_keys_override(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={
+            'openai_api_key': 'sk-test-1',
+            'google_api_key': 'g-test-1',
+        })
+        self.assertEqual(200, res.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertEqual('sk-test-1', state['openai_api_key'])
+        self.assertEqual('g-test-1', state['google_api_key'])
+
+    def test_settings_enable_skills(self) -> None:
+        from mu_cli.web import create_app
+
+        skills_dir = Path("skills")
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        skill_path = skills_dir / "web-ui-skill.md"
+        skill_path.write_text("Always propose polished UI details.", encoding="utf-8")
+        self.addCleanup(lambda: skill_path.unlink(missing_ok=True))
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={'enabled_skills': ['web-ui-skill']})
+        self.assertEqual(200, res.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertIn('web-ui-skill', state['skills'])
+        self.assertIn('web-ui-skill', state['enabled_skills'])
+
+    def test_skill_content_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        skills_dir = Path("skills")
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        skill_path = skills_dir / "viewer-skill.md"
+        skill_path.write_text("# Viewer\n\ncontent", encoding="utf-8")
+        self.addCleanup(lambda: skill_path.unlink(missing_ok=True))
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.get('/api/skills/viewer-skill')
+        self.assertEqual(200, res.status_code)
+        payload = res.get_json()
+        assert payload is not None
+        self.assertEqual('viewer-skill', payload['name'])
+        self.assertIn('Viewer', payload['content'])
+
     def test_git_repo_and_branch_endpoints(self) -> None:
         from mu_cli.web import create_app
 
@@ -225,6 +339,25 @@ class WebTests(unittest.TestCase):
             assert diff_payload is not None
             self.assertIn('status', diff_payload)
             self.assertIn('diff', diff_payload)
+
+    def test_session_turns_are_scoped_to_active_session(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/session', json={'action': 'new', 'name': 's1'})
+        client.post('/api/chat', json={'text': 'one'})
+        state1 = client.get('/api/state').get_json()
+        assert state1 is not None
+        self.assertTrue(all((turn.get('session') == 's1') for turn in state1['session_turns']))
+
+        client.post('/api/session', json={'action': 'new', 'name': 's2'})
+        client.post('/api/chat', json={'text': 'two'})
+        state2 = client.get('/api/state').get_json()
+        assert state2 is not None
+        self.assertTrue(all((turn.get('session') == 's2') for turn in state2['session_turns']))
 
     def test_research_export_endpoint(self) -> None:
         from mu_cli.web import create_app
@@ -298,6 +431,36 @@ class WebTests(unittest.TestCase):
         assert job is not None
         self.assertEqual(revised, job['plan'])
         self.assertTrue(any(evt == 'plan: revised_by_user' for evt in job.get('events', [])))
+
+    def test_background_job_can_be_killed(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'max_runtime_seconds': 60})
+        started = client.post('/api/chat/background', json={'text': 'long running task for kill switch'})
+        self.assertEqual(200, started.status_code)
+        job_id = started.get_json()['job_id']
+
+        kill = client.post(f'/api/jobs/{job_id}/kill', json={'reason': 'test kill'})
+        self.assertEqual(200, kill.status_code)
+
+        deadline = time.time() + 5
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] == 'killed':
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertEqual('killed', job['status'])
+        self.assertTrue(job.get('cancel_requested'))
+        self.assertTrue(any('killed' in event for event in job.get('events', [])))
 
     def test_background_job_tracks_terminal_event(self) -> None:
         from mu_cli.web import create_app

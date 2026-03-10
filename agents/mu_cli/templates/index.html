@@ -120,8 +120,68 @@
       color: var(--muted);
       font-weight: 600;
     }
+    .collapsible-panel > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 8px;
+    }
+    .collapsible-panel > summary::-webkit-details-marker { display: none; }
+    .collapsible-panel > summary::after {
+      content: '▾';
+      color: var(--muted);
+      font-size: 11px;
+      transition: transform .18s ease;
+    }
+    .collapsible-panel:not([open]) > summary::after { transform: rotate(-90deg); }
+    .collapsible-panel > summary h3 { margin: 0; }
+    .panel-body { min-height: 0; }
 
     .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: 8px 12px; }
+    .workspace-layout {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      gap: 10px;
+      align-items: stretch;
+    }
+    .meta-rail {
+      min-height: 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr) auto; }
+    .workspace-layout.meta-hidden .meta-sidebar { display: none; }
+    .meta-toggle-icon {
+      align-self: flex-start;
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .meta-help {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      font-size: 10px;
+      margin-left: 4px;
+      color: var(--muted);
+      cursor: help;
+    }
     .topbar {
       display: flex;
       align-items: center;
@@ -137,6 +197,8 @@
 
     .top-git-launch { display: none; }
     .top-git-launch.show { display: inline-flex; }
+    .git-panel { display: none; }
+    .git-panel.show { display: block; }
     .git-diff-box {
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -174,43 +236,6 @@
       position: relative;
     }
 
-    .plan-overlay {
-      position: absolute;
-      inset: 0;
-      z-index: 30;
-      background: color-mix(in srgb, var(--bg) 78%, transparent);
-      border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-      border-radius: 12px;
-      display: none;
-      overflow: hidden;
-      backdrop-filter: blur(2px);
-    }
-    .plan-overlay.show { display: grid; grid-template-rows: auto minmax(0,1fr); }
-    .plan-overlay-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 8px 10px;
-      border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-      background: color-mix(in srgb, var(--surface) 85%, transparent);
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .plan-overlay-body {
-      overflow: auto;
-      padding: 10px;
-      display: grid;
-      gap: 8px;
-      font-size: 12px;
-    }
-    .plan-stage {
-      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-      border-radius: 8px;
-      padding: 8px;
-      background: color-mix(in srgb, var(--surface) 90%, transparent);
-    }
-
     .messages {
       min-height: 0;
       overflow: auto;
@@ -239,6 +264,119 @@
     .trace-wrap[open] > summary { border-bottom-color: var(--border); }
     .trace-wrap > summary::-webkit-details-marker { display: none; }
     .trace { max-height: 120px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
+
+     .meta-sidebar {
+      width: 360px;
+      min-width: 260px;
+      max-width: 60vw;
+      resize: horizontal;
+      min-height: 0;
+      overflow: hidden;
+      border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      padding-left: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .meta-sidebar h4 {
+      margin: 0;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 4px 2px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 6px;
+    }
+    .meta-feed {
+      min-height: 0;
+      overflow: auto;
+      flex: 1;
+      display: grid;
+      gap: 8px;
+      padding-right: 2px;
+    }
+    .meta-cards { display: grid; gap: 8px; }
+    .meta-card {
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+      padding: 8px;
+      font-size: 12px;
+    }
+    .meta-card .meta-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .meta-lines { display: grid; gap: 5px; }
+    .meta-line {
+      border-left: 2px solid color-mix(in srgb, var(--border) 80%, transparent);
+      padding-left: 7px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .meta-item { border-left-width: 3px; padding-left: 8px; }
+    .meta-tag {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 10px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+    }
+    .meta-item.tool-call { border-left-color: #8b5cf6; }
+    .meta-item.tool-call .meta-tag { color: #a78bfa; border-color: color-mix(in srgb, #8b5cf6 55%, var(--border)); }
+    .meta-item.tool-result { border-left-color: #0ea5e9; }
+    .meta-item.tool-result .meta-tag { color: #38bdf8; border-color: color-mix(in srgb, #0ea5e9 55%, var(--border)); }
+    .meta-item.citation { border-left-color: #22c55e; }
+    .meta-item.citation .meta-tag { color: #22c55e; border-color: color-mix(in srgb, #22c55e 55%, var(--border)); }
+    .meta-item.research { border-left-color: #f59e0b; }
+    .meta-item.research .meta-tag { color: #f59e0b; border-color: color-mix(in srgb, #f59e0b 55%, var(--border)); }
+    .meta-item.workspace { border-left-color: #06b6d4; }
+    .meta-item.workspace .meta-tag { color: #06b6d4; border-color: color-mix(in srgb, #06b6d4 55%, var(--border)); }
+    .meta-item.automation { border-left-color: #ec4899; }
+    .meta-item.automation .meta-tag { color: #ec4899; border-color: color-mix(in srgb, #ec4899 55%, var(--border)); }
+    .meta-content { white-space: normal; }
+    .meta-content pre {
+      margin: 0;
+      background: color-mix(in srgb, var(--surface) 75%, transparent);
+      border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+      border-radius: 8px;
+      padding: 8px;
+      max-height: 180px;
+      overflow: auto;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .meta-content code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .meta-link {
+      color: var(--primary);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      word-break: break-all;
+    }
+    .meta-empty {
+      color: var(--muted);
+      font-size: 12px;
+      border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+    }
 
     .msg {
       margin: 0 auto;
@@ -497,6 +635,14 @@
       font-weight: 500;
     }
     .btn-soft:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--border) 85%, var(--muted)); }
+    .btn-kill {
+      background: #dc2626;
+      border-color: #dc2626;
+      color: #fff;
+      font-weight: 700;
+    }
+    .btn-kill:hover { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+    .btn-kill:disabled { opacity: 0.7; }
 
     .btn-accent {
       border: 1px solid color-mix(in srgb, var(--border) 70%, var(--muted));
@@ -973,6 +1119,13 @@
     @media (max-width: 1000px) {
       .shell { grid-template-columns: minmax(0,1fr); }
       .sidebar { display: none; }
+      .workspace-layout { grid-template-columns: minmax(0,1fr); }
+      .meta-sidebar {
+        border-left: 0;
+        border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+        padding-left: 0;
+        padding-top: 8px;
+      }
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
@@ -980,8 +1133,10 @@
 <body>
   <div id="app" class="shell sidebar-hidden">
     <aside id="sidebar" class="sidebar">
-      <div class="panel">
-        <h3>Runtime</h3>
+
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Runtime</h3></summary>
+        <div class="panel-body">
         <div class="small-muted mb-2">Applied automatically</div>
 
         <label class="small-muted mb-1">Provider</label>
@@ -1006,10 +1161,20 @@
           <button id="clearUploads" class="btn btn-soft btn-sm">Clear store</button>
         </div>
         <div id="uploadList" class="upload-list small-muted"></div>
-      </div>
+        </div>
+      </details>
+      <details id="gitPanel" class="panel collapsible-panel git-panel" open>
+        <summary><h3>GIT</h3></summary>
+        <div class="panel-body">
+          <div class="small-muted mb-2">Open branch / diff controls for the selected git workspace.</div>
+          <button id="openGitModal" class="btn btn-soft btn-sm" type="button">Open Git controls</button>
+        </div>
+      </details>
 
-      <div class="panel">
-        <h3>Sessions</h3>
+
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Sessions</h3></summary>
+        <div class="panel-body">
         <div class="small-muted mb-2" id="activeSession">active: -</div>
 
         <div class="d-flex gap-2 mb-2">
@@ -1018,17 +1183,53 @@
 
         <div id="sessionList" class="session-list mb-2"></div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
-      </div>
+        </div>
+      </details>
 
-      <div class="panel">
-        <h3>Session usage</h3>
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Skills</h3></summary>
+        <div class="panel-body">
+          <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
+        </div>
+      </details>
+
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Session behavior</h3></summary>
+        <div class="panel-body">
+          <label class="small-muted mb-1">Max session runtime (seconds)</label>
+          <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
+          <label class="small-muted mb-1">Condense window (raw messages)</label>
+          <input id="condenseWindow" type="number" min="2" step="1" class="form-control mb-2" value="12" />
+
+          <div class="form-check mb-1">
+            <input class="form-check-input" id="agentic" type="checkbox" checked />
+            <label class="form-check-label small-muted" for="agentic">Agentic planning <span class="meta-help" title="Enables autonomous multi-step planning/execution loops with tool usage.">i</span></label>
+          </div>
+          <div class="form-check mb-1">
+            <input class="form-check-input" id="researchMode" type="checkbox" />
+            <label class="form-check-label small-muted" for="researchMode">Research mode <span class="meta-help" title="Adds deeper source gathering/citation behavior and research-oriented prompts.">i</span></label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" id="condenseEnabled" type="checkbox" />
+            <label class="form-check-label small-muted" for="condenseEnabled">Auto condense <span class="meta-help" title="Periodically compresses old context into summaries to reduce message window size.">i</span></label>
+          </div>
+        </div>
+      </details>
+
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Session usage</h3></summary>
+        <div class="panel-body">
         <div class="usage-grid">
           <div class="usage-chip"><div class="small-muted">Input</div><div id="usageIn">0</div></div>
           <div class="usage-chip"><div class="small-muted">Output</div><div id="usageOut">0</div></div>
           <div class="usage-chip"><div class="small-muted">Total</div><div id="usageTotal">0</div></div>
           <div class="usage-chip"><div class="small-muted">Cost USD</div><div id="usageCost">0.000000</div></div>
         </div>
-      </div>
+        <div class="d-flex gap-2 mt-2">
+          <button id="openMetrics" class="btn btn-soft btn-sm" type="button">Metrics</button>
+                  </div>
+        </div>
+      </details>
     </aside>
 
     <section class="main">
@@ -1036,49 +1237,63 @@
         <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
         <div class="title">mu_cli</div>
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
-        <button id="openMetrics" class="btn btn-soft btn-sm">Metrics</button>
-        <button id="togglePlanOutput" class="btn btn-soft btn-sm">Plan output</button>
-        <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
+                        <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
-        <button id="openGitModal" class="btn btn-soft btn-sm top-git-launch">GIT</button>
-      </div>
+              </div>
 
-      <div class="chat-layout">
-        <div id="messages" class="messages"></div>
-        <div id="planOverlay" class="plan-overlay">
-          <div class="plan-overlay-head">
-            <strong>Plan output</strong>
-            <span id="planOverlayStatus">Idle</span>
+      <div class="workspace-layout">
+        <div class="chat-layout">
+          <div id="messages" class="messages"></div>
+
+          <div id="chatComposer">
+            <div class="prompt-wrap">
+              <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
+              <button id="promptAttach" class="btn btn-soft prompt-attach" title="Attach file">+</button>
+              <input id="promptAttachInput" type="file" class="d-none" multiple />
+            </div>
+            <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
+            <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>AI is thinking…</span></div>
+            <div id="queryRuntime" class="query-runtime">Runtime: 00:00</div>
+            <details id="backgroundLive" class="bg-live">
+              <summary id="backgroundLiveSummary">Live run activity</summary>
+              <div id="backgroundLiveBody" class="bg-live-body"><div class="bg-live-empty">No activity yet.</div></div>
+            </details>
+            <div class="d-flex align-items-center gap-2 mt-2">
+              <button id="send" class="btn btn-accent btn-sm">Send</button>
+              <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
+              <button id="killJob" class="btn btn-kill btn-sm d-none">⛔ Kill running job</button>
+              <div id="report" class="small-muted"></div>
+            </div>
           </div>
-          <div id="planOverlayBody" class="plan-overlay-body"></div>
         </div>
 
-        <details class="trace-wrap" id="traceWrap">
-          <summary>Debug traces</summary>
-          <div id="traces" class="trace">debug traces will appear here</div>
-        </details>
-
-        <div id="chatComposer">
-          <div class="prompt-wrap">
-            <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
-            <button id="promptAttach" class="btn btn-soft prompt-attach" title="Attach file">+</button>
-            <input id="promptAttachInput" type="file" class="d-none" multiple />
+        <div class="meta-rail">
+          <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel"><</button>
+          <aside class="meta-sidebar">
+          <h4>Run metadata</h4>
+          <div class="meta-feed">
+            <details class="trace-wrap" id="traceWrap" open>
+              <summary>Debug traces</summary>
+              <div id="traces" class="trace">debug traces will appear here</div>
+            </details>
+            <div id="metaFeed" class="meta-cards"></div>
           </div>
-          <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
-          <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>Session is searching…</span></div>
-          <div id="queryRuntime" class="query-runtime">Runtime: 00:00</div>
-          <details id="backgroundLive" class="bg-live">
-            <summary id="backgroundLiveSummary">Live run activity</summary>
-            <div id="backgroundLiveBody" class="bg-live-body"><div class="bg-live-empty">No activity yet.</div></div>
-          </details>
-          <div class="d-flex align-items-center gap-2 mt-2">
-            <button id="send" class="btn btn-accent btn-sm">Send</button>
-            <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
-            <div id="report" class="small-muted"></div>
-          </div>
+          </aside>
         </div>
       </div>
     </section>
+  </div>
+
+  
+  <div id="runDetailsModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(980px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Run details</h5>
+        <button id="closeRunDetailsModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="runDetailsMeta" class="small-muted mb-2"></div>
+      <pre id="runDetailsBody" class="trace" style="max-height:65vh;white-space:pre-wrap;line-height:1.45"></pre>
+    </div>
   </div>
 
   <div id="planApprovalModal" class="modal-backdrop-custom">
@@ -1099,8 +1314,19 @@
 
   <div id="sessionMenuOverlay" class="session-menu">
     <button type="button" data-session-cmd="refresh">Refresh</button>
+    <button type="button" data-session-cmd="clear">Clear session context</button>
     <button type="button" data-session-cmd="condense">Condense settings</button>
     <button type="button" data-session-cmd="delete">Delete</button>
+  </div>
+
+  <div id="skillViewModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(900px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 id="skillViewTitle" class="m-0">Skill</h5>
+        <button id="closeSkillViewModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="skillViewBody" class="trace" style="max-height:70vh;white-space:normal;line-height:1.45">Loading…</div>
+    </div>
   </div>
 
   <div id="advancedModal" class="modal-backdrop-custom">
@@ -1112,29 +1338,14 @@
       <div class="settings-layout">
         <section class="settings-section">
           <h6>General</h6>
-          <label class="small-muted mb-1">API key (global)</label>
-          <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
-          <label class="small-muted mb-1">Max session runtime (seconds)</label>
-          <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
-          <label class="small-muted mb-1">Condense window (raw messages)</label>
-          <input id="condenseWindow" type="number" min="2" step="1" class="form-control mb-2" value="12" />
-
+          <label class="small-muted mb-1">OpenAI API key (override env)</label>
+          <input id="openaiApiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+          <label class="small-muted mb-1">Google/Gemini API key (override env)</label>
+          <input id="googleApiKey" type="password" class="form-control mb-2" placeholder="AIza..." />
           <div class="toggles-grid">
             <div class="form-check">
               <input class="form-check-input" id="debug" type="checkbox" />
               <label class="form-check-label small-muted" for="debug">Debug mode</label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" id="agentic" type="checkbox" checked />
-              <label class="form-check-label small-muted" for="agentic">Agentic planning</label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" id="researchMode" type="checkbox" />
-              <label class="form-check-label small-muted" for="researchMode">Research mode</label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" id="condenseEnabled" type="checkbox" />
-              <label class="form-check-label small-muted" for="condenseEnabled">Auto condense</label>
             </div>
             <div class="form-check">
               <input class="form-check-input" id="darkMode" type="checkbox" />
@@ -1145,15 +1356,8 @@
 
         <section class="settings-section">
           <h6>Pricing</h6>
-          <div class="small-muted mb-2">Input/output cost per 1M tokens</div>
-          <label class="small-muted mb-1">Provider</label>
-          <input id="pricingProvider" class="form-control mb-2" />
-          <label class="small-muted mb-1">Model</label>
-          <input id="pricingModel" class="form-control mb-2" />
-          <label class="small-muted mb-1">Input per 1M (USD)</label>
-          <input id="pricingInput" type="number" step="0.000001" class="form-control mb-2" />
-          <label class="small-muted mb-1">Output per 1M (USD)</label>
-          <input id="pricingOutput" type="number" step="0.000001" class="form-control mb-2" />
+          <div class="small-muted mb-2">Edit full pricing JSON document.</div>
+          <textarea id="pricingJson" class="form-control mb-2" style="min-height:220px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"></textarea>
           <button id="savePricing" class="btn btn-accent btn-sm">Save pricing</button>
         </section>
 
@@ -1316,7 +1520,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '' };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {} };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -1328,7 +1532,9 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
-let planOverlayUserVisible = false;
+let sendingSession = null;
+const runNoticesBySession = {};
+const runDetailsById = {};
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1350,6 +1556,7 @@ async function apiForm(path, formData) {
 
 function renderGitControls() {
   const launch = document.getElementById('openGitModal');
+  const gitPanel = document.getElementById('gitPanel');
   const repoSel = document.getElementById('gitRepo');
   const branchSel = document.getElementById('gitBranch');
   const status = document.getElementById('gitStatus');
@@ -1359,6 +1566,7 @@ function renderGitControls() {
 
   const hasGitWorkspace = !!workspace && repos.length > 0;
   if (launch) launch.classList.toggle('show', hasGitWorkspace);
+  if (gitPanel) gitPanel.classList.toggle('show', hasGitWorkspace);
 
   repoSel.innerHTML = '';
   if (!repos.length) {
@@ -1482,7 +1690,11 @@ function classifyBackgroundEvent(line) {
   return '';
 }
 
+let _lastBackgroundActivityKey = null;
 function renderBackgroundActivity(job) {
+  const key = job ? `${job.id}|${job.status}|${job.iterations}|${(job.last_step || "").slice(0,120)}` : "none";
+  if (_lastBackgroundActivityKey === key) return;
+  _lastBackgroundActivityKey = key;
   const panel = document.getElementById('backgroundLive');
   const body = document.getElementById('backgroundLiveBody');
   const summary = document.getElementById('backgroundLiveSummary');
@@ -1513,50 +1725,12 @@ function renderBackgroundActivity(job) {
   panel.open = active;
 }
 
-function renderPlanOutput(job) {
-  const overlay = document.getElementById('planOverlay');
-  const body = document.getElementById('planOverlayBody');
-  const status = document.getElementById('planOverlayStatus');
-  if (!overlay || !body || !status) return;
-
-  const active = !!job && ['running', 'awaiting_plan_approval'].includes(job.status);
-  const shouldShow = active || planOverlayUserVisible;
-  overlay.classList.toggle('show', shouldShow);
-  document.getElementById('togglePlanOutput').textContent = shouldShow ? 'Hide plan output' : 'Plan output';
-
-  if (!shouldShow) return;
-  if (!job) {
-    status.textContent = 'Idle';
-    body.innerHTML = '<div class="plan-stage">No active session output.</div>';
-    return;
-  }
-
-  status.textContent = `${job.status || 'running'} · ${job.iterations || 0} step(s)`;
-  const sections = [];
-  if (job.plan) sections.push(`<div class="plan-stage"><strong>Plan</strong><div>${escapeHtml(String(job.plan))}</div></div>`);
-  if (job.last_step) sections.push(`<div class="plan-stage"><strong>Current step</strong><div>${escapeHtml(String(job.last_step))}</div></div>`);
-  if (Array.isArray(job.checkpoints) && job.checkpoints.length) {
-    const items = job.checkpoints.slice(-8).map((cp) => `
-      <li>#${Number(cp.iteration || 0)} · ${escapeHtml(String(cp.summary || cp.status || 'update'))}</li>
-    `).join('');
-    sections.push(`<div class="plan-stage"><strong>Recent checkpoints</strong><ul style="margin:6px 0 0 18px">${items}</ul></div>`);
-  }
-  if (Array.isArray(job.events) && job.events.length) {
-    const events = job.events.slice(-12).map((e) => `<li>${escapeHtml(String(e))}</li>`).join('');
-    sections.push(`<div class="plan-stage"><strong>Execution events</strong><ul style="margin:6px 0 0 18px">${events}</ul></div>`);
-  }
-  body.innerHTML = sections.join('') || '<div class="plan-stage">Waiting for execution updates…</div>';
-}
-
 function beginBackgroundPolling() {
   if (backgroundJobPoll) return;
   backgroundJobPoll = setInterval(async () => {
     try {
       const job = activeSearchingJob();
-      if (!job) {
-        renderBackgroundActivity(null);
-        return;
-      }
+      if (!job) return;
       const latest = await api(`/api/jobs/${job.id}`);
       updateBackgroundJobInState(latest);
       await pollApproval();
@@ -1566,8 +1740,7 @@ function beginBackgroundPolling() {
         if (latest.last_step) reportEl.textContent = `background ${latest.status}: ${latest.last_step}`;
         else reportEl.textContent = `background ${latest.status}: ${latest.iterations || 0} iteration(s)`;
       }
-      renderBackgroundActivity(latest);
-      renderPlanOutput(latest);
+      if (latest.session === state.activeSession) { renderBackgroundActivity(latest); renderMetadataPanel(); }
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
@@ -1602,6 +1775,23 @@ function _drawLineChart(canvas, seriesMap) {
   }
 
   const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7'];
+  const pad = 28;
+  ctx.strokeStyle = '#9ca3af';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad, h - pad);
+  ctx.lineTo(w - 8, h - pad);
+  ctx.moveTo(pad, h - pad);
+  ctx.lineTo(pad, 8);
+  ctx.stroke();
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('Turns (X)', w - 66, h - 10);
+  ctx.save();
+  ctx.translate(10, 44);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Usage (Y)', 0, 0);
+  ctx.restore();
   let maxLen = 0;
   let maxY = 0;
   keys.forEach((k) => {
@@ -1612,7 +1802,6 @@ function _drawLineChart(canvas, seriesMap) {
   maxLen = Math.max(2, maxLen);
   maxY = Math.max(1, maxY);
 
-  const pad = 28;
   const plotW = w - pad * 2;
   const plotH = h - pad * 2;
 
@@ -1648,7 +1837,12 @@ function _drawLineChart(canvas, seriesMap) {
 }
 
 function renderMetrics() {
-  const turns = Array.isArray(state.sessionTurns) ? state.sessionTurns.slice() : [];
+  const turns = (Array.isArray(state.sessionTurns) ? state.sessionTurns.slice() : []).filter((turn) => {
+    const session = String(turn.session || '');
+    if (!state.activeSession) return true;
+    if (!session) return true;
+    return session === state.activeSession;
+  });
   const messages = Array.isArray(state.messages) ? state.messages : [];
   const usage = state.sessionUsage || {};
 
@@ -2126,11 +2320,276 @@ function isToolRole(role) {
 }
 
 function shouldRenderMessage(message) {
+  if (message && message.metadata && message.metadata.show_in_main === false) return false;
   if (message.role !== 'assistant') return true;
   const content = String(message.content || '').trim();
   const toolCalls = (message.metadata && message.metadata.tool_calls) || [];
   const typing = !!(message.metadata && message.metadata.typing);
-  return content.length > 0 || toolCalls.length > 0 || typing;
+  return content.length > 0 || typing;
+}
+
+function collectAssistantMetadata(messages, assistantIndex) {
+  const toolRequests = [];
+  const toolResults = [];
+  const assistantMessage = messages[assistantIndex] || {};
+  const directCalls = (assistantMessage.metadata && assistantMessage.metadata.tool_calls) || [];
+  for (const call of directCalls) {
+    const name = String(call.name || 'tool');
+    const args = String(call.arguments || '').trim();
+    const shortArgs = args.length > 420 ? `${args.slice(0, 417)}...` : args;
+    toolRequests.push(`name=${name}${shortArgs ? ` args=${shortArgs}` : ''}`);
+  }
+
+  for (let i = assistantIndex + 1; i < messages.length; i += 1) {
+    const current = messages[i];
+    if (!current) continue;
+    if (current.role === 'assistant' || current.role === 'user') break;
+    if (current.role === 'tool_result') {
+      const summary = summarizeToolResult(current.content);
+      const raw = String(current.content || '').trim();
+      const snippet = raw.length > 700 ? `${raw.slice(0, 697)}...` : raw;
+      toolResults.push(`${summary}\nmodel_received=${snippet}`);
+    }
+  }
+
+  const reasons = scoreReasonsByUrl(messages, assistantIndex);
+  const citations = extractCitationLinks(assistantMessage.content || '');
+  const citationItems = citations.map((url) => {
+    const why = reasons[url] ? `\nwhy chosen: ${reasons[url]}` : '';
+    return `${url}${why}`;
+  });
+  const researchSteps = [];
+  const trail = buildResearchTrailPanel(messages, assistantIndex);
+  if (trail) {
+    const steps = [];
+    for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (!m) continue;
+      if (m.role === 'user') break;
+      if (m.role === 'tool_result') steps.push(summarizeToolResult(m.content));
+    }
+    researchSteps.push(...steps.reverse());
+  }
+
+  return { toolRequests, toolResults, citationItems, researchSteps };
+}
+
+function collectAutomationMetadata(messages) {
+  const items = [];
+  for (const message of (messages || [])) {
+    if (!message || !message.metadata || message.metadata.show_in_main !== false) continue;
+    const kind = String(message.metadata.automation_kind || 'automation');
+    const role = String(message.role || 'message');
+    const text = String(message.content || '').trim();
+    if (!text) continue;
+    items.push({ kind, role, text: text.length > 900 ? `${text.slice(0, 897)}...` : text });
+  }
+  return items;
+}
+
+function _metaRow(kind, label, value) {
+  const row = document.createElement('div');
+  row.className = `meta-line meta-item ${kind}`;
+
+  const tag = document.createElement('span');
+  tag.className = 'meta-tag';
+  tag.textContent = label;
+  row.appendChild(tag);
+
+  const body = document.createElement('div');
+  body.className = 'meta-content';
+
+  const raw = String(value || '').trim();
+  const firstUrl = raw.match(/https?:\/\/[^\s]+/);
+  if (kind === 'citation' && firstUrl) {
+    const link = document.createElement('a');
+    link.className = 'meta-link';
+    link.href = firstUrl[0];
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = firstUrl[0];
+    body.appendChild(link);
+    const remainder = raw.replace(firstUrl[0], '').trim();
+    if (remainder) {
+      const extra = document.createElement('pre');
+      const code = document.createElement('code');
+      code.className = 'language-text';
+      code.textContent = remainder;
+      extra.appendChild(code);
+      body.appendChild(extra);
+      if (window.hljs) window.hljs.highlightElement(code);
+    }
+    row.appendChild(body);
+    return row;
+  }
+
+  const pre = document.createElement('pre');
+  const code = document.createElement('code');
+  let lang = 'language-text';
+  let output = raw || '(empty)';
+  if ((output.startsWith('{') && output.endsWith('}')) || (output.startsWith('[') && output.endsWith(']'))) {
+    try {
+      output = JSON.stringify(JSON.parse(output), null, 2);
+      lang = 'language-json';
+    } catch (_) {
+      // keep plain text
+    }
+  }
+  code.className = lang;
+  code.textContent = output;
+  pre.appendChild(code);
+  body.appendChild(pre);
+  row.appendChild(body);
+  if (window.hljs) window.hljs.highlightElement(code);
+  return row;
+}
+
+function renderMetadataPanel() {
+  const host = document.getElementById('metaFeed');
+  host.innerHTML = '';
+  const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
+  let cards = 0;
+
+  const ws = state.workspaceIndexStats || {};
+  if (Object.keys(ws).length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = '<div class="meta-head"><span>Workspace indexing</span><span>stats</span></div>';
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const [key, value] of Object.entries(ws)) {
+      lines.appendChild(_metaRow('workspace', 'Workspace stat', `${key}: ${value}`));
+    }
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
+
+  for (let idx = state.messages.length - 1; idx >= 0; idx -= 1) {
+    const m = state.messages[idx];
+    if (!m || m.role !== 'assistant') continue;
+    const meta = collectAssistantMetadata(state.messages, idx);
+    if (!meta.toolRequests.length && !meta.toolResults.length && !meta.citationItems.length && !meta.researchSteps.length) continue;
+
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    const stamp = formatTimestamp(messageTimes.get(idx));
+    card.innerHTML = `<div class="meta-head"><span>Assistant metadata</span><span>${escapeHtml(stamp || '—')}</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+
+    for (const item of meta.toolRequests) lines.appendChild(_metaRow('tool-call', 'Tool call', item));
+    for (const item of meta.toolResults) lines.appendChild(_metaRow('tool-result', 'Tool result', item));
+    for (const item of meta.citationItems) lines.appendChild(_metaRow('citation', 'Citation', item));
+    for (const item of meta.researchSteps) lines.appendChild(_metaRow('research', 'Research step', item));
+
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
+
+  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
+    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
+  });
+  if (liveTraceItems.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const line of liveTraceItems.slice().reverse()) {
+      let kind = 'automation';
+      let label = 'Stream event';
+      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
+      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
+      else if (line.startsWith('status:')) { kind = 'research'; label = 'Status'; }
+      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
+      lines.appendChild(_metaRow(kind, label, line));
+    }
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
+
+  const automation = collectAutomationMetadata(state.messages);
+  if (automation.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Agent/Plan automation</span><span>${automation.length} items</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const item of automation.slice(-20).reverse()) {
+      lines.appendChild(_metaRow('automation', `${item.kind} · ${item.role}`, item.text));
+    }
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
+
+  if (!cards) host.innerHTML = '<div class="meta-empty">No tool/research metadata yet.</div>';
+}
+
+
+
+function _escapeAttr(value) {
+  return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _jobDetailsText(job) {
+  const lines = [];
+  lines.push(`Session: ${job.session || '-'}`);
+  lines.push(`Job: ${job.id || '-'}`);
+  lines.push(`Status: ${job.status || '-'}`);
+  lines.push(`Iterations: ${job.iterations || 0}`);
+  if (job.started_at) lines.push(`Started: ${job.started_at}`);
+  if (job.finished_at) lines.push(`Finished: ${job.finished_at}`);
+  if (job.error) lines.push(`Error: ${job.error}`);
+  if (job.report) {
+    lines.push('');
+    lines.push('Report:');
+    lines.push(JSON.stringify(job.report, null, 2));
+  }
+  if (job.plan) {
+    lines.push('');
+    lines.push('Plan:');
+    lines.push(String(job.plan));
+  }
+  if (Array.isArray(job.checkpoints) && job.checkpoints.length) {
+    lines.push('');
+    lines.push('Checkpoints:');
+    lines.push(JSON.stringify(job.checkpoints, null, 2));
+  }
+  if (Array.isArray(job.events) && job.events.length) {
+    lines.push('');
+    lines.push('Events:');
+    lines.push(job.events.join('\\n'));
+  }
+  return lines.join('\\n');
+}
+
+function maybeRecordJobTerminalNotice(job) {
+  if (!job || !job.id || !job.session) return;
+  if (job.status !== 'timed_out') return;
+  const session = String(job.session);
+  const id = `timeout-${job.id}`;
+  const notices = runNoticesBySession[session] || [];
+  if (notices.some((n) => n.id === id)) return;
+  const details = _jobDetailsText(job);
+  runDetailsById[id] = details;
+  notices.push({
+    id,
+    text: 'Agent timed out before completing this run.',
+  });
+  runNoticesBySession[session] = notices;
+}
+
+function openRunDetails(id, title = '') {
+  const body = document.getElementById('runDetailsBody');
+  const meta = document.getElementById('runDetailsMeta');
+  if (!body || !meta) return;
+  meta.textContent = title || '';
+  body.textContent = runDetailsById[id] || 'No details available.';
+  showModal('runDetailsModal', true);
 }
 
 function renderMessages() {
@@ -2142,27 +2601,8 @@ function renderMessages() {
   state.messages.forEach((m, idx) => {
     if (!shouldRenderMessage(m)) return;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim() && ((m.metadata && m.metadata.tool_calls) || []).length) {
-      const calls = (m.metadata && m.metadata.tool_calls) || [];
-      const line = calls.map((call) => `calling ${call.name || 'tool'}...`).join(' | ');
-      if (anchor) {
-        const el = document.createElement('div');
-        el.className = 'tool-inline call';
-        el.textContent = line;
-        anchor.appendChild(el);
-      }
-      return;
-    }
-
-    if (m.role === 'tool_result') {
-      if (anchor) {
-        const el = document.createElement('div');
-        el.className = 'tool-inline result';
-        el.textContent = summarizeToolResult(m.content);
-        anchor.appendChild(el);
-      }
-      return;
-    }
+    if (m.role === 'assistant' && !String(m.content || '').trim()) return;
+    if (m.role === 'tool_result' || m.role === 'tool_call') return;
 
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
@@ -2190,21 +2630,18 @@ function renderMessages() {
     box.appendChild(row);
     anchor = row;
 
-    if (m.role === 'assistant') {
-      const reasons = scoreReasonsByUrl(state.messages, idx);
-      const citationHtml = buildCitationPanel(m.content, reasons);
-      if (citationHtml) {
-        const container = document.createElement('div');
-        container.innerHTML = citationHtml;
-        row.appendChild(container.firstElementChild);
-      }
-      const trailHtml = buildResearchTrailPanel(state.messages, idx);
-      if (trailHtml) {
-        const trailContainer = document.createElement('div');
-        trailContainer.innerHTML = trailHtml;
-        row.appendChild(trailContainer.firstElementChild);
-      }
-    }
+  });
+
+  const notices = runNoticesBySession[state.activeSession || ''] || [];
+  notices.forEach((notice) => {
+    const row = document.createElement('div');
+    row.className = 'msg role-assistant';
+    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta"><span class="msg-tag">System</span><span class="msg-time">notice</span></div>`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = `<p>${escapeHtml(notice.text)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;
+    row.appendChild(bubble);
+    box.appendChild(row);
   });
 
   highlightCodeBlocks(box);
@@ -2275,22 +2712,54 @@ function updateQueryRuntime() {
   runtimeEl.classList.add('show');
 }
 
+async function killActiveJob() {
+  const job = activeSearchingJob();
+  if (!job) return;
+  const killBtn = document.getElementById('killJob');
+  if (killBtn) killBtn.disabled = true;
+  try {
+    await api(`/api/jobs/${job.id}/kill`, 'POST', { reason: 'killed from UI' });
+    const latest = await api(`/api/jobs/${job.id}`);
+    updateBackgroundJobInState(latest);
+    const reportEl = document.getElementById('report');
+    if (reportEl) reportEl.textContent = `kill signal sent: ${job.id}`;
+    updateChatBusyState();
+  } catch (err) {
+    alert(err.message || 'Unable to kill running job');
+  } finally {
+    if (killBtn) killBtn.disabled = false;
+  }
+}
+
+function updateKillButton() {
+  const killBtn = document.getElementById('killJob');
+  if (!killBtn) return;
+  const active = activeSearchingJob();
+  const show = !!active;
+  killBtn.classList.toggle('d-none', !show);
+  killBtn.disabled = !show;
+}
+
 function updateChatBusyState() {
-  const busy = !!activeSearchingJob();
+  const searching = !!activeSearchingJob();
+  const sendingForSession = !!sending && (!sendingSession || sendingSession === state.activeSession);
+  const busy = searching || sendingForSession;
   const composer = document.getElementById('chatComposer');
   const indicator = document.getElementById('searchingIndicator');
   const prompt = document.getElementById('prompt');
   const send = document.getElementById('send');
   const sendBackground = document.getElementById('sendBackground');
+  const attach = document.getElementById('promptAttach');
   if (composer) composer.classList.toggle('composer-disabled', busy);
   if (indicator) indicator.classList.toggle('show', busy);
   if (prompt) prompt.disabled = busy;
   if (send) send.disabled = busy;
   if (sendBackground) sendBackground.disabled = busy;
-  updateThinking(busy || sending);
+  if (attach) attach.disabled = busy;
+  updateThinking(busy);
   updateQueryRuntime();
   renderBackgroundActivity(activeSearchingJob() || null);
-  renderPlanOutput(activeSearchingJob() || null);
+  updateKillButton();
 }
 
 
@@ -2401,6 +2870,48 @@ function buildToolVisibilityPayload() {
   return payload;
 }
 
+function buildEnabledSkillsPayload() {
+  const enabled = [];
+  document.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+    if (el.checked) enabled.push(el.getAttribute('data-skill-enabled'));
+  });
+  return enabled;
+}
+
+function renderSkillSettings() {
+  const host = document.getElementById('skillToggleList');
+  const skills = Array.isArray(state.skills) ? state.skills : [];
+  const enabled = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
+  if (!skills.length) {
+    host.textContent = 'No skills found in ./skills.';
+    return;
+  }
+  host.innerHTML = skills.map((skillName) => `
+    <div class="tool-visibility-row d-flex align-items-center gap-2 justify-content-between">
+      <label class="d-flex align-items-center gap-2 m-0" style="min-width:0">
+        <input type="checkbox" class="form-check-input" data-skill-enabled="${escapeHtml(skillName)}" ${enabled.has(skillName) ? 'checked' : ''} />
+        <span class="small-muted text-truncate">${escapeHtml(skillName)}</span>
+      </label>
+      <button type="button" class="btn btn-soft btn-sm" data-skill-view="${escapeHtml(skillName)}">View</button>
+    </div>
+  `).join('');
+  host.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+    el.addEventListener('change', scheduleApplySettings);
+  });
+  host.querySelectorAll('[data-skill-view]').forEach((el) => {
+    el.addEventListener('click', () => openSkillView(el.getAttribute('data-skill-view') || '').catch((e) => alert(e.message)));
+  });
+}
+
+async function openSkillView(name) {
+  if (!name) return;
+  document.getElementById('skillViewTitle').textContent = `Skill: ${name}`;
+  document.getElementById('skillViewBody').textContent = 'Loading…';
+  showModal('skillViewModal', true);
+  const payload = await api(`/api/skills/${encodeURIComponent(name)}`);
+  document.getElementById('skillViewBody').innerHTML = formatMessageContent(payload.content || '');
+}
+
 function parseCustomToolsInput() {
   const raw = document.getElementById('customTools').value.trim();
   if (!raw) return [];
@@ -2431,13 +2942,15 @@ function buildSettingsPayload() {
   return {
     provider: document.getElementById('provider').value,
     model: document.getElementById('model').value,
-    api_key: document.getElementById('apiKey').value || null,
+    openai_api_key: document.getElementById('openaiApiKey').value || null,
+    google_api_key: document.getElementById('googleApiKey').value || null,
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
     agentic_planning: document.getElementById('agentic').checked,
     research_mode: document.getElementById('researchMode').checked,
     tool_visibility: buildToolVisibilityPayload(),
+    enabled_skills: buildEnabledSkillsPayload(),
     custom_tools: parseCustomToolsInput(),
   };
 }
@@ -2455,20 +2968,17 @@ function updateUsagePanel(usage) {
 }
 
 function syncPricingEditor() {
-  const provider = document.getElementById('provider').value;
-  const model = document.getElementById('model').value;
-  document.getElementById('pricingProvider').value = provider;
-  document.getElementById('pricingModel').value = model;
-  const row = (((state.pricing || {})[provider] || {})[model]) || { input_per_1m: 0, output_per_1m: 0 };
-  document.getElementById('pricingInput').value = Number(row.input_per_1m || 0);
-  document.getElementById('pricingOutput').value = Number(row.output_per_1m || 0);
+  const pricingJson = document.getElementById('pricingJson');
+  if (!pricingJson) return;
+  if (document.activeElement === pricingJson) return;
+  pricingJson.value = JSON.stringify(state.pricing || {}, null, 2);
 }
 
 function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal', 'runDetailsModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -2485,12 +2995,14 @@ async function applySettings() {
 }
 
 async function savePricing() {
-  await api('/api/pricing', 'POST', {
-    provider: document.getElementById('pricingProvider').value.trim(),
-    model: document.getElementById('pricingModel').value.trim(),
-    input_per_1m: Number(document.getElementById('pricingInput').value || 0),
-    output_per_1m: Number(document.getElementById('pricingOutput').value || 0),
-  });
+  const raw = document.getElementById('pricingJson').value || '{}';
+  let parsed = {};
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Invalid pricing JSON: ${err.message}`);
+  }
+  await api('/api/pricing', 'POST', { pricing: parsed });
   await refreshState();
 }
 
@@ -2590,6 +3102,7 @@ async function sendApprovalDecision(decision) {
 
 async function refreshState() {
   syncing = true;
+  const previousSession = state.activeSession;
   const s = await api('/api/state');
   state.models = s.models;
   state.messages = s.messages;
@@ -2598,6 +3111,7 @@ async function refreshState() {
   state.sessionUsage = s.session_usage || {};
   state.sessions = s.sessions || [];
   state.activeSession = s.session || '';
+  if (previousSession !== state.activeSession) _lastBackgroundActivityKey = null;
   state.sessionTurns = s.session_turns || [];
   state.uploads = s.uploads || [];
   state.pendingApproval = s.pending_approval || null;
@@ -2608,6 +3122,9 @@ async function refreshState() {
   state.gitCurrentRepo = s.git_current_repo || null;
   state.gitCurrentBranch = s.git_current_branch || null;
   state.gitBranches = s.git_branches || [];
+  state.skills = s.skills || [];
+  state.enabledSkills = s.enabled_skills || [];
+  state.workspaceIndexStats = s.workspace_index_stats || {};
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -2623,11 +3140,18 @@ async function refreshState() {
   document.getElementById('model').value = s.model;
   document.getElementById('approval').value = s.approval_mode;
   document.getElementById('workspace').value = s.workspace || '';
+  if (document.activeElement !== document.getElementById('openaiApiKey')) {
+    document.getElementById('openaiApiKey').value = s.openai_api_key || '';
+  }
+  if (document.activeElement !== document.getElementById('googleApiKey')) {
+    document.getElementById('googleApiKey').value = s.google_api_key || '';
+  }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
   document.getElementById('condenseEnabled').checked = !!s.condense_enabled;
   document.getElementById('condenseWindow').value = Number(s.condense_window || 12);
+  document.getElementById('maxRuntime').value = Number(s.max_runtime_seconds || 900);
   document.getElementById('meta').textContent = `${s.provider}:${s.model}`;
   if (document.activeElement !== document.getElementById('customTools')) {
     document.getElementById('customTools').value = JSON.stringify(customSpecs, null, 2);
@@ -2640,11 +3164,12 @@ async function refreshState() {
   renderSessions(state.sessions, state.activeSession);
   renderUploads();
   renderToolSettings();
+  renderSkillSettings();
   renderGitControls();
   renderMessages();
+  renderMetadataPanel();
   renderTraces();
   updateChatBusyState();
-  renderBackgroundActivity(activeJob || activeSearchingJob() || null);
   renderMetrics();
 
   if (state.pendingApproval) {
@@ -2669,8 +3194,8 @@ function updateBackgroundJobInState(job) {
   else state.backgroundJobs.push(job);
   renderSessions(state.sessions || [], state.activeSession || '');
   updateChatBusyState();
+  maybeRecordJobTerminalNotice(job);
   if (job.session === state.activeSession) renderBackgroundActivity(job);
-  if (job.session === state.activeSession) renderPlanOutput(job);
 }
 
 
@@ -2689,7 +3214,9 @@ async function sendPrompt(background = false) {
   if (!text) return;
 
   sending = true;
+  sendingSession = selectedSessionName() || state.activeSession || null;
   updateThinking(true);
+  updateChatBusyState();
   document.getElementById('prompt').value = '';
 
   if (approvalPoll) clearInterval(approvalPoll);
@@ -2702,6 +3229,7 @@ async function sendPrompt(background = false) {
   let draft = { role: 'assistant', content: '', metadata: { typing: true } };
   state.messages.push(draft);
   renderMessages();
+  renderMetadataPanel();
 
   try {
     if (background) {
@@ -2712,8 +3240,8 @@ async function sendPrompt(background = false) {
         for (let i = 0; i < 120; i += 1) {
           const job = await api(`/api/jobs/${bg.job_id}`);
           updateBackgroundJobInState(job);
-          renderBackgroundActivity(job);
-          if (job.usage) updateUsagePanel(job.usage);
+          if (job.session === state.activeSession) { renderBackgroundActivity(job); renderMetadataPanel(); }
+          if (job.usage && job.session === state.activeSession) updateUsagePanel(job.usage);
           updateQueryRuntime();
           if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
           if (job.status === 'awaiting_plan_approval') {
@@ -2725,6 +3253,8 @@ async function sendPrompt(background = false) {
           }
           if (['completed', 'failed', 'timed_out'].includes(job.status)) {
             reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
+            maybeRecordJobTerminalNotice(job);
+            await refreshState();
             break;
           }
           await new Promise((r) => setTimeout(r, 1000));
@@ -2765,10 +3295,12 @@ async function sendPrompt(background = false) {
           if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
           renderMessages();
+          renderMetadataPanel();
         } else if (event.type === 'trace') {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);
           renderTraces();
+          renderMetadataPanel();
           updateChatBusyState();
         } else if (event.type === 'report') {
           const r = event.report;
@@ -2787,6 +3319,8 @@ async function sendPrompt(background = false) {
     }
     updateThinking(false);
     sending = false;
+    sendingSession = null;
+    updateChatBusyState();
   }
 }
 
@@ -2834,6 +3368,7 @@ async function createSessionFromModal() {
     workspace: document.getElementById('newSessionWorkspace').value.trim() || null,
     agentic_planning: document.getElementById('newSessionAgentic').checked,
     research_mode: document.getElementById('newSessionResearch').checked,
+    enabled_skills: buildEnabledSkillsPayload(),
   });
   showModal('newSessionModal', false);
 }
@@ -2867,7 +3402,7 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
 
-for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();
@@ -2875,7 +3410,7 @@ for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug
     scheduleApplySettings();
     syncPricingEditor();
   });
-  if (id === 'workspace' || id === 'apiKey') {
+  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey') {
     document.getElementById(id).addEventListener('blur', scheduleApplySettings);
   }
 }
@@ -2890,6 +3425,7 @@ document.getElementById('promptAttachInput').addEventListener('change', () => up
 
 document.getElementById('send').addEventListener('click', () => sendPrompt(false).catch((e) => alert(e.message)));
 document.getElementById('sendBackground').addEventListener('click', () => sendPrompt(true).catch((e) => alert(e.message)));
+document.getElementById('killJob').addEventListener('click', () => killActiveJob().catch((e) => alert(e.message)));
 document.getElementById('newSession').addEventListener('click', () => openNewSessionModal());
 document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
 document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
@@ -2910,11 +3446,19 @@ document.getElementById('openGitModal').addEventListener('click', async () => {
   showModal('gitModal', true);
 });
 document.getElementById('closeGitModal').addEventListener('click', () => showModal('gitModal', false));
-document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
-document.getElementById('togglePlanOutput').addEventListener('click', () => {
-  planOverlayUserVisible = !planOverlayUserVisible;
-  renderPlanOutput(activeSearchingJob() || null);
+document.getElementById('closeSkillViewModal').addEventListener('click', () => showModal('skillViewModal', false));
+document.getElementById('closeRunDetailsModal').addEventListener('click', () => showModal('runDetailsModal', false));
+document.getElementById('toggleMetaSidebar').addEventListener('click', () => {
+  const layout = document.querySelector('.workspace-layout');
+  if (!layout) return;
+  layout.classList.toggle('meta-hidden');
+  const btn = document.getElementById('toggleMetaSidebar');
+  const hidden = layout.classList.contains('meta-hidden');
+  btn.textContent = hidden ? '>' : '<';
+  btn.title = hidden ? 'Show metadata panel' : 'Hide metadata panel';
+  btn.setAttribute('aria-label', btn.title);
 });
+document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
 
 document.getElementById('browseWorkspace').addEventListener('click', () => {
   showModal('workspaceModal', true);
@@ -2981,6 +3525,7 @@ document.getElementById('sessionMenuOverlay').querySelectorAll('[data-session-cm
     closeAllSessionMenus();
     if (!name) return;
     if (cmd === 'refresh') await sessionAction('switch', name);
+    if (cmd === 'clear') await sessionAction('clear', name);
     if (cmd === 'condense') { openCondenseModal(name); return; }
     if (cmd === 'delete') await sessionAction('delete', name);
   });
@@ -2990,7 +3535,21 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
 });
 
-document.addEventListener('click', () => closeAllSessionMenus());
+document.addEventListener('click', (ev) => {
+  const btn = ev.target && ev.target.closest ? ev.target.closest('[data-run-details]') : null;
+  if (btn) {
+    const id = btn.getAttribute('data-run-details') || '';
+    openRunDetails(id, `Run ${id}`);
+    return;
+  }
+  closeAllSessionMenus();
+});
+const metaToggleBtn = document.getElementById('toggleMetaSidebar');
+if (metaToggleBtn) {
+  metaToggleBtn.textContent = '<';
+  metaToggleBtn.title = 'Hide metadata panel';
+  metaToggleBtn.setAttribute('aria-label', 'Hide metadata panel');
+}
 hydrateThemePreference();
 refreshState().catch((e) => alert(e.message));
 if (runtimeTick) clearInterval(runtimeTick);

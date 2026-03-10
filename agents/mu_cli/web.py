@@ -23,6 +23,7 @@ from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
+from mu_cli.skills import SkillStore
 from mu_cli.tools.base import Tool, ToolResult
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
@@ -39,6 +40,7 @@ from mu_cli.tools.filesystem import (
     CustomCommandTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
+    MakefileAgentTool,
     ReadFileTool,
     WriteFileTool,
 )
@@ -50,7 +52,8 @@ from werkzeug.utils import secure_filename
 class WebRuntime:
     provider: str
     model: str
-    api_key: str | None
+    openai_api_key: str | None
+    google_api_key: str | None
     approval_mode: str
     system_prompt: str
     session_name: str
@@ -80,6 +83,8 @@ class WebRuntime:
     condense_enabled: bool = False
     condense_window: int = 12
     summary_index: list[dict[str, Any]] = field(default_factory=list)
+    skill_store: SkillStore | None = None
+    enabled_skills: list[str] = field(default_factory=list)
 
 
 
@@ -218,6 +223,15 @@ def _build_provider(name: str, model: str, api_key: str | None):
     raise ValueError(f"Unsupported provider: {name}")
 
 
+def _provider_api_key(runtime: WebRuntime, provider_name: str | None = None) -> str | None:
+    name = provider_name or runtime.provider
+    if name == "openai":
+        return runtime.openai_api_key
+    if name == "gemini":
+        return runtime.google_api_key
+    return None
+
+
 def _is_git_repo(path: Path) -> bool:
     try:
         proc = subprocess.run(
@@ -330,6 +344,34 @@ def _inject_planning(agent: Agent, workspace_summary: str | None = None, git_gui
     )
 
 
+def _sync_skill_prompts(runtime: WebRuntime) -> None:
+    kept: list[Message] = []
+    for message in runtime.agent.state.messages:
+        if message.role is not Role.SYSTEM:
+            kept.append(message)
+            continue
+        kind = message.metadata.get("kind")
+        if isinstance(kind, str) and kind.startswith("skill:"):
+            continue
+        kept.append(message)
+    runtime.agent.state.messages = kept
+
+    if runtime.skill_store is None:
+        return
+
+    for name in runtime.enabled_skills:
+        skill = runtime.skill_store.load_skill(name)
+        if skill is None or not skill.content:
+            continue
+        runtime.agent.state.messages.append(
+            Message(
+                role=Role.SYSTEM,
+                content=f"Skill `{skill.name}` instructions:\n\n{skill.content}",
+                metadata={"kind": f"skill:{skill.name}"},
+            )
+        )
+
+
 def _runtime_git_context(runtime: WebRuntime) -> tuple[str | None, str | None]:
     workspace = runtime.workspace_path
     if not workspace:
@@ -353,7 +395,7 @@ def _git_agent_instruction(runtime: WebRuntime) -> str | None:
 
 
 def _new_agent(runtime: WebRuntime) -> Agent:
-    provider = _build_provider(runtime.provider, runtime.model, runtime.api_key)
+    provider = _build_provider(runtime.provider, runtime.model, _provider_api_key(runtime))
 
     def on_approval(tool_name: str, args: dict) -> bool:
         mode = runtime.approval_mode
@@ -520,8 +562,10 @@ def _uploaded_context_prompt(runtime: WebRuntime) -> str | None:
 def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = None) -> dict[str, Any]:
     non_system = [m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
     raw_window = max(2, int(window_size or runtime.condense_window or 12))
-    if len(non_system) <= raw_window + 2:
+    if len(non_system) <= 4:
         return {"ok": True, "unchanged": True, "message": "not enough history to condense"}
+
+    raw_window = min(raw_window, len(non_system) - 2)
 
     cutoff = max(0, len(non_system) - raw_window)
     older = non_system[:cutoff]
@@ -565,12 +609,15 @@ def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = 
     }
     runtime.summary_index.append(summary_entry)
 
-    older_set = set(id(m) for m in older)
+    older_set = {id(m) for m in older}
+    kept_messages: list[Message] = []
     for msg in runtime.agent.state.messages:
         if msg.role is Role.SYSTEM:
+            kept_messages.append(msg)
             continue
         if id(msg) in older_set:
-            msg.metadata["excluded_from_model"] = True
+            continue
+        kept_messages.append(msg)
 
     summary_msg = Message(
         role=Role.TOOL_RESULT,
@@ -584,7 +631,8 @@ def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = 
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
-    runtime.agent.state.messages.append(summary_msg)
+    kept_messages.append(summary_msg)
+    runtime.agent.state.messages = kept_messages
 
     return {
         "ok": True,
@@ -748,6 +796,7 @@ def _persist(runtime: WebRuntime) -> None:
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
             summary_index=runtime.summary_index,
+            enabled_skills=runtime.enabled_skills,
         )
     )
 
@@ -782,6 +831,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     if loaded.condense_window is not None:
         runtime.condense_window = int(loaded.condense_window)
     runtime.summary_index = list(loaded.summary_index or [])
+    runtime.enabled_skills = list(loaded.enabled_skills or [])
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
         if path.exists() and path.is_dir():
@@ -792,6 +842,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
+    _sync_skill_prompts(runtime)
 
     return True
 
@@ -804,7 +855,8 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
     runtime = WebRuntime(
         provider=base.provider,
         model=base.model,
-        api_key=base.api_key,
+        openai_api_key=base.openai_api_key,
+        google_api_key=base.google_api_key,
         approval_mode=base.approval_mode,
         system_prompt=base.system_prompt,
         session_name=session_name,
@@ -831,6 +883,8 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         condense_enabled=False,
         condense_window=12,
         summary_index=[],
+        skill_store=base.skill_store,
+        enabled_skills=list(base.enabled_skills),
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
@@ -840,8 +894,31 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
             _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
         if runtime.research_mode:
             _inject_research_prompt(runtime.agent)
+        _sync_skill_prompts(runtime)
         _persist(runtime)
     return runtime
+
+
+
+
+def _mark_messages_as_metadata(messages: list[Message], *, kind: str) -> None:
+    for message in messages:
+        if message.role not in {Role.USER, Role.ASSISTANT}:
+            continue
+        message.metadata["show_in_main"] = False
+        message.metadata["metadata_group"] = "automation"
+        message.metadata["automation_kind"] = kind
+
+
+def _is_internal_agent_loop_prompt(prompt: str) -> bool:
+    normalized = " ".join((prompt or "").strip().split()).lower()
+    return normalized.startswith("continue executing the approved plan.") or normalized.startswith("execute the replan.") or normalized.startswith("you appear stalled.")
+
+def _step_internal(runtime: WebRuntime, prompt: str, kind: str) -> Message:
+    before = len(runtime.agent.state.messages)
+    reply = runtime.agent.step(prompt)
+    _mark_messages_as_metadata(runtime.agent.state.messages[before:], kind=kind)
+    return reply
 
 
 def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: str) -> str:
@@ -882,10 +959,23 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "verification_policy": _verification_policy_for_task(text),
         "checkpoints": [],
         "answer_contract": None,
+        "cancel_requested": False,
+        "cancel_reason": None,
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
+
+        def _cancelled() -> bool:
+            return bool(job.get("cancel_requested"))
+
+        def _mark_cancelled(reason: str) -> None:
+            if job.get("status") in {"killed", "completed", "failed", "timed_out"}:
+                return
+            job["status"] = "killed"
+            job["cancel_reason"] = reason
+            job["events"].append(f"status: killed ({reason})")
+
         try:
             isolated = _build_session_runtime(base_runtime, session_name)
             isolated.debug = True
@@ -898,15 +988,19 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["events"].append(f"checkpoint: restored {len(restored_checkpoints[-8:])}")
 
             if isolated.agentic_planning:
-                plan_reply = isolated.agent.step(
+                plan_reply = _step_internal(
+                    isolated,
                     "Create an execution plan for the task below. Keep it short and actionable as numbered steps. "
-                    "Start with 'PLAN:'.\n\nTask:\n" + text
+                    "Start with 'PLAN:'.\n\nTask:\n" + text,
+                    kind="plan_draft",
                 )
                 plan_text = (plan_reply.content or "").strip()
                 if not plan_text or plan_text.lower().startswith("calling tool"):
-                    fallback_reply = isolated.agent.step(
+                    fallback_reply = _step_internal(
+                        isolated,
                         "Provide ONLY a concise numbered execution plan for the same task. "
-                        "Do not call tools. Start with 'PLAN:'."
+                        "Do not call tools. Start with 'PLAN:'.",
+                        kind="plan_fallback",
                     )
                     plan_text = (fallback_reply.content or "").strip()
                 if not plan_text:
@@ -921,14 +1015,16 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "Respond in exactly two lines: 'CRITIQUE: ...' and 'PLAN_OK: yes|no'.\n\n"
                     f"Task:\n{text}\n\nProposed plan:\n{plan_text}"
                 )
-                critic_reply = isolated.agent.step(critic_prompt)
+                critic_reply = _step_internal(isolated, critic_prompt, kind="plan_critic")
                 critic_text = (critic_reply.content or "").strip()
                 plan_ok = "plan_ok: yes" in critic_text.lower()
                 job["planner_critic"] = critic_text[:1200]
                 job["events"].append("plan: critic_passed" if plan_ok else "plan: critic_failed")
                 if not plan_ok:
-                    revise_reply = isolated.agent.step(
-                        "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'."
+                    revise_reply = _step_internal(
+                        isolated,
+                        "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'.",
+                        kind="plan_revise",
                     )
                     revised_text = (revise_reply.content or "").strip()
                     if revised_text:
@@ -940,10 +1036,16 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 _persist(isolated)
                 job["status"] = "awaiting_plan_approval"
                 while datetime.now(timezone.utc).timestamp() < deadline:
+                    if _cancelled():
+                        _mark_cancelled("user requested stop")
+                        return
                     decision = job.get("plan_approval")
                     if decision in {"approve", "deny"}:
                         break
                     threading.Event().wait(0.4)
+                if _cancelled():
+                    _mark_cancelled("user requested stop")
+                    return
                 if job.get("plan_approval") != "approve":
                     job["events"].append("plan: denied_or_timed_out")
                     raise RuntimeError("Plan not approved before timeout or was denied.")
@@ -978,6 +1080,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 + "- Final answer must include: Confidence: <high|medium|low> and Evidence: bullets linked to tool outputs."
             )
             while datetime.now(timezone.utc).timestamp() < deadline:
+                if _cancelled():
+                    _mark_cancelled("user requested stop")
+                    break
                 if int(job["iterations"]) >= max_iterations:
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
                     break
@@ -990,6 +1095,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 )
                 turn_messages = isolated.agent.state.messages[before_len:]
                 had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
+                if _is_internal_agent_loop_prompt(prompt):
+                    _mark_messages_as_metadata(turn_messages, kind="agent_loop")
                 report = _turn_report(isolated, prompt, reply.content)
                 if len(isolated.traces) > trace_cursor:
                     job["events"].extend(isolated.traces[trace_cursor:])
@@ -1032,9 +1139,11 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         job["events"].append("status: stalled_no_tool_progress")
                         if replan_count < 2:
                             replan_count += 1
-                            replan_reply = isolated.agent.step(
+                            replan_reply = _step_internal(
+                                isolated,
                                 "Generate REPLAN with 3-6 concise steps to recover from stall. "
-                                "Start with 'REPLAN:'. Include one immediate next tool call recommendation."
+                                "Start with 'REPLAN:'. Include one immediate next tool call recommendation.",
+                                kind="replan",
                             )
                             replanned = (replan_reply.content or "").strip()
                             if replanned:
@@ -1059,7 +1168,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "When all tasks are complete, begin your response with 'PLAN_COMPLETE'."
                 )
 
-            if datetime.now(timezone.utc).timestamp() >= deadline:
+            if job.get("status") == "killed":
+                pass
+            elif datetime.now(timezone.utc).timestamp() >= deadline:
                 job["status"] = "timed_out"
 
             job["report"] = {
@@ -1070,7 +1181,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 "total_tokens": total_tokens,
                 "estimated_cost_usd": total_cost,
             }
-            if job["status"] != "timed_out":
+            if job["status"] not in {"timed_out", "killed"}:
                 job["status"] = "completed"
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
@@ -1099,7 +1210,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["events"].append("status: completed_without_explicit_plan_complete")
         except Exception as exc:
             job["error"] = str(exc)
-            if job.get("status") != "timed_out":
+            if job.get("status") not in {"timed_out", "killed"}:
                 job["status"] = "failed"
             job["events"].append(f"status: failed ({exc})")
         finally:
@@ -1137,17 +1248,20 @@ def create_app():
         ScoreSourcesTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
+        MakefileAgentTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),
         GetUploadedContextFileTool(uploads_root, lambda: runtime.session_name),
         ClearUploadedContextStoreTool(uploads_root, lambda: runtime.session_name),
         RetrieveConversationSummaryTool(lambda: runtime),
     ]
     session_store = SessionStore(Path(".mu_cli/sessions"), "default")
+    skill_store = SkillStore(Path("skills"))
 
     runtime = WebRuntime(
         provider="echo",
         model="echo",
-        api_key=None,
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        google_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         approval_mode="ask",
         system_prompt="You are a helpful coding assistant. Keep responses concise.",
         session_name="default",
@@ -1174,6 +1288,8 @@ def create_app():
         condense_enabled=False,
         condense_window=12,
         summary_index=[],
+        skill_store=skill_store,
+        enabled_skills=[],
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     _refresh_tooling(runtime)
@@ -1182,6 +1298,7 @@ def create_app():
     _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
+    _sync_skill_prompts(runtime)
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
 
@@ -1217,7 +1334,7 @@ def create_app():
                 "debug": runtime.debug,
                 "agentic_planning": runtime.agentic_planning,
                 "research_mode": runtime.research_mode,
-                "models": get_model_catalog({"gemini": runtime.api_key}),
+                "models": get_model_catalog({"openai": runtime.openai_api_key, "gemini": runtime.google_api_key}),
                 "sessions": sessions,
                 "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
                 "traces": runtime.traces[-50:],
@@ -1256,8 +1373,24 @@ def create_app():
                 "git_current_repo": git_current_repo,
                 "git_current_branch": git_current_branch,
                 "git_branches": git_branches,
+                "skills": runtime.skill_store.list_skills() if runtime.skill_store else [],
+                "enabled_skills": runtime.enabled_skills,
+                "workspace_index_stats": (
+                    runtime.workspace_store.snapshot.index_stats if runtime.workspace_store.snapshot else {}
+                ),
+                "openai_api_key": runtime.openai_api_key,
+                "google_api_key": runtime.google_api_key,
             }
         )
+
+    @app.get("/api/skills/<name>")
+    def skill_content(name: str):
+        if runtime.skill_store is None:
+            return jsonify({"error": "skills not configured"}), 404
+        skill = runtime.skill_store.load_skill(name)
+        if skill is None:
+            return jsonify({"error": "skill not found"}), 404
+        return jsonify({"name": skill.name, "content": skill.content})
 
     @app.post("/api/chat")
     def chat():
@@ -1294,6 +1427,22 @@ def create_app():
         if job is None:
             return jsonify({"error": "job not found"}), 404
         return jsonify(job)
+
+    @app.post("/api/jobs/<job_id>/kill")
+    def kill_job(job_id: str):
+        job = runtime.background_jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "job not found"}), 404
+        status = str(job.get("status") or "")
+        if status in {"completed", "failed", "timed_out", "killed"}:
+            return jsonify({"ok": False, "job_id": job_id, "status": status, "message": "job is not running"}), 409
+        reason = str((request.get_json(silent=True) or {}).get("reason", "")).strip() or "user requested stop"
+        job["cancel_requested"] = True
+        job["cancel_reason"] = reason
+        events = job.setdefault("events", [])
+        if isinstance(events, list):
+            events.append(f"cancel_requested: {reason}")
+        return jsonify({"ok": True, "job_id": job_id, "status": job.get("status"), "cancel_requested": True})
 
     @app.post("/api/jobs/<job_id>/plan")
     def decide_job_plan(job_id: str):
@@ -1378,10 +1527,13 @@ def create_app():
         payload = request.get_json(force=True)
 
         runtime.provider = str(payload.get("provider", runtime.provider))
+        if "openai_api_key" in payload:
+            runtime.openai_api_key = payload.get("openai_api_key") or None
+        if "google_api_key" in payload:
+            runtime.google_api_key = payload.get("google_api_key") or None
         selected_model = str(payload.get("model", runtime.model))
-        available = get_models(runtime.provider, runtime.api_key)
+        available = get_models(runtime.provider, _provider_api_key(runtime))
         runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
-        runtime.api_key = payload.get("api_key", runtime.api_key)
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
@@ -1400,6 +1552,10 @@ def create_app():
         if isinstance(custom_tools, list):
             runtime.custom_tool_specs = custom_tools
 
+        enabled_skills = payload.get("enabled_skills")
+        if isinstance(enabled_skills, list):
+            runtime.enabled_skills = [str(item).strip() for item in enabled_skills if str(item).strip()]
+
         workspace = payload.get("workspace")
         if workspace:
             path = Path(str(workspace)).expanduser()
@@ -1417,6 +1573,7 @@ def create_app():
             _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
         if runtime.research_mode:
             _inject_research_prompt(runtime.agent)
+        _sync_skill_prompts(runtime)
 
         _persist(runtime)
         return jsonify({"ok": True})
@@ -1427,6 +1584,14 @@ def create_app():
             return jsonify({"pricing": runtime.pricing.data})
 
         payload = request.get_json(force=True)
+        if "pricing" in payload:
+            pricing_payload = payload.get("pricing")
+            if not isinstance(pricing_payload, dict):
+                return jsonify({"error": "pricing must be a JSON object"}), 400
+            runtime.pricing.data = pricing_payload
+            runtime.pricing.save()
+            return jsonify({"ok": True, "pricing": runtime.pricing.data})
+
         provider = str(payload.get("provider", "")).strip()
         model = str(payload.get("model", "")).strip()
         if not provider or not model:
@@ -1679,8 +1844,11 @@ def create_app():
 
             runtime.provider = str(payload.get("provider", runtime.provider))
             selected_model = str(payload.get("model", runtime.model))
-            runtime.api_key = payload.get("api_key", runtime.api_key)
-            available = get_models(runtime.provider, runtime.api_key)
+            if "openai_api_key" in payload:
+                runtime.openai_api_key = payload.get("openai_api_key") or None
+            if "google_api_key" in payload:
+                runtime.google_api_key = payload.get("google_api_key") or None
+            available = get_models(runtime.provider, _provider_api_key(runtime))
             runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
             runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
             runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
@@ -1688,6 +1856,11 @@ def create_app():
             runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
             runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
             runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
+            enabled_skills = payload.get("enabled_skills")
+            if isinstance(enabled_skills, list):
+                runtime.enabled_skills = [str(item).strip() for item in enabled_skills if str(item).strip()]
+            else:
+                runtime.enabled_skills = []
 
             workspace = payload.get("workspace")
             runtime.workspace_path = str(workspace).strip() if workspace else None
@@ -1710,6 +1883,7 @@ def create_app():
                 _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
             if runtime.research_mode:
                 _inject_research_prompt(runtime.agent)
+            _sync_skill_prompts(runtime)
             _persist(runtime)
             return jsonify({"ok": True, "session": name})
 
@@ -1730,6 +1904,33 @@ def create_app():
             if not deleted:
                 return jsonify({"error": "session not found"}), 404
             return jsonify({"ok": True})
+
+        if action == "clear":
+            target = name or runtime.session_name
+            if target != runtime.session_name:
+                loaded = _load_session(runtime, target)
+                if not loaded:
+                    return jsonify({"error": "session not found"}), 404
+
+            runtime.agent = _new_agent(runtime)
+            runtime.agent.add_system_prompt(runtime.system_prompt)
+            if runtime.workspace_path:
+                path = Path(runtime.workspace_path).expanduser()
+                if path.exists() and path.is_dir():
+                    runtime.workspace_store.attach(path)
+            if runtime.agentic_planning:
+                summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
+                _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
+            if runtime.research_mode:
+                _inject_research_prompt(runtime.agent)
+            _sync_skill_prompts(runtime)
+            runtime.session_usage = _default_usage()
+            runtime.session_turns = []
+            runtime.uploads = []
+            runtime.research_artifacts = {}
+            runtime.summary_index = []
+            _persist(runtime)
+            return jsonify({"ok": True, "session": runtime.session_name})
 
         if action == "condense":
             w = payload.get("window")

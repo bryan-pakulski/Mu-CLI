@@ -23,6 +23,7 @@ class SessionTests(unittest.TestCase):
                 agentic_planning=True,
                 research_mode=False,
                 max_runtime_seconds=1200,
+                enabled_skills=["code-review"],
             )
             store.save(state)
 
@@ -38,6 +39,7 @@ class SessionTests(unittest.TestCase):
             self.assertTrue(loaded.agentic_planning)
             self.assertFalse(loaded.research_mode)
             self.assertEqual(1200, loaded.max_runtime_seconds)
+            self.assertEqual(["code-review"], loaded.enabled_skills)
 
     def test_list_and_delete_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -57,6 +59,14 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(["one", "two"], sessions)
             self.assertTrue(store.delete("one"))
             self.assertFalse(store.delete("missing"))
+
+    def test_load_ignores_empty_or_invalid_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td), "bad")
+            (Path(td) / "bad.json").write_text("", encoding="utf-8")
+            self.assertIsNone(store.load())
+            (Path(td) / "bad.json").write_text("not-json", encoding="utf-8")
+            self.assertIsNone(store.load())
 
 
 if __name__ == "__main__":

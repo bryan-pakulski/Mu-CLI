@@ -24,6 +24,7 @@ class SessionState:
     condense_enabled: bool | None = None
     condense_window: int | None = None
     summary_index: list[dict] | None = None
+    enabled_skills: list[str] | None = None
 
 
 class SessionStore:
@@ -42,7 +43,13 @@ class SessionStore:
     def load(self) -> SessionState | None:
         if not self.path.exists():
             return None
-        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        raw = self.path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return None
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
         messages = [
             Message(
                 role=Role(item["role"]),
@@ -68,6 +75,7 @@ class SessionStore:
             condense_enabled=payload.get("condense_enabled"),
             condense_window=payload.get("condense_window"),
             summary_index=payload.get("summary_index"),
+            enabled_skills=payload.get("enabled_skills"),
         )
 
     def save(self, state: SessionState) -> None:
@@ -87,6 +95,7 @@ class SessionStore:
             "condense_enabled": state.condense_enabled,
             "condense_window": state.condense_window,
             "summary_index": state.summary_index or [],
+            "enabled_skills": state.enabled_skills or [],
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

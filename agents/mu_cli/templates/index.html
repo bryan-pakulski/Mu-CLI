@@ -153,8 +153,8 @@
       align-items: flex-start;
       gap: 8px;
     }
-    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr); }
-    .workspace-layout.meta-hidden .meta-rail { display: none; }
+    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr) auto; }
+    .workspace-layout.meta-hidden .meta-sidebar { display: none; }
     .meta-toggle-icon {
       align-self: flex-start;
       margin-top: 8px;
@@ -1258,7 +1258,7 @@
         </div>
 
         <div class="meta-rail">
-          <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel">⮜</button>
+          <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel"><</button>
           <aside class="meta-sidebar">
           <h4>Run metadata</h4>
           <div class="meta-feed">
@@ -3306,7 +3306,7 @@ document.getElementById('toggleMetaSidebar').addEventListener('click', () => {
   layout.classList.toggle('meta-hidden');
   const btn = document.getElementById('toggleMetaSidebar');
   const hidden = layout.classList.contains('meta-hidden');
-  btn.textContent = hidden ? '⮞' : '⮜';
+  btn.textContent = hidden ? '>' : '<';
   btn.title = hidden ? 'Show metadata panel' : 'Hide metadata panel';
   btn.setAttribute('aria-label', btn.title);
 });
@@ -3390,7 +3390,7 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
 document.addEventListener('click', () => closeAllSessionMenus());
 const metaToggleBtn = document.getElementById('toggleMetaSidebar');
 if (metaToggleBtn) {
-  metaToggleBtn.textContent = '⮜';
+  metaToggleBtn.textContent = '<';
   metaToggleBtn.title = 'Hide metadata panel';
   metaToggleBtn.setAttribute('aria-label', 'Hide metadata panel');
 }

@@ -2786,7 +2786,7 @@ bindClick('toggleMetaSidebar', () => {
   layout.classList.toggle('meta-hidden');
   const btn = byId('toggleMetaSidebar');
   const hidden = layout.classList.contains('meta-hidden');
-  btn.textContent = hidden ? '>' : '<';
+  btn.textContent = '☰';
   btn.title = hidden ? 'Show metadata panel' : 'Hide metadata panel';
   btn.setAttribute('aria-label', btn.title);
 });
@@ -3035,7 +3035,7 @@ const Events = {
 
 const metaToggleBtn = document.getElementById('toggleMetaSidebar');
 if (metaToggleBtn) {
-  metaToggleBtn.textContent = '<';
+  metaToggleBtn.textContent = '☰';
   metaToggleBtn.title = 'Hide metadata panel';
   metaToggleBtn.setAttribute('aria-label', 'Hide metadata panel');
 }

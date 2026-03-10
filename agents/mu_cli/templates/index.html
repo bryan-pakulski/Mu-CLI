@@ -1163,6 +1163,11 @@
         </section>
 
         <section class="settings-section">
+          <h6>Skills</h6>
+          <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
+        </section>
+
+        <section class="settings-section">
           <h6>Custom tools</h6>
           <div class="small-muted custom-tools-hint mb-1">Format: [{"name":"run_tests","description":"Run tests","command":["make","test-verbose"],"mutating":false}]</div>
           <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
@@ -1316,7 +1321,7 @@
   </div>
 
 <script>
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '' };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [] };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -2401,6 +2406,33 @@ function buildToolVisibilityPayload() {
   return payload;
 }
 
+function buildEnabledSkillsPayload() {
+  const enabled = [];
+  document.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+    if (el.checked) enabled.push(el.getAttribute('data-skill-enabled'));
+  });
+  return enabled;
+}
+
+function renderSkillSettings() {
+  const host = document.getElementById('skillToggleList');
+  const skills = Array.isArray(state.skills) ? state.skills : [];
+  const enabled = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
+  if (!skills.length) {
+    host.textContent = 'No skills found in ./skills.';
+    return;
+  }
+  host.innerHTML = skills.map((skillName) => `
+    <label class="tool-visibility-row d-flex align-items-center gap-2">
+      <input type="checkbox" class="form-check-input" data-skill-enabled="${escapeHtml(skillName)}" ${enabled.has(skillName) ? 'checked' : ''} />
+      <span class="small-muted">${escapeHtml(skillName)}</span>
+    </label>
+  `).join('');
+  host.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+    el.addEventListener('change', scheduleApplySettings);
+  });
+}
+
 function parseCustomToolsInput() {
   const raw = document.getElementById('customTools').value.trim();
   if (!raw) return [];
@@ -2438,6 +2470,7 @@ function buildSettingsPayload() {
     agentic_planning: document.getElementById('agentic').checked,
     research_mode: document.getElementById('researchMode').checked,
     tool_visibility: buildToolVisibilityPayload(),
+    enabled_skills: buildEnabledSkillsPayload(),
     custom_tools: parseCustomToolsInput(),
   };
 }
@@ -2608,6 +2641,8 @@ async function refreshState() {
   state.gitCurrentRepo = s.git_current_repo || null;
   state.gitCurrentBranch = s.git_current_branch || null;
   state.gitBranches = s.git_branches || [];
+  state.skills = s.skills || [];
+  state.enabledSkills = s.enabled_skills || [];
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -2640,6 +2675,7 @@ async function refreshState() {
   renderSessions(state.sessions, state.activeSession);
   renderUploads();
   renderToolSettings();
+  renderSkillSettings();
   renderGitControls();
   renderMessages();
   renderTraces();
@@ -2834,6 +2870,7 @@ async function createSessionFromModal() {
     workspace: document.getElementById('newSessionWorkspace').value.trim() || null,
     agentic_planning: document.getElementById('newSessionAgentic').checked,
     research_mode: document.getElementById('newSessionResearch').checked,
+    enabled_skills: buildEnabledSkillsPayload(),
   });
   showModal('newSessionModal', false);
 }

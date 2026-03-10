@@ -76,6 +76,7 @@ Notes:
 - Includes a top-panel `GIT` button (visible for git workspaces) that opens a modal for repository/branch actions and current workspace diff view.
 - During background agent sessions, a dedicated “Plan output” overlay shows plan, checkpoints, and execution stages without reloading chat messages.
 - Includes built-in session management actions (new/load/delete/list/status).
+- Includes settings controls to enable/disable available skills per session.
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
 
 ## Workspace context and memory

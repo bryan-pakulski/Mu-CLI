@@ -23,6 +23,7 @@ from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
+from mu_cli.skills import SkillStore
 from mu_cli.tools.base import Tool, ToolResult
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
@@ -80,6 +81,8 @@ class WebRuntime:
     condense_enabled: bool = False
     condense_window: int = 12
     summary_index: list[dict[str, Any]] = field(default_factory=list)
+    skill_store: SkillStore | None = None
+    enabled_skills: list[str] = field(default_factory=list)
 
 
 
@@ -328,6 +331,34 @@ def _inject_planning(agent: Agent, workspace_summary: str | None = None, git_gui
             metadata={"kind": "agentic_planning"},
         )
     )
+
+
+def _sync_skill_prompts(runtime: WebRuntime) -> None:
+    kept: list[Message] = []
+    for message in runtime.agent.state.messages:
+        if message.role is not Role.SYSTEM:
+            kept.append(message)
+            continue
+        kind = message.metadata.get("kind")
+        if isinstance(kind, str) and kind.startswith("skill:"):
+            continue
+        kept.append(message)
+    runtime.agent.state.messages = kept
+
+    if runtime.skill_store is None:
+        return
+
+    for name in runtime.enabled_skills:
+        skill = runtime.skill_store.load_skill(name)
+        if skill is None or not skill.content:
+            continue
+        runtime.agent.state.messages.append(
+            Message(
+                role=Role.SYSTEM,
+                content=f"Skill `{skill.name}` instructions:\n\n{skill.content}",
+                metadata={"kind": f"skill:{skill.name}"},
+            )
+        )
 
 
 def _runtime_git_context(runtime: WebRuntime) -> tuple[str | None, str | None]:
@@ -748,6 +779,7 @@ def _persist(runtime: WebRuntime) -> None:
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
             summary_index=runtime.summary_index,
+            enabled_skills=runtime.enabled_skills,
         )
     )
 
@@ -782,6 +814,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     if loaded.condense_window is not None:
         runtime.condense_window = int(loaded.condense_window)
     runtime.summary_index = list(loaded.summary_index or [])
+    runtime.enabled_skills = list(loaded.enabled_skills or [])
     if runtime.workspace_path:
         path = Path(runtime.workspace_path).expanduser()
         if path.exists() and path.is_dir():
@@ -792,6 +825,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
+    _sync_skill_prompts(runtime)
 
     return True
 
@@ -831,6 +865,8 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         condense_enabled=False,
         condense_window=12,
         summary_index=[],
+        skill_store=base.skill_store,
+        enabled_skills=list(base.enabled_skills),
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
@@ -840,6 +876,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
             _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
         if runtime.research_mode:
             _inject_research_prompt(runtime.agent)
+        _sync_skill_prompts(runtime)
         _persist(runtime)
     return runtime
 
@@ -1143,6 +1180,7 @@ def create_app():
         RetrieveConversationSummaryTool(lambda: runtime),
     ]
     session_store = SessionStore(Path(".mu_cli/sessions"), "default")
+    skill_store = SkillStore(Path("skills"))
 
     runtime = WebRuntime(
         provider="echo",
@@ -1174,6 +1212,8 @@ def create_app():
         condense_enabled=False,
         condense_window=12,
         summary_index=[],
+        skill_store=skill_store,
+        enabled_skills=[],
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
     _refresh_tooling(runtime)
@@ -1182,6 +1222,7 @@ def create_app():
     _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
     if runtime.research_mode:
         _inject_research_prompt(runtime.agent)
+    _sync_skill_prompts(runtime)
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
 
@@ -1256,6 +1297,8 @@ def create_app():
                 "git_current_repo": git_current_repo,
                 "git_current_branch": git_current_branch,
                 "git_branches": git_branches,
+                "skills": runtime.skill_store.list_skills() if runtime.skill_store else [],
+                "enabled_skills": runtime.enabled_skills,
             }
         )
 
@@ -1400,6 +1443,10 @@ def create_app():
         if isinstance(custom_tools, list):
             runtime.custom_tool_specs = custom_tools
 
+        enabled_skills = payload.get("enabled_skills")
+        if isinstance(enabled_skills, list):
+            runtime.enabled_skills = [str(item).strip() for item in enabled_skills if str(item).strip()]
+
         workspace = payload.get("workspace")
         if workspace:
             path = Path(str(workspace)).expanduser()
@@ -1417,6 +1464,7 @@ def create_app():
             _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
         if runtime.research_mode:
             _inject_research_prompt(runtime.agent)
+        _sync_skill_prompts(runtime)
 
         _persist(runtime)
         return jsonify({"ok": True})
@@ -1688,6 +1736,11 @@ def create_app():
             runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
             runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
             runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
+            enabled_skills = payload.get("enabled_skills")
+            if isinstance(enabled_skills, list):
+                runtime.enabled_skills = [str(item).strip() for item in enabled_skills if str(item).strip()]
+            else:
+                runtime.enabled_skills = []
 
             workspace = payload.get("workspace")
             runtime.workspace_path = str(workspace).strip() if workspace else None
@@ -1710,6 +1763,7 @@ def create_app():
                 _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
             if runtime.research_mode:
                 _inject_research_prompt(runtime.agent)
+            _sync_skill_prompts(runtime)
             _persist(runtime)
             return jsonify({"ok": True, "session": name})
 

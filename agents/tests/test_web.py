@@ -180,6 +180,27 @@ class WebTests(unittest.TestCase):
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
 
+    def test_settings_enable_skills(self) -> None:
+        from mu_cli.web import create_app
+
+        skills_dir = Path("skills")
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        skill_path = skills_dir / "web-ui-skill.md"
+        skill_path.write_text("Always propose polished UI details.", encoding="utf-8")
+        self.addCleanup(lambda: skill_path.unlink(missing_ok=True))
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={'enabled_skills': ['web-ui-skill']})
+        self.assertEqual(200, res.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertIn('web-ui-skill', state['skills'])
+        self.assertIn('web-ui-skill', state['enabled_skills'])
+
     def test_git_repo_and_branch_endpoints(self) -> None:
         from mu_cli.web import create_app
 

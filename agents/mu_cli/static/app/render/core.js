@@ -1359,15 +1359,28 @@ function _metaRow(kind, label, value) {
   const row = document.createElement('div');
   row.className = `meta-line meta-item ${kind}`;
 
+  const raw = String(value || '').trim();
+  const preview = (raw || '(empty)').replace(/\s+/g, ' ').slice(0, 140);
+
+  const details = document.createElement('details');
+  details.className = 'meta-entry';
+
+  const summary = document.createElement('summary');
   const tag = document.createElement('span');
   tag.className = 'meta-tag';
   tag.textContent = label;
-  row.appendChild(tag);
+  const previewEl = document.createElement('span');
+  previewEl.className = 'meta-preview';
+  previewEl.textContent = preview.length < (raw || '(empty)').replace(/\s+/g, ' ').length ? `${preview}…` : preview;
+  summary.appendChild(tag);
+  summary.appendChild(previewEl);
+  details.appendChild(summary);
 
+  const bodyWrap = document.createElement('div');
+  bodyWrap.className = 'meta-entry-body';
   const body = document.createElement('div');
   body.className = 'meta-content';
 
-  const raw = String(value || '').trim();
   const firstUrl = raw.match(/https?:\/\/[^\s]+/);
   if (kind === 'citation' && firstUrl) {
     const link = document.createElement('a');
@@ -1387,7 +1400,9 @@ function _metaRow(kind, label, value) {
       body.appendChild(extra);
       if (window.hljs) window.hljs.highlightElement(code);
     }
-    row.appendChild(body);
+    bodyWrap.appendChild(body);
+    details.appendChild(bodyWrap);
+    row.appendChild(details);
     return row;
   }
 
@@ -1407,10 +1422,13 @@ function _metaRow(kind, label, value) {
   code.textContent = output;
   pre.appendChild(code);
   body.appendChild(pre);
-  row.appendChild(body);
+  bodyWrap.appendChild(body);
+  details.appendChild(bodyWrap);
+  row.appendChild(details);
   if (window.hljs) window.hljs.highlightElement(code);
   return row;
 }
+
 
 function _metaFilterAllows(kind, label, text) {
   const filter = state.timelineFilter || 'all';

@@ -1197,7 +1197,39 @@ def create_app():
             if role == "assistant" and idx < len(turns):
                 idx += 1
                 current_ts = turns[idx]["timestamp"] if idx < len(turns) and isinstance(turns[idx], dict) else current_ts
+
+        # Inject live background-job updates for the active session.
+        live_jobs = [
+            j for j in runtime.background_jobs.values()
+            if isinstance(j, dict)
+            and str(j.get("session", "")).strip() == runtime.session_name
+            and str(j.get("status", "")).strip().lower() not in {"completed", "failed", "timed_out"}
+        ]
+        for job in live_jobs:
+            ts = str(job.get("started_at", "")).strip() or datetime.now(timezone.utc).isoformat()
+            plan = str(job.get("plan", "")).strip()
+            if plan:
+                msgs.append({
+                    "role": "tool",
+                    "content": f"Background plan ({job.get('id','')[:8]}):\n{plan}",
+                    "ui_timestamp": ts,
+                })
+            last_step = str(job.get("last_step", "")).strip()
+            if last_step:
+                msgs.append({
+                    "role": "assistant",
+                    "content": f"Background progress ({job.get('id','')[:8]}): {last_step}",
+                    "ui_timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            events = list(job.get("events", []))[-4:]
+            if events:
+                msgs.append({
+                    "role": "tool",
+                    "content": "Background events:\n" + "\n".join(f"- {e}" for e in events),
+                    "ui_timestamp": datetime.now(timezone.utc).isoformat(),
+                })
         return msgs
+
 
     @app.get("/")
     def index():
@@ -1321,6 +1353,10 @@ def create_app():
     def ui_chat_background():
         text = str(request.form.get("text", "")).strip()
         if text:
+            runtime.agent.state.messages.append(
+                Message(role=Role.USER, content=text, metadata={"kind": "background_queued"})
+            )
+            _persist(runtime)
             _start_background_turn(runtime, runtime.session_name, text)
         return render_template("partials/jobs.html", jobs=list(runtime.background_jobs.values())[-20:])
 

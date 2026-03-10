@@ -10,11 +10,11 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-    :root { --bg:#f6f7f9; --surface:#fff; --surface-2:#f3f4f6; --border:#e4e7eb; --text:#20242b; --muted:#6b7280; }
-    body.dark-mode { --bg:#121212; --surface:#1e1e1e; --surface-2:#252525; --border:#343434; --text:#e6e1e5; --muted:#b0a9b5; }
-    html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:"Inter",sans-serif; font-size:14px; }
+        :root { --bg:#faf7ff; --surface:#ffffff; --surface-2:#f3ecff; --border:#e2d7f5; --text:#1f1630; --muted:#6f5d86; --accent:#7c4dff; --accent-2:#b388ff; }
+    body.dark-mode { --bg:#141218; --surface:#1f1b24; --surface-2:#2a2433; --border:#3d334b; --text:#f4effa; --muted:#c4b8d2; --accent:#b388ff; --accent-2:#d0bcff; }
+    html, body { height:100%; margin:0; overflow:hidden; background:var(--bg); color:var(--text); font-family:"Inter",sans-serif; font-size:14px; }
 
-    .shell { height:100vh; display:grid; grid-template-columns:340px minmax(0,1fr); transition:grid-template-columns .24s ease; }
+    .shell { height:100vh; display:grid; grid-template-columns:340px minmax(0,1fr); transition:grid-template-columns .24s ease; background:var(--bg); }
     .shell.sidebar-hidden { grid-template-columns:0 minmax(0,1fr); }
     .sidebar { overflow:auto; padding:8px 10px; transform:translateX(0); opacity:1; transition:transform .22s ease, opacity .22s ease; }
     .shell.sidebar-hidden .sidebar { transform:translateX(-16px); opacity:0; pointer-events:none; }
@@ -33,23 +33,23 @@
     .main { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; padding:8px 12px; }
     .topbar { display:flex; align-items:center; gap:8px; padding:4px 2px 8px; }
     .title { font-size:14px; font-weight:700; }
-    .pill { margin-left:auto; border:1px solid var(--border); border-radius:999px; padding:3px 8px; color:var(--muted); font-size:10px; background:var(--surface-2); }
+    .pill { margin-left:auto; border:0; border-radius:999px; padding:3px 8px; color:var(--muted); font-size:10px; background:color-mix(in srgb, var(--surface-2) 70%, transparent); }
     .chat-layout { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto auto auto; gap:7px; }
     .messages { min-height:0; overflow:auto; padding:2px 0; }
     .msg { margin:0 auto; max-width:900px; padding:4px 0 6px; }
     .msg-meta { display:inline-flex; align-items:center; gap:6px; margin:0 10px 4px; font-size:10px; color:var(--muted); text-transform:uppercase; }
     .bubble { border:0; border-radius:10px; background:color-mix(in srgb, var(--surface-2) 62%, transparent); padding:9px 11px; margin:0 8px; white-space:pre-wrap; }
-    .msg.role-user .bubble { background:color-mix(in srgb, #dbe7ff 36%, var(--surface-2)); }
+    .msg.role-user .bubble { background:color-mix(in srgb, var(--accent-2) 24%, var(--surface-2)); }
     .composer { padding-top:4px; background:transparent; }
     textarea, input, select { width:100%; border:0; border-radius:10px; padding:8px 10px; background:var(--surface-2); color:var(--text); }
     textarea { padding:10px; }
-    textarea:focus, input:focus, select:focus { outline:none; box-shadow:0 0 0 2px color-mix(in srgb, #2f6fed 25%, transparent); }
+    textarea:focus, input:focus, select:focus { outline:none; box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
     .actions { display:flex; gap:8px; align-items:center; margin-top:8px; }
     button { border:0; border-radius:10px; background:transparent; color:var(--text); padding:7px 10px; font-weight:600; cursor:pointer; transition:all .16s ease; }
     button:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,.05); }
     button.primary { background:color-mix(in srgb, var(--surface-2) 70%, transparent); }
-    .send-btn { background:#2f6fed; color:#fff; }
-    .send-btn:hover { box-shadow:0 6px 20px rgba(47,111,237,.24); }
+    .send-btn { background:var(--accent); color:#fff; }
+    .send-btn:hover { box-shadow:0 6px 20px color-mix(in srgb, var(--accent) 40%, transparent); }
     .muted { color:var(--muted); font-size:12px; }
     .trace { max-height:120px; overflow:auto; padding:6px 8px; font-size:10.5px; white-space:pre-wrap; color:var(--muted); background:color-mix(in srgb, var(--surface-2) 45%, transparent); border-radius:8px; }
     .role-tool .msg-meta { color: color-mix(in srgb, var(--muted) 80%, #94a3b8); font-size:10px; }

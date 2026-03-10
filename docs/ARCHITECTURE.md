@@ -29,6 +29,7 @@ This creates high cognitive load for onboarding and raises regression risk when 
 - ✅ Stage 2 complete: centralized key runtime mutations (session new/clear and settings updates) into shared runtime service helpers to reduce ad hoc route-level state mutation.
 - ✅ Stage 3 complete: moved frontend JavaScript into `static/app.js` and organized code by boundaries (networking helpers, state/reducers, render functions, event wiring) while keeping server-rendered template deployment unchanged.
 - ✅ Stage 4 complete: added explicit typed API contracts for high-churn POST routes (`/api/session`, `/api/settings`, `/api/chat/*`) with predictable 400 error responses and regression tests.
+- ✅ Frontend Stage 2 complete: split frontend source into real modules under `static/app/` (`network.js`, `store.js`, `render/core.js`, `main.js`, `events.js`) with a tiny bundle build step.
 
 
 ### 1) Split web backend by responsibility

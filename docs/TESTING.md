@@ -17,6 +17,7 @@ This runs the unit test suite via Python `unittest` discovery.
 - `make test-web` — only Flask/web endpoint tests.
 - `make test-fast` — alias for `test` (for local loops/CI scripts).
 - `make check` — full local verification target (currently test suite).
+- `make build-frontend` — rebuild `agents/mu_cli/static/app.js` from modular source files under `agents/mu_cli/static/app/`.
 
 ## Running a specific test module/case
 

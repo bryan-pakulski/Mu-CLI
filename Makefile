@@ -12,7 +12,7 @@ APPROVAL_MODE ?= ask
 AGENTIC_PLANNING ?= 1
 DEBUG ?= 0
 
-.PHONY: test test-fast test-verbose test-web check run run-web run-echo run-openai run-gemini models docker-build docker-run-web docker-run-cli docker-models help
+.PHONY: test test-fast test-verbose test-web check build-frontend run run-web run-echo run-openai run-gemini models docker-build docker-run-web docker-run-cli docker-models help
 
 help:
 	@echo "Targets:"
@@ -43,6 +43,9 @@ test-web:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest agents.tests.test_web
 
 check: test
+
+build-frontend:
+	$(PYTHON) scripts/build_frontend_bundle.py
 
 models:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mu_cli.cli --list-models

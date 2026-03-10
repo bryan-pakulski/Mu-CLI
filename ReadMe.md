@@ -54,6 +54,7 @@ make test-fast
 make test-verbose
 make test-web
 make check
+make build-frontend
 make models
 make run-echo
 make run-openai   # requires OPENAI_API_KEY

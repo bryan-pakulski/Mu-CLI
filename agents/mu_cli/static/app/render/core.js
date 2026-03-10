@@ -1412,6 +1412,21 @@ function _metaRow(kind, label, value) {
   return row;
 }
 
+function _metaFilterAllows(kind, label, text) {
+  const filter = state.timelineFilter || 'all';
+  if (filter === 'all') return true;
+  const hay = `${label || ''} ${text || ''}`.toLowerCase();
+  if (filter === 'tool') return kind === 'tool-call' || kind === 'tool-result';
+  if (filter === 'model') {
+    if (kind === 'automation') return /(^|\b)model[:\s]/i.test(hay);
+    return false;
+  }
+  if (filter === 'status') {
+    return /status[:=]|completed|failed|killed|timed_out|awaiting_plan_approval/i.test(hay);
+  }
+  return true;
+}
+
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
   host.innerHTML = '';
@@ -1419,18 +1434,22 @@ function renderMetadataPanel() {
   let cards = 0;
 
   const ws = state.workspaceIndexStats || {};
-  if (Object.keys(ws).length) {
+  if (Object.keys(ws).length && _metaFilterAllows('workspace', 'Workspace indexing', 'workspace stats')) {
     const card = document.createElement('div');
     card.className = 'meta-card';
     card.innerHTML = '<div class="meta-head"><span>Workspace indexing</span><span>stats</span></div>';
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
     for (const [key, value] of Object.entries(ws)) {
-      lines.appendChild(_metaRow('workspace', 'Workspace stat', `${key}: ${value}`));
+      const label = 'Workspace stat';
+      const body = `${key}: ${value}`;
+      if (_metaFilterAllows('workspace', label, body)) lines.appendChild(_metaRow('workspace', label, body));
     }
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   for (let idx = state.messages.length - 1; idx >= 0; idx -= 1) {
@@ -1446,14 +1465,16 @@ function renderMetadataPanel() {
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
 
-    for (const item of meta.toolRequests) lines.appendChild(_metaRow('tool-call', 'Tool call', item));
-    for (const item of meta.toolResults) lines.appendChild(_metaRow('tool-result', 'Tool result', item));
-    for (const item of meta.citationItems) lines.appendChild(_metaRow('citation', 'Citation', item));
-    for (const item of meta.researchSteps) lines.appendChild(_metaRow('research', 'Research step', item));
+    for (const item of meta.toolRequests) if (_metaFilterAllows('tool-call', 'Tool call', item)) lines.appendChild(_metaRow('tool-call', 'Tool call', item));
+    for (const item of meta.toolResults) if (_metaFilterAllows('tool-result', 'Tool result', item)) lines.appendChild(_metaRow('tool-result', 'Tool result', item));
+    for (const item of meta.citationItems) if (_metaFilterAllows('citation', 'Citation', item)) lines.appendChild(_metaRow('citation', 'Citation', item));
+    for (const item of meta.researchSteps) if (_metaFilterAllows('research', 'Research step', item)) lines.appendChild(_metaRow('research', 'Research step', item));
 
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
@@ -1472,11 +1493,13 @@ function renderMetadataPanel() {
       else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
       else if (line.startsWith('status:')) { kind = 'research'; label = 'Status'; }
       else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
-      lines.appendChild(_metaRow(kind, label, line));
+      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
     }
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   const automation = collectAutomationMetadata(state.messages);
@@ -1487,11 +1510,14 @@ function renderMetadataPanel() {
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
     for (const item of automation.slice(-20).reverse()) {
-      lines.appendChild(_metaRow('automation', `${item.kind} · ${item.role}`, item.text));
+      const label = `${item.kind} · ${item.role}`;
+      if (_metaFilterAllows('automation', label, item.text)) lines.appendChild(_metaRow('automation', label, item.text));
     }
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   const terminalJobs = (state.backgroundJobs || [])
@@ -1509,14 +1535,16 @@ function renderMetadataPanel() {
         ? JSON.stringify(job.report, null, 2)
         : (job.last_step || `status=${job.status}; iterations=${job.iterations || 0}`);
       const label = `Run ${job.id || '-'} · ${job.status || 'unknown'}`;
-      lines.appendChild(_metaRow('automation', label, reportText));
+      if (_metaFilterAllows('automation', label, reportText)) lines.appendChild(_metaRow('automation', label, reportText));
     });
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
-  if (!cards) host.innerHTML = '<div class="meta-empty">No tool/research metadata yet.</div>';
+  if (!cards) host.innerHTML = '<div class="meta-empty">No metadata items match this filter.</div>';
 }
 
 

@@ -181,17 +181,28 @@
       grid-template-columns: minmax(0,1fr) auto;
       gap: 10px;
       align-items: stretch;
+      position: relative;
     }
     .meta-rail {
       min-height: 0;
       display: grid;
-      grid-template-columns: auto 8px minmax(220px, var(--meta-width));
+      grid-template-columns: auto 8px var(--meta-width);
       align-items: stretch;
       gap: 8px;
     }
-    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr) auto; }
+    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr); }
     .workspace-layout.meta-hidden .meta-resize-handle,
     .workspace-layout.meta-hidden .meta-sidebar { display: none; }
+    .workspace-layout.meta-hidden .meta-rail {
+      position: absolute;
+      right: 0;
+      top: 0;
+      width: auto;
+      z-index: 4;
+      display: block;
+      min-height: auto;
+    }
+    .workspace-layout.meta-hidden .meta-toggle-icon { margin-top: 0; }
     .meta-toggle-icon {
       align-self: flex-start;
       margin-top: 8px;
@@ -435,7 +446,7 @@
     .meta-resize-handle:hover { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--primary) 30%, var(--border)), transparent); }
 
      .meta-sidebar {
-      width: var(--meta-width);
+      width: auto;
       min-width: 220px;
       max-width: min(520px, 48vw);
       min-height: 0;
@@ -1298,6 +1309,7 @@
       .sidebar { display: none; }
       .workspace-layout { grid-template-columns: minmax(0,1fr); }
       .meta-rail { grid-template-columns: auto 0 minmax(0,1fr); }
+      .workspace-layout.meta-hidden .meta-rail { position: static; }
       .meta-resize-handle { display:none; }
       .meta-sidebar {
         max-width: 100%;

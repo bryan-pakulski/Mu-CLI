@@ -212,10 +212,10 @@ bindClick('refreshGitDiff', async () => {
   renderGitControls();
 });
 
-bindClick('timelineFilterAll', () => { state.timelineFilter = 'all'; renderExecutionTimeline(); });
-bindClick('timelineFilterModel', () => { state.timelineFilter = 'model'; renderExecutionTimeline(); });
-bindClick('timelineFilterTool', () => { state.timelineFilter = 'tool'; renderExecutionTimeline(); });
-bindClick('timelineFilterStatus', () => { state.timelineFilter = 'status'; renderExecutionTimeline(); });
+bindClick('timelineFilterAll', () => { state.timelineFilter = 'all'; renderExecutionTimeline(); renderMetadataPanel(); });
+bindClick('timelineFilterModel', () => { state.timelineFilter = 'model'; renderExecutionTimeline(); renderMetadataPanel(); });
+bindClick('timelineFilterTool', () => { state.timelineFilter = 'tool'; renderExecutionTimeline(); renderMetadataPanel(); });
+bindClick('timelineFilterStatus', () => { state.timelineFilter = 'status'; renderExecutionTimeline(); renderMetadataPanel(); });
 
 bindClick('gitInlineMode', () => { state.gitDiffMode = 'inline'; renderGitDiffWorkbench(); });
 bindClick('gitSideMode', () => { state.gitDiffMode = 'side'; renderGitDiffWorkbench(); });

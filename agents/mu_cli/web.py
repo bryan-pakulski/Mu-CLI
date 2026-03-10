@@ -1039,6 +1039,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             no_progress_streak = 0
             previous_step = None
             replan_count = 0
+            completed_by_plan = False
             policy = job.get("verification_policy") or _verification_policy_for_task(text)
             job["events"].append(
                 f"verification_policy: type={policy.get('task_type')} checks={','.join(policy.get('required_checks', []))}"
@@ -1110,6 +1111,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["checkpoints"] = job["checkpoints"][-30:]
 
                 if _is_plan_complete(reply.content):
+                    completed_by_plan = True
+                    job["events"].append("status: plan_complete_detected")
                     break
                 if not isolated.agentic_planning:
                     break
@@ -1150,6 +1153,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
 
             if job.get("status") == "killed":
                 pass
+            elif completed_by_plan or _is_plan_complete(job.get("last_step") or ""):
+                job["status"] = "completed"
             elif datetime.now(timezone.utc).timestamp() >= deadline:
                 job["status"] = "timed_out"
 

@@ -892,15 +892,25 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
     return runtime
 
 
-def _step_internal(runtime: WebRuntime, prompt: str, kind: str) -> Message:
-    before = len(runtime.agent.state.messages)
-    reply = runtime.agent.step(prompt)
-    for message in runtime.agent.state.messages[before:]:
+
+
+def _mark_messages_as_metadata(messages: list[Message], *, kind: str) -> None:
+    for message in messages:
         if message.role not in {Role.USER, Role.ASSISTANT}:
             continue
         message.metadata["show_in_main"] = False
         message.metadata["metadata_group"] = "automation"
         message.metadata["automation_kind"] = kind
+
+
+def _is_internal_agent_loop_prompt(prompt: str) -> bool:
+    normalized = " ".join((prompt or "").strip().split()).lower()
+    return normalized.startswith("continue executing the approved plan.") or normalized.startswith("execute the replan.") or normalized.startswith("you appear stalled.")
+
+def _step_internal(runtime: WebRuntime, prompt: str, kind: str) -> Message:
+    before = len(runtime.agent.state.messages)
+    reply = runtime.agent.step(prompt)
+    _mark_messages_as_metadata(runtime.agent.state.messages[before:], kind=kind)
     return reply
 
 
@@ -1056,6 +1066,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 )
                 turn_messages = isolated.agent.state.messages[before_len:]
                 had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
+                if _is_internal_agent_loop_prompt(prompt):
+                    _mark_messages_as_metadata(turn_messages, kind="agent_loop")
                 report = _turn_report(isolated, prompt, reply.content)
                 if len(isolated.traces) > trace_cursor:
                     job["events"].extend(isolated.traces[trace_cursor:])

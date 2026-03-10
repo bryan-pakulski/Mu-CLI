@@ -1223,7 +1223,7 @@
               <input id="promptAttachInput" type="file" class="d-none" multiple />
             </div>
             <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
-            <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>Session is searching…</span></div>
+            <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>AI is thinking…</span></div>
             <div id="queryRuntime" class="query-runtime">Runtime: 00:00</div>
             <details id="backgroundLive" class="bg-live">
               <summary id="backgroundLiveSummary">Live run activity</summary>
@@ -1512,6 +1512,7 @@ const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
 let planOverlayUserVisible = false;
+let sendingSession = null;
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -2610,18 +2611,22 @@ function updateQueryRuntime() {
 }
 
 function updateChatBusyState() {
-  const busy = !!activeSearchingJob();
+  const searching = !!activeSearchingJob();
+  const sendingForSession = !!sending && (!sendingSession || sendingSession === state.activeSession);
+  const busy = searching || sendingForSession;
   const composer = document.getElementById('chatComposer');
   const indicator = document.getElementById('searchingIndicator');
   const prompt = document.getElementById('prompt');
   const send = document.getElementById('send');
   const sendBackground = document.getElementById('sendBackground');
+  const attach = document.getElementById('promptAttach');
   if (composer) composer.classList.toggle('composer-disabled', busy);
   if (indicator) indicator.classList.toggle('show', busy);
   if (prompt) prompt.disabled = busy;
   if (send) send.disabled = busy;
   if (sendBackground) sendBackground.disabled = busy;
-  updateThinking(busy || sending);
+  if (attach) attach.disabled = busy;
+  updateThinking(busy);
   updateQueryRuntime();
   renderBackgroundActivity(activeSearchingJob() || null);
   renderPlanOutput(activeSearchingJob() || null);
@@ -3078,7 +3083,9 @@ async function sendPrompt(background = false) {
   if (!text) return;
 
   sending = true;
+  sendingSession = selectedSessionName() || state.activeSession || null;
   updateThinking(true);
+  updateChatBusyState();
   document.getElementById('prompt').value = '';
 
   if (approvalPoll) clearInterval(approvalPoll);
@@ -3178,6 +3185,8 @@ async function sendPrompt(background = false) {
     }
     updateThinking(false);
     sending = false;
+    sendingSession = null;
+    updateChatBusyState();
   }
 }
 

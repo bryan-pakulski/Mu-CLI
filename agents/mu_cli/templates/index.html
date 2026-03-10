@@ -1722,8 +1722,11 @@ Keep responses concise"></textarea>
             <select id="rulesVersionSelect" class="form-select form-select-sm" style="max-width:220px"></select>
             <button id="rollbackRulesVersion" class="btn btn-soft btn-sm" type="button">Rollback</button>
             <button id="deleteRulesVersion" class="btn btn-soft btn-sm" type="button">Delete</button>
+            <button id="compareRulesVersion" class="btn btn-soft btn-sm" type="button">Compare</button>
+            <button id="checkRulesConflicts" class="btn btn-soft btn-sm" type="button">Conflict check</button>
           </div>
           <div id="rulesVersionStatus" class="small-muted"></div>
+          <pre id="rulesVersionDiffOutput" class="trace mt-1" style="max-height:160px">No rules diff computed yet.</pre>
         </section>
 
         <section class="settings-section">

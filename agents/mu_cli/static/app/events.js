@@ -36,6 +36,8 @@ bindClick('deleteSkillPreset', () => deleteSkillPresetFromUI());
 bindClick('saveRulesVersion', () => saveRulesVersionFromUI());
 bindClick('rollbackRulesVersion', () => rollbackRulesVersionFromUI());
 bindClick('deleteRulesVersion', () => deleteRulesVersionFromUI());
+bindClick('compareRulesVersion', () => compareRulesVersionFromUI());
+bindClick('checkRulesConflicts', () => checkRulesConflictsFromUI());
 
 bindClick('saveBehaviorProfile', () => saveBehaviorProfileFromUI());
 bindClick('applyBehaviorProfile', () => applyBehaviorProfileFromUI());

@@ -2083,6 +2083,85 @@ function deleteRulesVersionFromUI() {
   if (status) status.textContent = 'Deleted selected rules version.';
 }
 
+function _lineDiff(before, after) {
+  const a = String(before || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const b = String(after || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const removed = a.filter((line) => !b.includes(line)).map((line) => `- ${line}`);
+  const added = b.filter((line) => !a.includes(line)).map((line) => `+ ${line}`);
+  const unchanged = b.filter((line) => a.includes(line)).slice(0, 12).map((line) => `  ${line}`);
+  return [
+    '# Rules diff',
+    '## Added',
+    ...(added.length ? added : ['(none)']),
+    '',
+    '## Removed',
+    ...(removed.length ? removed : ['(none)']),
+    '',
+    '## Unchanged (sample)',
+    ...(unchanged.length ? unchanged : ['(none)']),
+  ].join('\n');
+}
+
+function compareRulesVersionFromUI() {
+  const sel = document.getElementById('rulesVersionSelect');
+  const key = String(sel && sel.value || '');
+  const out = document.getElementById('rulesVersionDiffOutput');
+  const status = document.getElementById('rulesVersionStatus');
+  if (!out) return;
+  const store = _readStage3Store();
+  const found = (store.rulesVersions || []).find((v) => v.id === key);
+  if (!found) {
+    out.textContent = 'Select a rules version to compare.';
+    if (status) status.textContent = 'No version selected for comparison.';
+    return;
+  }
+  const current = String((document.getElementById('rulesChecklist') || {}).value || '');
+  out.textContent = _lineDiff(found.rulesChecklist || '', current);
+  if (status) status.textContent = `Compared current rules against ${found.label}.`;
+}
+
+function checkRulesConflictsFromUI() {
+  const out = document.getElementById('rulesVersionDiffOutput');
+  const status = document.getElementById('rulesVersionStatus');
+  if (!out) return;
+  const lines = String((document.getElementById('rulesChecklist') || {}).value || '')
+    .split('\n').map((l) => l.trim()).filter(Boolean);
+  const seen = new Set();
+  const polarityByKey = new Map();
+  const duplicates = [];
+  const contradictory = [];
+
+  const normalize = (line) => String(line || '').toLowerCase().replace(/^(always|never|do not|don't|no|do|use|prefer)\s+/, '').trim();
+  const polarity = (line) => (/^(never|do not|don't|no)\b/i.test(line) ? 'neg' : 'pos');
+
+  lines.forEach((line) => {
+    const key = normalize(line);
+    const sig = `${key}::${String(line).toLowerCase()}`;
+    if (seen.has(sig)) duplicates.push(line);
+    seen.add(sig);
+
+    const pol = polarity(line);
+    const prior = polarityByKey.get(key);
+    if (prior && prior !== pol) contradictory.push(line);
+    if (!prior) polarityByKey.set(key, pol);
+  });
+
+  const report = [
+    '# Rules conflict check',
+    `Total rules: ${lines.length}`,
+    '',
+    '## Duplicate-like rules',
+    ...(duplicates.length ? duplicates.map((d) => `- ${d}`) : ['(none)']),
+    '',
+    '## Potential contradictions',
+    ...(contradictory.length ? contradictory.map((d) => `- ${d}`) : ['(none)']),
+  ].join('\n');
+  out.textContent = report;
+  if (status) status.textContent = (duplicates.length || contradictory.length)
+    ? `Conflict check found ${duplicates.length + contradictory.length} issue(s).`
+    : 'Conflict check passed with no obvious issues.';
+}
+
 function saveBehaviorProfileFromUI() {
   const name = String((document.getElementById('behaviorProfileName') || {}).value || '').trim();
   if (!name) throw new Error('Profile name required');

@@ -122,6 +122,12 @@
     }
 
     .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: 8px 12px; }
+    .workspace-layout {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0,1fr) 360px;
+      gap: 10px;
+    }
     .topbar {
       display: flex;
       align-items: center;
@@ -239,6 +245,65 @@
     .trace-wrap[open] > summary { border-bottom-color: var(--border); }
     .trace-wrap > summary::-webkit-details-marker { display: none; }
     .trace { max-height: 120px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
+
+    .meta-sidebar {
+      min-height: 0;
+      overflow: auto;
+      border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      padding-left: 10px;
+      display: grid;
+      grid-template-rows: auto minmax(0,1fr);
+      gap: 8px;
+    }
+    .meta-sidebar h4 {
+      margin: 0;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 4px 2px;
+    }
+    .meta-feed {
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+      padding-right: 2px;
+    }
+    .meta-cards { display: grid; gap: 8px; }
+    .meta-card {
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+      padding: 8px;
+      font-size: 12px;
+    }
+    .meta-card .meta-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .meta-lines { display: grid; gap: 5px; }
+    .meta-line {
+      border-left: 2px solid color-mix(in srgb, var(--border) 80%, transparent);
+      padding-left: 7px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .meta-empty {
+      color: var(--muted);
+      font-size: 12px;
+      border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+    }
 
     .msg {
       margin: 0 auto;
@@ -973,6 +1038,13 @@
     @media (max-width: 1000px) {
       .shell { grid-template-columns: minmax(0,1fr); }
       .sidebar { display: none; }
+      .workspace-layout { grid-template-columns: minmax(0,1fr); }
+      .meta-sidebar {
+        border-left: 0;
+        border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+        padding-left: 0;
+        padding-top: 8px;
+      }
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
@@ -1043,40 +1115,48 @@
         <button id="openGitModal" class="btn btn-soft btn-sm top-git-launch">GIT</button>
       </div>
 
-      <div class="chat-layout">
-        <div id="messages" class="messages"></div>
-        <div id="planOverlay" class="plan-overlay">
-          <div class="plan-overlay-head">
-            <strong>Plan output</strong>
-            <span id="planOverlayStatus">Idle</span>
+      <div class="workspace-layout">
+        <div class="chat-layout">
+          <div id="messages" class="messages"></div>
+          <div id="planOverlay" class="plan-overlay">
+            <div class="plan-overlay-head">
+              <strong>Plan output</strong>
+              <span id="planOverlayStatus">Idle</span>
+            </div>
+            <div id="planOverlayBody" class="plan-overlay-body"></div>
           </div>
-          <div id="planOverlayBody" class="plan-overlay-body"></div>
+
+          <div id="chatComposer">
+            <div class="prompt-wrap">
+              <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
+              <button id="promptAttach" class="btn btn-soft prompt-attach" title="Attach file">+</button>
+              <input id="promptAttachInput" type="file" class="d-none" multiple />
+            </div>
+            <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
+            <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>Session is searching…</span></div>
+            <div id="queryRuntime" class="query-runtime">Runtime: 00:00</div>
+            <details id="backgroundLive" class="bg-live">
+              <summary id="backgroundLiveSummary">Live run activity</summary>
+              <div id="backgroundLiveBody" class="bg-live-body"><div class="bg-live-empty">No activity yet.</div></div>
+            </details>
+            <div class="d-flex align-items-center gap-2 mt-2">
+              <button id="send" class="btn btn-accent btn-sm">Send</button>
+              <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
+              <div id="report" class="small-muted"></div>
+            </div>
+          </div>
         </div>
 
-        <details class="trace-wrap" id="traceWrap">
-          <summary>Debug traces</summary>
-          <div id="traces" class="trace">debug traces will appear here</div>
-        </details>
-
-        <div id="chatComposer">
-          <div class="prompt-wrap">
-            <textarea id="prompt" class="form-control" placeholder="Ask anything..."></textarea>
-            <button id="promptAttach" class="btn btn-soft prompt-attach" title="Attach file">+</button>
-            <input id="promptAttachInput" type="file" class="d-none" multiple />
+        <aside class="meta-sidebar">
+          <h4>Run metadata</h4>
+          <div class="meta-feed">
+            <details class="trace-wrap" id="traceWrap" open>
+              <summary>Debug traces</summary>
+              <div id="traces" class="trace">debug traces will appear here</div>
+            </details>
+            <div id="metaFeed" class="meta-cards"></div>
           </div>
-          <div id="promptUploadStatus" class="small-muted mt-1 prompt-upload-status">No files attached this turn.</div>
-          <div id="searchingIndicator" class="searching-indicator"><span class="searching-dot"></span><span>Session is searching…</span></div>
-          <div id="queryRuntime" class="query-runtime">Runtime: 00:00</div>
-          <details id="backgroundLive" class="bg-live">
-            <summary id="backgroundLiveSummary">Live run activity</summary>
-            <div id="backgroundLiveBody" class="bg-live-body"><div class="bg-live-empty">No activity yet.</div></div>
-          </details>
-          <div class="d-flex align-items-center gap-2 mt-2">
-            <button id="send" class="btn btn-accent btn-sm">Send</button>
-            <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
-            <div id="report" class="small-muted"></div>
-          </div>
-        </div>
+        </aside>
       </div>
     </section>
   </div>
@@ -2135,7 +2215,99 @@ function shouldRenderMessage(message) {
   const content = String(message.content || '').trim();
   const toolCalls = (message.metadata && message.metadata.tool_calls) || [];
   const typing = !!(message.metadata && message.metadata.typing);
-  return content.length > 0 || toolCalls.length > 0 || typing;
+  return content.length > 0 || typing;
+}
+
+function collectAssistantMetadata(messages, assistantIndex) {
+  const toolRequests = [];
+  const toolResults = [];
+  const assistantMessage = messages[assistantIndex] || {};
+  const directCalls = (assistantMessage.metadata && assistantMessage.metadata.tool_calls) || [];
+  for (const call of directCalls) {
+    const name = String(call.name || 'tool');
+    const args = String(call.arguments || '').trim();
+    const shortArgs = args.length > 180 ? `${args.slice(0, 177)}...` : args;
+    toolRequests.push(`requested ${name}${shortArgs ? ` with args ${shortArgs}` : ''}`);
+  }
+
+  for (let i = assistantIndex + 1; i < messages.length; i += 1) {
+    const current = messages[i];
+    if (!current) continue;
+    if (current.role === 'assistant' || current.role === 'user') break;
+    if (current.role === 'tool_result') toolResults.push(summarizeToolResult(current.content));
+  }
+
+  const reasons = scoreReasonsByUrl(messages, assistantIndex);
+  const citations = extractCitationLinks(assistantMessage.content || '');
+  const citationItems = citations.map((url) => {
+    const why = reasons[url] ? `\nwhy chosen: ${reasons[url]}` : '';
+    return `${url}${why}`;
+  });
+  const researchSteps = [];
+  const trail = buildResearchTrailPanel(messages, assistantIndex);
+  if (trail) {
+    const steps = [];
+    for (let i = assistantIndex - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (!m) continue;
+      if (m.role === 'user') break;
+      if (m.role === 'tool_result') steps.push(summarizeToolResult(m.content));
+    }
+    researchSteps.push(...steps.reverse());
+  }
+
+  return { toolRequests, toolResults, citationItems, researchSteps };
+}
+
+function renderMetadataPanel() {
+  const host = document.getElementById('metaFeed');
+  host.innerHTML = '';
+  const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
+  let cards = 0;
+
+  state.messages.forEach((m, idx) => {
+    if (m.role !== 'assistant') return;
+    const meta = collectAssistantMetadata(state.messages, idx);
+    if (!meta.toolRequests.length && !meta.toolResults.length && !meta.citationItems.length && !meta.researchSteps.length) return;
+
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    const stamp = formatTimestamp(messageTimes.get(idx));
+    card.innerHTML = `<div class="meta-head"><span>Assistant metadata</span><span>${escapeHtml(stamp || '—')}</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+
+    for (const item of meta.toolRequests) {
+      const row = document.createElement('div');
+      row.className = 'meta-line';
+      row.textContent = `Tool call: ${item}`;
+      lines.appendChild(row);
+    }
+    for (const item of meta.toolResults) {
+      const row = document.createElement('div');
+      row.className = 'meta-line';
+      row.textContent = `Tool result: ${item}`;
+      lines.appendChild(row);
+    }
+    for (const item of meta.citationItems) {
+      const row = document.createElement('div');
+      row.className = 'meta-line';
+      row.textContent = `Citation: ${item}`;
+      lines.appendChild(row);
+    }
+    for (const item of meta.researchSteps) {
+      const row = document.createElement('div');
+      row.className = 'meta-line';
+      row.textContent = `Research: ${item}`;
+      lines.appendChild(row);
+    }
+
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  });
+
+  if (!cards) host.innerHTML = '<div class="meta-empty">No tool/research metadata yet.</div>';
 }
 
 function renderMessages() {
@@ -2147,27 +2319,8 @@ function renderMessages() {
   state.messages.forEach((m, idx) => {
     if (!shouldRenderMessage(m)) return;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim() && ((m.metadata && m.metadata.tool_calls) || []).length) {
-      const calls = (m.metadata && m.metadata.tool_calls) || [];
-      const line = calls.map((call) => `calling ${call.name || 'tool'}...`).join(' | ');
-      if (anchor) {
-        const el = document.createElement('div');
-        el.className = 'tool-inline call';
-        el.textContent = line;
-        anchor.appendChild(el);
-      }
-      return;
-    }
-
-    if (m.role === 'tool_result') {
-      if (anchor) {
-        const el = document.createElement('div');
-        el.className = 'tool-inline result';
-        el.textContent = summarizeToolResult(m.content);
-        anchor.appendChild(el);
-      }
-      return;
-    }
+    if (m.role === 'assistant' && !String(m.content || '').trim()) return;
+    if (m.role === 'tool_result' || m.role === 'tool_call') return;
 
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
@@ -2195,21 +2348,6 @@ function renderMessages() {
     box.appendChild(row);
     anchor = row;
 
-    if (m.role === 'assistant') {
-      const reasons = scoreReasonsByUrl(state.messages, idx);
-      const citationHtml = buildCitationPanel(m.content, reasons);
-      if (citationHtml) {
-        const container = document.createElement('div');
-        container.innerHTML = citationHtml;
-        row.appendChild(container.firstElementChild);
-      }
-      const trailHtml = buildResearchTrailPanel(state.messages, idx);
-      if (trailHtml) {
-        const trailContainer = document.createElement('div');
-        trailContainer.innerHTML = trailHtml;
-        row.appendChild(trailContainer.firstElementChild);
-      }
-    }
   });
 
   highlightCodeBlocks(box);
@@ -2678,6 +2816,7 @@ async function refreshState() {
   renderSkillSettings();
   renderGitControls();
   renderMessages();
+  renderMetadataPanel();
   renderTraces();
   updateChatBusyState();
   renderBackgroundActivity(activeJob || activeSearchingJob() || null);
@@ -2738,6 +2877,7 @@ async function sendPrompt(background = false) {
   let draft = { role: 'assistant', content: '', metadata: { typing: true } };
   state.messages.push(draft);
   renderMessages();
+  renderMetadataPanel();
 
   try {
     if (background) {
@@ -2801,6 +2941,7 @@ async function sendPrompt(background = false) {
           if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
           renderMessages();
+          renderMetadataPanel();
         } else if (event.type === 'trace') {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);

@@ -34,7 +34,18 @@ This slice begins Stage 3 by introducing practical control-plane surfaces in the
 ## Stage 3 continuation (this pass)
 
 - Added skills preset save/apply/delete controls for lifecycle management in Settings.
+- Expanded skills lifecycle visibility with per-skill detail breakdowns for preset membership and session override usage.
 - Added tools console analytics table (risk/calls/failures/latency estimate).
+- Expanded tools console visibility with per-tool session override coverage.
 - Added context controls (exclude traces/uploads/tools and summarize rules action).
 - Added prompt/rules versioning controls (save, rollback, delete).
 - Added model behavior profiles (save/apply/delete).
+
+## Stage 3 completion status
+
+- Stage 3 Control Plane surfaces are now complete for the UI-managed scope:
+  - Skills management now includes lifecycle detail visibility and preset workflows.
+  - Tools management console includes operational signals and session-override coverage.
+  - Context budget manager includes exclusion toggles and summarize action.
+  - System prompt/rules manager includes version save/compare/rollback/delete and conflict checks.
+  - Model behavior controls include live knobs plus profile save/apply/delete.

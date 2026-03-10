@@ -42,11 +42,11 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 
 ### Stage 3 — Control plane surfaces (weeks 8-10)
 
-- [~] Skills management v2 (details, presets, lifecycle visibility).
-- [~] Tools management console (enablement, risk, latency/failure signal, session overrides).
-- [~] Context budget manager (token allocation meter, pin/summarize/exclude controls).
-- [~] System prompt/rules manager (versioning, diff, rollback, conflict checks).
-- [~] Model behavior controls (knobs/sliders + saved profiles).
+- [x] Skills management v2 (details, presets, lifecycle visibility).
+- [x] Tools management console (enablement, risk, latency/failure signal, session overrides).
+- [x] Context budget manager (token allocation meter, pin/summarize/exclude controls).
+- [x] System prompt/rules manager (versioning, diff, rollback, conflict checks).
+- [x] Model behavior controls (knobs/sliders + saved profiles).
 
 ### Stage 4 — Analytics + hardening + rollout (weeks 11-12)
 
@@ -92,8 +92,8 @@ Use this section as the baseline in-product help content so users can discover c
 | Session + Git workflows | Stage 2 | TBD | Shell integration | [ ] |
 | Diff + review workflows | Stage 2 | TBD | Hunk actions prototype | [ ] |
 | Runtime observability | Stage 2 | TBD | Timeline MVP | [ ] |
-| Skills/tools/rules controls | Stage 3 | TBD | Control center MVP | [~] |
-| Context budget tooling | Stage 3 | TBD | Token meter MVP | [~] |
+| Skills/tools/rules controls | Stage 3 | TBD | Control center MVP | [x] |
+| Context budget tooling | Stage 3 | TBD | Token meter MVP | [x] |
 | Metrics and rollout | Stage 4 | TBD | Telemetry dashboard MVP | [ ] |
 
 ## Execution rules

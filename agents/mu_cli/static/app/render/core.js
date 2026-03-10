@@ -52,19 +52,24 @@ function renderToolsConsole() {
   const host = document.getElementById('toolsConsoleHost');
   if (!host) return;
   const traces = state.traces || [];
+  const overrideStore = _readSessionOverrideStore();
+  const sessions = overrideStore.sessions || {};
   const rows = (state.tools || []).filter((t) => t.source === 'builtin').map((t) => {
     const name = String(t.name || '');
     const calls = traces.filter((line) => String(line).includes(name)).length;
     const failures = traces.filter((line) => String(line).includes(name) && /error|failed/i.test(String(line))).length;
     const risk = t.mutating ? 'high' : 'low';
     const latency = calls ? `${Math.max(80, 120 + (name.length * 7))}ms` : '—';
-    return { name, risk, calls, failures, latency };
+    const overrideSessions = Object.entries(sessions)
+      .filter(([, cfg]) => Object.prototype.hasOwnProperty.call((cfg && cfg.tool_visibility) || {}, name))
+      .map(([sessionName]) => sessionName);
+    return { name, risk, calls, failures, latency, overrideSessions };
   });
   if (!rows.length) {
     host.textContent = 'No tool analytics available.';
     return;
   }
-  host.innerHTML = `<table class="compact-table"><thead><tr><th>Tool</th><th>Risk</th><th>Calls</th><th>Failures</th><th>Latency</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.risk)}</td><td>${r.calls}</td><td>${r.failures}</td><td>${escapeHtml(r.latency)}</td></tr>`).join('')}</tbody></table>`;
+  host.innerHTML = `<table class="compact-table"><thead><tr><th>Tool</th><th>Risk</th><th>Calls</th><th>Failures</th><th>Latency</th><th>Session overrides</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.risk)}</td><td>${r.calls}</td><td>${r.failures}</td><td>${escapeHtml(r.latency)}</td><td title="${escapeHtml(r.overrideSessions.join(', '))}">${r.overrideSessions.length ? `${r.overrideSessions.length} session(s)` : '—'}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function _readSessionOverrideStore() {
@@ -1986,17 +1991,21 @@ function renderSkillsLifecycleVisibility() {
   const sessions = overrideStore.sessions || {};
 
   const rows = skills.map((name) => {
-    const inPresets = presetEntries.filter(([, list]) => Array.isArray(list) && list.includes(name)).length;
-    const sessionOverridden = Object.values(sessions).filter((cfg) => Array.isArray(cfg && cfg.enabled_skills) && cfg.enabled_skills.includes(name)).length;
+    const presetNames = presetEntries
+      .filter(([, list]) => Array.isArray(list) && list.includes(name))
+      .map(([presetName]) => presetName);
+    const overriddenSessions = Object.entries(sessions)
+      .filter(([, cfg]) => Array.isArray(cfg && cfg.enabled_skills) && cfg.enabled_skills.includes(name))
+      .map(([sessionName]) => sessionName);
     return {
       name,
       now: enabledNow.has(name),
-      inPresets,
-      sessionOverridden,
+      inPresets: presetNames,
+      overriddenSessions,
     };
   });
 
-  host.innerHTML = `<table class="compact-table"><thead><tr><th>Skill</th><th>Now</th><th>Presets</th><th>Session overrides</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${r.now ? 'enabled' : 'off'}</td><td>${r.inPresets}</td><td>${r.sessionOverridden}</td></tr>`).join('')}</tbody></table>`;
+  host.innerHTML = `<table class="compact-table"><thead><tr><th>Skill</th><th>Now</th><th>Presets</th><th>Session overrides</th><th>Details</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${r.now ? 'enabled' : 'off'}</td><td>${r.inPresets.length}</td><td>${r.overriddenSessions.length}</td><td><div class="small-muted">${r.inPresets.length ? `Presets: ${escapeHtml(r.inPresets.join(', '))}` : 'Presets: —'}</div><div class="small-muted">${r.overriddenSessions.length ? `Sessions: ${escapeHtml(r.overriddenSessions.join(', '))}` : 'Sessions: —'}</div></td></tr>`).join('')}</tbody></table>`;
 }
 
 function renderSkillSettings() {

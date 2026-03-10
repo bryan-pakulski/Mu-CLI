@@ -389,16 +389,16 @@ def _new_agent(runtime: WebRuntime) -> Agent:
 
         approved = decision == "approve"
         runtime.traces.append(
-            f"approval: id={request_id} tool={tool_name} decision={'approve' if approved else 'deny'}"
+            f"approval: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] id={request_id} tool={tool_name} decision={'approve' if approved else 'deny'}"
         )
         return approved
 
     def on_model_response(message: Message, calls: list[ToolCall]) -> None:
         if not runtime.debug:
             return
-        runtime.traces.append(f"model: {message.content}")
+        runtime.traces.append(f"model: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] {message.content}")
         for call in calls:
-            runtime.traces.append(f"tool-request: id={call.call_id} name={call.name} args={call.args}")
+            runtime.traces.append(f"tool-request: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] id={call.call_id} name={call.name} args={call.args}")
 
     def on_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
         runtime.workspace_store.record_tool_run(name, args, output, ok)
@@ -406,7 +406,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         _update_tool_reliability(runtime, name, ok, latency_ms)
         if runtime.debug:
             latency_suffix = f" latency_ms={latency_ms}" if latency_ms is not None else ""
-            runtime.traces.append(f"tool-run: name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
+            runtime.traces.append(f"tool-run: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
 
     return Agent(
         provider=provider,
@@ -1246,7 +1246,7 @@ def create_app():
         system_prompt="You are a helpful coding assistant. Keep responses concise.",
         session_name="default",
         workspace_path=None,
-        debug=False,
+        debug=True,
         agentic_planning=True,
         research_mode=False,
         workspace_store=workspace_store,

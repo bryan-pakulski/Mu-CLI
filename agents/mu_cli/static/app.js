@@ -1410,7 +1410,8 @@ function collectAutomationMetadata(messages) {
     const role = String(message.role || 'message');
     const text = String(message.content || '').trim();
     if (!text) continue;
-    items.push({ kind, role, text: text.length > 900 ? `${text.slice(0, 897)}...` : text });
+    const stamp = formatTimestamp(message.metadata.timestamp || message.metadata.ts || '');
+    items.push({ kind, role, text: text.length > 900 ? `${text.slice(0, 897)}...` : text, stamp: stamp || '—' });
   }
   return items;
 }
@@ -1593,7 +1594,7 @@ function renderMetadataPanel() {
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
     for (const item of automation.slice(-20).reverse()) {
-      const label = `${item.kind} · ${item.role}`;
+      const label = `${item.stamp} · ${item.kind} · ${item.role}`;
       if (_metaFilterAllows(item.kind, label, item.text)) lines.appendChild(_metaRow('automation', label, item.text));
     }
     if (lines.childElementCount) {

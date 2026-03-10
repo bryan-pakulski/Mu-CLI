@@ -78,9 +78,11 @@ Notes:
 - Includes built-in session management actions (new/load/delete/list/status).
 - Includes settings controls to enable/disable available skills per session.
 - Skills list in the left sidebar includes a `View` action to inspect skill markdown content.
+- Settings include provider-specific API key overrides (`OpenAI`, `Google/Gemini`) instead of a single global key.
 - Session row menu includes a clear action to wipe context and restart that session.
 - Left runtime panels are collapsible (runtime, sessions, skills, usage).
 - Right metadata panel is collapsible/resizable and groups compact debug/tool/research metadata.
+- Session usage panel includes `Metrics` and `Detailed stats` actions for per-session analytics.
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
 
 ## Workspace context and memory

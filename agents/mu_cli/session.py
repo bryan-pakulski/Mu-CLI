@@ -43,7 +43,13 @@ class SessionStore:
     def load(self) -> SessionState | None:
         if not self.path.exists():
             return None
-        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        raw = self.path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return None
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
         messages = [
             Message(
                 role=Role(item["role"]),

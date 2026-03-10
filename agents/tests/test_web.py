@@ -201,6 +201,24 @@ class WebTests(unittest.TestCase):
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
 
+    def test_settings_provider_api_keys_override(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={
+            'openai_api_key': 'sk-test-1',
+            'google_api_key': 'g-test-1',
+        })
+        self.assertEqual(200, res.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertEqual('sk-test-1', state['openai_api_key'])
+        self.assertEqual('g-test-1', state['google_api_key'])
+
     def test_settings_enable_skills(self) -> None:
         from mu_cli.web import create_app
 
@@ -287,6 +305,25 @@ class WebTests(unittest.TestCase):
             assert diff_payload is not None
             self.assertIn('status', diff_payload)
             self.assertIn('diff', diff_payload)
+
+    def test_session_turns_are_scoped_to_active_session(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/session', json={'action': 'new', 'name': 's1'})
+        client.post('/api/chat', json={'text': 'one'})
+        state1 = client.get('/api/state').get_json()
+        assert state1 is not None
+        self.assertTrue(all((turn.get('session') == 's1') for turn in state1['session_turns']))
+
+        client.post('/api/session', json={'action': 'new', 'name': 's2'})
+        client.post('/api/chat', json={'text': 'two'})
+        state2 = client.get('/api/state').get_json()
+        assert state2 is not None
+        self.assertTrue(all((turn.get('session') == 's2') for turn in state2['session_turns']))
 
     def test_research_export_endpoint(self) -> None:
         from mu_cli.web import create_app

@@ -1155,6 +1155,10 @@
           <div class="usage-chip"><div class="small-muted">Total</div><div id="usageTotal">0</div></div>
           <div class="usage-chip"><div class="small-muted">Cost USD</div><div id="usageCost">0.000000</div></div>
         </div>
+        <div class="d-flex gap-2 mt-2">
+          <button id="openMetrics" class="btn btn-soft btn-sm" type="button">Metrics</button>
+          <button id="openDetailedStats" class="btn btn-soft btn-sm" type="button">Detailed stats</button>
+        </div>
         </div>
       </details>
     </aside>
@@ -1164,7 +1168,6 @@
         <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
         <div class="title">mu_cli</div>
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
-        <button id="openMetrics" class="btn btn-soft btn-sm">Metrics</button>
         <button id="togglePlanOutput" class="btn btn-soft btn-sm">Plan output</button>
         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
@@ -1259,8 +1262,10 @@
       <div class="settings-layout">
         <section class="settings-section">
           <h6>General</h6>
-          <label class="small-muted mb-1">API key (global)</label>
-          <input id="apiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+          <label class="small-muted mb-1">OpenAI API key (override env)</label>
+          <input id="openaiApiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
+          <label class="small-muted mb-1">Google/Gemini API key (override env)</label>
+          <input id="googleApiKey" type="password" class="form-control mb-2" placeholder="AIza..." />
           <label class="small-muted mb-1">Max session runtime (seconds)</label>
           <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
           <label class="small-muted mb-1">Condense window (raw messages)</label>
@@ -1795,7 +1800,12 @@ function _drawLineChart(canvas, seriesMap) {
 }
 
 function renderMetrics() {
-  const turns = Array.isArray(state.sessionTurns) ? state.sessionTurns.slice() : [];
+  const turns = (Array.isArray(state.sessionTurns) ? state.sessionTurns.slice() : []).filter((turn) => {
+    const session = String(turn.session || '');
+    if (!state.activeSession) return true;
+    if (!session) return true;
+    return session === state.activeSession;
+  });
   const messages = Array.isArray(state.messages) ? state.messages : [];
   const usage = state.sessionUsage || {};
 
@@ -2733,7 +2743,8 @@ function buildSettingsPayload() {
   return {
     provider: document.getElementById('provider').value,
     model: document.getElementById('model').value,
-    api_key: document.getElementById('apiKey').value || null,
+    openai_api_key: document.getElementById('openaiApiKey').value || null,
+    google_api_key: document.getElementById('googleApiKey').value || null,
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
@@ -2771,7 +2782,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -2929,6 +2940,12 @@ async function refreshState() {
   document.getElementById('model').value = s.model;
   document.getElementById('approval').value = s.approval_mode;
   document.getElementById('workspace').value = s.workspace || '';
+  if (document.activeElement !== document.getElementById('openaiApiKey')) {
+    document.getElementById('openaiApiKey').value = s.openai_api_key || '';
+  }
+  if (document.activeElement !== document.getElementById('googleApiKey')) {
+    document.getElementById('googleApiKey').value = s.google_api_key || '';
+  }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
@@ -3178,7 +3195,7 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
 
-for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   document.getElementById(id).addEventListener('change', () => {
     if (id === 'provider') wireModels(document.getElementById('provider').value);
     if (id === 'darkMode') applyThemePreference();
@@ -3186,7 +3203,7 @@ for (const id of ['provider', 'model', 'apiKey', 'approval', 'workspace', 'debug
     scheduleApplySettings();
     syncPricingEditor();
   });
-  if (id === 'workspace' || id === 'apiKey') {
+  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey') {
     document.getElementById(id).addEventListener('blur', scheduleApplySettings);
   }
 }
@@ -3210,6 +3227,12 @@ document.getElementById('toggleSidebar').addEventListener('click', () => documen
 document.getElementById('openAdvanced').addEventListener('click', () => showModal('advancedModal', true));
 document.getElementById('closeAdvanced').addEventListener('click', () => showModal('advancedModal', false));
 document.getElementById('openMetrics').addEventListener('click', () => { renderMetrics(); showModal('metricsModal', true); });
+document.getElementById('openDetailedStats').addEventListener('click', () => {
+  renderMetrics();
+  showModal('metricsModal', true);
+  const breakdown = document.getElementById('metricsModelBreakdown');
+  if (breakdown) breakdown.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 document.getElementById('closeMetrics').addEventListener('click', () => showModal('metricsModal', false));
 document.getElementById('openGitModal').addEventListener('click', async () => {
   try {

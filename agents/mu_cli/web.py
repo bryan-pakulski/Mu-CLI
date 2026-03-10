@@ -51,7 +51,8 @@ from werkzeug.utils import secure_filename
 class WebRuntime:
     provider: str
     model: str
-    api_key: str | None
+    openai_api_key: str | None
+    google_api_key: str | None
     approval_mode: str
     system_prompt: str
     session_name: str
@@ -221,6 +222,15 @@ def _build_provider(name: str, model: str, api_key: str | None):
     raise ValueError(f"Unsupported provider: {name}")
 
 
+def _provider_api_key(runtime: WebRuntime, provider_name: str | None = None) -> str | None:
+    name = provider_name or runtime.provider
+    if name == "openai":
+        return runtime.openai_api_key
+    if name == "gemini":
+        return runtime.google_api_key
+    return None
+
+
 def _is_git_repo(path: Path) -> bool:
     try:
         proc = subprocess.run(
@@ -384,7 +394,7 @@ def _git_agent_instruction(runtime: WebRuntime) -> str | None:
 
 
 def _new_agent(runtime: WebRuntime) -> Agent:
-    provider = _build_provider(runtime.provider, runtime.model, runtime.api_key)
+    provider = _build_provider(runtime.provider, runtime.model, _provider_api_key(runtime))
 
     def on_approval(tool_name: str, args: dict) -> bool:
         mode = runtime.approval_mode
@@ -838,7 +848,8 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
     runtime = WebRuntime(
         provider=base.provider,
         model=base.model,
-        api_key=base.api_key,
+        openai_api_key=base.openai_api_key,
+        google_api_key=base.google_api_key,
         approval_mode=base.approval_mode,
         system_prompt=base.system_prompt,
         session_name=session_name,
@@ -1205,7 +1216,8 @@ def create_app():
     runtime = WebRuntime(
         provider="echo",
         model="echo",
-        api_key=None,
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        google_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         approval_mode="ask",
         system_prompt="You are a helpful coding assistant. Keep responses concise.",
         session_name="default",
@@ -1278,7 +1290,7 @@ def create_app():
                 "debug": runtime.debug,
                 "agentic_planning": runtime.agentic_planning,
                 "research_mode": runtime.research_mode,
-                "models": get_model_catalog({"gemini": runtime.api_key}),
+                "models": get_model_catalog({"openai": runtime.openai_api_key, "gemini": runtime.google_api_key}),
                 "sessions": sessions,
                 "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
                 "traces": runtime.traces[-50:],
@@ -1322,6 +1334,8 @@ def create_app():
                 "workspace_index_stats": (
                     runtime.workspace_store.snapshot.index_stats if runtime.workspace_store.snapshot else {}
                 ),
+                "openai_api_key": runtime.openai_api_key,
+                "google_api_key": runtime.google_api_key,
             }
         )
 
@@ -1453,10 +1467,13 @@ def create_app():
         payload = request.get_json(force=True)
 
         runtime.provider = str(payload.get("provider", runtime.provider))
+        if "openai_api_key" in payload:
+            runtime.openai_api_key = payload.get("openai_api_key") or None
+        if "google_api_key" in payload:
+            runtime.google_api_key = payload.get("google_api_key") or None
         selected_model = str(payload.get("model", runtime.model))
-        available = get_models(runtime.provider, runtime.api_key)
+        available = get_models(runtime.provider, _provider_api_key(runtime))
         runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
-        runtime.api_key = payload.get("api_key", runtime.api_key)
         runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
         runtime.debug = bool(payload.get("debug", runtime.debug))
         runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
@@ -1759,8 +1776,11 @@ def create_app():
 
             runtime.provider = str(payload.get("provider", runtime.provider))
             selected_model = str(payload.get("model", runtime.model))
-            runtime.api_key = payload.get("api_key", runtime.api_key)
-            available = get_models(runtime.provider, runtime.api_key)
+            if "openai_api_key" in payload:
+                runtime.openai_api_key = payload.get("openai_api_key") or None
+            if "google_api_key" in payload:
+                runtime.google_api_key = payload.get("google_api_key") or None
+            available = get_models(runtime.provider, _provider_api_key(runtime))
             runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
             runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
             runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))

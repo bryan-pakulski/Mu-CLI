@@ -60,6 +60,14 @@ class SessionTests(unittest.TestCase):
             self.assertTrue(store.delete("one"))
             self.assertFalse(store.delete("missing"))
 
+    def test_load_ignores_empty_or_invalid_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            store = SessionStore(Path(td), "bad")
+            (Path(td) / "bad.json").write_text("", encoding="utf-8")
+            self.assertIsNone(store.load())
+            (Path(td) / "bad.json").write_text("not-json", encoding="utf-8")
+            self.assertIsNone(store.load())
+
 
 if __name__ == "__main__":
     unittest.main()

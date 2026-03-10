@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import re
 import subprocess
 import threading
 import urllib.parse
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -45,46 +44,11 @@ from mu_cli.tools.filesystem import (
     WriteFileTool,
 )
 from mu_cli.workspace import WorkspaceStore
-from werkzeug.utils import secure_filename
-
-
-@dataclass(slots=True)
-class WebRuntime:
-    provider: str
-    model: str
-    openai_api_key: str | None
-    google_api_key: str | None
-    approval_mode: str
-    system_prompt: str
-    session_name: str
-    workspace_path: str | None
-    debug: bool
-    agentic_planning: bool
-    research_mode: bool
-    workspace_store: WorkspaceStore
-    session_store: SessionStore
-    pricing: PricingCatalog
-    tools: list[Tool]
-    agent: Agent
-    traces: list[str]
-    session_usage: dict[str, float]
-    session_turns: list[dict]
-    uploads: list[dict]
-    uploads_dir: Path
-    base_tools: list[Tool]
-    enabled_tools: dict[str, bool]
-    custom_tool_specs: list[dict]
-    custom_tool_errors: list[str]
-    research_artifacts: dict[str, Any]
-    approval_condition: threading.Condition = field(default_factory=threading.Condition)
-    pending_approval: dict[str, Any] | None = None
-    background_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    max_runtime_seconds: int = 900
-    condense_enabled: bool = False
-    condense_window: int = 12
-    summary_index: list[dict[str, Any]] = field(default_factory=list)
-    skill_store: SkillStore | None = None
-    enabled_skills: list[str] = field(default_factory=list)
+from mu_cli.webapp.routes_session import SessionRouteDeps, register_session_routes
+from mu_cli.webapp.runtime import WebRuntime, default_usage
+from mu_cli.webapp.routes_state import StateRouteDeps, register_state_routes
+from mu_cli.webapp.routes_chat import ChatRouteDeps, register_chat_routes
+from mu_cli.webapp.services_runtime import RuntimeMutationDeps, mutate_runtime_for_clear, mutate_runtime_for_new_session, mutate_runtime_for_settings
 
 
 
@@ -124,7 +88,7 @@ class RetrieveConversationSummaryTool:
         return ToolResult(ok=True, output="\n".join(lines))
 
 def _default_usage() -> dict[str, float]:
-    return {"input_tokens": 0.0, "output_tokens": 0.0, "total_tokens": 0.0, "estimated_cost_usd": 0.0}
+    return default_usage()
 
 
 
@@ -801,6 +765,31 @@ def _persist(runtime: WebRuntime) -> None:
     )
 
 
+def _attach_workspace_if_available(runtime: WebRuntime) -> None:
+    if not runtime.workspace_path:
+        return
+    path = Path(runtime.workspace_path).expanduser()
+    if path.exists() and path.is_dir():
+        runtime.workspace_store.attach(path)
+
+
+def _initialize_fresh_session_state(runtime: WebRuntime, *, reset_summary_index: bool = False) -> None:
+    runtime.agent = _new_agent(runtime)
+    runtime.agent.add_system_prompt(runtime.system_prompt)
+    if runtime.agentic_planning:
+        summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
+        _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
+    if runtime.research_mode:
+        _inject_research_prompt(runtime.agent)
+    _sync_skill_prompts(runtime)
+    runtime.session_usage = _default_usage()
+    runtime.session_turns = []
+    runtime.uploads = []
+    runtime.research_artifacts = {}
+    if reset_summary_index:
+        runtime.summary_index = []
+
+
 def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.session_store.use(session_name)
     loaded = runtime.session_store.load()
@@ -832,10 +821,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.condense_window = int(loaded.condense_window)
     runtime.summary_index = list(loaded.summary_index or [])
     runtime.enabled_skills = list(loaded.enabled_skills or [])
-    if runtime.workspace_path:
-        path = Path(runtime.workspace_path).expanduser()
-        if path.exists() and path.is_dir():
-            runtime.workspace_store.attach(path)
+    _attach_workspace_if_available(runtime)
 
     if runtime.agentic_planning:
         summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
@@ -888,13 +874,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
-        runtime.agent = _new_agent(runtime)
-        runtime.agent.add_system_prompt(runtime.system_prompt)
-        if runtime.agentic_planning:
-            _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
-        if runtime.research_mode:
-            _inject_research_prompt(runtime.agent)
-        _sync_skill_prompts(runtime)
+        _initialize_fresh_session_state(runtime)
         _persist(runtime)
     return runtime
 
@@ -1229,7 +1209,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
 
 
 def create_app():
-    from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+    from flask import Flask
 
     app = Flask(__name__, template_folder="templates")
 
@@ -1302,643 +1282,62 @@ def create_app():
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
 
-    @app.get("/")
-    def index():
-        return render_template("index.html")
-
-    @app.get("/api/state")
-    def state():
-        sessions = runtime.session_store.list_sessions()
-        git_repos: list[str] = []
-        git_current_repo: str | None = None
-        git_current_branch: str | None = None
-        git_branches: list[str] = []
-        if runtime.workspace_path:
-            workspace = Path(runtime.workspace_path).expanduser()
-            git_repos = _discover_git_repos(workspace)
-            if _is_git_repo(workspace):
-                git_current_repo = str(workspace)
-            elif git_repos:
-                git_current_repo = git_repos[0]
-            if git_current_repo:
-                repo_path = Path(git_current_repo)
-                git_current_branch = _git_current_branch(repo_path)
-                git_branches = _git_branches(repo_path)
-        return jsonify(
-            {
-                "provider": runtime.provider,
-                "model": runtime.model,
-                "approval_mode": runtime.approval_mode,
-                "session": runtime.session_name,
-                "workspace": runtime.workspace_path,
-                "debug": runtime.debug,
-                "agentic_planning": runtime.agentic_planning,
-                "research_mode": runtime.research_mode,
-                "models": get_model_catalog({"openai": runtime.openai_api_key, "gemini": runtime.google_api_key}),
-                "sessions": sessions,
-                "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
-                "traces": runtime.traces[-50:],
-                "session_usage": runtime.session_usage,
-                "session_turns": runtime.session_turns[-200:],
-                "pricing": runtime.pricing.data,
-                "uploads": runtime.uploads,
-                "pending_approval": runtime.pending_approval,
-                "research_artifacts": runtime.research_artifacts,
-                "background_jobs": list(runtime.background_jobs.values())[-50:],
-                "max_runtime_seconds": runtime.max_runtime_seconds,
-                "condense_enabled": runtime.condense_enabled,
-                "condense_window": runtime.condense_window,
-                "tools": [
-                    {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "enabled": runtime.enabled_tools.get(tool.name, True),
-                        "source": "builtin",
-                    }
-                    for tool in runtime.base_tools
-                ]
-                + [
-                    {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "enabled": True,
-                        "source": "custom",
-                    }
-                    for tool in runtime.tools
-                    if tool.name not in {base.name for base in runtime.base_tools}
-                ],
-                "custom_tool_specs": runtime.custom_tool_specs,
-                "custom_tool_errors": runtime.custom_tool_errors,
-                "git_repos": git_repos,
-                "git_current_repo": git_current_repo,
-                "git_current_branch": git_current_branch,
-                "git_branches": git_branches,
-                "skills": runtime.skill_store.list_skills() if runtime.skill_store else [],
-                "enabled_skills": runtime.enabled_skills,
-                "workspace_index_stats": (
-                    runtime.workspace_store.snapshot.index_stats if runtime.workspace_store.snapshot else {}
-                ),
-                "openai_api_key": runtime.openai_api_key,
-                "google_api_key": runtime.google_api_key,
-            }
-        )
-
-    @app.get("/api/skills/<name>")
-    def skill_content(name: str):
-        if runtime.skill_store is None:
-            return jsonify({"error": "skills not configured"}), 404
-        skill = runtime.skill_store.load_skill(name)
-        if skill is None:
-            return jsonify({"error": "skill not found"}), 404
-        return jsonify({"name": skill.name, "content": skill.content})
-
-    @app.post("/api/chat")
-    def chat():
-        payload = request.get_json(force=True)
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            return jsonify({"error": "text is required"}), 400
-
-        reply = _run_turn_with_uploaded_context(runtime, text)
-        report = _turn_report(runtime, text, reply.content)
-        _record_turn(runtime, report)
-        if runtime.condense_enabled:
-            _condense_session_context(runtime, window_size=runtime.condense_window)
-        _persist(runtime)
-        return jsonify({"reply": asdict(reply), "report": report, "traces": runtime.traces[-50:]})
-
-    @app.post("/api/chat/background")
-    def chat_background():
-        payload = request.get_json(force=True)
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            return jsonify({"error": "text is required"}), 400
-        session_name = str(payload.get("session", runtime.session_name)).strip() or runtime.session_name
-        job_id = _start_background_turn(runtime, session_name, text)
-        return jsonify({"ok": True, "job_id": job_id, "session": session_name})
-
-    @app.get("/api/jobs")
-    def list_jobs():
-        return jsonify({"jobs": list(runtime.background_jobs.values())})
-
-    @app.get("/api/jobs/<job_id>")
-    def get_job(job_id: str):
-        job = runtime.background_jobs.get(job_id)
-        if job is None:
-            return jsonify({"error": "job not found"}), 404
-        return jsonify(job)
-
-    @app.post("/api/jobs/<job_id>/kill")
-    def kill_job(job_id: str):
-        job = runtime.background_jobs.get(job_id)
-        if job is None:
-            return jsonify({"error": "job not found"}), 404
-        status = str(job.get("status") or "")
-        if status in {"completed", "failed", "timed_out", "killed"}:
-            return jsonify({"ok": False, "job_id": job_id, "status": status, "message": "job is not running"}), 409
-        reason = str((request.get_json(silent=True) or {}).get("reason", "")).strip() or "user requested stop"
-        job["cancel_requested"] = True
-        job["cancel_reason"] = reason
-        events = job.setdefault("events", [])
-        if isinstance(events, list):
-            events.append(f"cancel_requested: {reason}")
-        return jsonify({"ok": True, "job_id": job_id, "status": job.get("status"), "cancel_requested": True})
-
-    @app.post("/api/jobs/<job_id>/plan")
-    def decide_job_plan(job_id: str):
-        job = runtime.background_jobs.get(job_id)
-        if job is None:
-            return jsonify({"error": "job not found"}), 404
-        payload = request.get_json(force=True)
-        decision = str(payload.get("decision", "")).strip().lower()
-        if decision not in {"approve", "deny"}:
-            return jsonify({"error": "decision must be approve|deny"}), 400
-        revised_plan = str(payload.get("revised_plan", "")).strip()
-        if decision == "approve" and revised_plan:
-            job["plan"] = revised_plan
-            events = job.setdefault("events", [])
-            if isinstance(events, list):
-                events.append("plan: revised_by_user")
-        job["plan_approval"] = decision
-        return jsonify({"ok": True, "job_id": job_id, "decision": decision, "plan": job.get("plan")})
-
-    @app.post("/api/chat/stream")
-    def chat_stream():
-        payload = request.get_json(force=True)
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            return jsonify({"error": "text is required"}), 400
-
-        events: queue.Queue[dict] = queue.Queue()
-        done = threading.Event()
-
-        original_model_response = runtime.agent.on_model_response
-        original_tool_run = runtime.agent.on_tool_run
-
-        def stream_model_response(message: Message, calls: list[ToolCall]) -> None:
-            if original_model_response is not None:
-                original_model_response(message, calls)
-            for call in calls:
-                events.put({"type": "trace", "line": f"tool-request: id={call.call_id} name={call.name} args={call.args}"})
-            if message.content:
-                for chunk in _iter_chunks(message.content):
-                    events.put({"type": "assistant_chunk", "chunk": chunk})
-
-        def stream_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
-            if original_tool_run is not None:
-                original_tool_run(name, args, ok, output)
-            events.put({"type": "trace", "line": f"tool-run: name={name} ok={ok} args={args} output={output[:200]}"})
-
-        def run_turn() -> None:
-            runtime.agent.on_model_response = stream_model_response
-            runtime.agent.on_tool_run = stream_tool_run
-            try:
-                reply = _run_turn_with_uploaded_context(runtime, text)
-                report = _turn_report(runtime, text, reply.content)
-                _record_turn(runtime, report)
-                if runtime.condense_enabled:
-                    _condense_session_context(runtime, window_size=runtime.condense_window)
-                _persist(runtime)
-                events.put({"type": "report", "report": report})
-                events.put({"type": "done", "reply": asdict(reply), "traces": runtime.traces[-50:]})
-            except Exception as exc:  # pragma: no cover - defensive for stream transport
-                events.put({"type": "error", "error": str(exc)})
-            finally:
-                runtime.agent.on_model_response = original_model_response
-                runtime.agent.on_tool_run = original_tool_run
-                done.set()
-
-        thread = threading.Thread(target=run_turn, daemon=True)
-        thread.start()
-
-        @stream_with_context
-        def generate():
-            while not done.is_set() or not events.empty():
-                try:
-                    item = events.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                yield json.dumps(item) + "\n"
-
-        return Response(generate(), mimetype="application/x-ndjson")
-
-    @app.post("/api/settings")
-    def update_settings():
-        payload = request.get_json(force=True)
-
-        runtime.provider = str(payload.get("provider", runtime.provider))
-        if "openai_api_key" in payload:
-            runtime.openai_api_key = payload.get("openai_api_key") or None
-        if "google_api_key" in payload:
-            runtime.google_api_key = payload.get("google_api_key") or None
-        selected_model = str(payload.get("model", runtime.model))
-        available = get_models(runtime.provider, _provider_api_key(runtime))
-        runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
-        runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
-        runtime.debug = bool(payload.get("debug", runtime.debug))
-        runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
-        runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
-        runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
-        runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
-        runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
-        tool_visibility = payload.get("tool_visibility")
-        if isinstance(tool_visibility, dict):
-            for tool in runtime.base_tools:
-                value = tool_visibility.get(tool.name)
-                if isinstance(value, bool):
-                    runtime.enabled_tools[tool.name] = value
-
-        custom_tools = payload.get("custom_tools")
-        if isinstance(custom_tools, list):
-            runtime.custom_tool_specs = custom_tools
-
-        enabled_skills = payload.get("enabled_skills")
-        if isinstance(enabled_skills, list):
-            runtime.enabled_skills = [str(item).strip() for item in enabled_skills if str(item).strip()]
-
-        workspace = payload.get("workspace")
-        if workspace:
-            path = Path(str(workspace)).expanduser()
-            if path.exists() and path.is_dir():
-                snapshot = runtime.workspace_store.attach(path)
-                runtime.workspace_path = str(path)
-                runtime.traces.append(f"workspace-attached: {snapshot.root} files={len(snapshot.files)}")
-
-        previous_messages = list(runtime.agent.state.messages)
-        _refresh_tooling(runtime)
-        runtime.agent = _new_agent(runtime)
-        runtime.agent.state.messages = previous_messages
-        if runtime.agentic_planning:
-            summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-            _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
-        if runtime.research_mode:
-            _inject_research_prompt(runtime.agent)
-        _sync_skill_prompts(runtime)
-
-        _persist(runtime)
-        return jsonify({"ok": True})
-
-    @app.route("/api/pricing", methods=["GET", "POST"])
-    def pricing_settings():
-        if request.method == "GET":
-            return jsonify({"pricing": runtime.pricing.data})
-
-        payload = request.get_json(force=True)
-        if "pricing" in payload:
-            pricing_payload = payload.get("pricing")
-            if not isinstance(pricing_payload, dict):
-                return jsonify({"error": "pricing must be a JSON object"}), 400
-            runtime.pricing.data = pricing_payload
-            runtime.pricing.save()
-            return jsonify({"ok": True, "pricing": runtime.pricing.data})
-
-        provider = str(payload.get("provider", "")).strip()
-        model = str(payload.get("model", "")).strip()
-        if not provider or not model:
-            return jsonify({"error": "provider and model are required"}), 400
-
-        input_per_1m = float(payload.get("input_per_1m", 0.0))
-        output_per_1m = float(payload.get("output_per_1m", 0.0))
-        runtime.pricing.update_model_pricing(provider, model, input_per_1m, output_per_1m)
-        return jsonify({"ok": True, "pricing": runtime.pricing.data})
-
-    @app.get("/api/fs/dirs")
-    def list_dirs():
-        raw = str(request.args.get("path", "") or "")
-        path = Path(raw).expanduser() if raw else Path.cwd()
-        if not path.exists() or not path.is_dir():
-            return jsonify({"error": "invalid directory"}), 400
-
-        children = []
-        for child in sorted(path.iterdir(), key=lambda x: x.name.lower()):
-            if child.is_dir() and not child.name.startswith('.'):
-                children.append({"name": child.name, "path": str(child)})
-
-        return jsonify(
-            {
-                "cwd": str(path),
-                "parent": str(path.parent) if path.parent != path else None,
-                "children": children,
-            }
-        )
-
-    @app.get("/api/git/repos")
-    def list_git_repos():
-        raw_workspace = str(request.args.get("workspace", "") or "").strip()
-        if not raw_workspace:
-            return jsonify({"repos": []})
-        workspace = Path(raw_workspace).expanduser()
-        return jsonify({"repos": _discover_git_repos(workspace)})
-
-    @app.get("/api/git/branches")
-    def list_git_branches():
-        raw_repo = str(request.args.get("repo", "") or "").strip()
-        if not raw_repo:
-            return jsonify({"error": "repo is required"}), 400
-        repo = Path(raw_repo).expanduser()
-        if not _is_git_repo(repo):
-            return jsonify({"error": "repo is not a git repository"}), 400
-        return jsonify({"repo": str(repo), "current_branch": _git_current_branch(repo), "branches": _git_branches(repo)})
-
-    @app.post("/api/git/branch")
-    def git_branch_action():
-        payload = request.get_json(force=True)
-        action = str(payload.get("action", "")).strip()
-        raw_repo = str(payload.get("repo", "")).strip()
-        if not raw_repo:
-            return jsonify({"error": "repo is required"}), 400
-        repo = Path(raw_repo).expanduser()
-        if not _is_git_repo(repo):
-            return jsonify({"error": "repo is not a git repository"}), 400
-
-        if action == "create":
-            branch = str(payload.get("branch", "")).strip()
-            base = str(payload.get("base", "")).strip()
-            if not branch:
-                return jsonify({"error": "branch is required"}), 400
-            cmd = ["git", "-C", str(repo), "checkout", "-b", branch]
-            if base:
-                cmd.append(base)
-            proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
-        elif action == "switch":
-            branch = str(payload.get("branch", "")).strip()
-            if not branch:
-                return jsonify({"error": "branch is required"}), 400
-            proc = subprocess.run(["git", "-C", str(repo), "checkout", branch], text=True, capture_output=True, check=False)
-        else:
-            return jsonify({"error": "action must be create|switch"}), 400
-
-        if proc.returncode != 0:
-            return jsonify({"error": (proc.stderr or proc.stdout or "git command failed").strip()}), 400
-        return jsonify(
-            {
-                "ok": True,
-                "repo": str(repo),
-                "current_branch": _git_current_branch(repo),
-                "branches": _git_branches(repo),
-                "output": (proc.stdout or "").strip(),
-            }
-        )
-
-    @app.get("/api/git/diff")
-    def git_diff_status():
-        raw_repo = str(request.args.get("repo", "") or "").strip()
-        if not raw_repo:
-            return jsonify({"error": "repo is required"}), 400
-        repo = Path(raw_repo).expanduser()
-        if not _is_git_repo(repo):
-            return jsonify({"error": "repo is not a git repository"}), 400
-
-        status_proc = subprocess.run(
-            ["git", "-C", str(repo), "status", "--short"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        diff_proc = subprocess.run(
-            ["git", "-C", str(repo), "diff"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        cached_diff_proc = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--cached"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if status_proc.returncode != 0 or diff_proc.returncode != 0 or cached_diff_proc.returncode != 0:
-            return jsonify({"error": "unable to read git diff/status"}), 400
-
-        return jsonify(
-            {
-                "repo": str(repo),
-                "status": (status_proc.stdout or "").strip(),
-                "diff": (diff_proc.stdout or "").strip(),
-                "cached_diff": (cached_diff_proc.stdout or "").strip(),
-            }
-        )
-
-    @app.route("/api/approval", methods=["GET", "POST"])
-    def approval_actions():
-        if request.method == "GET":
-            return jsonify({"pending": runtime.pending_approval})
-
-        payload = request.get_json(force=True)
-        request_id = str(payload.get("id", "")).strip()
-        decision = str(payload.get("decision", "")).strip().lower()
-        if decision not in {"approve", "deny"}:
-            return jsonify({"error": "decision must be approve|deny"}), 400
-
-        with runtime.approval_condition:
-            if runtime.pending_approval is None or runtime.pending_approval.get("id") != request_id:
-                return jsonify({"error": "no matching pending approval"}), 404
-            runtime.pending_approval["decision"] = decision
-            runtime.approval_condition.notify_all()
-
-        return jsonify({"ok": True})
-
-    @app.post("/api/uploads")
-    def upload_files():
-        files = request.files.getlist("files")
-        if not files:
-            return jsonify({"error": "no files uploaded"}), 400
-
-        session_dir = runtime.uploads_dir / runtime.session_name
-        session_dir.mkdir(parents=True, exist_ok=True)
-        uploaded: list[dict] = []
-
-        for file in files:
-            filename = secure_filename(file.filename or "upload.bin")
-            if not filename:
-                continue
-            target = session_dir / filename
-            file.save(target)
-
-            raw = target.read_bytes()
-            kind = "binary"
-            try:
-                raw.decode("utf-8")
-                kind = "text"
-            except UnicodeDecodeError:
-                if target.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-                    kind = "image"
-
-            item = {
-                "name": filename,
-                "path": str(target),
-                "size": len(raw),
-                "kind": kind,
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            }
-            runtime.uploads.append(item)
-            uploaded.append(item)
-
-        _persist(runtime)
-        return jsonify({"ok": True, "uploads": uploaded})
-
-    @app.delete("/api/uploads")
-    def clear_uploads():
-        session_dir = runtime.uploads_dir / runtime.session_name
-        removed = 0
-        if session_dir.exists():
-            for item in session_dir.iterdir():
-                if item.is_file():
-                    item.unlink()
-                    removed += 1
-        runtime.uploads = []
-        _persist(runtime)
-        return jsonify({"ok": True, "removed": removed})
-
-    @app.delete("/api/uploads/<name>")
-    def delete_upload(name: str):
-        safe_name = Path(name).name
-        session_dir = runtime.uploads_dir / runtime.session_name
-        target = session_dir / safe_name
-        if not target.exists() or not target.is_file():
-            return jsonify({"error": "uploaded file not found"}), 404
-
-        target.unlink()
-        _remove_uploaded_entry(runtime, safe_name)
-        _persist(runtime)
-        return jsonify({"ok": True, "removed": safe_name})
-
-    @app.get("/api/research/export")
-    def export_research():
-        fmt = str(request.args.get("format", "json")).strip().lower()
-        artifacts = runtime.research_artifacts or {}
-        if fmt == "markdown" or fmt == "md":
-            lines = ["# Research Artifacts", ""]
-            lines.append("## Visited URLs")
-            for url in artifacts.get("visited_urls", []):
-                lines.append(f"- {url}")
-            lines.append("")
-            lines.append("## Deduped Sources")
-            for item in artifacts.get("deduped_sources", []):
-                lines.append(f"- {item.get('url','')} (count={item.get('count', 0)})")
-            lines.append("")
-            lines.append("## Claim Graph")
-            for claim, urls in artifacts.get("claim_graph", {}).items():
-                lines.append(f"- {claim}")
-                for url in urls:
-                    lines.append(f"  - {url}")
-            return jsonify({"format": "markdown", "content": "\n".join(lines)})
-        return jsonify({"format": "json", "content": artifacts})
-
-
-    @app.post("/api/session")
-    def session_action():
-        payload = request.get_json(force=True)
-        action = str(payload.get("action", "")).strip()
-        name = str(payload.get("name", "")).strip()
-
-        if action == "status":
-            return jsonify({"session": runtime.session_name})
-
-        if action == "list":
-            return jsonify({"sessions": runtime.session_store.list_sessions()})
-
-        if action == "new":
-            if not name:
-                return jsonify({"error": "name required"}), 400
-
-            runtime.provider = str(payload.get("provider", runtime.provider))
-            selected_model = str(payload.get("model", runtime.model))
-            if "openai_api_key" in payload:
-                runtime.openai_api_key = payload.get("openai_api_key") or None
-            if "google_api_key" in payload:
-                runtime.google_api_key = payload.get("google_api_key") or None
-            available = get_models(runtime.provider, _provider_api_key(runtime))
-            runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
-            runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
-            runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
-            runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
-            runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
-            runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
-            runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
-            enabled_skills = payload.get("enabled_skills")
-            if isinstance(enabled_skills, list):
-                runtime.enabled_skills = [str(item).strip() for item in enabled_skills if str(item).strip()]
-            else:
-                runtime.enabled_skills = []
-
-            workspace = payload.get("workspace")
-            runtime.workspace_path = str(workspace).strip() if workspace else None
-            runtime.workspace_store.snapshot = None
-            if runtime.workspace_path:
-                path = Path(runtime.workspace_path).expanduser()
-                if path.exists() and path.is_dir():
-                    runtime.workspace_store.attach(path)
-
-            runtime.session_name = name
-            runtime.session_store.use(name)
-            runtime.agent = _new_agent(runtime)
-            runtime.agent.add_system_prompt(runtime.system_prompt)
-            runtime.session_usage = _default_usage()
-            runtime.session_turns = []
-            runtime.uploads = []
-            runtime.research_artifacts = {}
-            if runtime.agentic_planning:
-                summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-                _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
-            if runtime.research_mode:
-                _inject_research_prompt(runtime.agent)
-            _sync_skill_prompts(runtime)
-            _persist(runtime)
-            return jsonify({"ok": True, "session": name})
-
-        if action in {"load", "switch"}:
-            if not name:
-                return jsonify({"error": "name required"}), 400
-            loaded = _load_session(runtime, name)
-            if not loaded:
-                return jsonify({"error": "session not found"}), 404
-            return jsonify({"ok": True, "session": name})
-
-        if action == "delete":
-            if not name:
-                return jsonify({"error": "name required"}), 400
-            if name == runtime.session_name:
-                return jsonify({"error": "cannot delete active session"}), 400
-            deleted = runtime.session_store.delete(name)
-            if not deleted:
-                return jsonify({"error": "session not found"}), 404
-            return jsonify({"ok": True})
-
-        if action == "clear":
-            target = name or runtime.session_name
-            if target != runtime.session_name:
-                loaded = _load_session(runtime, target)
-                if not loaded:
-                    return jsonify({"error": "session not found"}), 404
-
-            runtime.agent = _new_agent(runtime)
-            runtime.agent.add_system_prompt(runtime.system_prompt)
-            if runtime.workspace_path:
-                path = Path(runtime.workspace_path).expanduser()
-                if path.exists() and path.is_dir():
-                    runtime.workspace_store.attach(path)
-            if runtime.agentic_planning:
-                summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-                _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
-            if runtime.research_mode:
-                _inject_research_prompt(runtime.agent)
-            _sync_skill_prompts(runtime)
-            runtime.session_usage = _default_usage()
-            runtime.session_turns = []
-            runtime.uploads = []
-            runtime.research_artifacts = {}
-            runtime.summary_index = []
-            _persist(runtime)
-            return jsonify({"ok": True, "session": runtime.session_name})
-
-        if action == "condense":
-            w = payload.get("window")
-            result = _condense_session_context(runtime, window_size=int(w) if w is not None else runtime.condense_window)
-            _persist(runtime)
-            return jsonify(result)
-
-        return jsonify({"error": "unsupported action"}), 400
+    runtime_mutation_deps = RuntimeMutationDeps(
+        get_models=get_models,
+        provider_api_key=_provider_api_key,
+        attach_workspace_if_available=_attach_workspace_if_available,
+        initialize_fresh_session_state=_initialize_fresh_session_state,
+        initialize_fresh_session_state_reset_summary=lambda runtime_ref: _initialize_fresh_session_state(runtime_ref, reset_summary_index=True),
+        refresh_tooling=_refresh_tooling,
+        new_agent=_new_agent,
+        inject_planning=_inject_planning,
+        inject_research_prompt=_inject_research_prompt,
+        sync_skill_prompts=_sync_skill_prompts,
+        git_agent_instruction=_git_agent_instruction,
+    )
+
+    register_state_routes(
+        app,
+        runtime,
+        StateRouteDeps(
+            discover_git_repos=_discover_git_repos,
+            is_git_repo=_is_git_repo,
+            git_current_branch=_git_current_branch,
+            git_branches=_git_branches,
+            get_model_catalog=get_model_catalog,
+            mutate_for_settings=lambda runtime_ref, payload: mutate_runtime_for_settings(runtime_ref, payload, runtime_mutation_deps),
+            persist=_persist,
+            remove_uploaded_entry=_remove_uploaded_entry,
+        ),
+    )
+
+    register_chat_routes(
+        app,
+        runtime,
+        ChatRouteDeps(
+            run_turn_with_uploaded_context=_run_turn_with_uploaded_context,
+            turn_report=_turn_report,
+            record_turn=_record_turn,
+            condense_session_context=_condense_session_context,
+            persist=_persist,
+            start_background_turn=_start_background_turn,
+            iter_chunks=_iter_chunks,
+            load_session=_load_session,
+        ),
+    )
+
+    register_session_routes(
+        app,
+        runtime,
+        SessionRouteDeps(
+            load_session=_load_session,
+            delete_session=lambda runtime_ref, name: runtime_ref.session_store.delete(name),
+            persist=_persist,
+            condense_session_context=_condense_session_context,
+            mutate_for_new_session=lambda runtime_ref, payload, name: mutate_runtime_for_new_session(runtime_ref, payload, name, runtime_mutation_deps),
+            mutate_for_clear=lambda runtime_ref, reset_summary_index: mutate_runtime_for_clear(runtime_ref, reset_summary_index=reset_summary_index, deps=runtime_mutation_deps),
+        ),
+    )
 
     return app
 

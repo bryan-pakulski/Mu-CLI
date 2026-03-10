@@ -48,6 +48,59 @@ class WebTests(unittest.TestCase):
         assert state is not None
         self.assertGreaterEqual(state['session_usage']['total_tokens'], payload['report']['total_tokens'])
 
+
+    def test_chat_endpoint_rejects_non_object_payload(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/chat', json=['not-an-object'])
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('payload must be a JSON object', body.get('error', ''))
+
+    def test_chat_stream_endpoint_rejects_non_string_session(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/chat/stream', json={'text': 'hello', 'session': 123})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('session must be a string', body.get('error', ''))
+
+    def test_session_endpoint_rejects_invalid_enabled_skills_type(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/session', json={'action': 'new', 'name': 'x', 'enabled_skills': 'oops'})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('enabled_skills must be a list of strings', body.get('error', ''))
+
+    def test_settings_endpoint_rejects_invalid_debug_type(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={'debug': 'yes'})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('debug must be a boolean', body.get('error', ''))
+
     def test_session_clear_action_resets_context(self) -> None:
         from mu_cli.web import create_app
 
@@ -84,6 +137,26 @@ class WebTests(unittest.TestCase):
         self.assertTrue(any(event.get('type') == 'assistant_chunk' for event in events))
         self.assertTrue(any(event.get('type') == 'report' for event in events))
         self.assertEqual('done', events[-1].get('type'))
+
+    def test_chat_stream_endpoint_honors_requested_session(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        create = client.post('/api/session', json={'action': 'new', 'name': 'stream-session'})
+        self.assertEqual(200, create.status_code)
+        switched = client.post('/api/session', json={'action': 'switch', 'name': 'default'})
+        self.assertEqual(200, switched.status_code)
+
+        res = client.post('/api/chat/stream', json={'text': 'hello', 'session': 'stream-session'})
+        self.assertEqual(200, res.status_code)
+        _ = b''.join(res.response).decode('utf-8')
+
+        status = client.post('/api/session', json={'action': 'status'})
+        self.assertEqual(200, status.status_code)
+        self.assertEqual('stream-session', status.get_json()['session'])
 
     def test_web_approval_deny_mode_rejects_mutating_tool(self) -> None:
         from mu_cli.web import create_app
@@ -191,6 +264,72 @@ class WebTests(unittest.TestCase):
         names = [item['name'] for item in state['uploads']]
         self.assertNotIn('a.txt', names)
         self.assertIn('b.txt', names)
+
+
+    def test_job_plan_endpoint_rejects_invalid_decision_type(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        bg = client.post('/api/chat/background', json={'text': 'hello'})
+        self.assertEqual(200, bg.status_code)
+        job_id = bg.get_json()['job_id']
+
+        res = client.post(f'/api/jobs/{job_id}/plan', json={'decision': 7})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('decision must be a string', body.get('error', ''))
+
+    def test_job_kill_endpoint_rejects_invalid_reason_type(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        bg = client.post('/api/chat/background', json={'text': 'hello'})
+        self.assertEqual(200, bg.status_code)
+        job_id = bg.get_json()['job_id']
+
+        res = client.post(f'/api/jobs/{job_id}/kill', json={'reason': 9})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('reason must be a string', body.get('error', ''))
+
+    def test_pricing_endpoint_rejects_non_numeric_cost_fields(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/pricing', json={
+            'provider': 'echo',
+            'model': 'echo',
+            'input_per_1m': 'cheap',
+            'output_per_1m': 1.0,
+        })
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('input_per_1m must be a number', body.get('error', ''))
+
+    def test_upload_endpoint_rejects_missing_files_payload(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/uploads', data={}, content_type='multipart/form-data')
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('no files uploaded', body.get('error', ''))
 
     def test_settings_tool_visibility_and_custom_tools(self) -> None:
         from mu_cli.web import create_app
@@ -491,6 +630,70 @@ class WebTests(unittest.TestCase):
         self.assertIn('checkpoints', job)
         self.assertIsInstance(job.get('checkpoints', []), list)
         self.assertIn('answer_contract', job)
+
+
+    def test_user_journey_new_chat_stream_clear_happy_path(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        created = client.post('/api/session', json={'action': 'new', 'name': 'journey-a'})
+        self.assertEqual(200, created.status_code)
+
+        chat = client.post('/api/chat', json={'text': 'hello from journey'})
+        self.assertEqual(200, chat.status_code)
+        chat_body = chat.get_json()
+        assert chat_body is not None
+        self.assertIn('reply', chat_body)
+
+        stream = client.post('/api/chat/stream', json={'text': 'follow up from stream'})
+        self.assertEqual(200, stream.status_code)
+        raw = b''.join(stream.response).decode('utf-8')
+        events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        self.assertTrue(any(event.get('type') == 'assistant_chunk' for event in events))
+        self.assertEqual('done', events[-1].get('type'))
+
+        cleared = client.post('/api/session', json={'action': 'clear'})
+        self.assertEqual(200, cleared.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertEqual('journey-a', state['session'])
+        self.assertEqual([], state['messages'])
+        self.assertEqual(0.0, float(state['session_usage']['total_tokens']))
+
+    def test_user_journey_with_upload_and_clear_happy_path(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        created = client.post('/api/session', json={'action': 'new', 'name': 'journey-b'})
+        self.assertEqual(200, created.status_code)
+
+        up = client.post(
+            '/api/uploads',
+            data={'files': [(io.BytesIO(b'note for context'), 'note.txt')]},
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(200, up.status_code)
+
+        chat = client.post('/api/chat', json={'text': 'use uploaded note'})
+        self.assertEqual(200, chat.status_code)
+
+        stream = client.post('/api/chat/stream', json={'text': 'stream after upload'})
+        self.assertEqual(200, stream.status_code)
+        _ = b''.join(stream.response).decode('utf-8')
+
+        clear_uploads = client.delete('/api/uploads')
+        self.assertEqual(200, clear_uploads.status_code)
+        self.assertGreaterEqual(clear_uploads.get_json()['removed'], 1)
+
+        cleared = client.post('/api/session', json={'action': 'clear'})
+        self.assertEqual(200, cleared.status_code)
 
 
 if __name__ == '__main__':

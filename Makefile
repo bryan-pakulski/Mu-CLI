@@ -12,12 +12,15 @@ APPROVAL_MODE ?= ask
 AGENTIC_PLANNING ?= 1
 DEBUG ?= 0
 
-.PHONY: test test-verbose run run-web run-echo run-openai run-gemini models docker-build docker-run-web docker-run-cli docker-models help
+.PHONY: test test-fast test-verbose test-web check build-frontend run run-web run-echo run-openai run-gemini models docker-build docker-run-web docker-run-cli docker-models help
 
 help:
 	@echo "Targets:"
 	@echo "  make test            - Run unit tests"
+	@echo "  make test-fast       - Run unit tests (fast local alias)"
 	@echo "  make test-verbose    - Run unit tests (verbose)"
+	@echo "  make test-web        - Run only web/API tests"
+	@echo "  make check           - Run full local verification"
 	@echo "  make models          - Show supported model catalog"
 	@echo "  make run-echo        - Start CLI with echo provider"
 	@echo "  make run-openai      - Start CLI with openai provider (uses OPENAI_API_KEY)"
@@ -31,8 +34,18 @@ help:
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s agents/tests
 
+test-fast: test
+
 test-verbose:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s agents/tests -v
+
+test-web:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest agents.tests.test_web
+
+check: test
+
+build-frontend:
+	$(PYTHON) scripts/build_frontend_bundle.py
 
 models:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mu_cli.cli --list-models

@@ -48,6 +48,7 @@ from mu_cli.webapp.routes_session import SessionRouteDeps, register_session_rout
 from mu_cli.webapp.runtime import WebRuntime, default_usage
 from mu_cli.webapp.routes_state import StateRouteDeps, register_state_routes
 from mu_cli.webapp.routes_chat import ChatRouteDeps, register_chat_routes
+from mu_cli.webapp.services_runtime import RuntimeMutationDeps, mutate_runtime_for_clear, mutate_runtime_for_new_session, mutate_runtime_for_settings
 
 
 
@@ -1281,6 +1282,20 @@ def create_app():
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
 
+    runtime_mutation_deps = RuntimeMutationDeps(
+        get_models=get_models,
+        provider_api_key=_provider_api_key,
+        attach_workspace_if_available=_attach_workspace_if_available,
+        initialize_fresh_session_state=_initialize_fresh_session_state,
+        initialize_fresh_session_state_reset_summary=lambda runtime_ref: _initialize_fresh_session_state(runtime_ref, reset_summary_index=True),
+        refresh_tooling=_refresh_tooling,
+        new_agent=_new_agent,
+        inject_planning=_inject_planning,
+        inject_research_prompt=_inject_research_prompt,
+        sync_skill_prompts=_sync_skill_prompts,
+        git_agent_instruction=_git_agent_instruction,
+    )
+
     register_state_routes(
         app,
         runtime,
@@ -1290,14 +1305,7 @@ def create_app():
             git_current_branch=_git_current_branch,
             git_branches=_git_branches,
             get_model_catalog=get_model_catalog,
-            get_models=get_models,
-            provider_api_key=_provider_api_key,
-            refresh_tooling=_refresh_tooling,
-            new_agent=_new_agent,
-            inject_planning=_inject_planning,
-            inject_research_prompt=_inject_research_prompt,
-            sync_skill_prompts=_sync_skill_prompts,
-            git_agent_instruction=_git_agent_instruction,
+            mutate_for_settings=lambda runtime_ref, payload: mutate_runtime_for_settings(runtime_ref, payload, runtime_mutation_deps),
             persist=_persist,
             remove_uploaded_entry=_remove_uploaded_entry,
         ),
@@ -1322,14 +1330,12 @@ def create_app():
         app,
         runtime,
         SessionRouteDeps(
-            get_models=get_models,
-            provider_api_key=_provider_api_key,
             load_session=_load_session,
-            attach_workspace_if_available=_attach_workspace_if_available,
-            initialize_fresh_session_state=_initialize_fresh_session_state,
-            initialize_fresh_session_state_reset_summary=lambda runtime_ref: _initialize_fresh_session_state(runtime_ref, reset_summary_index=True),
+            delete_session=lambda runtime_ref, name: runtime_ref.session_store.delete(name),
             persist=_persist,
             condense_session_context=_condense_session_context,
+            mutate_for_new_session=lambda runtime_ref, payload, name: mutate_runtime_for_new_session(runtime_ref, payload, name, runtime_mutation_deps),
+            mutate_for_clear=lambda runtime_ref, reset_summary_index: mutate_runtime_for_clear(runtime_ref, reset_summary_index=reset_summary_index, deps=runtime_mutation_deps),
         ),
     )
 

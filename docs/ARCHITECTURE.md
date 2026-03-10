@@ -26,6 +26,7 @@ This creates high cognitive load for onboarding and raises regression risk when 
 **Progress**
 
 - ✅ Stage 1 complete: introduced modular backend package `mu_cli/webapp/` with `routes_state.py`, `routes_chat.py`, `routes_session.py`, `runtime.py`, and `jobs.py`; `create_app()` now acts as a thin composition root wiring route registrars and dependencies.
+- ✅ Stage 2 complete: centralized key runtime mutations (session new/clear and settings updates) into shared runtime service helpers to reduce ad hoc route-level state mutation.
 
 
 ### 1) Split web backend by responsibility
@@ -43,6 +44,8 @@ Keep `create_app()` as a thin composition root wiring shared runtime + blueprint
 ### 2) Stabilize runtime mutation through service helpers
 
 Continue centralizing repeated state transitions behind helpers (for example session reset/new/load), and avoid route handlers mutating `runtime` ad hoc.
+
+Status: ✅ Completed for session new/clear and settings update flows via `webapp/services_runtime.py`.
 
 ### 3) Make frontend modular without changing deployment model
 

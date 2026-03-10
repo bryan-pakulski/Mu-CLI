@@ -1324,6 +1324,67 @@ def create_app():
             _start_background_turn(runtime, runtime.session_name, text)
         return render_template("partials/jobs.html", jobs=list(runtime.background_jobs.values())[-20:])
 
+
+    def _workspace_browser(path_text: str | None = None) -> tuple[str, str | None, list[dict[str, str]]]:
+        start = Path(path_text).expanduser() if path_text else (Path(runtime.workspace_path).expanduser() if runtime.workspace_path else Path.cwd())
+        if not start.exists() or not start.is_dir():
+            start = Path.cwd()
+        children: list[dict[str, str]] = []
+        for child in sorted(start.iterdir(), key=lambda x: x.name.lower()):
+            if child.is_dir() and not child.name.startswith('.'):
+                children.append({"name": child.name, "path": str(child)})
+        parent = str(start.parent) if start.parent != start else None
+        return str(start), parent, children
+
+    @app.get("/ui/workspace")
+    def ui_workspace():
+        browse, parent, children = _workspace_browser(request.args.get("browse"))
+        return render_template(
+            "partials/workspace.html",
+            workspace=runtime.workspace_path or "",
+            browse=browse,
+            parent=parent,
+            children=children,
+            message=request.args.get("message", ""),
+        )
+
+    @app.post("/ui/workspace")
+    def ui_workspace_action():
+        action = str(request.form.get("action", "")).strip()
+        browse = str(request.form.get("browse", "")).strip()
+        message = ""
+        if action == "attach":
+            target = str(request.form.get("workspace", "")).strip()
+            path = Path(target).expanduser() if target else None
+            if path and path.exists() and path.is_dir():
+                snapshot = runtime.workspace_store.attach(path)
+                runtime.workspace_path = str(path)
+                runtime.traces.append(f"workspace-attached: {snapshot.root} files={len(snapshot.files)}")
+                _persist(runtime)
+                message = f"attached {path}"
+            else:
+                message = "invalid workspace path"
+        elif action == "detach":
+            runtime.workspace_path = None
+            runtime.workspace_store.snapshot = None
+            _persist(runtime)
+            message = "workspace detached"
+        elif action == "open_child":
+            browse = str(request.form.get("child", browse)).strip()
+        elif action == "up":
+            pth = Path(browse).expanduser() if browse else Path.cwd()
+            browse = str(pth.parent if pth.parent != pth else pth)
+
+        browse, parent, children = _workspace_browser(browse)
+        return render_template(
+            "partials/workspace.html",
+            workspace=runtime.workspace_path or "",
+            browse=browse,
+            parent=parent,
+            children=children,
+            message=message,
+        )
+
     @app.get("/ui/settings")
     def ui_settings():
         variant = str(request.args.get("variant", "full")).strip().lower()

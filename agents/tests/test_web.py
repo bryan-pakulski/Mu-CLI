@@ -36,6 +36,13 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, session_panel.status_code)
         self.assertIn('Session', session_panel.get_data(as_text=True))
 
+        workspace_panel = client.get('/ui/workspace')
+        self.assertEqual(200, workspace_panel.status_code)
+        self.assertIn('Workspace', workspace_panel.get_data(as_text=True))
+
+        workspace_attach = client.post('/ui/workspace', data={'action': 'attach', 'workspace': '.', 'browse': '.'})
+        self.assertEqual(200, workspace_attach.status_code)
+
         jobs_panel = client.get('/ui/jobs')
         self.assertEqual(200, jobs_panel.status_code)
 

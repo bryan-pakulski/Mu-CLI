@@ -70,6 +70,7 @@
   <div class="shell" :class="{ 'sidebar-hidden': !sidebarOpen }">
     <aside class="sidebar">
       <div id="session-panel" hx-get="/ui/session" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
+      <div id="workspace-panel" hx-get="/ui/workspace" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
       <div id="settings-panel" hx-get="/ui/settings?variant=full" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
       <div id="jobs-panel" hx-get="/ui/jobs" hx-trigger="load, every 3s, refresh from:body" hx-swap="innerHTML"></div>
     </aside>

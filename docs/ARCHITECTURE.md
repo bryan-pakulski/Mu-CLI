@@ -23,6 +23,11 @@ This creates high cognitive load for onboarding and raises regression risk when 
 
 ## Recommended architecture decisions (incremental, low-risk)
 
+**Progress**
+
+- ✅ Stage 1 started: introduced a modular web route package and moved `/api/session` route handling into `mu_cli/webapp/routes_session.py`, with `create_app()` now wiring session routes through explicit dependencies.
+
+
 ### 1) Split web backend by responsibility
 
 Create a package such as `mu_cli/webapp/` and gradually move logic:
@@ -65,8 +70,8 @@ Suggested first ADRs:
 
 ## Near-term refactor plan (suggested sequencing)
 
-1. Move session lifecycle helpers to a dedicated `runtime.py` module.
-2. Extract `/api/session` action handling into `routes_session.py`.
+1. Move session lifecycle helpers to a dedicated `runtime.py` module. *(in progress)*
+2. Extract `/api/session` action handling into `routes_session.py`. *(done)*
 3. Move background job orchestration into `jobs.py` with focused tests.
 4. Add request schema validation helpers for top 3 mutable endpoints.
 

@@ -46,6 +46,7 @@ from mu_cli.tools.filesystem import (
 )
 from mu_cli.workspace import WorkspaceStore
 from werkzeug.utils import secure_filename
+from mu_cli.webapp.routes_session import SessionRouteDeps, register_session_routes
 
 
 @dataclass(slots=True)
@@ -1845,93 +1846,20 @@ def create_app():
         return jsonify({"format": "json", "content": artifacts})
 
 
-    @app.post("/api/session")
-    def session_action():
-        payload = request.get_json(force=True)
-        action = str(payload.get("action", "")).strip()
-        name = str(payload.get("name", "")).strip()
-
-        if action == "status":
-            return jsonify({"session": runtime.session_name})
-
-        if action == "list":
-            return jsonify({"sessions": runtime.session_store.list_sessions()})
-
-        if action == "new":
-            if not name:
-                return jsonify({"error": "name required"}), 400
-
-            runtime.provider = str(payload.get("provider", runtime.provider))
-            selected_model = str(payload.get("model", runtime.model))
-            if "openai_api_key" in payload:
-                runtime.openai_api_key = payload.get("openai_api_key") or None
-            if "google_api_key" in payload:
-                runtime.google_api_key = payload.get("google_api_key") or None
-            available = get_models(runtime.provider, _provider_api_key(runtime))
-            runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
-            runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
-            runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
-            runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
-            runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
-            runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
-            runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
-            enabled_skills = payload.get("enabled_skills")
-            if isinstance(enabled_skills, list):
-                runtime.enabled_skills = [str(item).strip() for item in enabled_skills if str(item).strip()]
-            else:
-                runtime.enabled_skills = []
-
-            workspace = payload.get("workspace")
-            runtime.workspace_path = str(workspace).strip() if workspace else None
-            runtime.workspace_store.snapshot = None
-            if runtime.workspace_path:
-                path = Path(runtime.workspace_path).expanduser()
-                if path.exists() and path.is_dir():
-                    runtime.workspace_store.attach(path)
-
-            runtime.session_name = name
-            runtime.session_store.use(name)
-            _initialize_fresh_session_state(runtime)
-            _persist(runtime)
-            return jsonify({"ok": True, "session": name})
-
-        if action in {"load", "switch"}:
-            if not name:
-                return jsonify({"error": "name required"}), 400
-            loaded = _load_session(runtime, name)
-            if not loaded:
-                return jsonify({"error": "session not found"}), 404
-            return jsonify({"ok": True, "session": name})
-
-        if action == "delete":
-            if not name:
-                return jsonify({"error": "name required"}), 400
-            if name == runtime.session_name:
-                return jsonify({"error": "cannot delete active session"}), 400
-            deleted = runtime.session_store.delete(name)
-            if not deleted:
-                return jsonify({"error": "session not found"}), 404
-            return jsonify({"ok": True})
-
-        if action == "clear":
-            target = name or runtime.session_name
-            if target != runtime.session_name:
-                loaded = _load_session(runtime, target)
-                if not loaded:
-                    return jsonify({"error": "session not found"}), 404
-
-            _attach_workspace_if_available(runtime)
-            _initialize_fresh_session_state(runtime, reset_summary_index=True)
-            _persist(runtime)
-            return jsonify({"ok": True, "session": runtime.session_name})
-
-        if action == "condense":
-            w = payload.get("window")
-            result = _condense_session_context(runtime, window_size=int(w) if w is not None else runtime.condense_window)
-            _persist(runtime)
-            return jsonify(result)
-
-        return jsonify({"error": "unsupported action"}), 400
+    register_session_routes(
+        app,
+        runtime,
+        SessionRouteDeps(
+            get_models=get_models,
+            provider_api_key=_provider_api_key,
+            load_session=_load_session,
+            attach_workspace_if_available=_attach_workspace_if_available,
+            initialize_fresh_session_state=_initialize_fresh_session_state,
+            initialize_fresh_session_state_reset_summary=lambda runtime_ref: _initialize_fresh_session_state(runtime_ref, reset_summary_index=True),
+            persist=_persist,
+            condense_session_context=_condense_session_context,
+        ),
+    )
 
     return app
 

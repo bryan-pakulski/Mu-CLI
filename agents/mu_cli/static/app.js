@@ -2779,6 +2779,55 @@ function initShellResize() {
   });
 }
 
+function initMetaResize() {
+  const layout = document.querySelector('.workspace-layout');
+  const handle = byId('metaResizeHandle');
+  const sidebar = byId('metaSidebar');
+  if (!layout || !handle || !sidebar) return;
+
+  const minWidth = 220;
+  const maxWidth = () => Math.min(520, Math.max(280, Math.floor(window.innerWidth * 0.5)));
+  const applyWidth = (value) => {
+    const next = Math.min(maxWidth(), Math.max(minWidth, Number(value) || 320));
+    layout.style.setProperty('--meta-width', `${next}px`);
+    localStorage.setItem('mu_meta_width', String(next));
+  };
+
+  const stored = Number(localStorage.getItem('mu_meta_width') || 0);
+  if (stored) applyWidth(stored);
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    applyWidth(startWidth - (e.clientX - startX));
+  };
+  const onUp = () => {
+    dragging = false;
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  };
+
+  handle.addEventListener('mousedown', (e) => {
+    if (layout.classList.contains('meta-hidden')) return;
+    dragging = true;
+    startX = e.clientX;
+    startWidth = sidebar.getBoundingClientRect().width;
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+
+  window.addEventListener('resize', () => {
+    const current = Number(localStorage.getItem('mu_meta_width') || sidebar.getBoundingClientRect().width || 320);
+    applyWidth(current);
+  });
+}
+
+
 function setSurface(surface) {
   const app = byId('app');
   if (!app) return;
@@ -2942,6 +2991,7 @@ if (metaToggleBtn) {
 }
 hydrateThemePreference();
 initShellResize();
+initMetaResize();
 setSurface(localStorage.getItem('mu_ui_surface') || 'operate');
 refreshState().catch((e) => alert(e.message));
 if (runtimeTick) clearInterval(runtimeTick);

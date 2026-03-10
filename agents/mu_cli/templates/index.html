@@ -175,6 +175,7 @@
       font-weight: 600;
     }
     .workspace-layout {
+      --meta-width: 320px;
       min-height: 0;
       display: grid;
       grid-template-columns: minmax(0,1fr) auto;
@@ -183,11 +184,13 @@
     }
     .meta-rail {
       min-height: 0;
-      display: flex;
-      align-items: flex-start;
+      display: grid;
+      grid-template-columns: auto 8px minmax(220px, var(--meta-width));
+      align-items: stretch;
       gap: 8px;
     }
     .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr) auto; }
+    .workspace-layout.meta-hidden .meta-resize-handle,
     .workspace-layout.meta-hidden .meta-sidebar { display: none; }
     .meta-toggle-icon {
       align-self: flex-start;
@@ -258,11 +261,11 @@
     .git-quick-pill.dirty { border-color: color-mix(in srgb, var(--color-warn) 30%, var(--border)); color: var(--color-warn); }
     .session-toolbar { display:flex; gap:6px; margin-bottom:8px; }
     .session-recent { margin-top:8px; }
-    .timeline-panel { border:0; border-radius:0; background:transparent; padding:4px 0; max-height:180px; overflow:auto; }
+    .timeline-panel { border:0; border-radius:0; background:transparent; padding:4px 0; max-height:220px; overflow:auto; min-width:0; }
     .timeline-item { display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
     .timeline-item:last-child { border-bottom:0; }
     .timeline-step { min-width:20px; color:var(--muted); font-size:11px; }
-    .timeline-line { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; }
+    .timeline-line { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:11px; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
     .timeline-item.tool-request .timeline-line { color:#7c3aed; }
     .timeline-item.tool-run .timeline-line { color:#0f766e; }
     .timeline-item.model .timeline-line { color:#1d4ed8; }
@@ -421,11 +424,18 @@
     .trace-wrap > summary::-webkit-details-marker { display: none; }
     .trace { max-height: 120px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
 
+    .meta-resize-handle {
+      width: 8px;
+      cursor: col-resize;
+      border-radius: 999px;
+      background: linear-gradient(to right, transparent, color-mix(in srgb, var(--border) 60%, transparent), transparent);
+    }
+    .meta-resize-handle:hover { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--primary) 30%, var(--border)), transparent); }
+
      .meta-sidebar {
-      width: 360px;
-      min-width: 260px;
-      max-width: 60vw;
-      resize: horizontal;
+      width: var(--meta-width);
+      min-width: 220px;
+      max-width: min(520px, 48vw);
       min-height: 0;
       overflow: hidden;
       border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
@@ -455,7 +465,7 @@
       gap: 8px;
       padding-right: 2px;
     }
-    .meta-cards { display: grid; gap: 8px; }
+    .meta-cards { display: grid; gap: 8px; min-width: 0; }
     .meta-card {
       border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
       border-radius: 10px;
@@ -479,6 +489,7 @@
       padding-left: 7px;
       white-space: pre-wrap;
       word-break: break-word;
+      overflow-wrap: anywhere;
     }
     .meta-item { border-left-width: 3px; padding-left: 8px; }
     .meta-tag {
@@ -506,7 +517,7 @@
     .meta-item.workspace .meta-tag { color: #06b6d4; border-color: color-mix(in srgb, #06b6d4 55%, var(--border)); }
     .meta-item.automation { border-left-color: #ec4899; }
     .meta-item.automation .meta-tag { color: #ec4899; border-color: color-mix(in srgb, #ec4899 55%, var(--border)); }
-    .meta-content { white-space: normal; }
+    .meta-content { white-space: normal; overflow-wrap: anywhere; }
     .meta-content pre {
       margin: 0;
       background: color-mix(in srgb, var(--surface) 75%, transparent);
@@ -1276,7 +1287,10 @@
       .shell { grid-template-columns: minmax(0,1fr); }
       .sidebar { display: none; }
       .workspace-layout { grid-template-columns: minmax(0,1fr); }
+      .meta-rail { grid-template-columns: auto 0 minmax(0,1fr); }
+      .meta-resize-handle { display:none; }
       .meta-sidebar {
+        max-width: 100%;
         border-left: 0;
         border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
         padding-left: 0;
@@ -1430,16 +1444,6 @@
               <summary id="backgroundLiveSummary">Live run activity</summary>
               <div id="backgroundLiveBody" class="bg-live-body"><div class="bg-live-empty">No activity yet.</div></div>
             </details>
-            <details class="trace-wrap" open>
-              <summary>Execution timeline</summary>
-              <div class="timeline-filters">
-                <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
-                <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
-                <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
-                <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
-              </div>
-              <div id="executionTimeline" class="timeline-panel"></div>
-            </details>
             <div class="d-flex align-items-center gap-2 mt-2">
               <button id="send" class="btn btn-accent btn-sm">Send</button>
               <button id="sendBackground" class="btn btn-soft btn-sm">Send in background</button>
@@ -1451,10 +1455,21 @@
 
         <div class="meta-rail">
           <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel"><</button>
-          <aside class="meta-sidebar">
+          <div id="metaResizeHandle" class="meta-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize metadata panel"></div>
+          <aside id="metaSidebar" class="meta-sidebar">
           <div class="zone-label">Inspect</div>
           <h4>Run metadata</h4>
           <div class="meta-feed">
+            <details class="trace-wrap" open>
+              <summary>Execution timeline</summary>
+              <div class="timeline-filters">
+                <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
+                <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
+                <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
+                <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
+              </div>
+              <div id="executionTimeline" class="timeline-panel"></div>
+            </details>
             <details class="trace-wrap" id="traceWrap" open>
               <summary>Debug traces</summary>
               <div id="traces" class="trace">debug traces will appear here</div>

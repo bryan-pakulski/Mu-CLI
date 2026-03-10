@@ -14,6 +14,7 @@ from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
+from mu_cli.skills import SkillStore
 from mu_cli.tools.base import Tool
 from mu_cli.tools.filesystem import (
     ApplyPatchTool,
@@ -78,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list-models", action="store_true", help="Print supported model catalog and exit")
     parser.add_argument("--no-agentic-planning", action="store_true")
     parser.add_argument("--debug", action="store_true", help="Print debug traces of model/tool activity")
+    parser.add_argument("--skills-dir", default="skills", help="Directory containing session-loadable .md skill files")
     return parser
 
 
@@ -131,6 +133,7 @@ def build_help_text(tools: Sequence[Tool]) -> str:
         "- /agentic status: Show planning-prompt injection status.\n"
         "- /debug status|on|off: Debug tracing mode.\n"
         "- /session status|list|new <name>|load <name>|delete <name>: Session management.\n"
+        "- /skills list|status|enable <name>|disable <name>: Session skill management.\n"
         "- /quit (or /q, exit): Exit the CLI.\n\n"
         f"Tools:\n{tool_lines}"
     )
@@ -161,6 +164,31 @@ def _inject_planning_prompt(agent: Agent, workspace_summary: str | None = None) 
     )
 
 
+def _sync_skill_prompts(agent: Agent, context: RuntimeContext) -> None:
+    kept = []
+    for message in agent.state.messages:
+        if message.role is not Role.SYSTEM:
+            kept.append(message)
+            continue
+        kind = message.metadata.get("kind")
+        if isinstance(kind, str) and kind.startswith("skill:"):
+            continue
+        kept.append(message)
+    agent.state.messages = kept
+
+    for skill_name in context.enabled_skills:
+        skill = context.skill_store.load_skill(skill_name)
+        if skill is None or not skill.content:
+            continue
+        agent.state.messages.append(
+            Message(
+                role=Role.SYSTEM,
+                content=f"Skill `{skill.name}` instructions:\n\n{skill.content}",
+                metadata={"kind": f"skill:{skill.name}"},
+            )
+        )
+
+
 class RuntimeContext:
     def __init__(
         self,
@@ -176,6 +204,8 @@ class RuntimeContext:
         agentic_planning_enabled: bool,
         system_prompt: str,
         debug_enabled: bool,
+        skill_store: SkillStore,
+        enabled_skills: list[str] | None = None,
     ) -> None:
         self.provider_name = provider_name
         self.model_name = model_name
@@ -189,6 +219,8 @@ class RuntimeContext:
         self.agentic_planning_enabled = agentic_planning_enabled
         self.system_prompt = system_prompt
         self.debug_enabled = debug_enabled
+        self.skill_store = skill_store
+        self.enabled_skills = list(enabled_skills or [])
 
 
 class CommandCompleter:
@@ -205,6 +237,7 @@ class CommandCompleter:
             "/agentic",
             "/debug",
             "/session",
+            "/skills",
             "/quit",
             "/q",
             "exit",
@@ -228,6 +261,8 @@ class CommandCompleter:
             return [item for item in ["status", "on", "off"] if item.startswith(text)]
         if stripped.startswith("/session "):
             return [item for item in ["status", "list", "new", "load", "delete"] if item.startswith(text)]
+        if stripped.startswith("/skills "):
+            return [item for item in ["list", "status", "enable", "disable"] if item.startswith(text)]
         return [command for command in self.commands if command.startswith(text)]
 
     def complete(self, text: str, state: int) -> str | None:
@@ -301,6 +336,7 @@ def _initialize_fresh_agent(context: RuntimeContext, agent: Agent) -> None:
     if context.agentic_planning_enabled:
         workspace_summary = context.workspace_store.summary() if context.workspace_store.snapshot else None
         _inject_planning_prompt(agent, workspace_summary)
+    _sync_skill_prompts(agent, context)
 
 
 def _handle_session_command(rest: str, context: RuntimeContext, agent: Agent) -> tuple[str, Agent | None]:
@@ -330,6 +366,7 @@ def _handle_session_command(rest: str, context: RuntimeContext, agent: Agent) ->
         context.model_name = loaded.model
         context.workspace_path = loaded.workspace
         context.approval_policy.mode = loaded.approval_mode
+        context.enabled_skills = list(loaded.enabled_skills or [])
         new_agent = _make_agent(context)
         new_agent.state.messages = loaded.messages
         if context.workspace_path:
@@ -338,6 +375,7 @@ def _handle_session_command(rest: str, context: RuntimeContext, agent: Agent) ->
                 context.workspace_store.attach(path)
         if context.agentic_planning_enabled:
             _inject_planning_prompt(new_agent, context.workspace_store.summary() if context.workspace_store.snapshot else None)
+        _sync_skill_prompts(new_agent, context)
         return f"Loaded session: {name}", new_agent
     if rest.startswith("delete "):
         name = rest[len("delete ") :].strip()
@@ -437,6 +475,33 @@ def _handle_local_command(user_input: str, context: RuntimeContext, agent: Agent
         output, replacement = _handle_session_command(rest, context, agent)
         return True, output, replacement
 
+    if user_input.startswith("/skills "):
+        _, _, rest = user_input.partition(" ")
+        rest = rest.strip()
+        if rest == "list":
+            available = context.skill_store.list_skills()
+            if not available:
+                return True, "No skills found. Add .md files under the skills directory.", None
+            return True, "Available skills:\n" + "\n".join(f"- {name}" for name in available), None
+        if rest == "status":
+            names = context.enabled_skills
+            return True, "Enabled skills:\n" + ("\n".join(f"- {name}" for name in names) if names else "(none)"), None
+        if rest.startswith("enable "):
+            name = rest[len("enable ") :].strip()
+            skill = context.skill_store.load_skill(name)
+            if skill is None:
+                return True, f"Skill not found: {name}", None
+            if name not in context.enabled_skills:
+                context.enabled_skills.append(name)
+            _sync_skill_prompts(agent, context)
+            return True, f"Enabled skill: {name}", None
+        if rest.startswith("disable "):
+            name = rest[len("disable ") :].strip()
+            context.enabled_skills = [item for item in context.enabled_skills if item != name]
+            _sync_skill_prompts(agent, context)
+            return True, f"Disabled skill: {name}", None
+        return True, "Usage: /skills list|status|enable <name>|disable <name>", None
+
     return False, None, None
 
 
@@ -470,6 +535,7 @@ def _persist_session(context: RuntimeContext, agent: Agent) -> None:
         approval_mode=context.approval_policy.mode,
         messages=agent.state.messages,
         agentic_planning=context.agentic_planning_enabled,
+        enabled_skills=context.enabled_skills,
     )
     context.session_store.save(state)
 
@@ -482,6 +548,7 @@ def run() -> int:
         return 0
 
     workspace_store = WorkspaceStore(Path(".mu_cli/workspaces"))
+    skill_store = SkillStore(Path(args.skills_dir))
     tools: list[Tool] = [
         ReadFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         WriteFileTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
@@ -505,6 +572,7 @@ def run() -> int:
     model_name = resumed.model if resumed else (args.model or get_models(provider_name, args.api_key)[0])
     workspace_path = resumed.workspace if resumed else args.workspace
     approval_mode = resumed.approval_mode if resumed else args.approval_mode
+    enabled_skills = list(resumed.enabled_skills or []) if resumed else []
 
     context = RuntimeContext(
         provider_name=provider_name,
@@ -519,6 +587,8 @@ def run() -> int:
         agentic_planning_enabled=not args.no_agentic_planning,
         system_prompt=args.system,
         debug_enabled=args.debug,
+        skill_store=skill_store,
+        enabled_skills=enabled_skills,
     )
 
     agent = _make_agent(context)
@@ -541,6 +611,7 @@ def run() -> int:
     if context.agentic_planning_enabled:
         workspace_summary = context.workspace_store.summary() if context.workspace_store.snapshot else None
         _inject_planning_prompt(agent, workspace_summary)
+    _sync_skill_prompts(agent, context)
 
     print(f"ai-cli [{context.provider_name}:{context.model_name}] started. Type /quit to exit.")
     print("Tip: use /help for commands and tool descriptions.")

@@ -20,6 +20,7 @@ Provider-agnostic CLI scaffold intended for a **human-in-the-loop development wo
 - workspace indexing + tool-run memory
 - per-turn token/cost report with JSON-configurable provider pricing
 - session persistence (resume conversations and workspace state)
+- session-scoped model skills loaded from Markdown files
 
 ### Git workflow support
 
@@ -96,6 +97,17 @@ Notes:
 - `/session load <name>`: load existing session
 - `/session delete <name>`: delete a session (cannot delete active session)
 
+## Skills
+
+- Skills are Markdown files loaded from `./skills` by default.
+- Configure a different folder with `--skills-dir <path>`.
+- Skills are enabled per session and persisted in session state.
+- Commands:
+  - `/skills list`
+  - `/skills status`
+  - `/skills enable <name>`
+  - `/skills disable <name>`
+
 ## Agentic planning prompt
 
 - A planning-focused system prompt is auto-injected by default to keep the model transparent and tool-first.
@@ -157,4 +169,5 @@ Useful commands:
 - `/agentic status`
 - `/debug status`, `/debug on`, `/debug off`
 - `/session status`, `/session list`, `/session new demo`, `/session load demo`
+- `/skills list`, `/skills enable code-review`, `/skills status`
 - `/quit`

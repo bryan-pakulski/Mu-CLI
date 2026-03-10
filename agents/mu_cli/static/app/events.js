@@ -28,6 +28,23 @@ bindClick('sendBackground', () => sendPrompt(true));
 bindClick('killJob', () => killActiveJob());
 bindClick('newSession', () => openNewSessionModal());
 bindClick('savePricing', () => savePricing());
+
+bindClick('saveSkillPreset', () => saveSkillPresetFromUI());
+bindClick('applySkillPreset', () => applySkillPresetFromUI());
+bindClick('deleteSkillPreset', () => deleteSkillPresetFromUI());
+
+bindClick('saveRulesVersion', () => saveRulesVersionFromUI());
+bindClick('rollbackRulesVersion', () => rollbackRulesVersionFromUI());
+bindClick('deleteRulesVersion', () => deleteRulesVersionFromUI());
+
+bindClick('saveBehaviorProfile', () => saveBehaviorProfileFromUI());
+bindClick('applyBehaviorProfile', () => applyBehaviorProfileFromUI());
+bindClick('deleteBehaviorProfile', () => deleteBehaviorProfileFromUI());
+
+bindChange('ctxExcludeTraces', () => updateContextExcludesFromUI());
+bindChange('ctxExcludeUploads', () => updateContextExcludesFromUI());
+bindChange('ctxExcludeTools', () => updateContextExcludesFromUI());
+bindClick('summarizeContextNow', () => summarizeContextRulesNow());
 bindClick('uploadFiles', () => uploadContextFiles());
 bindClick('clearUploads', () => clearUploadedStore());
 

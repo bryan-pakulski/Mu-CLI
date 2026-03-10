@@ -92,8 +92,8 @@ Use this section as the baseline in-product help content so users can discover c
 | Session + Git workflows | Stage 2 | TBD | Shell integration | [ ] |
 | Diff + review workflows | Stage 2 | TBD | Hunk actions prototype | [ ] |
 | Runtime observability | Stage 2 | TBD | Timeline MVP | [ ] |
-| Skills/tools/rules controls | Stage 3 | TBD | Control center MVP | [ ] |
-| Context budget tooling | Stage 3 | TBD | Token meter MVP | [ ] |
+| Skills/tools/rules controls | Stage 3 | TBD | Control center MVP | [~] |
+| Context budget tooling | Stage 3 | TBD | Token meter MVP | [~] |
 | Metrics and rollout | Stage 4 | TBD | Telemetry dashboard MVP | [ ] |
 
 ## Execution rules

@@ -284,6 +284,11 @@
     .control-grid { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; margin-bottom:6px; }
     .control-grid input[type="range"] { width:100%; }
 
+    .mini-toolbar { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+    .mini-toolbar .form-control { min-width: 160px; max-width: 260px; }
+    .compact-table { width:100%; font-size:12px; border-collapse: collapse; }
+    .compact-table th, .compact-table td { padding:4px 6px; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+
     .override-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
     .override-grid .full { grid-column: 1 / -1; }
     @media (max-width: 900px) { .override-grid { grid-template-columns: 1fr; } }
@@ -1593,6 +1598,8 @@
         <section class="settings-section">
           <h6>Tool visibility</h6>
           <div id="toolVisibilityList" class="tool-visibility-list small-muted">Loading tools...</div>
+          <div class="small-muted mt-2">Tools console</div>
+          <div id="toolsConsoleHost" class="small-muted">Loading tool analytics...</div>
         </section>
 
         <section class="settings-section">
@@ -1604,6 +1611,18 @@
 
 
         <section class="settings-section">
+          <h6>Skills presets</h6>
+          <div class="mini-toolbar">
+            <input id="skillPresetName" class="form-control form-control-sm" placeholder="preset name" />
+            <button id="saveSkillPreset" class="btn btn-soft btn-sm" type="button">Save preset</button>
+            <select id="skillPresetSelect" class="form-select form-select-sm" style="max-width:220px"></select>
+            <button id="applySkillPreset" class="btn btn-soft btn-sm" type="button">Apply</button>
+            <button id="deleteSkillPreset" class="btn btn-soft btn-sm" type="button">Delete</button>
+          </div>
+          <div id="skillPresetStatus" class="small-muted"></div>
+        </section>
+
+        <section class="settings-section">
           <h6>System prompt & rules</h6>
           <label class="small-muted mb-1">System prompt override (session-local, UI-managed)</label>
           <textarea id="systemPromptOverride" class="form-control mb-2" style="min-height:120px"></textarea>
@@ -1611,6 +1630,14 @@
           <textarea id="rulesChecklist" class="form-control" style="min-height:96px" placeholder="Prefer tool calls
 Cite file paths
 Keep responses concise"></textarea>
+          <div class="mini-toolbar">
+            <input id="rulesVersionName" class="form-control form-control-sm" placeholder="version label" />
+            <button id="saveRulesVersion" class="btn btn-soft btn-sm" type="button">Save version</button>
+            <select id="rulesVersionSelect" class="form-select form-select-sm" style="max-width:220px"></select>
+            <button id="rollbackRulesVersion" class="btn btn-soft btn-sm" type="button">Rollback</button>
+            <button id="deleteRulesVersion" class="btn btn-soft btn-sm" type="button">Delete</button>
+          </div>
+          <div id="rulesVersionStatus" class="small-muted"></div>
         </section>
 
         <section class="settings-section">
@@ -1618,6 +1645,13 @@ Keep responses concise"></textarea>
           <div class="small-muted mb-1">Live context footprint estimate (chars proxy).</div>
           <div class="context-budget-meter"><div id="contextBudgetFill" class="context-budget-fill"></div></div>
           <div id="contextBudgetRows"></div>
+          <div class="mini-toolbar">
+            <label class="small-muted"><input type="checkbox" id="ctxExcludeTraces" /> Exclude traces</label>
+            <label class="small-muted"><input type="checkbox" id="ctxExcludeUploads" /> Exclude uploads</label>
+            <label class="small-muted"><input type="checkbox" id="ctxExcludeTools" /> Exclude tool specs</label>
+            <button id="summarizeContextNow" class="btn btn-soft btn-sm" type="button">Summarize rules text</button>
+          </div>
+          <div id="contextBudgetActionStatus" class="small-muted"></div>
           <div class="small-muted mt-1">Target limit: <span id="contextBudgetTargetLabel">16000</span> chars</div>
         </section>
 
@@ -1627,6 +1661,14 @@ Keep responses concise"></textarea>
           <div class="control-grid"><label class="small-muted" for="knobTopP">Top-p</label><span id="knobTopPVal" class="small-muted">0.95</span><input id="knobTopP" type="range" min="0" max="1" step="0.01" value="0.95" style="grid-column:1 / -1" /></div>
           <div class="control-grid"><label class="small-muted" for="knobToolBias">Tool eagerness</label><span id="knobToolBiasVal" class="small-muted">0.70</span><input id="knobToolBias" type="range" min="0" max="1" step="0.01" value="0.70" style="grid-column:1 / -1" /></div>
           <div class="control-grid"><label class="small-muted" for="knobVerbosity">Verbosity</label><span id="knobVerbosityVal" class="small-muted">0.50</span><input id="knobVerbosity" type="range" min="0" max="1" step="0.01" value="0.50" style="grid-column:1 / -1" /></div>
+          <div class="mini-toolbar">
+            <input id="behaviorProfileName" class="form-control form-control-sm" placeholder="profile name" />
+            <button id="saveBehaviorProfile" class="btn btn-soft btn-sm" type="button">Save profile</button>
+            <select id="behaviorProfileSelect" class="form-select form-select-sm" style="max-width:220px"></select>
+            <button id="applyBehaviorProfile" class="btn btn-soft btn-sm" type="button">Apply</button>
+            <button id="deleteBehaviorProfile" class="btn btn-soft btn-sm" type="button">Delete</button>
+          </div>
+          <div id="behaviorProfileStatus" class="small-muted"></div>
         </section>
       </div>
     </div>

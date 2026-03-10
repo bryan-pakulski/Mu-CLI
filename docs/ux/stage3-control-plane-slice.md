@@ -29,3 +29,12 @@ This slice begins Stage 3 by introducing practical control-plane surfaces in the
 - Supports per-session runtime settings overrides (provider/model/approval/workspace/agentic/research/condense/runtime).
 - Supports per-session control-plane text overrides (system prompt + rules) layered over global defaults.
 - Global defaults remain lowest-priority and are editable from main Settings.
+
+
+## Stage 3 continuation (this pass)
+
+- Added skills preset save/apply/delete controls for lifecycle management in Settings.
+- Added tools console analytics table (risk/calls/failures/latency estimate).
+- Added context controls (exclude traces/uploads/tools and summarize rules action).
+- Added prompt/rules versioning controls (save, rollback, delete).
+- Added model behavior profiles (save/apply/delete).

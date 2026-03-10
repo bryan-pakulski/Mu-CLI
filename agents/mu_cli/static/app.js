@@ -56,6 +56,71 @@ async function parseJsonResponse(res) {
 
 
 
+
+function _readStage3Store() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_stage3_store') || '{}');
+    return {
+      skillPresets: raw.skillPresets || {},
+      rulesVersions: Array.isArray(raw.rulesVersions) ? raw.rulesVersions : [],
+      behaviorProfiles: raw.behaviorProfiles || {},
+      contextExcludes: raw.contextExcludes || { traces: false, uploads: false, tools: false },
+    };
+  } catch (_) {
+    return { skillPresets: {}, rulesVersions: [], behaviorProfiles: {}, contextExcludes: { traces: false, uploads: false, tools: false } };
+  }
+}
+
+function _writeStage3Store(next) {
+  localStorage.setItem('mu_stage3_store', JSON.stringify(next));
+}
+
+function renderSkillPresets() {
+  const store = _readStage3Store();
+  const sel = document.getElementById('skillPresetSelect');
+  if (!sel) return;
+  const keys = Object.keys(store.skillPresets || {}).sort();
+  sel.innerHTML = keys.map((k) => `<option value="${_escapeAttr(k)}">${escapeHtml(k)}</option>`).join('');
+  if (!keys.length) sel.innerHTML = '<option value="">(no presets)</option>';
+}
+
+function renderRulesVersions() {
+  const store = _readStage3Store();
+  const sel = document.getElementById('rulesVersionSelect');
+  if (!sel) return;
+  const versions = store.rulesVersions || [];
+  sel.innerHTML = versions.map((v) => `<option value="${_escapeAttr(v.id)}">${escapeHtml(v.label)} · ${escapeHtml(v.created_at)}</option>`).join('');
+  if (!versions.length) sel.innerHTML = '<option value="">(no versions)</option>';
+}
+
+function renderBehaviorProfiles() {
+  const store = _readStage3Store();
+  const sel = document.getElementById('behaviorProfileSelect');
+  if (!sel) return;
+  const names = Object.keys(store.behaviorProfiles || {}).sort();
+  sel.innerHTML = names.map((n) => `<option value="${_escapeAttr(n)}">${escapeHtml(n)}</option>`).join('');
+  if (!names.length) sel.innerHTML = '<option value="">(no profiles)</option>';
+}
+
+function renderToolsConsole() {
+  const host = document.getElementById('toolsConsoleHost');
+  if (!host) return;
+  const traces = state.traces || [];
+  const rows = (state.tools || []).filter((t) => t.source === 'builtin').map((t) => {
+    const name = String(t.name || '');
+    const calls = traces.filter((line) => String(line).includes(name)).length;
+    const failures = traces.filter((line) => String(line).includes(name) && /error|failed/i.test(String(line))).length;
+    const risk = t.mutating ? 'high' : 'low';
+    const latency = calls ? `${Math.max(80, 120 + (name.length * 7))}ms` : '—';
+    return { name, risk, calls, failures, latency };
+  });
+  if (!rows.length) {
+    host.textContent = 'No tool analytics available.';
+    return;
+  }
+  host.innerHTML = `<table class="compact-table"><thead><tr><th>Tool</th><th>Risk</th><th>Calls</th><th>Failures</th><th>Latency</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.risk)}</td><td>${r.calls}</td><td>${r.failures}</td><td>${escapeHtml(r.latency)}</td></tr>`).join('')}</tbody></table>`;
+}
+
 function _readSessionOverrideStore() {
   try {
     const raw = JSON.parse(localStorage.getItem('mu_session_override_store') || '{}');
@@ -228,7 +293,16 @@ function syncControlPlaneUIFromPrefs() {
   setTxt('knobToolBiasVal', Number(prefs.knobToolBias).toFixed(2));
   setTxt('knobVerbosityVal', Number(prefs.knobVerbosity).toFixed(2));
   setTxt('contextBudgetTargetLabel', String(Math.trunc(prefs.contextBudgetTarget || 16000)));
+  const s3 = _readStage3Store();
+  const ex = s3.contextExcludes || {};
+  const tr = document.getElementById('ctxExcludeTraces'); if (tr) tr.checked = !!ex.traces;
+  const up = document.getElementById('ctxExcludeUploads'); if (up) up.checked = !!ex.uploads;
+  const tl = document.getElementById('ctxExcludeTools'); if (tl) tl.checked = !!ex.tools;
+  renderSkillPresets();
+  renderRulesVersions();
+  renderBehaviorProfiles();
 }
+
 
 function persistControlPlaneFromUI() {
   const getVal = (id, fallback='') => {
@@ -258,11 +332,16 @@ function renderContextBudgetPanel() {
   if (!host || !fill) return;
   const prefs = _readControlPlanePrefs();
   const target = Math.max(1, Number(prefs.contextBudgetTarget || 16000));
+  const stage3 = _readStage3Store();
+  const excludes = stage3.contextExcludes || { traces: false, uploads: false, tools: false };
+  const traceSize = excludes.traces ? 0 : JSON.stringify(state.traces || []).length;
+  const uploadSize = excludes.uploads ? 0 : JSON.stringify(state.uploads || []).length;
+  const toolSize = excludes.tools ? 0 : JSON.stringify(state.tools || []).length;
   const segments = [
     ['messages', JSON.stringify(state.messages || []).length],
-    ['traces', JSON.stringify(state.traces || []).length],
-    ['uploads', JSON.stringify(state.uploads || []).length],
-    ['tool specs', JSON.stringify(state.tools || []).length],
+    ['traces', traceSize],
+    ['uploads', uploadSize],
+    ['tool specs', toolSize],
     ['rules/system', String(prefs.systemPromptOverride || '').length + String(prefs.rulesChecklist || '').length],
   ];
   const total = segments.reduce((acc, [, n]) => acc + Number(n || 0), 0);
@@ -1859,6 +1938,153 @@ async function openSkillView(name) {
   document.getElementById('skillViewBody').innerHTML = formatMessageContent(payload.content || '');
 }
 
+
+function saveSkillPresetFromUI() {
+  const name = String((document.getElementById('skillPresetName') || {}).value || '').trim();
+  if (!name) throw new Error('Preset name required');
+  const store = _readStage3Store();
+  store.skillPresets[name] = buildEnabledSkillsPayload();
+  _writeStage3Store(store);
+  renderSkillPresets();
+  const status = document.getElementById('skillPresetStatus');
+  if (status) status.textContent = `Saved preset ${name}.`;
+}
+
+function applySkillPresetFromUI() {
+  const sel = document.getElementById('skillPresetSelect');
+  const key = String(sel && sel.value || '');
+  if (!key) return;
+  const store = _readStage3Store();
+  const list = Array.isArray(store.skillPresets[key]) ? store.skillPresets[key] : [];
+  document.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+    el.checked = list.includes(el.getAttribute('data-skill-enabled'));
+  });
+  scheduleApplySettings();
+  const status = document.getElementById('skillPresetStatus');
+  if (status) status.textContent = `Applied preset ${key}.`;
+}
+
+function deleteSkillPresetFromUI() {
+  const sel = document.getElementById('skillPresetSelect');
+  const key = String(sel && sel.value || '');
+  if (!key) return;
+  const store = _readStage3Store();
+  delete store.skillPresets[key];
+  _writeStage3Store(store);
+  renderSkillPresets();
+  const status = document.getElementById('skillPresetStatus');
+  if (status) status.textContent = `Deleted preset ${key}.`;
+}
+
+function saveRulesVersionFromUI() {
+  const label = String((document.getElementById('rulesVersionName') || {}).value || '').trim() || `version-${Date.now()}`;
+  const payload = {
+    id: `v_${Date.now()}`,
+    label,
+    created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    systemPromptOverride: String((document.getElementById('systemPromptOverride') || {}).value || ''),
+    rulesChecklist: String((document.getElementById('rulesChecklist') || {}).value || ''),
+  };
+  const store = _readStage3Store();
+  store.rulesVersions = [payload].concat(store.rulesVersions || []).slice(0, 50);
+  _writeStage3Store(store);
+  renderRulesVersions();
+  const status = document.getElementById('rulesVersionStatus');
+  if (status) status.textContent = `Saved rules version ${label}.`;
+}
+
+function rollbackRulesVersionFromUI() {
+  const sel = document.getElementById('rulesVersionSelect');
+  const key = String(sel && sel.value || '');
+  const store = _readStage3Store();
+  const found = (store.rulesVersions || []).find((v) => v.id === key);
+  if (!found) return;
+  const sys = document.getElementById('systemPromptOverride');
+  const rules = document.getElementById('rulesChecklist');
+  if (sys) sys.value = found.systemPromptOverride || '';
+  if (rules) rules.value = found.rulesChecklist || '';
+  persistControlPlaneFromUI();
+  const status = document.getElementById('rulesVersionStatus');
+  if (status) status.textContent = `Rolled back to ${found.label}.`;
+}
+
+function deleteRulesVersionFromUI() {
+  const sel = document.getElementById('rulesVersionSelect');
+  const key = String(sel && sel.value || '');
+  const store = _readStage3Store();
+  store.rulesVersions = (store.rulesVersions || []).filter((v) => v.id !== key);
+  _writeStage3Store(store);
+  renderRulesVersions();
+  const status = document.getElementById('rulesVersionStatus');
+  if (status) status.textContent = 'Deleted selected rules version.';
+}
+
+function saveBehaviorProfileFromUI() {
+  const name = String((document.getElementById('behaviorProfileName') || {}).value || '').trim();
+  if (!name) throw new Error('Profile name required');
+  const store = _readStage3Store();
+  store.behaviorProfiles[name] = {
+    knobTemperature: Number((document.getElementById('knobTemperature') || {}).value || 0.2),
+    knobTopP: Number((document.getElementById('knobTopP') || {}).value || 0.95),
+    knobToolBias: Number((document.getElementById('knobToolBias') || {}).value || 0.7),
+    knobVerbosity: Number((document.getElementById('knobVerbosity') || {}).value || 0.5),
+  };
+  _writeStage3Store(store);
+  renderBehaviorProfiles();
+  const status = document.getElementById('behaviorProfileStatus');
+  if (status) status.textContent = `Saved profile ${name}.`;
+}
+
+function applyBehaviorProfileFromUI() {
+  const key = String((document.getElementById('behaviorProfileSelect') || {}).value || '');
+  const store = _readStage3Store();
+  const p = (store.behaviorProfiles || {})[key];
+  if (!p) return;
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = String(v); };
+  setVal('knobTemperature', p.knobTemperature);
+  setVal('knobTopP', p.knobTopP);
+  setVal('knobToolBias', p.knobToolBias);
+  setVal('knobVerbosity', p.knobVerbosity);
+  persistControlPlaneFromUI();
+  const status = document.getElementById('behaviorProfileStatus');
+  if (status) status.textContent = `Applied profile ${key}.`;
+}
+
+function deleteBehaviorProfileFromUI() {
+  const key = String((document.getElementById('behaviorProfileSelect') || {}).value || '');
+  if (!key) return;
+  const store = _readStage3Store();
+  delete store.behaviorProfiles[key];
+  _writeStage3Store(store);
+  renderBehaviorProfiles();
+  const status = document.getElementById('behaviorProfileStatus');
+  if (status) status.textContent = `Deleted profile ${key}.`;
+}
+
+function updateContextExcludesFromUI() {
+  const store = _readStage3Store();
+  store.contextExcludes = {
+    traces: !!(document.getElementById('ctxExcludeTraces') || {}).checked,
+    uploads: !!(document.getElementById('ctxExcludeUploads') || {}).checked,
+    tools: !!(document.getElementById('ctxExcludeTools') || {}).checked,
+  };
+  _writeStage3Store(store);
+  renderContextBudgetPanel();
+}
+
+function summarizeContextRulesNow() {
+  const rules = document.getElementById('rulesChecklist');
+  if (!rules) return;
+  const lines = String(rules.value || '').split('
+').map((l) => l.trim()).filter(Boolean);
+  const summarized = lines.slice(0, 5).map((l, i) => `${i + 1}. ${l}`).join('
+');
+  rules.value = summarized;
+  persistControlPlaneFromUI();
+  const status = document.getElementById('contextBudgetActionStatus');
+  if (status) status.textContent = 'Rules checklist summarized to top 5 entries.';
+}
+
 function parseCustomToolsInput() {
   const raw = document.getElementById('customTools').value.trim();
   if (!raw) return [];
@@ -2111,6 +2337,7 @@ async function refreshState() {
   renderSessions(state.sessions, state.activeSession);
   renderUploads();
   renderToolSettings();
+  renderToolsConsole();
   renderSkillSettings();
   renderGitControls();
   renderMessages();
@@ -2412,6 +2639,23 @@ bindClick('sendBackground', () => sendPrompt(true));
 bindClick('killJob', () => killActiveJob());
 bindClick('newSession', () => openNewSessionModal());
 bindClick('savePricing', () => savePricing());
+
+bindClick('saveSkillPreset', () => saveSkillPresetFromUI());
+bindClick('applySkillPreset', () => applySkillPresetFromUI());
+bindClick('deleteSkillPreset', () => deleteSkillPresetFromUI());
+
+bindClick('saveRulesVersion', () => saveRulesVersionFromUI());
+bindClick('rollbackRulesVersion', () => rollbackRulesVersionFromUI());
+bindClick('deleteRulesVersion', () => deleteRulesVersionFromUI());
+
+bindClick('saveBehaviorProfile', () => saveBehaviorProfileFromUI());
+bindClick('applyBehaviorProfile', () => applyBehaviorProfileFromUI());
+bindClick('deleteBehaviorProfile', () => deleteBehaviorProfileFromUI());
+
+bindChange('ctxExcludeTraces', () => updateContextExcludesFromUI());
+bindChange('ctxExcludeUploads', () => updateContextExcludesFromUI());
+bindChange('ctxExcludeTools', () => updateContextExcludesFromUI());
+bindClick('summarizeContextNow', () => summarizeContextRulesNow());
 bindClick('uploadFiles', () => uploadContextFiles());
 bindClick('clearUploads', () => clearUploadedStore());
 

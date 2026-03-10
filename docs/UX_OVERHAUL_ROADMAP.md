@@ -30,7 +30,7 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 
 - [ ] Add design tokens (spacing, typography, color roles, radii, shadows, interaction states).
 - [ ] Implement core UI primitives (cards, tabs, split panes, badges, empty/error/loading states).
-- [ ] Introduce global layout shell and panel-resize/collapse patterns.
+- [~] Introduce global layout shell and panel-resize/collapse patterns. *(slice 01 in progress: surface tabs + IA zone labels + shortcuts)*
 - [ ] Add keyboard shortcut infrastructure and focus conventions.
 
 ### Stage 2 — Core operational workflows (weeks 4-7)
@@ -74,6 +74,10 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 - Ship behind toggles when risk is medium/high.
 - Include explicit UX acceptance criteria in PR descriptions.
 - Keep documentation and visuals in sync with behavior changes.
+
+## Stage notes
+
+- Stage 1 slice artifact: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
 
 ## Immediate next actions
 

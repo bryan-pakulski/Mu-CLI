@@ -11,6 +11,15 @@
   <link id="hljsTheme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" />
   <style>
     :root {
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --font-size-xs: 11px;
+      --font-size-sm: 12px;
+      --font-size-md: 14px;
+      --font-size-lg: 16px;
       --bg: #f6f7f9;
       --surface: #ffffff;
       --surface-2: #f3f4f6;
@@ -64,7 +73,7 @@
     .shell {
       height: 100vh;
       display: grid;
-      grid-template-columns: 340px minmax(0,1fr);
+      grid-template-columns: 320px minmax(0,1fr);
       gap: 0;
       padding: 0;
       transition: grid-template-columns .2s ease;
@@ -77,6 +86,8 @@
       user-select: none;
     }
     .shell.sidebar-hidden { grid-template-columns: 0 minmax(0,1fr); }
+    .shell[data-surface="control"] { grid-template-columns: 380px minmax(0,1fr); }
+    .shell[data-surface="review"] .meta-sidebar { border-left-color: color-mix(in srgb, var(--primary) 30%, var(--border)); }
     .shell.sidebar-hidden .sidebar {
       transform: translateX(-16px);
       opacity: 0;
@@ -93,7 +104,7 @@
     .sidebar {
       min-height: 0;
       overflow: auto;
-      padding: 10px 12px;
+      padding: var(--space-3);
       border: 0;
       border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
       border-radius: 0;
@@ -139,7 +150,15 @@
     .collapsible-panel > summary h3 { margin: 0; }
     .panel-body { min-height: 0; }
 
-    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: 8px 12px; }
+    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: var(--space-2) var(--space-3); }
+    .zone-label {
+      font-size: var(--font-size-xs);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: var(--space-2);
+      font-weight: 600;
+    }
     .workspace-layout {
       min-height: 0;
       display: grid;
@@ -193,6 +212,31 @@
       border: 0;
       background: transparent;
       box-shadow: none;
+    }
+    .surface-switch {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-left: 6px;
+    }
+    .surface-tab {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: var(--font-size-xs);
+      padding: 4px 10px;
+    }
+    .surface-tab.active {
+      background: var(--primary-soft);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .shortcut-hint {
+      color: var(--muted);
+      font-size: var(--font-size-xs);
+      margin-left: auto;
     }
 
     .top-git-launch { display: none; }
@@ -1133,6 +1177,7 @@
 <body>
   <div id="app" class="shell sidebar-hidden">
     <aside id="sidebar" class="sidebar">
+      <div class="zone-label">Navigate &amp; scope</div>
 
       <details class="panel collapsible-panel" open>
         <summary><h3>Runtime</h3></summary>
@@ -1236,13 +1281,20 @@
       <div class="topbar">
         <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
         <div class="title">mu_cli</div>
+        <div class="surface-switch" role="tablist" aria-label="Workspace surface">
+          <button class="surface-tab active" data-surface-tab="operate" role="tab" aria-selected="true">Operate</button>
+          <button class="surface-tab" data-surface-tab="control" role="tab" aria-selected="false">Control</button>
+          <button class="surface-tab" data-surface-tab="review" role="tab" aria-selected="false">Review</button>
+        </div>
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
                         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
+        <span class="shortcut-hint">⌘/Ctrl+B sidebar · ⌘/Ctrl+\ metadata · ⌘/Ctrl+, settings</span>
               </div>
 
       <div class="workspace-layout">
         <div class="chat-layout">
+          <div class="zone-label">Operate</div>
           <div id="messages" class="messages"></div>
 
           <div id="chatComposer">
@@ -1270,6 +1322,7 @@
         <div class="meta-rail">
           <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel"><</button>
           <aside class="meta-sidebar">
+          <div class="zone-label">Inspect</div>
           <h4>Run metadata</h4>
           <div class="meta-feed">
             <details class="trace-wrap" id="traceWrap" open>

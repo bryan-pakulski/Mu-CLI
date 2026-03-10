@@ -47,6 +47,7 @@ inspect progress, and either open a PR when complete or continue iterating.
 - ADR index: [`docs/adr/README.md`](docs/adr/README.md)
 - UX overhaul roadmap: [`docs/UX_OVERHAUL_ROADMAP.md`](docs/UX_OVERHAUL_ROADMAP.md)
 - Stage 0 UX foundation: [`docs/ux/stage0-foundation.md`](docs/ux/stage0-foundation.md)
+- Stage 1 shell slice: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
 
 ## Makefile shortcuts
 

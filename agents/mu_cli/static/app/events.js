@@ -68,6 +68,29 @@ bindClick('toggleMetaSidebar', () => {
   btn.setAttribute('aria-label', btn.title);
 });
 
+function setSurface(surface) {
+  const app = byId('app');
+  if (!app) return;
+  const next = ['operate', 'control', 'review'].includes(surface) ? surface : 'operate';
+  state.uiSurface = next;
+  app.setAttribute('data-surface', next);
+  localStorage.setItem('mu_ui_surface', next);
+  document.querySelectorAll('[data-surface-tab]').forEach((el) => {
+    const active = el.getAttribute('data-surface-tab') === next;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  if (next === 'control') app.classList.remove('sidebar-hidden');
+  if (next === 'review') {
+    const layout = document.querySelector('.workspace-layout');
+    if (layout) layout.classList.remove('meta-hidden');
+  }
+}
+
+document.querySelectorAll('[data-surface-tab]').forEach((el) => {
+  el.addEventListener('click', () => setSurface(el.getAttribute('data-surface-tab') || 'operate'));
+});
+
 bindClick('refreshGitDiff', async () => {
   await refreshGitDiff();
   renderGitControls();
@@ -129,6 +152,22 @@ if (promptInput) {
   });
 }
 
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    byId('app').classList.toggle('sidebar-hidden');
+  }
+  if (e.key === '\\') {
+    e.preventDefault();
+    byId('toggleMetaSidebar')?.click();
+  }
+  if (e.key === ',') {
+    e.preventDefault();
+    showModal('advancedModal', true);
+  }
+});
+
 document.addEventListener('click', (ev) => {
   const btn = ev.target && ev.target.closest ? ev.target.closest('[data-run-details]') : null;
   if (btn) {
@@ -154,6 +193,7 @@ if (metaToggleBtn) {
   metaToggleBtn.setAttribute('aria-label', 'Hide metadata panel');
 }
 hydrateThemePreference();
+setSurface(localStorage.getItem('mu_ui_surface') || 'operate');
 refreshState().catch((e) => alert(e.message));
 if (runtimeTick) clearInterval(runtimeTick);
 runtimeTick = setInterval(() => updateQueryRuntime(), 1000);

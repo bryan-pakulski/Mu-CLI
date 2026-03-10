@@ -268,6 +268,8 @@ async function saveSessionOverridesFromModal() {
     ...(_effectiveControlPrefsForSession(target) || {}),
     systemPromptOverride: document.getElementById('sessionOverrideSystemPrompt').value || '',
     rulesChecklist: document.getElementById('sessionOverrideRules').value || '',
+    enabled_skills: buildSessionOverrideSkillPayload(),
+    tool_visibility: buildSessionOverrideToolVisibilityPayload(),
   };
   _writeSessionOverrideStore(store);
 
@@ -2022,6 +2024,35 @@ function buildEnabledSkillsPayload() {
   return enabled;
 }
 
+function renderSkillsLifecycleVisibility() {
+  const host = document.getElementById('skillsLifecycleHost');
+  if (!host) return;
+  const skills = Array.isArray(state.skills) ? state.skills : [];
+  if (!skills.length) {
+    host.textContent = 'No skills found in ./skills.';
+    return;
+  }
+  const stage3 = _readStage3Store();
+  const presets = stage3.skillPresets || {};
+  const presetEntries = Object.entries(presets);
+  const enabledNow = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
+  const overrideStore = _readSessionOverrideStore();
+  const sessions = overrideStore.sessions || {};
+
+  const rows = skills.map((name) => {
+    const inPresets = presetEntries.filter(([, list]) => Array.isArray(list) && list.includes(name)).length;
+    const sessionOverridden = Object.values(sessions).filter((cfg) => Array.isArray(cfg && cfg.enabled_skills) && cfg.enabled_skills.includes(name)).length;
+    return {
+      name,
+      now: enabledNow.has(name),
+      inPresets,
+      sessionOverridden,
+    };
+  });
+
+  host.innerHTML = `<table class="compact-table"><thead><tr><th>Skill</th><th>Now</th><th>Presets</th><th>Session overrides</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${r.now ? 'enabled' : 'off'}</td><td>${r.inPresets}</td><td>${r.sessionOverridden}</td></tr>`).join('')}</tbody></table>`;
+}
+
 function renderSkillSettings() {
   const host = document.getElementById('skillToggleList');
   const skills = Array.isArray(state.skills) ? state.skills : [];
@@ -2045,6 +2076,7 @@ function renderSkillSettings() {
   host.querySelectorAll('[data-skill-view]').forEach((el) => {
     el.addEventListener('click', () => openSkillView(el.getAttribute('data-skill-view') || '').catch((e) => alert(e.message)));
   });
+  renderSkillsLifecycleVisibility();
 }
 
 async function openSkillView(name) {

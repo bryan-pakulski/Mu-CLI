@@ -27,6 +27,7 @@ from mu_cli.tools.filesystem import (
     ScoreSourcesTool,
     SearchWebContextTool,
     ListWorkspaceFilesTool,
+    MakefileAgentTool,
     ReadFileTool,
     WriteFileTool,
 )
@@ -562,6 +563,7 @@ def run() -> int:
         ScoreSourcesTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
+        MakefileAgentTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
     ]
     setup_autocomplete(tools)
 

@@ -40,6 +40,7 @@ from mu_cli.tools.filesystem import (
     CustomCommandTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
+    MakefileAgentTool,
     ReadFileTool,
     WriteFileTool,
 )
@@ -1217,6 +1218,7 @@ def create_app():
         ScoreSourcesTool(),
         ListWorkspaceFilesTool(workspace_store),
         GetWorkspaceFileContextTool(workspace_store),
+        MakefileAgentTool(lambda: Path(workspace_store.snapshot.root) if workspace_store.snapshot else None),
         ListUploadedContextFilesTool(uploads_root, lambda: runtime.session_name),
         GetUploadedContextFileTool(uploads_root, lambda: runtime.session_name),
         ClearUploadedContextStoreTool(uploads_root, lambda: runtime.session_name),

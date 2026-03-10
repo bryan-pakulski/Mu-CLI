@@ -17,6 +17,7 @@ from mu_cli.tools.filesystem import (
     GetWorkspaceFileContextTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
+    MakefileAgentTool,
     SearchWebContextTool,
     SearchArxivPapersTool,
     ScoreSourcesTool,
@@ -202,6 +203,36 @@ diff
             result = SearchWebContextTool().run({"query": "example", "provider": "duckduckgo"})
         self.assertTrue(result.ok)
         self.assertIn("https://example.com/post", result.output)
+
+
+    def test_makefile_agent_tool_lists_and_runs_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "Makefile.agent").write_text(
+                ".PHONY: hello\nhello:\n\t@echo hello-from-agent\n",
+                encoding="utf-8",
+            )
+            tool = MakefileAgentTool(lambda: root)
+
+            listed = tool.run({})
+            self.assertTrue(listed.ok, listed.output)
+            self.assertIn("hello", listed.output)
+
+            ran = tool.run({"target": "hello"})
+            self.assertTrue(ran.ok, ran.output)
+            self.assertIn("hello-from-agent", ran.output)
+
+    def test_makefile_agent_tool_requires_known_target(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "Makefile.agent").write_text(
+                "known:\n\t@echo ok\n",
+                encoding="utf-8",
+            )
+            tool = MakefileAgentTool(lambda: root)
+            result = tool.run({"target": "unknown"})
+            self.assertFalse(result.ok)
+            self.assertIn("Unknown Makefile.agent job", result.output)
 
     def test_custom_command_tool(self) -> None:
         tool = CustomCommandTool(

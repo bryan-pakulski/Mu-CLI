@@ -222,6 +222,19 @@ class WebTests(unittest.TestCase):
         self.assertEqual('custom', tools['say_hi']['source'])
         self.assertTrue(state['research_mode'])
 
+
+    def test_state_includes_makefile_agent_tool(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        tool_names = {item['name'] for item in state.get('tools', [])}
+        self.assertIn('run_make_agent_job', tool_names)
+
     def test_settings_provider_api_keys_override(self) -> None:
         from mu_cli.web import create_app
 

@@ -13,6 +13,7 @@ from mu_cli.tools.filesystem import (
     CustomCommandTool,
     ListUploadedContextFilesTool,
     ListWorkspaceFilesTool,
+    MakefileAgentTool,
     ReadFileTool,
     WriteFileTool,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "SearchArxivPapersTool",
     "ScoreSourcesTool",
     "CustomCommandTool",
+    "MakefileAgentTool",
     "ListWorkspaceFilesTool",
     "GetWorkspaceFileContextTool",
     "ListUploadedContextFilesTool",

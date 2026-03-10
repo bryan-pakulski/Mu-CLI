@@ -17,6 +17,7 @@ Provider-agnostic CLI scaffold intended for a **human-in-the-loop development wo
   - `git` (mutating; approval-gated)
   - `list_workspace_files`
   - `get_workspace_file_context`
+  - `run_make_agent_job` (runs jobs from read-only `Makefile.agent`)
 - workspace indexing + tool-run memory
 - per-turn token/cost report with JSON-configurable provider pricing
 - session persistence (resume conversations and workspace state)

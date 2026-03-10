@@ -928,3 +928,96 @@ class CustomCommandTool:
         if proc.returncode != 0:
             return ToolResult(ok=False, output=output.strip() or "command failed")
         return ToolResult(ok=True, output=output.strip() or "ok")
+
+
+class MakefileAgentTool:
+    """Run jobs exposed by a read-only Makefile.agent."""
+
+    name = "run_make_agent_job"
+    description = (
+        "Execute an allowed job from Makefile.agent (if present). "
+        "Use without a target to list available jobs."
+    )
+    mutating = True
+    schema = {
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": "Make target/job name from Makefile.agent. Leave empty to list jobs.",
+            },
+            "args": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional KEY=VALUE overrides or additional make arguments.",
+            },
+        },
+    }
+
+    def __init__(self, workspace_root_getter: Callable[[], Path | None]) -> None:
+        self.workspace_root_getter = workspace_root_getter
+
+    def _workspace_root(self) -> Path:
+        root = self.workspace_root_getter()
+        if root is not None:
+            return root
+        return Path.cwd()
+
+    def _makefile_path(self, root: Path) -> Path:
+        return root / "Makefile.agent"
+
+    def _list_targets(self, makefile: Path) -> list[str]:
+        content = makefile.read_text(encoding="utf-8", errors="ignore")
+        targets: list[str] = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("."):
+                continue
+            if line.startswith("	"):
+                continue
+            if ":" not in line:
+                continue
+            left = line.split(":", 1)[0].strip()
+            if not left or " " in left:
+                continue
+            if any(ch in left for ch in ("$", "%", "=")):
+                continue
+            targets.append(left)
+        # preserve order, unique
+        seen = set()
+        uniq = []
+        for t in targets:
+            if t in seen:
+                continue
+            seen.add(t)
+            uniq.append(t)
+        return uniq
+
+    def run(self, args: dict) -> ToolResult:
+        root = self._workspace_root()
+        makefile = self._makefile_path(root)
+        if not makefile.exists() or not makefile.is_file():
+            return ToolResult(ok=False, output=f"Makefile.agent not found at {makefile}")
+
+        target = str(args.get("target", "") or "").strip()
+        raw_args = args.get("args", [])
+        if raw_args is None:
+            raw_args = []
+        if not isinstance(raw_args, list) or not all(isinstance(item, str) for item in raw_args):
+            return ToolResult(ok=False, output="args must be an array of strings")
+
+        targets = self._list_targets(makefile)
+        if not target:
+            formatted = "\n".join(f"- {t}" for t in targets) if targets else "(none found)"
+            return ToolResult(ok=True, output=f"Available Makefile.agent jobs:\n{formatted}")
+
+        if targets and target not in targets:
+            formatted = ", ".join(targets)
+            return ToolResult(ok=False, output=f"Unknown Makefile.agent job '{target}'. Known jobs: {formatted}")
+
+        cmd = ["make", "-f", str(makefile), target, *raw_args]
+        proc = subprocess.run(cmd, text=True, capture_output=True, cwd=str(root), timeout=120, check=False)
+        output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+        if proc.returncode != 0:
+            return ToolResult(ok=False, output=output.strip() or "make job failed")
+        return ToolResult(ok=True, output=output.strip() or "ok")

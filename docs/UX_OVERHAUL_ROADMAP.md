@@ -35,10 +35,10 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 
 ### Stage 2 — Core operational workflows (weeks 4-7)
 
-- [ ] Multi-session management v2 (pinned/recent, health states, quick switch).
-- [ ] Git management v2 (repo/branch always visible, safer actions, status clarity).
-- [ ] Diff and code management v2 (inline/side-by-side, hunk-level accept/reject).
-- [ ] Real-time execution timeline (step-by-step model/tool events + metadata).
+- [~] Multi-session management v2 (pinned/recent, health states, quick switch).
+- [~] Git management v2 (repo/branch always visible, safer actions, status clarity).
+- [~] Diff and code management v2 (inline/side-by-side, hunk-level accept/reject).
+- [~] Real-time execution timeline (step-by-step model/tool events + metadata).
 
 ### Stage 3 — Control plane surfaces (weeks 8-10)
 
@@ -106,6 +106,7 @@ Use this section as the baseline in-product help content so users can discover c
 ## Stage notes
 
 - Stage 1 slice artifact: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
+- Stage 2 progress artifact: [`docs/ux/stage2-operational-workflows.md`](docs/ux/stage2-operational-workflows.md)
 
 ## Immediate next actions
 

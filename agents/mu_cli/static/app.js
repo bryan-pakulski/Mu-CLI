@@ -3,7 +3,7 @@
 
 // >>> app/store.js
 // --- state store + reducers -------------------------------------------------
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {}, uiSurface: 'operate' };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {}, uiSurface: 'operate', pinnedSessions: [], recentSessions: [], gitDiffMode: 'inline', gitHunkDecisions: {} };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -53,6 +53,151 @@ async function parseJsonResponse(res) {
 
 // >>> app/render/core.js
 // --- render functions -------------------------------------------------------
+
+function _readSessionPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_session_prefs') || '{}');
+    return {
+      pinned: Array.isArray(raw.pinned) ? raw.pinned : [],
+      recent: Array.isArray(raw.recent) ? raw.recent : [],
+    };
+  } catch (_) {
+    return { pinned: [], recent: [] };
+  }
+}
+
+function _writeSessionPrefs(next) {
+  localStorage.setItem('mu_session_prefs', JSON.stringify({
+    pinned: Array.isArray(next.pinned) ? next.pinned.slice(0, 30) : [],
+    recent: Array.isArray(next.recent) ? next.recent.slice(0, 30) : [],
+  }));
+}
+
+function markSessionRecent(name) {
+  const n = String(name || '').trim();
+  if (!n) return;
+  const prefs = _readSessionPrefs();
+  prefs.recent = [n].concat(prefs.recent.filter((x) => x !== n)).slice(0, 12);
+  _writeSessionPrefs(prefs);
+}
+
+function toggleSessionPin(name) {
+  const n = String(name || '').trim();
+  if (!n) return;
+  const prefs = _readSessionPrefs();
+  if (prefs.pinned.includes(n)) prefs.pinned = prefs.pinned.filter((x) => x !== n);
+  else prefs.pinned.unshift(n);
+  _writeSessionPrefs(prefs);
+  renderSessions(state.sessions || [], state.activeSession || '');
+}
+
+function parseGitDiffSections(diffText) {
+  const raw = String(diffText || '');
+  const statusIdx = raw.indexOf('Status:\n');
+  const unstagedIdx = raw.indexOf('\n\nUnstaged diff:\n');
+  const stagedIdx = raw.indexOf('\n\nStaged diff:\n');
+  if (statusIdx < 0 || unstagedIdx < 0 || stagedIdx < 0) {
+    return { status: '', unstaged: raw, staged: '' };
+  }
+  return {
+    status: raw.slice(statusIdx + 8, unstagedIdx).trim(),
+    unstaged: raw.slice(unstagedIdx + 18, stagedIdx).trim(),
+    staged: raw.slice(stagedIdx + 16).trim(),
+  };
+}
+
+function splitDiffHunks(diffText) {
+  const text = String(diffText || '').trim();
+  if (!text || text === '(none)') return [];
+  const lines = text.split('\n');
+  const hunks = [];
+  let current = null;
+  const pushCurrent = () => {
+    if (current && current.lines.length) {
+      current.text = current.lines.join('\n');
+      hunks.push(current);
+    }
+  };
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      pushCurrent();
+      current = { file: line.replace('diff --git ', ''), header: line, lines: [line] };
+      continue;
+    }
+    if (!current) {
+      current = { file: '(unknown)', header: 'diff', lines: [] };
+    }
+    current.lines.push(line);
+  }
+  pushCurrent();
+  return hunks;
+}
+
+function renderGitDiffWorkbench() {
+  const sections = parseGitDiffSections(state.gitDiff || '');
+  const quick = document.getElementById('gitQuickStatus');
+  const dirty = !!String(sections.status || '').trim() && String(sections.status || '').trim() !== '(clean)';
+  if (quick) {
+    quick.textContent = state.gitCurrentRepo ? `${state.gitCurrentRepo.split('/').pop()} · ${state.gitCurrentBranch || '-'} · ${dirty ? 'dirty' : 'clean'}` : 'git: no repo';
+    quick.className = `pill git-quick-pill ${dirty ? 'dirty' : 'clean'}`;
+  }
+
+  const mode = state.gitDiffMode || 'inline';
+  const inlineBtn = document.getElementById('gitInlineMode');
+  const sideBtn = document.getElementById('gitSideMode');
+  if (inlineBtn) inlineBtn.classList.toggle('active', mode === 'inline');
+  if (sideBtn) sideBtn.classList.toggle('active', mode === 'side');
+
+  const target = document.getElementById('gitDiffBox');
+  if (target) {
+    const combined = [
+      'Unstaged diff:',
+      sections.unstaged || '(none)',
+      '',
+      'Staged diff:',
+      sections.staged || '(none)',
+    ].join('\n');
+    target.innerHTML = mode === 'side' ? renderSideBySideDiff(combined) : `<pre>${escapeHtml(combined)}</pre>`;
+  }
+
+  const hunkHost = document.getElementById('gitHunkList');
+  if (!hunkHost) return;
+  const hunks = splitDiffHunks((sections.unstaged || '') + '\n' + (sections.staged || ''));
+  if (!hunks.length) {
+    hunkHost.innerHTML = '<div class="small-muted">No hunks available.</div>';
+    return;
+  }
+  hunkHost.innerHTML = hunks.map((h, idx) => {
+    const decision = state.gitHunkDecisions[idx] || 'pending';
+    return `<div class="git-hunk-row"><div><strong>Hunk ${idx + 1}</strong> <span class="small-muted">${escapeHtml(h.file)}</span></div><span class="ui-badge ${decision === 'accept' ? 'success' : (decision === 'reject' ? 'danger' : '')}">${decision}</span><div class="d-flex gap-1"><button class="btn btn-soft btn-sm" data-hunk-accept="${idx}">Accept</button><button class="btn btn-soft btn-sm" data-hunk-reject="${idx}">Reject</button></div></div>`;
+  }).join('');
+  hunkHost.querySelectorAll('[data-hunk-accept]').forEach((el) => el.addEventListener('click', () => {
+    state.gitHunkDecisions[el.getAttribute('data-hunk-accept')] = 'accept';
+    renderGitDiffWorkbench();
+  }));
+  hunkHost.querySelectorAll('[data-hunk-reject]').forEach((el) => el.addEventListener('click', () => {
+    state.gitHunkDecisions[el.getAttribute('data-hunk-reject')] = 'reject';
+    renderGitDiffWorkbench();
+  }));
+}
+
+function renderExecutionTimeline() {
+  const host = document.getElementById('executionTimeline');
+  if (!host) return;
+  const active = activeSearchingJob();
+  const jobEvents = Array.isArray(active && active.events) ? active.events : [];
+  const traceEvents = (state.traces || []).slice(-20);
+  const merged = traceEvents.concat(jobEvents).slice(-32);
+  if (!merged.length) {
+    host.innerHTML = '<div class="state-empty">No active timeline yet. Run a task to see model/tool steps in real time.</div>';
+    return;
+  }
+  host.innerHTML = merged.map((line, idx) => {
+    const cls = classifyBackgroundEvent(line) || (String(line).startsWith('model:') ? 'model' : 'status');
+    return `<div class="timeline-item ${cls}"><span class="timeline-step">${idx + 1}</span><span class="timeline-line">${escapeHtml(String(line))}</span></div>`;
+  }).join('');
+}
+
 function renderGitControls() {
   const launch = document.getElementById('openGitModal');
   const gitPanel = document.getElementById('gitPanel');
@@ -104,9 +249,9 @@ function renderGitControls() {
   if (!repos.length) status.textContent = 'Select a workspace containing a git repository.';
   else status.textContent = `Repo: ${state.gitCurrentRepo || '-'} · Current branch: ${state.gitCurrentBranch || '-'}`;
 
-  const diffBox = document.getElementById('gitDiffBox');
-  if (diffBox) diffBox.textContent = state.gitDiff || 'No diff yet.';
+  renderGitDiffWorkbench();
 }
+
 
 async function refreshGitRepos() {
   const workspace = document.getElementById('workspace').value.trim();
@@ -165,6 +310,7 @@ async function createBranchFromUI() {
   const repo = document.getElementById('gitRepo').value;
   const branch = document.getElementById('newBranchName').value.trim();
   if (!repo || !branch) return;
+  if (!confirm(`Create branch ${branch} in ${repo}?`)) return;
   await api('/api/git/branch', 'POST', { action: 'create', repo, branch, base: document.getElementById('gitBranch').value || '' });
   document.getElementById('newBranchName').value = '';
   await refreshGitBranches();
@@ -175,6 +321,7 @@ async function switchBranchFromUI() {
   const repo = document.getElementById('gitRepo').value;
   const branch = document.getElementById('gitBranch').value;
   if (!repo || !branch) return;
+  if (!confirm(`Switch ${repo} to branch ${branch}?`)) return;
   await api('/api/git/branch', 'POST', { action: 'switch', repo, branch });
   await refreshGitBranches();
   await refreshState();
@@ -226,6 +373,7 @@ function renderBackgroundActivity(job) {
     body.scrollTop = body.scrollHeight;
   }
   panel.open = active;
+  renderExecutionTimeline();
 }
 
 function beginBackgroundPolling() {
@@ -1285,8 +1433,14 @@ function renderSessions(list, active) {
   const host = document.getElementById('sessionList');
   host.innerHTML = '';
   const statuses = sessionStatusMap();
+  const prefs = _readSessionPrefs();
+  state.pinnedSessions = prefs.pinned.filter((n) => list.includes(n));
+  state.recentSessions = prefs.recent.filter((n) => list.includes(n));
+  const filter = String((document.getElementById('sessionQuickSwitch') || {}).value || '').trim().toLowerCase();
+  const ordered = state.pinnedSessions.concat(list.filter((n) => !state.pinnedSessions.includes(n)));
 
-  for (const name of list) {
+  for (const name of ordered) {
+    if (filter && !name.toLowerCase().includes(filter)) continue;
     const row = document.createElement('div');
     row.className = 'session-row';
 
@@ -1297,9 +1451,24 @@ function renderSessions(list, active) {
     const status = statusData ? statusData.status : '';
     const dotClass = status === 'running' ? 'running' : (status === 'done' ? 'done' : '');
     const tip = statusData?.job?.last_step || status || 'idle';
-    btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${escapeHtml(tip)}"></span><span class="session-name">${escapeHtml(name)}</span></span>`;
+    const isPinned = state.pinnedSessions.includes(name);
+    btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${escapeHtml(tip)}"></span><span class="session-name">${escapeHtml(name)}</span></span><span class="ui-badge ${status === 'running' ? 'warn' : (status === 'done' ? 'success' : '')}">${status || 'idle'}</span>`;
     btn.setAttribute('data-session-name', name);
-    btn.addEventListener('click', () => { completedSeenSessions.add(name); sessionAction('switch', name).catch((e) => alert(e.message)); });
+    btn.addEventListener('click', () => {
+      markSessionRecent(name);
+      completedSeenSessions.add(name);
+      sessionAction('switch', name).catch((e) => alert(e.message));
+    });
+
+    const pinBtn = document.createElement('button');
+    pinBtn.type = 'button';
+    pinBtn.className = 'session-menu-btn';
+    pinBtn.title = isPinned ? 'Unpin session' : 'Pin session';
+    pinBtn.textContent = isPinned ? '★' : '☆';
+    pinBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      toggleSessionPin(name);
+    });
 
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
@@ -1314,8 +1483,20 @@ function renderSessions(list, active) {
     });
 
     row.appendChild(btn);
+    row.appendChild(pinBtn);
     row.appendChild(menuBtn);
     host.appendChild(row);
+  }
+
+  const recentHost = document.getElementById('sessionRecent');
+  if (recentHost) {
+    const recent = state.recentSessions.filter((n) => n !== active).slice(0, 5);
+    recentHost.innerHTML = recent.length
+      ? recent.map((n) => `<button class="btn btn-soft btn-sm me-1 mb-1" data-recent-session="${_escapeAttr(n)}">${escapeHtml(n)}</button>`).join('')
+      : '<span class="small-muted">No recent sessions.</span>';
+    recentHost.querySelectorAll('[data-recent-session]').forEach((el) => {
+      el.addEventListener('click', () => sessionAction('switch', el.getAttribute('data-recent-session')).catch((e) => alert(e.message)));
+    });
   }
 
   document.getElementById('activeSession').textContent = `active: ${active}`;
@@ -1674,6 +1855,7 @@ async function refreshState() {
   renderTraces();
   updateChatBusyState();
   renderMetrics();
+  renderExecutionTimeline();
 
   if (state.pendingApproval) {
     document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
@@ -1901,6 +2083,7 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
   await api('/api/session', 'POST', { action, name, ...extra });
+  if (action === 'switch' && name) markSessionRecent(name);
   await refreshState();
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
@@ -2071,6 +2254,33 @@ bindClick('refreshGitDiff', async () => {
   await refreshGitDiff();
   renderGitControls();
 });
+
+bindClick('gitInlineMode', () => { state.gitDiffMode = 'inline'; renderGitDiffWorkbench(); });
+bindClick('gitSideMode', () => { state.gitDiffMode = 'side'; renderGitDiffWorkbench(); });
+bindClick('gitHunkAcceptAll', () => {
+  const hunks = splitDiffHunks((parseGitDiffSections(state.gitDiff || '').unstaged || '') + '\n' + (parseGitDiffSections(state.gitDiff || '').staged || ''));
+  state.gitHunkDecisions = {};
+  hunks.forEach((_, idx) => { state.gitHunkDecisions[idx] = 'accept'; });
+  renderGitDiffWorkbench();
+});
+bindClick('gitHunkRejectAll', () => {
+  const hunks = splitDiffHunks((parseGitDiffSections(state.gitDiff || '').unstaged || '') + '\n' + (parseGitDiffSections(state.gitDiff || '').staged || ''));
+  state.gitHunkDecisions = {};
+  hunks.forEach((_, idx) => { state.gitHunkDecisions[idx] = 'reject'; });
+  renderGitDiffWorkbench();
+});
+bindClick('gitHunkReset', () => { state.gitHunkDecisions = {}; renderGitDiffWorkbench(); });
+
+bindChange('sessionQuickSwitch', () => renderSessions(state.sessions || [], state.activeSession || ''));
+const sessionQuickSwitch = byId('sessionQuickSwitch');
+if (sessionQuickSwitch) {
+  sessionQuickSwitch.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const val = String(sessionQuickSwitch.value || '').trim().toLowerCase();
+    const target = (state.sessions || []).find((n) => String(n).toLowerCase().includes(val));
+    if (target) runWithAlert(() => sessionAction('switch', target));
+  });
+}
 
 bindClick('browseWorkspace', () => {
   showModal('workspaceModal', true);

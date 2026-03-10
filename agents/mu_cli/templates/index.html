@@ -250,6 +250,25 @@
       margin-left: auto;
     }
 
+    .git-quick-pill.clean { border-color: color-mix(in srgb, var(--color-success) 28%, var(--border)); color: var(--color-success); }
+    .git-quick-pill.dirty { border-color: color-mix(in srgb, var(--color-warn) 30%, var(--border)); color: var(--color-warn); }
+    .session-toolbar { display:flex; gap:6px; margin-bottom:8px; }
+    .session-recent { margin-top:8px; }
+    .timeline-panel { border:1px solid var(--border); border-radius:10px; background:var(--surface); padding:8px; max-height:180px; overflow:auto; }
+    .timeline-item { display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+    .timeline-item:last-child { border-bottom:0; }
+    .timeline-step { min-width:20px; color:var(--muted); font-size:11px; }
+    .timeline-line { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; }
+    .timeline-item.tool-request .timeline-line { color:#7c3aed; }
+    .timeline-item.tool-run .timeline-line { color:#0f766e; }
+    .timeline-item.model .timeline-line { color:#1d4ed8; }
+    .git-mode-toggle { display:flex; gap:6px; margin-bottom:8px; }
+    .git-mode-toggle .btn.active { background:var(--primary-soft); border-color:var(--primary); color:var(--text); }
+    .git-hunk-actions { display:flex; gap:6px; margin:8px 0; }
+    .git-hunk-list { max-height:180px; overflow:auto; border:1px solid var(--border); border-radius:10px; padding:8px; background:var(--surface-2); }
+    .git-hunk-row { display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center; padding:6px; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+    .git-hunk-row:last-child { border-bottom:0; }
+
     .sidebar-resize-handle {
       width: 8px;
       cursor: col-resize;
@@ -1294,8 +1313,12 @@
         <div class="d-flex gap-2 mb-2">
           <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
         </div>
+        <div class="session-toolbar">
+          <input id="sessionQuickSwitch" class="form-control form-control-sm" placeholder="Quick switch (type + Enter)" />
+        </div>
 
         <div id="sessionList" class="session-list mb-2"></div>
+        <div class="session-recent"><div class="small-muted mb-1">Recent</div><div id="sessionRecent"></div></div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
         </div>
       </details>
@@ -1360,6 +1383,7 @@
         <button id="openHelp" class="btn btn-soft btn-sm">Help</button>
                         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
+        <span id="gitQuickStatus" class="pill git-quick-pill">git: no repo</span>
         <span class="shortcut-hint">⌘/Ctrl+B sidebar · ⌘/Ctrl+\ metadata · ⌘/Ctrl+, settings</span>
               </div>
 
@@ -1380,6 +1404,10 @@
             <details id="backgroundLive" class="bg-live">
               <summary id="backgroundLiveSummary">Live run activity</summary>
               <div id="backgroundLiveBody" class="bg-live-body"><div class="bg-live-empty">No activity yet.</div></div>
+            </details>
+            <details class="trace-wrap" open>
+              <summary>Execution timeline</summary>
+              <div id="executionTimeline" class="timeline-panel"></div>
             </details>
             <div class="d-flex align-items-center gap-2 mt-2">
               <button id="send" class="btn btn-accent btn-sm">Send</button>
@@ -1668,7 +1696,18 @@
         <div class="small-muted" id="gitStatus">Select workspace to load repositories.</div>
         <button id="refreshGitDiff" class="btn btn-soft btn-sm" type="button">Refresh diff</button>
       </div>
+      <div class="git-mode-toggle">
+        <button id="gitInlineMode" class="btn btn-soft btn-sm active" type="button">Inline</button>
+        <button id="gitSideMode" class="btn btn-soft btn-sm" type="button">Side-by-side</button>
+      </div>
       <div id="gitDiffBox" class="git-diff-box">No diff yet.</div>
+      <div class="small-muted mt-2">Hunk decisions (review-only)</div>
+      <div class="git-hunk-actions">
+        <button id="gitHunkAcceptAll" class="btn btn-soft btn-sm" type="button">Accept all</button>
+        <button id="gitHunkRejectAll" class="btn btn-soft btn-sm" type="button">Reject all</button>
+        <button id="gitHunkReset" class="btn btn-soft btn-sm" type="button">Reset</button>
+      </div>
+      <div id="gitHunkList" class="git-hunk-list"></div>
     </div>
   </div>
 

@@ -136,6 +136,33 @@ bindClick('refreshGitDiff', async () => {
   renderGitControls();
 });
 
+bindClick('gitInlineMode', () => { state.gitDiffMode = 'inline'; renderGitDiffWorkbench(); });
+bindClick('gitSideMode', () => { state.gitDiffMode = 'side'; renderGitDiffWorkbench(); });
+bindClick('gitHunkAcceptAll', () => {
+  const hunks = splitDiffHunks((parseGitDiffSections(state.gitDiff || '').unstaged || '') + '\n' + (parseGitDiffSections(state.gitDiff || '').staged || ''));
+  state.gitHunkDecisions = {};
+  hunks.forEach((_, idx) => { state.gitHunkDecisions[idx] = 'accept'; });
+  renderGitDiffWorkbench();
+});
+bindClick('gitHunkRejectAll', () => {
+  const hunks = splitDiffHunks((parseGitDiffSections(state.gitDiff || '').unstaged || '') + '\n' + (parseGitDiffSections(state.gitDiff || '').staged || ''));
+  state.gitHunkDecisions = {};
+  hunks.forEach((_, idx) => { state.gitHunkDecisions[idx] = 'reject'; });
+  renderGitDiffWorkbench();
+});
+bindClick('gitHunkReset', () => { state.gitHunkDecisions = {}; renderGitDiffWorkbench(); });
+
+bindChange('sessionQuickSwitch', () => renderSessions(state.sessions || [], state.activeSession || ''));
+const sessionQuickSwitch = byId('sessionQuickSwitch');
+if (sessionQuickSwitch) {
+  sessionQuickSwitch.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const val = String(sessionQuickSwitch.value || '').trim().toLowerCase();
+    const target = (state.sessions || []).find((n) => String(n).toLowerCase().includes(val));
+    if (target) runWithAlert(() => sessionAction('switch', target));
+  });
+}
+
 bindClick('browseWorkspace', () => {
   showModal('workspaceModal', true);
   return loadDirs(byId('workspace').value.trim());

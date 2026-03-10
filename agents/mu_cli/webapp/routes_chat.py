@@ -10,7 +10,12 @@ from flask import Response, jsonify, request, stream_with_context
 
 from mu_cli.core.types import Message, ToolCall
 from mu_cli.webapp.jobs import JobDeps, decide_plan, get_job, list_jobs, request_kill, start_job
-from mu_cli.webapp.contracts import ContractValidationError, parse_chat_request
+from mu_cli.webapp.contracts import (
+    ContractValidationError,
+    parse_chat_request,
+    parse_job_kill_request,
+    parse_job_plan_request,
+)
 
 
 @dataclass(slots=True)
@@ -66,16 +71,20 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
 
     @app.post("/api/jobs/<job_id>/kill")
     def kill_job(job_id: str):
-        reason = str((request.get_json(silent=True) or {}).get("reason", "")).strip() or "user requested stop"
-        code, payload = request_kill(runtime, job_id, reason)
+        try:
+            req = parse_job_kill_request(request.get_json(silent=True))
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        code, payload = request_kill(runtime, job_id, req.reason)
         return jsonify(payload), code
 
     @app.post("/api/jobs/<job_id>/plan")
     def decide_job_plan(job_id: str):
-        payload = request.get_json(force=True)
-        decision = str(payload.get("decision", "")).strip().lower()
-        revised_plan = str(payload.get("revised_plan", "")).strip()
-        code, out = decide_plan(runtime, job_id, decision, revised_plan)
+        try:
+            req = parse_job_plan_request(request.get_json(force=True))
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        code, out = decide_plan(runtime, job_id, req.decision, req.revised_plan)
         return jsonify(out), code
 
     @app.post("/api/chat/stream")

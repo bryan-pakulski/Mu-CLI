@@ -10,7 +10,13 @@ from flask import jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
 from mu_cli.core.types import Role
-from mu_cli.webapp.contracts import ContractValidationError, parse_settings_update_request
+from mu_cli.webapp.contracts import (
+    ContractValidationError,
+    parse_pricing_request,
+    parse_settings_update_request,
+    parse_upload_delete_name,
+    parse_uploads_request,
+)
 
 
 @dataclass(slots=True)
@@ -131,20 +137,19 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
         if request.method == "GET":
             return jsonify({"pricing": runtime.pricing.data})
 
-        payload = request.get_json(force=True)
+        try:
+            req = parse_pricing_request(request.get_json(force=True))
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        payload = req.payload
         if "pricing" in payload:
             pricing_payload = payload.get("pricing")
-            if not isinstance(pricing_payload, dict):
-                return jsonify({"error": "pricing must be a JSON object"}), 400
             runtime.pricing.data = pricing_payload
             runtime.pricing.save()
             return jsonify({"ok": True, "pricing": runtime.pricing.data})
 
         provider = str(payload.get("provider", "")).strip()
         model = str(payload.get("model", "")).strip()
-        if not provider or not model:
-            return jsonify({"error": "provider and model are required"}), 400
-
         input_per_1m = float(payload.get("input_per_1m", 0.0))
         output_per_1m = float(payload.get("output_per_1m", 0.0))
         runtime.pricing.update_model_pricing(provider, model, input_per_1m, output_per_1m)
@@ -252,9 +257,10 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
 
     @app.post("/api/uploads")
     def upload_files():
-        files = request.files.getlist("files")
-        if not files:
-            return jsonify({"error": "no files uploaded"}), 400
+        try:
+            files = parse_uploads_request(request.files.getlist("files"))
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
 
         session_dir = runtime.uploads_dir / runtime.session_name
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -304,7 +310,10 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
 
     @app.delete("/api/uploads/<name>")
     def delete_upload(name: str):
-        safe_name = Path(name).name
+        try:
+            safe_name = parse_upload_delete_name(name)
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
         session_dir = runtime.uploads_dir / runtime.session_name
         target = session_dir / safe_name
         if not target.exists() or not target.is_file():

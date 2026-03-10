@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -120,3 +121,75 @@ def parse_settings_update_request(raw: Any) -> SettingsUpdateRequest:
             raise ContractValidationError("enabled_skills must be a list of strings")
 
     return SettingsUpdateRequest(payload=payload)
+
+
+@dataclass(slots=True)
+class JobKillRequest:
+    reason: str
+
+
+@dataclass(slots=True)
+class JobPlanRequest:
+    decision: str
+    revised_plan: str
+
+
+@dataclass(slots=True)
+class PricingRequest:
+    payload: dict[str, Any]
+
+
+def _opt_number(payload: dict[str, Any], key: str) -> float | None:
+    if key not in payload:
+        return None
+    value = payload[key]
+    if not isinstance(value, (int, float)):
+        raise ContractValidationError(f"{key} must be a number")
+    return float(value)
+
+
+def parse_job_kill_request(raw: Any) -> JobKillRequest:
+    payload = _expect_object(raw or {}, route="/api/jobs/<id>/kill")
+    reason = _opt_str(payload, "reason")
+    return JobKillRequest(reason=(reason or "").strip() or "user requested stop")
+
+
+def parse_job_plan_request(raw: Any) -> JobPlanRequest:
+    payload = _expect_object(raw, route="/api/jobs/<id>/plan")
+    decision = (_opt_str(payload, "decision") or "").strip().lower()
+    if not decision:
+        raise ContractValidationError("decision is required")
+    revised_plan = (_opt_str(payload, "revised_plan") or "").strip()
+    return JobPlanRequest(decision=decision, revised_plan=revised_plan)
+
+
+def parse_pricing_request(raw: Any) -> PricingRequest:
+    payload = _expect_object(raw, route="/api/pricing")
+    if "pricing" in payload:
+        if not isinstance(payload.get("pricing"), dict):
+            raise ContractValidationError("pricing must be a JSON object")
+        return PricingRequest(payload=payload)
+
+    provider = (_opt_str(payload, "provider") or "").strip()
+    model = (_opt_str(payload, "model") or "").strip()
+    if not provider or not model:
+        raise ContractValidationError("provider and model are required")
+    _opt_number(payload, "input_per_1m")
+    _opt_number(payload, "output_per_1m")
+    return PricingRequest(payload=payload)
+
+
+def parse_uploads_request(files: Any) -> list[Any]:
+    if not isinstance(files, list) or not files:
+        raise ContractValidationError("no files uploaded")
+    return files
+
+
+def parse_upload_delete_name(name: Any) -> str:
+    if not isinstance(name, str):
+        raise ContractValidationError("upload name must be a string")
+    if not name.strip():
+        raise ContractValidationError("upload name is required")
+    if Path(name).name != name:
+        raise ContractValidationError("upload name must not contain path separators")
+    return name

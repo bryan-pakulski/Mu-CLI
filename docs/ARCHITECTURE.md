@@ -29,6 +29,7 @@ This creates high cognitive load for onboarding and raises regression risk when 
 - ✅ Stage 2 complete: centralized key runtime mutations (session new/clear and settings updates) into shared runtime service helpers to reduce ad hoc route-level state mutation.
 - ✅ Stage 3 complete: moved frontend JavaScript into `static/app.js` and organized code by boundaries (networking helpers, state/reducers, render functions, event wiring) while keeping server-rendered template deployment unchanged.
 - ✅ Stage 4 complete: added explicit typed API contracts for high-churn POST routes (`/api/session`, `/api/settings`, `/api/chat/*`) with predictable 400 error responses and regression tests.
+- ✅ Contract Expansion Stage 3 complete: extended contract validation to additional mutable routes (`/api/jobs/<id>/plan`, `/api/jobs/<id>/kill`, `/api/pricing`, and uploads payload checks).
 - ✅ Frontend Stage 2 complete: split frontend source into real modules under `static/app/` (`network.js`, `store.js`, `render/core.js`, `main.js`, `events.js`) with a tiny bundle build step.
 
 
@@ -83,5 +84,6 @@ Status: ✅ Stage 1 complete — ADRs added:
 3. Move background job orchestration into `jobs.py` with focused tests. *(done for route/state handling split; deeper loop extraction can be incremental)*
 4. Add request schema validation helpers for top 3 mutable endpoints. *(done)*
 5. Add initial ADR set for key architecture decisions. *(done)*
+6. Expand contracts to remaining mutable routes (`jobs/*`, `pricing`, uploads assumptions). *(done)*
 
 This keeps each PR focused and minimizes behavior change risk.

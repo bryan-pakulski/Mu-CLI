@@ -10,6 +10,7 @@ from flask import Response, jsonify, request, stream_with_context
 
 from mu_cli.core.types import Message, ToolCall
 from mu_cli.webapp.jobs import JobDeps, decide_plan, get_job, list_jobs, request_kill, start_job
+from mu_cli.webapp.contracts import ContractValidationError, parse_chat_request
 
 
 @dataclass(slots=True)
@@ -29,13 +30,13 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
 
     @app.post("/api/chat")
     def chat():
-        payload = request.get_json(force=True)
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            return jsonify({"error": "text is required"}), 400
+        try:
+            req = parse_chat_request(request.get_json(force=True), route="/api/chat")
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
 
-        reply = deps.run_turn_with_uploaded_context(runtime, text)
-        report = deps.turn_report(runtime, text, reply.content)
+        reply = deps.run_turn_with_uploaded_context(runtime, req.text)
+        report = deps.turn_report(runtime, req.text, reply.content)
         deps.record_turn(runtime, report)
         if runtime.condense_enabled:
             deps.condense_session_context(runtime, window_size=runtime.condense_window)
@@ -44,12 +45,12 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
 
     @app.post("/api/chat/background")
     def chat_background():
-        payload = request.get_json(force=True)
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            return jsonify({"error": "text is required"}), 400
-        session_name = str(payload.get("session", runtime.session_name)).strip() or runtime.session_name
-        job_id = start_job(runtime, session_name, text, job_deps)
+        try:
+            req = parse_chat_request(request.get_json(force=True), route="/api/chat/background")
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        session_name = req.session or runtime.session_name
+        job_id = start_job(runtime, session_name, req.text, job_deps)
         return jsonify({"ok": True, "job_id": job_id, "session": session_name})
 
     @app.get("/api/jobs")
@@ -79,11 +80,11 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
 
     @app.post("/api/chat/stream")
     def chat_stream():
-        payload = request.get_json(force=True)
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            return jsonify({"error": "text is required"}), 400
-        session_name = str(payload.get("session", runtime.session_name)).strip() or runtime.session_name
+        try:
+            req = parse_chat_request(request.get_json(force=True), route="/api/chat/stream")
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        session_name = req.session or runtime.session_name
 
         events: queue.Queue[dict] = queue.Queue()
         done = threading.Event()
@@ -111,8 +112,8 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             try:
                 if runtime.session_name != session_name:
                     deps.load_session(runtime, session_name)
-                reply = deps.run_turn_with_uploaded_context(runtime, text)
-                report = deps.turn_report(runtime, text, reply.content)
+                reply = deps.run_turn_with_uploaded_context(runtime, req.text)
+                report = deps.turn_report(runtime, req.text, reply.content)
                 deps.record_turn(runtime, report)
                 if runtime.condense_enabled:
                     deps.condense_session_context(runtime, window_size=runtime.condense_window)

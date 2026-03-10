@@ -10,6 +10,7 @@ from flask import jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
 from mu_cli.core.types import Role
+from mu_cli.webapp.contracts import ContractValidationError, parse_settings_update_request
 
 
 @dataclass(slots=True)
@@ -117,8 +118,11 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
 
     @app.post("/api/settings")
     def update_settings():
-        payload = request.get_json(force=True)
-        deps.mutate_for_settings(runtime, payload)
+        try:
+            req = parse_settings_update_request(request.get_json(force=True))
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        deps.mutate_for_settings(runtime, req.payload)
         deps.persist(runtime)
         return jsonify({"ok": True})
 

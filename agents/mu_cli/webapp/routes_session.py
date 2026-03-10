@@ -5,6 +5,8 @@ from typing import Any, Callable
 
 from flask import jsonify, request
 
+from mu_cli.webapp.contracts import ContractValidationError, parse_session_action_request
+
 
 @dataclass(slots=True)
 class SessionRouteDeps:
@@ -19,9 +21,13 @@ class SessionRouteDeps:
 def register_session_routes(app, runtime: Any, deps: SessionRouteDeps) -> None:
     @app.post("/api/session")
     def session_action():
-        payload = request.get_json(force=True)
-        action = str(payload.get("action", "")).strip()
-        name = str(payload.get("name", "")).strip()
+        try:
+            req = parse_session_action_request(request.get_json(force=True))
+        except ContractValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        payload = req.payload
+        action = req.action
+        name = req.name
 
         if action == "status":
             return jsonify({"session": runtime.session_name})

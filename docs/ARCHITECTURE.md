@@ -28,6 +28,7 @@ This creates high cognitive load for onboarding and raises regression risk when 
 - ✅ Stage 1 complete: introduced modular backend package `mu_cli/webapp/` with `routes_state.py`, `routes_chat.py`, `routes_session.py`, `runtime.py`, and `jobs.py`; `create_app()` now acts as a thin composition root wiring route registrars and dependencies.
 - ✅ Stage 2 complete: centralized key runtime mutations (session new/clear and settings updates) into shared runtime service helpers to reduce ad hoc route-level state mutation.
 - ✅ Stage 3 complete: moved frontend JavaScript into `static/app.js` and organized code by boundaries (networking helpers, state/reducers, render functions, event wiring) while keeping server-rendered template deployment unchanged.
+- ✅ Stage 4 complete: added explicit typed API contracts for high-churn POST routes (`/api/session`, `/api/settings`, `/api/chat/*`) with predictable 400 error responses and regression tests.
 
 
 ### 1) Split web backend by responsibility
@@ -63,6 +64,8 @@ Status: ✅ Completed — JS moved to `static/app.js` and organized with explici
 
 Add typed payload validation for `POST` routes (`/api/session`, `/api/settings`, `/api/chat/*`) so malformed payload behavior is predictable and tested.
 
+Status: ✅ Completed via `webapp/contracts.py` validation helpers and route integration with regression tests.
+
 ### 5) Add architecture decision records (ADRs)
 
 Record major decisions in `docs/adr/` to reduce future churn and repeated debates.
@@ -77,6 +80,6 @@ Suggested first ADRs:
 1. Move session lifecycle helpers to a dedicated `runtime.py` module. *(done)*
 2. Extract `/api/session` action handling into `routes_session.py`. *(done)*
 3. Move background job orchestration into `jobs.py` with focused tests. *(done for route/state handling split; deeper loop extraction can be incremental)*
-4. Add request schema validation helpers for top 3 mutable endpoints. *(next)*
+4. Add request schema validation helpers for top 3 mutable endpoints. *(done)*
 
 This keeps each PR focused and minimizes behavior change risk.

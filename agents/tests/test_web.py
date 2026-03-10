@@ -48,6 +48,59 @@ class WebTests(unittest.TestCase):
         assert state is not None
         self.assertGreaterEqual(state['session_usage']['total_tokens'], payload['report']['total_tokens'])
 
+
+    def test_chat_endpoint_rejects_non_object_payload(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/chat', json=['not-an-object'])
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('payload must be a JSON object', body.get('error', ''))
+
+    def test_chat_stream_endpoint_rejects_non_string_session(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/chat/stream', json={'text': 'hello', 'session': 123})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('session must be a string', body.get('error', ''))
+
+    def test_session_endpoint_rejects_invalid_enabled_skills_type(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/session', json={'action': 'new', 'name': 'x', 'enabled_skills': 'oops'})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('enabled_skills must be a list of strings', body.get('error', ''))
+
+    def test_settings_endpoint_rejects_invalid_debug_type(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.post('/api/settings', json={'debug': 'yes'})
+        self.assertEqual(400, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertIn('debug must be a boolean', body.get('error', ''))
+
     def test_session_clear_action_resets_context(self) -> None:
         from mu_cli.web import create_app
 

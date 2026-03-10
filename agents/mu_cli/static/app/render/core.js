@@ -1436,19 +1436,24 @@ function _metaRow(kind, label, value) {
 }
 
 
+function _metaFilterCategory(kind, label, text) {
+  const rawKind = String(kind || '').toLowerCase();
+  const hay = `${label || ''} ${text || ''}`.toLowerCase();
+
+  if (rawKind === 'tool-call' || rawKind === 'tool-result' || rawKind.includes('tool')) return 'tool';
+  if (rawKind === 'status' || rawKind === 'workspace') return 'status';
+  if (rawKind === 'model' || rawKind === 'plan' || rawKind === 'automation' || rawKind === 'research' || rawKind === 'citation') return 'model';
+
+  if (/tool-request:|tool-run:|\btool\b/.test(hay)) return 'tool';
+  if (/status[:=]|completed|failed|killed|timed_out|awaiting_plan_approval|workspace/.test(hay)) return 'status';
+  if (/model[:\s]|plan[:\s]|automation|research|citation/.test(hay)) return 'model';
+  return 'status';
+}
+
 function _metaFilterAllows(kind, label, text) {
   const filter = state.timelineFilter || 'all';
   if (filter === 'all') return true;
-  const hay = `${label || ''} ${text || ''}`.toLowerCase();
-  if (filter === 'tool') return kind === 'tool-call' || kind === 'tool-result';
-  if (filter === 'model') {
-    if (kind === 'automation') return /(^|\b)model[:\s]/i.test(hay);
-    return false;
-  }
-  if (filter === 'status') {
-    return /status[:=]|completed|failed|killed|timed_out|awaiting_plan_approval/i.test(hay);
-  }
-  return true;
+  return _metaFilterCategory(kind, label, text) === filter;
 }
 
 function renderMetadataPanel() {
@@ -1515,7 +1520,7 @@ function renderMetadataPanel() {
       let label = 'Stream event';
       if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
       else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
-      else if (line.startsWith('status:')) { kind = 'research'; label = 'Status'; }
+      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
       else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
       if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
     }
@@ -1535,7 +1540,7 @@ function renderMetadataPanel() {
     lines.className = 'meta-lines';
     for (const item of automation.slice(-20).reverse()) {
       const label = `${item.kind} · ${item.role}`;
-      if (_metaFilterAllows('automation', label, item.text)) lines.appendChild(_metaRow('automation', label, item.text));
+      if (_metaFilterAllows(item.kind, label, item.text)) lines.appendChild(_metaRow('automation', label, item.text));
     }
     if (lines.childElementCount) {
       card.appendChild(lines);
@@ -1559,7 +1564,7 @@ function renderMetadataPanel() {
         ? JSON.stringify(job.report, null, 2)
         : (job.last_step || `status=${job.status}; iterations=${job.iterations || 0}`);
       const label = `Run ${job.id || '-'} · ${job.status || 'unknown'}`;
-      if (_metaFilterAllows('automation', label, reportText)) lines.appendChild(_metaRow('automation', label, reportText));
+      if (_metaFilterAllows('status', label, reportText)) lines.appendChild(_metaRow('automation', label, reportText));
     });
     if (lines.childElementCount) {
       card.appendChild(lines);

@@ -197,6 +197,8 @@
 
     .top-git-launch { display: none; }
     .top-git-launch.show { display: inline-flex; }
+    .git-panel { display: none; }
+    .git-panel.show { display: block; }
     .git-diff-box {
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -1122,6 +1124,7 @@
 <body>
   <div id="app" class="shell sidebar-hidden">
     <aside id="sidebar" class="sidebar">
+
       <details class="panel collapsible-panel" open>
         <summary><h3>Runtime</h3></summary>
         <div class="panel-body">
@@ -1151,6 +1154,35 @@
         <div id="uploadList" class="upload-list small-muted"></div>
         </div>
       </details>
+      <details id="gitPanel" class="panel collapsible-panel git-panel" open>
+        <summary><h3>GIT</h3></summary>
+        <div class="panel-body">
+          <div class="small-muted mb-2">Open branch / diff controls for the selected git workspace.</div>
+          <button id="openGitModal" class="btn btn-soft btn-sm" type="button">Open Git controls</button>
+        </div>
+      </details>
+
+
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Sessions</h3></summary>
+        <div class="panel-body">
+        <div class="small-muted mb-2" id="activeSession">active: -</div>
+
+        <div class="d-flex gap-2 mb-2">
+          <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
+        </div>
+
+        <div id="sessionList" class="session-list mb-2"></div>
+        <div id="sessionActionStatus" class="small-muted mt-2"></div>
+        </div>
+      </details>
+
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Skills</h3></summary>
+        <div class="panel-body">
+          <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
+        </div>
+      </details>
 
       <details class="panel collapsible-panel" open>
         <summary><h3>Session behavior</h3></summary>
@@ -1172,27 +1204,6 @@
             <input class="form-check-input" id="condenseEnabled" type="checkbox" />
             <label class="form-check-label small-muted" for="condenseEnabled">Auto condense <span class="meta-help" title="Periodically compresses old context into summaries to reduce message window size.">i</span></label>
           </div>
-        </div>
-      </details>
-
-      <details class="panel collapsible-panel" open>
-        <summary><h3>Sessions</h3></summary>
-        <div class="panel-body">
-        <div class="small-muted mb-2" id="activeSession">active: -</div>
-
-        <div class="d-flex gap-2 mb-2">
-          <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
-        </div>
-
-        <div id="sessionList" class="session-list mb-2"></div>
-        <div id="sessionActionStatus" class="small-muted mt-2"></div>
-        </div>
-      </details>
-
-      <details class="panel collapsible-panel" open>
-        <summary><h3>Skills</h3></summary>
-        <div class="panel-body">
-          <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
         </div>
       </details>
 
@@ -1219,8 +1230,7 @@
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
                         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
-        <button id="openGitModal" class="btn btn-soft btn-sm top-git-launch">GIT</button>
-      </div>
+              </div>
 
       <div class="workspace-layout">
         <div class="chat-layout">
@@ -1522,6 +1532,7 @@ async function apiForm(path, formData) {
 
 function renderGitControls() {
   const launch = document.getElementById('openGitModal');
+  const gitPanel = document.getElementById('gitPanel');
   const repoSel = document.getElementById('gitRepo');
   const branchSel = document.getElementById('gitBranch');
   const status = document.getElementById('gitStatus');
@@ -1531,6 +1542,7 @@ function renderGitControls() {
 
   const hasGitWorkspace = !!workspace && repos.length > 0;
   if (launch) launch.classList.toggle('show', hasGitWorkspace);
+  if (gitPanel) gitPanel.classList.toggle('show', hasGitWorkspace);
 
   repoSel.innerHTML = '';
   if (!repos.length) {
@@ -2436,6 +2448,29 @@ function renderMetadataPanel() {
     cards += 1;
   }
 
+  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
+    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
+  });
+  if (liveTraceItems.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const line of liveTraceItems.slice().reverse()) {
+      let kind = 'automation';
+      let label = 'Stream event';
+      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
+      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
+      else if (line.startsWith('status:')) { kind = 'research'; label = 'Status'; }
+      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
+      lines.appendChild(_metaRow(kind, label, line));
+    }
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
+
   const automation = collectAutomationMetadata(state.messages);
   if (automation.length) {
     const card = document.createElement('div');
@@ -3119,6 +3154,7 @@ async function sendPrompt(background = false) {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);
           renderTraces();
+          renderMetadataPanel();
           updateChatBusyState();
         } else if (event.type === 'report') {
           const r = event.report;

@@ -562,8 +562,10 @@ def _uploaded_context_prompt(runtime: WebRuntime) -> str | None:
 def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = None) -> dict[str, Any]:
     non_system = [m for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
     raw_window = max(2, int(window_size or runtime.condense_window or 12))
-    if len(non_system) <= raw_window + 2:
+    if len(non_system) <= 4:
         return {"ok": True, "unchanged": True, "message": "not enough history to condense"}
+
+    raw_window = min(raw_window, len(non_system) - 2)
 
     cutoff = max(0, len(non_system) - raw_window)
     older = non_system[:cutoff]
@@ -607,12 +609,15 @@ def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = 
     }
     runtime.summary_index.append(summary_entry)
 
-    older_set = set(id(m) for m in older)
+    older_set = {id(m) for m in older}
+    kept_messages: list[Message] = []
     for msg in runtime.agent.state.messages:
         if msg.role is Role.SYSTEM:
+            kept_messages.append(msg)
             continue
         if id(msg) in older_set:
-            msg.metadata["excluded_from_model"] = True
+            continue
+        kept_messages.append(msg)
 
     summary_msg = Message(
         role=Role.TOOL_RESULT,
@@ -626,7 +631,8 @@ def _condense_session_context(runtime: WebRuntime, *, window_size: int | None = 
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
-    runtime.agent.state.messages.append(summary_msg)
+    kept_messages.append(summary_msg)
+    runtime.agent.state.messages = kept_messages
 
     return {
         "ok": True,

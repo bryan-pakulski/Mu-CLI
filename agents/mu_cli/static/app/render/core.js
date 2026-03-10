@@ -138,6 +138,7 @@ async function openSessionOverridesModal(sessionName) {
   const prefs = _effectiveControlPrefsForSession(name);
   document.getElementById('sessionOverrideSystemPrompt').value = prefs.systemPromptOverride || '';
   document.getElementById('sessionOverrideRules').value = prefs.rulesChecklist || '';
+  renderSessionOverrideLists();
 
   providerSel.onchange = () => wireOverrideModels();
   document.getElementById('sessionOverridesModal').setAttribute('data-session', name);
@@ -147,6 +148,40 @@ async function openSessionOverridesModal(sessionName) {
     await api('/api/session', 'POST', { action: 'switch', name: currentSession });
     await refreshState();
   }
+}
+
+
+function renderSessionOverrideLists() {
+  const skillsHost = document.getElementById('sessionOverrideSkills');
+  const toolsHost = document.getElementById('sessionOverrideTools');
+  if (!skillsHost || !toolsHost) return;
+
+  const skills = Array.isArray(state.skills) ? state.skills : [];
+  const enabled = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
+  skillsHost.innerHTML = skills.length
+    ? skills.map((name) => `<label class="tool-visibility-row d-flex align-items-center gap-2"><input type="checkbox" class="form-check-input" data-session-override-skill="${escapeHtml(name)}" ${enabled.has(name) ? 'checked' : ''} /><span class="small-muted">${escapeHtml(name)}</span></label>`).join('')
+    : '<span class="small-muted">No skills configured.</span>';
+
+  const builtinTools = (state.tools || []).filter((t) => t.source === 'builtin');
+  toolsHost.innerHTML = builtinTools.length
+    ? builtinTools.map((tool) => `<label class="tool-visibility-row d-flex align-items-center gap-2"><input type="checkbox" class="form-check-input" data-session-override-tool="${escapeHtml(tool.name)}" ${tool.enabled ? 'checked' : ''} /><span class="small-muted">${escapeHtml(tool.name)}</span></label>`).join('')
+    : '<span class="small-muted">No tools available.</span>';
+}
+
+function buildSessionOverrideSkillPayload() {
+  const out = [];
+  document.querySelectorAll('[data-session-override-skill]').forEach((el) => {
+    if (el.checked) out.push(el.getAttribute('data-session-override-skill'));
+  });
+  return out;
+}
+
+function buildSessionOverrideToolVisibilityPayload() {
+  const out = {};
+  document.querySelectorAll('[data-session-override-tool]').forEach((el) => {
+    out[el.getAttribute('data-session-override-tool')] = !!el.checked;
+  });
+  return out;
 }
 
 async function saveSessionOverridesFromModal() {
@@ -168,6 +203,8 @@ async function saveSessionOverridesFromModal() {
     condense_enabled: !!document.getElementById('sessionOverrideCondense').checked,
     condense_window: Number(document.getElementById('sessionOverrideCondenseWindow').value || 12),
     max_runtime_seconds: Number(document.getElementById('sessionOverrideMaxRuntime').value || 900),
+    enabled_skills: buildSessionOverrideSkillPayload(),
+    tool_visibility: buildSessionOverrideToolVisibilityPayload(),
   };
   await api('/api/settings', 'POST', payload);
 
@@ -2021,16 +2058,13 @@ function updateContextExcludesFromUI() {
 function summarizeContextRulesNow() {
   const rules = document.getElementById('rulesChecklist');
   if (!rules) return;
-  const lines = String(rules.value || '').split('
-').map((l) => l.trim()).filter(Boolean);
-  const summarized = lines.slice(0, 5).map((l, i) => `${i + 1}. ${l}`).join('
-');
+  const lines = String(rules.value || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const summarized = lines.slice(0, 5).map((l, i) => `${i + 1}. ${l}`).join('\n');
   rules.value = summarized;
   persistControlPlaneFromUI();
   const status = document.getElementById('contextBudgetActionStatus');
   if (status) status.textContent = 'Rules checklist summarized to top 5 entries.';
 }
-
 function parseCustomToolsInput() {
   const raw = document.getElementById('customTools').value.trim();
   if (!raw) return [];

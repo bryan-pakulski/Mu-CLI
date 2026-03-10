@@ -16,13 +16,20 @@
 
     .shell { height:100vh; display:grid; grid-template-columns:340px minmax(0,1fr); transition:grid-template-columns .24s ease; }
     .shell.sidebar-hidden { grid-template-columns:0 minmax(0,1fr); }
-    .sidebar { overflow:auto; padding:10px 12px; transform:translateX(0); opacity:1; transition:transform .22s ease, opacity .22s ease; }
+    .sidebar { overflow:auto; padding:8px 10px; transform:translateX(0); opacity:1; transition:transform .22s ease, opacity .22s ease; }
     .shell.sidebar-hidden .sidebar { transform:translateX(-16px); opacity:0; pointer-events:none; }
 
     .shell.modal-active .sidebar, .shell.modal-active .main { filter: blur(3px); pointer-events:none; user-select:none; transition:filter .2s ease; }
 
-    .panel { padding:8px 0 10px; margin-bottom:6px; }
-    .panel h3 { margin:0 0 8px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+    .panel { padding:4px 0 6px; margin-bottom:4px; }
+    .panel h3 { margin:0 0 6px; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+    .topic { margin-bottom:4px; }
+    .topic summary { list-style:none; cursor:pointer; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; padding:4px 2px; display:flex; align-items:center; gap:6px; }
+    .topic summary::-webkit-details-marker { display:none; }
+    .topic .chev { display:inline-block; transition:transform .15s ease; font-size:10px; }
+    .topic[open] .chev { transform:rotate(90deg); }
+    .topic-body { padding:0 0 2px 2px; }
+    .topic-body .panel h3 { display:none; }
     .main { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; padding:8px 12px; }
     .topbar { display:flex; align-items:center; gap:8px; padding:4px 2px 8px; }
     .title { font-size:14px; font-weight:700; }
@@ -69,10 +76,30 @@
 <body x-data="{ sending:false, sidebarOpen:true, sessionRunning:false, darkMode: (localStorage.getItem('mucli-dark') === '1') }" :class="{'dark-mode': darkMode}" @htmx:afterRequest.window="sending=false" @htmx:responseError.window="sending=false" @htmx:sendError.window="sending=false" @htmx:afterSwap.window="sessionRunning = ((document.getElementById('session-runtime-state')?.textContent || '').trim() === 'running')">
   <div class="shell" :class="{ 'sidebar-hidden': !sidebarOpen }">
     <aside class="sidebar">
-      <div id="session-panel" hx-get="/ui/session" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
-      <div id="workspace-panel" hx-get="/ui/workspace" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
-      <div id="settings-panel" hx-get="/ui/settings?variant=full" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
-      <div id="jobs-panel" hx-get="/ui/jobs" hx-trigger="load, every 3s, refresh from:body" hx-swap="innerHTML"></div>
+      <details class="topic" open>
+        <summary><span class="chev">▶</span> Sessions</summary>
+        <div class="topic-body">
+          <div id="session-panel" hx-get="/ui/session" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
+        </div>
+      </details>
+      <details class="topic">
+        <summary><span class="chev">▶</span> Workspace</summary>
+        <div class="topic-body">
+          <div id="workspace-panel" hx-get="/ui/workspace" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
+        </div>
+      </details>
+      <details class="topic" open>
+        <summary><span class="chev">▶</span> Settings</summary>
+        <div class="topic-body">
+          <div id="settings-panel" hx-get="/ui/settings?variant=full" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
+        </div>
+      </details>
+      <details class="topic">
+        <summary><span class="chev">▶</span> Jobs</summary>
+        <div class="topic-body">
+          <div id="jobs-panel" hx-get="/ui/jobs" hx-trigger="load, every 3s, refresh from:body" hx-swap="innerHTML"></div>
+        </div>
+      </details>
     </aside>
 
     <main class="main">

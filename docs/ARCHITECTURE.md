@@ -27,6 +27,7 @@ This creates high cognitive load for onboarding and raises regression risk when 
 
 - ✅ Stage 1 complete: introduced modular backend package `mu_cli/webapp/` with `routes_state.py`, `routes_chat.py`, `routes_session.py`, `runtime.py`, and `jobs.py`; `create_app()` now acts as a thin composition root wiring route registrars and dependencies.
 - ✅ Stage 2 complete: centralized key runtime mutations (session new/clear and settings updates) into shared runtime service helpers to reduce ad hoc route-level state mutation.
+- ✅ Stage 3 complete: moved frontend JavaScript into `static/app.js` and organized code by boundaries (networking helpers, state/reducers, render functions, event wiring) while keeping server-rendered template deployment unchanged.
 
 
 ### 1) Split web backend by responsibility
@@ -56,7 +57,7 @@ If keeping a single HTML deliverable, still extract logic into sections with str
 - render functions
 - event wiring
 
-A medium-term step is moving JS into `static/app.js` while preserving server-side template simplicity.
+Status: ✅ Completed — JS moved to `static/app.js` and organized with explicit section boundaries and module facades while preserving server-side template simplicity.
 
 ### 4) Adopt explicit API contracts for high-churn routes
 

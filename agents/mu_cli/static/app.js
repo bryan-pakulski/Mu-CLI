@@ -3,7 +3,7 @@
 
 // >>> app/store.js
 // --- state store + reducers -------------------------------------------------
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {}, uiSurface: 'operate', pinnedSessions: [], recentSessions: [], gitDiffMode: 'inline', gitHunkDecisions: {} };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {}, uiSurface: 'operate', pinnedSessions: [], recentSessions: [], gitDiffMode: 'inline', gitHunkDecisions: {}, timelineFilter: 'all', gitDiffStats: { files: 0, additions: 0, deletions: 0 } };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -133,8 +133,26 @@ function splitDiffHunks(diffText) {
   return hunks;
 }
 
+
+function computeDiffStats(diffText) {
+  const text = String(diffText || '').trim();
+  if (!text || text === '(none)') return { files: 0, additions: 0, deletions: 0 };
+  const lines = text.split('\n');
+  let files = 0;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) files += 1;
+    else if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
+  }
+  return { files, additions, deletions };
+}
+
 function renderGitDiffWorkbench() {
   const sections = parseGitDiffSections(state.gitDiff || '');
+  const combinedForStats = (sections.unstaged || '') + '\n' + (sections.staged || '');
+  state.gitDiffStats = computeDiffStats(combinedForStats);
   const quick = document.getElementById('gitQuickStatus');
   const dirty = !!String(sections.status || '').trim() && String(sections.status || '').trim() !== '(clean)';
   if (quick) {
@@ -187,14 +205,27 @@ function renderExecutionTimeline() {
   const active = activeSearchingJob();
   const jobEvents = Array.isArray(active && active.events) ? active.events : [];
   const traceEvents = (state.traces || []).slice(-20);
-  const merged = traceEvents.concat(jobEvents).slice(-32);
-  if (!merged.length) {
-    host.innerHTML = '<div class="state-empty">No active timeline yet. Run a task to see model/tool steps in real time.</div>';
+  const merged = traceEvents.concat(jobEvents).slice(-64);
+  const filter = state.timelineFilter || 'all';
+  const map = { all: 'timelineFilterAll', model: 'timelineFilterModel', tool: 'timelineFilterTool', status: 'timelineFilterStatus' };
+  Object.entries(map).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', key === filter);
+  });
+  const filtered = merged.filter((line) => {
+    const cls = classifyBackgroundEvent(line) || (String(line).startsWith('model:') ? 'model' : 'status');
+    if (filter === 'all') return true;
+    if (filter === 'tool') return cls === 'tool-request' || cls === 'tool-run';
+    return cls === filter;
+  });
+  if (!filtered.length) {
+    host.innerHTML = '<div class="state-empty">No events match this timeline filter.</div>';
     return;
   }
-  host.innerHTML = merged.map((line, idx) => {
+  host.innerHTML = filtered.map((line, idx) => {
     const cls = classifyBackgroundEvent(line) || (String(line).startsWith('model:') ? 'model' : 'status');
-    return `<div class="timeline-item ${cls}"><span class="timeline-step">${idx + 1}</span><span class="timeline-line">${escapeHtml(String(line))}</span></div>`;
+    const source = String(line).startsWith('tool-') ? 'tool' : (String(line).startsWith('model:') ? 'model' : 'run');
+    return `<div class="timeline-item ${cls}"><span class="timeline-step">${idx + 1}</span><span class="timeline-line">${escapeHtml(String(line))}</span><span class="ui-badge">${source}</span></div>`;
   }).join('');
 }
 
@@ -248,6 +279,12 @@ function renderGitControls() {
 
   if (!repos.length) status.textContent = 'Select a workspace containing a git repository.';
   else status.textContent = `Repo: ${state.gitCurrentRepo || '-'} · Current branch: ${state.gitCurrentBranch || '-'}`;
+
+  const gitStats = document.getElementById('gitDiffStats');
+  if (gitStats) {
+    const st = state.gitDiffStats || { files: 0, additions: 0, deletions: 0 };
+    gitStats.textContent = `files ${st.files} · +${st.additions} · -${st.deletions}`;
+  }
 
   renderGitDiffWorkbench();
 }
@@ -1499,6 +1536,14 @@ function renderSessions(list, active) {
     });
   }
 
+  const health = document.getElementById('sessionHealthSummary');
+  if (health) {
+    const running = Object.values(statuses).filter((s) => s.status === 'running').length;
+    const done = Object.values(statuses).filter((s) => s.status === 'done').length;
+    const idle = Math.max(0, list.length - running - done);
+    health.textContent = `idle ${idle} · running ${running} · done ${done}`;
+  }
+
   document.getElementById('activeSession').textContent = `active: ${active}`;
 }
 
@@ -2254,6 +2299,11 @@ bindClick('refreshGitDiff', async () => {
   await refreshGitDiff();
   renderGitControls();
 });
+
+bindClick('timelineFilterAll', () => { state.timelineFilter = 'all'; renderExecutionTimeline(); });
+bindClick('timelineFilterModel', () => { state.timelineFilter = 'model'; renderExecutionTimeline(); });
+bindClick('timelineFilterTool', () => { state.timelineFilter = 'tool'; renderExecutionTimeline(); });
+bindClick('timelineFilterStatus', () => { state.timelineFilter = 'status'; renderExecutionTimeline(); });
 
 bindClick('gitInlineMode', () => { state.gitDiffMode = 'inline'; renderGitDiffWorkbench(); });
 bindClick('gitSideMode', () => { state.gitDiffMode = 'side'; renderGitDiffWorkbench(); });

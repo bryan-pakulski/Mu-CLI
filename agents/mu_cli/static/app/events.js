@@ -136,6 +136,11 @@ bindClick('refreshGitDiff', async () => {
   renderGitControls();
 });
 
+bindClick('timelineFilterAll', () => { state.timelineFilter = 'all'; renderExecutionTimeline(); });
+bindClick('timelineFilterModel', () => { state.timelineFilter = 'model'; renderExecutionTimeline(); });
+bindClick('timelineFilterTool', () => { state.timelineFilter = 'tool'; renderExecutionTimeline(); });
+bindClick('timelineFilterStatus', () => { state.timelineFilter = 'status'; renderExecutionTimeline(); });
+
 bindClick('gitInlineMode', () => { state.gitDiffMode = 'inline'; renderGitDiffWorkbench(); });
 bindClick('gitSideMode', () => { state.gitDiffMode = 'side'; renderGitDiffWorkbench(); });
 bindClick('gitHunkAcceptAll', () => {

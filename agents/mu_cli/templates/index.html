@@ -269,6 +269,11 @@
     .git-hunk-row { display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center; padding:6px; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
     .git-hunk-row:last-child { border-bottom:0; }
 
+    .session-health { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
+    .timeline-filters { display:flex; gap:6px; margin:6px 0; flex-wrap:wrap; }
+    .timeline-filters .btn { padding: 2px 8px; }
+    .git-diff-stats { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
+
     .sidebar-resize-handle {
       width: 8px;
       cursor: col-resize;
@@ -1313,6 +1318,7 @@
         <div class="d-flex gap-2 mb-2">
           <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
         </div>
+        <div id="sessionHealthSummary" class="session-health">idle 0 · running 0 · done 0</div>
         <div class="session-toolbar">
           <input id="sessionQuickSwitch" class="form-control form-control-sm" placeholder="Quick switch (type + Enter)" />
         </div>
@@ -1407,6 +1413,12 @@
             </details>
             <details class="trace-wrap" open>
               <summary>Execution timeline</summary>
+              <div class="timeline-filters">
+                <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
+                <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
+                <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
+                <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
+              </div>
               <div id="executionTimeline" class="timeline-panel"></div>
             </details>
             <div class="d-flex align-items-center gap-2 mt-2">
@@ -1696,6 +1708,7 @@
         <div class="small-muted" id="gitStatus">Select workspace to load repositories.</div>
         <button id="refreshGitDiff" class="btn btn-soft btn-sm" type="button">Refresh diff</button>
       </div>
+      <div id="gitDiffStats" class="git-diff-stats">files 0 · +0 · -0</div>
       <div class="git-mode-toggle">
         <button id="gitInlineMode" class="btn btn-soft btn-sm active" type="button">Inline</button>
         <button id="gitSideMode" class="btn btn-soft btn-sm" type="button">Side-by-side</button>

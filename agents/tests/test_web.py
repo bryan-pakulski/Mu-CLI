@@ -632,5 +632,69 @@ class WebTests(unittest.TestCase):
         self.assertIn('answer_contract', job)
 
 
+    def test_user_journey_new_chat_stream_clear_happy_path(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        created = client.post('/api/session', json={'action': 'new', 'name': 'journey-a'})
+        self.assertEqual(200, created.status_code)
+
+        chat = client.post('/api/chat', json={'text': 'hello from journey'})
+        self.assertEqual(200, chat.status_code)
+        chat_body = chat.get_json()
+        assert chat_body is not None
+        self.assertIn('reply', chat_body)
+
+        stream = client.post('/api/chat/stream', json={'text': 'follow up from stream'})
+        self.assertEqual(200, stream.status_code)
+        raw = b''.join(stream.response).decode('utf-8')
+        events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        self.assertTrue(any(event.get('type') == 'assistant_chunk' for event in events))
+        self.assertEqual('done', events[-1].get('type'))
+
+        cleared = client.post('/api/session', json={'action': 'clear'})
+        self.assertEqual(200, cleared.status_code)
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        self.assertEqual('journey-a', state['session'])
+        self.assertEqual([], state['messages'])
+        self.assertEqual(0.0, float(state['session_usage']['total_tokens']))
+
+    def test_user_journey_with_upload_and_clear_happy_path(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        created = client.post('/api/session', json={'action': 'new', 'name': 'journey-b'})
+        self.assertEqual(200, created.status_code)
+
+        up = client.post(
+            '/api/uploads',
+            data={'files': [(io.BytesIO(b'note for context'), 'note.txt')]},
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(200, up.status_code)
+
+        chat = client.post('/api/chat', json={'text': 'use uploaded note'})
+        self.assertEqual(200, chat.status_code)
+
+        stream = client.post('/api/chat/stream', json={'text': 'stream after upload'})
+        self.assertEqual(200, stream.status_code)
+        _ = b''.join(stream.response).decode('utf-8')
+
+        clear_uploads = client.delete('/api/uploads')
+        self.assertEqual(200, clear_uploads.status_code)
+        self.assertGreaterEqual(clear_uploads.get_json()['removed'], 1)
+
+        cleared = client.post('/api/session', json={'action': 'clear'})
+        self.assertEqual(200, cleared.status_code)
+
+
 if __name__ == '__main__':
     unittest.main()

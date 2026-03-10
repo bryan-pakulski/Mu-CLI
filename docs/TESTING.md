@@ -19,10 +19,12 @@ This runs the unit test suite via Python `unittest` discovery.
 - `make check` — full local verification target (currently test suite).
 - `make build-frontend` — rebuild `agents/mu_cli/static/app.js` from modular source files under `agents/mu_cli/static/app/`.
 
-## Running a specific test module/case
+## Running focused suites
 
 ```bash
-PYTHONPATH=agents python -m unittest agents.tests.test_web.WebTests.test_chat_stream_endpoint
+PYTHONPATH=agents python -m unittest agents.tests.test_web_contracts
+PYTHONPATH=agents python -m unittest agents.tests.test_web_services_runtime
+PYTHONPATH=agents python -m unittest agents.tests.test_web.WebTests.test_user_journey_new_chat_stream_clear_happy_path
 ```
 
 ## Optional: run with pytest

@@ -1,0 +1,20 @@
+<div class="panel">
+  <h3>Activity</h3>
+  {% if activity %}
+    {% set ns = namespace(day='') %}
+    <div style="display:grid; gap:6px; max-height:62vh; overflow:auto;">
+      {% for a in activity %}
+        {% if a.date != ns.day %}
+          {% set ns.day = a.date %}
+          <div class="muted" style="font-size:10px; opacity:.9; margin-top:6px;">{{ a.date }}</div>
+        {% endif %}
+        <div style="display:grid; gap:2px;">
+          <div class="muted" style="font-size:10px;"><span class="mono">{{ a.ts_display }}</span> · <span class="activity-tag">{{ a.tag }}</span></div>
+          <div class="tool-content">{{ a.text }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="muted">No activity yet.</div>
+  {% endif %}
+</div>

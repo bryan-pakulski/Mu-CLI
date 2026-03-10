@@ -1186,49 +1186,126 @@ def create_app():
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
 
+    def _fmt_ts(value: str | None) -> str:
+        if not value:
+            return datetime.now(timezone.utc).strftime("%d/%m/%Y - %H:%M:%S")
+        try:
+            text = str(value).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(text)
+            return dt.strftime("%d/%m/%Y - %H:%M:%S")
+        except Exception:
+            return datetime.now(timezone.utc).strftime("%d/%m/%Y - %H:%M:%S")
+
     def _ui_messages() -> list[dict]:
         msgs = [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM]
         turns = list(runtime.session_turns)
         idx = 0
         current_ts = turns[idx]["timestamp"] if idx < len(turns) and isinstance(turns[idx], dict) else None
+        result: list[dict] = []
         for item in msgs:
+            role_obj = item.get("role", "")
+            role = role_obj.value if hasattr(role_obj, "value") else str(role_obj)
+            if role not in {"user", "assistant"}:
+                continue
+            item["role"] = role
             item["ui_timestamp"] = current_ts
-            role = str(item.get("role", ""))
+            item["ui_timestamp_display"] = _fmt_ts(current_ts)
+            result.append(item)
             if role == "assistant" and idx < len(turns):
                 idx += 1
                 current_ts = turns[idx]["timestamp"] if idx < len(turns) and isinstance(turns[idx], dict) else current_ts
+        return result
 
-        # Inject live background-job updates for the active session.
-        live_jobs = [
-            j for j in runtime.background_jobs.values()
-            if isinstance(j, dict)
-            and str(j.get("session", "")).strip() == runtime.session_name
-            and str(j.get("status", "")).strip().lower() not in {"completed", "failed", "timed_out"}
-        ]
-        for job in live_jobs:
-            ts = str(job.get("started_at", "")).strip() or datetime.now(timezone.utc).isoformat()
+    def _ui_activity() -> list[dict]:
+        items: list[dict] = []
+
+        # Tool/model metadata messages
+        for m in runtime.agent.state.messages:
+            if m.role is Role.SYSTEM:
+                continue
+            if m.role in {Role.TOOL_RESULT, Role.TOOL_CALL}:
+                ts = datetime.now(timezone.utc).isoformat()
+                items.append({
+                    "tag": "TOOL",
+                    "text": m.content,
+                    "ts": ts,
+                    "ts_display": _fmt_ts(ts),
+                    "date": _fmt_ts(ts).split(" - ")[0],
+                })
+
+        # Runtime traces
+        for line in runtime.traces[-80:]:
+            ts = datetime.now(timezone.utc).isoformat()
+            text = str(line)
+            lowered = text.lower()
+            tag = "ERROR" if any(token in lowered for token in ["error", "failed", "exception", "timed_out", "timeout"]) else "TRACE"
+            items.append({
+                "tag": tag,
+                "text": text,
+                "ts": ts,
+                "ts_display": _fmt_ts(ts),
+                "date": _fmt_ts(ts).split(" - ")[0],
+            })
+
+        # Background job details for active session
+        for job in runtime.background_jobs.values():
+            if not isinstance(job, dict):
+                continue
+            if str(job.get("session", "")).strip() != runtime.session_name:
+                continue
+            jts = str(job.get("started_at", "")).strip() or datetime.now(timezone.utc).isoformat()
+            jid = str(job.get("id", ""))[:8]
+            status = str(job.get("status", "")).strip() or "unknown"
+            items.append({
+                "tag": "JOB",
+                "text": f"[{jid}] status={status}",
+                "ts": jts,
+                "ts_display": _fmt_ts(jts),
+                "date": _fmt_ts(jts).split(" - ")[0],
+            })
             plan = str(job.get("plan", "")).strip()
             if plan:
-                msgs.append({
-                    "role": "tool",
-                    "content": f"Background plan ({job.get('id','')[:8]}):\n{plan}",
-                    "ui_timestamp": ts,
+                items.append({
+                    "tag": "PLAN",
+                    "text": plan,
+                    "ts": jts,
+                    "ts_display": _fmt_ts(jts),
+                    "date": _fmt_ts(jts).split(" - ")[0],
                 })
             last_step = str(job.get("last_step", "")).strip()
             if last_step:
-                msgs.append({
-                    "role": "assistant",
-                    "content": f"Background progress ({job.get('id','')[:8]}): {last_step}",
-                    "ui_timestamp": datetime.now(timezone.utc).isoformat(),
+                ts = datetime.now(timezone.utc).isoformat()
+                items.append({
+                    "tag": "STEP",
+                    "text": last_step,
+                    "ts": ts,
+                    "ts_display": _fmt_ts(ts),
+                    "date": _fmt_ts(ts).split(" - ")[0],
                 })
-            events = list(job.get("events", []))[-4:]
-            if events:
-                msgs.append({
-                    "role": "tool",
-                    "content": "Background events:\n" + "\n".join(f"- {e}" for e in events),
-                    "ui_timestamp": datetime.now(timezone.utc).isoformat(),
+            for ev in list(job.get("events", []))[-8:]:
+                ts = datetime.now(timezone.utc).isoformat()
+                ev_text = str(ev)
+                ev_tag = "ERROR" if any(token in ev_text.lower() for token in ["failed", "error", "timed_out", "timeout"]) else "EVENT"
+                items.append({
+                    "tag": ev_tag,
+                    "text": ev_text,
+                    "ts": ts,
+                    "ts_display": _fmt_ts(ts),
+                    "date": _fmt_ts(ts).split(" - ")[0],
                 })
-        return msgs
+            error_text = str(job.get("error", "")).strip()
+            if error_text:
+                ts = str(job.get("finished_at", "")).strip() or datetime.now(timezone.utc).isoformat()
+                items.append({
+                    "tag": "ERROR",
+                    "text": f"[{jid}] {error_text}",
+                    "ts": ts,
+                    "ts_display": _fmt_ts(ts),
+                    "date": _fmt_ts(ts).split(" - ")[0],
+                })
+
+        items.sort(key=lambda x: x.get("ts", ""))
+        return items[-250:]
 
 
     @app.get("/")
@@ -1247,14 +1324,22 @@ def create_app():
     def ui_chat():
         text = str(request.form.get("text", "")).strip()
         if text:
-            reply = _run_turn_with_uploaded_context(runtime, text)
-            report = _turn_report(runtime, text, reply.content)
-            _record_turn(runtime, report)
-            if runtime.condense_enabled:
-                _condense_session_context(runtime, window_size=runtime.condense_window)
-            _persist(runtime)
+            try:
+                reply = _run_turn_with_uploaded_context(runtime, text)
+                report = _turn_report(runtime, text, reply.content)
+                _record_turn(runtime, report)
+                if runtime.condense_enabled:
+                    _condense_session_context(runtime, window_size=runtime.condense_window)
+                _persist(runtime)
+            except Exception as exc:
+                runtime.traces.append(f"ui-chat-error: {exc}")
+                _persist(runtime)
         return render_template("partials/messages.html", messages=_ui_messages())
 
+
+    @app.get("/ui/activity")
+    def ui_activity():
+        return render_template("partials/activity.html", activity=_ui_activity())
 
     @app.get("/ui/state")
     def ui_state():
@@ -1278,7 +1363,7 @@ def create_app():
                 continue
             if str(job.get("session", "")).strip() != session_name:
                 continue
-            if str(job.get("status", "")).strip().lower() in {"running", "waiting_plan"}:
+            if str(job.get("status", "")).strip().lower() in {"running", "waiting_plan", "awaiting_plan_approval"}:
                 return True
         return False
 
@@ -1292,7 +1377,7 @@ def create_app():
             if not sname:
                 continue
             state = str(job.get("status", "")).strip().lower()
-            if state in {"running", "waiting_plan"}:
+            if state in {"running", "waiting_plan", "awaiting_plan_approval"}:
                 statuses[sname] = "running"
             elif statuses.get(sname) != "running" and state in {"failed", "timed_out"}:
                 statuses[sname] = "attention"
@@ -1324,10 +1409,25 @@ def create_app():
                 name = f"session-{int(time.time())}"
             else:
                 name = raw_name
+            runtime.provider = str(request.form.get("provider", runtime.provider)).strip() or runtime.provider
+            selected_model = str(request.form.get("model", runtime.model)).strip() or runtime.model
+            available = get_models(runtime.provider, runtime.api_key)
+            runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
+            runtime.approval_mode = str(request.form.get("approval_mode", runtime.approval_mode)).strip() or runtime.approval_mode
+            runtime.agentic_planning = str(request.form.get("agentic_planning", "")).lower() in {"on", "true", "1", "yes"}
+            runtime.research_mode = str(request.form.get("research_mode", "")).lower() in {"on", "true", "1", "yes"}
             runtime.session_name = name
             runtime.session_store.use(name)
             runtime.agent = _new_agent(runtime)
             runtime.agent.add_system_prompt(runtime.system_prompt)
+            runtime.session_usage = _default_usage()
+            runtime.session_turns = []
+            runtime.traces = []
+            runtime.research_artifacts = {}
+            if runtime.agentic_planning:
+                _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
+            if runtime.research_mode:
+                _inject_research_prompt(runtime.agent)
             _persist(runtime)
             message = f"created {name}"
         elif action == "delete":
@@ -1337,12 +1437,40 @@ def create_app():
                 message = f"deleted {name}"
             else:
                 message = "session not found"
+        elif action == "clear":
+            if _load_session(runtime, name):
+                runtime.agent.state.messages = [m for m in runtime.agent.state.messages if m.role is Role.SYSTEM]
+                runtime.session_usage = _default_usage()
+                runtime.session_turns = []
+                runtime.traces = []
+                runtime.research_artifacts = {}
+                _persist(runtime)
+                message = f"cleared {name}"
+            else:
+                message = "session not found"
         return render_template(
             "partials/session.html",
             active=runtime.session_name,
             sessions=runtime.session_store.list_sessions(),
             statuses=_session_statuses(),
             message=message,
+        )
+
+    @app.get("/ui/session/new")
+    def ui_session_new():
+        provider = str(request.args.get("provider", runtime.provider)).strip() or runtime.provider
+        provider_models = get_models(provider, runtime.api_key)
+        model = str(request.args.get("model", runtime.model)).strip() or runtime.model
+        if model not in provider_models and provider_models:
+            model = provider_models[0]
+        return render_template(
+            "partials/session_new_modal.html",
+            provider=provider,
+            models=provider_models,
+            model=model,
+            approval_mode=runtime.approval_mode,
+            agentic_planning=runtime.agentic_planning,
+            research_mode=runtime.research_mode,
         )
 
     @app.get("/ui/jobs")
@@ -1374,9 +1502,17 @@ def create_app():
 
     @app.get("/ui/workspace")
     def ui_workspace():
-        browse, parent, children = _workspace_browser(request.args.get("browse"))
         return render_template(
             "partials/workspace.html",
+            workspace=runtime.workspace_path or "",
+            message=request.args.get("message", ""),
+        )
+
+    @app.get("/ui/workspace/modal")
+    def ui_workspace_modal():
+        browse, parent, children = _workspace_browser(request.args.get("browse"))
+        return render_template(
+            "partials/workspace_modal.html",
             workspace=runtime.workspace_path or "",
             browse=browse,
             parent=parent,
@@ -1412,14 +1548,16 @@ def create_app():
             browse = str(pth.parent if pth.parent != pth else pth)
 
         browse, parent, children = _workspace_browser(browse)
-        return render_template(
-            "partials/workspace.html",
-            workspace=runtime.workspace_path or "",
-            browse=browse,
-            parent=parent,
-            children=children,
-            message=message,
-        )
+        if action == "open_child":
+            return render_template(
+                "partials/workspace_modal.html",
+                workspace=runtime.workspace_path or "",
+                browse=browse,
+                parent=parent,
+                children=children,
+                message=message,
+            )
+        return render_template("partials/workspace.html", workspace=runtime.workspace_path or "", message=message)
 
     @app.get("/ui/settings")
     def ui_settings():

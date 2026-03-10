@@ -1,6 +1,6 @@
 {% if messages %}
   {% for m in messages %}
-    {% set ts = m.ui_timestamp or '' %}
+    {% set ts = m.ui_timestamp_display or '' %}
     {% if m.role == 'tool' %}
     <article class="msg role-tool">
       <div class="msg-meta">tool {% if ts %}· {{ ts }}{% endif %}</div>

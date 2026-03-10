@@ -10,17 +10,17 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-        :root { --bg:#faf7ff; --surface:#ffffff; --surface-2:#f3ecff; --border:#e2d7f5; --text:#1f1630; --muted:#6f5d86; --accent:#7c4dff; --accent-2:#b388ff; }
-    body.dark-mode { --bg:#141218; --surface:#1f1b24; --surface-2:#2a2433; --border:#3d334b; --text:#f4effa; --muted:#c4b8d2; --accent:#b388ff; --accent-2:#d0bcff; }
+    :root { --bg:#fafafa; --surface:#ffffff; --surface-2:#f3f3f3; --border:#e1e1e1; --text:#1f1f1f; --muted:#616161; --accent:#1565c0; --accent-2:#e3f2fd; }
+    body.dark-mode { --bg:#1e1e1e; --surface:#252526; --surface-2:#2d2d30; --border:#3c3c3c; --text:#d4d4d4; --muted:#9da1a6; --accent:#4fc1ff; --accent-2:#2a3342; }
     html, body { height:100%; margin:0; overflow:hidden; background:var(--bg); color:var(--text); font-family:"Inter",sans-serif; font-size:14px; }
-
-    .shell { height:100vh; display:grid; grid-template-columns:340px minmax(0,1fr); transition:grid-template-columns .24s ease; background:var(--bg); }
-    .shell.sidebar-hidden { grid-template-columns:0 minmax(0,1fr); }
-    .sidebar { overflow:auto; padding:8px 10px; transform:translateX(0); opacity:1; transition:transform .22s ease, opacity .22s ease; }
+    .shell { height:100vh; display:grid; grid-template-columns:300px minmax(0,1fr) 320px; transition:grid-template-columns .24s ease; background:var(--bg); }
+    .shell.sidebar-hidden { grid-template-columns:0 minmax(0,1fr) 320px; }
+    .shell.activity-hidden { grid-template-columns:300px minmax(0,1fr) 0; }
+    .shell.sidebar-hidden.activity-hidden { grid-template-columns:0 minmax(0,1fr) 0; }
+    .sidebar,.activity-panel { overflow:auto; padding:8px 10px; transition:transform .22s ease, opacity .22s ease; }
     .shell.sidebar-hidden .sidebar { transform:translateX(-16px); opacity:0; pointer-events:none; }
-
+    .shell.activity-hidden .activity-panel { transform:translateX(16px); opacity:0; pointer-events:none; }
     .shell.modal-active .sidebar, .shell.modal-active .main { filter: blur(3px); pointer-events:none; user-select:none; transition:filter .2s ease; }
-
     .panel { padding:4px 0 6px; margin-bottom:4px; }
     .panel h3 { margin:0 0 6px; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
     .topic { margin-bottom:4px; }
@@ -33,34 +33,26 @@
     .main { min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr); overflow:hidden; padding:8px 12px; }
     .topbar { display:flex; align-items:center; gap:8px; padding:4px 2px 8px; }
     .title { font-size:14px; font-weight:700; }
-    .pill { margin-left:auto; border:0; border-radius:999px; padding:3px 8px; color:var(--muted); font-size:10px; background:color-mix(in srgb, var(--surface-2) 70%, transparent); }
+    .pill { margin-left:auto; border:0; border-radius:999px; padding:3px 8px; color:var(--muted); font-size:10px; background:color-mix(in srgb, var(--surface-2) 80%, transparent); }
     .chat-layout { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto auto auto; gap:7px; }
     .messages { min-height:0; overflow:auto; padding:2px 0; }
     .msg { margin:0 auto; max-width:900px; padding:4px 0 6px; }
     .msg-meta { display:inline-flex; align-items:center; gap:6px; margin:0 10px 4px; font-size:10px; color:var(--muted); text-transform:uppercase; }
-    .bubble { border:0; border-radius:10px; background:color-mix(in srgb, var(--surface-2) 62%, transparent); padding:9px 11px; margin:0 8px; white-space:pre-wrap; }
-    .msg.role-user .bubble { background:color-mix(in srgb, var(--accent-2) 24%, var(--surface-2)); }
+    .bubble { border:0; border-radius:10px; background:color-mix(in srgb, var(--surface-2) 80%, transparent); padding:9px 11px; margin:0 8px; white-space:pre-wrap; }
+    .msg.role-user .bubble { background:color-mix(in srgb, var(--accent-2) 86%, var(--surface-2)); }
     .composer { padding-top:4px; background:transparent; }
     textarea, input, select { width:100%; border:0; border-radius:10px; padding:8px 10px; background:var(--surface-2); color:var(--text); }
-    textarea { padding:10px; }
-    textarea:focus, input:focus, select:focus { outline:none; box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
-    .actions { display:flex; gap:8px; align-items:center; margin-top:8px; }
+    textarea:focus, input:focus, select:focus { outline:none; box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent); }
+    .actions { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
     button { border:0; border-radius:10px; background:transparent; color:var(--text); padding:7px 10px; font-weight:600; cursor:pointer; transition:all .16s ease; }
-    button:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,.05); }
     button.primary { background:color-mix(in srgb, var(--surface-2) 70%, transparent); }
     .send-btn { background:var(--accent); color:#fff; }
-    .send-btn:hover { box-shadow:0 6px 20px color-mix(in srgb, var(--accent) 40%, transparent); }
     .muted { color:var(--muted); font-size:12px; }
     .trace { max-height:120px; overflow:auto; padding:6px 8px; font-size:10.5px; white-space:pre-wrap; color:var(--muted); background:color-mix(in srgb, var(--surface-2) 45%, transparent); border-radius:8px; }
-    .role-tool .msg-meta { color: color-mix(in srgb, var(--muted) 80%, #94a3b8); font-size:10px; }
-    .tool-details { margin:0 8px; }
-    .tool-details summary { cursor:pointer; color:color-mix(in srgb, var(--muted) 85%, #94a3b8); font-size:11px; }
-    .tool-content { color:color-mix(in srgb, var(--muted) 82%, #94a3b8); font-size:11px; padding:6px 0 0; white-space:pre-wrap; }
+    .activity-tag { font-size:10px; color:var(--accent); font-weight:700; }
     .kv { display:grid; grid-template-columns:90px 1fr; gap:4px 8px; font-size:12px; }
     .mono { font-family:"JetBrains Mono", ui-monospace, monospace; }
-
     .bottom-stats { padding:5px 8px; font-size:9.5px; color:var(--muted); }
-
     .session-main { width:100%; text-align:left; display:flex; align-items:center; gap:6px; padding:6px 8px; }
     .session-main.active { background:color-mix(in srgb, var(--surface-2) 75%, transparent); border-radius:8px; }
     .status-dot { width:7px; height:7px; border-radius:999px; display:inline-block; background:#9ca3af; }
@@ -70,50 +62,47 @@
     .menu-item { width:100%; text-align:left; padding:6px 8px; border-radius:6px; }
     .menu-item:hover { background:var(--surface-2); transform:none; box-shadow:none; }
     .modal-backdrop { position:fixed; inset:0; background:color-mix(in srgb, var(--bg) 76%, transparent); display:grid; place-items:center; z-index:40; }
-    .modal-card { width:min(860px, 92vw); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.10); padding:12px; transform:translateY(0); transition:all .2s ease; }
+    .modal-card { width:min(860px, 92vw); max-height:86vh; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.20); padding:12px; }
   </style>
 </head>
-<body x-data="{ sending:false, sidebarOpen:true, sessionRunning:false, darkMode: (localStorage.getItem('mucli-dark') === '1') }" :class="{'dark-mode': darkMode}" @htmx:afterRequest.window="sending=false" @htmx:responseError.window="sending=false" @htmx:sendError.window="sending=false" @htmx:afterSwap.window="sessionRunning = ((document.getElementById('session-runtime-state')?.textContent || '').trim() === 'running')">
-  <div class="shell" :class="{ 'sidebar-hidden': !sidebarOpen }">
+<body
+  x-data="{ sending:false, sidebarOpen:true, activityOpen:true, sessionRunning:false, darkMode:(localStorage.getItem('mucli-dark')==='1'), modalOpen:false, modalTitle:'', openModal(url,title){ this.modalTitle=title; this.modalOpen=true; htmx.ajax('GET', url, {target:'#modal-content', swap:'innerHTML'}); } }"
+  :class="{'dark-mode': darkMode}"
+  @htmx:before-request.window="if(($event.target?.closest && $event.target.closest('.composer')) || $event.target?.classList?.contains('composer')) sending=true"
+  @htmx:after-request.window="sending=false"
+  @htmx:response-error.window="sending=false"
+  @htmx:send-error.window="sending=false"
+  @htmx:after-swap.window="sessionRunning = ((document.getElementById('session-runtime-state')?.textContent || '').trim() === 'running')"
+  @open-modal.window="openModal($event.detail.url, $event.detail.title || 'Modal')"
+  @close-modal.window="modalOpen=false"
+>
+  <div class="shell" :class="{ 'sidebar-hidden': !sidebarOpen, 'activity-hidden': !activityOpen, 'modal-active': modalOpen }">
     <aside class="sidebar">
       <details class="topic" open>
         <summary><span class="chev">▶</span> Sessions</summary>
-        <div class="topic-body">
-          <div id="session-panel" hx-get="/ui/session" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
-        </div>
+        <div class="topic-body"><div id="session-panel" hx-get="/ui/session" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div></div>
       </details>
-      <details class="topic">
+      <details class="topic" open>
         <summary><span class="chev">▶</span> Workspace</summary>
-        <div class="topic-body">
-          <div id="workspace-panel" hx-get="/ui/workspace" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
-        </div>
+        <div class="topic-body"><div id="workspace-panel" hx-get="/ui/workspace" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div></div>
       </details>
       <details class="topic" open>
         <summary><span class="chev">▶</span> Settings</summary>
-        <div class="topic-body">
-          <div id="settings-panel" hx-get="/ui/settings?variant=full" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div>
-        </div>
+        <div class="topic-body"><div id="settings-panel" hx-get="/ui/settings?variant=full" hx-trigger="load, refresh from:body" hx-swap="innerHTML"></div></div>
       </details>
-      <details class="topic">
-        <summary><span class="chev">▶</span> Jobs</summary>
-        <div class="topic-body">
-          <div id="jobs-panel" hx-get="/ui/jobs" hx-trigger="load, every 3s, refresh from:body" hx-swap="innerHTML"></div>
-        </div>
-      </details>
+      <details class="topic"><summary><span class="chev">▶</span> Jobs</summary><div class="topic-body"><div id="jobs-panel" hx-get="/ui/jobs" hx-trigger="load, every 3s, refresh from:body" hx-swap="innerHTML"></div></div></details>
     </aside>
 
     <main class="main">
       <div class="topbar">
-        <button @click="sidebarOpen=!sidebarOpen" :aria-label="sidebarOpen ? 'Hide sidebar' : 'Show sidebar'" x-text="sidebarOpen ? '←' : '→'"></button>
-        <button @click="darkMode=!darkMode; localStorage.setItem('mucli-dark', darkMode ? '1' : '0')" :aria-label="darkMode ? 'Switch to light mode' : 'Switch to dark mode'" x-text="darkMode ? '☀' : '☾'"></button>
-        <div class="title">mu_cli GUI</div>
-        <div class="pill">Reactive</div>
+        <button @click="sidebarOpen=!sidebarOpen" x-text="sidebarOpen ? '←' : '→'"></button>
+        <button @click="darkMode=!darkMode; localStorage.setItem('mucli-dark', darkMode ? '1' : '0')" x-text="darkMode ? '☀' : '☾'"></button>
+        <button @click="activityOpen=!activityOpen" x-text="activityOpen ? '⟩' : '⟨'"></button>
+        <div class="title">mu_cli GUI</div><div class="pill">Reactive</div>
       </div>
-
       <section class="chat-layout">
         <div id="messages" class="messages" hx-get="/ui/messages" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
-
-        <form class="composer" :style="sessionRunning ? 'opacity:.55; pointer-events:none;' : ''" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" @submit="sending=true" hx-on::after-request="this.reset(); document.querySelector('#messages').scrollTop=999999; htmx.trigger(document.body,'refresh');">
+        <form class="composer" :style="sessionRunning ? 'opacity:.55; pointer-events:none;' : ''" hx-post="/ui/chat" hx-target="#messages" hx-swap="innerHTML" hx-on::after-request="this.reset();document.querySelector('#messages').scrollTop=999999;htmx.trigger(document.body,'refresh');">
           <textarea name="text" rows="4" placeholder="Ask the agent..."></textarea>
           <div class="actions">
             <button type="submit" class="send-btn" :disabled="sending || sessionRunning" x-text="sending ? 'Sending…' : 'Send message'">Send message</button>
@@ -122,16 +111,27 @@
             <span class="muted" x-show="sessionRunning">Waiting for background job to finish…</span>
           </div>
         </form>
-        <form x-ref="bgform" style="display:none" hx-post="/ui/chat/background" hx-target="#jobs-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')">
-          <textarea name="text"></textarea>
-        </form>
-
+        <form x-ref="bgform" style="display:none" hx-post="/ui/chat/background" hx-target="#jobs-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')"><textarea name="text"></textarea></form>
         <div id="session-runtime-state" style="display:none">idle</div>
-        <div id="trace" class="trace" hx-get="/ui/state" hx-trigger="load, every 3s" hx-select="#trace-lines" hx-swap="innerHTML"></div>
-        <div id="session-stats" class="bottom-stats" hx-get="/ui/state" hx-trigger="load, every 4s, refresh from:body" hx-select="#session-stats" hx-swap="innerHTML"></div>
       </section>
     </main>
+
+    <aside class="activity-panel">
+      <details class="topic" open><summary><span class="chev">▶</span> Activity</summary><div class="topic-body"><div id="activity-panel" hx-get="/ui/activity" hx-trigger="load, every 2s, refresh from:body" hx-swap="innerHTML"></div></div></details>
+      <details class="topic"><summary><span class="chev">▶</span> Runtime status</summary><div class="topic-body"><div id="trace" class="trace" hx-get="/ui/state" hx-trigger="load, every 3s" hx-select="#trace-lines" hx-swap="innerHTML"></div><div id="session-stats" class="bottom-stats" hx-get="/ui/state" hx-trigger="load, every 4s, refresh from:body" hx-select="#session-stats" hx-swap="innerHTML"></div></div></details>
+    </aside>
   </div>
 
+  <template x-if="modalOpen">
+    <div class="modal-backdrop" @click.self="modalOpen=false">
+      <div class="modal-card">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
+          <strong x-text="modalTitle"></strong>
+          <button type="button" @click="modalOpen=false">Close</button>
+        </div>
+        <div id="modal-content"></div>
+      </div>
+    </div>
+  </template>
 </body>
 </html>

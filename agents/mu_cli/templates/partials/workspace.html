@@ -1,31 +1,10 @@
 <div class="panel">
   <h3>Workspace</h3>
-  <form hx-post="/ui/workspace" hx-target="#workspace-panel" hx-swap="innerHTML" hx-on::after-request="htmx.trigger(document.body,'refresh')">
-    <div class="kv">
-      <div>Active</div><div class="mono">{{ workspace or 'none' }}</div>
-      <div>Path</div><div><input name="workspace" value="{{ workspace or browse }}" class="mono" /></div>
-      <div>Browse</div><div class="mono">{{ browse }}</div>
-    </div>
-    <input type="hidden" name="browse" value="{{ browse }}" />
-    <div class="actions">
-      <button type="submit" name="action" value="attach" class="primary">Attach</button>
-      <button type="submit" name="action" value="detach">Detach</button>
-      <button type="submit" name="action" value="up">Up</button>
-      <button type="button" onclick="this.closest('.panel').querySelector('#workspace-browser').open = true">Browse folders</button>
-      {% if message %}<span class="muted">{{ message }}</span>{% endif %}
-    </div>
-  </form>
-  <details id="workspace-browser" style="margin-top:6px;">
-    <summary class="muted">Folder browser</summary>
-    <div style="display:grid; gap:4px; margin-top:6px; max-height:140px; overflow:auto;">
-      {% for child in children[:80] %}
-      <form hx-post="/ui/workspace" hx-target="#workspace-panel" hx-swap="innerHTML" style="margin:0;">
-        <input type="hidden" name="action" value="open_child" />
-        <input type="hidden" name="browse" value="{{ browse }}" />
-        <input type="hidden" name="child" value="{{ child.path }}" />
-        <button type="submit" class="session-main"><span class="mono">{{ child.name }}/</span></button>
-      </form>
-      {% endfor %}
-    </div>
-  </details>
+  <div class="kv">
+    <div>Active</div><div class="mono">{{ workspace or 'none' }}</div>
+  </div>
+  <div class="actions">
+    <button type="button" @click="$dispatch('open-modal', {url:'/ui/workspace/modal', title:'Workspace management'})" class="primary">Manage workspace</button>
+    {% if message %}<span class="muted">{{ message }}</span>{% endif %}
+  </div>
 </div>

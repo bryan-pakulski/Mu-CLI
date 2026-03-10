@@ -36,15 +36,26 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, session_panel.status_code)
         self.assertIn('Session', session_panel.get_data(as_text=True))
 
+        session_new_modal = client.get('/ui/session/new')
+        self.assertEqual(200, session_new_modal.status_code)
+        self.assertIn('Create session', session_new_modal.get_data(as_text=True))
+
         workspace_panel = client.get('/ui/workspace')
         self.assertEqual(200, workspace_panel.status_code)
-        self.assertIn('Workspace', workspace_panel.get_data(as_text=True))
+        self.assertIn('Manage workspace', workspace_panel.get_data(as_text=True))
+
+        workspace_modal = client.get('/ui/workspace/modal')
+        self.assertEqual(200, workspace_modal.status_code)
+        self.assertIn('Attach', workspace_modal.get_data(as_text=True))
 
         workspace_attach = client.post('/ui/workspace', data={'action': 'attach', 'workspace': '.', 'browse': '.'})
         self.assertEqual(200, workspace_attach.status_code)
 
         jobs_panel = client.get('/ui/jobs')
         self.assertEqual(200, jobs_panel.status_code)
+
+        activity_panel = client.get('/ui/activity')
+        self.assertEqual(200, activity_panel.status_code)
 
         settings = client.get('/ui/settings')
         self.assertEqual(200, settings.status_code)
@@ -79,6 +90,9 @@ class WebTests(unittest.TestCase):
         bg = client.post('/ui/chat/background', data={'text': 'hello in background'})
         self.assertEqual(200, bg.status_code)
         self.assertIn('background', bg.get_data(as_text=True).lower())
+
+        clear_session = client.post('/ui/session', data={'action': 'clear', 'name': 'default'})
+        self.assertEqual(200, clear_session.status_code)
 
     def test_web_state_and_session_endpoints(self) -> None:
         from mu_cli.web import create_app

@@ -105,6 +105,7 @@ Use this section as the baseline in-product help content so users can discover c
 
 ## Stage notes
 
+- Design guideline: [`docs/ux/design-guidelines.md`](docs/ux/design-guidelines.md)
 - Stage 1 slice artifact: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
 - Stage 2 progress artifact: [`docs/ux/stage2-operational-workflows.md`](docs/ux/stage2-operational-workflows.md)
 

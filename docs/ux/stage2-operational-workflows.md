@@ -27,3 +27,8 @@
 ## Notes
 
 - Hunk decisions in this slice are review-state annotations in the UI (non-mutating), preparing for future server-backed apply/reject workflows.
+
+
+## Style alignment updates
+
+- Added/started enforcing the new minimalist container rule: avoid nested containers and keep one visible container layer per region.

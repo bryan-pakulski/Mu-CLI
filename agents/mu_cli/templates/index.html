@@ -254,7 +254,7 @@
     .git-quick-pill.dirty { border-color: color-mix(in srgb, var(--color-warn) 30%, var(--border)); color: var(--color-warn); }
     .session-toolbar { display:flex; gap:6px; margin-bottom:8px; }
     .session-recent { margin-top:8px; }
-    .timeline-panel { border:1px solid var(--border); border-radius:10px; background:var(--surface); padding:8px; max-height:180px; overflow:auto; }
+    .timeline-panel { border:0; border-radius:0; background:transparent; padding:4px 0; max-height:180px; overflow:auto; }
     .timeline-item { display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
     .timeline-item:last-child { border-bottom:0; }
     .timeline-step { min-width:20px; color:var(--muted); font-size:11px; }
@@ -265,7 +265,7 @@
     .git-mode-toggle { display:flex; gap:6px; margin-bottom:8px; }
     .git-mode-toggle .btn.active { background:var(--primary-soft); border-color:var(--primary); color:var(--text); }
     .git-hunk-actions { display:flex; gap:6px; margin:8px 0; }
-    .git-hunk-list { max-height:180px; overflow:auto; border:1px solid var(--border); border-radius:10px; padding:8px; background:var(--surface-2); }
+    .git-hunk-list { max-height:180px; overflow:auto; border:0; border-radius:0; padding:4px 0; background:transparent; }
     .git-hunk-row { display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center; padding:6px; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
     .git-hunk-row:last-child { border-bottom:0; }
 
@@ -283,21 +283,21 @@
     }
 
     .ui-card {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--surface);
-      box-shadow: var(--elevation-1);
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
     }
     .ui-list-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: var(--space-2);
-      padding: 6px 8px;
-      border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-      border-radius: 10px;
-      background: color-mix(in srgb, var(--surface) 85%, var(--surface-2));
-      margin-bottom: 6px;
+      padding: 4px 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      margin-bottom: 4px;
     }
     .ui-badge {
       display: inline-flex;
@@ -318,14 +318,14 @@
     .ui-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
     .ui-split-pane { min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: stretch; }
     .state-empty, .state-loading, .state-error {
-      border: 1px dashed var(--border);
-      border-radius: 10px;
-      padding: 10px;
+      border: 0;
+      border-radius: 0;
+      padding: 4px 0;
       color: var(--muted);
       font-size: var(--font-size-sm);
-      background: color-mix(in srgb, var(--surface) 84%, var(--surface-2));
+      background: transparent;
     }
-    .state-error { border-style: solid; border-color: color-mix(in srgb, var(--color-danger) 28%, var(--border)); color: var(--color-danger); background: var(--color-danger-soft); }
+    .state-error { color: var(--color-danger); }
 
     .top-git-launch { display: none; }
     .top-git-launch.show { display: inline-flex; }
@@ -1267,7 +1267,7 @@
     <aside id="sidebar" class="sidebar">
       <div class="zone-label">Navigate &amp; scope</div>
 
-      <details class="panel collapsible-panel ui-card" open>
+      <details class="panel collapsible-panel" open>
         <summary><h3>Runtime</h3></summary>
         <div class="panel-body">
         <div class="small-muted mb-2">Applied automatically</div>
@@ -1296,7 +1296,7 @@
         <div id="uploadList" class="upload-list small-muted state-empty">No uploaded context files.</div>
         </div>
       </details>
-      <details id="gitPanel" class="panel collapsible-panel ui-card git-panel" open>
+      <details id="gitPanel" class="panel collapsible-panel git-panel" open>
         <summary><h3>GIT</h3></summary>
         <div class="panel-body">
           <div class="small-muted mb-2">Open branch / diff controls for the selected git workspace.</div>
@@ -1305,7 +1305,7 @@
       </details>
 
 
-      <details class="panel collapsible-panel ui-card" open>
+      <details class="panel collapsible-panel" open>
         <summary><h3>Sessions</h3></summary>
         <div class="panel-body">
         <div class="small-muted mb-2" id="activeSession">active: -</div>
@@ -1323,14 +1323,14 @@
         </div>
       </details>
 
-      <details class="panel collapsible-panel ui-card" open>
+      <details class="panel collapsible-panel" open>
         <summary><h3>Skills</h3></summary>
         <div class="panel-body">
           <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
         </div>
       </details>
 
-      <details class="panel collapsible-panel ui-card" open>
+      <details class="panel collapsible-panel" open>
         <summary><h3>Session behavior</h3></summary>
         <div class="panel-body">
           <label class="small-muted mb-1">Max session runtime (seconds)</label>
@@ -1353,7 +1353,7 @@
         </div>
       </details>
 
-      <details class="panel collapsible-panel ui-card" open>
+      <details class="panel collapsible-panel" open>
         <summary><h3>Session usage</h3></summary>
         <div class="panel-body">
         <div class="usage-grid">
@@ -1652,8 +1652,8 @@
         <h5 class="m-0">HELP</h5>
         <button id="closeHelpModal" class="btn btn-soft btn-sm">Close</button>
       </div>
-      <div class="state-loading mb-2">Use this as a quick operator guide while working across Operate / Control / Review surfaces.</div>
-      <div class="ui-list-row"><strong>Shortcuts</strong><span class="ui-badge success">Productivity</span></div>
+      <div class="small-muted mb-2">Use this as a quick operator guide while working across Operate / Control / Review surfaces.</div>
+      <div class="d-flex justify-content-between align-items-center mb-1"><strong>Shortcuts</strong><span class="ui-badge success">Productivity</span></div>
       <table class="ui-table mb-2">
         <thead><tr><th>Action</th><th>Shortcut</th></tr></thead>
         <tbody>
@@ -1663,9 +1663,9 @@
           <tr><td>Open settings</td><td>Ctrl/Cmd + ,</td></tr>
         </tbody>
       </table>
-      <div class="ui-list-row"><strong>Tooltips and controls</strong><span class="ui-badge warn">Clarity</span></div>
+      <div class="d-flex justify-content-between align-items-center mb-1"><strong>Tooltips and controls</strong><span class="ui-badge warn">Clarity</span></div>
       <div class="small-muted mb-2">Hover info icons to learn effect, when to use, and tradeoff of behavior toggles (agentic, research, condense).</div>
-      <div class="ui-list-row"><strong>Effective workflow</strong><span class="ui-badge">Operate → Control → Review</span></div>
+      <div class="d-flex justify-content-between align-items-center mb-1"><strong>Effective workflow</strong><span class="ui-badge">Operate → Control → Review</span></div>
       <ul class="small-muted mb-0">
         <li><strong>Operate:</strong> choose session/workspace and run tasks.</li>
         <li><strong>Control:</strong> tune runtime, tools, and model behavior before long runs.</li>

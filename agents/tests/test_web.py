@@ -100,6 +100,27 @@ class WebTests(unittest.TestCase):
         self.assertIn('reply', payload)
         self.assertIn('rejected by approval policy', payload['reply']['content'])
 
+
+    def test_pricing_endpoint_replaces_full_document(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        payload = {
+            'pricing': {
+                'openai': {
+                    'gpt-test': {'input_per_1m': 1.0, 'output_per_1m': 2.0},
+                },
+            },
+        }
+        res = client.post('/api/pricing', json=payload)
+        self.assertEqual(200, res.status_code)
+        body = res.get_json()
+        assert body is not None
+        self.assertEqual(payload['pricing'], body['pricing'])
+
     def test_pricing_endpoint_updates_model_row(self) -> None:
         from mu_cli.web import create_app
 

@@ -1536,6 +1536,14 @@ def create_app():
             return jsonify({"pricing": runtime.pricing.data})
 
         payload = request.get_json(force=True)
+        if "pricing" in payload:
+            pricing_payload = payload.get("pricing")
+            if not isinstance(pricing_payload, dict):
+                return jsonify({"error": "pricing must be a JSON object"}), 400
+            runtime.pricing.data = pricing_payload
+            runtime.pricing.save()
+            return jsonify({"ok": True, "pricing": runtime.pricing.data})
+
         provider = str(payload.get("provider", "")).strip()
         model = str(payload.get("model", "")).strip()
         if not provider or not model:

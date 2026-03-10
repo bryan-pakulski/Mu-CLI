@@ -271,11 +271,11 @@
       max-width: 60vw;
       resize: horizontal;
       min-height: 0;
-      overflow: auto;
+      overflow: hidden;
       border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
       padding-left: 10px;
-      display: grid;
-      grid-template-rows: auto minmax(0,1fr);
+      display: flex;
+      flex-direction: column;
       gap: 8px;
     }
     .meta-sidebar h4 {
@@ -294,6 +294,7 @@
     .meta-feed {
       min-height: 0;
       overflow: auto;
+      flex: 1;
       display: grid;
       gap: 8px;
       padding-right: 2px;
@@ -1274,6 +1275,18 @@
     </section>
   </div>
 
+  
+  <div id="runDetailsModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(980px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Run details</h5>
+        <button id="closeRunDetailsModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="runDetailsMeta" class="small-muted mb-2"></div>
+      <pre id="runDetailsBody" class="trace" style="max-height:65vh;white-space:pre-wrap;line-height:1.45"></pre>
+    </div>
+  </div>
+
   <div id="planApprovalModal" class="modal-backdrop-custom">
     <div class="modal-card" style="width:min(760px,96vw)">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1511,6 +1524,8 @@ const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
 let sendingSession = null;
+const runNoticesBySession = {};
+const runDetailsById = {};
 
 async function api(path, method='GET', body=null) {
   const res = await fetch(path, {
@@ -1716,7 +1731,7 @@ function beginBackgroundPolling() {
         if (latest.last_step) reportEl.textContent = `background ${latest.status}: ${latest.last_step}`;
         else reportEl.textContent = `background ${latest.status}: ${latest.iterations || 0} iteration(s)`;
       }
-      if (latest.session === state.activeSession) renderBackgroundActivity(latest);
+      if (latest.session === state.activeSession) { renderBackgroundActivity(latest); renderMetadataPanel(); }
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
@@ -1751,6 +1766,23 @@ function _drawLineChart(canvas, seriesMap) {
   }
 
   const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7'];
+  const pad = 28;
+  ctx.strokeStyle = '#9ca3af';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad, h - pad);
+  ctx.lineTo(w - 8, h - pad);
+  ctx.moveTo(pad, h - pad);
+  ctx.lineTo(pad, 8);
+  ctx.stroke();
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('Turns (X)', w - 66, h - 10);
+  ctx.save();
+  ctx.translate(10, 44);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Usage (Y)', 0, 0);
+  ctx.restore();
   let maxLen = 0;
   let maxY = 0;
   keys.forEach((k) => {
@@ -2490,6 +2522,68 @@ function renderMetadataPanel() {
 }
 
 
+
+function _escapeAttr(value) {
+  return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _jobDetailsText(job) {
+  const lines = [];
+  lines.push(`Session: ${job.session || '-'}`);
+  lines.push(`Job: ${job.id || '-'}`);
+  lines.push(`Status: ${job.status || '-'}`);
+  lines.push(`Iterations: ${job.iterations || 0}`);
+  if (job.started_at) lines.push(`Started: ${job.started_at}`);
+  if (job.finished_at) lines.push(`Finished: ${job.finished_at}`);
+  if (job.error) lines.push(`Error: ${job.error}`);
+  if (job.report) {
+    lines.push('');
+    lines.push('Report:');
+    lines.push(JSON.stringify(job.report, null, 2));
+  }
+  if (job.plan) {
+    lines.push('');
+    lines.push('Plan:');
+    lines.push(String(job.plan));
+  }
+  if (Array.isArray(job.checkpoints) && job.checkpoints.length) {
+    lines.push('');
+    lines.push('Checkpoints:');
+    lines.push(JSON.stringify(job.checkpoints, null, 2));
+  }
+  if (Array.isArray(job.events) && job.events.length) {
+    lines.push('');
+    lines.push('Events:');
+    lines.push(job.events.join('\\n'));
+  }
+  return lines.join('\\n');
+}
+
+function maybeRecordJobTerminalNotice(job) {
+  if (!job || !job.id || !job.session) return;
+  if (job.status !== 'timed_out') return;
+  const session = String(job.session);
+  const id = `timeout-${job.id}`;
+  const notices = runNoticesBySession[session] || [];
+  if (notices.some((n) => n.id === id)) return;
+  const details = _jobDetailsText(job);
+  runDetailsById[id] = details;
+  notices.push({
+    id,
+    text: 'Agent timed out before completing this run.',
+  });
+  runNoticesBySession[session] = notices;
+}
+
+function openRunDetails(id, title = '') {
+  const body = document.getElementById('runDetailsBody');
+  const meta = document.getElementById('runDetailsMeta');
+  if (!body || !meta) return;
+  meta.textContent = title || '';
+  body.textContent = runDetailsById[id] || 'No details available.';
+  showModal('runDetailsModal', true);
+}
+
 function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
@@ -2528,6 +2622,18 @@ function renderMessages() {
     box.appendChild(row);
     anchor = row;
 
+  });
+
+  const notices = runNoticesBySession[state.activeSession || ''] || [];
+  notices.forEach((notice) => {
+    const row = document.createElement('div');
+    row.className = 'msg role-assistant';
+    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta"><span class="msg-tag">System</span><span class="msg-time">notice</span></div>`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = `<p>${escapeHtml(notice.text)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;
+    row.appendChild(bubble);
+    box.appendChild(row);
   });
 
   highlightCodeBlocks(box);
@@ -2835,7 +2941,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal', 'runDetailsModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -3051,6 +3157,7 @@ function updateBackgroundJobInState(job) {
   else state.backgroundJobs.push(job);
   renderSessions(state.sessions || [], state.activeSession || '');
   updateChatBusyState();
+  maybeRecordJobTerminalNotice(job);
   if (job.session === state.activeSession) renderBackgroundActivity(job);
 }
 
@@ -3096,7 +3203,7 @@ async function sendPrompt(background = false) {
         for (let i = 0; i < 120; i += 1) {
           const job = await api(`/api/jobs/${bg.job_id}`);
           updateBackgroundJobInState(job);
-          if (job.session === state.activeSession) renderBackgroundActivity(job);
+          if (job.session === state.activeSession) { renderBackgroundActivity(job); renderMetadataPanel(); }
           if (job.usage && job.session === state.activeSession) updateUsagePanel(job.usage);
           updateQueryRuntime();
           if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
@@ -3109,6 +3216,8 @@ async function sendPrompt(background = false) {
           }
           if (['completed', 'failed', 'timed_out'].includes(job.status)) {
             reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
+            maybeRecordJobTerminalNotice(job);
+            await refreshState();
             break;
           }
           await new Promise((r) => setTimeout(r, 1000));
@@ -3300,6 +3409,7 @@ document.getElementById('openGitModal').addEventListener('click', async () => {
 });
 document.getElementById('closeGitModal').addEventListener('click', () => showModal('gitModal', false));
 document.getElementById('closeSkillViewModal').addEventListener('click', () => showModal('skillViewModal', false));
+document.getElementById('closeRunDetailsModal').addEventListener('click', () => showModal('runDetailsModal', false));
 document.getElementById('toggleMetaSidebar').addEventListener('click', () => {
   const layout = document.querySelector('.workspace-layout');
   if (!layout) return;
@@ -3387,7 +3497,15 @@ document.getElementById('prompt').addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
 });
 
-document.addEventListener('click', () => closeAllSessionMenus());
+document.addEventListener('click', (ev) => {
+  const btn = ev.target && ev.target.closest ? ev.target.closest('[data-run-details]') : null;
+  if (btn) {
+    const id = btn.getAttribute('data-run-details') || '';
+    openRunDetails(id, `Run ${id}`);
+    return;
+  }
+  closeAllSessionMenus();
+});
 const metaToggleBtn = document.getElementById('toggleMetaSidebar');
 if (metaToggleBtn) {
   metaToggleBtn.textContent = '<';

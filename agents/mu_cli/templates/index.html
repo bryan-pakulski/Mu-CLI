@@ -145,9 +145,16 @@
       display: grid;
       grid-template-columns: minmax(0,1fr) auto;
       gap: 10px;
+      align-items: stretch;
+    }
+    .meta-rail {
+      min-height: 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
     }
     .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr); }
-    .workspace-layout.meta-hidden .meta-sidebar { display: none; }
+    .workspace-layout.meta-hidden .meta-rail { display: none; }
     .meta-toggle-icon {
       align-self: flex-start;
       margin-top: 8px;
@@ -225,43 +232,6 @@
       overflow: hidden;
       background: transparent;
       position: relative;
-    }
-
-    .plan-overlay {
-      position: absolute;
-      inset: 0;
-      z-index: 30;
-      background: color-mix(in srgb, var(--bg) 78%, transparent);
-      border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-      border-radius: 12px;
-      display: none;
-      overflow: hidden;
-      backdrop-filter: blur(2px);
-    }
-    .plan-overlay.show { display: grid; grid-template-rows: auto minmax(0,1fr); }
-    .plan-overlay-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 8px 10px;
-      border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-      background: color-mix(in srgb, var(--surface) 85%, transparent);
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .plan-overlay-body {
-      overflow: auto;
-      padding: 10px;
-      display: grid;
-      gap: 8px;
-      font-size: 12px;
-    }
-    .plan-stage {
-      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-      border-radius: 8px;
-      padding: 8px;
-      background: color-mix(in srgb, var(--surface) 90%, transparent);
     }
 
     .messages {
@@ -1247,8 +1217,7 @@
         <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
         <div class="title">mu_cli</div>
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
-        <button id="togglePlanOutput" class="btn btn-soft btn-sm">Plan output</button>
-                <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
+                        <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
         <button id="openGitModal" class="btn btn-soft btn-sm top-git-launch">GIT</button>
       </div>
@@ -1256,13 +1225,6 @@
       <div class="workspace-layout">
         <div class="chat-layout">
           <div id="messages" class="messages"></div>
-          <div id="planOverlay" class="plan-overlay">
-            <div class="plan-overlay-head">
-              <strong>Plan output</strong>
-              <span id="planOverlayStatus">Idle</span>
-            </div>
-            <div id="planOverlayBody" class="plan-overlay-body"></div>
-          </div>
 
           <div id="chatComposer">
             <div class="prompt-wrap">
@@ -1285,8 +1247,9 @@
           </div>
         </div>
 
-        <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel">⮜</button>
-        <aside class="meta-sidebar">
+        <div class="meta-rail">
+          <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel">⮜</button>
+          <aside class="meta-sidebar">
           <h4>Run metadata</h4>
           <div class="meta-feed">
             <details class="trace-wrap" id="traceWrap" open>
@@ -1295,7 +1258,8 @@
             </details>
             <div id="metaFeed" class="meta-cards"></div>
           </div>
-        </aside>
+          </aside>
+        </div>
       </div>
     </section>
   </div>
@@ -1536,7 +1500,6 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
-let planOverlayUserVisible = false;
 let sendingSession = null;
 
 async function api(path, method='GET', body=null) {
@@ -1691,7 +1654,11 @@ function classifyBackgroundEvent(line) {
   return '';
 }
 
+let _lastBackgroundActivityKey = null;
 function renderBackgroundActivity(job) {
+  const key = job ? `${job.id}|${job.status}|${job.iterations}|${(job.last_step || "").slice(0,120)}` : "none";
+  if (_lastBackgroundActivityKey === key) return;
+  _lastBackgroundActivityKey = key;
   const panel = document.getElementById('backgroundLive');
   const body = document.getElementById('backgroundLiveBody');
   const summary = document.getElementById('backgroundLiveSummary');
@@ -1722,50 +1689,12 @@ function renderBackgroundActivity(job) {
   panel.open = active;
 }
 
-function renderPlanOutput(job) {
-  const overlay = document.getElementById('planOverlay');
-  const body = document.getElementById('planOverlayBody');
-  const status = document.getElementById('planOverlayStatus');
-  if (!overlay || !body || !status) return;
-
-  const active = !!job && ['running', 'awaiting_plan_approval'].includes(job.status);
-  const shouldShow = active || planOverlayUserVisible;
-  overlay.classList.toggle('show', shouldShow);
-  document.getElementById('togglePlanOutput').textContent = shouldShow ? 'Hide plan output' : 'Plan output';
-
-  if (!shouldShow) return;
-  if (!job) {
-    status.textContent = 'Idle';
-    body.innerHTML = '<div class="plan-stage">No active session output.</div>';
-    return;
-  }
-
-  status.textContent = `${job.status || 'running'} · ${job.iterations || 0} step(s)`;
-  const sections = [];
-  if (job.plan) sections.push(`<div class="plan-stage"><strong>Plan</strong><div>${escapeHtml(String(job.plan))}</div></div>`);
-  if (job.last_step) sections.push(`<div class="plan-stage"><strong>Current step</strong><div>${escapeHtml(String(job.last_step))}</div></div>`);
-  if (Array.isArray(job.checkpoints) && job.checkpoints.length) {
-    const items = job.checkpoints.slice(-8).map((cp) => `
-      <li>#${Number(cp.iteration || 0)} · ${escapeHtml(String(cp.summary || cp.status || 'update'))}</li>
-    `).join('');
-    sections.push(`<div class="plan-stage"><strong>Recent checkpoints</strong><ul style="margin:6px 0 0 18px">${items}</ul></div>`);
-  }
-  if (Array.isArray(job.events) && job.events.length) {
-    const events = job.events.slice(-12).map((e) => `<li>${escapeHtml(String(e))}</li>`).join('');
-    sections.push(`<div class="plan-stage"><strong>Execution events</strong><ul style="margin:6px 0 0 18px">${events}</ul></div>`);
-  }
-  body.innerHTML = sections.join('') || '<div class="plan-stage">Waiting for execution updates…</div>';
-}
-
 function beginBackgroundPolling() {
   if (backgroundJobPoll) return;
   backgroundJobPoll = setInterval(async () => {
     try {
       const job = activeSearchingJob();
-      if (!job) {
-        renderBackgroundActivity(null);
-        return;
-      }
+      if (!job) return;
       const latest = await api(`/api/jobs/${job.id}`);
       updateBackgroundJobInState(latest);
       await pollApproval();
@@ -1775,8 +1704,7 @@ function beginBackgroundPolling() {
         if (latest.last_step) reportEl.textContent = `background ${latest.status}: ${latest.last_step}`;
         else reportEl.textContent = `background ${latest.status}: ${latest.iterations || 0} iteration(s)`;
       }
-      renderBackgroundActivity(latest);
-      renderPlanOutput(latest);
+      if (latest.session === state.activeSession) renderBackgroundActivity(latest);
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
@@ -2654,7 +2582,6 @@ function updateChatBusyState() {
   updateThinking(busy);
   updateQueryRuntime();
   renderBackgroundActivity(activeSearchingJob() || null);
-  renderPlanOutput(activeSearchingJob() || null);
 }
 
 
@@ -2997,6 +2924,7 @@ async function sendApprovalDecision(decision) {
 
 async function refreshState() {
   syncing = true;
+  const previousSession = state.activeSession;
   const s = await api('/api/state');
   state.models = s.models;
   state.messages = s.messages;
@@ -3005,6 +2933,7 @@ async function refreshState() {
   state.sessionUsage = s.session_usage || {};
   state.sessions = s.sessions || [];
   state.activeSession = s.session || '';
+  if (previousSession !== state.activeSession) _lastBackgroundActivityKey = null;
   state.sessionTurns = s.session_turns || [];
   state.uploads = s.uploads || [];
   state.pendingApproval = s.pending_approval || null;
@@ -3063,7 +2992,6 @@ async function refreshState() {
   renderMetadataPanel();
   renderTraces();
   updateChatBusyState();
-  renderBackgroundActivity(activeJob || activeSearchingJob() || null);
   renderMetrics();
 
   if (state.pendingApproval) {
@@ -3089,7 +3017,6 @@ function updateBackgroundJobInState(job) {
   renderSessions(state.sessions || [], state.activeSession || '');
   updateChatBusyState();
   if (job.session === state.activeSession) renderBackgroundActivity(job);
-  if (job.session === state.activeSession) renderPlanOutput(job);
 }
 
 
@@ -3134,8 +3061,8 @@ async function sendPrompt(background = false) {
         for (let i = 0; i < 120; i += 1) {
           const job = await api(`/api/jobs/${bg.job_id}`);
           updateBackgroundJobInState(job);
-          renderBackgroundActivity(job);
-          if (job.usage) updateUsagePanel(job.usage);
+          if (job.session === state.activeSession) renderBackgroundActivity(job);
+          if (job.usage && job.session === state.activeSession) updateUsagePanel(job.usage);
           updateQueryRuntime();
           if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
           if (job.status === 'awaiting_plan_approval') {
@@ -3348,10 +3275,6 @@ document.getElementById('toggleMetaSidebar').addEventListener('click', () => {
   btn.setAttribute('aria-label', btn.title);
 });
 document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
-document.getElementById('togglePlanOutput').addEventListener('click', () => {
-  planOverlayUserVisible = !planOverlayUserVisible;
-  renderPlanOutput(activeSearchingJob() || null);
-});
 
 document.getElementById('browseWorkspace').addEventListener('click', () => {
   showModal('workspaceModal', true);

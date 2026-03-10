@@ -70,10 +70,10 @@ Status: ✅ Completed via `webapp/contracts.py` validation helpers and route int
 
 Record major decisions in `docs/adr/` to reduce future churn and repeated debates.
 
-Suggested first ADRs:
-- Session model and persistence boundaries
-- Why streaming endpoint may switch runtime session
-- Frontend packaging strategy (single-file vs static assets)
+Status: ✅ Stage 1 complete — ADRs added:
+- [`0001-session-model-and-persistence-boundaries.md`](adr/0001-session-model-and-persistence-boundaries.md)
+- [`0002-stream-session-switching-behavior.md`](adr/0002-stream-session-switching-behavior.md)
+- [`0003-frontend-packaging-strategy.md`](adr/0003-frontend-packaging-strategy.md)
 
 ## Near-term refactor plan (suggested sequencing)
 
@@ -81,5 +81,6 @@ Suggested first ADRs:
 2. Extract `/api/session` action handling into `routes_session.py`. *(done)*
 3. Move background job orchestration into `jobs.py` with focused tests. *(done for route/state handling split; deeper loop extraction can be incremental)*
 4. Add request schema validation helpers for top 3 mutable endpoints. *(done)*
+5. Add initial ADR set for key architecture decisions. *(done)*
 
 This keeps each PR focused and minimizes behavior change risk.

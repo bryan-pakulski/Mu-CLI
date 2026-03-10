@@ -44,6 +44,7 @@ inspect progress, and either open a PR when complete or continue iterating.
 
 - Architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Testing guide: [`docs/TESTING.md`](docs/TESTING.md)
+- ADR index: [`docs/adr/README.md`](docs/adr/README.md)
 
 ## Makefile shortcuts
 

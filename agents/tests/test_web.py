@@ -85,6 +85,26 @@ class WebTests(unittest.TestCase):
         self.assertTrue(any(event.get('type') == 'report' for event in events))
         self.assertEqual('done', events[-1].get('type'))
 
+    def test_chat_stream_endpoint_honors_requested_session(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        create = client.post('/api/session', json={'action': 'new', 'name': 'stream-session'})
+        self.assertEqual(200, create.status_code)
+        switched = client.post('/api/session', json={'action': 'switch', 'name': 'default'})
+        self.assertEqual(200, switched.status_code)
+
+        res = client.post('/api/chat/stream', json={'text': 'hello', 'session': 'stream-session'})
+        self.assertEqual(200, res.status_code)
+        _ = b''.join(res.response).decode('utf-8')
+
+        status = client.post('/api/session', json={'action': 'status'})
+        self.assertEqual(200, status.status_code)
+        self.assertEqual('stream-session', status.get_json()['session'])
+
     def test_web_approval_deny_mode_rejects_mutating_tool(self) -> None:
         from mu_cli.web import create_app
 

@@ -40,11 +40,19 @@ inspect progress, and either open a PR when complete or continue iterating.
 - Open the full guide at [`../doco.html`](../doco.html).
 - Developer workflow rule: when CLI commands/tools/provider behavior changes, update `doco.html` in the same PR.
 
+## Additional developer docs
+
+- Architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Testing guide: [`docs/TESTING.md`](docs/TESTING.md)
+
 ## Makefile shortcuts
 
 ```bash
 make test
+make test-fast
 make test-verbose
+make test-web
+make check
 make models
 make run-echo
 make run-openai   # requires OPENAI_API_KEY
@@ -69,6 +77,16 @@ make docker-models
 Notes:
 - Container persists app state via `./.mu_cli:/app/.mu_cli` volume.
 - Current repo is mounted at `/workspace` for tool access in containerized CLI runs.
+
+## Maintainability direction
+
+The project is currently easiest to evolve when changes are kept small and bounded by layer:
+
+- Provider/tool behavior in `agents/mu_cli/providers/` and `agents/mu_cli/tools/`.
+- Session/runtime behavior in `agents/mu_cli/session.py`, `agents/mu_cli/workspace.py`, and `agents/mu_cli/web.py`.
+- UI behavior in `agents/mu_cli/templates/index.html`.
+
+For architectural refactor plans (including backend route decomposition and frontend modularization), see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## GUI (Flask)
 

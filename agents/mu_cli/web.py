@@ -801,6 +801,31 @@ def _persist(runtime: WebRuntime) -> None:
     )
 
 
+def _attach_workspace_if_available(runtime: WebRuntime) -> None:
+    if not runtime.workspace_path:
+        return
+    path = Path(runtime.workspace_path).expanduser()
+    if path.exists() and path.is_dir():
+        runtime.workspace_store.attach(path)
+
+
+def _initialize_fresh_session_state(runtime: WebRuntime, *, reset_summary_index: bool = False) -> None:
+    runtime.agent = _new_agent(runtime)
+    runtime.agent.add_system_prompt(runtime.system_prompt)
+    if runtime.agentic_planning:
+        summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
+        _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
+    if runtime.research_mode:
+        _inject_research_prompt(runtime.agent)
+    _sync_skill_prompts(runtime)
+    runtime.session_usage = _default_usage()
+    runtime.session_turns = []
+    runtime.uploads = []
+    runtime.research_artifacts = {}
+    if reset_summary_index:
+        runtime.summary_index = []
+
+
 def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.session_store.use(session_name)
     loaded = runtime.session_store.load()
@@ -832,10 +857,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.condense_window = int(loaded.condense_window)
     runtime.summary_index = list(loaded.summary_index or [])
     runtime.enabled_skills = list(loaded.enabled_skills or [])
-    if runtime.workspace_path:
-        path = Path(runtime.workspace_path).expanduser()
-        if path.exists() and path.is_dir():
-            runtime.workspace_store.attach(path)
+    _attach_workspace_if_available(runtime)
 
     if runtime.agentic_planning:
         summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
@@ -888,13 +910,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
-        runtime.agent = _new_agent(runtime)
-        runtime.agent.add_system_prompt(runtime.system_prompt)
-        if runtime.agentic_planning:
-            _inject_planning(runtime.agent, git_guidance=_git_agent_instruction(runtime))
-        if runtime.research_mode:
-            _inject_research_prompt(runtime.agent)
-        _sync_skill_prompts(runtime)
+        _initialize_fresh_session_state(runtime)
         _persist(runtime)
     return runtime
 
@@ -1468,6 +1484,7 @@ def create_app():
         text = str(payload.get("text", "")).strip()
         if not text:
             return jsonify({"error": "text is required"}), 400
+        session_name = str(payload.get("session", runtime.session_name)).strip() or runtime.session_name
 
         events: queue.Queue[dict] = queue.Queue()
         done = threading.Event()
@@ -1493,6 +1510,8 @@ def create_app():
             runtime.agent.on_model_response = stream_model_response
             runtime.agent.on_tool_run = stream_tool_run
             try:
+                if runtime.session_name != session_name:
+                    _load_session(runtime, session_name)
                 reply = _run_turn_with_uploaded_context(runtime, text)
                 report = _turn_report(runtime, text, reply.content)
                 _record_turn(runtime, report)
@@ -1872,18 +1891,7 @@ def create_app():
 
             runtime.session_name = name
             runtime.session_store.use(name)
-            runtime.agent = _new_agent(runtime)
-            runtime.agent.add_system_prompt(runtime.system_prompt)
-            runtime.session_usage = _default_usage()
-            runtime.session_turns = []
-            runtime.uploads = []
-            runtime.research_artifacts = {}
-            if runtime.agentic_planning:
-                summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-                _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
-            if runtime.research_mode:
-                _inject_research_prompt(runtime.agent)
-            _sync_skill_prompts(runtime)
+            _initialize_fresh_session_state(runtime)
             _persist(runtime)
             return jsonify({"ok": True, "session": name})
 
@@ -1912,23 +1920,8 @@ def create_app():
                 if not loaded:
                     return jsonify({"error": "session not found"}), 404
 
-            runtime.agent = _new_agent(runtime)
-            runtime.agent.add_system_prompt(runtime.system_prompt)
-            if runtime.workspace_path:
-                path = Path(runtime.workspace_path).expanduser()
-                if path.exists() and path.is_dir():
-                    runtime.workspace_store.attach(path)
-            if runtime.agentic_planning:
-                summary = runtime.workspace_store.summary() if runtime.workspace_store.snapshot else None
-                _inject_planning(runtime.agent, summary, _git_agent_instruction(runtime))
-            if runtime.research_mode:
-                _inject_research_prompt(runtime.agent)
-            _sync_skill_prompts(runtime)
-            runtime.session_usage = _default_usage()
-            runtime.session_turns = []
-            runtime.uploads = []
-            runtime.research_artifacts = {}
-            runtime.summary_index = []
+            _attach_workspace_if_available(runtime)
+            _initialize_fresh_session_state(runtime, reset_summary_index=True)
             _persist(runtime)
             return jsonify({"ok": True, "session": runtime.session_name})
 

@@ -1542,16 +1542,28 @@ async function api(path, method='GET', body=null) {
     headers: {'Content-Type': 'application/json'},
     body: body ? JSON.stringify(body) : null,
   });
-  const json = await res.json();
+  const json = await parseJsonResponse(res);
   if (!res.ok) throw new Error(json.error || 'request failed');
   return json;
 }
 
 async function apiForm(path, formData) {
   const res = await fetch(path, { method: 'POST', body: formData });
-  const json = await res.json();
+  const json = await parseJsonResponse(res);
   if (!res.ok) throw new Error(json.error || 'request failed');
   return json;
+}
+
+async function parseJsonResponse(res) {
+  const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('application/json')) return res.json();
+  const raw = await res.text();
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return { error: raw };
+  }
 }
 
 function renderGitControls() {
@@ -1560,7 +1572,9 @@ function renderGitControls() {
   const repoSel = document.getElementById('gitRepo');
   const branchSel = document.getElementById('gitBranch');
   const status = document.getElementById('gitStatus');
-  const workspace = (document.getElementById('workspace').value || '').trim();
+  const workspaceInput = document.getElementById('workspace');
+  if (!repoSel || !branchSel || !status || !workspaceInput) return;
+  const workspace = (workspaceInput.value || '').trim();
   const repos = state.gitRepos || [];
   const branches = state.gitBranches || [];
 
@@ -1692,7 +1706,9 @@ function classifyBackgroundEvent(line) {
 
 let _lastBackgroundActivityKey = null;
 function renderBackgroundActivity(job) {
-  const key = job ? `${job.id}|${job.status}|${job.iterations}|${(job.last_step || "").slice(0,120)}` : "none";
+  const events = Array.isArray(job && job.events) ? job.events : [];
+  const eventTail = events.length ? String(events[events.length - 1]).slice(0, 120) : '';
+  const key = job ? `${job.id}|${job.status}|${job.iterations}|${(job.last_step || "").slice(0,120)}|${events.length}|${eventTail}` : "none";
   if (_lastBackgroundActivityKey === key) return;
   _lastBackgroundActivityKey = key;
   const panel = document.getElementById('backgroundLive');
@@ -1700,7 +1716,7 @@ function renderBackgroundActivity(job) {
   const summary = document.getElementById('backgroundLiveSummary');
   if (!panel || !body || !summary) return;
   const active = !!job && ['running', 'awaiting_plan_approval'].includes(job.status);
-  const events = Array.isArray(job && job.events) ? job.events.slice(-24) : [];
+  const recentEvents = events.slice(-24);
 
   if (!job) {
     panel.classList.remove('show');
@@ -1712,10 +1728,10 @@ function renderBackgroundActivity(job) {
 
   panel.classList.add('show');
   summary.textContent = `Live run activity · ${job.status || 'idle'} · ${job.iterations || 0} step(s)`;
-  if (!events.length) {
+  if (!recentEvents.length) {
     body.innerHTML = '<div class="bg-live-empty">No activity yet.</div>';
   } else {
-    body.innerHTML = events.map((line) => {
+    body.innerHTML = recentEvents.map((line) => {
       const cls = classifyBackgroundEvent(line);
       const safe = escapeHtml(String(line));
       return `<div class="bg-live-line ${cls}">${safe}</div>`;
@@ -3268,7 +3284,7 @@ async function sendPrompt(background = false) {
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, session: selectedSessionName() || undefined }),
     });
     if (!res.ok || !res.body) throw new Error('stream request failed');
 
@@ -3402,41 +3418,72 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
 
+function byId(id) {
+  return document.getElementById(id);
+}
+
+function runWithAlert(task) {
+  Promise.resolve().then(task).catch((e) => alert(e.message));
+}
+
+function bindClick(id, handler) {
+  const el = byId(id);
+  if (!el) return;
+  el.addEventListener('click', (event) => runWithAlert(() => handler(event)));
+}
+
+function bindChange(id, handler) {
+  const el = byId(id);
+  if (!el) return;
+  el.addEventListener('change', (event) => runWithAlert(() => handler(event)));
+}
+
+function resolvePlanApproval(ok, revisedPlan = '') {
+  showModal('planApprovalModal', false);
+  if (!planApprovalResolver) return;
+  const resolve = planApprovalResolver;
+  planApprovalResolver = null;
+  resolve({ ok, revisedPlan: String(revisedPlan || '').trim() });
+}
+
 for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
-  document.getElementById(id).addEventListener('change', () => {
-    if (id === 'provider') wireModels(document.getElementById('provider').value);
+  const input = byId(id);
+  if (!input) continue;
+  input.addEventListener('change', () => {
+    if (id === 'provider') wireModels(byId('provider').value);
     if (id === 'darkMode') applyThemePreference();
-    if (id === 'workspace') refreshGitRepos().catch((e) => alert(e.message));
+    if (id === 'workspace') runWithAlert(() => refreshGitRepos());
     scheduleApplySettings();
     syncPricingEditor();
   });
   if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey') {
-    document.getElementById(id).addEventListener('blur', scheduleApplySettings);
+    input.addEventListener('blur', scheduleApplySettings);
   }
 }
 
-document.getElementById('customTools').addEventListener('blur', scheduleApplySettings);
+const customToolsInput = byId('customTools');
+if (customToolsInput) customToolsInput.addEventListener('blur', scheduleApplySettings);
 
-document.getElementById('promptAttach').addEventListener('click', (e) => {
+bindClick('promptAttach', (e) => {
   e.preventDefault();
-  document.getElementById('promptAttachInput').click();
+  byId('promptAttachInput').click();
 });
-document.getElementById('promptAttachInput').addEventListener('change', () => uploadPromptAttachmentFiles().catch((e) => alert(e.message)));
+bindChange('promptAttachInput', () => uploadPromptAttachmentFiles());
 
-document.getElementById('send').addEventListener('click', () => sendPrompt(false).catch((e) => alert(e.message)));
-document.getElementById('sendBackground').addEventListener('click', () => sendPrompt(true).catch((e) => alert(e.message)));
-document.getElementById('killJob').addEventListener('click', () => killActiveJob().catch((e) => alert(e.message)));
-document.getElementById('newSession').addEventListener('click', () => openNewSessionModal());
-document.getElementById('savePricing').addEventListener('click', () => savePricing().catch((e) => alert(e.message)));
-document.getElementById('uploadFiles').addEventListener('click', () => uploadContextFiles().catch((e) => alert(e.message)));
-document.getElementById('clearUploads').addEventListener('click', () => clearUploadedStore().catch((e) => alert(e.message)));
+bindClick('send', () => sendPrompt(false));
+bindClick('sendBackground', () => sendPrompt(true));
+bindClick('killJob', () => killActiveJob());
+bindClick('newSession', () => openNewSessionModal());
+bindClick('savePricing', () => savePricing());
+bindClick('uploadFiles', () => uploadContextFiles());
+bindClick('clearUploads', () => clearUploadedStore());
 
-document.getElementById('toggleSidebar').addEventListener('click', () => document.getElementById('app').classList.toggle('sidebar-hidden'));
-document.getElementById('openAdvanced').addEventListener('click', () => showModal('advancedModal', true));
-document.getElementById('closeAdvanced').addEventListener('click', () => showModal('advancedModal', false));
-document.getElementById('openMetrics').addEventListener('click', () => { renderMetrics(); showModal('metricsModal', true); });
-document.getElementById('closeMetrics').addEventListener('click', () => showModal('metricsModal', false));
-document.getElementById('openGitModal').addEventListener('click', async () => {
+bindClick('toggleSidebar', () => byId('app').classList.toggle('sidebar-hidden'));
+bindClick('openAdvanced', () => showModal('advancedModal', true));
+bindClick('closeAdvanced', () => showModal('advancedModal', false));
+bindClick('openMetrics', () => { renderMetrics(); showModal('metricsModal', true); });
+bindClick('closeMetrics', () => showModal('metricsModal', false));
+bindClick('openGitModal', async () => {
   try {
     await refreshGitBranches();
   } catch (_) {
@@ -3445,95 +3492,89 @@ document.getElementById('openGitModal').addEventListener('click', async () => {
   renderGitControls();
   showModal('gitModal', true);
 });
-document.getElementById('closeGitModal').addEventListener('click', () => showModal('gitModal', false));
-document.getElementById('closeSkillViewModal').addEventListener('click', () => showModal('skillViewModal', false));
-document.getElementById('closeRunDetailsModal').addEventListener('click', () => showModal('runDetailsModal', false));
-document.getElementById('toggleMetaSidebar').addEventListener('click', () => {
+
+for (const [buttonId, modalId] of [
+  ['closeGitModal', 'gitModal'],
+  ['closeSkillViewModal', 'skillViewModal'],
+  ['closeRunDetailsModal', 'runDetailsModal'],
+  ['closeWorkspaceModal', 'workspaceModal'],
+  ['closeNewSessionModal', 'newSessionModal'],
+  ['closeCondenseModal', 'condenseModal'],
+]) {
+  bindClick(buttonId, () => showModal(modalId, false));
+}
+
+bindClick('toggleMetaSidebar', () => {
   const layout = document.querySelector('.workspace-layout');
   if (!layout) return;
   layout.classList.toggle('meta-hidden');
-  const btn = document.getElementById('toggleMetaSidebar');
+  const btn = byId('toggleMetaSidebar');
   const hidden = layout.classList.contains('meta-hidden');
   btn.textContent = hidden ? '>' : '<';
   btn.title = hidden ? 'Show metadata panel' : 'Hide metadata panel';
   btn.setAttribute('aria-label', btn.title);
 });
-document.getElementById('refreshGitDiff').addEventListener('click', () => refreshGitDiff().then(renderGitControls).catch((e) => alert(e.message)));
 
-document.getElementById('browseWorkspace').addEventListener('click', () => {
+bindClick('refreshGitDiff', async () => {
+  await refreshGitDiff();
+  renderGitControls();
+});
+
+bindClick('browseWorkspace', () => {
   showModal('workspaceModal', true);
-  loadDirs(document.getElementById('workspace').value.trim()).catch((e) => alert(e.message));
+  return loadDirs(byId('workspace').value.trim());
 });
-document.getElementById('gitRepo').addEventListener('change', () => {
-  state.gitCurrentRepo = document.getElementById('gitRepo').value || null;
-  refreshGitBranches().catch((e) => alert(e.message));
+
+bindChange('gitRepo', () => {
+  state.gitCurrentRepo = byId('gitRepo').value || null;
+  return refreshGitBranches();
 });
-document.getElementById('switchBranch').addEventListener('click', () => switchBranchFromUI().catch((e) => alert(e.message)));
-document.getElementById('createBranch').addEventListener('click', () => createBranchFromUI().catch((e) => alert(e.message)));
-document.getElementById('closeWorkspaceModal').addEventListener('click', () => showModal('workspaceModal', false));
-document.getElementById('closeNewSessionModal').addEventListener('click', () => showModal('newSessionModal', false));
-document.getElementById('closeCondenseModal').addEventListener('click', () => showModal('condenseModal', false));
-document.getElementById('runCondenseNow').addEventListener('click', () => runCondenseFromModal().catch((e) => alert(e.message)));
-document.getElementById('createSessionConfirm').addEventListener('click', () => createSessionFromModal().catch((e) => alert(e.message)));
-document.getElementById('newSessionProvider').addEventListener('change', () => wireNewSessionModels(document.getElementById('newSessionProvider').value));
-document.getElementById('loadDir').addEventListener('click', () => loadDirs(document.getElementById('dirPath').value.trim()).catch((e) => alert(e.message)));
-document.getElementById('chooseDir').addEventListener('click', () => {
+
+bindClick('switchBranch', () => switchBranchFromUI());
+bindClick('createBranch', () => createBranchFromUI());
+bindClick('runCondenseNow', () => runCondenseFromModal());
+bindClick('createSessionConfirm', () => createSessionFromModal());
+bindChange('newSessionProvider', () => wireNewSessionModels(byId('newSessionProvider').value));
+bindClick('loadDir', () => loadDirs(byId('dirPath').value.trim()));
+
+bindClick('chooseDir', () => {
   if (!selectedDir) return;
-  document.getElementById('workspace').value = selectedDir;
+  byId('workspace').value = selectedDir;
   showModal('workspaceModal', false);
   scheduleApplySettings();
-  refreshGitRepos().catch((e) => alert(e.message));
+  return refreshGitRepos();
 });
 
-document.getElementById('approveYes').addEventListener('click', () => sendApprovalDecision('approve').catch((e) => alert(e.message)));
-document.getElementById('approveNo').addEventListener('click', () => sendApprovalDecision('deny').catch((e) => alert(e.message)));
+bindClick('approveYes', () => sendApprovalDecision('approve'));
+bindClick('approveNo', () => sendApprovalDecision('deny'));
 
+bindClick('closePlanApprovalModal', () => resolvePlanApproval(false));
+bindClick('planApprovalDeny', () => resolvePlanApproval(false));
+bindClick('planApprovalApprove', () => resolvePlanApproval(true, byId('planApprovalContent').value));
 
-document.getElementById('closePlanApprovalModal').addEventListener('click', () => {
-  showModal('planApprovalModal', false);
-  if (planApprovalResolver) {
-    const resolve = planApprovalResolver;
-    planApprovalResolver = null;
-    resolve({ ok: false, revisedPlan: '' });
-  }
-});
-document.getElementById('planApprovalDeny').addEventListener('click', () => {
-  showModal('planApprovalModal', false);
-  if (planApprovalResolver) {
-    const resolve = planApprovalResolver;
-    planApprovalResolver = null;
-    resolve({ ok: false, revisedPlan: '' });
-  }
-});
-document.getElementById('planApprovalApprove').addEventListener('click', () => {
-  showModal('planApprovalModal', false);
-  if (planApprovalResolver) {
-    const resolve = planApprovalResolver;
-    planApprovalResolver = null;
-    resolve({
-      ok: true,
-      revisedPlan: String(document.getElementById('planApprovalContent').value || '').trim(),
-    });
-  }
-});
-
-document.getElementById('sessionMenuOverlay').querySelectorAll('[data-session-cmd]').forEach((el) => {
-  el.addEventListener('click', async (ev) => {
-    ev.stopPropagation();
-    const cmd = el.getAttribute('data-session-cmd');
-    const name = openSessionMenuFor;
-    closeAllSessionMenus();
-    if (!name) return;
-    if (cmd === 'refresh') await sessionAction('switch', name);
-    if (cmd === 'clear') await sessionAction('clear', name);
-    if (cmd === 'condense') { openCondenseModal(name); return; }
-    if (cmd === 'delete') await sessionAction('delete', name);
+const sessionMenuOverlay = byId('sessionMenuOverlay');
+if (sessionMenuOverlay) {
+  sessionMenuOverlay.querySelectorAll('[data-session-cmd]').forEach((el) => {
+    el.addEventListener('click', (ev) => runWithAlert(async () => {
+      ev.stopPropagation();
+      const cmd = el.getAttribute('data-session-cmd');
+      const name = openSessionMenuFor;
+      closeAllSessionMenus();
+      if (!name) return;
+      if (cmd === 'refresh') await sessionAction('switch', name);
+      if (cmd === 'clear') await sessionAction('clear', name);
+      if (cmd === 'condense') { openCondenseModal(name); return; }
+      if (cmd === 'delete') await sessionAction('delete', name);
+    }));
   });
-});
+}
 
-document.getElementById('prompt').addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt().catch((err) => alert(err.message));
-});
+const promptInput = byId('prompt');
+if (promptInput) {
+  promptInput.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runWithAlert(() => sendPrompt());
+  });
+}
 
 document.addEventListener('click', (ev) => {
   const btn = ev.target && ev.target.closest ? ev.target.closest('[data-run-details]') : null;

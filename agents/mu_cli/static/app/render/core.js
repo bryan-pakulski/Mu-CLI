@@ -1494,6 +1494,28 @@ function renderMetadataPanel() {
     cards += 1;
   }
 
+  const terminalJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === state.activeSession && ['completed', 'failed', 'killed', 'timed_out'].includes(job.status))
+    .slice(-8)
+    .reverse();
+  if (terminalJobs.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Background execution reports</span><span>${terminalJobs.length} run(s)</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    terminalJobs.forEach((job) => {
+      const reportText = job.report
+        ? JSON.stringify(job.report, null, 2)
+        : (job.last_step || `status=${job.status}; iterations=${job.iterations || 0}`);
+      const label = `Run ${job.id || '-'} · ${job.status || 'unknown'}`;
+      lines.appendChild(_metaRow('automation', label, reportText));
+    });
+    card.appendChild(lines);
+    host.appendChild(card);
+    cards += 1;
+  }
+
   if (!cards) host.innerHTML = '<div class="meta-empty">No tool/research metadata yet.</div>';
 }
 

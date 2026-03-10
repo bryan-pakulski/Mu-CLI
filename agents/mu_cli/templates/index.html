@@ -262,10 +262,10 @@
     .session-toolbar { display:flex; gap:6px; margin-bottom:8px; }
     .session-recent { margin-top:8px; }
     .timeline-panel { border:0; border-radius:0; background:transparent; padding:4px 0; max-height:220px; overflow:auto; min-width:0; }
-    .timeline-item { display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+    .timeline-item { display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); min-width:0; }
     .timeline-item:last-child { border-bottom:0; }
-    .timeline-step { min-width:20px; color:var(--muted); font-size:11px; }
-    .timeline-line { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:11px; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
+    .timeline-step { min-width:20px; color:var(--muted); font-size:11px; flex: 0 0 auto; }
+    .timeline-line { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:11px; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; min-width:0; flex:1 1 auto; }
     .timeline-item.tool-request .timeline-line { color:#7c3aed; }
     .timeline-item.tool-run .timeline-line { color:#0f766e; }
     .timeline-item.model .timeline-line { color:#1d4ed8; }
@@ -279,6 +279,8 @@
     .session-health { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
     .timeline-filters { display:flex; gap:6px; margin:6px 0; flex-wrap:wrap; }
     .timeline-filters .btn { padding: 2px 8px; }
+    .meta-sidebar-top { display:grid; gap:4px; min-width:0; }
+    .meta-sidebar-top .timeline-filters { margin: 0 0 2px; }
     .git-diff-stats { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
 
     .context-budget-row { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-bottom:4px; }
@@ -464,7 +466,9 @@
       display: grid;
       gap: 8px;
       padding-right: 2px;
+      min-width: 0;
     }
+    .meta-feed > * { min-width: 0; }
     .meta-cards { display: grid; gap: 8px; min-width: 0; }
     .meta-card {
       border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
@@ -472,6 +476,10 @@
       background: color-mix(in srgb, var(--surface-2) 75%, transparent);
       padding: 8px;
       font-size: 12px;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      box-sizing: border-box;
     }
     .meta-card .meta-head {
       display: flex;
@@ -482,8 +490,10 @@
       margin-bottom: 6px;
       text-transform: uppercase;
       letter-spacing: .06em;
+      min-width: 0;
     }
-    .meta-lines { display: grid; gap: 5px; }
+    .meta-card .meta-head > span { min-width: 0; overflow-wrap: anywhere; }
+    .meta-lines { display: grid; gap: 5px; min-width: 0; }
     .meta-line {
       border-left: 2px solid color-mix(in srgb, var(--border) 80%, transparent);
       padding-left: 7px;
@@ -1457,17 +1467,19 @@
           <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel"><</button>
           <div id="metaResizeHandle" class="meta-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize metadata panel"></div>
           <aside id="metaSidebar" class="meta-sidebar">
-          <div class="zone-label">Inspect</div>
-          <h4>Run metadata</h4>
+          <div class="meta-sidebar-top">
+            <div class="zone-label">Inspect</div>
+            <h4>Run metadata</h4>
+            <div class="timeline-filters" aria-label="Execution timeline filters">
+              <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
+              <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
+              <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
+              <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
+            </div>
+          </div>
           <div class="meta-feed">
             <details class="trace-wrap" open>
               <summary>Execution timeline</summary>
-              <div class="timeline-filters">
-                <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
-                <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
-                <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
-                <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
-              </div>
               <div id="executionTimeline" class="timeline-panel"></div>
             </details>
             <details class="trace-wrap" id="traceWrap" open>

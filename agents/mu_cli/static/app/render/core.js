@@ -1509,10 +1509,57 @@ function _metaFilterAllows(kind, label, text) {
 
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
+  const summaryHost = document.getElementById('metaSummary');
   host.querySelectorAll('details.meta-entry[open][data-meta-key]').forEach((el) => metadataExpandedKeys.add(el.dataset.metaKey));
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
+
+  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
+    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
+  });
+
+  const assistantMetaCounts = { calls: 0, results: 0, citations: 0, research: 0 };
+  for (let idx = state.messages.length - 1; idx >= 0; idx -= 1) {
+    const m = state.messages[idx];
+    if (!m || m.role !== 'assistant') continue;
+    const meta = collectAssistantMetadata(state.messages, idx);
+    assistantMetaCounts.calls += meta.toolRequests.length;
+    assistantMetaCounts.results += meta.toolResults.length;
+    assistantMetaCounts.citations += meta.citationItems.length;
+    assistantMetaCounts.research += meta.researchSteps.length;
+  }
+
+  if (summaryHost) {
+    const latestEvent = liveTraceItems.length ? liveTraceItems[liveTraceItems.length - 1] : 'No live events yet';
+    summaryHost.innerHTML = [
+      `<div class="meta-summary-chip"><span class="label">Live events</span><span class="value">${liveTraceItems.length}</span></div>`,
+      `<div class="meta-summary-chip"><span class="label">Tool calls/results</span><span class="value">${assistantMetaCounts.calls}/${assistantMetaCounts.results}</span></div>`,
+      `<div class="meta-summary-chip"><span class="label">Latest</span><span class="value">${escapeHtml(latestEvent)}</span></div>`,
+    ].join('');
+  }
+
+  if (liveTraceItems.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const line of liveTraceItems.slice().reverse()) {
+      let kind = 'automation';
+      let label = 'Stream event';
+      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
+      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
+      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
+      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
+      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
+    }
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
+  }
 
   const ws = state.workspaceIndexStats || {};
   if (Object.keys(ws).length && _metaFilterAllows('workspace', 'Workspace indexing', 'workspace stats')) {
@@ -1551,31 +1598,6 @@ function renderMetadataPanel() {
     for (const item of meta.citationItems) if (_metaFilterAllows('citation', 'Citation', item)) lines.appendChild(_metaRow('citation', 'Citation', item));
     for (const item of meta.researchSteps) if (_metaFilterAllows('research', 'Research step', item)) lines.appendChild(_metaRow('research', 'Research step', item));
 
-    if (lines.childElementCount) {
-      card.appendChild(lines);
-      host.appendChild(card);
-      cards += 1;
-    }
-  }
-
-  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
-    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
-  });
-  if (liveTraceItems.length) {
-    const card = document.createElement('div');
-    card.className = 'meta-card';
-    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
-    const lines = document.createElement('div');
-    lines.className = 'meta-lines';
-    for (const line of liveTraceItems.slice().reverse()) {
-      let kind = 'automation';
-      let label = 'Stream event';
-      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
-      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
-      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
-      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
-      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
-    }
     if (lines.childElementCount) {
       card.appendChild(lines);
       host.appendChild(card);
@@ -2355,6 +2377,7 @@ function buildSettingsPayload() {
     openai_api_key: document.getElementById('openaiApiKey').value || null,
     google_api_key: document.getElementById('googleApiKey').value || null,
     ollama_endpoint: document.getElementById('ollamaEndpoint').value || null,
+    ollama_context_window: Number(document.getElementById('ollamaContextWindow').value || 65536),
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
@@ -2576,6 +2599,13 @@ async function refreshState() {
   }
   if (document.activeElement !== document.getElementById('ollamaEndpoint')) {
     document.getElementById('ollamaEndpoint').value = s.ollama_endpoint || '';
+  }
+  const ctxInput = document.getElementById('ollamaContextWindow');
+  if (ctxInput && document.activeElement !== ctxInput) {
+    const ctxValue = Number(s.ollama_context_window || 65536);
+    ctxInput.value = String(ctxValue);
+    const ctxLabel = document.getElementById('ollamaContextWindowValue');
+    if (ctxLabel) ctxLabel.textContent = String(ctxValue);
   }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;

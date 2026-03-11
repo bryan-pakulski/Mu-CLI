@@ -289,8 +289,12 @@
     .session-health { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
     .timeline-filters { display:flex; gap:6px; margin:6px 0; flex-wrap:wrap; }
     .timeline-filters .btn { padding: 2px 8px; }
-    .meta-sidebar-top { display:grid; gap:4px; min-width:0; }
+    .meta-sidebar-top { display:grid; gap:6px; min-width:0; }
     .meta-sidebar-top .timeline-filters { margin: 0 0 2px; }
+    .meta-summary { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:6px; }
+    .meta-summary-chip { border:1px solid var(--border); border-radius:10px; background:var(--surface-2); padding:6px 8px; min-width:0; }
+    .meta-summary-chip .label { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .meta-summary-chip .value { display:block; font-weight:600; font-size:12px; overflow-wrap:anywhere; }
     .git-diff-stats { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
 
     .context-budget-row { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-bottom:4px; }
@@ -483,7 +487,7 @@
       min-width: 0;
     }
     .meta-feed > * { min-width: 0; }
-    .meta-cards { display: grid; gap: 6px; min-width: 0; }
+    .meta-cards { display: grid; gap: 8px; min-width: 0; }
     .meta-card {
       border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
       border-radius: 10px;
@@ -1524,6 +1528,7 @@
           <div class="meta-sidebar-top">
             <div class="zone-label">Inspect</div>
             <h4>Run metadata</h4>
+            <div id="metaSummary" class="meta-summary" aria-live="polite"></div>
             <div class="timeline-filters" aria-label="Execution timeline filters">
               <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
               <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
@@ -1663,6 +1668,8 @@
           <input id="googleApiKey" type="password" class="form-control mb-2" placeholder="AIza..." />
           <label class="small-muted mb-1">Ollama endpoint (override env)</label>
           <input id="ollamaEndpoint" type="text" class="form-control mb-2" placeholder="http://127.0.0.1:11434" />
+          <label class="small-muted mb-1">Ollama context window: <span id="ollamaContextWindowValue">65536</span> tokens</label>
+          <input id="ollamaContextWindow" type="range" class="form-range mb-2" min="4096" max="131072" step="1024" value="65536" />
           <div class="toggles-grid">
             <div class="form-check">
               <input class="form-check-input" id="debug" type="checkbox" checked />

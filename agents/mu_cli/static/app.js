@@ -15,7 +15,6 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
-const metadataExpandedKeys = new Set();
 let sendingSession = null;
 const runNoticesBySession = {};
 const runDetailsById = {};
@@ -55,7 +54,8 @@ async function parseJsonResponse(res) {
 // >>> app/render/core.js
 // --- render functions -------------------------------------------------------
 
-
+const pendingBackgroundPromptsBySession = globalThis.pendingBackgroundPromptsBySession || {};
+const metadataExpandedKeys = globalThis.metadataExpandedKeys || new Set();
 
 
 function _readStage3Store() {
@@ -160,7 +160,6 @@ async function openSessionOverridesModal(sessionName) {
   const currentSession = state.activeSession || '';
   if (currentSession !== name) {
     await api('/api/session', 'POST', { action: 'switch', name });
-    flushStreamRender(true);
     await refreshState();
   }
 
@@ -1564,10 +1563,57 @@ function _metaFilterAllows(kind, label, text) {
 
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
+  const summaryHost = document.getElementById('metaSummary');
   host.querySelectorAll('details.meta-entry[open][data-meta-key]').forEach((el) => metadataExpandedKeys.add(el.dataset.metaKey));
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
+
+  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
+    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
+  });
+
+  const assistantMetaCounts = { calls: 0, results: 0, citations: 0, research: 0 };
+  for (let idx = state.messages.length - 1; idx >= 0; idx -= 1) {
+    const m = state.messages[idx];
+    if (!m || m.role !== 'assistant') continue;
+    const meta = collectAssistantMetadata(state.messages, idx);
+    assistantMetaCounts.calls += meta.toolRequests.length;
+    assistantMetaCounts.results += meta.toolResults.length;
+    assistantMetaCounts.citations += meta.citationItems.length;
+    assistantMetaCounts.research += meta.researchSteps.length;
+  }
+
+  if (summaryHost) {
+    const latestEvent = liveTraceItems.length ? liveTraceItems[liveTraceItems.length - 1] : 'No live events yet';
+    summaryHost.innerHTML = [
+      `<div class="meta-summary-chip"><span class="label">Live events</span><span class="value">${liveTraceItems.length}</span></div>`,
+      `<div class="meta-summary-chip"><span class="label">Tool calls/results</span><span class="value">${assistantMetaCounts.calls}/${assistantMetaCounts.results}</span></div>`,
+      `<div class="meta-summary-chip"><span class="label">Latest</span><span class="value">${escapeHtml(latestEvent)}</span></div>`,
+    ].join('');
+  }
+
+  if (liveTraceItems.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const line of liveTraceItems.slice().reverse()) {
+      let kind = 'automation';
+      let label = 'Stream event';
+      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
+      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
+      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
+      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
+      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
+    }
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
+  }
 
   const ws = state.workspaceIndexStats || {};
   if (Object.keys(ws).length && _metaFilterAllows('workspace', 'Workspace indexing', 'workspace stats')) {
@@ -1606,31 +1652,6 @@ function renderMetadataPanel() {
     for (const item of meta.citationItems) if (_metaFilterAllows('citation', 'Citation', item)) lines.appendChild(_metaRow('citation', 'Citation', item));
     for (const item of meta.researchSteps) if (_metaFilterAllows('research', 'Research step', item)) lines.appendChild(_metaRow('research', 'Research step', item));
 
-    if (lines.childElementCount) {
-      card.appendChild(lines);
-      host.appendChild(card);
-      cards += 1;
-    }
-  }
-
-  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
-    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
-  });
-  if (liveTraceItems.length) {
-    const card = document.createElement('div');
-    card.className = 'meta-card';
-    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
-    const lines = document.createElement('div');
-    lines.className = 'meta-lines';
-    for (const line of liveTraceItems.slice().reverse()) {
-      let kind = 'automation';
-      let label = 'Stream event';
-      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
-      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
-      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
-      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
-      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
-    }
     if (lines.childElementCount) {
       card.appendChild(lines);
       host.appendChild(card);
@@ -2410,6 +2431,7 @@ function buildSettingsPayload() {
     openai_api_key: document.getElementById('openaiApiKey').value || null,
     google_api_key: document.getElementById('googleApiKey').value || null,
     ollama_endpoint: document.getElementById('ollamaEndpoint').value || null,
+    ollama_context_window: Number(document.getElementById('ollamaContextWindow').value || 65536),
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
@@ -2632,6 +2654,13 @@ async function refreshState() {
   if (document.activeElement !== document.getElementById('ollamaEndpoint')) {
     document.getElementById('ollamaEndpoint').value = s.ollama_endpoint || '';
   }
+  const ctxInput = document.getElementById('ollamaContextWindow');
+  if (ctxInput && document.activeElement !== ctxInput) {
+    const ctxValue = Number(s.ollama_context_window || 65536);
+    ctxInput.value = String(ctxValue);
+    const ctxLabel = document.getElementById('ollamaContextWindowValue');
+    if (ctxLabel) ctxLabel.textContent = String(ctxValue);
+  }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
@@ -2689,7 +2718,6 @@ function updateBackgroundJobInState(job) {
 }
 
 
-
 function askPlanApproval(job) {
   return new Promise((resolve) => {
     planApprovalResolver = resolve;
@@ -2716,49 +2744,16 @@ async function sendPrompt(background = false) {
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
-  let streamRenderTimer = null;
-  let streamRenderPending = false;
-  const flushStreamRender = (force = false) => {
-    if (streamRenderTimer) {
-      clearTimeout(streamRenderTimer);
-      streamRenderTimer = null;
-    }
-    streamRenderPending = false;
-    if (force) {
-      renderMessages();
-      renderMetadataPanel();
-      return;
-    }
-    streamRenderTimer = setTimeout(() => {
-      streamRenderTimer = null;
-      renderMessages();
-      renderMetadataPanel();
-    }, 70);
-  };
-  const scheduleStreamRender = () => {
-    if (streamRenderPending) return;
-    streamRenderPending = true;
-    flushStreamRender(false);
-  };
-
-  let draft = null;
-  let thinkingDraft = null;
-  let pendingThinking = null;
-  if (!background) {
-    state.messages.push({ role: 'user', content: text });
-    pendingThinking = { role: 'assistant', content: '', metadata: { typing: true, kind: 'thinking_output', ephemeral: true } };
-    state.messages.push(pendingThinking);
-    draft = { role: 'assistant', content: '', metadata: { typing: true } };
-    state.messages.push(draft);
-  }
+  state.messages.push({ role: 'user', content: text });
+  let draft = { role: 'assistant', content: '', metadata: { typing: true } };
+  state.messages.push(draft);
   renderMessages();
   renderMetadataPanel();
 
   try {
     if (background) {
-      const active = selectedSessionName() || state.activeSession || '';
+      const active = selectedSessionName();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
-      updateBackgroundJobInState({ id: bg.job_id, session: bg.session || active, status: 'running', iterations: 0, events: [], prompt: text });
       reportEl.textContent = `background job started: ${bg.job_id}`;
       const pollUntilDone = async () => {
         for (let i = 0; i < 120; i += 1) {
@@ -2812,29 +2807,14 @@ async function sendPrompt(background = false) {
         const event = JSON.parse(line);
         if (event.type === 'assistant_chunk') {
           updateThinking(false);
-          if (pendingThinking) {
-            state.messages = state.messages.filter((m) => m !== pendingThinking);
-            pendingThinking = null;
-          }
           if (!draft) {
             draft = { role: 'assistant', content: '' };
             state.messages.push(draft);
           }
           if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
-          scheduleStreamRender();
-        } else if (event.type === 'thinking_chunk') {
-          updateThinking(false);
-          if (pendingThinking) {
-            state.messages = state.messages.filter((m) => m !== pendingThinking);
-            pendingThinking = null;
-          }
-          if (!thinkingDraft) {
-            thinkingDraft = { role: 'assistant', content: '', metadata: { kind: 'thinking_output', tag: event.tag || 'thinking output' } };
-            state.messages.push(thinkingDraft);
-          }
-          thinkingDraft.content += event.chunk;
-          scheduleStreamRender();
+          renderMessages();
+          renderMetadataPanel();
         } else if (event.type === 'trace') {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);
@@ -2850,7 +2830,6 @@ async function sendPrompt(background = false) {
       }
     }
 
-    flushStreamRender(true);
     await refreshState();
   } finally {
     if (approvalPoll) {
@@ -2858,16 +2837,6 @@ async function sendPrompt(background = false) {
       approvalPoll = null;
     }
     updateThinking(false);
-    if (streamRenderTimer) {
-      clearTimeout(streamRenderTimer);
-      streamRenderTimer = null;
-    }
-    if (pendingThinking) {
-      state.messages = state.messages.filter((m) => m !== pendingThinking);
-      pendingThinking = null;
-      renderMessages();
-      renderMetadataPanel();
-    }
     sending = false;
     sendingSession = null;
     updateChatBusyState();
@@ -2983,7 +2952,7 @@ function resolvePlanApproval(ok, revisedPlan = '') {
 
 // >>> app/events.js
 // --- event wiring -----------------------------------------------------------
-for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaEndpoint', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaContextWindow', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   const input = byId(id);
   if (!input) continue;
   input.addEventListener('change', () => {
@@ -2993,13 +2962,20 @@ for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaEn
     scheduleApplySettings();
     syncPricingEditor();
   });
-  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey' || id === 'ollamaEndpoint') {
+  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey') {
     input.addEventListener('blur', scheduleApplySettings);
   }
 }
 
 const customToolsInput = byId('customTools');
 if (customToolsInput) customToolsInput.addEventListener('blur', scheduleApplySettings);
+const ollamaContextWindowInput = byId('ollamaContextWindow');
+if (ollamaContextWindowInput) {
+  ollamaContextWindowInput.addEventListener('input', () => {
+    const label = byId('ollamaContextWindowValue');
+    if (label) label.textContent = String(ollamaContextWindowInput.value || '65536');
+  });
+}
 
 bindClick('promptAttach', (e) => {
   e.preventDefault();

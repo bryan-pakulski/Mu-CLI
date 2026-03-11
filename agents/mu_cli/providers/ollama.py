@@ -20,11 +20,13 @@ class OllamaProvider:
         api_key: str | None = None,
         host: str | None = None,
         stream_callback: StreamCallback | None = None,
+        context_window: int | None = None,
     ) -> None:
         _ = api_key
         self.model = model
         self.host = (host or os.getenv("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
         self.stream_callback = stream_callback
+        self.context_window = max(1024, int(context_window or 65536))
 
     def set_stream_callback(self, callback: StreamCallback | None) -> None:
         self.stream_callback = callback
@@ -128,6 +130,7 @@ class OllamaProvider:
             "messages": self._convert_messages(messages),
             "stream": bool(stream),
         }
+        payload["options"] = {"num_ctx": self.context_window}
         api_tools = self._convert_tools(tools)
         if api_tools:
             payload["tools"] = api_tools

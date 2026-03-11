@@ -52,7 +52,9 @@ class WebContractTests(unittest.TestCase):
         cases = [
             ({"debug": True}, True, None),
             ({"tool_visibility": {"read_file": False}}, True, None),
+            ({"ollama_context_window": 65536}, True, None),
             ({"debug": "yes"}, False, "debug must be a boolean"),
+            ({"ollama_context_window": "big"}, False, "ollama_context_window must be an integer"),
             ({"tool_visibility": []}, False, "tool_visibility must be an object"),
             ({"tool_visibility": {"read_file": "no"}}, False, "tool_visibility must be an object of booleans"),
         ]

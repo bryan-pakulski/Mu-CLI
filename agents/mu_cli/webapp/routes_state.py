@@ -115,6 +115,7 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
                 "openai_api_key": runtime.openai_api_key,
                 "google_api_key": runtime.google_api_key,
                 "ollama_endpoint": runtime.ollama_endpoint,
+                "ollama_context_window": runtime.ollama_context_window,
                 "telemetry": deps.telemetry_snapshot(runtime),
             }
         )

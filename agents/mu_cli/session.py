@@ -23,6 +23,7 @@ class SessionState:
     max_runtime_seconds: int | None = None
     condense_enabled: bool | None = None
     condense_window: int | None = None
+    ollama_context_window: int | None = None
     summary_index: list[dict] | None = None
     enabled_skills: list[str] | None = None
     traces: list[str] | None = None
@@ -76,6 +77,7 @@ class SessionStore:
             max_runtime_seconds=payload.get("max_runtime_seconds"),
             condense_enabled=payload.get("condense_enabled"),
             condense_window=payload.get("condense_window"),
+            ollama_context_window=payload.get("ollama_context_window"),
             summary_index=payload.get("summary_index"),
             enabled_skills=payload.get("enabled_skills"),
             traces=payload.get("traces"),
@@ -98,6 +100,7 @@ class SessionStore:
             "max_runtime_seconds": state.max_runtime_seconds,
             "condense_enabled": state.condense_enabled,
             "condense_window": state.condense_window,
+            "ollama_context_window": state.ollama_context_window,
             "summary_index": state.summary_index or [],
             "enabled_skills": state.enabled_skills or [],
             "traces": state.traces or [],

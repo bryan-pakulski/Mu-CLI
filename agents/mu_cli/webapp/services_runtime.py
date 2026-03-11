@@ -37,6 +37,7 @@ def mutate_runtime_for_new_session(runtime: Any, payload: dict[str, Any], name: 
     runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
     runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
     runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
+    runtime.ollama_context_window = int(payload.get("ollama_context_window", runtime.ollama_context_window) or runtime.ollama_context_window)
 
     enabled_skills = payload.get("enabled_skills")
     if isinstance(enabled_skills, list):
@@ -80,6 +81,7 @@ def mutate_runtime_for_settings(runtime: Any, payload: dict[str, Any], deps: Run
     runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
     runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
     runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
+    runtime.ollama_context_window = int(payload.get("ollama_context_window", runtime.ollama_context_window) or runtime.ollama_context_window)
 
     tool_visibility = payload.get("tool_visibility")
     if isinstance(tool_visibility, dict):

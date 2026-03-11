@@ -258,7 +258,7 @@ def _tool_reliability_hint(runtime: WebRuntime) -> str:
         lines.append(f"{name}: score={float(data.get('score', 0.0)):.2f}, runs={int(data.get('runs', 0))}")
     return "Tool reliability preference (use higher-scored tools when equivalent): " + "; ".join(lines)
 
-def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint: str | None = None):
+def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint: str | None = None, ollama_context_window: int | None = None):
     if name == "echo":
         return EchoProvider()
     if name == "openai":
@@ -266,7 +266,7 @@ def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint:
     if name == "gemini":
         return GeminiProvider(model=model, api_key=api_key)
     if name == "ollama":
-        return OllamaProvider(model=model, host=ollama_endpoint)
+        return OllamaProvider(model=model, host=ollama_endpoint, context_window=ollama_context_window)
     raise ValueError(f"Unsupported provider: {name}")
 
 
@@ -449,7 +449,13 @@ def _git_agent_instruction(runtime: WebRuntime) -> str | None:
 
 
 def _new_agent(runtime: WebRuntime) -> Agent:
-    provider = _build_provider(runtime.provider, runtime.model, _provider_api_key(runtime), _provider_ollama_endpoint(runtime))
+    provider = _build_provider(
+        runtime.provider,
+        runtime.model,
+        _provider_api_key(runtime),
+        _provider_ollama_endpoint(runtime),
+        runtime.ollama_context_window,
+    )
 
     def on_approval(tool_name: str, args: dict) -> bool:
         mode = runtime.approval_mode
@@ -850,6 +856,7 @@ def _persist(runtime: WebRuntime) -> None:
             max_runtime_seconds=runtime.max_runtime_seconds,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
+            ollama_context_window=runtime.ollama_context_window,
             summary_index=runtime.summary_index,
             enabled_skills=runtime.enabled_skills,
             traces=runtime.traces,
@@ -913,6 +920,8 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.condense_enabled = bool(loaded.condense_enabled)
     if loaded.condense_window is not None:
         runtime.condense_window = int(loaded.condense_window)
+    if loaded.ollama_context_window is not None:
+        runtime.ollama_context_window = int(loaded.ollama_context_window)
     runtime.summary_index = list(loaded.summary_index or [])
     runtime.enabled_skills = list(loaded.enabled_skills or [])
     runtime.traces = list(loaded.traces or [])
@@ -1010,6 +1019,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         max_runtime_seconds=900,
         condense_enabled=False,
         condense_window=12,
+        ollama_context_window=65536,
         summary_index=[],
         skill_store=base.skill_store,
         enabled_skills=list(base.enabled_skills),
@@ -1417,6 +1427,7 @@ def create_app():
         max_runtime_seconds=900,
         condense_enabled=False,
         condense_window=12,
+        ollama_context_window=65536,
         summary_index=[],
         skill_store=skill_store,
         enabled_skills=[],

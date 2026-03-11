@@ -83,7 +83,7 @@ def parse_session_action_request(raw: Any) -> SessionActionRequest:
         _opt_str(payload, key)
     for key in ("agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)
-    for key in ("max_runtime_seconds", "condense_window", "window"):
+    for key in ("max_runtime_seconds", "condense_window", "ollama_context_window", "window"):
         _opt_int(payload, key)
 
     enabled_skills = payload.get("enabled_skills")
@@ -100,7 +100,7 @@ def parse_settings_update_request(raw: Any) -> SettingsUpdateRequest:
         _opt_str(payload, key)
     for key in ("debug", "agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)
-    for key in ("max_runtime_seconds", "condense_window"):
+    for key in ("max_runtime_seconds", "condense_window", "ollama_context_window"):
         _opt_int(payload, key)
 
     tool_visibility = payload.get("tool_visibility")

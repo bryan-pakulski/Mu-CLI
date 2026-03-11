@@ -98,20 +98,17 @@
       transition: filter .16s ease;
       user-select: none;
     }
-    .shell.sidebar-hidden { grid-template-columns: 0 0 minmax(0,1fr); }
+    .shell.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
     .shell[data-surface="control"] { --sidebar-width: 380px; }
     .shell[data-surface="review"] .meta-sidebar { border-left-color: color-mix(in srgb, var(--primary) 30%, var(--border)); }
     .shell.sidebar-hidden .sidebar {
-      transform: translateX(-16px);
-      opacity: 0;
-      pointer-events: none;
+      display: none;
     }
     .shell.sidebar-hidden .sidebar-resize-handle {
-      opacity: 0;
-      pointer-events: none;
+      display: none;
     }
     .shell.sidebar-hidden .main {
-      grid-column: 1 / -1;
+      grid-column: 1;
     }
 
     .glass {

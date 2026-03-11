@@ -109,6 +109,7 @@ def _default_telemetry() -> dict[str, Any]:
         'request_counts': {},
         'action_counts': {},
         'harness_counts': {},
+        'job_outcomes': [],
         'last_updated_at': datetime.now(timezone.utc).isoformat(),
     }
 
@@ -128,6 +129,7 @@ def _load_telemetry(runtime: WebRuntime) -> None:
         'request_counts': payload.get('request_counts') or {},
         'action_counts': payload.get('action_counts') or {},
         'harness_counts': payload.get('harness_counts') or {},
+        'job_outcomes': payload.get('job_outcomes') or [],
         'last_updated_at': payload.get('last_updated_at') or datetime.now(timezone.utc).isoformat(),
     }
 
@@ -147,10 +149,48 @@ def _record_harness_counter(runtime: WebRuntime, key: str, count: int = 1) -> No
     _record_telemetry(runtime, "harness_counts", key, count=count)
 
 
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    rank = max(0, min(len(ordered) - 1, int(round((pct / 100.0) * (len(ordered) - 1)))))
+    return float(ordered[rank])
+
+
+def _record_job_outcome(runtime: WebRuntime, job: dict[str, Any]) -> None:
+    outcomes = runtime.telemetry.setdefault("job_outcomes", [])
+    if not isinstance(outcomes, list):
+        outcomes = []
+        runtime.telemetry["job_outcomes"] = outcomes
+    started_at = str(job.get("started_at") or "")
+    finished_at = str(job.get("finished_at") or "")
+    duration_seconds = 0.0
+    try:
+        if started_at and finished_at:
+            duration_seconds = max(0.0, (datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)).total_seconds())
+    except ValueError:
+        duration_seconds = 0.0
+    contract = job.get("answer_contract") if isinstance(job.get("answer_contract"), dict) else {}
+    outcome = {
+        "job_id": str(job.get("id") or ""),
+        "status": str(job.get("status") or "unknown"),
+        "terminal_reason": str(job.get("terminal_reason") or ""),
+        "duration_seconds": float(round(duration_seconds, 3)),
+        "verified": bool(contract.get("verified")) if contract else None,
+        "missing_checks_count": len(contract.get("missing_checks", [])) if contract else 0,
+        "timestamp": finished_at or datetime.now(timezone.utc).isoformat(),
+    }
+    outcomes.append(outcome)
+    if len(outcomes) > 300:
+        runtime.telemetry["job_outcomes"] = outcomes[-300:]
+    _persist_telemetry(runtime)
+
+
 def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
     req_counts = runtime.telemetry.get('request_counts') or {}
     action_counts = runtime.telemetry.get('action_counts') or {}
     harness_counts = runtime.telemetry.get('harness_counts') or {}
+    job_outcomes = runtime.telemetry.get('job_outcomes') or []
     total_requests = int(sum(int(v) for v in req_counts.values()))
     tool_failures = len([line for line in (runtime.traces or []) if 'tool-run:' in str(line) and 'ok=False' in str(line)])
     approval_waits = len([line for line in (runtime.traces or []) if 'approval' in str(line).lower()])
@@ -166,6 +206,10 @@ def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
         except ValueError:
             uptime_seconds = 0
 
+    durations = [float(item.get("duration_seconds", 0.0)) for item in job_outcomes if isinstance(item, dict)]
+    verified_samples = [item for item in job_outcomes if isinstance(item, dict) and item.get("verified") is not None]
+    verifier_gaps = len([item for item in verified_samples if not bool(item.get("verified"))])
+
     return {
         'started_at': started_at,
         'last_updated_at': runtime.telemetry.get('last_updated_at'),
@@ -173,12 +217,16 @@ def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
         'request_counts': req_counts,
         'action_counts': action_counts,
         'harness_counts': harness_counts,
+        'job_outcomes_count': len(job_outcomes),
         'total_requests': total_requests,
         'chat_turns': len(runtime.session_turns or []),
         'tool_failures': tool_failures,
         'approval_wait_events': approval_waits,
         'background_jobs_completed': bg_completed,
         'background_jobs_failed_or_timed_out': bg_failed,
+        'job_runtime_p50_seconds': round(_percentile(durations, 50), 3),
+        'job_runtime_p95_seconds': round(_percentile(durations, 95), 3),
+        'verifier_gap_rate': round((verifier_gaps / len(verified_samples)), 4) if verified_samples else 0.0,
     }
 
 
@@ -1564,6 +1612,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             except Exception:
                 pass
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _record_job_outcome(base_runtime, job)
             _emit_stream_event("done", status=str(job.get("status") or "unknown"))
 
     thread = threading.Thread(target=runner, daemon=True)

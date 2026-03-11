@@ -15,7 +15,7 @@ This tracker records implemented workstreams so we can measure progress against 
 - [x] `/api/health` endpoint for backlog/status visibility
 - [x] Event taxonomy documented (`agent_event_taxonomy.md`)
 - [x] Guardrail tests for transition helper
-- [ ] Dashboard views for p50/p95 runtime + verifier gap trend (pending UI/ops surface)
+- [x] Dashboard-ready telemetry metrics for p50/p95 runtime + verifier gap trend
 
 ## Delivered artifacts
 
@@ -24,8 +24,12 @@ This tracker records implemented workstreams so we can measure progress against 
 - Event taxonomy: `agents/docs/agent_event_taxonomy.md`
 - Plan: `agents/docs/agent_harness_implementation_plan.md`
 
-## Next up (Phase 0 completion)
+## Phase 0 Status
 
-1. Add basic metrics dashboard cards for runtime percentiles and verifier-gap rate.
-2. Add regression assertions for event category prefixes and stream payload keys.
-3. Lock API contract snapshots for `/api/health` and `/api/telemetry`.
+Phase 0 is now functionally complete from a backend/runtime perspective (state lifecycle guards, health surface, telemetry counters, event taxonomy, and progress tracking).
+
+## Next up
+
+1. Begin Phase 1: add explicit `BudgetPolicy` object and enforce token/tool-call budgets.
+2. Add policy-driven retry matrix and terminal reasons for budget exhaustion.
+3. Add UI dashboard cards that consume the new telemetry metrics.

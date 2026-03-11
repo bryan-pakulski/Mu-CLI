@@ -177,6 +177,39 @@ class WebTests(unittest.TestCase):
         self.assertIn('queue_depth', payload)
         self.assertIn('background_jobs_by_status', payload)
 
+    def test_telemetry_exposes_runtime_percentiles_and_verifier_gap_rate(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 30, 'approval_mode': 'auto'})
+        started = []
+        for prompt in ('telemetry run one', 'telemetry run two'):
+            res = client.post('/api/chat/background', json={'text': prompt})
+            self.assertEqual(200, res.status_code)
+            started.append(res.get_json()['job_id'])
+
+        deadline = time.time() + 6
+        pending = set(started)
+        while time.time() < deadline and pending:
+            for job_id in list(pending):
+                poll = client.get(f'/api/jobs/{job_id}')
+                self.assertEqual(200, poll.status_code)
+                job = poll.get_json()
+                if job['status'] in {'completed', 'failed', 'timed_out', 'killed'}:
+                    pending.discard(job_id)
+            time.sleep(0.05)
+
+        telemetry = client.get('/api/telemetry')
+        self.assertEqual(200, telemetry.status_code)
+        payload = (telemetry.get_json() or {}).get('telemetry') or {}
+        self.assertIn('job_runtime_p50_seconds', payload)
+        self.assertIn('job_runtime_p95_seconds', payload)
+        self.assertIn('verifier_gap_rate', payload)
+        self.assertIn('job_outcomes_count', payload)
+
     def test_background_job_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 

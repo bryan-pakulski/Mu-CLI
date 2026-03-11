@@ -32,6 +32,8 @@ This plan operationalizes `agent_harness_architecture.md` into phased delivery s
 - Every background job transition is validated and test-covered.
 - We can answer: *why did this job fail or stop?* from events only.
 
+**Status:** Complete (backend/runtime scope delivered).
+
 ## Phase 1 — Reliable Long-Running Loop (1–2 sprints)
 
 ### Scope

@@ -160,6 +160,7 @@ async function openSessionOverridesModal(sessionName) {
   const currentSession = state.activeSession || '';
   if (currentSession !== name) {
     await api('/api/session', 'POST', { action: 'switch', name });
+    flushStreamRender(true);
     await refreshState();
   }
 
@@ -2715,6 +2716,31 @@ async function sendPrompt(background = false) {
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
+  let streamRenderTimer = null;
+  let streamRenderPending = false;
+  const flushStreamRender = (force = false) => {
+    if (streamRenderTimer) {
+      clearTimeout(streamRenderTimer);
+      streamRenderTimer = null;
+    }
+    streamRenderPending = false;
+    if (force) {
+      renderMessages();
+      renderMetadataPanel();
+      return;
+    }
+    streamRenderTimer = setTimeout(() => {
+      streamRenderTimer = null;
+      renderMessages();
+      renderMetadataPanel();
+    }, 70);
+  };
+  const scheduleStreamRender = () => {
+    if (streamRenderPending) return;
+    streamRenderPending = true;
+    flushStreamRender(false);
+  };
+
   let draft = null;
   let thinkingDraft = null;
   let pendingThinking = null;
@@ -2796,8 +2822,7 @@ async function sendPrompt(background = false) {
           }
           if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
-          renderMessages();
-          renderMetadataPanel();
+          scheduleStreamRender();
         } else if (event.type === 'thinking_chunk') {
           updateThinking(false);
           if (pendingThinking) {
@@ -2809,8 +2834,7 @@ async function sendPrompt(background = false) {
             state.messages.push(thinkingDraft);
           }
           thinkingDraft.content += event.chunk;
-          renderMessages();
-          renderMetadataPanel();
+          scheduleStreamRender();
         } else if (event.type === 'trace') {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);
@@ -2826,6 +2850,7 @@ async function sendPrompt(background = false) {
       }
     }
 
+    flushStreamRender(true);
     await refreshState();
   } finally {
     if (approvalPoll) {
@@ -2833,6 +2858,10 @@ async function sendPrompt(background = false) {
       approvalPoll = null;
     }
     updateThinking(false);
+    if (streamRenderTimer) {
+      clearTimeout(streamRenderTimer);
+      streamRenderTimer = null;
+    }
     if (pendingThinking) {
       state.messages = state.messages.filter((m) => m !== pendingThinking);
       pendingThinking = null;

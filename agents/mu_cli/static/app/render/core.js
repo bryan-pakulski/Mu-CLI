@@ -1668,11 +1668,7 @@ function renderMetadataPanel() {
   });
 
   const activeJob = (state.backgroundJobs || []).find((j) => j && j.session === state.activeSession && ['running', 'awaiting_plan_approval'].includes(j.status));
-  if (summaryHost) {
-    summaryHost.innerHTML = [
-      `<div class="meta-summary-chip"><span class="label">Background</span><span class="value">${activeJob ? `${escapeHtml(activeJob.status || 'running')} · step ${Number(activeJob.iterations || 0)}` : 'idle'}</span></div>`,
-    ].join('');
-  }
+  if (summaryHost) summaryHost.innerHTML = '';
 
   if (activeJob && Array.isArray(activeJob.events) && activeJob.events.length) {
     const card = document.createElement('div');

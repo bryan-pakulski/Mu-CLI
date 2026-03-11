@@ -1169,6 +1169,26 @@ function renderSideBySideDiff(diffText) {
 
 function formatMessageContent(content) {
   const source = String(content || '');
+  const markedApi = window.marked;
+  const purifierApi = window.DOMPurify;
+  if (markedApi && typeof markedApi.parse === 'function' && purifierApi && typeof purifierApi.sanitize === 'function') {
+    try {
+      markedApi.setOptions({
+        breaks: true,
+        gfm: true,
+        headerIds: false,
+        mangle: false,
+      });
+      const markdownHtml = markedApi.parse(source || '');
+      const cleaned = purifierApi.sanitize(markdownHtml, {
+        USE_PROFILES: { html: true },
+      });
+      if (String(cleaned || '').trim()) return cleaned;
+    } catch (_err) {
+      // fall through to local formatter
+    }
+  }
+
   let html = '';
   const blockPattern = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
   const trimmed = source.trim();

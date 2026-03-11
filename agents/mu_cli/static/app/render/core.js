@@ -1700,7 +1700,7 @@ function renderMessages() {
   state.messages.forEach((m, idx) => {
     if (!shouldRenderMessage(m)) return;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim()) return;
+    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) return;
     if (m.role === 'tool_result' || m.role === 'tool_call') return;
 
     const row = document.createElement('div');

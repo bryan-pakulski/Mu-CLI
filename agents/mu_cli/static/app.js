@@ -1755,7 +1755,7 @@ function renderMessages() {
   state.messages.forEach((m, idx) => {
     if (!shouldRenderMessage(m)) return;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim()) return;
+    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) return;
     if (m.role === 'tool_result' || m.role === 'tool_call') return;
 
     const row = document.createElement('div');
@@ -2733,8 +2733,11 @@ async function sendPrompt(background = false) {
 
   let draft = null;
   let thinkingDraft = null;
+  let pendingThinking = null;
   if (!background) {
     state.messages.push({ role: 'user', content: text });
+    pendingThinking = { role: 'assistant', content: '', metadata: { typing: true, kind: 'thinking_output', ephemeral: true } };
+    state.messages.push(pendingThinking);
     draft = { role: 'assistant', content: '', metadata: { typing: true } };
     state.messages.push(draft);
   }
@@ -2801,6 +2804,10 @@ async function sendPrompt(background = false) {
         const event = JSON.parse(line);
         if (event.type === 'assistant_chunk') {
           updateThinking(false);
+          if (pendingThinking) {
+            state.messages = state.messages.filter((m) => m !== pendingThinking);
+            pendingThinking = null;
+          }
           if (!draft) {
             draft = { role: 'assistant', content: '' };
             state.messages.push(draft);
@@ -2811,6 +2818,10 @@ async function sendPrompt(background = false) {
           renderMetadataPanel();
         } else if (event.type === 'thinking_chunk') {
           updateThinking(false);
+          if (pendingThinking) {
+            state.messages = state.messages.filter((m) => m !== pendingThinking);
+            pendingThinking = null;
+          }
           if (!thinkingDraft) {
             thinkingDraft = { role: 'assistant', content: '', metadata: { kind: 'thinking_output', tag: event.tag || 'thinking output' } };
             state.messages.push(thinkingDraft);
@@ -2840,6 +2851,12 @@ async function sendPrompt(background = false) {
       approvalPoll = null;
     }
     updateThinking(false);
+    if (pendingThinking) {
+      state.messages = state.messages.filter((m) => m !== pendingThinking);
+      pendingThinking = null;
+      renderMessages();
+      renderMetadataPanel();
+    }
     sending = false;
     sendingSession = null;
     updateChatBusyState();

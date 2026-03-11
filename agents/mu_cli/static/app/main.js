@@ -49,6 +49,7 @@ async function sendPrompt(background = false) {
       const active = selectedSessionName();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
       reportEl.textContent = `background job started: ${bg.job_id}`;
+      startBackgroundJobStream(bg.job_id, bg.session || active || state.activeSession || '');
       await refreshState();
       return;
     }

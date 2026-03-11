@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
+import time
 from typing import Any, Callable
 
-from flask import jsonify, request
+from flask import Response, jsonify, request, stream_with_context
 from mu_cli.webapp.jobs import JobDeps, decide_plan, get_job, list_jobs, request_kill, start_job
 from mu_cli.webapp.contracts import (
     ContractValidationError,
@@ -91,6 +93,48 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
         if job is None:
             return jsonify({"error": "job not found"}), 404
         return jsonify(job)
+
+    @app.get("/api/jobs/<job_id>/stream")
+    def stream_job_route(job_id: str):
+        job = get_job(runtime, job_id)
+        if job is None:
+            return jsonify({"error": "job not found"}), 404
+
+        try:
+            cursor = max(0, int(request.args.get("cursor", "0") or "0"))
+        except (TypeError, ValueError):
+            cursor = 0
+
+        @stream_with_context
+        def generate():
+            local_cursor = cursor
+            heartbeat_deadline = time.monotonic() + 10.0
+            while True:
+                current = get_job(runtime, job_id)
+                if current is None:
+                    yield json.dumps({"type": "error", "error": "job not found"}) + "\n"
+                    break
+                stream_events = current.get("stream_events") if isinstance(current, dict) else []
+                rows = stream_events if isinstance(stream_events, list) else []
+                emitted = False
+                for row in rows:
+                    seq = int((row or {}).get("seq") or 0)
+                    if seq <= local_cursor:
+                        continue
+                    local_cursor = seq
+                    emitted = True
+                    yield json.dumps(row) + "\n"
+                if emitted:
+                    heartbeat_deadline = time.monotonic() + 10.0
+                status = str(current.get("status") or "")
+                if status in {"completed", "failed", "timed_out", "killed"} and not emitted:
+                    break
+                if time.monotonic() >= heartbeat_deadline:
+                    heartbeat_deadline = time.monotonic() + 10.0
+                    yield json.dumps({"type": "heartbeat", "cursor": local_cursor}) + "\n"
+                time.sleep(0.15)
+
+        return Response(generate(), mimetype="application/x-ndjson")
 
     @app.post("/api/jobs/<job_id>/kill")
     def kill_job(job_id: str):

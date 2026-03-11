@@ -159,6 +159,34 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, status.status_code)
         self.assertEqual('stream-session', status.get_json()['session'])
 
+    def test_background_job_stream_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        start = client.post('/api/chat/background', json={'text': 'hello'})
+        self.assertEqual(200, start.status_code)
+        payload = start.get_json()
+        assert payload is not None
+        job_id = payload['job_id']
+
+        res = client.get(f'/api/jobs/{job_id}/stream', buffered=False)
+        self.assertEqual(200, res.status_code)
+        got_status = False
+        for idx, chunk in enumerate(res.response):
+            text = chunk.decode('utf-8').strip()
+            if not text:
+                continue
+            event = json.loads(text)
+            if event.get('type') == 'status':
+                got_status = True
+                break
+            if idx > 30:
+                break
+        self.assertTrue(got_status)
+
     def test_web_approval_deny_mode_rejects_mutating_tool(self) -> None:
         from mu_cli.web import create_app
 

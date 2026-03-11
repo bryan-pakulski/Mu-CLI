@@ -776,10 +776,98 @@ function beginBackgroundPolling() {
           await refreshState();
         }
       }
+      if (['completed', 'failed', 'killed', 'timed_out'].includes(String(latest.status || ''))) stopBackgroundJobStream(String(latest.id || ''));
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
   }, 1500);
+}
+
+function stopBackgroundJobStream(jobId) {
+  const key = String(jobId || '');
+  if (!key) return;
+  const ctl = backgroundStreamAbortByJob[key];
+  if (ctl) {
+    try { ctl.abort(); } catch (_) { /* no-op */ }
+  }
+  delete backgroundStreamAbortByJob[key];
+  delete backgroundStreamDraftByJob[key];
+}
+
+async function startBackgroundJobStream(jobId, sessionName) {
+  const key = String(jobId || '');
+  if (!key || backgroundStreamAbortByJob[key]) return;
+  const controller = new AbortController();
+  backgroundStreamAbortByJob[key] = controller;
+  try {
+    const res = await fetch(`/api/jobs/${encodeURIComponent(key)}/stream`, { signal: controller.signal });
+    if (!res.ok || !res.body) throw new Error('background stream unavailable');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'heartbeat') continue;
+        const job = (state.backgroundJobs || []).find((j) => String(j.id || '') === key);
+        if (!job) continue;
+        if (event.type === 'assistant_chunk' || event.type === 'thinking_chunk') {
+          const tag = event.type === 'thinking_chunk' ? 'thinking_output' : 'assistant';
+          let draft = backgroundStreamDraftByJob[key];
+          if (!draft) {
+            draft = { role: 'assistant', content: '', metadata: { kind: 'background_stream', stream_job_id: key } };
+            if (tag === 'thinking_output') draft.metadata.kind = 'thinking_output';
+            backgroundStreamDraftByJob[key] = draft;
+            if (String(sessionName || '') === String(state.activeSession || '')) state.messages.push(draft);
+          }
+          draft.content += String(event.chunk || '');
+          renderMessages();
+        } else if (event.type === 'assistant_message') {
+          if (String(event.content || '').trim()) {
+            job.last_step = String(event.content || '').slice(0, 240);
+            job.final_response = String(event.content || '');
+            const draft = backgroundStreamDraftByJob[key];
+            if (draft && !String(draft.content || '').trim()) draft.content = String(event.content || '');
+            renderMessages();
+          }
+        } else if (event.type === 'trace') {
+          const line = String(event.line || '');
+          if (line) {
+            if (!Array.isArray(job.events)) job.events = [];
+            job.events.push(line);
+            if (job.events.length > 120) job.events = job.events.slice(-120);
+            state.traces.push(line);
+            state.traces = state.traces.slice(-80);
+            renderTraces();
+          }
+        } else if (event.type === 'checkpoint' && event.checkpoint) {
+          if (!Array.isArray(job.checkpoints)) job.checkpoints = [];
+          job.checkpoints.push(event.checkpoint);
+          if (job.checkpoints.length > 30) job.checkpoints = job.checkpoints.slice(-30);
+        } else if (event.type === 'status') {
+          if (event.status) job.status = String(event.status);
+          if (event.last_step) job.last_step = String(event.last_step);
+        } else if (event.type === 'error') {
+          job.status = 'failed';
+          job.error = String(event.error || 'background stream error');
+        } else if (event.type === 'done') {
+          if (event.status) job.status = String(event.status);
+        }
+        updateBackgroundJobInState(job);
+        renderMetadataPanel();
+      }
+    }
+  } catch (_) {
+    // background polling remains as fallback
+  } finally {
+    stopBackgroundJobStream(key);
+  }
 }
 
 
@@ -2687,6 +2775,18 @@ async function refreshState() {
   state.tools = s.tools || [];
   state.customToolErrors = s.custom_tool_errors || [];
   state.backgroundJobs = s.background_jobs || [];
+  const runningJobIds = new Set(
+    (state.backgroundJobs || [])
+      .filter((job) => job && ['running', 'awaiting_plan_approval'].includes(String(job.status || '')))
+      .map((job) => String(job.id || '')),
+  );
+  Object.keys(backgroundStreamAbortByJob).forEach((jobId) => {
+    if (!runningJobIds.has(jobId)) stopBackgroundJobStream(jobId);
+  });
+  for (const job of (state.backgroundJobs || [])) {
+    if (!job || !runningJobIds.has(String(job.id || ''))) continue;
+    startBackgroundJobStream(job.id, job.session || s.session || '');
+  }
   state.gitRepos = s.git_repos || [];
   state.gitCurrentRepo = s.git_current_repo || null;
   state.gitCurrentBranch = s.git_current_branch || null;

@@ -1121,10 +1121,27 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "cancel_requested": False,
         "cancel_reason": None,
         "final_response": None,
+        "stream_seq": 0,
+        "stream_events": [],
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
+
+        def _emit_stream_event(event_type: str, **payload: Any) -> None:
+            seq = int(job.get("stream_seq") or 0) + 1
+            job["stream_seq"] = seq
+            event = {
+                "seq": seq,
+                "type": event_type,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            event.update(payload)
+            entries = job.setdefault("stream_events", [])
+            if isinstance(entries, list):
+                entries.append(event)
+                if len(entries) > 500:
+                    job["stream_events"] = entries[-500:]
 
         def _cancelled() -> bool:
             return bool(job.get("cancel_requested"))
@@ -1135,10 +1152,12 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             job["status"] = "killed"
             job["cancel_reason"] = reason
             job["events"].append(f"status: killed ({reason})")
+            _emit_stream_event("status", status="killed", reason=reason)
 
         try:
             isolated = _build_session_runtime(base_runtime, session_name)
             isolated.debug = True
+            _emit_stream_event("status", status="running", job_id=job_id)
             trace_cursor = len(isolated.traces)
             deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
             checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
@@ -1257,24 +1276,68 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
                     break
                 job["status"] = "running"
+                original_model_response = isolated.agent.on_model_response
+                original_model_stream = getattr(isolated.agent, "on_model_stream", None)
+                original_tool_run = isolated.agent.on_tool_run
+
+                def _on_model_response(message: Message, calls: list[ToolCall]) -> None:
+                    if original_model_response is not None:
+                        original_model_response(message, calls)
+                    for call in calls:
+                        line = f"tool-request: id={call.call_id} name={call.name} args={call.args}"
+                        job["events"].append(line)
+                        _emit_stream_event("trace", line=line)
+
+                def _on_model_stream(payload: dict[str, Any]) -> None:
+                    if original_model_stream is not None:
+                        original_model_stream(payload)
+                    kind = str(payload.get("kind", ""))
+                    chunk = str(payload.get("chunk", ""))
+                    if not chunk:
+                        return
+                    if kind == "thinking_output":
+                        _emit_stream_event("thinking_chunk", chunk=chunk)
+                    else:
+                        _emit_stream_event("assistant_chunk", chunk=chunk)
+
+                def _on_tool_run(name: str, args: dict[str, Any], ok: bool, output: str) -> None:
+                    if original_tool_run is not None:
+                        original_tool_run(name, args, ok, output)
+                    line = f"tool-run: name={name} ok={ok} args={args} output={str(output)[:200]}"
+                    job["events"].append(line)
+                    _emit_stream_event("trace", line=line)
+
+                isolated.agent.on_model_response = _on_model_response
+                isolated.agent.on_model_stream = _on_model_stream
+                isolated.agent.on_tool_run = _on_tool_run
                 before_len = len(isolated.agent.state.messages)
-                reply = _run_turn_with_uploaded_context(
-                    isolated,
-                    prompt,
-                    allow_citation_repair=(prompt == text),
-                )
+                try:
+                    reply = _run_turn_with_uploaded_context(
+                        isolated,
+                        prompt,
+                        allow_citation_repair=(prompt == text),
+                    )
+                finally:
+                    isolated.agent.on_model_response = original_model_response
+                    isolated.agent.on_model_stream = original_model_stream
+                    isolated.agent.on_tool_run = original_tool_run
                 job["final_response"] = str(reply.content or "")
+                _emit_stream_event("assistant_message", content=str(reply.content or ""))
                 turn_messages = isolated.agent.state.messages[before_len:]
                 had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
                 if _is_internal_agent_loop_prompt(prompt):
                     _mark_messages_as_metadata(turn_messages, kind="agent_loop")
                 report = _turn_report(isolated, prompt, reply.content)
                 if len(isolated.traces) > trace_cursor:
-                    job["events"].extend(isolated.traces[trace_cursor:])
+                    new_traces = isolated.traces[trace_cursor:]
+                    job["events"].extend(new_traces)
+                    for line in new_traces:
+                        _emit_stream_event("trace", line=str(line))
                     trace_cursor = len(isolated.traces)
                     if len(job["events"]) > 120:
                         job["events"] = job["events"][-120:]
                 job["last_step"] = (reply.content or "").strip()[:240]
+                _emit_stream_event("status", status="running", last_step=job["last_step"], iterations=int(job.get("iterations") or 0))
                 stalled = _is_stalled_response(previous_step, job["last_step"])
                 previous_step = job["last_step"]
                 _record_turn(isolated, report)
@@ -1297,6 +1360,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 job["checkpoints"].append(checkpoint)
+                _emit_stream_event("checkpoint", checkpoint=checkpoint)
                 if len(job["checkpoints"]) > 30:
                     job["checkpoints"] = job["checkpoints"][-30:]
 
@@ -1358,6 +1422,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             }
             if job["status"] not in {"timed_out", "killed"}:
                 job["status"] = "completed"
+                _emit_stream_event("status", status="completed")
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
@@ -1388,6 +1453,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             if job.get("status") not in {"timed_out", "killed"}:
                 job["status"] = "failed"
             job["events"].append(f"status: failed ({exc})")
+            _emit_stream_event("error", error=str(exc))
         finally:
             try:
                 if "isolated" in locals():
@@ -1401,6 +1467,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             except Exception:
                 pass
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _emit_stream_event("done", status=str(job.get("status") or "unknown"))
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()

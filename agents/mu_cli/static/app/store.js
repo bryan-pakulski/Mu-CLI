@@ -14,3 +14,5 @@ let backgroundJobPoll = null;
 let sendingSession = null;
 const runNoticesBySession = {};
 const runDetailsById = {};
+const backgroundStreamAbortByJob = {};
+const backgroundStreamDraftByJob = {};

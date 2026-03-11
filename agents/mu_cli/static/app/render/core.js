@@ -1896,6 +1896,21 @@ function _systemEventSummary(message) {
   return `${label}${toolName} · ${preview}`;
 }
 
+function _systemGroupSummary(messages) {
+  const rows = Array.isArray(messages) ? messages : [];
+  if (!rows.length) return 'SYSTEM EVENT · (no content)';
+  const counts = {};
+  for (const item of rows) {
+    const label = _systemEventLabel(item);
+    counts[label] = (counts[label] || 0) + 1;
+  }
+  const parts = Object.keys(counts)
+    .sort()
+    .map((label) => `${label}${counts[label] > 1 ? `×${counts[label]}` : ''}`);
+  const tail = _systemEventSummary(rows[rows.length - 1]).split(' · ').slice(1).join(' · ');
+  return `${parts.join(' + ')} · ${tail || '(no content)'}`;
+}
+
 function _tagPill(label, kind) {
   return `<span class="msg-tag msg-tag-${_escapeAttr(kind || 'default')}">${escapeHtml(label || '')}</span>`;
 }
@@ -1915,11 +1930,25 @@ function renderMessages() {
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
 
   let anchor = null;
-  state.messages.forEach((m, idx) => {
-    if (!shouldRenderMessage(m)) return;
+  for (let idx = 0; idx < state.messages.length; idx += 1) {
+    const m = state.messages[idx];
+    if (!shouldRenderMessage(m)) continue;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) return;
+    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) continue;
     if (m.role !== 'user' && m.role !== 'assistant') {
+      const grouped = [m];
+      let j = idx + 1;
+      while (j < state.messages.length) {
+        const next = state.messages[j];
+        if (!shouldRenderMessage(next)) {
+          j += 1;
+          continue;
+        }
+        if (!next || next.role === 'user' || next.role === 'assistant') break;
+        grouped.push(next);
+        j += 1;
+      }
+
       const row = document.createElement('div');
       row.className = 'msg role-assistant role-system-event';
       row.innerHTML = '<div class="role">assistant</div>';
@@ -1931,13 +1960,20 @@ function renderMessages() {
 
       const bubble = document.createElement('div');
       bubble.className = 'bubble compact-system-bubble';
-      const summary = _systemEventSummary(m);
-      const body = escapeHtml(String(m.content || '(no content)'));
-      bubble.innerHTML = `<details class="system-event-details"><summary>${escapeHtml(summary)}</summary><pre><code>${body}</code></pre></details>`;
+      const summary = _systemGroupSummary(grouped);
+      const body = grouped
+        .map((item) => {
+          const label = _systemEventLabel(item);
+          const text = String((item && item.content) || '(no content)');
+          return `[${label}]\n${text}`;
+        })
+        .join('\n\n');
+      bubble.innerHTML = `<details class="system-event-details"><summary>${escapeHtml(summary)}</summary><pre><code>${escapeHtml(body)}</code></pre></details>`;
       row.appendChild(bubble);
       box.appendChild(row);
       anchor = row;
-      return;
+      idx = j - 1;
+      continue;
     }
 
     const row = document.createElement('div');
@@ -1972,8 +2008,7 @@ function renderMessages() {
     row.appendChild(bubble);
     box.appendChild(row);
     anchor = row;
-
-  });
+  }
 
 
   const chatJobs = (state.backgroundJobs || [])

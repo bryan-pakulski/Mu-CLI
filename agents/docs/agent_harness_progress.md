@@ -41,3 +41,5 @@ Phase 0 is now functionally complete from a backend/runtime perspective (state l
 - [x] Wired budget policy into background job payloads (`budget_policy`) for visibility.
 - [x] Enforced token/tool-call budget exhaustion with explicit terminal reason `budget_exhausted`.
 - [x] Added tests for budget policy helper and job budget-policy exposure.
+
+- [x] Added policy-driven retry controls for stall/missing-evidence/tool-failure triggers.

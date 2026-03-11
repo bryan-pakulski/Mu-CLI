@@ -120,6 +120,22 @@ def _budget_policy_for_runtime(max_runtime_seconds: int) -> BudgetPolicy:
     )
 
 
+@dataclass(slots=True)
+class RetryPolicy:
+    max_stall_retries: int
+    max_missing_evidence_retries: int
+    max_tool_failure_retries: int
+    max_parser_retries: int
+
+
+def _retry_policy_for_task(task_type: str) -> RetryPolicy:
+    if task_type == "security":
+        return RetryPolicy(max_stall_retries=3, max_missing_evidence_retries=3, max_tool_failure_retries=3, max_parser_retries=2)
+    if task_type == "bugfix":
+        return RetryPolicy(max_stall_retries=3, max_missing_evidence_retries=3, max_tool_failure_retries=2, max_parser_retries=2)
+    return RetryPolicy(max_stall_retries=2, max_missing_evidence_retries=2, max_tool_failure_retries=2, max_parser_retries=1)
+
+
 def _telemetry_path() -> Path:
     path = Path('.mu_cli/telemetry.json')
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1233,6 +1249,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "iterations": 0,
         "runtime_budget_seconds": int(base_runtime.max_runtime_seconds),
         "budget_policy": asdict(_budget_policy_for_runtime(int(base_runtime.max_runtime_seconds))),
+        "retry_policy": None,
+        "retry_counts": {"stall": 0, "missing_evidence": 0, "tool_failure": 0, "parser": 0},
         "plan": None,
         "plan_approval": None,
         "last_step": None,
@@ -1384,6 +1402,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             unsatisfactory_nudges = 0
             max_unsatisfactory_nudges = 4
             policy = job.get("verification_policy") or _verification_policy_for_task(text)
+            retry_policy = _retry_policy_for_task(str(policy.get("task_type") or "general"))
+            job["retry_policy"] = asdict(retry_policy)
+            retry_counts = job.get("retry_counts") if isinstance(job.get("retry_counts"), dict) else {"stall": 0, "missing_evidence": 0, "tool_failure": 0, "parser": 0}
+            job["retry_counts"] = retry_counts
             job["events"].append(
                 f"verification_policy: type={policy.get('task_type')} checks={','.join(policy.get('required_checks', []))}"
             )
@@ -1446,6 +1468,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 isolated.agent.on_model_response = _on_model_response
                 isolated.agent.on_model_stream = _on_model_stream
                 isolated.agent.on_tool_run = _on_tool_run
+                before_event_len = len(job.get("events", []))
                 _trim_internal_loop_messages(isolated.agent)
                 before_len = len(isolated.agent.state.messages)
                 try:
@@ -1464,6 +1487,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 turn_tool_calls = len([message for message in turn_messages if message.role is Role.TOOL_RESULT])
                 tool_calls_used += turn_tool_calls
                 had_tool_activity = turn_tool_calls > 0
+                new_events = list((job.get("events") or [])[before_event_len:])
+                turn_tool_failure = any("tool-run:" in str(line) and "ok=False" in str(line) for line in new_events)
                 if _is_internal_agent_loop_prompt(prompt):
                     _mark_messages_as_metadata(turn_messages, kind="agent_loop")
                 report = _turn_report(isolated, prompt, reply.content)
@@ -1527,6 +1552,14 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     break
                 if unsatisfactory_nudges < max_unsatisfactory_nudges:
                     unsatisfactory_nudges += 1
+                    if assessment["missing_checks"]:
+                        retry_counts["missing_evidence"] = int(retry_counts.get("missing_evidence", 0)) + 1
+                        job["events"].append(f"retry: missing_evidence #{retry_counts['missing_evidence']}")
+                        if int(retry_counts.get("missing_evidence", 0)) > int(retry_policy.max_missing_evidence_retries):
+                            job["events"].append("status: missing_evidence_retry_limit_reached")
+                            job["terminal_reason"] = "failed_unrecoverable"
+                            transition_job_status(job, JobStatus.FAILED.value, reason="missing_evidence_retry_exhausted")
+                            break
                     missing_parts: list[str] = []
                     if not assessment["plan_complete"]:
                         missing_parts.append("begin with PLAN_COMPLETE")
@@ -1548,6 +1581,15 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         f"Please {guidance}. Keep progressing execution with tools when needed."
                     )
                     continue
+                if turn_tool_failure:
+                    retry_counts["tool_failure"] = int(retry_counts.get("tool_failure", 0)) + 1
+                    job["events"].append(f"retry: tool_failure #{retry_counts['tool_failure']}")
+                    _record_harness_counter(base_runtime, "tool_failures")
+                    if int(retry_counts.get("tool_failure", 0)) > int(retry_policy.max_tool_failure_retries):
+                        job["events"].append("status: tool_failure_retry_limit_reached")
+                        job["terminal_reason"] = "failed_unrecoverable"
+                        transition_job_status(job, JobStatus.FAILED.value, reason="tool_failure_retry_exhausted")
+                        break
                 if not isolated.agentic_planning:
                     break
                 if not had_tool_activity:
@@ -1555,6 +1597,13 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     if no_progress_streak >= 2:
                         job["events"].append("status: stalled_no_tool_progress")
                         _record_harness_counter(base_runtime, "stalls")
+                        retry_counts["stall"] = int(retry_counts.get("stall", 0)) + 1
+                        job["events"].append(f"retry: stall #{retry_counts['stall']}")
+                        if int(retry_counts.get("stall", 0)) > int(retry_policy.max_stall_retries):
+                            job["events"].append("status: stall_retry_limit_reached")
+                            job["terminal_reason"] = "failed_unrecoverable"
+                            transition_job_status(job, JobStatus.FAILED.value, reason="stall_retry_exhausted")
+                            break
                         if replan_count < int(budget.max_replans):
                             replan_count += 1
                             replan_reply = _step_internal(
@@ -1596,7 +1645,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             elif completed_by_plan or _is_plan_complete(job.get("last_step") or ""):
                 transition_job_status(job, JobStatus.VERIFYING.value, reason="plan_complete_or_equivalent")
                 transition_job_status(job, JobStatus.COMPLETED.value, reason="verification_ready")
-                job["terminal_reason"] = "completed_satisfactory"
+                if isinstance(job.get("answer_contract"), dict) and job["answer_contract"].get("explicit_blockers") and not job["answer_contract"].get("verified"):
+                    job["terminal_reason"] = "completed_with_blockers"
+                else:
+                    job["terminal_reason"] = "completed_satisfactory"
             elif datetime.now(timezone.utc).timestamp() >= deadline:
                 transition_job_status(job, JobStatus.TIMED_OUT.value, reason="deadline_elapsed")
                 job["terminal_reason"] = "timed_out"
@@ -1613,14 +1665,17 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if str(job.get("status") or "") != JobStatus.COMPLETED.value:
                     transition_job_status(job, JobStatus.VERIFYING.value, reason="final_contract_check")
                     transition_job_status(job, JobStatus.COMPLETED.value, reason="finalized")
+                contract = _satisfactory_assessment(job.get("last_step"), job.get("events", []), policy)
+                job["answer_contract"] = contract
                 if not job.get("terminal_reason"):
-                    job["terminal_reason"] = "completed_satisfactory"
+                    if contract.get("explicit_blockers") and not contract.get("verified"):
+                        job["terminal_reason"] = "completed_with_blockers"
+                    else:
+                        job["terminal_reason"] = "completed_satisfactory"
                 _emit_stream_event("status", status="completed")
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
-                contract = _satisfactory_assessment(job.get("last_step"), job.get("events", []), policy)
-                job["answer_contract"] = contract
                 if contract["verified"]:
                     job["events"].append("verification: passed")
                 else:

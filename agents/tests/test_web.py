@@ -230,6 +230,13 @@ class WebTests(unittest.TestCase):
         self.assertIn('max_tokens', policy)
         self.assertIn('max_tool_calls', policy)
         self.assertIn('max_replans', policy)
+        retry_policy = job.get('retry_policy') or {}
+        self.assertIn('max_stall_retries', retry_policy)
+        self.assertIn('max_missing_evidence_retries', retry_policy)
+        self.assertIn('max_tool_failure_retries', retry_policy)
+        retry_counts = job.get('retry_counts') or {}
+        self.assertIn('stall', retry_counts)
+        self.assertIn('missing_evidence', retry_counts)
 
     def test_background_job_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
@@ -771,7 +778,7 @@ class WebTests(unittest.TestCase):
         self.assertTrue(transitions)
         self.assertEqual('queued', transitions[0].get('from'))
         self.assertEqual('planning', transitions[0].get('to'))
-        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'timed_out', 'failed_unrecoverable', 'killed'})
+        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'failed_unrecoverable', 'killed'})
 
         telemetry = client.get('/api/telemetry')
         self.assertEqual(200, telemetry.status_code)

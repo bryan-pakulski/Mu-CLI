@@ -96,3 +96,8 @@ A job is satisfactory only if all required parts are present:
 
 For phased execution details, see `agents/docs/agent_harness_implementation_plan.md`.
 
+
+## Operations Artifacts
+
+- Event taxonomy: `agents/docs/agent_event_taxonomy.md`
+- Rework progress tracker: `agents/docs/agent_harness_progress.md`

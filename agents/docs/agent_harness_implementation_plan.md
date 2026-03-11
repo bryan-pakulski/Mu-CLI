@@ -155,6 +155,11 @@ This plan operationalizes `agent_harness_architecture.md` into phased delivery s
 5. Phase 3 indexing v2 enhancements.
 6. Stabilization pass + readiness review for Phase 5.
 
+
+## Progress Tracking
+
+Track completed implementation items in `agents/docs/agent_harness_progress.md`.
+
 ## Initial Backlog (ready to implement next)
 
 - [ ] Introduce `JobTerminalReason` enum and wire to job payload.

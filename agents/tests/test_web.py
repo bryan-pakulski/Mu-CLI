@@ -174,6 +174,7 @@ class WebTests(unittest.TestCase):
         payload = health.get_json() or {}
         self.assertTrue(payload.get('ok'))
         self.assertIn('background_jobs_backlog', payload)
+        self.assertIn('queue_depth', payload)
         self.assertIn('background_jobs_by_status', payload)
 
     def test_background_job_stream_endpoint(self) -> None:

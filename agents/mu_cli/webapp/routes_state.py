@@ -144,6 +144,7 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
             "uptime_seconds": deps.telemetry_snapshot(runtime).get("uptime_seconds", 0),
             "background_jobs_total": len(statuses),
             "background_jobs_backlog": backlog,
+            "queue_depth": backlog,
             "background_jobs_by_status": by_status,
         })
 

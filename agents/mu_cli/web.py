@@ -1392,6 +1392,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
                     checkpoint_store[session_name] = list(job.get("checkpoints", []))[-20:]
                     _persist(isolated)
+                    # Keep foreground runtime counters/messages in sync with completed background work
+                    # when the same session is currently selected in the UI.
+                    if base_runtime.session_name == session_name:
+                        _load_session(base_runtime, session_name)
             except Exception:
                 pass
             job["finished_at"] = datetime.now(timezone.utc).isoformat()

@@ -2711,8 +2711,13 @@ async function refreshState() {
   }
 
   syncPricingEditor();
-  const activeJob = (state.backgroundJobs || []).find((j) => j.session === s.session && ['running', 'awaiting_plan_approval'].includes(j.status));
+  const sessionJobs = (state.backgroundJobs || []).filter((j) => j && j.session === s.session);
+  const activeJob = sessionJobs.find((j) => ['running', 'awaiting_plan_approval'].includes(j.status));
+  const latestTerminalJob = sessionJobs
+    .filter((j) => ['completed', 'failed', 'killed', 'timed_out'].includes(j.status))
+    .sort((a, b) => String(b.finished_at || '').localeCompare(String(a.finished_at || '')))[0];
   if (activeJob && activeJob.usage) updateUsagePanel(activeJob.usage);
+  else if (latestTerminalJob && latestTerminalJob.usage) updateUsagePanel(latestTerminalJob.usage);
   else updateUsagePanel(state.sessionUsage);
   renderSessions(state.sessions, state.activeSession);
   renderUploads();

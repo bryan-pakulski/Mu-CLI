@@ -15,6 +15,8 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
+const pendingBackgroundPromptsBySession = {};
+const metadataExpandedKeys = new Set();
 let sendingSession = null;
 const runNoticesBySession = {};
 const runDetailsById = {};
@@ -1467,6 +1469,13 @@ function _metaRow(kind, label, value) {
 
   const details = document.createElement('details');
   details.className = 'meta-entry';
+  const metaKey = `${kind}|${label}|${raw.slice(0, 400)}`;
+  details.dataset.metaKey = metaKey;
+  if (metadataExpandedKeys.has(metaKey)) details.open = true;
+  details.addEventListener('toggle', () => {
+    if (details.open) metadataExpandedKeys.add(metaKey);
+    else metadataExpandedKeys.delete(metaKey);
+  });
 
   const summary = document.createElement('summary');
   const tag = document.createElement('span');
@@ -1555,6 +1564,7 @@ function _metaFilterAllows(kind, label, text) {
 
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
+  host.querySelectorAll('details.meta-entry[open][data-meta-key]').forEach((el) => metadataExpandedKeys.add(el.dataset.metaKey));
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
@@ -1775,6 +1785,22 @@ function renderMessages() {
     box.appendChild(row);
     anchor = row;
 
+  });
+
+  const pending = pendingBackgroundPromptsBySession[state.activeSession || ''] || [];
+  pending.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'msg role-user';
+    row.innerHTML = '<div class="role">user</div>';
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.innerHTML = '<span class="msg-tag">You</span><span class="msg-time">queued background</span>';
+    row.appendChild(meta);
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = formatMessageContent(item.text || '');
+    row.appendChild(bubble);
+    box.appendChild(row);
   });
 
   const notices = runNoticesBySession[state.activeSession || ''] || [];
@@ -2651,9 +2677,33 @@ function updateBackgroundJobInState(job) {
   renderSessions(state.sessions || [], state.activeSession || '');
   updateChatBusyState();
   maybeRecordJobTerminalNotice(job);
+  if (['completed', 'failed', 'killed', 'timed_out'].includes(job.status)) {
+    clearPendingBackgroundPrompt(job.session, job.id);
+  }
   if (job.session === state.activeSession) renderBackgroundActivity(job);
 }
 
+
+
+function addPendingBackgroundPrompt(sessionName, text, jobId = null) {
+  const key = String(sessionName || state.activeSession || '');
+  if (!key || !text) return null;
+  const item = {
+    id: `bg_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    jobId,
+    text: String(text),
+    createdAt: new Date().toISOString(),
+  };
+  if (!Array.isArray(pendingBackgroundPromptsBySession[key])) pendingBackgroundPromptsBySession[key] = [];
+  pendingBackgroundPromptsBySession[key].push(item);
+  return item;
+}
+
+function clearPendingBackgroundPrompt(sessionName, jobId) {
+  const key = String(sessionName || '');
+  if (!key || !jobId || !Array.isArray(pendingBackgroundPromptsBySession[key])) return;
+  pendingBackgroundPromptsBySession[key] = pendingBackgroundPromptsBySession[key].filter((item) => item.jobId !== jobId);
+}
 
 function askPlanApproval(job) {
   return new Promise((resolve) => {
@@ -2681,17 +2731,23 @@ async function sendPrompt(background = false) {
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
-  state.messages.push({ role: 'user', content: text });
-  let draft = { role: 'assistant', content: '', metadata: { typing: true } };
+  let draft = null;
   let thinkingDraft = null;
-  state.messages.push(draft);
+  if (!background) {
+    state.messages.push({ role: 'user', content: text });
+    draft = { role: 'assistant', content: '', metadata: { typing: true } };
+    state.messages.push(draft);
+  }
   renderMessages();
   renderMetadataPanel();
 
   try {
     if (background) {
-      const active = selectedSessionName();
+      const active = selectedSessionName() || state.activeSession || '';
+      const pendingPrompt = addPendingBackgroundPrompt(active, text);
+      renderMessages();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
+      if (pendingPrompt) pendingPrompt.jobId = bg.job_id;
       reportEl.textContent = `background job started: ${bg.job_id}`;
       const pollUntilDone = async () => {
         for (let i = 0; i < 120; i += 1) {

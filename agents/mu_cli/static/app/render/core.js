@@ -1,6 +1,7 @@
 // --- render functions -------------------------------------------------------
 
-
+const pendingBackgroundPromptsBySession = globalThis.pendingBackgroundPromptsBySession || {};
+const metadataExpandedKeys = globalThis.metadataExpandedKeys || new Set();
 
 
 function _readStage3Store() {
@@ -1413,6 +1414,13 @@ function _metaRow(kind, label, value) {
 
   const details = document.createElement('details');
   details.className = 'meta-entry';
+  const metaKey = `${kind}|${label}|${raw.slice(0, 400)}`;
+  details.dataset.metaKey = metaKey;
+  if (metadataExpandedKeys.has(metaKey)) details.open = true;
+  details.addEventListener('toggle', () => {
+    if (details.open) metadataExpandedKeys.add(metaKey);
+    else metadataExpandedKeys.delete(metaKey);
+  });
 
   const summary = document.createElement('summary');
   const tag = document.createElement('span');
@@ -1501,6 +1509,7 @@ function _metaFilterAllows(kind, label, text) {
 
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
+  host.querySelectorAll('details.meta-entry[open][data-meta-key]').forEach((el) => metadataExpandedKeys.add(el.dataset.metaKey));
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
@@ -1721,6 +1730,22 @@ function renderMessages() {
     box.appendChild(row);
     anchor = row;
 
+  });
+
+  const pending = pendingBackgroundPromptsBySession[state.activeSession || ''] || [];
+  pending.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'msg role-user';
+    row.innerHTML = '<div class="role">user</div>';
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.innerHTML = '<span class="msg-tag">You</span><span class="msg-time">queued background</span>';
+    row.appendChild(meta);
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = formatMessageContent(item.text || '');
+    row.appendChild(bubble);
+    box.appendChild(row);
   });
 
   const notices = runNoticesBySession[state.activeSession || ''] || [];

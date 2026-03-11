@@ -730,6 +730,7 @@ function timelineEventsForActiveSession() {
 }
 
 let _lastBackgroundActivityKey = null;
+const _terminalJobStateSynced = new Set();
 function renderBackgroundActivity(job) {
   const events = Array.isArray(job && job.events) ? job.events : [];
   const eventTail = events.length ? String(events[events.length - 1]).slice(0, 120) : '';
@@ -777,6 +778,9 @@ function beginBackgroundPolling() {
       if (!job) return;
       const latest = await api(`/api/jobs/${job.id}`);
       updateBackgroundJobInState(latest);
+      if (['running', 'awaiting_plan_approval'].includes(String(latest.status || ''))) {
+        _terminalJobStateSynced.delete(String(latest.id || ''));
+      }
       if (latest.status === 'awaiting_plan_approval') await pollApproval();
       if (latest.usage) updateUsagePanel(latest.usage);
       const reportEl = document.getElementById('report');
@@ -785,6 +789,13 @@ function beginBackgroundPolling() {
         else reportEl.textContent = `background ${latest.status}: ${latest.iterations || 0} iteration(s)`;
       }
       if (latest.session === state.activeSession) { renderBackgroundActivity(latest); renderMetadataPanel(); }
+      if (latest.session === state.activeSession && ['completed', 'failed', 'killed', 'timed_out'].includes(String(latest.status || ''))) {
+        const key = String(latest.id || '');
+        if (!_terminalJobStateSynced.has(key)) {
+          _terminalJobStateSynced.add(key);
+          await refreshState();
+        }
+      }
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
@@ -1605,6 +1616,24 @@ function renderMetadataPanel() {
       `<div class="meta-summary-chip"><span class="label">Tool calls/results</span><span class="value">${assistantMetaCounts.calls}/${assistantMetaCounts.results}</span></div>`,
       `<div class="meta-summary-chip span-2"><span class="label">Latest event</span><span class="value">${escapeHtml(latestEvent)}</span><span class="stamp">${escapeHtml(latestStamp || '—')}</span></div>`,
     ].join('');
+  }
+
+  if (activeJob && Array.isArray(activeJob.events) && activeJob.events.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card meta-live-card';
+    card.innerHTML = `<div class="meta-head"><span>Background task activity</span><span>${escapeHtml(String(activeJob.status || 'running'))} · ${Number(activeJob.iterations || 0)} steps</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const line of activeJob.events.slice(-20).reverse()) {
+      const stamp = timestampFromEventLine(line);
+      const label = stamp ? `Background · ${stamp}` : 'Background';
+      if (_metaFilterAllows('status', label, line)) lines.appendChild(_metaRow('status', label, line));
+    }
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   if (liveTraceItems.length) {

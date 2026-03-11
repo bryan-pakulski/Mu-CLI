@@ -1723,26 +1723,10 @@ function renderMetadataPanel() {
     return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:') || line.startsWith('plan:');
   });
 
-  const assistantMetaCounts = { calls: 0, results: 0, citations: 0, research: 0 };
-  for (let idx = state.messages.length - 1; idx >= 0; idx -= 1) {
-    const m = state.messages[idx];
-    if (!m || m.role !== 'assistant') continue;
-    const meta = collectAssistantMetadata(state.messages, idx);
-    assistantMetaCounts.calls += meta.toolRequests.length;
-    assistantMetaCounts.results += meta.toolResults.length;
-    assistantMetaCounts.citations += meta.citationItems.length;
-    assistantMetaCounts.research += meta.researchSteps.length;
-  }
-
   const activeJob = (state.backgroundJobs || []).find((j) => j && j.session === state.activeSession && ['running', 'awaiting_plan_approval'].includes(j.status));
   if (summaryHost) {
-    const latestEvent = liveTraceItems.length ? liveTraceItems[liveTraceItems.length - 1] : 'No live events yet';
-    const latestStamp = timestampFromEventLine(latestEvent);
     summaryHost.innerHTML = [
-      `<div class="meta-summary-chip"><span class="label">Live events</span><span class="value">${liveTraceItems.length}</span></div>`,
       `<div class="meta-summary-chip"><span class="label">Background</span><span class="value">${activeJob ? `${escapeHtml(activeJob.status || 'running')} · step ${Number(activeJob.iterations || 0)}` : 'idle'}</span></div>`,
-      `<div class="meta-summary-chip"><span class="label">Tool calls/results</span><span class="value">${assistantMetaCounts.calls}/${assistantMetaCounts.results}</span></div>`,
-      `<div class="meta-summary-chip span-2"><span class="label">Latest event</span><span class="value">${escapeHtml(latestEvent)}</span><span class="stamp">${escapeHtml(latestStamp || '—')}</span></div>`,
     ].join('');
   }
 

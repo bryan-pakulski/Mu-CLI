@@ -92,7 +92,7 @@ function renderRulesVersions() {
   const sel = document.getElementById('rulesVersionSelect');
   if (!sel) return;
   const versions = store.rulesVersions || [];
-  sel.innerHTML = versions.map((v) => `<option value="${_escapeAttr(v.id)}">${escapeHtml(v.label)} · ${escapeHtml(v.created_at)}</option>`).join('');
+  sel.innerHTML = versions.map((v) => `<option value="${_escapeAttr(v.id)}">${escapeHtml(v.label)} · ${escapeHtml(formatTimestamp(v.created_at) || String(v.created_at || ''))}</option>`).join('');
   if (!versions.length) sel.innerHTML = '<option value="">(no versions)</option>';
 }
 
@@ -926,10 +926,7 @@ function _locGenerated(messages) {
 }
 
 function _formatChartTimeLabel(value) {
-  if (!value) return '';
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return '';
-  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return formatTimestamp(value);
 }
 
 function _drawMetricChart(canvas, points, { yLabel, valueFormatter }) {
@@ -1108,7 +1105,7 @@ function formatTimestamp(value) {
   const hours = String(dt.getHours()).padStart(2, '0');
   const minutes = String(dt.getMinutes()).padStart(2, '0');
   const seconds = String(dt.getSeconds()).padStart(2, '0');
-  return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
 }
 
 function timestampFromEventLine(line) {
@@ -1893,8 +1890,8 @@ function _jobDetailsText(job) {
   lines.push(`Job: ${job.id || '-'}`);
   lines.push(`Status: ${job.status || '-'}`);
   lines.push(`Iterations: ${job.iterations || 0}`);
-  if (job.started_at) lines.push(`Started: ${job.started_at}`);
-  if (job.finished_at) lines.push(`Finished: ${job.finished_at}`);
+  if (job.started_at) lines.push(`Started: ${formatTimestamp(job.started_at) || job.started_at}`);
+  if (job.finished_at) lines.push(`Finished: ${formatTimestamp(job.finished_at) || job.finished_at}`);
   if (job.error) lines.push(`Error: ${job.error}`);
   if (job.report) {
     lines.push('');
@@ -1931,6 +1928,7 @@ function maybeRecordJobTerminalNotice(job) {
   notices.push({
     id,
     text: 'Agent timed out before completing this run.',
+    timestamp: new Date().toISOString(),
   });
   runNoticesBySession[session] = notices;
 }
@@ -1965,8 +1963,8 @@ function renderMessages() {
       meta.className = 'msg-meta';
       let tag = m.role === 'user' ? 'You' : 'AI';
       if (m.role === 'assistant' && m.metadata && m.metadata.kind === 'thinking_output') tag = 'thinking output';
-      const stamp = formatTimestamp(messageTimes.get(idx));
-      meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
+      const stamp = formatTimestamp(messageTimes.get(idx)) || formatTimestamp(new Date().toISOString());
+      meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp)}</span>`;
       row.appendChild(meta);
     }
 
@@ -2001,7 +1999,8 @@ function renderMessages() {
     row.innerHTML = '<div class="role">assistant</div>';
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
-    meta.innerHTML = '<span class="msg-tag">Live run activity</span><span class="msg-time">background</span>';
+    const jobStamp = formatTimestamp(job.started_at || job.finished_at || '') || formatTimestamp(new Date().toISOString());
+    meta.innerHTML = `<span class="msg-tag">Live run activity</span><span class="msg-time">${escapeHtml(jobStamp)}</span>`;
     row.appendChild(meta);
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
@@ -2027,7 +2026,8 @@ function renderMessages() {
   notices.forEach((notice) => {
     const row = document.createElement('div');
     row.className = 'msg role-assistant';
-    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta"><span class="msg-tag">System</span><span class="msg-time">notice</span></div>`;
+    const noticeStamp = formatTimestamp(notice.timestamp || '') || formatTimestamp(new Date().toISOString());
+    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta"><span class="msg-tag">System</span><span class="msg-time">${escapeHtml(noticeStamp)}</span></div>`;
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.innerHTML = `<p>${escapeHtml(notice.text)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;

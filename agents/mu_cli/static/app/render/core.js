@@ -1732,18 +1732,26 @@ function renderMessages() {
 
   });
 
-  const pending = pendingBackgroundPromptsBySession[state.activeSession || ''] || [];
-  pending.forEach((item) => {
+
+  const chatJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
+    .slice()
+    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
+  chatJobs.forEach((job) => {
     const row = document.createElement('div');
-    row.className = 'msg role-user';
-    row.innerHTML = '<div class="role">user</div>';
+    row.className = 'msg role-assistant';
+    row.innerHTML = '<div class="role">assistant</div>';
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
-    meta.innerHTML = '<span class="msg-tag">You</span><span class="msg-time">queued background</span>';
+    meta.innerHTML = '<span class="msg-tag">Live run activity</span><span class="msg-time">background</span>';
     row.appendChild(meta);
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = formatMessageContent(item.text || '');
+    const status = escapeHtml(String(job.status || 'unknown'));
+    const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
+    const events = Array.isArray(job.events) ? job.events.map((line) => escapeHtml(String(line || ''))).join('\n') : '';
+    const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
+    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
     row.appendChild(bubble);
     box.appendChild(row);
   });

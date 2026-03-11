@@ -15,7 +15,6 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
-const pendingBackgroundPromptsBySession = {};
 const metadataExpandedKeys = new Set();
 let sendingSession = null;
 const runNoticesBySession = {};
@@ -1787,18 +1786,26 @@ function renderMessages() {
 
   });
 
-  const pending = pendingBackgroundPromptsBySession[state.activeSession || ''] || [];
-  pending.forEach((item) => {
+
+  const chatJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
+    .slice()
+    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
+  chatJobs.forEach((job) => {
     const row = document.createElement('div');
-    row.className = 'msg role-user';
-    row.innerHTML = '<div class="role">user</div>';
+    row.className = 'msg role-assistant';
+    row.innerHTML = '<div class="role">assistant</div>';
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
-    meta.innerHTML = '<span class="msg-tag">You</span><span class="msg-time">queued background</span>';
+    meta.innerHTML = '<span class="msg-tag">Live run activity</span><span class="msg-time">background</span>';
     row.appendChild(meta);
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = formatMessageContent(item.text || '');
+    const status = escapeHtml(String(job.status || 'unknown'));
+    const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
+    const events = Array.isArray(job.events) ? job.events.map((line) => escapeHtml(String(line || ''))).join('\n') : '';
+    const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
+    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
     row.appendChild(bubble);
     box.appendChild(row);
   });
@@ -2677,33 +2684,10 @@ function updateBackgroundJobInState(job) {
   renderSessions(state.sessions || [], state.activeSession || '');
   updateChatBusyState();
   maybeRecordJobTerminalNotice(job);
-  if (['completed', 'failed', 'killed', 'timed_out'].includes(job.status)) {
-    clearPendingBackgroundPrompt(job.session, job.id);
-  }
   if (job.session === state.activeSession) renderBackgroundActivity(job);
 }
 
 
-
-function addPendingBackgroundPrompt(sessionName, text, jobId = null) {
-  const key = String(sessionName || state.activeSession || '');
-  if (!key || !text) return null;
-  const item = {
-    id: `bg_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
-    jobId,
-    text: String(text),
-    createdAt: new Date().toISOString(),
-  };
-  if (!Array.isArray(pendingBackgroundPromptsBySession[key])) pendingBackgroundPromptsBySession[key] = [];
-  pendingBackgroundPromptsBySession[key].push(item);
-  return item;
-}
-
-function clearPendingBackgroundPrompt(sessionName, jobId) {
-  const key = String(sessionName || '');
-  if (!key || !jobId || !Array.isArray(pendingBackgroundPromptsBySession[key])) return;
-  pendingBackgroundPromptsBySession[key] = pendingBackgroundPromptsBySession[key].filter((item) => item.jobId !== jobId);
-}
 
 function askPlanApproval(job) {
   return new Promise((resolve) => {
@@ -2747,10 +2731,8 @@ async function sendPrompt(background = false) {
   try {
     if (background) {
       const active = selectedSessionName() || state.activeSession || '';
-      const pendingPrompt = addPendingBackgroundPrompt(active, text);
-      renderMessages();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
-      if (pendingPrompt) pendingPrompt.jobId = bg.job_id;
+      updateBackgroundJobInState({ id: bg.job_id, session: bg.session || active, status: 'running', iterations: 0, events: [], prompt: text });
       reportEl.textContent = `background job started: ${bg.job_id}`;
       const pollUntilDone = async () => {
         for (let i = 0; i < 120; i += 1) {

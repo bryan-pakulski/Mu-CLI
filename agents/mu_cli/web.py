@@ -1078,6 +1078,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0},
         "completed_flash_until": None,
         "events": [],
+        "prompt": text,
         "planner_critic": None,
         "verification_policy": _verification_policy_for_task(text),
         "checkpoints": [],

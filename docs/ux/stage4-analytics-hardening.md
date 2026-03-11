@@ -36,3 +36,13 @@ These are baseline targets for Stage 4 sign-off; they can be tightened after rea
 ## Deferred in this pass
 
 - Feature-flag framework and phased rollout path (explicitly deferred per request).
+
+
+## Bug fixes from operator feedback
+
+- Fixed background-run kill UX by making kill action clickable while runs are active.
+- Fixed Operate/Control/Review switching to deterministically show/hide sidebar and metadata panels per flow.
+- Added flow shortcuts: `Ctrl/Cmd + 1/2/3` for Operate/Control/Review.
+- Fixed metrics chart axes/rendering with timestamped X-axis and proper Y-axis units for tokens and USD cost.
+- Simplified session rows by removing non-functional favorites and retaining one-line row + hamburger actions.
+- Improved Git controls refresh behavior to always reload selected repo branch/diff and show current git short status in the modal header.

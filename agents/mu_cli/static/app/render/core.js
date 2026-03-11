@@ -562,7 +562,12 @@ function renderGitControls() {
   branchSel.value = state.gitCurrentBranch || '';
 
   if (!repos.length) status.textContent = 'Select a workspace containing a git repository.';
-  else status.textContent = `Repo: ${state.gitCurrentRepo || '-'} · Current branch: ${state.gitCurrentBranch || '-'}`;
+  else {
+    const short = String(state.gitStatusShort || '').trim();
+    status.textContent = short
+      ? `Repo: ${state.gitCurrentRepo || '-'} · Branch: ${state.gitCurrentBranch || '-'} · Status: ${short}`
+      : `Repo: ${state.gitCurrentRepo || '-'} · Branch: ${state.gitCurrentBranch || '-'} · Status: clean`;
+  }
 
   const gitStats = document.getElementById('gitDiffStats');
   if (gitStats) {
@@ -613,6 +618,7 @@ async function refreshGitDiff() {
   }
   const payload = await api(`/api/git/diff?repo=${encodeURIComponent(state.gitCurrentRepo)}`);
   const status = String(payload.status || '').trim();
+  state.gitStatusShort = status;
   const diff = String(payload.diff || '').trim();
   const staged = String(payload.cached_diff || '').trim();
   state.gitDiff = [
@@ -740,81 +746,89 @@ function _locGenerated(messages) {
   return loc;
 }
 
-function _drawLineChart(canvas, seriesMap) {
+function _formatChartTimeLabel(value) {
+  if (!value) return '';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function _drawMetricChart(canvas, points, { yLabel, valueFormatter }) {
   if (!canvas || !canvas.getContext) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const keys = Object.keys(seriesMap || {});
-  if (!keys.length) {
+  const rows = Array.isArray(points) ? points : [];
+  if (!rows.length) {
     ctx.fillStyle = '#6b7280';
     ctx.font = '12px sans-serif';
     ctx.fillText('No data yet', 12, 20);
     return;
   }
 
-  const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7'];
-  const pad = 28;
+  const padLeft = 62;
+  const padRight = 14;
+  const padTop = 16;
+  const padBottom = 44;
+  const plotW = Math.max(10, w - padLeft - padRight);
+  const plotH = Math.max(10, h - padTop - padBottom);
+
+  const maxY = Math.max(1, ...rows.map((r) => Number(r.y || 0)));
+  const ticks = 4;
+
   ctx.strokeStyle = '#9ca3af';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(pad, h - pad);
-  ctx.lineTo(w - 8, h - pad);
-  ctx.moveTo(pad, h - pad);
-  ctx.lineTo(pad, 8);
+  ctx.moveTo(padLeft, padTop);
+  ctx.lineTo(padLeft, h - padBottom);
+  ctx.lineTo(w - padRight, h - padBottom);
   ctx.stroke();
+
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#6b7280';
+  for (let i = 0; i <= ticks; i += 1) {
+    const ratio = i / ticks;
+    const y = h - padBottom - ratio * plotH;
+    const v = ratio * maxY;
+    ctx.strokeStyle = 'rgba(156,163,175,0.25)';
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(w - padRight, y);
+    ctx.stroke();
+    ctx.fillText(valueFormatter(v), 8, y + 3);
+  }
+
+  const xTickIdx = [0, Math.floor((rows.length - 1) / 2), rows.length - 1].filter((v, i, arr) => arr.indexOf(v) === i);
+  xTickIdx.forEach((idx) => {
+    const ratio = rows.length === 1 ? 0 : idx / (rows.length - 1);
+    const x = padLeft + ratio * plotW;
+    const label = _formatChartTimeLabel(rows[idx] && rows[idx].x);
+    ctx.fillStyle = '#6b7280';
+    ctx.fillText(label, Math.max(2, x - 28), h - 18);
+  });
+
+  ctx.strokeStyle = '#6366f1';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  rows.forEach((row, idx) => {
+    const ratioX = rows.length === 1 ? 0 : idx / (rows.length - 1);
+    const x = padLeft + ratioX * plotW;
+    const y = h - padBottom - (Number(row.y || 0) / maxY) * plotH;
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
   ctx.fillStyle = '#6b7280';
   ctx.font = '11px sans-serif';
-  ctx.fillText('Turns (X)', w - 66, h - 10);
+  ctx.fillText('Time (X)', w - 58, h - 6);
   ctx.save();
-  ctx.translate(10, 44);
+  ctx.translate(12, 42);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText('Usage (Y)', 0, 0);
+  ctx.fillText(yLabel, 0, 0);
   ctx.restore();
-  let maxLen = 0;
-  let maxY = 0;
-  keys.forEach((k) => {
-    const arr = seriesMap[k] || [];
-    maxLen = Math.max(maxLen, arr.length);
-    arr.forEach((v) => { maxY = Math.max(maxY, Number(v || 0)); });
-  });
-  maxLen = Math.max(2, maxLen);
-  maxY = Math.max(1, maxY);
-
-  const plotW = w - pad * 2;
-  const plotH = h - pad * 2;
-
-  ctx.strokeStyle = '#9ca3af';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(pad, pad);
-  ctx.lineTo(pad, h - pad);
-  ctx.lineTo(w - pad, h - pad);
-  ctx.stroke();
-
-  keys.forEach((key, idx) => {
-    const arr = seriesMap[key] || [];
-    ctx.strokeStyle = colors[idx % colors.length];
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    arr.forEach((v, i) => {
-      const x = pad + (i / (maxLen - 1)) * plotW;
-      const y = h - pad - (Number(v || 0) / maxY) * plotH;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  });
-
-  // legend
-  keys.slice(0, 4).forEach((key, idx) => {
-    ctx.fillStyle = colors[idx % colors.length];
-    ctx.fillRect(pad + idx * 120, 8, 10, 10);
-    ctx.fillStyle = '#6b7280';
-    ctx.font = '11px sans-serif';
-    ctx.fillText(key.slice(0, 18), pad + idx * 120 + 14, 17);
-  });
 }
 
 function renderMetrics() {
@@ -840,8 +854,8 @@ function renderMetrics() {
   if (locEl) locEl.textContent = String(loc);
   if (turnsEl) turnsEl.textContent = String(turns.length);
 
-  const byModelTokens = {};
-  const byModelCost = {};
+  const tokenPoints = [];
+  const costPoints = [];
   const breakdown = {};
 
   for (const turn of turns) {
@@ -849,13 +863,8 @@ function renderMetrics() {
     const model = String(turn.model || 'unknown');
     const key = `${provider}:${model}`;
 
-    if (!byModelTokens[key]) byModelTokens[key] = [];
-    if (!byModelCost[key]) byModelCost[key] = [];
-
-    const prevTok = byModelTokens[key].length ? byModelTokens[key][byModelTokens[key].length - 1] : 0;
-    const prevCost = byModelCost[key].length ? byModelCost[key][byModelCost[key].length - 1] : 0;
-    byModelTokens[key].push(prevTok + Number(turn.total_tokens || 0));
-    byModelCost[key].push(prevCost + Number(turn.estimated_cost_usd || 0));
+    tokenPoints.push({ x: turn.timestamp || '', y: Number(turn.total_tokens || 0) });
+    costPoints.push({ x: turn.timestamp || '', y: Number(turn.estimated_cost_usd || 0) });
 
     const row = breakdown[key] || { provider, model, turns: 0, tokens: 0, cost: 0 };
     row.turns += 1;
@@ -864,8 +873,14 @@ function renderMetrics() {
     breakdown[key] = row;
   }
 
-  _drawLineChart(document.getElementById('metricsTokenChart'), byModelTokens);
-  _drawLineChart(document.getElementById('metricsCostChart'), byModelCost);
+  _drawMetricChart(document.getElementById('metricsTokenChart'), tokenPoints, {
+    yLabel: 'Tokens (Y)',
+    valueFormatter: (v) => `${Math.round(Number(v || 0))}`,
+  });
+  _drawMetricChart(document.getElementById('metricsCostChart'), costPoints, {
+    yLabel: 'Cost USD (Y)',
+    valueFormatter: (v) => `$${Number(v || 0).toFixed(4)}`,
+  });
 
   const body = document.getElementById('metricsModelBreakdown');
   if (body) {
@@ -1859,10 +1874,9 @@ function renderSessions(list, active) {
   host.innerHTML = '';
   const statuses = sessionStatusMap();
   const prefs = _readSessionPrefs();
-  state.pinnedSessions = prefs.pinned.filter((n) => list.includes(n));
   state.recentSessions = prefs.recent.filter((n) => list.includes(n));
   const filter = String((document.getElementById('sessionQuickSwitch') || {}).value || '').trim().toLowerCase();
-  const ordered = state.pinnedSessions.concat(list.filter((n) => !state.pinnedSessions.includes(n)));
+  const ordered = list.slice();
 
   for (const name of ordered) {
     if (filter && !name.toLowerCase().includes(filter)) continue;
@@ -1876,23 +1890,12 @@ function renderSessions(list, active) {
     const status = statusData ? statusData.status : '';
     const dotClass = status === 'running' ? 'running' : (status === 'done' ? 'done' : '');
     const tip = statusData?.job?.last_step || status || 'idle';
-    const isPinned = state.pinnedSessions.includes(name);
     btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${escapeHtml(tip)}"></span><span class="session-name">${escapeHtml(name)}</span></span><span class="ui-badge ${status === 'running' ? 'warn' : (status === 'done' ? 'success' : '')}">${status || 'idle'}</span>`;
     btn.setAttribute('data-session-name', name);
     btn.addEventListener('click', () => {
       markSessionRecent(name);
       completedSeenSessions.add(name);
       sessionAction('switch', name).catch((e) => alert(e.message));
-    });
-
-    const pinBtn = document.createElement('button');
-    pinBtn.type = 'button';
-    pinBtn.className = 'session-menu-btn';
-    pinBtn.title = isPinned ? 'Unpin session' : 'Pin session';
-    pinBtn.textContent = isPinned ? '★' : '☆';
-    pinBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      toggleSessionPin(name);
     });
 
     const menuBtn = document.createElement('button');
@@ -1908,7 +1911,6 @@ function renderSessions(list, active) {
     });
 
     row.appendChild(btn);
-    row.appendChild(pinBtn);
     row.appendChild(menuBtn);
     host.appendChild(row);
   }

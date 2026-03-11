@@ -93,7 +93,6 @@
     .shell.modal-active .main {
       filter: blur(3px);
       transition: filter .16s ease;
-      pointer-events: none;
       user-select: none;
     }
     .shell.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
@@ -953,7 +952,6 @@
     }
     .composer-disabled {
       opacity: .55;
-      pointer-events: none;
       filter: grayscale(.15);
     }
 
@@ -1488,7 +1486,7 @@
                         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
         <span id="gitQuickStatus" class="pill git-quick-pill">git: no repo</span>
-        <span class="shortcut-hint">⌘/Ctrl+B sidebar · ⌘/Ctrl+\ metadata · ⌘/Ctrl+, settings</span>
+        <span class="shortcut-hint">⌘/Ctrl+1 Operate · 2 Control · 3 Review · ⌘/Ctrl+B sidebar · ⌘/Ctrl+\ metadata · ⌘/Ctrl+, settings</span>
               </div>
 
       <div class="workspace-layout ui-split-pane">
@@ -1921,6 +1919,7 @@ Keep responses concise"></textarea>
           <tr><td>Toggle sidebar</td><td>Ctrl/Cmd + B</td></tr>
           <tr><td>Toggle metadata panel</td><td>Ctrl/Cmd + \</td></tr>
           <tr><td>Open settings</td><td>Ctrl/Cmd + ,</td></tr>
+          <tr><td>Switch to Operate / Control / Review</td><td>Ctrl/Cmd + 1 / 2 / 3</td></tr>
         </tbody>
       </table>
       <div class="d-flex justify-content-between align-items-center mb-1"><strong>Tooltips and controls</strong><span class="ui-badge warn">Clarity</span></div>

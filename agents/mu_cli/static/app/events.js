@@ -188,6 +188,7 @@ function initMetaResize() {
 
 function setSurface(surface) {
   const app = byId('app');
+  const layout = document.querySelector('.workspace-layout');
   if (!app) return;
   const next = ['operate', 'control', 'review'].includes(surface) ? surface : 'operate';
   state.uiSurface = next;
@@ -198,12 +199,19 @@ function setSurface(surface) {
     el.classList.toggle('active', active);
     el.setAttribute('aria-selected', active ? 'true' : 'false');
   });
-  if (next === 'control') app.classList.remove('sidebar-hidden');
-  closeAllSessionMenus();
-  if (next === 'review') {
-    const layout = document.querySelector('.workspace-layout');
+
+  if (next === 'operate') {
+    app.classList.add('sidebar-hidden');
+    if (layout) layout.classList.add('meta-hidden');
+  } else if (next === 'control') {
+    app.classList.remove('sidebar-hidden');
+    if (layout) layout.classList.add('meta-hidden');
+  } else {
+    app.classList.add('sidebar-hidden');
     if (layout) layout.classList.remove('meta-hidden');
   }
+
+  closeAllSessionMenus();
 }
 
 document.querySelectorAll('[data-surface-tab]').forEach((el) => {
@@ -211,8 +219,9 @@ document.querySelectorAll('[data-surface-tab]').forEach((el) => {
 });
 
 bindClick('refreshGitDiff', async () => {
-  await refreshGitDiff();
-  renderGitControls();
+  const repoSel = byId('gitRepo');
+  if (repoSel && repoSel.value) state.gitCurrentRepo = repoSel.value;
+  await refreshGitBranches();
 });
 
 bindClick('timelineFilterAll', () => { state.timelineFilter = 'all'; renderExecutionTimeline(); renderMetadataPanel(); });
@@ -321,6 +330,9 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     showModal('advancedModal', true);
   }
+  if (e.key === '1') { e.preventDefault(); setSurface('operate'); }
+  if (e.key === '2') { e.preventDefault(); setSurface('control'); }
+  if (e.key === '3') { e.preventDefault(); setSurface('review'); }
 });
 
 document.addEventListener('click', (ev) => {

@@ -130,6 +130,23 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
         stats = deps.clear_all_stored_data(runtime)
         return jsonify({"ok": True, "cleared": stats, "session": runtime.session_name})
 
+
+    @app.get("/api/health")
+    def health_state():
+        jobs = runtime.background_jobs or {}
+        statuses = [str(item.get("status") or "unknown") for item in jobs.values()]
+        by_status: dict[str, int] = {}
+        for status in statuses:
+            by_status[status] = int(by_status.get(status, 0)) + 1
+        backlog = sum(1 for status in statuses if status not in {"completed", "failed", "timed_out", "killed"})
+        return jsonify({
+            "ok": True,
+            "uptime_seconds": deps.telemetry_snapshot(runtime).get("uptime_seconds", 0),
+            "background_jobs_total": len(statuses),
+            "background_jobs_backlog": backlog,
+            "background_jobs_by_status": by_status,
+        })
+
     @app.get("/api/telemetry")
     def telemetry_state():
         return jsonify({"telemetry": deps.telemetry_snapshot(runtime)})

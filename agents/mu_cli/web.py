@@ -52,6 +52,7 @@ from mu_cli.webapp.runtime import WebRuntime, default_usage
 from mu_cli.webapp.routes_state import StateRouteDeps, register_state_routes
 from mu_cli.webapp.routes_chat import ChatRouteDeps, register_chat_routes
 from mu_cli.webapp.services_runtime import RuntimeMutationDeps, mutate_runtime_for_clear, mutate_runtime_for_new_session, mutate_runtime_for_settings
+from mu_cli.webapp.job_state import JobStatus, TERMINAL_STATUSES, transition_job_status
 
 
 
@@ -107,6 +108,7 @@ def _default_telemetry() -> dict[str, Any]:
         'started_at': datetime.now(timezone.utc).isoformat(),
         'request_counts': {},
         'action_counts': {},
+        'harness_counts': {},
         'last_updated_at': datetime.now(timezone.utc).isoformat(),
     }
 
@@ -125,6 +127,7 @@ def _load_telemetry(runtime: WebRuntime) -> None:
         'started_at': payload.get('started_at') or datetime.now(timezone.utc).isoformat(),
         'request_counts': payload.get('request_counts') or {},
         'action_counts': payload.get('action_counts') or {},
+        'harness_counts': payload.get('harness_counts') or {},
         'last_updated_at': payload.get('last_updated_at') or datetime.now(timezone.utc).isoformat(),
     }
 
@@ -140,9 +143,14 @@ def _record_telemetry(runtime: WebRuntime, category: str, key: str, count: int =
     _persist_telemetry(runtime)
 
 
+def _record_harness_counter(runtime: WebRuntime, key: str, count: int = 1) -> None:
+    _record_telemetry(runtime, "harness_counts", key, count=count)
+
+
 def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
     req_counts = runtime.telemetry.get('request_counts') or {}
     action_counts = runtime.telemetry.get('action_counts') or {}
+    harness_counts = runtime.telemetry.get('harness_counts') or {}
     total_requests = int(sum(int(v) for v in req_counts.values()))
     tool_failures = len([line for line in (runtime.traces or []) if 'tool-run:' in str(line) and 'ok=False' in str(line)])
     approval_waits = len([line for line in (runtime.traces or []) if 'approval' in str(line).lower()])
@@ -164,6 +172,7 @@ def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
         'uptime_seconds': uptime_seconds,
         'request_counts': req_counts,
         'action_counts': action_counts,
+        'harness_counts': harness_counts,
         'total_requests': total_requests,
         'chat_turns': len(runtime.session_turns or []),
         'tool_failures': tool_failures,
@@ -1071,13 +1080,36 @@ def _mark_messages_as_metadata(messages: list[Message], *, kind: str) -> None:
 
 def _is_internal_agent_loop_prompt(prompt: str) -> bool:
     normalized = " ".join((prompt or "").strip().split()).lower()
-    return normalized.startswith("continue executing the approved plan.") or normalized.startswith("execute the replan.") or normalized.startswith("you appear stalled.")
+    return (
+        normalized.startswith("continue executing the approved plan.")
+        or normalized.startswith("execute the replan.")
+        or normalized.startswith("you appear stalled.")
+        or normalized.startswith("your previous response is not yet satisfactory.")
+    )
 
 def _step_internal(runtime: WebRuntime, prompt: str, kind: str) -> Message:
     before = len(runtime.agent.state.messages)
     reply = runtime.agent.step(prompt)
     _mark_messages_as_metadata(runtime.agent.state.messages[before:], kind=kind)
     return reply
+
+
+def _trim_internal_loop_messages(agent: Agent, *, max_automation_messages: int = 14) -> None:
+    messages = agent.state.messages
+    automation_indexes = [
+        idx
+        for idx, message in enumerate(messages)
+        if message.role in {Role.USER, Role.ASSISTANT} and message.metadata.get("metadata_group") == "automation"
+    ]
+    if len(automation_indexes) <= max_automation_messages:
+        return
+    keep = set(automation_indexes[-max_automation_messages:])
+    trimmed: list[Message] = []
+    for idx, message in enumerate(messages):
+        if idx in automation_indexes and idx not in keep:
+            continue
+        trimmed.append(message)
+    agent.state.messages = trimmed
 
 
 def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: str) -> str:
@@ -1097,11 +1129,32 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             return True
         return cur in {"continue", "continuing", "working on it", "still working"}
 
+    def _satisfactory_assessment(last_step: str | None, events: list[str], policy: dict[str, Any]) -> dict[str, Any]:
+        answer_text = str(last_step or "")
+        lowered = answer_text.lower()
+        required_checks = list((policy or {}).get("required_checks", []))
+        verified, missing = _has_verification_evidence(events, required_checks)
+        has_confidence = "confidence:" in lowered
+        has_evidence = "evidence:" in lowered
+        explicit_blockers = any(token in lowered for token in ("blocker", "blocked", "unable to", "could not"))
+        plan_complete = _is_plan_complete(answer_text)
+        satisfactory = plan_complete and has_confidence and has_evidence and (verified or explicit_blockers)
+        return {
+            "confidence": "high" if verified and satisfactory else ("medium" if verified else "low"),
+            "has_confidence_section": has_confidence,
+            "has_evidence_section": has_evidence,
+            "verified": verified,
+            "missing_checks": missing,
+            "plan_complete": plan_complete,
+            "explicit_blockers": explicit_blockers,
+            "satisfactory": satisfactory,
+        }
+
     job_id = uuid.uuid4().hex
     base_runtime.background_jobs[job_id] = {
         "id": job_id,
         "session": session_name,
-        "status": "running",
+        "status": JobStatus.QUEUED.value,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "finished_at": None,
         "error": None,
@@ -1122,12 +1175,14 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "cancel_requested": False,
         "cancel_reason": None,
         "final_response": None,
+        "terminal_reason": None,
         "stream_seq": 0,
         "stream_events": [],
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
+        transition_job_status(job, JobStatus.PLANNING.value, reason="runner_started")
 
         def _emit_stream_event(event_type: str, **payload: Any) -> None:
             seq = int(job.get("stream_seq") or 0) + 1
@@ -1148,9 +1203,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             return bool(job.get("cancel_requested"))
 
         def _mark_cancelled(reason: str) -> None:
-            if job.get("status") in {"killed", "completed", "failed", "timed_out"}:
+            if str(job.get("status") or "") in TERMINAL_STATUSES:
                 return
-            job["status"] = "killed"
+            transition_job_status(job, JobStatus.KILLED.value, reason="cancel_requested")
+            job["terminal_reason"] = "killed"
             job["cancel_reason"] = reason
             job["events"].append(f"status: killed ({reason})")
             _emit_stream_event("status", status="killed", reason=reason)
@@ -1223,7 +1279,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     raise RuntimeError("Plan denied by approval policy.")
                 else:
                     job["last_step"] = "Plan drafted; waiting for approval"
-                    job["status"] = "awaiting_plan_approval"
+                    transition_job_status(job, JobStatus.AWAITING_PLAN_APPROVAL.value, reason="plan_waiting_for_approval")
                     while datetime.now(timezone.utc).timestamp() < deadline:
                         if _cancelled():
                             _mark_cancelled("user requested stop")
@@ -1249,6 +1305,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             previous_step = None
             replan_count = 0
             completed_by_plan = False
+            satisfactory_submitted = False
+            unsatisfactory_nudges = 0
+            max_unsatisfactory_nudges = 4
             policy = job.get("verification_policy") or _verification_policy_for_task(text)
             job["events"].append(
                 f"verification_policy: type={policy.get('task_type')} checks={','.join(policy.get('required_checks', []))}"
@@ -1275,8 +1334,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     break
                 if int(job["iterations"]) >= max_iterations:
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
+                    _record_harness_counter(base_runtime, "iteration_caps")
                     break
-                job["status"] = "running"
+                transition_job_status(job, JobStatus.RUNNING.value, reason="execution_iteration")
                 original_model_response = isolated.agent.on_model_response
                 original_model_stream = getattr(isolated.agent, "on_model_stream", None)
                 original_tool_run = isolated.agent.on_tool_run
@@ -1311,6 +1371,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 isolated.agent.on_model_response = _on_model_response
                 isolated.agent.on_model_stream = _on_model_stream
                 isolated.agent.on_tool_run = _on_tool_run
+                _trim_internal_loop_messages(isolated.agent)
                 before_len = len(isolated.agent.state.messages)
                 try:
                     reply = _run_turn_with_uploaded_context(
@@ -1368,13 +1429,42 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if _is_plan_complete(reply.content):
                     completed_by_plan = True
                     job["events"].append("status: plan_complete_detected")
+                assessment = _satisfactory_assessment(job.get("last_step"), job.get("events", []), policy)
+                job["answer_contract"] = assessment
+                if assessment["satisfactory"]:
+                    satisfactory_submitted = True
+                    job["events"].append("status: satisfactory_answer_submitted")
                     break
+                if unsatisfactory_nudges < max_unsatisfactory_nudges:
+                    unsatisfactory_nudges += 1
+                    missing_parts: list[str] = []
+                    if not assessment["plan_complete"]:
+                        missing_parts.append("begin with PLAN_COMPLETE")
+                    if not assessment["has_confidence_section"]:
+                        missing_parts.append("add a Confidence: section")
+                    if not assessment["has_evidence_section"]:
+                        missing_parts.append("add an Evidence: section")
+                    if assessment["missing_checks"]:
+                        missing_parts.append(
+                            "include verification evidence for: " + ", ".join(assessment["missing_checks"])
+                        )
+                    if assessment["verified"] is False and not assessment["explicit_blockers"]:
+                        missing_parts.append("if blocked, explicitly state blockers")
+                    guidance = "; ".join(missing_parts) or "finish with complete validated answer"
+                    job["events"].append(f"status: unsatisfactory_answer_nudge #{unsatisfactory_nudges}")
+                    _record_harness_counter(base_runtime, "nudges")
+                    prompt = (
+                        "Your previous response is not yet satisfactory. "
+                        f"Please {guidance}. Keep progressing execution with tools when needed."
+                    )
+                    continue
                 if not isolated.agentic_planning:
                     break
                 if not had_tool_activity:
                     no_progress_streak = no_progress_streak + 1 if stalled else 0
                     if no_progress_streak >= 2:
                         job["events"].append("status: stalled_no_tool_progress")
+                        _record_harness_counter(base_runtime, "stalls")
                         if replan_count < 2:
                             replan_count += 1
                             replan_reply = _step_internal(
@@ -1387,6 +1477,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                             if replanned:
                                 job["plan"] = replanned
                                 job["events"].append(f"plan: replan_triggered #{replan_count}")
+                                _record_harness_counter(base_runtime, "replans")
                                 prompt = (
                                     "Execute the REPLAN. Complete the next concrete tool action now. "
                                     "When done, return 'PLAN_COMPLETE' with Confidence and Evidence sections."
@@ -1406,12 +1497,19 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "When all tasks are complete, begin your response with 'PLAN_COMPLETE'."
                 )
 
-            if job.get("status") == "killed":
+            if not satisfactory_submitted and unsatisfactory_nudges >= max_unsatisfactory_nudges:
+                job["events"].append("status: unsatisfactory_answer_limit_reached")
+                _record_harness_counter(base_runtime, "unsatisfactory_limits")
+
+            if job.get("status") == JobStatus.KILLED.value:
                 pass
             elif completed_by_plan or _is_plan_complete(job.get("last_step") or ""):
-                job["status"] = "completed"
+                transition_job_status(job, JobStatus.VERIFYING.value, reason="plan_complete_or_equivalent")
+                transition_job_status(job, JobStatus.COMPLETED.value, reason="verification_ready")
+                job["terminal_reason"] = "completed_satisfactory"
             elif datetime.now(timezone.utc).timestamp() >= deadline:
-                job["status"] = "timed_out"
+                transition_job_status(job, JobStatus.TIMED_OUT.value, reason="deadline_elapsed")
+                job["terminal_reason"] = "timed_out"
 
             job["report"] = {
                 "provider": isolated.provider,
@@ -1421,39 +1519,37 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 "total_tokens": total_tokens,
                 "estimated_cost_usd": total_cost,
             }
-            if job["status"] not in {"timed_out", "killed"}:
-                job["status"] = "completed"
+            if str(job.get("status") or "") not in {JobStatus.TIMED_OUT.value, JobStatus.KILLED.value}:
+                if str(job.get("status") or "") != JobStatus.COMPLETED.value:
+                    transition_job_status(job, JobStatus.VERIFYING.value, reason="final_contract_check")
+                    transition_job_status(job, JobStatus.COMPLETED.value, reason="finalized")
+                if not job.get("terminal_reason"):
+                    job["terminal_reason"] = "completed_satisfactory"
                 _emit_stream_event("status", status="completed")
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
-                required_checks = list((policy or {}).get("required_checks", []))
-                verified, missing = _has_verification_evidence(job.get("events", []), required_checks)
-                answer_text = str(job.get("last_step") or "")
-                has_confidence = "confidence:" in answer_text.lower()
-                has_evidence = "evidence:" in answer_text.lower()
-                confidence = "medium" if verified else "low"
-                contract = {
-                    "confidence": confidence,
-                    "has_confidence_section": has_confidence,
-                    "has_evidence_section": has_evidence,
-                    "verified": verified,
-                    "missing_checks": missing,
-                }
+                contract = _satisfactory_assessment(job.get("last_step"), job.get("events", []), policy)
                 job["answer_contract"] = contract
-                if verified:
+                if contract["verified"]:
                     job["events"].append("verification: passed")
                 else:
-                    job["events"].append("verification: gaps=" + ",".join(missing))
+                    job["events"].append("verification: gaps=" + ",".join(contract["missing_checks"]))
+                    _record_harness_counter(base_runtime, "verification_failures")
                 if _is_plan_complete(job.get("last_step")):
                     job["events"].append("status: completed")
                 else:
                     job["events"].append("status: completed_without_explicit_plan_complete")
         except Exception as exc:
             job["error"] = str(exc)
-            if job.get("status") not in {"timed_out", "killed"}:
-                job["status"] = "failed"
+            if _cancelled():
+                transition_job_status(job, JobStatus.KILLED.value, reason="cancelled_during_exception")
+                job["terminal_reason"] = "killed"
+            elif str(job.get("status") or "") not in {JobStatus.TIMED_OUT.value, JobStatus.KILLED.value}:
+                transition_job_status(job, JobStatus.FAILED.value, reason="exception")
+                job["terminal_reason"] = "failed_unrecoverable"
             job["events"].append(f"status: failed ({exc})")
+            _record_harness_counter(base_runtime, "failures")
             _emit_stream_event("error", error=str(exc))
         finally:
             try:
@@ -1571,6 +1667,8 @@ def create_app():
     @app.after_request
     def _response_log_hook(response):
         from flask import g, request
+        if request.path == "/api/state/clear-all":
+            return response
         started = getattr(g, "_request_started_at", None)
         elapsed_ms = 0
         if started is not None:

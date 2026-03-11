@@ -33,6 +33,8 @@ def execute_chat_turn(runtime: Any, text: str, deps: ChatTurnDeps) -> ChatTurnRe
     deps.record_turn(runtime, report)
     if runtime.condense_enabled:
         deps.condense_session_context(runtime, window_size=runtime.condense_window)
+    if hasattr(runtime, "traces"):
+        runtime.traces.append(f"chat: turn_completed tokens={int(report.get('total_tokens', 0))}")
     deps.persist(runtime)
     return ChatTurnResult(reply=asdict(reply), report=report, traces=runtime.traces[-50:])
 

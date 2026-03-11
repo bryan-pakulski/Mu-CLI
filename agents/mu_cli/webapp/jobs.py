@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from mu_cli.webapp.job_state import JobStatus, TERMINAL_STATUSES, transition_job_status
+
 
 @dataclass(slots=True)
 class JobDeps:
@@ -26,13 +28,16 @@ def request_kill(runtime: Any, job_id: str, reason: str) -> tuple[int, dict[str,
     if job is None:
         return 404, {"error": "job not found"}
     status = str(job.get("status") or "")
-    if status in {"completed", "failed", "timed_out", "killed"}:
-        return 409, {"ok": False, "job_id": job_id, "status": status, "message": "job is not running"}
+    if status in TERMINAL_STATUSES:
+        return 200, {"ok": True, "job_id": job_id, "status": status, "cancel_requested": status == JobStatus.KILLED.value, "message": "job already terminal"}
     job["cancel_requested"] = True
     job["cancel_reason"] = reason
+    transition_job_status(job, JobStatus.KILLED.value, reason="kill_requested_via_api")
+    job["terminal_reason"] = "killed"
     events = job.setdefault("events", [])
     if isinstance(events, list):
         events.append(f"cancel_requested: {reason}")
+        events.append(f"status: killed ({reason})")
     return 200, {"ok": True, "job_id": job_id, "status": job.get("status"), "cancel_requested": True}
 
 

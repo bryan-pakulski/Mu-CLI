@@ -31,6 +31,28 @@ class WorkspaceTests(unittest.TestCase):
             self.assertIn("agents/mu_cli/templates/index.html", paths)
             self.assertGreaterEqual(snapshot.index_stats.get("indexed", 0), 4)
 
+
+    def test_attach_builds_file_purpose_and_reuses_when_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            target = root / "service.py"
+            target.write_text("def run_service():\n    return True\n", encoding="utf-8")
+
+            store = WorkspaceStore(Path(td) / "store")
+            first = store.attach(root)
+            row = next(item for item in first.files if item.path == "service.py")
+            self.assertTrue(row.purpose)
+            self.assertTrue(row.fingerprint)
+            self.assertEqual(1, first.index_stats.get("recomputed_descriptions"))
+
+            second = store.attach(root)
+            self.assertEqual(1, second.index_stats.get("reused_descriptions"))
+
+            target.write_text("def run_service():\n    return False\n", encoding="utf-8")
+            third = store.attach(root)
+            self.assertEqual(1, third.index_stats.get("recomputed_descriptions"))
+
     def test_tool_run_persists(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "repo"

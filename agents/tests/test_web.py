@@ -159,6 +159,23 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, status.status_code)
         self.assertEqual('stream-session', status.get_json()['session'])
 
+    def test_health_endpoint_reports_background_backlog(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        start = client.post('/api/chat/background', json={'text': 'health backlog check'})
+        self.assertEqual(200, start.status_code)
+
+        health = client.get('/api/health')
+        self.assertEqual(200, health.status_code)
+        payload = health.get_json() or {}
+        self.assertTrue(payload.get('ok'))
+        self.assertIn('background_jobs_backlog', payload)
+        self.assertIn('background_jobs_by_status', payload)
+
     def test_background_job_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 
@@ -672,6 +689,40 @@ class WebTests(unittest.TestCase):
         self.assertTrue(job.get('cancel_requested'))
         self.assertTrue(any('killed' in event for event in job.get('events', [])))
 
+    def test_background_job_records_status_transitions(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 30, 'approval_mode': 'auto'})
+        res = client.post('/api/chat/background', json={'text': 'transition check'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 5
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] in {'completed', 'failed', 'timed_out', 'killed'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        transitions = job.get('status_transitions', [])
+        self.assertTrue(transitions)
+        self.assertEqual('queued', transitions[0].get('from'))
+        self.assertEqual('planning', transitions[0].get('to'))
+        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'timed_out', 'failed_unrecoverable', 'killed'})
+
+        telemetry = client.get('/api/telemetry')
+        self.assertEqual(200, telemetry.status_code)
+        payload = telemetry.get_json() or {}
+        self.assertIn('harness_counts', (payload.get('telemetry') or {}))
+
     def test_background_job_tracks_terminal_event(self) -> None:
         from mu_cli.web import create_app
 
@@ -701,6 +752,34 @@ class WebTests(unittest.TestCase):
         self.assertIn('checkpoints', job)
         self.assertIsInstance(job.get('checkpoints', []), list)
         self.assertIn('answer_contract', job)
+
+    def test_background_job_nudges_until_satisfactory_contract(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'max_runtime_seconds': 45, 'approval_mode': 'auto'})
+        res = client.post('/api/chat/background', json={'text': 'Please summarize status updates only.'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 6
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] in {'completed', 'failed', 'timed_out'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertIn(job['status'], {'completed', 'failed', 'timed_out'})
+        self.assertTrue(any('unsatisfactory_answer_nudge' in event for event in job.get('events', [])))
+        contract = job.get('answer_contract') or {}
+        self.assertIn('satisfactory', contract)
 
 
     def test_user_journey_new_chat_stream_clear_happy_path(self) -> None:

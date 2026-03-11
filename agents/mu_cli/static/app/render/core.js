@@ -1856,9 +1856,16 @@ function renderMessages() {
     bubble.className = 'bubble';
     const status = escapeHtml(String(job.status || 'unknown'));
     const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
-    const events = Array.isArray(job.events) ? job.events.map((line) => escapeHtml(String(line || ''))).join('\n') : '';
+    const fallbackTimelineEvents = timelineEventsForActiveSession().slice(-40);
+    const eventLinesRaw = (Array.isArray(job.events) && job.events.length)
+      ? job.events
+      : fallbackTimelineEvents;
+    const events = eventLinesRaw.map((line) => escapeHtml(String(line || ''))).join('\n');
     const plan = escapeHtml(String(job.plan || '(not drafted)'));
-    const stages = buildJobStageLines(job).map((line) => escapeHtml(line)).join('\n');
+    const stageLines = buildJobStageLines(job);
+    const fallbackStages = fallbackTimelineEvents
+      .filter((line) => String(line || '').startsWith('plan:') || String(line || '').startsWith('status:') || String(line || '').startsWith('tool-request:') || String(line || '').startsWith('tool-run:'));
+    const stages = (stageLines.length ? stageLines : fallbackStages).map((line) => escapeHtml(line)).join('\n');
     const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
     bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Plan</strong><pre><code>${plan}</code></pre><strong>Stages</strong><pre><code>${stages || '(no stages yet)'}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
     row.appendChild(bubble);

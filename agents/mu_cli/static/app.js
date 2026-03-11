@@ -720,6 +720,32 @@ function classifyBackgroundEvent(line) {
   return '';
 }
 
+function _formatCheckpointStage(checkpoint) {
+  if (!checkpoint || typeof checkpoint !== 'object') return '';
+  const iter = Number(checkpoint.iteration || 0);
+  const summary = String(checkpoint.summary || '').trim();
+  const stamp = formatTimestamp(checkpoint.timestamp || '');
+  const head = iter > 0 ? `Stage ${iter}` : 'Stage';
+  return `${head}${stamp ? ` · ${stamp}` : ''}${summary ? ` · ${summary}` : ''}`;
+}
+
+function buildJobStageLines(job) {
+  const stages = [];
+  const checkpoints = Array.isArray(job && job.checkpoints) ? job.checkpoints : [];
+  checkpoints.slice(-8).forEach((cp) => {
+    const line = _formatCheckpointStage(cp);
+    if (line) stages.push(line);
+  });
+
+  const events = Array.isArray(job && job.events) ? job.events : [];
+  for (const line of events) {
+    if (String(line).startsWith('plan:') || String(line).startsWith('status:') || String(line).startsWith('verification:')) {
+      stages.push(String(line));
+    }
+  }
+  return stages.slice(-16);
+}
+
 function timelineEventsForActiveSession() {
   const traces = (state.traces || []).map((line) => String(line || '')).filter(Boolean);
   const jobs = (state.backgroundJobs || []).filter((j) => j && j.session === state.activeSession);
@@ -757,13 +783,21 @@ function renderBackgroundActivity(job) {
   if (!recentEvents.length) {
     body.innerHTML = '<div class="bg-live-empty">No activity yet.</div>';
   } else {
+    const planText = String((job && job.plan) || '').trim();
+    const stageLines = buildJobStageLines(job);
+    const planBlock = planText
+      ? `<div class="bg-live-section"><div class="bg-live-section-title">Plan</div><pre><code>${escapeHtml(planText)}</code></pre></div>`
+      : '';
+    const stageBlock = stageLines.length
+      ? `<div class="bg-live-section"><div class="bg-live-section-title">Stages</div>${stageLines.map((line) => `<div class="bg-live-line stage">${escapeHtml(line)}</div>`).join('')}</div>`
+      : '';
     body.innerHTML = recentEvents.map((line) => {
       const cls = classifyBackgroundEvent(line);
       const safe = escapeHtml(String(line));
       const stamp = timestampFromEventLine(line);
       const stampHtml = stamp ? `<span class="bg-live-time">${escapeHtml(stamp)}</span>` : '';
       return `<div class="bg-live-line ${cls}">${stampHtml}<span>${safe}</span></div>`;
-    }).join('');
+    }).join('') + planBlock + stageBlock;
     body.scrollTop = body.scrollHeight;
   }
   panel.open = active;
@@ -1877,8 +1911,10 @@ function renderMessages() {
     const status = escapeHtml(String(job.status || 'unknown'));
     const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
     const events = Array.isArray(job.events) ? job.events.map((line) => escapeHtml(String(line || ''))).join('\n') : '';
+    const plan = escapeHtml(String(job.plan || '(not drafted)'));
+    const stages = buildJobStageLines(job).map((line) => escapeHtml(line)).join('\n');
     const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
-    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
+    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Plan</strong><pre><code>${plan}</code></pre><strong>Stages</strong><pre><code>${stages || '(no stages yet)'}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
     row.appendChild(bubble);
     box.appendChild(row);
   });

@@ -40,26 +40,33 @@ class OllamaProvider:
                 payload: dict[str, Any] = {"role": "assistant", "content": message.content}
                 tool_calls = message.metadata.get("tool_calls")
                 if tool_calls:
-                    payload["tool_calls"] = [
-                        {
-                            "id": item.get("id") or "call_generated",
-                            "type": "function",
-                            "function": {
-                                "name": item["name"],
-                                "arguments": item["arguments"],
-                            },
-                        }
-                        for item in tool_calls
-                    ]
+                    normalized_calls = []
+                    for item in tool_calls:
+                        raw_args = item.get("arguments", {})
+                        if isinstance(raw_args, str):
+                            try:
+                                parsed_args = json.loads(raw_args)
+                            except json.JSONDecodeError:
+                                parsed_args = {}
+                        elif isinstance(raw_args, dict):
+                            parsed_args = raw_args
+                        else:
+                            parsed_args = {}
+
+                        normalized_calls.append(
+                            {
+                                "id": item.get("id") or "call_generated",
+                                "type": "function",
+                                "function": {
+                                    "name": item["name"],
+                                    "arguments": parsed_args,
+                                },
+                            }
+                        )
+                    payload["tool_calls"] = normalized_calls
                 converted.append(payload)
             elif message.role is Role.TOOL_RESULT:
-                converted.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": message.metadata.get("tool_call_id", "call_generated"),
-                        "content": message.content,
-                    }
-                )
+                converted.append({"role": "tool", "content": message.content})
         return converted
 
     @staticmethod

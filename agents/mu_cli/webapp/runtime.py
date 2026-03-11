@@ -45,6 +45,8 @@ class WebRuntime:
     pending_approval: dict[str, Any] | None = None
     background_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_runtime_seconds: int = 900
+    debug_level: str = "info"
+    ollama_context_window: int = 65536
     condense_enabled: bool = False
     condense_window: int = 12
     summary_index: list[dict[str, Any]] = field(default_factory=list)

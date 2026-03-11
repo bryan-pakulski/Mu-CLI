@@ -30,9 +30,6 @@ async function sendPrompt(background = false) {
   updateChatBusyState();
   document.getElementById('prompt').value = '';
 
-  if (approvalPoll) clearInterval(approvalPoll);
-  approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1000);
-
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
@@ -47,31 +44,7 @@ async function sendPrompt(background = false) {
       const active = selectedSessionName();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
       reportEl.textContent = `background job started: ${bg.job_id}`;
-      const pollUntilDone = async () => {
-        for (let i = 0; i < 120; i += 1) {
-          const job = await api(`/api/jobs/${bg.job_id}`);
-          updateBackgroundJobInState(job);
-          if (job.session === state.activeSession) { renderBackgroundActivity(job); renderMetadataPanel(); }
-          if (job.usage && job.session === state.activeSession) updateUsagePanel(job.usage);
-          updateQueryRuntime();
-          if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
-          if (job.status === 'awaiting_plan_approval') {
-            const approval = await askPlanApproval(job);
-            await api(`/api/jobs/${bg.job_id}/plan`, 'POST', {
-              decision: approval.ok ? 'approve' : 'deny',
-              revised_plan: approval.revisedPlan || undefined,
-            });
-          }
-          if (['completed', 'failed', 'timed_out'].includes(job.status)) {
-            reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
-            maybeRecordJobTerminalNotice(job);
-            await refreshState();
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-      };
-      pollUntilDone().catch(() => {});
+      startBackgroundJobStream(bg.job_id, bg.session || active || state.activeSession || '');
       await refreshState();
       return;
     }
@@ -124,10 +97,6 @@ async function sendPrompt(background = false) {
 
     await refreshState();
   } finally {
-    if (approvalPoll) {
-      clearInterval(approvalPoll);
-      approvalPoll = null;
-    }
     updateThinking(false);
     sending = false;
     sendingSession = null;
@@ -209,9 +178,29 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
   await api('/api/session', 'POST', { action, name, ...extra });
+  if (action === 'clear' && name) {
+    clearSessionLiveRunArtifacts(name);
+  }
   if (action === 'switch' && name) markSessionRecent(name);
   await refreshState();
   if (action === 'condense') status.textContent = 'Session context condensed.';
+}
+
+function clearSessionLiveRunArtifacts(sessionName) {
+  const session = String(sessionName || '').trim();
+  if (!session) return;
+  delete runNoticesBySession[session];
+  delete pendingBackgroundPromptsBySession[session];
+
+  const jobs = Array.isArray(state.backgroundJobs) ? state.backgroundJobs.slice() : [];
+  jobs
+    .filter((job) => job && String(job.session || '') === session)
+    .forEach((job) => stopBackgroundJobStream(job.id));
+  state.backgroundJobs = jobs.filter((job) => !job || String(job.session || '') !== session);
+
+  state.traces = [];
+  const reportEl = document.getElementById('report');
+  if (reportEl) reportEl.textContent = '';
 }
 
 function byId(id) {

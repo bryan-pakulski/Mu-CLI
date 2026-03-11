@@ -159,6 +159,48 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, status.status_code)
         self.assertEqual('stream-session', status.get_json()['session'])
 
+    def test_background_job_stream_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        start = client.post('/api/chat/background', json={'text': 'hello'})
+        self.assertEqual(200, start.status_code)
+        payload = start.get_json()
+        assert payload is not None
+        job_id = payload['job_id']
+
+        res = client.get(f'/api/jobs/{job_id}/stream', buffered=False)
+        self.assertEqual(200, res.status_code)
+        got_status = False
+        for idx, chunk in enumerate(res.response):
+            text = chunk.decode('utf-8').strip()
+            if not text:
+                continue
+            event = json.loads(text)
+            if event.get('type') == 'status':
+                got_status = True
+                break
+            if idx > 30:
+                break
+        self.assertTrue(got_status)
+
+    def test_approval_stream_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.get('/api/approval/stream', buffered=False)
+        self.assertEqual(200, res.status_code)
+        first = next(iter(res.response)).decode('utf-8').strip()
+        event = json.loads(first)
+        self.assertEqual('approval', event.get('type'))
+        self.assertIn('pending', event)
+
     def test_web_approval_deny_mode_rejects_mutating_tool(self) -> None:
         from mu_cli.web import create_app
 
@@ -173,6 +215,32 @@ class WebTests(unittest.TestCase):
         assert payload is not None
         self.assertIn('reply', payload)
         self.assertIn('rejected by approval policy', payload['reply']['content'])
+
+    def test_background_job_auto_mode_skips_plan_wait(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        set_mode = client.post('/api/settings', json={'approval_mode': 'auto'})
+        self.assertEqual(200, set_mode.status_code)
+
+        start = client.post('/api/chat/background', json={'text': 'Collect two references about autonomous driving in 2025.'})
+        self.assertEqual(200, start.status_code)
+        payload = start.get_json() or {}
+        job_id = payload.get('job_id')
+        self.assertTrue(job_id)
+
+        for _ in range(30):
+            job_res = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, job_res.status_code)
+            job = job_res.get_json() or {}
+            status = str(job.get('status') or '')
+            self.assertNotEqual('awaiting_plan_approval', status)
+            if status in {'completed', 'failed', 'timed_out', 'killed'}:
+                break
+            time.sleep(0.1)
 
 
     def test_pricing_endpoint_replaces_full_document(self) -> None:

@@ -7,7 +7,6 @@ const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns:
 let syncing = false;
 let applyTimer = null;
 let sending = false;
-let approvalPoll = null;
 let selectedDir = null;
 let lastApprovalPatchFingerprint = null;
 let openSessionMenuFor = null;
@@ -15,10 +14,12 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
-const metadataExpandedKeys = new Set();
 let sendingSession = null;
 const runNoticesBySession = {};
 const runDetailsById = {};
+const backgroundStreamAbortByJob = {};
+const backgroundStreamDraftByJob = {};
+let approvalStreamAbort = null;
 
 // >>> app/network.js
 // --- networking helpers -----------------------------------------------------
@@ -55,7 +56,8 @@ async function parseJsonResponse(res) {
 // >>> app/render/core.js
 // --- render functions -------------------------------------------------------
 
-
+const pendingBackgroundPromptsBySession = globalThis.pendingBackgroundPromptsBySession || {};
+const metadataExpandedKeys = globalThis.metadataExpandedKeys || new Set();
 
 
 function _readStage3Store() {
@@ -90,7 +92,7 @@ function renderRulesVersions() {
   const sel = document.getElementById('rulesVersionSelect');
   if (!sel) return;
   const versions = store.rulesVersions || [];
-  sel.innerHTML = versions.map((v) => `<option value="${_escapeAttr(v.id)}">${escapeHtml(v.label)} · ${escapeHtml(v.created_at)}</option>`).join('');
+  sel.innerHTML = versions.map((v) => `<option value="${_escapeAttr(v.id)}">${escapeHtml(v.label)} · ${escapeHtml(formatTimestamp(v.created_at) || String(v.created_at || ''))}</option>`).join('');
   if (!versions.length) sel.innerHTML = '<option value="">(no versions)</option>';
 }
 
@@ -160,7 +162,6 @@ async function openSessionOverridesModal(sessionName) {
   const currentSession = state.activeSession || '';
   if (currentSession !== name) {
     await api('/api/session', 'POST', { action: 'switch', name });
-    flushStreamRender(true);
     await refreshState();
   }
 
@@ -721,6 +722,32 @@ function classifyBackgroundEvent(line) {
   return '';
 }
 
+function _formatCheckpointStage(checkpoint) {
+  if (!checkpoint || typeof checkpoint !== 'object') return '';
+  const iter = Number(checkpoint.iteration || 0);
+  const summary = String(checkpoint.summary || '').trim();
+  const stamp = formatTimestamp(checkpoint.timestamp || '');
+  const head = iter > 0 ? `Stage ${iter}` : 'Stage';
+  return `${head}${stamp ? ` · ${stamp}` : ''}${summary ? ` · ${summary}` : ''}`;
+}
+
+function buildJobStageLines(job) {
+  const stages = [];
+  const checkpoints = Array.isArray(job && job.checkpoints) ? job.checkpoints : [];
+  checkpoints.slice(-8).forEach((cp) => {
+    const line = _formatCheckpointStage(cp);
+    if (line) stages.push(line);
+  });
+
+  const events = Array.isArray(job && job.events) ? job.events : [];
+  for (const line of events) {
+    if (String(line).startsWith('plan:') || String(line).startsWith('status:') || String(line).startsWith('verification:')) {
+      stages.push(String(line));
+    }
+  }
+  return stages.slice(-16);
+}
+
 function timelineEventsForActiveSession() {
   const traces = (state.traces || []).map((line) => String(line || '')).filter(Boolean);
   const jobs = (state.backgroundJobs || []).filter((j) => j && j.session === state.activeSession);
@@ -731,6 +758,7 @@ function timelineEventsForActiveSession() {
 }
 
 let _lastBackgroundActivityKey = null;
+const _terminalJobStateSynced = new Set();
 function renderBackgroundActivity(job) {
   const events = Array.isArray(job && job.events) ? job.events : [];
   const eventTail = events.length ? String(events[events.length - 1]).slice(0, 120) : '';
@@ -757,11 +785,21 @@ function renderBackgroundActivity(job) {
   if (!recentEvents.length) {
     body.innerHTML = '<div class="bg-live-empty">No activity yet.</div>';
   } else {
+    const planText = String((job && job.plan) || '').trim();
+    const stageLines = buildJobStageLines(job);
+    const planBlock = planText
+      ? `<div class="bg-live-section"><div class="bg-live-section-title">Plan</div><pre><code>${escapeHtml(planText)}</code></pre></div>`
+      : '';
+    const stageBlock = stageLines.length
+      ? `<div class="bg-live-section"><div class="bg-live-section-title">Stages</div>${stageLines.map((line) => `<div class="bg-live-line stage">${escapeHtml(line)}</div>`).join('')}</div>`
+      : '';
     body.innerHTML = recentEvents.map((line) => {
       const cls = classifyBackgroundEvent(line);
       const safe = escapeHtml(String(line));
-      return `<div class="bg-live-line ${cls}">${safe}</div>`;
-    }).join('');
+      const stamp = timestampFromEventLine(line);
+      const stampHtml = stamp ? `<span class="bg-live-time">${escapeHtml(stamp)}</span>` : '';
+      return `<div class="bg-live-line ${cls}">${stampHtml}<span>${safe}</span></div>`;
+    }).join('') + planBlock + stageBlock;
     body.scrollTop = body.scrollHeight;
   }
   panel.open = active;
@@ -770,24 +808,109 @@ function renderBackgroundActivity(job) {
 
 function beginBackgroundPolling() {
   if (backgroundJobPoll) return;
-  backgroundJobPoll = setInterval(async () => {
+  backgroundJobPoll = setInterval(() => {
     try {
-      const job = activeSearchingJob();
-      if (!job) return;
-      const latest = await api(`/api/jobs/${job.id}`);
-      updateBackgroundJobInState(latest);
-      await pollApproval();
-      if (latest.usage) updateUsagePanel(latest.usage);
-      const reportEl = document.getElementById('report');
-      if (reportEl) {
-        if (latest.last_step) reportEl.textContent = `background ${latest.status}: ${latest.last_step}`;
-        else reportEl.textContent = `background ${latest.status}: ${latest.iterations || 0} iteration(s)`;
+      for (const job of (state.backgroundJobs || [])) {
+        const id = String((job && job.id) || '');
+        if (!id) continue;
+        const status = String((job && job.status) || '');
+        if (['running', 'awaiting_plan_approval'].includes(status)) {
+          startBackgroundJobStream(id, job.session || state.activeSession || '');
+        } else {
+          stopBackgroundJobStream(id);
+        }
       }
-      if (latest.session === state.activeSession) { renderBackgroundActivity(latest); renderMetadataPanel(); }
     } catch (_) {
-      // ignored to avoid breaking UI polling loop
+      // keep UI alive even if stream supervision fails
     }
-  }, 900);
+  }, 2000);
+}
+
+function stopBackgroundJobStream(jobId) {
+  const key = String(jobId || '');
+  if (!key) return;
+  const ctl = backgroundStreamAbortByJob[key];
+  if (ctl) {
+    try { ctl.abort(); } catch (_) { /* no-op */ }
+  }
+  delete backgroundStreamAbortByJob[key];
+  delete backgroundStreamDraftByJob[key];
+}
+
+async function startBackgroundJobStream(jobId, sessionName) {
+  const key = String(jobId || '');
+  if (!key || backgroundStreamAbortByJob[key]) return;
+  const controller = new AbortController();
+  backgroundStreamAbortByJob[key] = controller;
+  try {
+    const res = await fetch(`/api/jobs/${encodeURIComponent(key)}/stream`, { signal: controller.signal });
+    if (!res.ok || !res.body) throw new Error('background stream unavailable');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'heartbeat') continue;
+        const job = (state.backgroundJobs || []).find((j) => String(j.id || '') === key);
+        if (!job) continue;
+        if (event.type === 'assistant_chunk' || event.type === 'thinking_chunk') {
+          const tag = event.type === 'thinking_chunk' ? 'thinking_output' : 'assistant';
+          let draft = backgroundStreamDraftByJob[key];
+          if (!draft) {
+            draft = { role: 'assistant', content: '', metadata: { kind: 'background_stream', stream_job_id: key } };
+            if (tag === 'thinking_output') draft.metadata.kind = 'thinking_output';
+            backgroundStreamDraftByJob[key] = draft;
+            if (String(sessionName || '') === String(state.activeSession || '')) state.messages.push(draft);
+          }
+          draft.content += String(event.chunk || '');
+          renderMessages();
+        } else if (event.type === 'assistant_message') {
+          if (String(event.content || '').trim()) {
+            job.last_step = String(event.content || '').slice(0, 240);
+            job.final_response = String(event.content || '');
+            const draft = backgroundStreamDraftByJob[key];
+            if (draft && !String(draft.content || '').trim()) draft.content = String(event.content || '');
+            renderMessages();
+          }
+        } else if (event.type === 'trace') {
+          const line = String(event.line || '');
+          if (line) {
+            if (!Array.isArray(job.events)) job.events = [];
+            job.events.push(line);
+            if (job.events.length > 120) job.events = job.events.slice(-120);
+            state.traces.push(line);
+            state.traces = state.traces.slice(-80);
+            renderTraces();
+          }
+        } else if (event.type === 'checkpoint' && event.checkpoint) {
+          if (!Array.isArray(job.checkpoints)) job.checkpoints = [];
+          job.checkpoints.push(event.checkpoint);
+          if (job.checkpoints.length > 30) job.checkpoints = job.checkpoints.slice(-30);
+        } else if (event.type === 'status') {
+          if (event.status) job.status = String(event.status);
+          if (event.last_step) job.last_step = String(event.last_step);
+        } else if (event.type === 'error') {
+          job.status = 'failed';
+          job.error = String(event.error || 'background stream error');
+        } else if (event.type === 'done') {
+          if (event.status) job.status = String(event.status);
+        }
+        updateBackgroundJobInState(job);
+        renderMetadataPanel();
+      }
+    }
+  } catch (_) {
+    // background polling remains as fallback
+  } finally {
+    stopBackgroundJobStream(key);
+  }
 }
 
 
@@ -803,10 +926,7 @@ function _locGenerated(messages) {
 }
 
 function _formatChartTimeLabel(value) {
-  if (!value) return '';
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return '';
-  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return formatTimestamp(value);
 }
 
 function _drawMetricChart(canvas, points, { yLabel, valueFormatter }) {
@@ -984,7 +1104,15 @@ function formatTimestamp(value) {
   const year = String(dt.getFullYear());
   const hours = String(dt.getHours()).padStart(2, '0');
   const minutes = String(dt.getMinutes()).padStart(2, '0');
-  return `${day}/${month}/${year} ${hours}:${minutes}`;
+  const seconds = String(dt.getSeconds()).padStart(2, '0');
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+}
+
+function timestampFromEventLine(line) {
+  const text = String(line || '');
+  const match = text.match(/\[([^\]]+)\]/);
+  if (!match) return '';
+  return formatTimestamp(match[1]);
 }
 
 function inferMessageTimestamps(messages, turns) {
@@ -1169,6 +1297,26 @@ function renderSideBySideDiff(diffText) {
 
 function formatMessageContent(content) {
   const source = String(content || '');
+  const markedApi = window.marked;
+  const purifierApi = window.DOMPurify;
+  if (markedApi && typeof markedApi.parse === 'function' && purifierApi && typeof purifierApi.sanitize === 'function') {
+    try {
+      markedApi.setOptions({
+        breaks: true,
+        gfm: true,
+        headerIds: false,
+        mangle: false,
+      });
+      const markdownHtml = markedApi.parse(source || '');
+      const cleaned = purifierApi.sanitize(markdownHtml, {
+        USE_PROFILES: { html: true },
+      });
+      if (String(cleaned || '').trim()) return cleaned;
+    } catch (_err) {
+      // fall through to local formatter
+    }
+  }
+
   let html = '';
   const blockPattern = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
   const trimmed = source.trim();
@@ -1295,21 +1443,21 @@ function scoreReasonsByUrl(messages, assistantIndex) {
   return reasons;
 }
 
-function buildCitationPanel(content, reasonsByUrl={}) {
+function buildCitationPanel(content, reasonsByUrl={}, citationIdPrefix='citation') {
   const links = extractCitationLinks(content);
   if (!links.length) return '';
   const items = links.map((url, idx) => `
-    <div id="citation-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${reasonsByUrl[url] ? `<div class="small-muted">why chosen: ${escapeHtml(reasonsByUrl[url])}</div>` : ''}</div>
+    <div id="${escapeHtml(citationIdPrefix)}-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${reasonsByUrl[url] ? `<div class="small-muted">why chosen: ${escapeHtml(reasonsByUrl[url])}</div>` : ''}</div>
   `).join('');
   return `<details class="citation-panel"><summary>ℹ Citations & URLs (${links.length})</summary><div class="citation-list">${items}</div></details>`;
 }
 
-function formatAssistantContentWithCitations(content, links) {
+function formatAssistantContentWithCitations(content, links, citationIdPrefix='citation') {
   let html = formatMessageContent(content);
   html = html.replace(/\[(\d+)\]/g, (full, numText) => {
     const idx = Number(numText);
     if (!Number.isInteger(idx) || idx < 1 || idx > links.length) return full;
-    return `<a href="#citation-${idx}" title="Jump to citation [${idx}]">[${idx}]</a>`;
+    return `<a href="#${escapeHtml(citationIdPrefix)}-${idx}" title="Jump to citation [${idx}]">[${idx}]</a>`;
   });
   return html;
 }
@@ -1564,10 +1712,62 @@ function _metaFilterAllows(kind, label, text) {
 
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
+  const summaryHost = document.getElementById('metaSummary');
   host.querySelectorAll('details.meta-entry[open][data-meta-key]').forEach((el) => metadataExpandedKeys.add(el.dataset.metaKey));
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
+
+  const timelineEvents = timelineEventsForActiveSession();
+  const liveTraceItems = timelineEvents.slice(-36).filter((line) => {
+    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:') || line.startsWith('plan:');
+  });
+
+  const activeJob = (state.backgroundJobs || []).find((j) => j && j.session === state.activeSession && ['running', 'awaiting_plan_approval'].includes(j.status));
+  if (summaryHost) summaryHost.innerHTML = '';
+
+  if (activeJob && Array.isArray(activeJob.events) && activeJob.events.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card meta-live-card';
+    card.innerHTML = `<div class="meta-head"><span>Background task activity</span><span>${escapeHtml(String(activeJob.status || 'running'))} · ${Number(activeJob.iterations || 0)} steps</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const line of activeJob.events.slice(-20).reverse()) {
+      const stamp = timestampFromEventLine(line);
+      const label = stamp ? `Background · ${stamp}` : 'Background';
+      if (_metaFilterAllows('status', label, line)) lines.appendChild(_metaRow('status', label, line));
+    }
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
+  }
+
+  if (liveTraceItems.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card meta-live-card';
+    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    for (const line of liveTraceItems.slice().reverse()) {
+      let kind = 'automation';
+      let label = 'Stream event';
+      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
+      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
+      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
+      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
+      else if (line.startsWith('plan:')) { kind = 'automation'; label = 'Plan'; }
+      const stamp = timestampFromEventLine(line);
+      const effectiveLabel = stamp ? `${label} · ${stamp}` : label;
+      if (_metaFilterAllows(kind, effectiveLabel, line)) lines.appendChild(_metaRow(kind, effectiveLabel, line));
+    }
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
+  }
 
   const ws = state.workspaceIndexStats || {};
   if (Object.keys(ws).length && _metaFilterAllows('workspace', 'Workspace indexing', 'workspace stats')) {
@@ -1606,31 +1806,6 @@ function renderMetadataPanel() {
     for (const item of meta.citationItems) if (_metaFilterAllows('citation', 'Citation', item)) lines.appendChild(_metaRow('citation', 'Citation', item));
     for (const item of meta.researchSteps) if (_metaFilterAllows('research', 'Research step', item)) lines.appendChild(_metaRow('research', 'Research step', item));
 
-    if (lines.childElementCount) {
-      card.appendChild(lines);
-      host.appendChild(card);
-      cards += 1;
-    }
-  }
-
-  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
-    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
-  });
-  if (liveTraceItems.length) {
-    const card = document.createElement('div');
-    card.className = 'meta-card';
-    card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
-    const lines = document.createElement('div');
-    lines.className = 'meta-lines';
-    for (const line of liveTraceItems.slice().reverse()) {
-      let kind = 'automation';
-      let label = 'Stream event';
-      if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
-      else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
-      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
-      else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
-      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
-    }
     if (lines.childElementCount) {
       card.appendChild(lines);
       host.appendChild(card);
@@ -1695,8 +1870,8 @@ function _jobDetailsText(job) {
   lines.push(`Job: ${job.id || '-'}`);
   lines.push(`Status: ${job.status || '-'}`);
   lines.push(`Iterations: ${job.iterations || 0}`);
-  if (job.started_at) lines.push(`Started: ${job.started_at}`);
-  if (job.finished_at) lines.push(`Finished: ${job.finished_at}`);
+  if (job.started_at) lines.push(`Started: ${formatTimestamp(job.started_at) || job.started_at}`);
+  if (job.finished_at) lines.push(`Finished: ${formatTimestamp(job.finished_at) || job.finished_at}`);
   if (job.error) lines.push(`Error: ${job.error}`);
   if (job.report) {
     lines.push('');
@@ -1723,18 +1898,69 @@ function _jobDetailsText(job) {
 
 function maybeRecordJobTerminalNotice(job) {
   if (!job || !job.id || !job.session) return;
-  if (job.status !== 'timed_out') return;
+  if (!['timed_out', 'completed'].includes(String(job.status || ''))) return;
   const session = String(job.session);
-  const id = `timeout-${job.id}`;
+  const isTimeout = job.status === 'timed_out';
+  const id = `${isTimeout ? 'timeout' : 'completed'}-${job.id}`;
   const notices = runNoticesBySession[session] || [];
   if (notices.some((n) => n.id === id)) return;
   const details = _jobDetailsText(job);
   runDetailsById[id] = details;
+  const startedMs = Date.parse(String(job.started_at || ''));
+  const finishedMs = Date.parse(String(job.finished_at || ''));
+  const runtimeSeconds = (!Number.isNaN(startedMs) && !Number.isNaN(finishedMs) && finishedMs >= startedMs)
+    ? (finishedMs - startedMs) / 1000
+    : 0;
+  const startedLabel = formatTimestamp(job.started_at || '') || 'unknown';
+  const runtimeLabel = _formatRuntime(runtimeSeconds);
   notices.push({
     id,
-    text: 'Agent timed out before completing this run.',
+    text: isTimeout
+      ? `Agent timed out before completing this run.\nStarted: ${startedLabel}\nRuntime: ${runtimeLabel}`
+      : `Run completed successfully.\nStarted: ${startedLabel}\nRuntime: ${runtimeLabel}`,
+    timestamp: job.finished_at || new Date().toISOString(),
+    started_at: startedLabel,
+    runtime: runtimeLabel,
   });
   runNoticesBySession[session] = notices;
+}
+
+function _systemEventLabel(message) {
+  const role = String((message && message.role) || '').toLowerCase();
+  if (role === 'tool_call') return 'TOOL CALL';
+  if (role === 'tool_result') return 'TOOL RESULT';
+  if (role === 'system') return 'SYSTEM';
+  if (!role) return 'SYSTEM EVENT';
+  return role.replace(/_/g, ' ').toUpperCase();
+}
+
+function _systemEventSummary(message) {
+  const label = _systemEventLabel(message);
+  const text = String((message && message.content) || '').trim();
+  const toolMatch = text.match(/\[tool=([^\]]+)\]/);
+  const toolName = toolMatch ? ` · ${toolMatch[1]}` : '';
+  const singleLine = text.replace(/\s+/g, ' ');
+  const preview = singleLine ? (singleLine.length > 120 ? `${singleLine.slice(0, 117)}...` : singleLine) : '(no content)';
+  return `${label}${toolName} · ${preview}`;
+}
+
+function _systemGroupSummary(messages) {
+  const rows = Array.isArray(messages) ? messages : [];
+  if (!rows.length) return 'SYSTEM EVENT · (no content)';
+  const counts = {};
+  for (const item of rows) {
+    const label = _systemEventLabel(item);
+    counts[label] = (counts[label] || 0) + 1;
+  }
+  const parts = Object.keys(counts)
+    .sort()
+    .map((label) => `${label}${counts[label] > 1 ? `×${counts[label]}` : ''}`);
+  const tail = _systemEventSummary(rows[rows.length - 1]).split(' · ').slice(1).join(' · ');
+  return `${parts.join(' + ')} · ${tail || '(no content)'}`;
+}
+
+function _tagPill(label, kind) {
+  return `<span class="msg-tag msg-tag-${_escapeAttr(kind || 'default')}">${escapeHtml(label || '')}</span>`;
 }
 
 function openRunDetails(id, title = '') {
@@ -1750,13 +1976,98 @@ function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
+  const chatJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
+    .slice()
+    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
+
+  function _appendLiveRunRows() {
+    chatJobs.forEach((job) => {
+      const row = document.createElement('div');
+      row.className = 'msg role-assistant';
+      row.innerHTML = '<div class="role">assistant</div>';
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      const jobStamp = formatTimestamp(job.started_at || job.finished_at || '') || formatTimestamp(new Date().toISOString());
+      meta.innerHTML = `${_tagPill('Live run activity', 'live-run')}<span class="msg-time">${escapeHtml(jobStamp)}</span>`;
+      row.appendChild(meta);
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      const status = escapeHtml(String(job.status || 'unknown'));
+      const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
+      const fallbackTimelineEvents = timelineEventsForActiveSession().slice(-40);
+      const eventLinesRaw = (Array.isArray(job.events) && job.events.length)
+        ? job.events
+        : fallbackTimelineEvents;
+      const events = eventLinesRaw.map((line) => escapeHtml(String(line || ''))).join('\n');
+      const plan = escapeHtml(String(job.plan || '(not drafted)'));
+      const stageLines = buildJobStageLines(job);
+      const fallbackStages = fallbackTimelineEvents
+        .filter((line) => String(line || '').startsWith('plan:') || String(line || '').startsWith('status:') || String(line || '').startsWith('tool-request:') || String(line || '').startsWith('tool-run:'));
+      const stages = (stageLines.length ? stageLines : fallbackStages).map((line) => escapeHtml(line)).join('\n');
+      const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
+      bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Plan</strong><pre><code>${plan}</code></pre><strong>Stages</strong><pre><code>${stages || '(no stages yet)'}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
+      row.appendChild(bubble);
+      box.appendChild(row);
+      anchor = row;
+    });
+  }
+
+  let lastAssistantIdx = -1;
+  for (let idx = 0; idx < state.messages.length; idx += 1) {
+    const m = state.messages[idx];
+    if (!m || m.role !== 'assistant') continue;
+    if (!shouldRenderMessage(m)) continue;
+    if (!String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) continue;
+    lastAssistantIdx = idx;
+  }
 
   let anchor = null;
-  state.messages.forEach((m, idx) => {
-    if (!shouldRenderMessage(m)) return;
+  for (let idx = 0; idx < state.messages.length; idx += 1) {
+    const m = state.messages[idx];
+    if (!shouldRenderMessage(m)) continue;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) return;
-    if (m.role === 'tool_result' || m.role === 'tool_call') return;
+    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) continue;
+    if (m.role !== 'user' && m.role !== 'assistant') {
+      const grouped = [m];
+      let j = idx + 1;
+      while (j < state.messages.length) {
+        const next = state.messages[j];
+        if (!shouldRenderMessage(next)) {
+          j += 1;
+          continue;
+        }
+        if (!next || next.role === 'user' || next.role === 'assistant') break;
+        grouped.push(next);
+        j += 1;
+      }
+
+      const row = document.createElement('div');
+      row.className = 'msg role-assistant role-system-event';
+      row.innerHTML = '<div class="role">assistant</div>';
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      const stamp = formatTimestamp(messageTimes.get(idx)) || formatTimestamp(new Date().toISOString());
+      meta.innerHTML = `${_tagPill('SYSTEM', 'system')}<span class="msg-time">${escapeHtml(stamp)}</span>`;
+      row.appendChild(meta);
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble compact-system-bubble';
+      const summary = _systemGroupSummary(grouped);
+      const body = grouped
+        .map((item) => {
+          const label = _systemEventLabel(item);
+          const text = String((item && item.content) || '(no content)');
+          return `[${label}]\n${text}`;
+        })
+        .join('\n\n');
+      bubble.innerHTML = `<details class="system-event-details"><summary>${escapeHtml(summary)}</summary><pre><code>${escapeHtml(body)}</code></pre></details>`;
+      row.appendChild(bubble);
+      box.appendChild(row);
+      anchor = row;
+      idx = j - 1;
+      continue;
+    }
 
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;
@@ -1767,58 +2078,48 @@ function renderMessages() {
       meta.className = 'msg-meta';
       let tag = m.role === 'user' ? 'You' : 'AI';
       if (m.role === 'assistant' && m.metadata && m.metadata.kind === 'thinking_output') tag = 'thinking output';
-      const stamp = formatTimestamp(messageTimes.get(idx));
-      meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
+      const stamp = formatTimestamp(messageTimes.get(idx)) || formatTimestamp(new Date().toISOString());
+      const tagKind = m.role === 'user' ? 'user' : (tag === 'thinking output' ? 'thinking' : 'ai');
+      meta.innerHTML = `${_tagPill(tag, tagKind)}<span class="msg-time">${escapeHtml(stamp)}</span>`;
       row.appendChild(meta);
     }
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
+    const citationPrefix = `msg-${idx}-citation`;
     if (m.role === 'tool_result' && m.metadata && m.metadata.kind === 'session_condensed_summary') {
       bubble.innerHTML = `<details><summary>Condensed summary (${escapeHtml(m.metadata.summary_id || '')})</summary><div class="small-muted mt-1">${formatMessageContent(m.content)}</div></details>`;
     } else if (m.role === 'assistant' && m.metadata && m.metadata.typing) bubble.innerHTML = '<p class="typing-dots"><span></span><span></span><span></span></p>';
     else bubble.innerHTML = m.role === 'assistant'
-      ? formatAssistantContentWithCitations(m.content, citationLinks)
+      ? formatAssistantContentWithCitations(m.content, citationLinks, citationPrefix)
       : formatMessageContent(m.content);
+    if (m.role === 'assistant' && citationLinks.length) {
+      const reasonsByUrl = scoreReasonsByUrl(state.messages, idx);
+      bubble.innerHTML += buildCitationPanel(m.content, reasonsByUrl, citationPrefix);
+    }
     row.appendChild(bubble);
     box.appendChild(row);
     anchor = row;
 
-  });
-
-
-  const chatJobs = (state.backgroundJobs || [])
-    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
-    .slice()
-    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
-  chatJobs.forEach((job) => {
-    const row = document.createElement('div');
-    row.className = 'msg role-assistant';
-    row.innerHTML = '<div class="role">assistant</div>';
-    const meta = document.createElement('div');
-    meta.className = 'msg-meta';
-    meta.innerHTML = '<span class="msg-tag">Live run activity</span><span class="msg-time">background</span>';
-    row.appendChild(meta);
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    const status = escapeHtml(String(job.status || 'unknown'));
-    const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
-    const events = Array.isArray(job.events) ? job.events.map((line) => escapeHtml(String(line || ''))).join('\n') : '';
-    const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
-    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
-    row.appendChild(bubble);
-    box.appendChild(row);
-  });
+    if (idx === lastAssistantIdx) {
+      _appendLiveRunRows();
+    }
+  }
+  if (lastAssistantIdx < 0) _appendLiveRunRows();
 
   const notices = runNoticesBySession[state.activeSession || ''] || [];
   notices.forEach((notice) => {
     const row = document.createElement('div');
     row.className = 'msg role-assistant';
-    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta"><span class="msg-tag">System</span><span class="msg-time">notice</span></div>`;
+    const noticeStamp = formatTimestamp(notice.timestamp || '') || formatTimestamp(new Date().toISOString());
+    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta">${_tagPill('SYSTEM', 'system')}<span class="msg-time">${escapeHtml(noticeStamp)}</span></div>`;
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = `<p>${escapeHtml(notice.text)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;
+    const noticeText = String(notice.text || '').split('\n')[0] || 'Agent timed out before completing this run.';
+    const startedText = String(notice.started_at || 'unknown');
+    const runtimeText = String(notice.runtime || '--:--');
+    bubble.innerHTML = `<p>${escapeHtml(noticeText)}</p><p class="small-muted">Started: ${escapeHtml(startedText)} · Runtime: ${escapeHtml(runtimeText)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;
     row.appendChild(bubble);
     box.appendChild(row);
   });
@@ -1831,6 +2132,7 @@ function renderMessages() {
 
 function renderTraces() {
   const el = document.getElementById('traces');
+  if (!el) return;
   const lines = timelineEventsForActiveSession();
   if (!lines.length) {
     el.textContent = 'debug traces will appear here';
@@ -2079,8 +2381,10 @@ function buildToolVisibilityPayload() {
 }
 
 function buildEnabledSkillsPayload() {
+  const toggles = Array.from(document.querySelectorAll('[data-skill-enabled]'));
+  if (!toggles.length) return Array.isArray(state.enabledSkills) ? [...state.enabledSkills] : [];
   const enabled = [];
-  document.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+  toggles.forEach((el) => {
     if (el.checked) enabled.push(el.getAttribute('data-skill-enabled'));
   });
   return enabled;
@@ -2121,6 +2425,7 @@ function renderSkillsLifecycleVisibility() {
 
 function renderSkillSettings() {
   const host = document.getElementById('skillToggleList');
+  if (!host) return;
   const skills = Array.isArray(state.skills) ? state.skills : [];
   const enabled = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
   if (!skills.length) {
@@ -2410,9 +2715,11 @@ function buildSettingsPayload() {
     openai_api_key: document.getElementById('openaiApiKey').value || null,
     google_api_key: document.getElementById('googleApiKey').value || null,
     ollama_endpoint: document.getElementById('ollamaEndpoint').value || null,
+    ollama_context_window: Number(document.getElementById('ollamaContextWindow').value || 65536),
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
-    debug: document.getElementById('debug').checked,
+    debug: document.getElementById('debugLevel').value === 'debug',
+    debug_level: document.getElementById('debugLevel').value || 'info',
     agentic_planning: document.getElementById('agentic').checked,
     research_mode: document.getElementById('researchMode').checked,
     tool_visibility: buildToolVisibilityPayload(),
@@ -2554,22 +2861,63 @@ async function loadDirs(path='') {
   }
 }
 
-async function pollApproval() {
-  const payload = await api('/api/approval');
-  state.pendingApproval = payload.pending;
+function _renderApprovalFromState() {
   const pending = state.pendingApproval;
-
   if (!pending) {
     document.getElementById('approvalPatchPreview').innerHTML = '';
     lastApprovalPatchFingerprint = null;
     showModal('approvalModal', false);
+    renderMetadataPanel();
     return;
   }
-
   document.getElementById('approvalToolName').textContent = `Tool: ${pending.tool_name}`;
   renderApprovalArgs(pending.args);
   renderApprovalPatchPreview(pending.args);
   showModal('approvalModal', true);
+  renderMetadataPanel();
+}
+
+function startApprovalStream() {
+  if (approvalStreamAbort) return;
+  const controller = new AbortController();
+  approvalStreamAbort = controller;
+
+  (async () => {
+    try {
+      const res = await fetch('/api/approval/stream', { signal: controller.signal });
+      if (!res.ok || !res.body) throw new Error('approval stream unavailable');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.type === 'heartbeat') continue;
+          if (event.type === 'approval') {
+            state.pendingApproval = event.pending || null;
+            _renderApprovalFromState();
+          }
+        }
+      }
+    } catch (_) {
+      // one-shot fallback keeps approvals functional if stream is unavailable
+      try {
+        const payload = await api('/api/approval');
+        state.pendingApproval = payload.pending || null;
+        _renderApprovalFromState();
+      } catch (_) {
+        // ignore fallback errors
+      }
+    } finally {
+      approvalStreamAbort = null;
+    }
+  })();
 }
 
 async function sendApprovalDecision(decision) {
@@ -2579,7 +2927,7 @@ async function sendApprovalDecision(decision) {
     decision,
   });
   state.pendingApproval = null;
-  showModal('approvalModal', false);
+  _renderApprovalFromState();
 }
 
 async function refreshState() {
@@ -2600,6 +2948,18 @@ async function refreshState() {
   state.tools = s.tools || [];
   state.customToolErrors = s.custom_tool_errors || [];
   state.backgroundJobs = s.background_jobs || [];
+  const runningJobIds = new Set(
+    (state.backgroundJobs || [])
+      .filter((job) => job && ['running', 'awaiting_plan_approval'].includes(String(job.status || '')))
+      .map((job) => String(job.id || '')),
+  );
+  Object.keys(backgroundStreamAbortByJob).forEach((jobId) => {
+    if (!runningJobIds.has(jobId)) stopBackgroundJobStream(jobId);
+  });
+  for (const job of (state.backgroundJobs || [])) {
+    if (!job || !runningJobIds.has(String(job.id || ''))) continue;
+    startBackgroundJobStream(job.id, job.session || s.session || '');
+  }
   state.gitRepos = s.git_repos || [];
   state.gitCurrentRepo = s.git_current_repo || null;
   state.gitCurrentBranch = s.git_current_branch || null;
@@ -2632,7 +2992,14 @@ async function refreshState() {
   if (document.activeElement !== document.getElementById('ollamaEndpoint')) {
     document.getElementById('ollamaEndpoint').value = s.ollama_endpoint || '';
   }
-  document.getElementById('debug').checked = !!s.debug;
+  const ctxInput = document.getElementById('ollamaContextWindow');
+  if (ctxInput && document.activeElement !== ctxInput) {
+    const ctxValue = Number(s.ollama_context_window || 65536);
+    ctxInput.value = String(ctxValue);
+    const ctxLabel = document.getElementById('ollamaContextWindowValue');
+    if (ctxLabel) ctxLabel.textContent = String(ctxValue);
+  }
+  document.getElementById('debugLevel').value = s.debug_level || (s.debug ? 'debug' : 'info');
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
   document.getElementById('condenseEnabled').checked = !!s.condense_enabled;
@@ -2644,8 +3011,13 @@ async function refreshState() {
   }
 
   syncPricingEditor();
-  const activeJob = (state.backgroundJobs || []).find((j) => j.session === s.session && ['running', 'awaiting_plan_approval'].includes(j.status));
+  const sessionJobs = (state.backgroundJobs || []).filter((j) => j && j.session === s.session);
+  const activeJob = sessionJobs.find((j) => ['running', 'awaiting_plan_approval'].includes(j.status));
+  const latestTerminalJob = sessionJobs
+    .filter((j) => ['completed', 'failed', 'killed', 'timed_out'].includes(j.status))
+    .sort((a, b) => String(b.finished_at || '').localeCompare(String(a.finished_at || '')))[0];
   if (activeJob && activeJob.usage) updateUsagePanel(activeJob.usage);
+  else if (latestTerminalJob && latestTerminalJob.usage) updateUsagePanel(latestTerminalJob.usage);
   else updateUsagePanel(state.sessionUsage);
   renderSessions(state.sessions, state.activeSession);
   renderUploads();
@@ -2662,16 +3034,8 @@ async function refreshState() {
   syncControlPlaneUIFromPrefs();
   renderContextBudgetPanel();
 
-  if (state.pendingApproval) {
-    document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
-    renderApprovalArgs(state.pendingApproval.args);
-    renderApprovalPatchPreview(state.pendingApproval.args);
-    showModal('approvalModal', true);
-  } else {
-    document.getElementById('approvalPatchPreview').innerHTML = '';
-    lastApprovalPatchFingerprint = null;
-    showModal('approvalModal', false);
-  }
+  _renderApprovalFromState();
+  startApprovalStream();
 
   syncing = false;
 }
@@ -2687,7 +3051,6 @@ function updateBackgroundJobInState(job) {
   maybeRecordJobTerminalNotice(job);
   if (job.session === state.activeSession) renderBackgroundActivity(job);
 }
-
 
 
 function askPlanApproval(job) {
@@ -2710,81 +3073,21 @@ async function sendPrompt(background = false) {
   updateChatBusyState();
   document.getElementById('prompt').value = '';
 
-  if (approvalPoll) clearInterval(approvalPoll);
-  approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1000);
-
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
-  let streamRenderTimer = null;
-  let streamRenderPending = false;
-  const flushStreamRender = (force = false) => {
-    if (streamRenderTimer) {
-      clearTimeout(streamRenderTimer);
-      streamRenderTimer = null;
-    }
-    streamRenderPending = false;
-    if (force) {
-      renderMessages();
-      renderMetadataPanel();
-      return;
-    }
-    streamRenderTimer = setTimeout(() => {
-      streamRenderTimer = null;
-      renderMessages();
-      renderMetadataPanel();
-    }, 70);
-  };
-  const scheduleStreamRender = () => {
-    if (streamRenderPending) return;
-    streamRenderPending = true;
-    flushStreamRender(false);
-  };
-
-  let draft = null;
-  let thinkingDraft = null;
-  let pendingThinking = null;
-  if (!background) {
-    state.messages.push({ role: 'user', content: text });
-    pendingThinking = { role: 'assistant', content: '', metadata: { typing: true, kind: 'thinking_output', ephemeral: true } };
-    state.messages.push(pendingThinking);
-    draft = { role: 'assistant', content: '', metadata: { typing: true } };
-    state.messages.push(draft);
-  }
+  state.messages.push({ role: 'user', content: text });
+  let draft = { role: 'assistant', content: '', metadata: { typing: true } };
+  state.messages.push(draft);
   renderMessages();
   renderMetadataPanel();
 
   try {
     if (background) {
-      const active = selectedSessionName() || state.activeSession || '';
+      const active = selectedSessionName();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
-      updateBackgroundJobInState({ id: bg.job_id, session: bg.session || active, status: 'running', iterations: 0, events: [], prompt: text });
       reportEl.textContent = `background job started: ${bg.job_id}`;
-      const pollUntilDone = async () => {
-        for (let i = 0; i < 120; i += 1) {
-          const job = await api(`/api/jobs/${bg.job_id}`);
-          updateBackgroundJobInState(job);
-          if (job.session === state.activeSession) { renderBackgroundActivity(job); renderMetadataPanel(); }
-          if (job.usage && job.session === state.activeSession) updateUsagePanel(job.usage);
-          updateQueryRuntime();
-          if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
-          if (job.status === 'awaiting_plan_approval') {
-            const approval = await askPlanApproval(job);
-            await api(`/api/jobs/${bg.job_id}/plan`, 'POST', {
-              decision: approval.ok ? 'approve' : 'deny',
-              revised_plan: approval.revisedPlan || undefined,
-            });
-          }
-          if (['completed', 'failed', 'timed_out'].includes(job.status)) {
-            reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
-            maybeRecordJobTerminalNotice(job);
-            await refreshState();
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-      };
-      pollUntilDone().catch(() => {});
+      startBackgroundJobStream(bg.job_id, bg.session || active || state.activeSession || '');
       await refreshState();
       return;
     }
@@ -2812,29 +3115,14 @@ async function sendPrompt(background = false) {
         const event = JSON.parse(line);
         if (event.type === 'assistant_chunk') {
           updateThinking(false);
-          if (pendingThinking) {
-            state.messages = state.messages.filter((m) => m !== pendingThinking);
-            pendingThinking = null;
-          }
           if (!draft) {
             draft = { role: 'assistant', content: '' };
             state.messages.push(draft);
           }
           if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
-          scheduleStreamRender();
-        } else if (event.type === 'thinking_chunk') {
-          updateThinking(false);
-          if (pendingThinking) {
-            state.messages = state.messages.filter((m) => m !== pendingThinking);
-            pendingThinking = null;
-          }
-          if (!thinkingDraft) {
-            thinkingDraft = { role: 'assistant', content: '', metadata: { kind: 'thinking_output', tag: event.tag || 'thinking output' } };
-            state.messages.push(thinkingDraft);
-          }
-          thinkingDraft.content += event.chunk;
-          scheduleStreamRender();
+          renderMessages();
+          renderMetadataPanel();
         } else if (event.type === 'trace') {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);
@@ -2850,24 +3138,9 @@ async function sendPrompt(background = false) {
       }
     }
 
-    flushStreamRender(true);
     await refreshState();
   } finally {
-    if (approvalPoll) {
-      clearInterval(approvalPoll);
-      approvalPoll = null;
-    }
     updateThinking(false);
-    if (streamRenderTimer) {
-      clearTimeout(streamRenderTimer);
-      streamRenderTimer = null;
-    }
-    if (pendingThinking) {
-      state.messages = state.messages.filter((m) => m !== pendingThinking);
-      pendingThinking = null;
-      renderMessages();
-      renderMetadataPanel();
-    }
     sending = false;
     sendingSession = null;
     updateChatBusyState();
@@ -2948,9 +3221,29 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
   await api('/api/session', 'POST', { action, name, ...extra });
+  if (action === 'clear' && name) {
+    clearSessionLiveRunArtifacts(name);
+  }
   if (action === 'switch' && name) markSessionRecent(name);
   await refreshState();
   if (action === 'condense') status.textContent = 'Session context condensed.';
+}
+
+function clearSessionLiveRunArtifacts(sessionName) {
+  const session = String(sessionName || '').trim();
+  if (!session) return;
+  delete runNoticesBySession[session];
+  delete pendingBackgroundPromptsBySession[session];
+
+  const jobs = Array.isArray(state.backgroundJobs) ? state.backgroundJobs.slice() : [];
+  jobs
+    .filter((job) => job && String(job.session || '') === session)
+    .forEach((job) => stopBackgroundJobStream(job.id));
+  state.backgroundJobs = jobs.filter((job) => !job || String(job.session || '') !== session);
+
+  state.traces = [];
+  const reportEl = document.getElementById('report');
+  if (reportEl) reportEl.textContent = '';
 }
 
 function byId(id) {
@@ -2983,7 +3276,7 @@ function resolvePlanApproval(ok, revisedPlan = '') {
 
 // >>> app/events.js
 // --- event wiring -----------------------------------------------------------
-for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaEndpoint', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaContextWindow', 'approval', 'workspace', 'debugLevel', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   const input = byId(id);
   if (!input) continue;
   input.addEventListener('change', () => {
@@ -2993,13 +3286,20 @@ for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaEn
     scheduleApplySettings();
     syncPricingEditor();
   });
-  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey' || id === 'ollamaEndpoint') {
+  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey') {
     input.addEventListener('blur', scheduleApplySettings);
   }
 }
 
 const customToolsInput = byId('customTools');
 if (customToolsInput) customToolsInput.addEventListener('blur', scheduleApplySettings);
+const ollamaContextWindowInput = byId('ollamaContextWindow');
+if (ollamaContextWindowInput) {
+  ollamaContextWindowInput.addEventListener('input', () => {
+    const label = byId('ollamaContextWindowValue');
+    if (label) label.textContent = String(ollamaContextWindowInput.value || '65536');
+  });
+}
 
 bindClick('promptAttach', (e) => {
   e.preventDefault();

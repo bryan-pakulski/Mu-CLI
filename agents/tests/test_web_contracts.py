@@ -51,8 +51,12 @@ class WebContractTests(unittest.TestCase):
     def test_settings_contract_table(self) -> None:
         cases = [
             ({"debug": True}, True, None),
+            ({"debug_level": "debug"}, True, None),
             ({"tool_visibility": {"read_file": False}}, True, None),
+            ({"ollama_context_window": 65536}, True, None),
             ({"debug": "yes"}, False, "debug must be a boolean"),
+            ({"ollama_context_window": "big"}, False, "ollama_context_window must be an integer"),
+            ({"debug_level": "verbose"}, False, "debug_level must be one of: debug, info, warn, error"),
             ({"tool_visibility": []}, False, "tool_visibility must be an object"),
             ({"tool_visibility": {"read_file": "no"}}, False, "tool_visibility must be an object of booleans"),
         ]

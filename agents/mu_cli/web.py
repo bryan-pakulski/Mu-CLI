@@ -258,7 +258,7 @@ def _tool_reliability_hint(runtime: WebRuntime) -> str:
         lines.append(f"{name}: score={float(data.get('score', 0.0)):.2f}, runs={int(data.get('runs', 0))}")
     return "Tool reliability preference (use higher-scored tools when equivalent): " + "; ".join(lines)
 
-def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint: str | None = None):
+def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint: str | None = None, ollama_context_window: int | None = None):
     if name == "echo":
         return EchoProvider()
     if name == "openai":
@@ -266,8 +266,29 @@ def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint:
     if name == "gemini":
         return GeminiProvider(model=model, api_key=api_key)
     if name == "ollama":
-        return OllamaProvider(model=model, host=ollama_endpoint)
+        return OllamaProvider(model=model, host=ollama_endpoint, context_window=ollama_context_window)
     raise ValueError(f"Unsupported provider: {name}")
+
+
+_DEBUG_LEVEL_ORDER = {"debug": 10, "info": 20, "warn": 30, "error": 40}
+
+
+def _normalize_debug_level(level: str | None) -> str:
+    candidate = str(level or "info").strip().lower()
+    return candidate if candidate in _DEBUG_LEVEL_ORDER else "info"
+
+
+def _should_log(runtime: WebRuntime, level: str) -> bool:
+    configured = _DEBUG_LEVEL_ORDER.get(_normalize_debug_level(getattr(runtime, "debug_level", "info")), 20)
+    current = _DEBUG_LEVEL_ORDER.get(_normalize_debug_level(level), 20)
+    return current >= configured
+
+
+def _log_trace(runtime: WebRuntime, level: str, message: str) -> None:
+    if not _should_log(runtime, level):
+        return
+    stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    runtime.traces.append(f"log/{_normalize_debug_level(level)}: [{stamp}] {message}")
 
 
 def _provider_api_key(runtime: WebRuntime, provider_name: str | None = None) -> str | None:
@@ -449,7 +470,13 @@ def _git_agent_instruction(runtime: WebRuntime) -> str | None:
 
 
 def _new_agent(runtime: WebRuntime) -> Agent:
-    provider = _build_provider(runtime.provider, runtime.model, _provider_api_key(runtime), _provider_ollama_endpoint(runtime))
+    provider = _build_provider(
+        runtime.provider,
+        runtime.model,
+        _provider_api_key(runtime),
+        _provider_ollama_endpoint(runtime),
+        runtime.ollama_context_window,
+    )
 
     def on_approval(tool_name: str, args: dict) -> bool:
         mode = runtime.approval_mode
@@ -476,6 +503,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
             if runtime.pending_approval and runtime.pending_approval.get("id") == request_id:
                 decision = runtime.pending_approval.get("decision")
                 runtime.pending_approval = None
+                runtime.approval_condition.notify_all()
 
         approved = decision == "approve"
         runtime.traces.append(
@@ -484,7 +512,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         return approved
 
     def on_model_response(message: Message, calls: list[ToolCall]) -> None:
-        if not runtime.debug:
+        if not _should_log(runtime, "debug"):
             return
         runtime.traces.append(f"model: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] {message.content}")
         for call in calls:
@@ -494,7 +522,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         runtime.workspace_store.record_tool_run(name, args, output, ok)
         latency_ms = _extract_latency_ms(output)
         _update_tool_reliability(runtime, name, ok, latency_ms)
-        if runtime.debug:
+        if _should_log(runtime, "debug"):
             latency_suffix = f" latency_ms={latency_ms}" if latency_ms is not None else ""
             runtime.traces.append(f"tool-run: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
 
@@ -848,8 +876,10 @@ def _persist(runtime: WebRuntime) -> None:
             agentic_planning=runtime.agentic_planning,
             research_mode=runtime.research_mode,
             max_runtime_seconds=runtime.max_runtime_seconds,
+            debug_level=runtime.debug_level,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
+            ollama_context_window=runtime.ollama_context_window,
             summary_index=runtime.summary_index,
             enabled_skills=runtime.enabled_skills,
             traces=runtime.traces,
@@ -909,10 +939,14 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.research_mode = bool(loaded.research_mode)
     if loaded.max_runtime_seconds is not None:
         runtime.max_runtime_seconds = int(loaded.max_runtime_seconds)
+    if loaded.debug_level is not None:
+        runtime.debug_level = _normalize_debug_level(loaded.debug_level)
     if loaded.condense_enabled is not None:
         runtime.condense_enabled = bool(loaded.condense_enabled)
     if loaded.condense_window is not None:
         runtime.condense_window = int(loaded.condense_window)
+    if loaded.ollama_context_window is not None:
+        runtime.ollama_context_window = int(loaded.ollama_context_window)
     runtime.summary_index = list(loaded.summary_index or [])
     runtime.enabled_skills = list(loaded.enabled_skills or [])
     runtime.traces = list(loaded.traces or [])
@@ -990,6 +1024,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         session_name=session_name,
         workspace_path=None,
         debug=base.debug,
+        debug_level=base.debug_level,
         agentic_planning=base.agentic_planning,
         research_mode=base.research_mode,
         workspace_store=workspace_store,
@@ -1010,6 +1045,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         max_runtime_seconds=900,
         condense_enabled=False,
         condense_window=12,
+        ollama_context_window=65536,
         summary_index=[],
         skill_store=base.skill_store,
         enabled_skills=list(base.enabled_skills),
@@ -1085,10 +1121,28 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "answer_contract": None,
         "cancel_requested": False,
         "cancel_reason": None,
+        "final_response": None,
+        "stream_seq": 0,
+        "stream_events": [],
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
+
+        def _emit_stream_event(event_type: str, **payload: Any) -> None:
+            seq = int(job.get("stream_seq") or 0) + 1
+            job["stream_seq"] = seq
+            event = {
+                "seq": seq,
+                "type": event_type,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            event.update(payload)
+            entries = job.setdefault("stream_events", [])
+            if isinstance(entries, list):
+                entries.append(event)
+                if len(entries) > 500:
+                    job["stream_events"] = entries[-500:]
 
         def _cancelled() -> bool:
             return bool(job.get("cancel_requested"))
@@ -1099,10 +1153,12 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             job["status"] = "killed"
             job["cancel_reason"] = reason
             job["events"].append(f"status: killed ({reason})")
+            _emit_stream_event("status", status="killed", reason=reason)
 
         try:
             isolated = _build_session_runtime(base_runtime, session_name)
             isolated.debug = True
+            _emit_stream_event("status", status="running", job_id=job_id)
             trace_cursor = len(isolated.traces)
             deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
             checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
@@ -1155,25 +1211,34 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         plan_text = revised_text
                         job["events"].append("plan: revised_after_critic")
                 job["plan"] = plan_text
-                job["last_step"] = "Plan drafted; waiting for approval"
                 job["events"].append("plan: drafted")
                 _persist(isolated)
-                job["status"] = "awaiting_plan_approval"
-                while datetime.now(timezone.utc).timestamp() < deadline:
+                if isolated.approval_mode == "auto":
+                    job["plan_approval"] = "approve"
+                    job["last_step"] = "Plan drafted; auto-approved"
+                    job["events"].append("plan: auto_approved")
+                elif isolated.approval_mode == "deny":
+                    job["plan_approval"] = "deny"
+                    job["events"].append("plan: denied_by_policy")
+                    raise RuntimeError("Plan denied by approval policy.")
+                else:
+                    job["last_step"] = "Plan drafted; waiting for approval"
+                    job["status"] = "awaiting_plan_approval"
+                    while datetime.now(timezone.utc).timestamp() < deadline:
+                        if _cancelled():
+                            _mark_cancelled("user requested stop")
+                            return
+                        decision = job.get("plan_approval")
+                        if decision in {"approve", "deny"}:
+                            break
+                        threading.Event().wait(0.4)
                     if _cancelled():
                         _mark_cancelled("user requested stop")
                         return
-                    decision = job.get("plan_approval")
-                    if decision in {"approve", "deny"}:
-                        break
-                    threading.Event().wait(0.4)
-                if _cancelled():
-                    _mark_cancelled("user requested stop")
-                    return
-                if job.get("plan_approval") != "approve":
-                    job["events"].append("plan: denied_or_timed_out")
-                    raise RuntimeError("Plan not approved before timeout or was denied.")
-                job["events"].append("plan: approved")
+                    if job.get("plan_approval") != "approve":
+                        job["events"].append("plan: denied_or_timed_out")
+                        raise RuntimeError("Plan not approved before timeout or was denied.")
+                    job["events"].append("plan: approved")
 
             total_input = 0
             total_output = 0
@@ -1212,23 +1277,68 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
                     break
                 job["status"] = "running"
+                original_model_response = isolated.agent.on_model_response
+                original_model_stream = getattr(isolated.agent, "on_model_stream", None)
+                original_tool_run = isolated.agent.on_tool_run
+
+                def _on_model_response(message: Message, calls: list[ToolCall]) -> None:
+                    if original_model_response is not None:
+                        original_model_response(message, calls)
+                    for call in calls:
+                        line = f"tool-request: id={call.call_id} name={call.name} args={call.args}"
+                        job["events"].append(line)
+                        _emit_stream_event("trace", line=line)
+
+                def _on_model_stream(payload: dict[str, Any]) -> None:
+                    if original_model_stream is not None:
+                        original_model_stream(payload)
+                    kind = str(payload.get("kind", ""))
+                    chunk = str(payload.get("chunk", ""))
+                    if not chunk:
+                        return
+                    if kind == "thinking_output":
+                        _emit_stream_event("thinking_chunk", chunk=chunk)
+                    else:
+                        _emit_stream_event("assistant_chunk", chunk=chunk)
+
+                def _on_tool_run(name: str, args: dict[str, Any], ok: bool, output: str) -> None:
+                    if original_tool_run is not None:
+                        original_tool_run(name, args, ok, output)
+                    line = f"tool-run: name={name} ok={ok} args={args} output={str(output)[:200]}"
+                    job["events"].append(line)
+                    _emit_stream_event("trace", line=line)
+
+                isolated.agent.on_model_response = _on_model_response
+                isolated.agent.on_model_stream = _on_model_stream
+                isolated.agent.on_tool_run = _on_tool_run
                 before_len = len(isolated.agent.state.messages)
-                reply = _run_turn_with_uploaded_context(
-                    isolated,
-                    prompt,
-                    allow_citation_repair=(prompt == text),
-                )
+                try:
+                    reply = _run_turn_with_uploaded_context(
+                        isolated,
+                        prompt,
+                        allow_citation_repair=(prompt == text),
+                    )
+                finally:
+                    isolated.agent.on_model_response = original_model_response
+                    isolated.agent.on_model_stream = original_model_stream
+                    isolated.agent.on_tool_run = original_tool_run
+                job["final_response"] = str(reply.content or "")
+                _emit_stream_event("assistant_message", content=str(reply.content or ""))
                 turn_messages = isolated.agent.state.messages[before_len:]
                 had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
                 if _is_internal_agent_loop_prompt(prompt):
                     _mark_messages_as_metadata(turn_messages, kind="agent_loop")
                 report = _turn_report(isolated, prompt, reply.content)
                 if len(isolated.traces) > trace_cursor:
-                    job["events"].extend(isolated.traces[trace_cursor:])
+                    new_traces = isolated.traces[trace_cursor:]
+                    job["events"].extend(new_traces)
+                    for line in new_traces:
+                        _emit_stream_event("trace", line=str(line))
                     trace_cursor = len(isolated.traces)
                     if len(job["events"]) > 120:
                         job["events"] = job["events"][-120:]
                 job["last_step"] = (reply.content or "").strip()[:240]
+                _emit_stream_event("status", status="running", last_step=job["last_step"], iterations=int(job.get("iterations") or 0))
                 stalled = _is_stalled_response(previous_step, job["last_step"])
                 previous_step = job["last_step"]
                 _record_turn(isolated, report)
@@ -1251,6 +1361,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 job["checkpoints"].append(checkpoint)
+                _emit_stream_event("checkpoint", checkpoint=checkpoint)
                 if len(job["checkpoints"]) > 30:
                     job["checkpoints"] = job["checkpoints"][-30:]
 
@@ -1312,6 +1423,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             }
             if job["status"] not in {"timed_out", "killed"}:
                 job["status"] = "completed"
+                _emit_stream_event("status", status="completed")
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
@@ -1342,15 +1454,21 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             if job.get("status") not in {"timed_out", "killed"}:
                 job["status"] = "failed"
             job["events"].append(f"status: failed ({exc})")
+            _emit_stream_event("error", error=str(exc))
         finally:
             try:
                 if "isolated" in locals():
                     checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
                     checkpoint_store[session_name] = list(job.get("checkpoints", []))[-20:]
                     _persist(isolated)
+                    # Keep foreground runtime counters/messages in sync with completed background work
+                    # when the same session is currently selected in the UI.
+                    if base_runtime.session_name == session_name:
+                        _load_session(base_runtime, session_name)
             except Exception:
                 pass
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _emit_stream_event("done", status=str(job.get("status") or "unknown"))
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
@@ -1397,6 +1515,7 @@ def create_app():
         session_name="default",
         workspace_path=None,
         debug=True,
+        debug_level="info",
         agentic_planning=True,
         research_mode=False,
         workspace_store=workspace_store,
@@ -1417,6 +1536,7 @@ def create_app():
         max_runtime_seconds=900,
         condense_enabled=False,
         condense_window=12,
+        ollama_context_window=65536,
         summary_index=[],
         skill_store=skill_store,
         enabled_skills=[],
@@ -1437,9 +1557,28 @@ def create_app():
 
     @app.before_request
     def _telemetry_request_hook():
-        from flask import request
+        from flask import g, request
         key = f"{request.method} {request.path}"
         _record_telemetry(runtime, 'request_counts', key)
+        g._request_started_at = datetime.now(timezone.utc)
+        if _should_log(runtime, "debug"):
+            body = request.get_json(silent=True)
+            if body is not None:
+                _log_trace(runtime, "debug", f"incoming {request.method} {request.path} body={json.dumps(body, ensure_ascii=False)[:500]}")
+            else:
+                _log_trace(runtime, "debug", f"incoming {request.method} {request.path}")
+
+    @app.after_request
+    def _response_log_hook(response):
+        from flask import g, request
+        started = getattr(g, "_request_started_at", None)
+        elapsed_ms = 0
+        if started is not None:
+            elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        level = "error" if response.status_code >= 500 else ("warn" if response.status_code >= 400 else "info")
+        if _should_log(runtime, level):
+            _log_trace(runtime, level, f"outgoing {request.method} {request.path} status={response.status_code} duration_ms={elapsed_ms}")
+        return response
 
     runtime_mutation_deps = RuntimeMutationDeps(
         get_models=get_models,

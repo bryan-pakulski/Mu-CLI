@@ -34,9 +34,11 @@ def mutate_runtime_for_new_session(runtime: Any, payload: dict[str, Any], name: 
     runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
     runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
     runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
+    runtime.debug_level = str(payload.get("debug_level", runtime.debug_level) or runtime.debug_level).lower()
     runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
     runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
     runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
+    runtime.ollama_context_window = int(payload.get("ollama_context_window", runtime.ollama_context_window) or runtime.ollama_context_window)
 
     enabled_skills = payload.get("enabled_skills")
     if isinstance(enabled_skills, list):
@@ -74,12 +76,14 @@ def mutate_runtime_for_settings(runtime: Any, payload: dict[str, Any], deps: Run
     available = deps.get_models(runtime.provider, deps.provider_api_key(runtime))
     runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
     runtime.approval_mode = str(payload.get("approval_mode", runtime.approval_mode))
+    runtime.debug_level = str(payload.get("debug_level", runtime.debug_level) or runtime.debug_level).lower()
     runtime.debug = bool(payload.get("debug", runtime.debug))
     runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
     runtime.research_mode = bool(payload.get("research_mode", runtime.research_mode))
     runtime.max_runtime_seconds = int(payload.get("max_runtime_seconds", runtime.max_runtime_seconds) or runtime.max_runtime_seconds)
     runtime.condense_enabled = bool(payload.get("condense_enabled", runtime.condense_enabled))
     runtime.condense_window = int(payload.get("condense_window", runtime.condense_window) or runtime.condense_window)
+    runtime.ollama_context_window = int(payload.get("ollama_context_window", runtime.ollama_context_window) or runtime.ollama_context_window)
 
     tool_visibility = payload.get("tool_visibility")
     if isinstance(tool_visibility, dict):

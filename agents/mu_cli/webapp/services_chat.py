@@ -93,9 +93,13 @@ class ChatStreamingService:
                 if runtime.session_name != session_name:
                     self.stream_deps.load_session(runtime, session_name)
                 result = execute_chat_turn(runtime, text, self.turn_deps)
+                if hasattr(runtime, "traces"):
+                    runtime.traces.append(f"io/outgoing: chat/stream reply={(result.reply or {}).get('content', '')[:1200]}")
                 events.put({"type": "report", "report": result.report})
                 events.put({"type": "done", "reply": result.reply, "traces": result.traces})
             except Exception as exc:  # pragma: no cover
+                if hasattr(runtime, "traces"):
+                    runtime.traces.append(f"io/error: chat/stream {exc}")
                 events.put({"type": "error", "error": str(exc)})
             finally:
                 runtime.agent.on_model_response = original_model_response

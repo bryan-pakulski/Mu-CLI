@@ -651,16 +651,37 @@
       font-weight: 600;
       background: color-mix(in srgb, var(--surface-2) 80%, transparent);
     }
+    .msg-tag-user {
+      border-color: color-mix(in srgb, #0f766e 45%, var(--border));
+      background: color-mix(in srgb, #14b8a6 14%, var(--surface-2));
+      color: #115e59;
+    }
+    .msg-tag-ai {
+      border-color: color-mix(in srgb, #4338ca 45%, var(--border));
+      background: color-mix(in srgb, #6366f1 14%, var(--surface-2));
+      color: #3730a3;
+    }
+    .msg-tag-thinking {
+      border-color: color-mix(in srgb, #b45309 45%, var(--border));
+      background: color-mix(in srgb, #f59e0b 18%, var(--surface-2));
+      color: #92400e;
+    }
+    .msg-tag-system {
+      border-color: color-mix(in srgb, #475569 45%, var(--border));
+      background: color-mix(in srgb, #64748b 18%, var(--surface-2));
+      color: #334155;
+    }
+    .msg-tag-live-run {
+      border-color: color-mix(in srgb, #be185d 45%, var(--border));
+      background: color-mix(in srgb, #ec4899 15%, var(--surface-2));
+      color: #9d174d;
+    }
     .msg-time { opacity: .85; }
-    .msg.role-user .msg-tag {
-      border-color: color-mix(in srgb, var(--border) 85%, var(--muted));
-      color: var(--muted);
-    }
-    body.dark-mode .msg.role-user .msg-tag { color: var(--muted); }
-    .msg.role-assistant .msg-tag {
-      border-color: color-mix(in srgb, var(--border) 80%, var(--muted));
-      color: var(--muted);
-    }
+    body.dark-mode .msg-tag-user { color: #99f6e4; }
+    body.dark-mode .msg-tag-ai { color: #c7d2fe; }
+    body.dark-mode .msg-tag-thinking { color: #fde68a; }
+    body.dark-mode .msg-tag-system { color: #cbd5e1; }
+    body.dark-mode .msg-tag-live-run { color: #fbcfe8; }
     .bubble {
       margin-top: 0;
       padding: 8px 10px;

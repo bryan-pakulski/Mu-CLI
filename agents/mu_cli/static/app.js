@@ -1952,6 +1952,10 @@ function _systemEventSummary(message) {
   return `${label}${toolName} · ${preview}`;
 }
 
+function _tagPill(label, kind) {
+  return `<span class="msg-tag msg-tag-${_escapeAttr(kind || 'default')}">${escapeHtml(label || '')}</span>`;
+}
+
 function openRunDetails(id, title = '') {
   const body = document.getElementById('runDetailsBody');
   const meta = document.getElementById('runDetailsMeta');
@@ -1978,7 +1982,7 @@ function renderMessages() {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
       const stamp = formatTimestamp(messageTimes.get(idx)) || formatTimestamp(new Date().toISOString());
-      meta.innerHTML = `<span class="msg-tag">SYSTEM</span><span class="msg-time">${escapeHtml(stamp)}</span>`;
+      meta.innerHTML = `${_tagPill('SYSTEM', 'system')}<span class="msg-time">${escapeHtml(stamp)}</span>`;
       row.appendChild(meta);
 
       const bubble = document.createElement('div');
@@ -2002,7 +2006,8 @@ function renderMessages() {
       let tag = m.role === 'user' ? 'You' : 'AI';
       if (m.role === 'assistant' && m.metadata && m.metadata.kind === 'thinking_output') tag = 'thinking output';
       const stamp = formatTimestamp(messageTimes.get(idx)) || formatTimestamp(new Date().toISOString());
-      meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp)}</span>`;
+      const tagKind = m.role === 'user' ? 'user' : (tag === 'thinking output' ? 'thinking' : 'ai');
+      meta.innerHTML = `${_tagPill(tag, tagKind)}<span class="msg-time">${escapeHtml(stamp)}</span>`;
       row.appendChild(meta);
     }
 
@@ -2038,7 +2043,7 @@ function renderMessages() {
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
     const jobStamp = formatTimestamp(job.started_at || job.finished_at || '') || formatTimestamp(new Date().toISOString());
-    meta.innerHTML = `<span class="msg-tag">Live run activity</span><span class="msg-time">${escapeHtml(jobStamp)}</span>`;
+    meta.innerHTML = `${_tagPill('Live run activity', 'live-run')}<span class="msg-time">${escapeHtml(jobStamp)}</span>`;
     row.appendChild(meta);
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
@@ -2065,7 +2070,7 @@ function renderMessages() {
     const row = document.createElement('div');
     row.className = 'msg role-assistant';
     const noticeStamp = formatTimestamp(notice.timestamp || '') || formatTimestamp(new Date().toISOString());
-    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta"><span class="msg-tag">System</span><span class="msg-time">${escapeHtml(noticeStamp)}</span></div>`;
+    row.innerHTML = `<div class="role">assistant</div><div class="msg-meta">${_tagPill('SYSTEM', 'system')}<span class="msg-time">${escapeHtml(noticeStamp)}</span></div>`;
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.innerHTML = `<p>${escapeHtml(notice.text)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;

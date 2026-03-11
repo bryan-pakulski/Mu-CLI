@@ -2375,6 +2375,7 @@ function buildSettingsPayload() {
     model: document.getElementById('model').value,
     openai_api_key: document.getElementById('openaiApiKey').value || null,
     google_api_key: document.getElementById('googleApiKey').value || null,
+    ollama_endpoint: document.getElementById('ollamaEndpoint').value || null,
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
@@ -2593,6 +2594,9 @@ async function refreshState() {
   }
   if (document.activeElement !== document.getElementById('googleApiKey')) {
     document.getElementById('googleApiKey').value = s.google_api_key || '';
+  }
+  if (document.activeElement !== document.getElementById('ollamaEndpoint')) {
+    document.getElementById('ollamaEndpoint').value = s.ollama_endpoint || '';
   }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
@@ -2895,7 +2899,7 @@ function resolvePlanApproval(ok, revisedPlan = '') {
 
 // >>> app/events.js
 // --- event wiring -----------------------------------------------------------
-for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaEndpoint', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   const input = byId(id);
   if (!input) continue;
   input.addEventListener('change', () => {
@@ -2905,7 +2909,7 @@ for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'approval
     scheduleApplySettings();
     syncPricingEditor();
   });
-  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey') {
+  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey' || id === 'ollamaEndpoint') {
     input.addEventListener('blur', scheduleApplySettings);
   }
 }

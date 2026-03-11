@@ -38,6 +38,7 @@ def _runtime() -> SimpleNamespace:
         model="echo",
         openai_api_key=None,
         google_api_key=None,
+        ollama_endpoint=None,
         approval_mode="auto",
         debug=False,
         agentic_planning=False,
@@ -130,6 +131,7 @@ class RuntimeMutationServiceTests(unittest.TestCase):
                     "tool_visibility": {"read_file": False},
                     "custom_tools": [{"name": "x"}],
                     "enabled_skills": ["s1", "s2"],
+                    "ollama_endpoint": "http://127.0.0.1:11434",
                     "workspace": td,
                     "agentic_planning": True,
                     "research_mode": True,
@@ -141,6 +143,7 @@ class RuntimeMutationServiceTests(unittest.TestCase):
         self.assertFalse(runtime.enabled_tools["read_file"])
         self.assertEqual([{"name": "x"}], runtime.custom_tool_specs)
         self.assertEqual(["s1", "s2"], runtime.enabled_skills)
+        self.assertEqual("http://127.0.0.1:11434", runtime.ollama_endpoint)
         self.assertEqual(1, calls.get("refresh_tooling"))
         self.assertEqual(1, calls.get("inject_planning"))
         self.assertEqual(1, calls.get("inject_research"))

@@ -2321,6 +2321,7 @@ function buildSettingsPayload() {
     model: document.getElementById('model').value,
     openai_api_key: document.getElementById('openaiApiKey').value || null,
     google_api_key: document.getElementById('googleApiKey').value || null,
+    ollama_endpoint: document.getElementById('ollamaEndpoint').value || null,
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
@@ -2539,6 +2540,9 @@ async function refreshState() {
   }
   if (document.activeElement !== document.getElementById('googleApiKey')) {
     document.getElementById('googleApiKey').value = s.google_api_key || '';
+  }
+  if (document.activeElement !== document.getElementById('ollamaEndpoint')) {
+    document.getElementById('ollamaEndpoint').value = s.ollama_endpoint || '';
   }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;

@@ -26,6 +26,7 @@ class SessionState:
     summary_index: list[dict] | None = None
     enabled_skills: list[str] | None = None
     traces: list[str] | None = None
+    ollama_endpoint: str | None = None
 
 
 class SessionStore:
@@ -78,6 +79,7 @@ class SessionStore:
             summary_index=payload.get("summary_index"),
             enabled_skills=payload.get("enabled_skills"),
             traces=payload.get("traces"),
+            ollama_endpoint=payload.get("ollama_endpoint"),
         )
 
     def save(self, state: SessionState) -> None:
@@ -99,6 +101,7 @@ class SessionStore:
             "summary_index": state.summary_index or [],
             "enabled_skills": state.enabled_skills or [],
             "traces": state.traces or [],
+            "ollama_endpoint": state.ollama_endpoint,
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

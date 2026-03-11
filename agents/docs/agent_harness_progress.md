@@ -5,7 +5,7 @@ This tracker records implemented workstreams so we can measure progress against 
 ## Snapshot
 
 - Last updated: 2026-03-11
-- Current focus: **Phase 0 — Baseline & Instrumentation**
+- Current focus: **Phase 1 — Reliable Long-Running Loop**
 
 ## Phase 0 checklist
 
@@ -33,3 +33,11 @@ Phase 0 is now functionally complete from a backend/runtime perspective (state l
 1. Begin Phase 1: add explicit `BudgetPolicy` object and enforce token/tool-call budgets.
 2. Add policy-driven retry matrix and terminal reasons for budget exhaustion.
 3. Add UI dashboard cards that consume the new telemetry metrics.
+
+
+## Phase 1 early progress
+
+- [x] Introduced `BudgetPolicy` model for runtime/token/tool/replan limits.
+- [x] Wired budget policy into background job payloads (`budget_policy`) for visibility.
+- [x] Enforced token/tool-call budget exhaustion with explicit terminal reason `budget_exhausted`.
+- [x] Added tests for budget policy helper and job budget-policy exposure.

@@ -210,6 +210,27 @@ class WebTests(unittest.TestCase):
         self.assertIn('verifier_gap_rate', payload)
         self.assertIn('job_outcomes_count', payload)
 
+    def test_background_job_exposes_budget_policy(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 35, 'approval_mode': 'auto'})
+        res = client.post('/api/chat/background', json={'text': 'budget policy check'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        poll = client.get(f'/api/jobs/{job_id}')
+        self.assertEqual(200, poll.status_code)
+        job = poll.get_json() or {}
+        policy = job.get('budget_policy') or {}
+        self.assertIn('max_runtime_s', policy)
+        self.assertIn('max_tokens', policy)
+        self.assertIn('max_tool_calls', policy)
+        self.assertIn('max_replans', policy)
+
     def test_background_job_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 

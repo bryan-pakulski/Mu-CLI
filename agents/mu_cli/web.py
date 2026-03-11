@@ -9,7 +9,7 @@ import threading
 import urllib.parse
 import uuid
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -95,6 +95,29 @@ def _default_usage() -> dict[str, float]:
     return default_usage()
 
 
+
+
+
+
+@dataclass(slots=True)
+class BudgetPolicy:
+    max_runtime_s: int
+    max_tokens: int
+    max_tool_calls: int
+    max_replans: int
+
+
+def _budget_policy_for_runtime(max_runtime_seconds: int) -> BudgetPolicy:
+    runtime_s = max(30, int(max_runtime_seconds or 0))
+    token_budget = max(1200, min(120000, runtime_s * 120))
+    tool_budget = max(4, min(160, runtime_s // 8))
+    replan_budget = 2
+    return BudgetPolicy(
+        max_runtime_s=runtime_s,
+        max_tokens=token_budget,
+        max_tool_calls=tool_budget,
+        max_replans=replan_budget,
+    )
 
 
 def _telemetry_path() -> Path:
@@ -1209,6 +1232,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "report": None,
         "iterations": 0,
         "runtime_budget_seconds": int(base_runtime.max_runtime_seconds),
+        "budget_policy": asdict(_budget_policy_for_runtime(int(base_runtime.max_runtime_seconds))),
         "plan": None,
         "plan_approval": None,
         "last_step": None,
@@ -1264,7 +1288,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             isolated.debug = True
             _emit_stream_event("status", status="running", job_id=job_id)
             trace_cursor = len(isolated.traces)
-            deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
+            budget = _budget_policy_for_runtime(int(isolated.max_runtime_seconds))
+            job["budget_policy"] = asdict(budget)
+            deadline = datetime.now(timezone.utc).timestamp() + budget.max_runtime_s
             checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
             restored_checkpoints = list(checkpoint_store.get(session_name, []))
             if restored_checkpoints:
@@ -1348,7 +1374,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             total_output = 0
             total_tokens = 0
             total_cost = 0.0
-            max_iterations = max(2, min(60, int(isolated.max_runtime_seconds // 25) or 24))
+            tool_calls_used = 0
+            max_iterations = max(2, min(60, int(budget.max_runtime_s // 25) or 24))
             no_progress_streak = 0
             previous_step = None
             replan_count = 0
@@ -1434,7 +1461,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["final_response"] = str(reply.content or "")
                 _emit_stream_event("assistant_message", content=str(reply.content or ""))
                 turn_messages = isolated.agent.state.messages[before_len:]
-                had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
+                turn_tool_calls = len([message for message in turn_messages if message.role is Role.TOOL_RESULT])
+                tool_calls_used += turn_tool_calls
+                had_tool_activity = turn_tool_calls > 0
                 if _is_internal_agent_loop_prompt(prompt):
                     _mark_messages_as_metadata(turn_messages, kind="agent_loop")
                 report = _turn_report(isolated, prompt, reply.content)
@@ -1462,7 +1491,20 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "output_tokens": total_output,
                     "total_tokens": total_tokens,
                     "estimated_cost_usd": total_cost,
+                    "tool_calls": tool_calls_used,
                 }
+                if total_tokens >= budget.max_tokens:
+                    job["events"].append(f"status: budget_exhausted(tokens={total_tokens},cap={budget.max_tokens})")
+                    job["terminal_reason"] = "budget_exhausted"
+                    _record_harness_counter(base_runtime, "budget_exhausted")
+                    transition_job_status(job, JobStatus.TIMED_OUT.value, reason="token_budget_exhausted")
+                    break
+                if tool_calls_used >= budget.max_tool_calls:
+                    job["events"].append(f"status: budget_exhausted(tool_calls={tool_calls_used},cap={budget.max_tool_calls})")
+                    job["terminal_reason"] = "budget_exhausted"
+                    _record_harness_counter(base_runtime, "budget_exhausted")
+                    transition_job_status(job, JobStatus.TIMED_OUT.value, reason="tool_budget_exhausted")
+                    break
                 checkpoint = {
                     "iteration": int(job["iterations"]),
                     "status": job.get("status"),
@@ -1513,7 +1555,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     if no_progress_streak >= 2:
                         job["events"].append("status: stalled_no_tool_progress")
                         _record_harness_counter(base_runtime, "stalls")
-                        if replan_count < 2:
+                        if replan_count < int(budget.max_replans):
                             replan_count += 1
                             replan_reply = _step_internal(
                                 isolated,

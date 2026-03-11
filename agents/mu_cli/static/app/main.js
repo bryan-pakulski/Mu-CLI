@@ -178,9 +178,29 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
   await api('/api/session', 'POST', { action, name, ...extra });
+  if (action === 'clear' && name) {
+    clearSessionLiveRunArtifacts(name);
+  }
   if (action === 'switch' && name) markSessionRecent(name);
   await refreshState();
   if (action === 'condense') status.textContent = 'Session context condensed.';
+}
+
+function clearSessionLiveRunArtifacts(sessionName) {
+  const session = String(sessionName || '').trim();
+  if (!session) return;
+  delete runNoticesBySession[session];
+  delete pendingBackgroundPromptsBySession[session];
+
+  const jobs = Array.isArray(state.backgroundJobs) ? state.backgroundJobs.slice() : [];
+  jobs
+    .filter((job) => job && String(job.session || '') === session)
+    .forEach((job) => stopBackgroundJobStream(job.id));
+  state.backgroundJobs = jobs.filter((job) => !job || String(job.session || '') !== session);
+
+  state.traces = [];
+  const reportEl = document.getElementById('report');
+  if (reportEl) reportEl.textContent = '';
 }
 
 function byId(id) {

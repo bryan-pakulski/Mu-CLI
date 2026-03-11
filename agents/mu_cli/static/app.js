@@ -1315,21 +1315,21 @@ function scoreReasonsByUrl(messages, assistantIndex) {
   return reasons;
 }
 
-function buildCitationPanel(content, reasonsByUrl={}) {
+function buildCitationPanel(content, reasonsByUrl={}, citationIdPrefix='citation') {
   const links = extractCitationLinks(content);
   if (!links.length) return '';
   const items = links.map((url, idx) => `
-    <div id="citation-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${reasonsByUrl[url] ? `<div class="small-muted">why chosen: ${escapeHtml(reasonsByUrl[url])}</div>` : ''}</div>
+    <div id="${escapeHtml(citationIdPrefix)}-${idx + 1}">[${idx + 1}] <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${reasonsByUrl[url] ? `<div class="small-muted">why chosen: ${escapeHtml(reasonsByUrl[url])}</div>` : ''}</div>
   `).join('');
   return `<details class="citation-panel"><summary>ℹ Citations & URLs (${links.length})</summary><div class="citation-list">${items}</div></details>`;
 }
 
-function formatAssistantContentWithCitations(content, links) {
+function formatAssistantContentWithCitations(content, links, citationIdPrefix='citation') {
   let html = formatMessageContent(content);
   html = html.replace(/\[(\d+)\]/g, (full, numText) => {
     const idx = Number(numText);
     if (!Number.isInteger(idx) || idx < 1 || idx > links.length) return full;
-    return `<a href="#citation-${idx}" title="Jump to citation [${idx}]">[${idx}]</a>`;
+    return `<a href="#${escapeHtml(citationIdPrefix)}-${idx}" title="Jump to citation [${idx}]">[${idx}]</a>`;
   });
   return html;
 }
@@ -1842,12 +1842,17 @@ function renderMessages() {
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     const citationLinks = m.role === 'assistant' ? extractCitationLinks(m.content) : [];
+    const citationPrefix = `msg-${idx}-citation`;
     if (m.role === 'tool_result' && m.metadata && m.metadata.kind === 'session_condensed_summary') {
       bubble.innerHTML = `<details><summary>Condensed summary (${escapeHtml(m.metadata.summary_id || '')})</summary><div class="small-muted mt-1">${formatMessageContent(m.content)}</div></details>`;
     } else if (m.role === 'assistant' && m.metadata && m.metadata.typing) bubble.innerHTML = '<p class="typing-dots"><span></span><span></span><span></span></p>';
     else bubble.innerHTML = m.role === 'assistant'
-      ? formatAssistantContentWithCitations(m.content, citationLinks)
+      ? formatAssistantContentWithCitations(m.content, citationLinks, citationPrefix)
       : formatMessageContent(m.content);
+    if (m.role === 'assistant' && citationLinks.length) {
+      const reasonsByUrl = scoreReasonsByUrl(state.messages, idx);
+      bubble.innerHTML += buildCitationPanel(m.content, reasonsByUrl, citationPrefix);
+    }
     row.appendChild(bubble);
     box.appendChild(row);
     anchor = row;

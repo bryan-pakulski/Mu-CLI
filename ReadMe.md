@@ -50,6 +50,7 @@ inspect progress, and either open a PR when complete or continue iterating.
 - Stage 1 shell slice: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
 - Stage 2 operational workflows: [`docs/ux/stage2-operational-workflows.md`](docs/ux/stage2-operational-workflows.md)
 - Stage 3 control-plane slice: [`docs/ux/stage3-control-plane-slice.md`](docs/ux/stage3-control-plane-slice.md)
+- Stage 4 analytics/hardening: [`docs/ux/stage4-analytics-hardening.md`](docs/ux/stage4-analytics-hardening.md)
 - UX design guidelines: [`docs/ux/design-guidelines.md`](docs/ux/design-guidelines.md)
 
 ## Makefile shortcuts

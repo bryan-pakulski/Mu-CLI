@@ -3,7 +3,7 @@
 
 // >>> app/store.js
 // --- state store + reducers -------------------------------------------------
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {}, uiSurface: 'operate', pinnedSessions: [], recentSessions: [], gitDiffMode: 'inline', gitHunkDecisions: {}, timelineFilter: 'all', gitDiffStats: { files: 0, additions: 0, deletions: 0 } };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {}, uiSurface: 'operate', pinnedSessions: [], recentSessions: [], gitDiffMode: 'inline', gitHunkDecisions: {}, timelineFilter: 'all', gitDiffStats: { files: 0, additions: 0, deletions: 0 }, telemetry: {} };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -931,6 +931,26 @@ function renderMetrics() {
         `<tr><td>${escapeHtml(row.provider)}</td><td>${escapeHtml(row.model)}</td><td>${row.turns}</td><td>${Math.trunc(row.tokens)}</td><td>${row.cost.toFixed(6)}</td></tr>`
       )).join('');
     }
+  }
+
+  const telemetry = state.telemetry || {};
+  const setMetric = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(value);
+  };
+  setMetric('metricTelemetryUptime', telemetry.uptime_seconds || 0);
+  setMetric('metricTelemetryRequests', telemetry.total_requests || 0);
+  setMetric('metricTelemetryToolFailures', telemetry.tool_failures || 0);
+  setMetric('metricTelemetryApprovalWaits', telemetry.approval_wait_events || 0);
+  setMetric('metricTelemetryJobsCompleted', telemetry.background_jobs_completed || 0);
+  setMetric('metricTelemetryJobsFailed', telemetry.background_jobs_failed_or_timed_out || 0);
+
+  const actionsBody = document.getElementById('metricsTelemetryActions');
+  if (actionsBody) {
+    const actionRows = Object.entries(telemetry.action_counts || {}).sort((a, b) => Number(b[1]) - Number(a[1]));
+    actionsBody.innerHTML = actionRows.length
+      ? actionRows.map(([name, count]) => `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(String(count))}</td></tr>`).join('')
+      : '<tr><td colspan="2" class="small-muted">No action telemetry recorded yet.</td></tr>';
   }
 }
 
@@ -2549,6 +2569,7 @@ async function refreshState() {
   state.skills = s.skills || [];
   state.enabledSkills = s.enabled_skills || [];
   state.workspaceIndexStats = s.workspace_index_stats || {};
+  state.telemetry = s.telemetry || {};
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');

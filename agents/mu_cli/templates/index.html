@@ -1794,6 +1794,22 @@ Keep responses concise"></textarea>
           <canvas id="metricsCostChart" class="chart-canvas" width="520" height="180"></canvas>
         </div>
       </div>
+
+      <div class="chart-wrap mt-2">
+        <div class="chart-title">Telemetry dashboard (Stage 4)</div>
+        <div class="metrics-grid">
+          <div class="metric-card"><div class="label">Uptime (s)</div><div id="metricTelemetryUptime" class="value">0</div></div>
+          <div class="metric-card"><div class="label">HTTP requests</div><div id="metricTelemetryRequests" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Tool failures (trace)</div><div id="metricTelemetryToolFailures" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Approval wait events</div><div id="metricTelemetryApprovalWaits" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Background jobs completed</div><div id="metricTelemetryJobsCompleted" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Background jobs failed/timed out</div><div id="metricTelemetryJobsFailed" class="value">0</div></div>
+        </div>
+        <table class="metrics-table mt-2">
+          <thead><tr><th>Action</th><th>Count</th></tr></thead>
+          <tbody id="metricsTelemetryActions"></tbody>
+        </table>
+      </div>
       <div class="chart-wrap">
         <div class="chart-title">Model breakdown</div>
         <table class="metrics-table">

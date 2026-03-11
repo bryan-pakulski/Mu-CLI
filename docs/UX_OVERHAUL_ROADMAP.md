@@ -50,10 +50,10 @@ This roadmap turns the high-level UX overhaul vision into a concrete, checkable 
 
 ### Stage 4 — Analytics + hardening + rollout (weeks 11-12)
 
-- [ ] Instrument UX and runtime telemetry dashboard.
+- [x] Instrument UX and runtime telemetry dashboard.
 - [ ] Add feature flags and phased rollout path.
-- [ ] Add regression test expansions for new flows.
-- [ ] Run UX sign-off with performance + reliability targets.
+- [x] Add regression test expansions for new flows.
+- [~] Run UX sign-off with performance + reliability targets.
 
 ## HELP (user quickstart)
 
@@ -94,7 +94,7 @@ Use this section as the baseline in-product help content so users can discover c
 | Runtime observability | Stage 2 | TBD | Timeline MVP | [ ] |
 | Skills/tools/rules controls | Stage 3 | TBD | Control center MVP | [x] |
 | Context budget tooling | Stage 3 | TBD | Token meter MVP | [x] |
-| Metrics and rollout | Stage 4 | TBD | Telemetry dashboard MVP | [ ] |
+| Metrics and rollout | Stage 4 | TBD | Telemetry dashboard MVP | [~] |
 
 ## Execution rules
 
@@ -110,6 +110,7 @@ Use this section as the baseline in-product help content so users can discover c
 - Stage 1 slice artifact: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
 - Stage 2 progress artifact: [`docs/ux/stage2-operational-workflows.md`](docs/ux/stage2-operational-workflows.md)
 - Stage 3 control-plane slice: [`docs/ux/stage3-control-plane-slice.md`](docs/ux/stage3-control-plane-slice.md)
+- Stage 4 analytics/hardening slice: [`docs/ux/stage4-analytics-hardening.md`](docs/ux/stage4-analytics-hardening.md)
 
 ## Immediate next actions
 

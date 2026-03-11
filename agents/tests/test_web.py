@@ -696,6 +696,37 @@ class WebTests(unittest.TestCase):
         cleared = client.post('/api/session', json={'action': 'clear'})
         self.assertEqual(200, cleared.status_code)
 
+    def test_state_includes_telemetry_snapshot(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        state = client.get('/api/state').get_json()
+        assert state is not None
+        telemetry = state.get('telemetry') or {}
+        self.assertIn('total_requests', telemetry)
+        self.assertIn('action_counts', telemetry)
+
+    def test_telemetry_action_counts_increment_for_chat_and_session(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/chat', json={'text': 'telemetry chat'})
+        client.post('/api/session', json={'action': 'clear'})
+
+        telemetry_res = client.get('/api/telemetry')
+        self.assertEqual(200, telemetry_res.status_code)
+        telemetry = (telemetry_res.get_json() or {}).get('telemetry') or {}
+        actions = telemetry.get('action_counts') or {}
+        self.assertGreaterEqual(int(actions.get('chat_turn', 0)), 1)
+        self.assertGreaterEqual(int(actions.get('session_clear', 0)), 1)
+
+
     def test_traces_persist_across_app_restart(self) -> None:
         from mu_cli.web import create_app
 

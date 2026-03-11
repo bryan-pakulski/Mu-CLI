@@ -8,6 +8,7 @@ import subprocess
 import threading
 import urllib.parse
 import uuid
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,6 +92,84 @@ class RetrieveConversationSummaryTool:
 def _default_usage() -> dict[str, float]:
     return default_usage()
 
+
+
+
+def _telemetry_path() -> Path:
+    path = Path('.mu_cli/telemetry.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _default_telemetry() -> dict[str, Any]:
+    return {
+        'started_at': datetime.now(timezone.utc).isoformat(),
+        'request_counts': {},
+        'action_counts': {},
+        'last_updated_at': datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _load_telemetry(runtime: WebRuntime) -> None:
+    path = _telemetry_path()
+    if not path.exists():
+        runtime.telemetry = _default_telemetry()
+        path.write_text(json.dumps(runtime.telemetry, indent=2), encoding='utf-8')
+        return
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError:
+        payload = _default_telemetry()
+    runtime.telemetry = {
+        'started_at': payload.get('started_at') or datetime.now(timezone.utc).isoformat(),
+        'request_counts': payload.get('request_counts') or {},
+        'action_counts': payload.get('action_counts') or {},
+        'last_updated_at': payload.get('last_updated_at') or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _persist_telemetry(runtime: WebRuntime) -> None:
+    runtime.telemetry['last_updated_at'] = datetime.now(timezone.utc).isoformat()
+    _telemetry_path().write_text(json.dumps(runtime.telemetry, indent=2), encoding='utf-8')
+
+
+def _record_telemetry(runtime: WebRuntime, category: str, key: str, count: int = 1) -> None:
+    bucket = runtime.telemetry.setdefault(category, {})
+    bucket[key] = int(bucket.get(key, 0)) + int(count)
+    _persist_telemetry(runtime)
+
+
+def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
+    req_counts = runtime.telemetry.get('request_counts') or {}
+    action_counts = runtime.telemetry.get('action_counts') or {}
+    total_requests = int(sum(int(v) for v in req_counts.values()))
+    tool_failures = len([line for line in (runtime.traces or []) if 'tool-run:' in str(line) and 'ok=False' in str(line)])
+    approval_waits = len([line for line in (runtime.traces or []) if 'approval' in str(line).lower()])
+    bg_jobs = runtime.background_jobs or {}
+    bg_completed = len([j for j in bg_jobs.values() if j.get('status') == 'completed'])
+    bg_failed = len([j for j in bg_jobs.values() if j.get('status') in {'failed', 'timed_out'}])
+
+    started_at = runtime.telemetry.get('started_at')
+    uptime_seconds = 0
+    if started_at:
+        try:
+            uptime_seconds = max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(started_at)).total_seconds()))
+        except ValueError:
+            uptime_seconds = 0
+
+    return {
+        'started_at': started_at,
+        'last_updated_at': runtime.telemetry.get('last_updated_at'),
+        'uptime_seconds': uptime_seconds,
+        'request_counts': req_counts,
+        'action_counts': action_counts,
+        'total_requests': total_requests,
+        'chat_turns': len(runtime.session_turns or []),
+        'tool_failures': tool_failures,
+        'approval_wait_events': approval_waits,
+        'background_jobs_completed': bg_completed,
+        'background_jobs_failed_or_timed_out': bg_failed,
+    }
 
 
 def _verification_policy_for_task(text: str) -> dict[str, Any]:
@@ -871,6 +950,8 @@ def _clear_all_stored_data(runtime: WebRuntime) -> dict[str, int]:
     runtime.session_store.use("default")
     _initialize_fresh_session_state(runtime, reset_summary_index=True)
     _persist(runtime)
+    runtime.telemetry = _default_telemetry()
+    _persist_telemetry(runtime)
 
     return {
         "sessions": removed_sessions,
@@ -918,6 +999,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         summary_index=[],
         skill_store=base.skill_store,
         enabled_skills=list(base.enabled_skills),
+        telemetry=dict(base.telemetry or {}),
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
@@ -1322,8 +1404,10 @@ def create_app():
         summary_index=[],
         skill_store=skill_store,
         enabled_skills=[],
+        telemetry={},
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
+    _load_telemetry(runtime)
     _refresh_tooling(runtime)
     runtime.agent = _new_agent(runtime)
     runtime.agent.add_system_prompt(runtime.system_prompt)
@@ -1333,6 +1417,13 @@ def create_app():
     _sync_skill_prompts(runtime)
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
+
+
+    @app.before_request
+    def _telemetry_request_hook():
+        from flask import request
+        key = f"{request.method} {request.path}"
+        _record_telemetry(runtime, 'request_counts', key)
 
     runtime_mutation_deps = RuntimeMutationDeps(
         get_models=get_models,
@@ -1361,6 +1452,8 @@ def create_app():
             persist=_persist,
             remove_uploaded_entry=_remove_uploaded_entry,
             clear_all_stored_data=_clear_all_stored_data,
+            telemetry_snapshot=_telemetry_snapshot,
+            record_telemetry_action=lambda runtime_ref, action: _record_telemetry(runtime_ref, "action_counts", action),
         ),
     )
 
@@ -1368,6 +1461,7 @@ def create_app():
         app,
         runtime,
         ChatRouteDeps(
+            record_telemetry_action=lambda runtime_ref, action: _record_telemetry(runtime_ref, "action_counts", action),
             run_turn_with_uploaded_context=_run_turn_with_uploaded_context,
             turn_report=_turn_report,
             record_turn=_record_turn,
@@ -1383,6 +1477,7 @@ def create_app():
         app,
         runtime,
         SessionRouteDeps(
+            record_telemetry_action=lambda runtime_ref, action: _record_telemetry(runtime_ref, "action_counts", action),
             load_session=_load_session,
             delete_session=lambda runtime_ref, name: runtime_ref.session_store.delete(name),
             persist=_persist,

@@ -49,6 +49,7 @@ class WebRuntime:
     summary_index: list[dict[str, Any]] = field(default_factory=list)
     skill_store: SkillStore | None = None
     enabled_skills: list[str] = field(default_factory=list)
+    telemetry: dict[str, Any] = field(default_factory=dict)
 
 
 def default_usage() -> dict[str, float]:

@@ -24,6 +24,7 @@ class ChatRouteDeps:
     start_background_turn: Callable[[Any, str, str], str]
     iter_chunks: Callable[[str], Any]
     load_session: Callable[[Any, str], bool]
+    record_telemetry_action: Callable[[Any, str], None]
 
 
 def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
@@ -36,6 +37,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
 
+        deps.record_telemetry_action(runtime, "chat_turn")
         result = execute_chat_turn(
             runtime,
             req.text,
@@ -55,7 +57,9 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             req = parse_chat_request(request.get_json(force=True), route="/api/chat/background")
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
+        deps.record_telemetry_action(runtime, "chat_stream")
         session_name = req.session or runtime.session_name
+        deps.record_telemetry_action(runtime, "chat_background_start")
         job_id = start_job(runtime, session_name, req.text, job_deps)
         return jsonify({"ok": True, "job_id": job_id, "session": session_name})
 
@@ -76,6 +80,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             req = parse_job_kill_request(request.get_json(silent=True))
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
+        deps.record_telemetry_action(runtime, "job_kill_request")
         code, payload = request_kill(runtime, job_id, req.reason)
         return jsonify(payload), code
 
@@ -85,6 +90,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             req = parse_job_plan_request(request.get_json(force=True))
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
+        deps.record_telemetry_action(runtime, "job_plan_decision")
         code, out = decide_plan(runtime, job_id, req.decision, req.revised_plan)
         return jsonify(out), code
 
@@ -94,6 +100,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             req = parse_chat_request(request.get_json(force=True), route="/api/chat/stream")
         except ContractValidationError as exc:
             return jsonify({"error": str(exc)}), 400
+        deps.record_telemetry_action(runtime, "chat_stream")
         session_name = req.session or runtime.session_name
         service = ChatStreamingService(
             turn_deps=ChatTurnDeps(

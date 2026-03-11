@@ -2,19 +2,32 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, Callable
 from urllib import parse, request
 
 from mu_cli.core.types import Message, ModelResponse, Role, ToolCall, UsageStats
 
 
+StreamCallback = Callable[[dict[str, Any]], None]
+
+
 class OllamaProvider:
     name = "ollama"
 
-    def __init__(self, model: str = "llama3.2", api_key: str | None = None, host: str | None = None) -> None:
+    def __init__(
+        self,
+        model: str = "llama3.2",
+        api_key: str | None = None,
+        host: str | None = None,
+        stream_callback: StreamCallback | None = None,
+    ) -> None:
         _ = api_key
         self.model = model
         self.host = (host or os.getenv("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
+        self.stream_callback = stream_callback
+
+    def set_stream_callback(self, callback: StreamCallback | None) -> None:
+        self.stream_callback = callback
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         converted: list[dict[str, Any]] = []
@@ -68,6 +81,34 @@ class OllamaProvider:
     def _url(self, path: str) -> str:
         return parse.urljoin(self.host + "/", path.lstrip("/"))
 
+    def _emit_stream_chunk(self, chunk: str) -> None:
+        if not chunk or self.stream_callback is None:
+            return
+        self.stream_callback({"kind": "thinking_output", "chunk": chunk})
+
+    def _parse_tool_calls(self, raw_calls: list[dict[str, Any]]) -> list[ToolCall]:
+        tool_calls: list[ToolCall] = []
+        for index, call in enumerate(raw_calls):
+            function_blob = call.get("function", {})
+            args_blob = function_blob.get("arguments", {})
+            if isinstance(args_blob, str):
+                try:
+                    parsed_args = json.loads(args_blob)
+                except json.JSONDecodeError:
+                    parsed_args = {}
+            elif isinstance(args_blob, dict):
+                parsed_args = args_blob
+            else:
+                parsed_args = {}
+            tool_calls.append(
+                ToolCall(
+                    name=str(function_blob.get("name", "")),
+                    args=parsed_args,
+                    call_id=str(call.get("id") or f"ollama_call_{index}"),
+                )
+            )
+        return tool_calls
+
     def generate(
         self,
         messages: list[Message],
@@ -90,39 +131,52 @@ class OllamaProvider:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with request.urlopen(req, timeout=120) as response:
-            data = json.loads(response.read().decode("utf-8"))
 
-        usage = UsageStats(
-            input_tokens=int(data.get("prompt_eval_count", 0) or 0),
-            output_tokens=int(data.get("eval_count", 0) or 0),
-            total_tokens=int((data.get("prompt_eval_count", 0) or 0) + (data.get("eval_count", 0) or 0)),
-        )
-
-        message_payload = data.get("message", {})
-        content = str(message_payload.get("content") or "")
-        tool_calls: list[ToolCall] = []
-        for index, call in enumerate(message_payload.get("tool_calls", [])):
-            function_blob = call.get("function", {})
-            args_blob = function_blob.get("arguments", {})
-            parsed_args: dict[str, Any]
-            if isinstance(args_blob, str):
-                try:
-                    parsed_args = json.loads(args_blob)
-                except json.JSONDecodeError:
-                    parsed_args = {}
-            elif isinstance(args_blob, dict):
-                parsed_args = args_blob
-            else:
-                parsed_args = {}
-            tool_calls.append(
-                ToolCall(
-                    name=str(function_blob.get("name", "")),
-                    args=parsed_args,
-                    call_id=str(call.get("id") or f"ollama_call_{index}"),
-                )
+        if not stream:
+            with request.urlopen(req, timeout=120) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            message_payload = data.get("message", {})
+            content = str(message_payload.get("content") or "")
+            tool_calls = self._parse_tool_calls(message_payload.get("tool_calls", []))
+            usage = UsageStats(
+                input_tokens=int(data.get("prompt_eval_count", 0) or 0),
+                output_tokens=int(data.get("eval_count", 0) or 0),
+                total_tokens=int((data.get("prompt_eval_count", 0) or 0) + (data.get("eval_count", 0) or 0)),
+            )
+            return ModelResponse(
+                message=Message(role=Role.ASSISTANT, content=content or "Calling tool..."),
+                tool_calls=tool_calls,
+                usage=usage,
             )
 
+        collected: list[str] = []
+        final_message_payload: dict[str, Any] = {}
+        prompt_eval_count = 0
+        eval_count = 0
+
+        with request.urlopen(req, timeout=120) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                part = json.loads(line)
+                msg = part.get("message", {})
+                chunk = str(msg.get("content") or "")
+                if chunk:
+                    collected.append(chunk)
+                    self._emit_stream_chunk(chunk)
+                if msg:
+                    final_message_payload = msg
+                prompt_eval_count = int(part.get("prompt_eval_count", prompt_eval_count) or prompt_eval_count)
+                eval_count = int(part.get("eval_count", eval_count) or eval_count)
+
+        content = "".join(collected).strip()
+        tool_calls = self._parse_tool_calls(final_message_payload.get("tool_calls", []))
+        usage = UsageStats(
+            input_tokens=prompt_eval_count,
+            output_tokens=eval_count,
+            total_tokens=prompt_eval_count + eval_count,
+        )
         return ModelResponse(
             message=Message(role=Role.ASSISTANT, content=content or "Calling tool..."),
             tool_calls=tool_calls,

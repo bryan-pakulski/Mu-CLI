@@ -1701,7 +1701,8 @@ function renderMessages() {
     if (m.role === 'user' || m.role === 'assistant') {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
-      const tag = m.role === 'user' ? 'You' : 'AI';
+      let tag = m.role === 'user' ? 'You' : 'AI';
+      if (m.role === 'assistant' && m.metadata && m.metadata.kind === 'thinking_output') tag = 'thinking output';
       const stamp = formatTimestamp(messageTimes.get(idx));
       meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
       row.appendChild(meta);

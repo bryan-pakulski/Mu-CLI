@@ -51,18 +51,34 @@ class ChatStreamingService:
     def stream_chat(self, runtime: Any, text: str, session_name: str) -> Response:
         events: queue.Queue[dict[str, Any]] = queue.Queue()
         done = threading.Event()
+        saw_stream_chunks = False
 
         original_model_response = runtime.agent.on_model_response
+        original_model_stream = getattr(runtime.agent, "on_model_stream", None)
         original_tool_run = runtime.agent.on_tool_run
 
         def stream_model_response(message: Message, calls: list[ToolCall]) -> None:
+            nonlocal saw_stream_chunks
             if original_model_response is not None:
                 original_model_response(message, calls)
             for call in calls:
                 events.put({"type": "trace", "line": f"tool-request: id={call.call_id} name={call.name} args={call.args}"})
-            if message.content:
+            if message.content and not saw_stream_chunks:
                 for chunk in self.stream_deps.iter_chunks(message.content):
                     events.put({"type": "assistant_chunk", "chunk": chunk})
+
+
+        def stream_model_chunk(payload: dict[str, Any]) -> None:
+            nonlocal saw_stream_chunks
+            kind = str(payload.get("kind", ""))
+            chunk = str(payload.get("chunk", ""))
+            if not chunk:
+                return
+            saw_stream_chunks = True
+            if kind == "thinking_output":
+                events.put({"type": "thinking_chunk", "tag": "thinking output", "chunk": chunk})
+            else:
+                events.put({"type": "assistant_chunk", "chunk": chunk})
 
         def stream_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
             if original_tool_run is not None:
@@ -71,6 +87,7 @@ class ChatStreamingService:
 
         def run_turn() -> None:
             runtime.agent.on_model_response = stream_model_response
+            runtime.agent.on_model_stream = stream_model_chunk
             runtime.agent.on_tool_run = stream_tool_run
             try:
                 if runtime.session_name != session_name:
@@ -82,6 +99,7 @@ class ChatStreamingService:
                 events.put({"type": "error", "error": str(exc)})
             finally:
                 runtime.agent.on_model_response = original_model_response
+                runtime.agent.on_model_stream = original_model_stream
                 runtime.agent.on_tool_run = original_tool_run
                 done.set()
 

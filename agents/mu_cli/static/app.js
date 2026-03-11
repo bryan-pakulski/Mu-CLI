@@ -1755,7 +1755,8 @@ function renderMessages() {
     if (m.role === 'user' || m.role === 'assistant') {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
-      const tag = m.role === 'user' ? 'You' : 'AI';
+      let tag = m.role === 'user' ? 'You' : 'AI';
+      if (m.role === 'assistant' && m.metadata && m.metadata.kind === 'thinking_output') tag = 'thinking output';
       const stamp = formatTimestamp(messageTimes.get(idx));
       meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
       row.appendChild(meta);
@@ -2678,6 +2679,7 @@ async function sendPrompt(background = false) {
 
   state.messages.push({ role: 'user', content: text });
   let draft = { role: 'assistant', content: '', metadata: { typing: true } };
+  let thinkingDraft = null;
   state.messages.push(draft);
   renderMessages();
   renderMetadataPanel();
@@ -2745,6 +2747,15 @@ async function sendPrompt(background = false) {
           }
           if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
+          renderMessages();
+          renderMetadataPanel();
+        } else if (event.type === 'thinking_chunk') {
+          updateThinking(false);
+          if (!thinkingDraft) {
+            thinkingDraft = { role: 'assistant', content: '', metadata: { kind: 'thinking_output', tag: event.tag || 'thinking output' } };
+            state.messages.push(thinkingDraft);
+          }
+          thinkingDraft.content += event.chunk;
           renderMessages();
           renderMetadataPanel();
         } else if (event.type === 'trace') {

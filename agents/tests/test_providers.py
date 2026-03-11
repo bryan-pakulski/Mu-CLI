@@ -106,6 +106,23 @@ class ProvidersTests(unittest.TestCase):
         self.assertIn("tools", payload)
 
 
+
+    @mock.patch("mu_cli.providers.ollama.request.urlopen")
+    def test_ollama_provider_stream_emits_thinking_output_chunks(self, mock_urlopen: mock.Mock) -> None:
+        stream_lines = [
+            json.dumps({"message": {"content": "Thinking "}, "done": False}).encode("utf-8"),
+            json.dumps({"message": {"content": "more"}, "prompt_eval_count": 3, "eval_count": 2, "done": True}).encode("utf-8"),
+        ]
+        mock_urlopen.return_value.__enter__.return_value.__iter__.return_value = iter(stream_lines)
+
+        seen: list[dict] = []
+        provider = OllamaProvider(model="llama3.2", host="http://localhost:11434", stream_callback=seen.append)
+        reply = provider.generate([Message(role=Role.USER, content="ping")], stream=True)
+
+        self.assertEqual("Thinking more", reply.message.content)
+        self.assertEqual(2, len(seen))
+        self.assertTrue(all(item.get("kind") == "thinking_output" for item in seen))
+
     @mock.patch("mu_cli.providers.ollama.request.urlopen")
     def test_ollama_provider_generate_parses_tool_calls(self, mock_urlopen: mock.Mock) -> None:
         mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(

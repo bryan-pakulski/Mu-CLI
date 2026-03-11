@@ -16,6 +16,7 @@ class SessionRouteDeps:
     condense_session_context: Callable[..., dict[str, Any]]
     mutate_for_new_session: Callable[[Any, dict[str, Any], str], None]
     mutate_for_clear: Callable[[Any, bool], None]
+    record_telemetry_action: Callable[[Any, str], None]
 
 
 def register_session_routes(app, runtime: Any, deps: SessionRouteDeps) -> None:
@@ -36,6 +37,7 @@ def register_session_routes(app, runtime: Any, deps: SessionRouteDeps) -> None:
             return jsonify({"sessions": runtime.session_store.list_sessions()})
 
         if action == "new":
+            deps.record_telemetry_action(runtime, "session_new")
             if not name:
                 return jsonify({"error": "name required"}), 400
             deps.mutate_for_new_session(runtime, payload, name)
@@ -43,6 +45,7 @@ def register_session_routes(app, runtime: Any, deps: SessionRouteDeps) -> None:
             return jsonify({"ok": True, "session": name})
 
         if action in {"load", "switch"}:
+            deps.record_telemetry_action(runtime, "session_load_or_switch")
             if not name:
                 return jsonify({"error": "name required"}), 400
             loaded = deps.load_session(runtime, name)
@@ -51,6 +54,7 @@ def register_session_routes(app, runtime: Any, deps: SessionRouteDeps) -> None:
             return jsonify({"ok": True, "session": name})
 
         if action == "delete":
+            deps.record_telemetry_action(runtime, "session_delete")
             if not name:
                 return jsonify({"error": "name required"}), 400
             if name == runtime.session_name:
@@ -61,6 +65,7 @@ def register_session_routes(app, runtime: Any, deps: SessionRouteDeps) -> None:
             return jsonify({"ok": True})
 
         if action == "clear":
+            deps.record_telemetry_action(runtime, "session_clear")
             target = name or runtime.session_name
             if target != runtime.session_name:
                 loaded = deps.load_session(runtime, target)
@@ -72,6 +77,7 @@ def register_session_routes(app, runtime: Any, deps: SessionRouteDeps) -> None:
             return jsonify({"ok": True, "session": runtime.session_name})
 
         if action == "condense":
+            deps.record_telemetry_action(runtime, "session_condense")
             w = payload.get("window")
             result = deps.condense_session_context(runtime, window_size=int(w) if w is not None else runtime.condense_window)
             deps.persist(runtime)

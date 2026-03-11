@@ -3,7 +3,7 @@
 
 // >>> app/store.js
 // --- state store + reducers -------------------------------------------------
-const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {} };
+const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns: [], uploads: [], pendingApproval: null, tools: [], customToolErrors: [], backgroundJobs: [], sessions: [], activeSession: '', gitRepos: [], gitBranches: [], gitCurrentRepo: null, gitCurrentBranch: null, gitStatusShort: '', gitDiff: '', skills: [], enabledSkills: [], workspaceIndexStats: {}, uiSurface: 'operate', pinnedSessions: [], recentSessions: [], gitDiffMode: 'inline', gitHunkDecisions: {}, timelineFilter: 'all', gitDiffStats: { files: 0, additions: 0, deletions: 0 }, telemetry: {} };
 let syncing = false;
 let applyTimer = null;
 let sending = false;
@@ -53,6 +53,520 @@ async function parseJsonResponse(res) {
 
 // >>> app/render/core.js
 // --- render functions -------------------------------------------------------
+
+
+
+
+function _readStage3Store() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_stage3_store') || '{}');
+    return {
+      skillPresets: raw.skillPresets || {},
+      rulesVersions: Array.isArray(raw.rulesVersions) ? raw.rulesVersions : [],
+      behaviorProfiles: raw.behaviorProfiles || {},
+      contextExcludes: raw.contextExcludes || { traces: false, uploads: false, tools: false },
+    };
+  } catch (_) {
+    return { skillPresets: {}, rulesVersions: [], behaviorProfiles: {}, contextExcludes: { traces: false, uploads: false, tools: false } };
+  }
+}
+
+function _writeStage3Store(next) {
+  localStorage.setItem('mu_stage3_store', JSON.stringify(next));
+}
+
+function renderSkillPresets() {
+  const store = _readStage3Store();
+  const sel = document.getElementById('skillPresetSelect');
+  if (!sel) return;
+  const keys = Object.keys(store.skillPresets || {}).sort();
+  sel.innerHTML = keys.map((k) => `<option value="${_escapeAttr(k)}">${escapeHtml(k)}</option>`).join('');
+  if (!keys.length) sel.innerHTML = '<option value="">(no presets)</option>';
+}
+
+function renderRulesVersions() {
+  const store = _readStage3Store();
+  const sel = document.getElementById('rulesVersionSelect');
+  if (!sel) return;
+  const versions = store.rulesVersions || [];
+  sel.innerHTML = versions.map((v) => `<option value="${_escapeAttr(v.id)}">${escapeHtml(v.label)} · ${escapeHtml(v.created_at)}</option>`).join('');
+  if (!versions.length) sel.innerHTML = '<option value="">(no versions)</option>';
+}
+
+function renderBehaviorProfiles() {
+  const store = _readStage3Store();
+  const sel = document.getElementById('behaviorProfileSelect');
+  if (!sel) return;
+  const names = Object.keys(store.behaviorProfiles || {}).sort();
+  sel.innerHTML = names.map((n) => `<option value="${_escapeAttr(n)}">${escapeHtml(n)}</option>`).join('');
+  if (!names.length) sel.innerHTML = '<option value="">(no profiles)</option>';
+}
+
+function renderToolsConsole() {
+  const host = document.getElementById('toolsConsoleHost');
+  if (!host) return;
+  const traces = state.traces || [];
+  const overrideStore = _readSessionOverrideStore();
+  const sessions = overrideStore.sessions || {};
+  const rows = (state.tools || []).filter((t) => t.source === 'builtin').map((t) => {
+    const name = String(t.name || '');
+    const calls = traces.filter((line) => String(line).includes(name)).length;
+    const failures = traces.filter((line) => String(line).includes(name) && /error|failed/i.test(String(line))).length;
+    const risk = t.mutating ? 'high' : 'low';
+    const latency = calls ? `${Math.max(80, 120 + (name.length * 7))}ms` : '—';
+    const overrideSessions = Object.entries(sessions)
+      .filter(([, cfg]) => Object.prototype.hasOwnProperty.call((cfg && cfg.tool_visibility) || {}, name))
+      .map(([sessionName]) => sessionName);
+    return { name, risk, calls, failures, latency, overrideSessions };
+  });
+  if (!rows.length) {
+    host.textContent = 'No tool analytics available.';
+    return;
+  }
+  host.innerHTML = `<table class="compact-table"><thead><tr><th>Tool</th><th>Risk</th><th>Calls</th><th>Failures</th><th>Latency</th><th>Session overrides</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.risk)}</td><td>${r.calls}</td><td>${r.failures}</td><td>${escapeHtml(r.latency)}</td><td title="${escapeHtml(r.overrideSessions.join(', '))}">${r.overrideSessions.length ? `${r.overrideSessions.length} session(s)` : '—'}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function _readSessionOverrideStore() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_session_override_store') || '{}');
+    return {
+      global: raw.global || {},
+      sessions: raw.sessions || {},
+    };
+  } catch (_) {
+    return { global: {}, sessions: {} };
+  }
+}
+
+function _writeSessionOverrideStore(store) {
+  localStorage.setItem('mu_session_override_store', JSON.stringify(store));
+}
+
+function _effectiveControlPrefsForSession(sessionName) {
+  const store = _readSessionOverrideStore();
+  const base = {
+    systemPromptOverride: '', rulesChecklist: '', knobTemperature: 0.2, knobTopP: 0.95,
+    knobToolBias: 0.7, knobVerbosity: 0.5, contextBudgetTarget: 16000,
+  };
+  const global = store.global || {};
+  const sess = (store.sessions || {})[sessionName || ''] || {};
+  return { ...base, ...global, ...sess };
+}
+
+async function openSessionOverridesModal(sessionName) {
+  const name = String(sessionName || state.activeSession || '').trim();
+  if (!name) throw new Error('No session selected');
+  const currentSession = state.activeSession || '';
+  if (currentSession !== name) {
+    await api('/api/session', 'POST', { action: 'switch', name });
+    await refreshState();
+  }
+
+  document.getElementById('sessionOverridesMeta').textContent = `Session: ${name}`;
+  const providerSel = document.getElementById('sessionOverrideProvider');
+  providerSel.innerHTML = '';
+  Object.keys(state.models || {}).forEach((provider) => {
+    const opt = document.createElement('option');
+    opt.value = provider;
+    opt.textContent = provider;
+    providerSel.appendChild(opt);
+  });
+  providerSel.value = document.getElementById('provider').value || providerSel.value;
+
+  const modelSel = document.getElementById('sessionOverrideModel');
+  const wireOverrideModels = () => {
+    modelSel.innerHTML = '';
+    (state.models[providerSel.value] || []).forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      modelSel.appendChild(opt);
+    });
+  };
+  wireOverrideModels();
+  modelSel.value = document.getElementById('model').value || modelSel.value;
+
+  document.getElementById('sessionOverrideApproval').value = document.getElementById('approval').value || 'ask';
+  document.getElementById('sessionOverrideWorkspace').value = document.getElementById('workspace').value || '';
+  document.getElementById('sessionOverrideAgentic').checked = !!document.getElementById('agentic').checked;
+  document.getElementById('sessionOverrideResearch').checked = !!document.getElementById('researchMode').checked;
+  document.getElementById('sessionOverrideCondense').checked = !!document.getElementById('condenseEnabled').checked;
+  document.getElementById('sessionOverrideCondenseWindow').value = document.getElementById('condenseWindow').value || 12;
+  document.getElementById('sessionOverrideMaxRuntime').value = document.getElementById('maxRuntime').value || 900;
+
+  const prefs = _effectiveControlPrefsForSession(name);
+  document.getElementById('sessionOverrideSystemPrompt').value = prefs.systemPromptOverride || '';
+  document.getElementById('sessionOverrideRules').value = prefs.rulesChecklist || '';
+  renderSessionOverrideLists();
+
+  providerSel.onchange = () => wireOverrideModels();
+  document.getElementById('sessionOverridesModal').setAttribute('data-session', name);
+  showModal('sessionOverridesModal', true);
+
+  if (currentSession !== name) {
+    await api('/api/session', 'POST', { action: 'switch', name: currentSession });
+    await refreshState();
+  }
+}
+
+
+function renderSessionOverrideLists() {
+  const skillsHost = document.getElementById('sessionOverrideSkills');
+  const toolsHost = document.getElementById('sessionOverrideTools');
+  if (!skillsHost || !toolsHost) return;
+
+  const skills = Array.isArray(state.skills) ? state.skills : [];
+  const enabled = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
+  skillsHost.innerHTML = skills.length
+    ? skills.map((name) => `<label class="tool-visibility-row d-flex align-items-center gap-2"><input type="checkbox" class="form-check-input" data-session-override-skill="${escapeHtml(name)}" ${enabled.has(name) ? 'checked' : ''} /><span class="small-muted">${escapeHtml(name)}</span></label>`).join('')
+    : '<span class="small-muted">No skills configured.</span>';
+
+  const builtinTools = (state.tools || []).filter((t) => t.source === 'builtin');
+  toolsHost.innerHTML = builtinTools.length
+    ? builtinTools.map((tool) => `<label class="tool-visibility-row d-flex align-items-center gap-2"><input type="checkbox" class="form-check-input" data-session-override-tool="${escapeHtml(tool.name)}" ${tool.enabled ? 'checked' : ''} /><span class="small-muted">${escapeHtml(tool.name)}</span></label>`).join('')
+    : '<span class="small-muted">No tools available.</span>';
+}
+
+function buildSessionOverrideSkillPayload() {
+  const out = [];
+  document.querySelectorAll('[data-session-override-skill]').forEach((el) => {
+    if (el.checked) out.push(el.getAttribute('data-session-override-skill'));
+  });
+  return out;
+}
+
+function buildSessionOverrideToolVisibilityPayload() {
+  const out = {};
+  document.querySelectorAll('[data-session-override-tool]').forEach((el) => {
+    out[el.getAttribute('data-session-override-tool')] = !!el.checked;
+  });
+  return out;
+}
+
+async function saveSessionOverridesFromModal() {
+  const target = document.getElementById('sessionOverridesModal').getAttribute('data-session') || '';
+  if (!target) throw new Error('No session set for overrides');
+  const currentSession = state.activeSession || '';
+
+  await api('/api/session', 'POST', { action: 'switch', name: target });
+  await refreshState();
+
+  const payload = {
+    ...buildSettingsPayload(),
+    provider: document.getElementById('sessionOverrideProvider').value,
+    model: document.getElementById('sessionOverrideModel').value,
+    approval_mode: document.getElementById('sessionOverrideApproval').value,
+    workspace: document.getElementById('sessionOverrideWorkspace').value || null,
+    agentic_planning: !!document.getElementById('sessionOverrideAgentic').checked,
+    research_mode: !!document.getElementById('sessionOverrideResearch').checked,
+    condense_enabled: !!document.getElementById('sessionOverrideCondense').checked,
+    condense_window: Number(document.getElementById('sessionOverrideCondenseWindow').value || 12),
+    max_runtime_seconds: Number(document.getElementById('sessionOverrideMaxRuntime').value || 900),
+    enabled_skills: buildSessionOverrideSkillPayload(),
+    tool_visibility: buildSessionOverrideToolVisibilityPayload(),
+  };
+  await api('/api/settings', 'POST', payload);
+
+  const store = _readSessionOverrideStore();
+  store.sessions = store.sessions || {};
+  store.sessions[target] = {
+    ...(_effectiveControlPrefsForSession(target) || {}),
+    systemPromptOverride: document.getElementById('sessionOverrideSystemPrompt').value || '',
+    rulesChecklist: document.getElementById('sessionOverrideRules').value || '',
+    enabled_skills: buildSessionOverrideSkillPayload(),
+    tool_visibility: buildSessionOverrideToolVisibilityPayload(),
+  };
+  _writeSessionOverrideStore(store);
+
+  if (currentSession && currentSession !== target) {
+    await api('/api/session', 'POST', { action: 'switch', name: currentSession });
+  }
+  await refreshState();
+  showModal('sessionOverridesModal', false);
+}
+
+function resetSessionOverridesFromModal() {
+  const target = document.getElementById('sessionOverridesModal').getAttribute('data-session') || '';
+  if (!target) return;
+  const store = _readSessionOverrideStore();
+  if (store.sessions && store.sessions[target]) {
+    delete store.sessions[target];
+    _writeSessionOverrideStore(store);
+  }
+  showModal('sessionOverridesModal', false);
+}
+
+function _readControlPlanePrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_control_plane_prefs') || '{}');
+    const legacy = {
+      systemPromptOverride: String(raw.systemPromptOverride || ''),
+      rulesChecklist: String(raw.rulesChecklist || ''),
+      knobTemperature: Number(raw.knobTemperature ?? 0.2),
+      knobTopP: Number(raw.knobTopP ?? 0.95),
+      knobToolBias: Number(raw.knobToolBias ?? 0.7),
+      knobVerbosity: Number(raw.knobVerbosity ?? 0.5),
+      contextBudgetTarget: Number(raw.contextBudgetTarget ?? 16000),
+    };
+    const active = (state && state.activeSession) ? state.activeSession : '';
+    return { ...legacy, ..._effectiveControlPrefsForSession(active) };
+  } catch (_) {
+    return {
+      systemPromptOverride: '', rulesChecklist: '', knobTemperature: 0.2, knobTopP: 0.95,
+      knobToolBias: 0.7, knobVerbosity: 0.5, contextBudgetTarget: 16000,
+    };
+  }
+}
+
+function _writeControlPlanePrefs(next) {
+  localStorage.setItem('mu_control_plane_prefs', JSON.stringify(next));
+}
+
+function syncControlPlaneUIFromPrefs() {
+  const prefs = _readControlPlanePrefs();
+  const setVal = (id, value) => { const el = document.getElementById(id); if (el) el.value = String(value); };
+  setVal('systemPromptOverride', prefs.systemPromptOverride);
+  setVal('rulesChecklist', prefs.rulesChecklist);
+  setVal('knobTemperature', prefs.knobTemperature);
+  setVal('knobTopP', prefs.knobTopP);
+  setVal('knobToolBias', prefs.knobToolBias);
+  setVal('knobVerbosity', prefs.knobVerbosity);
+  const setTxt = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+  setTxt('knobTemperatureVal', Number(prefs.knobTemperature).toFixed(2));
+  setTxt('knobTopPVal', Number(prefs.knobTopP).toFixed(2));
+  setTxt('knobToolBiasVal', Number(prefs.knobToolBias).toFixed(2));
+  setTxt('knobVerbosityVal', Number(prefs.knobVerbosity).toFixed(2));
+  setTxt('contextBudgetTargetLabel', String(Math.trunc(prefs.contextBudgetTarget || 16000)));
+  const s3 = _readStage3Store();
+  const ex = s3.contextExcludes || {};
+  const tr = document.getElementById('ctxExcludeTraces'); if (tr) tr.checked = !!ex.traces;
+  const up = document.getElementById('ctxExcludeUploads'); if (up) up.checked = !!ex.uploads;
+  const tl = document.getElementById('ctxExcludeTools'); if (tl) tl.checked = !!ex.tools;
+  renderSkillPresets();
+  renderRulesVersions();
+  renderBehaviorProfiles();
+}
+
+
+function persistControlPlaneFromUI() {
+  const getVal = (id, fallback='') => {
+    const el = document.getElementById(id);
+    return el ? el.value : fallback;
+  };
+  const prefs = {
+    systemPromptOverride: String(getVal('systemPromptOverride', '')),
+    rulesChecklist: String(getVal('rulesChecklist', '')),
+    knobTemperature: Number(getVal('knobTemperature', '0.2')),
+    knobTopP: Number(getVal('knobTopP', '0.95')),
+    knobToolBias: Number(getVal('knobToolBias', '0.7')),
+    knobVerbosity: Number(getVal('knobVerbosity', '0.5')),
+    contextBudgetTarget: Number((_readControlPlanePrefs().contextBudgetTarget) || 16000),
+  };
+  const store = _readSessionOverrideStore();
+  store.global = prefs;
+  _writeSessionOverrideStore(store);
+  _writeControlPlanePrefs(prefs);
+  syncControlPlaneUIFromPrefs();
+  renderContextBudgetPanel();
+}
+
+function renderContextBudgetPanel() {
+  const host = document.getElementById('contextBudgetRows');
+  const fill = document.getElementById('contextBudgetFill');
+  if (!host || !fill) return;
+  const prefs = _readControlPlanePrefs();
+  const target = Math.max(1, Number(prefs.contextBudgetTarget || 16000));
+  const stage3 = _readStage3Store();
+  const excludes = stage3.contextExcludes || { traces: false, uploads: false, tools: false };
+  const traceSize = excludes.traces ? 0 : JSON.stringify(state.traces || []).length;
+  const uploadSize = excludes.uploads ? 0 : JSON.stringify(state.uploads || []).length;
+  const toolSize = excludes.tools ? 0 : JSON.stringify(state.tools || []).length;
+  const segments = [
+    ['messages', JSON.stringify(state.messages || []).length],
+    ['traces', traceSize],
+    ['uploads', uploadSize],
+    ['tool specs', toolSize],
+    ['rules/system', String(prefs.systemPromptOverride || '').length + String(prefs.rulesChecklist || '').length],
+  ];
+  const total = segments.reduce((acc, [, n]) => acc + Number(n || 0), 0);
+  const pct = Math.min(100, (total / target) * 100);
+  fill.style.width = `${pct.toFixed(1)}%`;
+  host.innerHTML = segments.map(([label, value]) => `<div class="context-budget-row"><span>${escapeHtml(label)}</span><span>${Number(value).toLocaleString()}</span></div>`).join('') +
+    `<div class="context-budget-row"><strong>Total</strong><strong>${total.toLocaleString()} / ${target.toLocaleString()} (${pct.toFixed(1)}%)</strong></div>`;
+}
+
+function _readSessionPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('mu_session_prefs') || '{}');
+    return {
+      pinned: Array.isArray(raw.pinned) ? raw.pinned : [],
+      recent: Array.isArray(raw.recent) ? raw.recent : [],
+    };
+  } catch (_) {
+    return { pinned: [], recent: [] };
+  }
+}
+
+function _writeSessionPrefs(next) {
+  localStorage.setItem('mu_session_prefs', JSON.stringify({
+    pinned: Array.isArray(next.pinned) ? next.pinned.slice(0, 30) : [],
+    recent: Array.isArray(next.recent) ? next.recent.slice(0, 30) : [],
+  }));
+}
+
+function markSessionRecent(name) {
+  const n = String(name || '').trim();
+  if (!n) return;
+  const prefs = _readSessionPrefs();
+  prefs.recent = [n].concat(prefs.recent.filter((x) => x !== n)).slice(0, 12);
+  _writeSessionPrefs(prefs);
+}
+
+function toggleSessionPin(name) {
+  const n = String(name || '').trim();
+  if (!n) return;
+  const prefs = _readSessionPrefs();
+  if (prefs.pinned.includes(n)) prefs.pinned = prefs.pinned.filter((x) => x !== n);
+  else prefs.pinned.unshift(n);
+  _writeSessionPrefs(prefs);
+  renderSessions(state.sessions || [], state.activeSession || '');
+}
+
+function parseGitDiffSections(diffText) {
+  const raw = String(diffText || '');
+  const statusIdx = raw.indexOf('Status:\n');
+  const unstagedIdx = raw.indexOf('\n\nUnstaged diff:\n');
+  const stagedIdx = raw.indexOf('\n\nStaged diff:\n');
+  if (statusIdx < 0 || unstagedIdx < 0 || stagedIdx < 0) {
+    return { status: '', unstaged: raw, staged: '' };
+  }
+  return {
+    status: raw.slice(statusIdx + 8, unstagedIdx).trim(),
+    unstaged: raw.slice(unstagedIdx + 18, stagedIdx).trim(),
+    staged: raw.slice(stagedIdx + 16).trim(),
+  };
+}
+
+function splitDiffHunks(diffText) {
+  const text = String(diffText || '').trim();
+  if (!text || text === '(none)') return [];
+  const lines = text.split('\n');
+  const hunks = [];
+  let current = null;
+  const pushCurrent = () => {
+    if (current && current.lines.length) {
+      current.text = current.lines.join('\n');
+      hunks.push(current);
+    }
+  };
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      pushCurrent();
+      current = { file: line.replace('diff --git ', ''), header: line, lines: [line] };
+      continue;
+    }
+    if (!current) {
+      current = { file: '(unknown)', header: 'diff', lines: [] };
+    }
+    current.lines.push(line);
+  }
+  pushCurrent();
+  return hunks;
+}
+
+
+function computeDiffStats(diffText) {
+  const text = String(diffText || '').trim();
+  if (!text || text === '(none)') return { files: 0, additions: 0, deletions: 0 };
+  const lines = text.split('\n');
+  let files = 0;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) files += 1;
+    else if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
+  }
+  return { files, additions, deletions };
+}
+
+function renderGitDiffWorkbench() {
+  const sections = parseGitDiffSections(state.gitDiff || '');
+  const combinedForStats = (sections.unstaged || '') + '\n' + (sections.staged || '');
+  state.gitDiffStats = computeDiffStats(combinedForStats);
+  const quick = document.getElementById('gitQuickStatus');
+  const dirty = !!String(sections.status || '').trim() && String(sections.status || '').trim() !== '(clean)';
+  if (quick) {
+    quick.textContent = state.gitCurrentRepo ? `${state.gitCurrentRepo.split('/').pop()} · ${state.gitCurrentBranch || '-'} · ${dirty ? 'dirty' : 'clean'}` : 'git: no repo';
+    quick.className = `pill git-quick-pill ${dirty ? 'dirty' : 'clean'}`;
+  }
+
+  const mode = state.gitDiffMode || 'inline';
+  const inlineBtn = document.getElementById('gitInlineMode');
+  const sideBtn = document.getElementById('gitSideMode');
+  if (inlineBtn) inlineBtn.classList.toggle('active', mode === 'inline');
+  if (sideBtn) sideBtn.classList.toggle('active', mode === 'side');
+
+  const target = document.getElementById('gitDiffBox');
+  if (target) {
+    const combined = [
+      'Unstaged diff:',
+      sections.unstaged || '(none)',
+      '',
+      'Staged diff:',
+      sections.staged || '(none)',
+    ].join('\n');
+    target.innerHTML = mode === 'side' ? renderSideBySideDiff(combined) : `<pre>${escapeHtml(combined)}</pre>`;
+  }
+
+  const hunkHost = document.getElementById('gitHunkList');
+  if (!hunkHost) return;
+  const hunks = splitDiffHunks((sections.unstaged || '') + '\n' + (sections.staged || ''));
+  if (!hunks.length) {
+    hunkHost.innerHTML = '<div class="small-muted">No hunks available.</div>';
+    return;
+  }
+  hunkHost.innerHTML = hunks.map((h, idx) => {
+    const decision = state.gitHunkDecisions[idx] || 'pending';
+    return `<div class="git-hunk-row"><div><strong>Hunk ${idx + 1}</strong> <span class="small-muted">${escapeHtml(h.file)}</span></div><span class="ui-badge ${decision === 'accept' ? 'success' : (decision === 'reject' ? 'danger' : '')}">${decision}</span><div class="d-flex gap-1"><button class="btn btn-soft btn-sm" data-hunk-accept="${idx}">Accept</button><button class="btn btn-soft btn-sm" data-hunk-reject="${idx}">Reject</button></div></div>`;
+  }).join('');
+  hunkHost.querySelectorAll('[data-hunk-accept]').forEach((el) => el.addEventListener('click', () => {
+    state.gitHunkDecisions[el.getAttribute('data-hunk-accept')] = 'accept';
+    renderGitDiffWorkbench();
+  }));
+  hunkHost.querySelectorAll('[data-hunk-reject]').forEach((el) => el.addEventListener('click', () => {
+    state.gitHunkDecisions[el.getAttribute('data-hunk-reject')] = 'reject';
+    renderGitDiffWorkbench();
+  }));
+}
+
+function renderExecutionTimeline() {
+  const host = document.getElementById('executionTimeline');
+  if (!host) return;
+  const merged = timelineEventsForActiveSession();
+  const filter = state.timelineFilter || 'all';
+  const map = { all: 'timelineFilterAll', model: 'timelineFilterModel', tool: 'timelineFilterTool', status: 'timelineFilterStatus' };
+  Object.entries(map).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', key === filter);
+  });
+  const filtered = merged.filter((line) => {
+    const cls = classifyBackgroundEvent(line) || (String(line).startsWith('model:') ? 'model' : 'status');
+    if (filter === 'all') return true;
+    if (filter === 'tool') return cls === 'tool-request' || cls === 'tool-run';
+    return cls === filter;
+  });
+  if (!filtered.length) {
+    host.innerHTML = '<div class="state-empty">No events match this timeline filter.</div>';
+    return;
+  }
+  host.innerHTML = filtered.map((line, idx) => {
+    const cls = classifyBackgroundEvent(line) || (String(line).startsWith('model:') ? 'model' : 'status');
+    const source = String(line).startsWith('tool-') ? 'tool' : (String(line).startsWith('model:') ? 'model' : 'run');
+    return `<div class="timeline-item ${cls}"><span class="timeline-step">${idx + 1}</span><span class="timeline-line">${escapeHtml(String(line))}</span><span class="ui-badge">${source}</span></div>`;
+  }).join('');
+}
+
 function renderGitControls() {
   const launch = document.getElementById('openGitModal');
   const gitPanel = document.getElementById('gitPanel');
@@ -102,11 +616,22 @@ function renderGitControls() {
   branchSel.value = state.gitCurrentBranch || '';
 
   if (!repos.length) status.textContent = 'Select a workspace containing a git repository.';
-  else status.textContent = `Repo: ${state.gitCurrentRepo || '-'} · Current branch: ${state.gitCurrentBranch || '-'}`;
+  else {
+    const short = String(state.gitStatusShort || '').trim();
+    status.textContent = short
+      ? `Repo: ${state.gitCurrentRepo || '-'} · Branch: ${state.gitCurrentBranch || '-'} · Status: ${short}`
+      : `Repo: ${state.gitCurrentRepo || '-'} · Branch: ${state.gitCurrentBranch || '-'} · Status: clean`;
+  }
 
-  const diffBox = document.getElementById('gitDiffBox');
-  if (diffBox) diffBox.textContent = state.gitDiff || 'No diff yet.';
+  const gitStats = document.getElementById('gitDiffStats');
+  if (gitStats) {
+    const st = state.gitDiffStats || { files: 0, additions: 0, deletions: 0 };
+    gitStats.textContent = `files ${st.files} · +${st.additions} · -${st.deletions}`;
+  }
+
+  renderGitDiffWorkbench();
 }
+
 
 async function refreshGitRepos() {
   const workspace = document.getElementById('workspace').value.trim();
@@ -147,6 +672,7 @@ async function refreshGitDiff() {
   }
   const payload = await api(`/api/git/diff?repo=${encodeURIComponent(state.gitCurrentRepo)}`);
   const status = String(payload.status || '').trim();
+  state.gitStatusShort = status;
   const diff = String(payload.diff || '').trim();
   const staged = String(payload.cached_diff || '').trim();
   state.gitDiff = [
@@ -165,6 +691,7 @@ async function createBranchFromUI() {
   const repo = document.getElementById('gitRepo').value;
   const branch = document.getElementById('newBranchName').value.trim();
   if (!repo || !branch) return;
+  if (!confirm(`Create branch ${branch} in ${repo}?`)) return;
   await api('/api/git/branch', 'POST', { action: 'create', repo, branch, base: document.getElementById('gitBranch').value || '' });
   document.getElementById('newBranchName').value = '';
   await refreshGitBranches();
@@ -175,6 +702,7 @@ async function switchBranchFromUI() {
   const repo = document.getElementById('gitRepo').value;
   const branch = document.getElementById('gitBranch').value;
   if (!repo || !branch) return;
+  if (!confirm(`Switch ${repo} to branch ${branch}?`)) return;
   await api('/api/git/branch', 'POST', { action: 'switch', repo, branch });
   await refreshGitBranches();
   await refreshState();
@@ -189,6 +717,15 @@ function classifyBackgroundEvent(line) {
   if (txt.startsWith('tool-run:')) return 'tool-run';
   if (txt.startsWith('status:')) return 'status';
   return '';
+}
+
+function timelineEventsForActiveSession() {
+  const traces = (state.traces || []).map((line) => String(line || '')).filter(Boolean);
+  const jobs = (state.backgroundJobs || []).filter((j) => j && j.session === state.activeSession);
+  const active = jobs.find((j) => ['running', 'awaiting_plan_approval'].includes(j.status));
+  const recentJob = active || jobs.slice().reverse().find((j) => Array.isArray(j.events) && j.events.length);
+  const jobEvents = Array.isArray(recentJob && recentJob.events) ? recentJob.events.map((line) => String(line || '')).filter(Boolean) : [];
+  return traces.concat(jobEvents).slice(-64);
 }
 
 let _lastBackgroundActivityKey = null;
@@ -226,6 +763,7 @@ function renderBackgroundActivity(job) {
     body.scrollTop = body.scrollHeight;
   }
   panel.open = active;
+  renderExecutionTimeline();
 }
 
 function beginBackgroundPolling() {
@@ -262,81 +800,89 @@ function _locGenerated(messages) {
   return loc;
 }
 
-function _drawLineChart(canvas, seriesMap) {
+function _formatChartTimeLabel(value) {
+  if (!value) return '';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function _drawMetricChart(canvas, points, { yLabel, valueFormatter }) {
   if (!canvas || !canvas.getContext) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const keys = Object.keys(seriesMap || {});
-  if (!keys.length) {
+  const rows = Array.isArray(points) ? points : [];
+  if (!rows.length) {
     ctx.fillStyle = '#6b7280';
     ctx.font = '12px sans-serif';
     ctx.fillText('No data yet', 12, 20);
     return;
   }
 
-  const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7'];
-  const pad = 28;
+  const padLeft = 62;
+  const padRight = 14;
+  const padTop = 16;
+  const padBottom = 44;
+  const plotW = Math.max(10, w - padLeft - padRight);
+  const plotH = Math.max(10, h - padTop - padBottom);
+
+  const maxY = Math.max(1, ...rows.map((r) => Number(r.y || 0)));
+  const ticks = 4;
+
   ctx.strokeStyle = '#9ca3af';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(pad, h - pad);
-  ctx.lineTo(w - 8, h - pad);
-  ctx.moveTo(pad, h - pad);
-  ctx.lineTo(pad, 8);
+  ctx.moveTo(padLeft, padTop);
+  ctx.lineTo(padLeft, h - padBottom);
+  ctx.lineTo(w - padRight, h - padBottom);
   ctx.stroke();
+
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#6b7280';
+  for (let i = 0; i <= ticks; i += 1) {
+    const ratio = i / ticks;
+    const y = h - padBottom - ratio * plotH;
+    const v = ratio * maxY;
+    ctx.strokeStyle = 'rgba(156,163,175,0.25)';
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(w - padRight, y);
+    ctx.stroke();
+    ctx.fillText(valueFormatter(v), 8, y + 3);
+  }
+
+  const xTickIdx = [0, Math.floor((rows.length - 1) / 2), rows.length - 1].filter((v, i, arr) => arr.indexOf(v) === i);
+  xTickIdx.forEach((idx) => {
+    const ratio = rows.length === 1 ? 0 : idx / (rows.length - 1);
+    const x = padLeft + ratio * plotW;
+    const label = _formatChartTimeLabel(rows[idx] && rows[idx].x);
+    ctx.fillStyle = '#6b7280';
+    ctx.fillText(label, Math.max(2, x - 28), h - 18);
+  });
+
+  ctx.strokeStyle = '#6366f1';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  rows.forEach((row, idx) => {
+    const ratioX = rows.length === 1 ? 0 : idx / (rows.length - 1);
+    const x = padLeft + ratioX * plotW;
+    const y = h - padBottom - (Number(row.y || 0) / maxY) * plotH;
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
   ctx.fillStyle = '#6b7280';
   ctx.font = '11px sans-serif';
-  ctx.fillText('Turns (X)', w - 66, h - 10);
+  ctx.fillText('Time (X)', w - 58, h - 6);
   ctx.save();
-  ctx.translate(10, 44);
+  ctx.translate(12, 42);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText('Usage (Y)', 0, 0);
+  ctx.fillText(yLabel, 0, 0);
   ctx.restore();
-  let maxLen = 0;
-  let maxY = 0;
-  keys.forEach((k) => {
-    const arr = seriesMap[k] || [];
-    maxLen = Math.max(maxLen, arr.length);
-    arr.forEach((v) => { maxY = Math.max(maxY, Number(v || 0)); });
-  });
-  maxLen = Math.max(2, maxLen);
-  maxY = Math.max(1, maxY);
-
-  const plotW = w - pad * 2;
-  const plotH = h - pad * 2;
-
-  ctx.strokeStyle = '#9ca3af';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(pad, pad);
-  ctx.lineTo(pad, h - pad);
-  ctx.lineTo(w - pad, h - pad);
-  ctx.stroke();
-
-  keys.forEach((key, idx) => {
-    const arr = seriesMap[key] || [];
-    ctx.strokeStyle = colors[idx % colors.length];
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    arr.forEach((v, i) => {
-      const x = pad + (i / (maxLen - 1)) * plotW;
-      const y = h - pad - (Number(v || 0) / maxY) * plotH;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  });
-
-  // legend
-  keys.slice(0, 4).forEach((key, idx) => {
-    ctx.fillStyle = colors[idx % colors.length];
-    ctx.fillRect(pad + idx * 120, 8, 10, 10);
-    ctx.fillStyle = '#6b7280';
-    ctx.font = '11px sans-serif';
-    ctx.fillText(key.slice(0, 18), pad + idx * 120 + 14, 17);
-  });
 }
 
 function renderMetrics() {
@@ -362,8 +908,8 @@ function renderMetrics() {
   if (locEl) locEl.textContent = String(loc);
   if (turnsEl) turnsEl.textContent = String(turns.length);
 
-  const byModelTokens = {};
-  const byModelCost = {};
+  const tokenPoints = [];
+  const costPoints = [];
   const breakdown = {};
 
   for (const turn of turns) {
@@ -371,13 +917,8 @@ function renderMetrics() {
     const model = String(turn.model || 'unknown');
     const key = `${provider}:${model}`;
 
-    if (!byModelTokens[key]) byModelTokens[key] = [];
-    if (!byModelCost[key]) byModelCost[key] = [];
-
-    const prevTok = byModelTokens[key].length ? byModelTokens[key][byModelTokens[key].length - 1] : 0;
-    const prevCost = byModelCost[key].length ? byModelCost[key][byModelCost[key].length - 1] : 0;
-    byModelTokens[key].push(prevTok + Number(turn.total_tokens || 0));
-    byModelCost[key].push(prevCost + Number(turn.estimated_cost_usd || 0));
+    tokenPoints.push({ x: turn.timestamp || '', y: Number(turn.total_tokens || 0) });
+    costPoints.push({ x: turn.timestamp || '', y: Number(turn.estimated_cost_usd || 0) });
 
     const row = breakdown[key] || { provider, model, turns: 0, tokens: 0, cost: 0 };
     row.turns += 1;
@@ -386,8 +927,14 @@ function renderMetrics() {
     breakdown[key] = row;
   }
 
-  _drawLineChart(document.getElementById('metricsTokenChart'), byModelTokens);
-  _drawLineChart(document.getElementById('metricsCostChart'), byModelCost);
+  _drawMetricChart(document.getElementById('metricsTokenChart'), tokenPoints, {
+    yLabel: 'Tokens (Y)',
+    valueFormatter: (v) => `${Math.round(Number(v || 0))}`,
+  });
+  _drawMetricChart(document.getElementById('metricsCostChart'), costPoints, {
+    yLabel: 'Cost USD (Y)',
+    valueFormatter: (v) => `$${Number(v || 0).toFixed(4)}`,
+  });
 
   const body = document.getElementById('metricsModelBreakdown');
   if (body) {
@@ -399,6 +946,26 @@ function renderMetrics() {
         `<tr><td>${escapeHtml(row.provider)}</td><td>${escapeHtml(row.model)}</td><td>${row.turns}</td><td>${Math.trunc(row.tokens)}</td><td>${row.cost.toFixed(6)}</td></tr>`
       )).join('');
     }
+  }
+
+  const telemetry = state.telemetry || {};
+  const setMetric = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(value);
+  };
+  setMetric('metricTelemetryUptime', telemetry.uptime_seconds || 0);
+  setMetric('metricTelemetryRequests', telemetry.total_requests || 0);
+  setMetric('metricTelemetryToolFailures', telemetry.tool_failures || 0);
+  setMetric('metricTelemetryApprovalWaits', telemetry.approval_wait_events || 0);
+  setMetric('metricTelemetryJobsCompleted', telemetry.background_jobs_completed || 0);
+  setMetric('metricTelemetryJobsFailed', telemetry.background_jobs_failed_or_timed_out || 0);
+
+  const actionsBody = document.getElementById('metricsTelemetryActions');
+  if (actionsBody) {
+    const actionRows = Object.entries(telemetry.action_counts || {}).sort((a, b) => Number(b[1]) - Number(a[1]));
+    actionsBody.innerHTML = actionRows.length
+      ? actionRows.map(([name, count]) => `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(String(count))}</td></tr>`).join('')
+      : '<tr><td colspan="2" class="small-muted">No action telemetry recorded yet.</td></tr>';
   }
 }
 
@@ -885,7 +1452,8 @@ function collectAutomationMetadata(messages) {
     const role = String(message.role || 'message');
     const text = String(message.content || '').trim();
     if (!text) continue;
-    items.push({ kind, role, text: text.length > 900 ? `${text.slice(0, 897)}...` : text });
+    const stamp = formatTimestamp(message.metadata.timestamp || message.metadata.ts || '');
+    items.push({ kind, role, text: text.length > 900 ? `${text.slice(0, 897)}...` : text, stamp: stamp || '—' });
   }
   return items;
 }
@@ -894,15 +1462,28 @@ function _metaRow(kind, label, value) {
   const row = document.createElement('div');
   row.className = `meta-line meta-item ${kind}`;
 
+  const raw = String(value || '').trim();
+  const preview = (raw || '(empty)').replace(/\s+/g, ' ').slice(0, 140);
+
+  const details = document.createElement('details');
+  details.className = 'meta-entry';
+
+  const summary = document.createElement('summary');
   const tag = document.createElement('span');
   tag.className = 'meta-tag';
   tag.textContent = label;
-  row.appendChild(tag);
+  const previewEl = document.createElement('span');
+  previewEl.className = 'meta-preview';
+  previewEl.textContent = preview.length < (raw || '(empty)').replace(/\s+/g, ' ').length ? `${preview}…` : preview;
+  summary.appendChild(tag);
+  summary.appendChild(previewEl);
+  details.appendChild(summary);
 
+  const bodyWrap = document.createElement('div');
+  bodyWrap.className = 'meta-entry-body';
   const body = document.createElement('div');
   body.className = 'meta-content';
 
-  const raw = String(value || '').trim();
   const firstUrl = raw.match(/https?:\/\/[^\s]+/);
   if (kind === 'citation' && firstUrl) {
     const link = document.createElement('a');
@@ -922,7 +1503,9 @@ function _metaRow(kind, label, value) {
       body.appendChild(extra);
       if (window.hljs) window.hljs.highlightElement(code);
     }
-    row.appendChild(body);
+    bodyWrap.appendChild(body);
+    details.appendChild(bodyWrap);
+    row.appendChild(details);
     return row;
   }
 
@@ -942,9 +1525,32 @@ function _metaRow(kind, label, value) {
   code.textContent = output;
   pre.appendChild(code);
   body.appendChild(pre);
-  row.appendChild(body);
+  bodyWrap.appendChild(body);
+  details.appendChild(bodyWrap);
+  row.appendChild(details);
   if (window.hljs) window.hljs.highlightElement(code);
   return row;
+}
+
+
+function _metaFilterCategory(kind, label, text) {
+  const rawKind = String(kind || '').toLowerCase();
+  const hay = `${label || ''} ${text || ''}`.toLowerCase();
+
+  if (rawKind === 'tool-call' || rawKind === 'tool-result' || rawKind.includes('tool')) return 'tool';
+  if (rawKind === 'status' || rawKind === 'workspace') return 'status';
+  if (rawKind === 'model' || rawKind === 'plan' || rawKind === 'automation' || rawKind === 'research' || rawKind === 'citation') return 'model';
+
+  if (/tool-request:|tool-run:|\btool\b/.test(hay)) return 'tool';
+  if (/status[:=]|completed|failed|killed|timed_out|awaiting_plan_approval|workspace/.test(hay)) return 'status';
+  if (/model[:\s]|plan[:\s]|automation|research|citation/.test(hay)) return 'model';
+  return 'status';
+}
+
+function _metaFilterAllows(kind, label, text) {
+  const filter = state.timelineFilter || 'all';
+  if (filter === 'all') return true;
+  return _metaFilterCategory(kind, label, text) === filter;
 }
 
 function renderMetadataPanel() {
@@ -954,18 +1560,22 @@ function renderMetadataPanel() {
   let cards = 0;
 
   const ws = state.workspaceIndexStats || {};
-  if (Object.keys(ws).length) {
+  if (Object.keys(ws).length && _metaFilterAllows('workspace', 'Workspace indexing', 'workspace stats')) {
     const card = document.createElement('div');
     card.className = 'meta-card';
     card.innerHTML = '<div class="meta-head"><span>Workspace indexing</span><span>stats</span></div>';
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
     for (const [key, value] of Object.entries(ws)) {
-      lines.appendChild(_metaRow('workspace', 'Workspace stat', `${key}: ${value}`));
+      const label = 'Workspace stat';
+      const body = `${key}: ${value}`;
+      if (_metaFilterAllows('workspace', label, body)) lines.appendChild(_metaRow('workspace', label, body));
     }
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   for (let idx = state.messages.length - 1; idx >= 0; idx -= 1) {
@@ -981,14 +1591,16 @@ function renderMetadataPanel() {
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
 
-    for (const item of meta.toolRequests) lines.appendChild(_metaRow('tool-call', 'Tool call', item));
-    for (const item of meta.toolResults) lines.appendChild(_metaRow('tool-result', 'Tool result', item));
-    for (const item of meta.citationItems) lines.appendChild(_metaRow('citation', 'Citation', item));
-    for (const item of meta.researchSteps) lines.appendChild(_metaRow('research', 'Research step', item));
+    for (const item of meta.toolRequests) if (_metaFilterAllows('tool-call', 'Tool call', item)) lines.appendChild(_metaRow('tool-call', 'Tool call', item));
+    for (const item of meta.toolResults) if (_metaFilterAllows('tool-result', 'Tool result', item)) lines.appendChild(_metaRow('tool-result', 'Tool result', item));
+    for (const item of meta.citationItems) if (_metaFilterAllows('citation', 'Citation', item)) lines.appendChild(_metaRow('citation', 'Citation', item));
+    for (const item of meta.researchSteps) if (_metaFilterAllows('research', 'Research step', item)) lines.appendChild(_metaRow('research', 'Research step', item));
 
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
@@ -1005,13 +1617,15 @@ function renderMetadataPanel() {
       let label = 'Stream event';
       if (line.startsWith('tool-request:')) { kind = 'tool-call'; label = 'Tool call'; }
       else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
-      else if (line.startsWith('status:')) { kind = 'research'; label = 'Status'; }
+      else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
       else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
-      lines.appendChild(_metaRow(kind, label, line));
+      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
     }
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
   const automation = collectAutomationMetadata(state.messages);
@@ -1022,14 +1636,41 @@ function renderMetadataPanel() {
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
     for (const item of automation.slice(-20).reverse()) {
-      lines.appendChild(_metaRow('automation', `${item.kind} · ${item.role}`, item.text));
+      const label = `${item.stamp} · ${item.kind} · ${item.role}`;
+      if (_metaFilterAllows(item.kind, label, item.text)) lines.appendChild(_metaRow('automation', label, item.text));
     }
-    card.appendChild(lines);
-    host.appendChild(card);
-    cards += 1;
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
   }
 
-  if (!cards) host.innerHTML = '<div class="meta-empty">No tool/research metadata yet.</div>';
+  const terminalJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === state.activeSession && ['completed', 'failed', 'killed', 'timed_out'].includes(job.status))
+    .slice(-8)
+    .reverse();
+  if (terminalJobs.length) {
+    const card = document.createElement('div');
+    card.className = 'meta-card';
+    card.innerHTML = `<div class="meta-head"><span>Background execution reports</span><span>${terminalJobs.length} run(s)</span></div>`;
+    const lines = document.createElement('div');
+    lines.className = 'meta-lines';
+    terminalJobs.forEach((job) => {
+      const reportText = job.report
+        ? JSON.stringify(job.report, null, 2)
+        : (job.last_step || `status=${job.status}; iterations=${job.iterations || 0}`);
+      const label = `Run ${job.id || '-'} · ${job.status || 'unknown'}`;
+      if (_metaFilterAllows('status', label, reportText)) lines.appendChild(_metaRow('automation', label, reportText));
+    });
+    if (lines.childElementCount) {
+      card.appendChild(lines);
+      host.appendChild(card);
+      cards += 1;
+    }
+  }
+
+  if (!cards) host.innerHTML = '<div class="meta-empty">No metadata items match this filter.</div>';
 }
 
 
@@ -1155,11 +1796,12 @@ function renderMessages() {
 
 function renderTraces() {
   const el = document.getElementById('traces');
-  if (!state.traces.length) {
+  const lines = timelineEventsForActiveSession();
+  if (!lines.length) {
     el.textContent = 'debug traces will appear here';
     return;
   }
-  el.innerHTML = state.traces.map((line) => {
+  el.innerHTML = lines.map((line) => {
     let cls = 'trace-line';
     if (line.startsWith('model:')) cls += ' trace-model';
     else if (line.startsWith('tool-request:')) cls += ' trace-request';
@@ -1285,8 +1927,13 @@ function renderSessions(list, active) {
   const host = document.getElementById('sessionList');
   host.innerHTML = '';
   const statuses = sessionStatusMap();
+  const prefs = _readSessionPrefs();
+  state.recentSessions = prefs.recent.filter((n) => list.includes(n));
+  const filter = String((document.getElementById('sessionQuickSwitch') || {}).value || '').trim().toLowerCase();
+  const ordered = list.slice();
 
-  for (const name of list) {
+  for (const name of ordered) {
+    if (filter && !name.toLowerCase().includes(filter)) continue;
     const row = document.createElement('div');
     row.className = 'session-row';
 
@@ -1297,9 +1944,13 @@ function renderSessions(list, active) {
     const status = statusData ? statusData.status : '';
     const dotClass = status === 'running' ? 'running' : (status === 'done' ? 'done' : '');
     const tip = statusData?.job?.last_step || status || 'idle';
-    btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${escapeHtml(tip)}"></span><span class="session-name">${escapeHtml(name)}</span></span>`;
+    btn.innerHTML = `<span class="session-label"><span class="session-dot ${dotClass}" title="${escapeHtml(tip)}"></span><span class="session-name">${escapeHtml(name)}</span></span><span class="ui-badge ${status === 'running' ? 'warn' : (status === 'done' ? 'success' : '')}">${status || 'idle'}</span>`;
     btn.setAttribute('data-session-name', name);
-    btn.addEventListener('click', () => { completedSeenSessions.add(name); sessionAction('switch', name).catch((e) => alert(e.message)); });
+    btn.addEventListener('click', () => {
+      markSessionRecent(name);
+      completedSeenSessions.add(name);
+      sessionAction('switch', name).catch((e) => alert(e.message));
+    });
 
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
@@ -1316,6 +1967,25 @@ function renderSessions(list, active) {
     row.appendChild(btn);
     row.appendChild(menuBtn);
     host.appendChild(row);
+  }
+
+  const recentHost = document.getElementById('sessionRecent');
+  if (recentHost) {
+    const recent = state.recentSessions.filter((n) => n !== active).slice(0, 5);
+    recentHost.innerHTML = recent.length
+      ? recent.map((n) => `<button class="btn btn-soft btn-sm me-1 mb-1" data-recent-session="${_escapeAttr(n)}">${escapeHtml(n)}</button>`).join('')
+      : '<span class="small-muted">No recent sessions.</span>';
+    recentHost.querySelectorAll('[data-recent-session]').forEach((el) => {
+      el.addEventListener('click', () => sessionAction('switch', el.getAttribute('data-recent-session')).catch((e) => alert(e.message)));
+    });
+  }
+
+  const health = document.getElementById('sessionHealthSummary');
+  if (health) {
+    const running = Object.values(statuses).filter((s) => s.status === 'running').length;
+    const done = Object.values(statuses).filter((s) => s.status === 'done').length;
+    const idle = Math.max(0, list.length - running - done);
+    health.textContent = `idle ${idle} · running ${running} · done ${done}`;
   }
 
   document.getElementById('activeSession').textContent = `active: ${active}`;
@@ -1381,6 +2051,39 @@ function buildEnabledSkillsPayload() {
   return enabled;
 }
 
+function renderSkillsLifecycleVisibility() {
+  const host = document.getElementById('skillsLifecycleHost');
+  if (!host) return;
+  const skills = Array.isArray(state.skills) ? state.skills : [];
+  if (!skills.length) {
+    host.textContent = 'No skills found in ./skills.';
+    return;
+  }
+  const stage3 = _readStage3Store();
+  const presets = stage3.skillPresets || {};
+  const presetEntries = Object.entries(presets);
+  const enabledNow = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
+  const overrideStore = _readSessionOverrideStore();
+  const sessions = overrideStore.sessions || {};
+
+  const rows = skills.map((name) => {
+    const presetNames = presetEntries
+      .filter(([, list]) => Array.isArray(list) && list.includes(name))
+      .map(([presetName]) => presetName);
+    const overriddenSessions = Object.entries(sessions)
+      .filter(([, cfg]) => Array.isArray(cfg && cfg.enabled_skills) && cfg.enabled_skills.includes(name))
+      .map(([sessionName]) => sessionName);
+    return {
+      name,
+      now: enabledNow.has(name),
+      inPresets: presetNames,
+      overriddenSessions,
+    };
+  });
+
+  host.innerHTML = `<table class="compact-table"><thead><tr><th>Skill</th><th>Now</th><th>Presets</th><th>Session overrides</th><th>Details</th></tr></thead><tbody>${rows.map((r)=>`<tr><td>${escapeHtml(r.name)}</td><td>${r.now ? 'enabled' : 'off'}</td><td>${r.inPresets.length}</td><td>${r.overriddenSessions.length}</td><td><div class="small-muted">${r.inPresets.length ? `Presets: ${escapeHtml(r.inPresets.join(', '))}` : 'Presets: —'}</div><div class="small-muted">${r.overriddenSessions.length ? `Sessions: ${escapeHtml(r.overriddenSessions.join(', '))}` : 'Sessions: —'}</div></td></tr>`).join('')}</tbody></table>`;
+}
+
 function renderSkillSettings() {
   const host = document.getElementById('skillToggleList');
   const skills = Array.isArray(state.skills) ? state.skills : [];
@@ -1404,6 +2107,7 @@ function renderSkillSettings() {
   host.querySelectorAll('[data-skill-view]').forEach((el) => {
     el.addEventListener('click', () => openSkillView(el.getAttribute('data-skill-view') || '').catch((e) => alert(e.message)));
   });
+  renderSkillsLifecycleVisibility();
 }
 
 async function openSkillView(name) {
@@ -1415,6 +2119,229 @@ async function openSkillView(name) {
   document.getElementById('skillViewBody').innerHTML = formatMessageContent(payload.content || '');
 }
 
+
+function saveSkillPresetFromUI() {
+  const name = String((document.getElementById('skillPresetName') || {}).value || '').trim();
+  if (!name) throw new Error('Preset name required');
+  const store = _readStage3Store();
+  store.skillPresets[name] = buildEnabledSkillsPayload();
+  _writeStage3Store(store);
+  renderSkillPresets();
+  const status = document.getElementById('skillPresetStatus');
+  if (status) status.textContent = `Saved preset ${name}.`;
+}
+
+function applySkillPresetFromUI() {
+  const sel = document.getElementById('skillPresetSelect');
+  const key = String(sel && sel.value || '');
+  if (!key) return;
+  const store = _readStage3Store();
+  const list = Array.isArray(store.skillPresets[key]) ? store.skillPresets[key] : [];
+  document.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+    el.checked = list.includes(el.getAttribute('data-skill-enabled'));
+  });
+  scheduleApplySettings();
+  const status = document.getElementById('skillPresetStatus');
+  if (status) status.textContent = `Applied preset ${key}.`;
+}
+
+function deleteSkillPresetFromUI() {
+  const sel = document.getElementById('skillPresetSelect');
+  const key = String(sel && sel.value || '');
+  if (!key) return;
+  const store = _readStage3Store();
+  delete store.skillPresets[key];
+  _writeStage3Store(store);
+  renderSkillPresets();
+  const status = document.getElementById('skillPresetStatus');
+  if (status) status.textContent = `Deleted preset ${key}.`;
+}
+
+function saveRulesVersionFromUI() {
+  const label = String((document.getElementById('rulesVersionName') || {}).value || '').trim() || `version-${Date.now()}`;
+  const payload = {
+    id: `v_${Date.now()}`,
+    label,
+    created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    systemPromptOverride: String((document.getElementById('systemPromptOverride') || {}).value || ''),
+    rulesChecklist: String((document.getElementById('rulesChecklist') || {}).value || ''),
+  };
+  const store = _readStage3Store();
+  store.rulesVersions = [payload].concat(store.rulesVersions || []).slice(0, 50);
+  _writeStage3Store(store);
+  renderRulesVersions();
+  const status = document.getElementById('rulesVersionStatus');
+  if (status) status.textContent = `Saved rules version ${label}.`;
+}
+
+function rollbackRulesVersionFromUI() {
+  const sel = document.getElementById('rulesVersionSelect');
+  const key = String(sel && sel.value || '');
+  const store = _readStage3Store();
+  const found = (store.rulesVersions || []).find((v) => v.id === key);
+  if (!found) return;
+  const sys = document.getElementById('systemPromptOverride');
+  const rules = document.getElementById('rulesChecklist');
+  if (sys) sys.value = found.systemPromptOverride || '';
+  if (rules) rules.value = found.rulesChecklist || '';
+  persistControlPlaneFromUI();
+  const status = document.getElementById('rulesVersionStatus');
+  if (status) status.textContent = `Rolled back to ${found.label}.`;
+}
+
+function deleteRulesVersionFromUI() {
+  const sel = document.getElementById('rulesVersionSelect');
+  const key = String(sel && sel.value || '');
+  const store = _readStage3Store();
+  store.rulesVersions = (store.rulesVersions || []).filter((v) => v.id !== key);
+  _writeStage3Store(store);
+  renderRulesVersions();
+  const status = document.getElementById('rulesVersionStatus');
+  if (status) status.textContent = 'Deleted selected rules version.';
+}
+
+function _lineDiff(before, after) {
+  const a = String(before || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const b = String(after || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const removed = a.filter((line) => !b.includes(line)).map((line) => `- ${line}`);
+  const added = b.filter((line) => !a.includes(line)).map((line) => `+ ${line}`);
+  const unchanged = b.filter((line) => a.includes(line)).slice(0, 12).map((line) => `  ${line}`);
+  return [
+    '# Rules diff',
+    '## Added',
+    ...(added.length ? added : ['(none)']),
+    '',
+    '## Removed',
+    ...(removed.length ? removed : ['(none)']),
+    '',
+    '## Unchanged (sample)',
+    ...(unchanged.length ? unchanged : ['(none)']),
+  ].join('\n');
+}
+
+function compareRulesVersionFromUI() {
+  const sel = document.getElementById('rulesVersionSelect');
+  const key = String(sel && sel.value || '');
+  const out = document.getElementById('rulesVersionDiffOutput');
+  const status = document.getElementById('rulesVersionStatus');
+  if (!out) return;
+  const store = _readStage3Store();
+  const found = (store.rulesVersions || []).find((v) => v.id === key);
+  if (!found) {
+    out.textContent = 'Select a rules version to compare.';
+    if (status) status.textContent = 'No version selected for comparison.';
+    return;
+  }
+  const current = String((document.getElementById('rulesChecklist') || {}).value || '');
+  out.textContent = _lineDiff(found.rulesChecklist || '', current);
+  if (status) status.textContent = `Compared current rules against ${found.label}.`;
+}
+
+function checkRulesConflictsFromUI() {
+  const out = document.getElementById('rulesVersionDiffOutput');
+  const status = document.getElementById('rulesVersionStatus');
+  if (!out) return;
+  const lines = String((document.getElementById('rulesChecklist') || {}).value || '')
+    .split('\n').map((l) => l.trim()).filter(Boolean);
+  const seen = new Set();
+  const polarityByKey = new Map();
+  const duplicates = [];
+  const contradictory = [];
+
+  const normalize = (line) => String(line || '').toLowerCase().replace(/^(always|never|do not|don't|no|do|use|prefer)\s+/, '').trim();
+  const polarity = (line) => (/^(never|do not|don't|no)\b/i.test(line) ? 'neg' : 'pos');
+
+  lines.forEach((line) => {
+    const key = normalize(line);
+    const sig = `${key}::${String(line).toLowerCase()}`;
+    if (seen.has(sig)) duplicates.push(line);
+    seen.add(sig);
+
+    const pol = polarity(line);
+    const prior = polarityByKey.get(key);
+    if (prior && prior !== pol) contradictory.push(line);
+    if (!prior) polarityByKey.set(key, pol);
+  });
+
+  const report = [
+    '# Rules conflict check',
+    `Total rules: ${lines.length}`,
+    '',
+    '## Duplicate-like rules',
+    ...(duplicates.length ? duplicates.map((d) => `- ${d}`) : ['(none)']),
+    '',
+    '## Potential contradictions',
+    ...(contradictory.length ? contradictory.map((d) => `- ${d}`) : ['(none)']),
+  ].join('\n');
+  out.textContent = report;
+  if (status) status.textContent = (duplicates.length || contradictory.length)
+    ? `Conflict check found ${duplicates.length + contradictory.length} issue(s).`
+    : 'Conflict check passed with no obvious issues.';
+}
+
+function saveBehaviorProfileFromUI() {
+  const name = String((document.getElementById('behaviorProfileName') || {}).value || '').trim();
+  if (!name) throw new Error('Profile name required');
+  const store = _readStage3Store();
+  store.behaviorProfiles[name] = {
+    knobTemperature: Number((document.getElementById('knobTemperature') || {}).value || 0.2),
+    knobTopP: Number((document.getElementById('knobTopP') || {}).value || 0.95),
+    knobToolBias: Number((document.getElementById('knobToolBias') || {}).value || 0.7),
+    knobVerbosity: Number((document.getElementById('knobVerbosity') || {}).value || 0.5),
+  };
+  _writeStage3Store(store);
+  renderBehaviorProfiles();
+  const status = document.getElementById('behaviorProfileStatus');
+  if (status) status.textContent = `Saved profile ${name}.`;
+}
+
+function applyBehaviorProfileFromUI() {
+  const key = String((document.getElementById('behaviorProfileSelect') || {}).value || '');
+  const store = _readStage3Store();
+  const p = (store.behaviorProfiles || {})[key];
+  if (!p) return;
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = String(v); };
+  setVal('knobTemperature', p.knobTemperature);
+  setVal('knobTopP', p.knobTopP);
+  setVal('knobToolBias', p.knobToolBias);
+  setVal('knobVerbosity', p.knobVerbosity);
+  persistControlPlaneFromUI();
+  const status = document.getElementById('behaviorProfileStatus');
+  if (status) status.textContent = `Applied profile ${key}.`;
+}
+
+function deleteBehaviorProfileFromUI() {
+  const key = String((document.getElementById('behaviorProfileSelect') || {}).value || '');
+  if (!key) return;
+  const store = _readStage3Store();
+  delete store.behaviorProfiles[key];
+  _writeStage3Store(store);
+  renderBehaviorProfiles();
+  const status = document.getElementById('behaviorProfileStatus');
+  if (status) status.textContent = `Deleted profile ${key}.`;
+}
+
+function updateContextExcludesFromUI() {
+  const store = _readStage3Store();
+  store.contextExcludes = {
+    traces: !!(document.getElementById('ctxExcludeTraces') || {}).checked,
+    uploads: !!(document.getElementById('ctxExcludeUploads') || {}).checked,
+    tools: !!(document.getElementById('ctxExcludeTools') || {}).checked,
+  };
+  _writeStage3Store(store);
+  renderContextBudgetPanel();
+}
+
+function summarizeContextRulesNow() {
+  const rules = document.getElementById('rulesChecklist');
+  if (!rules) return;
+  const lines = String(rules.value || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const summarized = lines.slice(0, 5).map((l, i) => `${i + 1}. ${l}`).join('\n');
+  rules.value = summarized;
+  persistControlPlaneFromUI();
+  const status = document.getElementById('contextBudgetActionStatus');
+  if (status) status.textContent = 'Rules checklist summarized to top 5 entries.';
+}
 function parseCustomToolsInput() {
   const raw = document.getElementById('customTools').value.trim();
   if (!raw) return [];
@@ -1481,7 +2408,7 @@ function showModal(id, show) {
   const modal = document.getElementById(id);
   if (show) modal.classList.add('show');
   else modal.classList.remove('show');
-  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal', 'runDetailsModal']
+  const anyModalOpen = ['advancedModal', 'metricsModal', 'workspaceModal', 'approvalModal', 'newSessionModal', 'planApprovalModal', 'condenseModal', 'gitModal', 'skillViewModal', 'runDetailsModal', 'sessionOverridesModal']
     .some((modalId) => document.getElementById(modalId).classList.contains('show'));
   document.getElementById('app').classList.toggle('modal-active', anyModalOpen);
 }
@@ -1528,6 +2455,22 @@ async function uploadPromptAttachmentFiles() {
   await apiForm('/api/uploads', form);
   status.textContent = `${input.files.length} file(s) attached to context.`;
   input.value = '';
+  await refreshState();
+}
+
+
+async function clearAllStoredDataFromUI() {
+  const status = document.getElementById('clearAllStoredDataStatus');
+  const confirmed = window.confirm('Clear ALL persisted runtime data? This removes saved sessions, uploads, and workspace cache.');
+  if (!confirmed) return;
+  if (status) status.textContent = 'Clearing persisted data…';
+  const payload = await api('/api/state/clear-all', 'POST', {});
+
+  Object.keys(localStorage).forEach((key) => {
+    if (key.startsWith('mu_') || key === 'mu_cli_dark_mode') localStorage.removeItem(key);
+  });
+
+  if (status) status.textContent = `Cleared data (sessions: ${payload.cleared.sessions}, uploads: ${payload.cleared.upload_files}, workspace snapshots: ${payload.cleared.workspace_snapshots}).`;
   await refreshState();
 }
 
@@ -1628,6 +2571,7 @@ async function refreshState() {
   state.skills = s.skills || [];
   state.enabledSkills = s.enabled_skills || [];
   state.workspaceIndexStats = s.workspace_index_stats || {};
+  state.telemetry = s.telemetry || {};
   const customSpecs = s.custom_tool_specs || [];
 
   const providerSel = document.getElementById('provider');
@@ -1667,6 +2611,7 @@ async function refreshState() {
   renderSessions(state.sessions, state.activeSession);
   renderUploads();
   renderToolSettings();
+  renderToolsConsole();
   renderSkillSettings();
   renderGitControls();
   renderMessages();
@@ -1674,6 +2619,9 @@ async function refreshState() {
   renderTraces();
   updateChatBusyState();
   renderMetrics();
+  renderExecutionTimeline();
+  syncControlPlaneUIFromPrefs();
+  renderContextBudgetPanel();
 
   if (state.pendingApproval) {
     document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
@@ -1901,6 +2849,7 @@ async function sessionAction(action, explicitName = null, extra = {}) {
   const status = document.getElementById('sessionActionStatus');
   status.textContent = '';
   await api('/api/session', 'POST', { action, name, ...extra });
+  if (action === 'switch' && name) markSessionRecent(name);
   await refreshState();
   if (action === 'condense') status.textContent = 'Session context condensed.';
 }
@@ -1964,11 +2913,40 @@ bindClick('sendBackground', () => sendPrompt(true));
 bindClick('killJob', () => killActiveJob());
 bindClick('newSession', () => openNewSessionModal());
 bindClick('savePricing', () => savePricing());
+
+bindClick('saveSkillPreset', () => saveSkillPresetFromUI());
+bindClick('applySkillPreset', () => applySkillPresetFromUI());
+bindClick('deleteSkillPreset', () => deleteSkillPresetFromUI());
+
+bindClick('saveRulesVersion', () => saveRulesVersionFromUI());
+bindClick('rollbackRulesVersion', () => rollbackRulesVersionFromUI());
+bindClick('deleteRulesVersion', () => deleteRulesVersionFromUI());
+bindClick('compareRulesVersion', () => compareRulesVersionFromUI());
+bindClick('checkRulesConflicts', () => checkRulesConflictsFromUI());
+
+bindClick('saveBehaviorProfile', () => saveBehaviorProfileFromUI());
+bindClick('applyBehaviorProfile', () => applyBehaviorProfileFromUI());
+bindClick('deleteBehaviorProfile', () => deleteBehaviorProfileFromUI());
+
+bindChange('ctxExcludeTraces', () => updateContextExcludesFromUI());
+bindChange('ctxExcludeUploads', () => updateContextExcludesFromUI());
+bindChange('ctxExcludeTools', () => updateContextExcludesFromUI());
+bindClick('summarizeContextNow', () => summarizeContextRulesNow());
 bindClick('uploadFiles', () => uploadContextFiles());
 bindClick('clearUploads', () => clearUploadedStore());
+bindClick('clearAllStoredData', () => clearAllStoredDataFromUI());
 
-bindClick('toggleSidebar', () => byId('app').classList.toggle('sidebar-hidden'));
+
+for (const id of ['systemPromptOverride', 'rulesChecklist', 'knobTemperature', 'knobTopP', 'knobToolBias', 'knobVerbosity']) {
+  const el = byId(id);
+  if (!el) continue;
+  const evt = (id === 'systemPromptOverride' || id === 'rulesChecklist') ? 'blur' : 'input';
+  el.addEventListener(evt, () => persistControlPlaneFromUI());
+}
+
+bindClick('toggleSidebar', () => { byId('app').classList.toggle('sidebar-hidden'); closeAllSessionMenus(); });
 bindClick('openAdvanced', () => showModal('advancedModal', true));
+bindClick('openHelp', () => showModal('helpModal', true));
 bindClick('closeAdvanced', () => showModal('advancedModal', false));
 bindClick('openMetrics', () => { renderMetrics(); showModal('metricsModal', true); });
 bindClick('closeMetrics', () => showModal('metricsModal', false));
@@ -1984,11 +2962,13 @@ bindClick('openGitModal', async () => {
 
 for (const [buttonId, modalId] of [
   ['closeGitModal', 'gitModal'],
+  ['closeHelpModal', 'helpModal'],
   ['closeSkillViewModal', 'skillViewModal'],
   ['closeRunDetailsModal', 'runDetailsModal'],
   ['closeWorkspaceModal', 'workspaceModal'],
   ['closeNewSessionModal', 'newSessionModal'],
   ['closeCondenseModal', 'condenseModal'],
+  ['closeSessionOverridesModal', 'sessionOverridesModal'],
 ]) {
   bindClick(buttonId, () => showModal(modalId, false));
 }
@@ -1999,15 +2979,167 @@ bindClick('toggleMetaSidebar', () => {
   layout.classList.toggle('meta-hidden');
   const btn = byId('toggleMetaSidebar');
   const hidden = layout.classList.contains('meta-hidden');
-  btn.textContent = hidden ? '>' : '<';
+  btn.textContent = '☰';
   btn.title = hidden ? 'Show metadata panel' : 'Hide metadata panel';
   btn.setAttribute('aria-label', btn.title);
 });
 
-bindClick('refreshGitDiff', async () => {
-  await refreshGitDiff();
-  renderGitControls();
+
+function initShellResize() {
+  const app = byId('app');
+  const handle = byId('sidebarResizeHandle');
+  const sidebar = byId('sidebar');
+  if (!app || !handle || !sidebar) return;
+
+  const stored = Number(localStorage.getItem('mu_sidebar_width') || 0);
+  if (stored >= 260 && stored <= 560) app.style.setProperty('--sidebar-width', `${stored}px`);
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    const next = Math.min(560, Math.max(260, startWidth + (e.clientX - startX)));
+    app.style.setProperty('--sidebar-width', `${next}px`);
+    localStorage.setItem('mu_sidebar_width', String(next));
+  };
+  const onUp = () => {
+    dragging = false;
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  };
+
+  handle.addEventListener('mousedown', (e) => {
+    if (app.classList.contains('sidebar-hidden')) return;
+    dragging = true;
+    startX = e.clientX;
+    startWidth = sidebar.getBoundingClientRect().width;
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+}
+
+function initMetaResize() {
+  const layout = document.querySelector('.workspace-layout');
+  const handle = byId('metaResizeHandle');
+  const sidebar = byId('metaSidebar');
+  if (!layout || !handle || !sidebar) return;
+
+  const minWidth = 220;
+  const maxWidth = () => Math.min(520, Math.max(280, Math.floor(window.innerWidth * 0.5)));
+  const applyWidth = (value) => {
+    const next = Math.min(maxWidth(), Math.max(minWidth, Number(value) || 320));
+    layout.style.setProperty('--meta-width', `${next}px`);
+    localStorage.setItem('mu_meta_width', String(next));
+  };
+
+  const stored = Number(localStorage.getItem('mu_meta_width') || 0);
+  if (stored) applyWidth(stored);
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    applyWidth(startWidth - (e.clientX - startX));
+  };
+  const onUp = () => {
+    dragging = false;
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  };
+
+  handle.addEventListener('mousedown', (e) => {
+    if (layout.classList.contains('meta-hidden')) return;
+    dragging = true;
+    startX = e.clientX;
+    startWidth = sidebar.getBoundingClientRect().width;
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+
+  window.addEventListener('resize', () => {
+    const current = Number(localStorage.getItem('mu_meta_width') || sidebar.getBoundingClientRect().width || 320);
+    applyWidth(current);
+  });
+}
+
+
+function setSurface(surface) {
+  const app = byId('app');
+  const layout = document.querySelector('.workspace-layout');
+  if (!app) return;
+  const next = ['operate', 'control', 'review'].includes(surface) ? surface : 'operate';
+  state.uiSurface = next;
+  app.setAttribute('data-surface', next);
+  localStorage.setItem('mu_ui_surface', next);
+  document.querySelectorAll('[data-surface-tab]').forEach((el) => {
+    const active = el.getAttribute('data-surface-tab') === next;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+
+  if (next === 'operate') {
+    app.classList.add('sidebar-hidden');
+    if (layout) layout.classList.add('meta-hidden');
+  } else if (next === 'control') {
+    app.classList.remove('sidebar-hidden');
+    if (layout) layout.classList.add('meta-hidden');
+  } else {
+    app.classList.add('sidebar-hidden');
+    if (layout) layout.classList.remove('meta-hidden');
+  }
+
+  closeAllSessionMenus();
+}
+
+document.querySelectorAll('[data-surface-tab]').forEach((el) => {
+  el.addEventListener('click', () => setSurface(el.getAttribute('data-surface-tab') || 'operate'));
 });
+
+bindClick('refreshGitDiff', async () => {
+  const repoSel = byId('gitRepo');
+  if (repoSel && repoSel.value) state.gitCurrentRepo = repoSel.value;
+  await refreshGitBranches();
+});
+
+bindClick('timelineFilterAll', () => { state.timelineFilter = 'all'; renderExecutionTimeline(); renderMetadataPanel(); });
+bindClick('timelineFilterModel', () => { state.timelineFilter = 'model'; renderExecutionTimeline(); renderMetadataPanel(); });
+bindClick('timelineFilterTool', () => { state.timelineFilter = 'tool'; renderExecutionTimeline(); renderMetadataPanel(); });
+bindClick('timelineFilterStatus', () => { state.timelineFilter = 'status'; renderExecutionTimeline(); renderMetadataPanel(); });
+
+bindClick('gitInlineMode', () => { state.gitDiffMode = 'inline'; renderGitDiffWorkbench(); });
+bindClick('gitSideMode', () => { state.gitDiffMode = 'side'; renderGitDiffWorkbench(); });
+bindClick('gitHunkAcceptAll', () => {
+  const hunks = splitDiffHunks((parseGitDiffSections(state.gitDiff || '').unstaged || '') + '\n' + (parseGitDiffSections(state.gitDiff || '').staged || ''));
+  state.gitHunkDecisions = {};
+  hunks.forEach((_, idx) => { state.gitHunkDecisions[idx] = 'accept'; });
+  renderGitDiffWorkbench();
+});
+bindClick('gitHunkRejectAll', () => {
+  const hunks = splitDiffHunks((parseGitDiffSections(state.gitDiff || '').unstaged || '') + '\n' + (parseGitDiffSections(state.gitDiff || '').staged || ''));
+  state.gitHunkDecisions = {};
+  hunks.forEach((_, idx) => { state.gitHunkDecisions[idx] = 'reject'; });
+  renderGitDiffWorkbench();
+});
+bindClick('gitHunkReset', () => { state.gitHunkDecisions = {}; renderGitDiffWorkbench(); });
+
+bindChange('sessionQuickSwitch', () => renderSessions(state.sessions || [], state.activeSession || ''));
+const sessionQuickSwitch = byId('sessionQuickSwitch');
+if (sessionQuickSwitch) {
+  sessionQuickSwitch.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const val = String(sessionQuickSwitch.value || '').trim().toLowerCase();
+    const target = (state.sessions || []).find((n) => String(n).toLowerCase().includes(val));
+    if (target) runWithAlert(() => sessionAction('switch', target));
+  });
+}
 
 bindClick('browseWorkspace', () => {
   showModal('workspaceModal', true);
@@ -2023,6 +3155,8 @@ bindClick('switchBranch', () => switchBranchFromUI());
 bindClick('createBranch', () => createBranchFromUI());
 bindClick('runCondenseNow', () => runCondenseFromModal());
 bindClick('createSessionConfirm', () => createSessionFromModal());
+bindClick('saveSessionOverrides', () => saveSessionOverridesFromModal());
+bindClick('resetSessionOverrides', () => resetSessionOverridesFromModal());
 bindChange('newSessionProvider', () => wireNewSessionModels(byId('newSessionProvider').value));
 bindClick('loadDir', () => loadDirs(byId('dirPath').value.trim()));
 
@@ -2053,6 +3187,7 @@ if (sessionMenuOverlay) {
       if (cmd === 'refresh') await sessionAction('switch', name);
       if (cmd === 'clear') await sessionAction('clear', name);
       if (cmd === 'condense') { openCondenseModal(name); return; }
+      if (cmd === 'overrides') { await openSessionOverridesModal(name); return; }
       if (cmd === 'delete') await sessionAction('delete', name);
     }));
   });
@@ -2064,6 +3199,26 @@ if (promptInput) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runWithAlert(() => sendPrompt());
   });
 }
+
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    byId('app').classList.toggle('sidebar-hidden');
+    closeAllSessionMenus();
+  }
+  if (e.key === '\\') {
+    e.preventDefault();
+    byId('toggleMetaSidebar')?.click();
+  }
+  if (e.key === ',') {
+    e.preventDefault();
+    showModal('advancedModal', true);
+  }
+  if (e.key === '1') { e.preventDefault(); setSurface('operate'); }
+  if (e.key === '2') { e.preventDefault(); setSurface('control'); }
+  if (e.key === '3') { e.preventDefault(); setSurface('review'); }
+});
 
 document.addEventListener('click', (ev) => {
   const btn = ev.target && ev.target.closest ? ev.target.closest('[data-run-details]') : null;
@@ -2085,11 +3240,14 @@ const Events = {
 
 const metaToggleBtn = document.getElementById('toggleMetaSidebar');
 if (metaToggleBtn) {
-  metaToggleBtn.textContent = '<';
+  metaToggleBtn.textContent = '☰';
   metaToggleBtn.title = 'Hide metadata panel';
   metaToggleBtn.setAttribute('aria-label', 'Hide metadata panel');
 }
 hydrateThemePreference();
+initShellResize();
+initMetaResize();
+setSurface(localStorage.getItem('mu_ui_surface') || 'operate');
 refreshState().catch((e) => alert(e.message));
 if (runtimeTick) clearInterval(runtimeTick);
 runtimeTick = setInterval(() => updateQueryRuntime(), 1000);

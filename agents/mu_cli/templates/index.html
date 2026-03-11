@@ -11,6 +11,26 @@
   <link id="hljsTheme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" />
   <style>
     :root {
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --font-size-xs: 11px;
+      --font-size-sm: 12px;
+      --font-size-md: 14px;
+      --font-size-lg: 16px;
+      --line-tight: 1.3;
+      --line-normal: 1.5;
+      --color-success: #166534;
+      --color-success-soft: #edf7ee;
+      --color-warn: #9a6700;
+      --color-warn-soft: #fff8e6;
+      --color-danger: #9f1239;
+      --color-danger-soft: #fdf2f8;
+      --elevation-1: 0 1px 2px rgba(0,0,0,.06);
+      --elevation-2: 0 8px 24px rgba(0,0,0,.08);
+      --focus-ring: 0 0 0 2px color-mix(in srgb, var(--primary) 40%, transparent);
       --bg: #f6f7f9;
       --surface: #ffffff;
       --surface-2: #f3f4f6;
@@ -64,7 +84,7 @@
     .shell {
       height: 100vh;
       display: grid;
-      grid-template-columns: 340px minmax(0,1fr);
+      grid-template-columns: var(--sidebar-width, 320px) 8px minmax(0,1fr);
       gap: 0;
       padding: 0;
       transition: grid-template-columns .2s ease;
@@ -73,14 +93,19 @@
     .shell.modal-active .main {
       filter: blur(3px);
       transition: filter .16s ease;
-      pointer-events: none;
       user-select: none;
     }
-    .shell.sidebar-hidden { grid-template-columns: 0 minmax(0,1fr); }
+    .shell.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
+    .shell[data-surface="control"] { --sidebar-width: 380px; }
+    .shell[data-surface="review"] .meta-sidebar { border-left-color: color-mix(in srgb, var(--primary) 30%, var(--border)); }
     .shell.sidebar-hidden .sidebar {
+      display: none;
       transform: translateX(-16px);
       opacity: 0;
       pointer-events: none;
+    }
+    .shell.sidebar-hidden .main {
+      grid-column: 1 / -1;
     }
 
     .glass {
@@ -93,7 +118,7 @@
     .sidebar {
       min-height: 0;
       overflow: auto;
-      padding: 10px 12px;
+      padding: var(--space-3);
       border: 0;
       border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
       border-radius: 0;
@@ -139,22 +164,44 @@
     .collapsible-panel > summary h3 { margin: 0; }
     .panel-body { min-height: 0; }
 
-    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: 8px 12px; }
+    .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; padding: var(--space-2) var(--space-3); }
+    .zone-label {
+      font-size: var(--font-size-xs);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: var(--space-2);
+      font-weight: 600;
+    }
     .workspace-layout {
+      --meta-width: 320px;
       min-height: 0;
       display: grid;
       grid-template-columns: minmax(0,1fr) auto;
       gap: 10px;
       align-items: stretch;
+      position: relative;
     }
     .meta-rail {
       min-height: 0;
-      display: flex;
-      align-items: flex-start;
+      display: grid;
+      grid-template-columns: auto 8px var(--meta-width);
+      align-items: stretch;
       gap: 8px;
     }
-    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr) auto; }
+    .workspace-layout.meta-hidden { grid-template-columns: minmax(0,1fr); }
+    .workspace-layout.meta-hidden .meta-resize-handle,
     .workspace-layout.meta-hidden .meta-sidebar { display: none; }
+    .workspace-layout.meta-hidden .meta-rail {
+      position: absolute;
+      right: 0;
+      top: 0;
+      width: auto;
+      z-index: 4;
+      display: block;
+      min-height: auto;
+    }
+    .workspace-layout.meta-hidden .meta-toggle-icon { margin-top: 0; }
     .meta-toggle-icon {
       align-self: flex-start;
       margin-top: 8px;
@@ -194,6 +241,130 @@
       background: transparent;
       box-shadow: none;
     }
+    .surface-switch {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-left: 6px;
+    }
+    .surface-tab {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: var(--font-size-xs);
+      padding: 4px 10px;
+    }
+    .surface-tab.active {
+      background: var(--primary-soft);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .shortcut-hint {
+      color: var(--muted);
+      font-size: var(--font-size-xs);
+      margin-left: auto;
+    }
+
+    .git-quick-pill.clean { border-color: color-mix(in srgb, var(--color-success) 28%, var(--border)); color: var(--color-success); }
+    .git-quick-pill.dirty { border-color: color-mix(in srgb, var(--color-warn) 30%, var(--border)); color: var(--color-warn); }
+    .session-toolbar { display:flex; gap:6px; margin-bottom:8px; }
+    .session-recent { margin-top:8px; }
+    .timeline-panel { border:0; border-radius:0; background:transparent; padding:4px 0; max-height:220px; overflow:auto; min-width:0; }
+    .timeline-item { display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); min-width:0; }
+    .timeline-item:last-child { border-bottom:0; }
+    .timeline-step { min-width:20px; color:var(--muted); font-size:11px; flex: 0 0 auto; }
+    .timeline-line { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:11px; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; min-width:0; flex:1 1 auto; }
+    .timeline-item.tool-request .timeline-line { color:#7c3aed; }
+    .timeline-item.tool-run .timeline-line { color:#0f766e; }
+    .timeline-item.model .timeline-line { color:#1d4ed8; }
+    .git-mode-toggle { display:flex; gap:6px; margin-bottom:8px; }
+    .git-mode-toggle .btn.active { background:var(--primary-soft); border-color:var(--primary); color:var(--text); }
+    .git-hunk-actions { display:flex; gap:6px; margin:8px 0; }
+    .git-hunk-list { max-height:180px; overflow:auto; border:0; border-radius:0; padding:4px 0; background:transparent; }
+    .git-hunk-row { display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center; padding:6px; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+    .git-hunk-row:last-child { border-bottom:0; }
+
+    .session-health { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
+    .timeline-filters { display:flex; gap:6px; margin:6px 0; flex-wrap:wrap; }
+    .timeline-filters .btn { padding: 2px 8px; }
+    .meta-sidebar-top { display:grid; gap:4px; min-width:0; }
+    .meta-sidebar-top .timeline-filters { margin: 0 0 2px; }
+    .git-diff-stats { font-size: var(--font-size-xs); color: var(--muted); margin-bottom: 6px; }
+
+    .context-budget-row { display:flex; justify-content:space-between; gap:8px; font-size:12px; margin-bottom:4px; }
+    .context-budget-meter { height:6px; background:color-mix(in srgb, var(--border) 60%, transparent); border-radius:999px; overflow:hidden; margin:6px 0 8px; }
+    .context-budget-fill { height:100%; background:var(--primary); width:0%; }
+    .control-grid { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; margin-bottom:6px; }
+    .control-grid input[type="range"] { width:100%; }
+
+    .mini-toolbar { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+    .mini-toolbar .form-control { min-width: 160px; max-width: 260px; }
+    .compact-table { width:100%; font-size:12px; border-collapse: collapse; }
+    .compact-table th, .compact-table td { padding:4px 6px; border-bottom:1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+
+    .override-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .override-grid .full { grid-column: 1 / -1; }
+    @media (max-width: 900px) { .override-grid { grid-template-columns: 1fr; } }
+
+    .sidebar-resize-handle {
+      width: 8px;
+      cursor: col-resize;
+      background: linear-gradient(to right, transparent, color-mix(in srgb, var(--border) 60%, transparent), transparent);
+    }
+    .sidebar-resize-handle:hover { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--primary) 30%, var(--border)), transparent); }
+    .shell.sidebar-hidden .sidebar-resize-handle { display: none; pointer-events: none; }
+
+    :is(button, input, select, textarea, .surface-tab):focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
+    }
+
+    .ui-card {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .ui-list-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+      padding: 4px 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      margin-bottom: 4px;
+    }
+    .ui-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: var(--font-size-xs);
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--muted);
+    }
+    .ui-badge.success { border-color: color-mix(in srgb, var(--color-success) 30%, var(--border)); color: var(--color-success); background: var(--color-success-soft); }
+    .ui-badge.warn { border-color: color-mix(in srgb, var(--color-warn) 30%, var(--border)); color: var(--color-warn); background: var(--color-warn-soft); }
+    .ui-badge.danger { border-color: color-mix(in srgb, var(--color-danger) 30%, var(--border)); color: var(--color-danger); background: var(--color-danger-soft); }
+    .ui-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+    .ui-table th, .ui-table td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; }
+    .ui-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+    .ui-split-pane { min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: stretch; }
+    .state-empty, .state-loading, .state-error {
+      border: 0;
+      border-radius: 0;
+      padding: 4px 0;
+      color: var(--muted);
+      font-size: var(--font-size-sm);
+      background: transparent;
+    }
+    .state-error { color: var(--color-danger); }
 
     .top-git-launch { display: none; }
     .top-git-launch.show { display: inline-flex; }
@@ -252,24 +423,35 @@
       border-radius: 0;
       background: transparent;
       overflow: hidden;
+      margin: 0;
     }
     .trace-wrap > summary {
       list-style: none;
       cursor: pointer;
-      padding: 6px 10px;
+      padding: 4px 8px;
       color: var(--muted);
       border-bottom: 1px solid transparent;
       font-size: 11px;
+      line-height: 1.2;
+      margin: 0;
     }
     .trace-wrap[open] > summary { border-bottom-color: var(--border); }
     .trace-wrap > summary::-webkit-details-marker { display: none; }
+    .trace-wrap:not([open]) > :not(summary) { display: none !important; }
     .trace { max-height: 120px; overflow: auto; padding: 8px; font-size: 11px; white-space: pre-wrap; }
 
+    .meta-resize-handle {
+      width: 8px;
+      cursor: col-resize;
+      border-radius: 999px;
+      background: linear-gradient(to right, transparent, color-mix(in srgb, var(--border) 60%, transparent), transparent);
+    }
+    .meta-resize-handle:hover { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--primary) 30%, var(--border)), transparent); }
+
      .meta-sidebar {
-      width: 360px;
-      min-width: 260px;
-      max-width: 60vw;
-      resize: horizontal;
+      width: auto;
+      min-width: 220px;
+      max-width: min(520px, 48vw);
       min-height: 0;
       overflow: hidden;
       border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
@@ -298,14 +480,20 @@
       display: grid;
       gap: 8px;
       padding-right: 2px;
+      min-width: 0;
     }
-    .meta-cards { display: grid; gap: 8px; }
+    .meta-feed > * { min-width: 0; }
+    .meta-cards { display: grid; gap: 6px; min-width: 0; }
     .meta-card {
       border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
       border-radius: 10px;
       background: color-mix(in srgb, var(--surface-2) 75%, transparent);
-      padding: 8px;
-      font-size: 12px;
+      padding: 6px;
+      font-size: 11px;
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      box-sizing: border-box;
     }
     .meta-card .meta-head {
       display: flex;
@@ -316,27 +504,57 @@
       margin-bottom: 6px;
       text-transform: uppercase;
       letter-spacing: .06em;
+      min-width: 0;
     }
-    .meta-lines { display: grid; gap: 5px; }
+    .meta-card .meta-head > span { min-width: 0; overflow-wrap: anywhere; }
+    .meta-lines { display: grid; gap: 3px; min-width: 0; }
     .meta-line {
       border-left: 2px solid color-mix(in srgb, var(--border) 80%, transparent);
-      padding-left: 7px;
-      white-space: pre-wrap;
+      padding-left: 5px;
+      white-space: normal;
       word-break: break-word;
+      overflow-wrap: anywhere;
     }
-    .meta-item { border-left-width: 3px; padding-left: 8px; }
+    .meta-item { border-left-width: 3px; }
+    .meta-entry {
+      border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+      border-radius: 8px;
+      padding: 2px 6px;
+      background: color-mix(in srgb, var(--surface) 82%, transparent);
+    }
+    .meta-entry > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      min-width: 0;
+      padding: 1px 0;
+    }
+    .meta-entry > summary::-webkit-details-marker { display: none; }
+    .meta-preview {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      min-width: 0;
+    }
+    .meta-entry-body { margin-top: 4px; min-width: 0; }
     .meta-tag {
       display: inline-flex;
       align-items: center;
       border: 1px solid var(--border);
       border-radius: 999px;
-      padding: 1px 7px;
-      font-size: 10px;
-      letter-spacing: .04em;
+      padding: 0 5px;
+      font-size: 9px;
+      letter-spacing: .03em;
       text-transform: uppercase;
-      margin-bottom: 6px;
+      margin-bottom: 0;
+      line-height: 1.2;
       color: var(--muted);
       background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+      flex: 0 0 auto;
     }
     .meta-item.tool-call { border-left-color: #8b5cf6; }
     .meta-item.tool-call .meta-tag { color: #a78bfa; border-color: color-mix(in srgb, #8b5cf6 55%, var(--border)); }
@@ -350,24 +568,36 @@
     .meta-item.workspace .meta-tag { color: #06b6d4; border-color: color-mix(in srgb, #06b6d4 55%, var(--border)); }
     .meta-item.automation { border-left-color: #ec4899; }
     .meta-item.automation .meta-tag { color: #ec4899; border-color: color-mix(in srgb, #ec4899 55%, var(--border)); }
-    .meta-content { white-space: normal; }
+    .meta-content { white-space: normal; overflow-wrap: anywhere; }
     .meta-content pre {
       margin: 0;
       background: color-mix(in srgb, var(--surface) 75%, transparent);
       border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
       border-radius: 8px;
-      padding: 8px;
-      max-height: 180px;
+      padding: 6px;
+      max-height: 140px;
       overflow: auto;
-      font-size: 11px;
-      line-height: 1.35;
+      font-size: 10px;
+      line-height: 1.3;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
-    .meta-content code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .meta-content code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      display: block;
+      max-width: 100%;
+    }
     .meta-link {
       color: var(--primary);
       text-decoration: underline;
       text-underline-offset: 2px;
-      word-break: break-all;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      display: block;
     }
     .meta-empty {
       color: var(--muted);
@@ -722,7 +952,6 @@
     }
     .composer-disabled {
       opacity: .55;
-      pointer-events: none;
       filter: grayscale(.15);
     }
 
@@ -1120,7 +1349,11 @@
       .shell { grid-template-columns: minmax(0,1fr); }
       .sidebar { display: none; }
       .workspace-layout { grid-template-columns: minmax(0,1fr); }
+      .meta-rail { grid-template-columns: auto 0 minmax(0,1fr); }
+      .workspace-layout.meta-hidden .meta-rail { position: static; }
+      .meta-resize-handle { display:none; }
       .meta-sidebar {
+        max-width: 100%;
         border-left: 0;
         border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
         padding-left: 0;
@@ -1133,6 +1366,7 @@
 <body>
   <div id="app" class="shell sidebar-hidden">
     <aside id="sidebar" class="sidebar">
+      <div class="zone-label">Navigate &amp; scope</div>
 
       <details class="panel collapsible-panel" open>
         <summary><h3>Runtime</h3></summary>
@@ -1160,7 +1394,7 @@
           <button id="uploadFiles" class="btn btn-soft btn-sm">Upload</button>
           <button id="clearUploads" class="btn btn-soft btn-sm">Clear store</button>
         </div>
-        <div id="uploadList" class="upload-list small-muted"></div>
+        <div id="uploadList" class="upload-list small-muted state-empty">No uploaded context files.</div>
         </div>
       </details>
       <details id="gitPanel" class="panel collapsible-panel git-panel" open>
@@ -1180,8 +1414,13 @@
         <div class="d-flex gap-2 mb-2">
           <button id="newSession" class="btn btn-soft btn-sm" type="button">New session</button>
         </div>
+        <div id="sessionHealthSummary" class="session-health">idle 0 · running 0 · done 0</div>
+        <div class="session-toolbar">
+          <input id="sessionQuickSwitch" class="form-control form-control-sm" placeholder="Quick switch (type + Enter)" />
+        </div>
 
         <div id="sessionList" class="session-list mb-2"></div>
+        <div class="session-recent"><div class="small-muted mb-1">Recent</div><div id="sessionRecent"></div></div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
         </div>
       </details>
@@ -1231,18 +1470,28 @@
         </div>
       </details>
     </aside>
+    <div id="sidebarResizeHandle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
 
     <section class="main">
       <div class="topbar">
         <button id="toggleSidebar" class="btn btn-soft btn-sm">☰</button>
         <div class="title">mu_cli</div>
+        <div class="surface-switch ui-tabs" role="tablist" aria-label="Workspace surface">
+          <button class="surface-tab active" data-surface-tab="operate" role="tab" aria-selected="true">Operate</button>
+          <button class="surface-tab" data-surface-tab="control" role="tab" aria-selected="false">Control</button>
+          <button class="surface-tab" data-surface-tab="review" role="tab" aria-selected="false">Review</button>
+        </div>
         <button id="openAdvanced" class="btn btn-soft btn-sm">Settings</button>
+        <button id="openHelp" class="btn btn-soft btn-sm">Help</button>
                         <div id="thinking" class="thinking"><span class="spinner-border spinner-border-sm"></span><span>AI thinking…</span></div>
         <span id="meta" class="pill">loading...</span>
+        <span id="gitQuickStatus" class="pill git-quick-pill">git: no repo</span>
+        <span class="shortcut-hint">⌘/Ctrl+1 Operate · 2 Control · 3 Review · ⌘/Ctrl+B sidebar · ⌘/Ctrl+\ metadata · ⌘/Ctrl+, settings</span>
               </div>
 
-      <div class="workspace-layout">
+      <div class="workspace-layout ui-split-pane">
         <div class="chat-layout">
+          <div class="zone-label">Operate</div>
           <div id="messages" class="messages"></div>
 
           <div id="chatComposer">
@@ -1268,10 +1517,24 @@
         </div>
 
         <div class="meta-rail">
-          <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel"><</button>
-          <aside class="meta-sidebar">
-          <h4>Run metadata</h4>
+          <button id="toggleMetaSidebar" class="meta-toggle-icon" type="button" title="Hide metadata panel" aria-label="Hide metadata panel">☰</button>
+          <div id="metaResizeHandle" class="meta-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize metadata panel"></div>
+          <aside id="metaSidebar" class="meta-sidebar">
+          <div class="meta-sidebar-top">
+            <div class="zone-label">Inspect</div>
+            <h4>Run metadata</h4>
+            <div class="timeline-filters" aria-label="Execution timeline filters">
+              <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
+              <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
+              <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
+              <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
+            </div>
+          </div>
           <div class="meta-feed">
+            <details class="trace-wrap" open>
+              <summary>Execution timeline</summary>
+              <div id="executionTimeline" class="timeline-panel"></div>
+            </details>
             <details class="trace-wrap" id="traceWrap" open>
               <summary>Debug traces</summary>
               <div id="traces" class="trace">debug traces will appear here</div>
@@ -1312,10 +1575,65 @@
     </div>
   </div>
 
+
+  <div id="sessionOverridesModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(880px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Session overrides</h5>
+        <button id="closeSessionOverridesModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div id="sessionOverridesMeta" class="small-muted mb-2">Session: -</div>
+      <div class="override-grid">
+        <div>
+          <label class="small-muted mb-1">Provider</label>
+          <select id="sessionOverrideProvider" class="form-select mb-2"></select>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Model</label>
+          <select id="sessionOverrideModel" class="form-select mb-2"></select>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Approval mode</label>
+          <select id="sessionOverrideApproval" class="form-select mb-2"><option>ask</option><option>auto</option><option>deny</option></select>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Workspace</label>
+          <input id="sessionOverrideWorkspace" class="form-control mb-2" placeholder="/path/to/repo" />
+        </div>
+        <div>
+          <div class="form-check mb-1"><input id="sessionOverrideAgentic" class="form-check-input" type="checkbox" /><label class="form-check-label small-muted" for="sessionOverrideAgentic">Agentic planning</label></div>
+          <div class="form-check mb-1"><input id="sessionOverrideResearch" class="form-check-input" type="checkbox" /><label class="form-check-label small-muted" for="sessionOverrideResearch">Research mode</label></div>
+          <div class="form-check"><input id="sessionOverrideCondense" class="form-check-input" type="checkbox" /><label class="form-check-label small-muted" for="sessionOverrideCondense">Auto condense</label></div>
+        </div>
+        <div>
+          <label class="small-muted mb-1">Condense window</label>
+          <input id="sessionOverrideCondenseWindow" type="number" min="2" step="1" class="form-control mb-2" value="12" />
+          <label class="small-muted mb-1">Max runtime (s)</label>
+          <input id="sessionOverrideMaxRuntime" type="number" min="30" step="30" class="form-control" value="900" />
+        </div>
+        <div class="full">
+          <label class="small-muted mb-1">System prompt override (session)</label>
+          <textarea id="sessionOverrideSystemPrompt" class="form-control mb-2" style="min-height:90px"></textarea>
+          <label class="small-muted mb-1">Rules checklist (session)</label>
+          <textarea id="sessionOverrideRules" class="form-control mb-2" style="min-height:80px"></textarea>
+          <div class="small-muted mb-1">Enabled skills override</div>
+          <div id="sessionOverrideSkills" class="tool-visibility-list small-muted mb-2">Loading skills...</div>
+          <div class="small-muted mb-1">Tool visibility override</div>
+          <div id="sessionOverrideTools" class="tool-visibility-list small-muted">Loading tools...</div>
+        </div>
+      </div>
+      <div class="d-flex justify-content-end gap-2 mt-3">
+        <button id="resetSessionOverrides" class="btn btn-soft btn-sm">Reset session overrides</button>
+        <button id="saveSessionOverrides" class="btn btn-accent btn-sm">Save overrides</button>
+      </div>
+    </div>
+  </div>
+
   <div id="sessionMenuOverlay" class="session-menu">
     <button type="button" data-session-cmd="refresh">Refresh</button>
     <button type="button" data-session-cmd="clear">Clear session context</button>
     <button type="button" data-session-cmd="condense">Condense settings</button>
+    <button type="button" data-session-cmd="overrides">Session overrides</button>
     <button type="button" data-session-cmd="delete">Delete</button>
   </div>
 
@@ -1344,7 +1662,7 @@
           <input id="googleApiKey" type="password" class="form-control mb-2" placeholder="AIza..." />
           <div class="toggles-grid">
             <div class="form-check">
-              <input class="form-check-input" id="debug" type="checkbox" />
+              <input class="form-check-input" id="debug" type="checkbox" checked />
               <label class="form-check-label small-muted" for="debug">Debug mode</label>
             </div>
             <div class="form-check">
@@ -1362,8 +1680,17 @@
         </section>
 
         <section class="settings-section">
+          <h6>Data management</h6>
+          <div class="small-muted mb-2">Persisted runtime/session data is stored under <code>.mu_cli/</code> and survives restarts.</div>
+          <button id="clearAllStoredData" class="btn btn-soft btn-sm" type="button">Clear all stored data</button>
+          <div id="clearAllStoredDataStatus" class="small-muted mt-1"></div>
+        </section>
+
+        <section class="settings-section">
           <h6>Tool visibility</h6>
           <div id="toolVisibilityList" class="tool-visibility-list small-muted">Loading tools...</div>
+          <div class="small-muted mt-2">Tools console</div>
+          <div id="toolsConsoleHost" class="small-muted">Loading tool analytics...</div>
         </section>
 
         <section class="settings-section">
@@ -1371,6 +1698,73 @@
           <div class="small-muted custom-tools-hint mb-1">Format: [{"name":"run_tests","description":"Run tests","command":["make","test-verbose"],"mutating":false}]</div>
           <textarea id="customTools" class="form-control mb-1" placeholder='[]'></textarea>
           <div id="customToolErrors" class="small-muted"></div>
+        </section>
+
+
+        <section class="settings-section">
+          <h6>Skills presets</h6>
+          <div class="mini-toolbar">
+            <input id="skillPresetName" class="form-control form-control-sm" placeholder="preset name" />
+            <button id="saveSkillPreset" class="btn btn-soft btn-sm" type="button">Save preset</button>
+            <select id="skillPresetSelect" class="form-select form-select-sm" style="max-width:220px"></select>
+            <button id="applySkillPreset" class="btn btn-soft btn-sm" type="button">Apply</button>
+            <button id="deleteSkillPreset" class="btn btn-soft btn-sm" type="button">Delete</button>
+          </div>
+          <div id="skillPresetStatus" class="small-muted"></div>
+          <div class="small-muted mt-2">Lifecycle visibility</div>
+          <div id="skillsLifecycleHost" class="small-muted">Loading skill lifecycle view...</div>
+        </section>
+
+        <section class="settings-section">
+          <h6>System prompt & rules</h6>
+          <label class="small-muted mb-1">System prompt override (session-local, UI-managed)</label>
+          <textarea id="systemPromptOverride" class="form-control mb-2" style="min-height:120px"></textarea>
+          <label class="small-muted mb-1">Rules checklist (one per line)</label>
+          <textarea id="rulesChecklist" class="form-control" style="min-height:96px" placeholder="Prefer tool calls
+Cite file paths
+Keep responses concise"></textarea>
+          <div class="mini-toolbar">
+            <input id="rulesVersionName" class="form-control form-control-sm" placeholder="version label" />
+            <button id="saveRulesVersion" class="btn btn-soft btn-sm" type="button">Save version</button>
+            <select id="rulesVersionSelect" class="form-select form-select-sm" style="max-width:220px"></select>
+            <button id="rollbackRulesVersion" class="btn btn-soft btn-sm" type="button">Rollback</button>
+            <button id="deleteRulesVersion" class="btn btn-soft btn-sm" type="button">Delete</button>
+            <button id="compareRulesVersion" class="btn btn-soft btn-sm" type="button">Compare</button>
+            <button id="checkRulesConflicts" class="btn btn-soft btn-sm" type="button">Conflict check</button>
+          </div>
+          <div id="rulesVersionStatus" class="small-muted"></div>
+          <pre id="rulesVersionDiffOutput" class="trace mt-1" style="max-height:160px">No rules diff computed yet.</pre>
+        </section>
+
+        <section class="settings-section">
+          <h6>Context budget</h6>
+          <div class="small-muted mb-1">Live context footprint estimate (chars proxy).</div>
+          <div class="context-budget-meter"><div id="contextBudgetFill" class="context-budget-fill"></div></div>
+          <div id="contextBudgetRows"></div>
+          <div class="mini-toolbar">
+            <label class="small-muted"><input type="checkbox" id="ctxExcludeTraces" /> Exclude traces</label>
+            <label class="small-muted"><input type="checkbox" id="ctxExcludeUploads" /> Exclude uploads</label>
+            <label class="small-muted"><input type="checkbox" id="ctxExcludeTools" /> Exclude tool specs</label>
+            <button id="summarizeContextNow" class="btn btn-soft btn-sm" type="button">Summarize rules text</button>
+          </div>
+          <div id="contextBudgetActionStatus" class="small-muted"></div>
+          <div class="small-muted mt-1">Target limit: <span id="contextBudgetTargetLabel">16000</span> chars</div>
+        </section>
+
+        <section class="settings-section">
+          <h6>Model behavior knobs</h6>
+          <div class="control-grid"><label class="small-muted" for="knobTemperature">Temperature</label><span id="knobTemperatureVal" class="small-muted">0.20</span><input id="knobTemperature" type="range" min="0" max="2" step="0.05" value="0.2" style="grid-column:1 / -1" /></div>
+          <div class="control-grid"><label class="small-muted" for="knobTopP">Top-p</label><span id="knobTopPVal" class="small-muted">0.95</span><input id="knobTopP" type="range" min="0" max="1" step="0.01" value="0.95" style="grid-column:1 / -1" /></div>
+          <div class="control-grid"><label class="small-muted" for="knobToolBias">Tool eagerness</label><span id="knobToolBiasVal" class="small-muted">0.70</span><input id="knobToolBias" type="range" min="0" max="1" step="0.01" value="0.70" style="grid-column:1 / -1" /></div>
+          <div class="control-grid"><label class="small-muted" for="knobVerbosity">Verbosity</label><span id="knobVerbosityVal" class="small-muted">0.50</span><input id="knobVerbosity" type="range" min="0" max="1" step="0.01" value="0.50" style="grid-column:1 / -1" /></div>
+          <div class="mini-toolbar">
+            <input id="behaviorProfileName" class="form-control form-control-sm" placeholder="profile name" />
+            <button id="saveBehaviorProfile" class="btn btn-soft btn-sm" type="button">Save profile</button>
+            <select id="behaviorProfileSelect" class="form-select form-select-sm" style="max-width:220px"></select>
+            <button id="applyBehaviorProfile" class="btn btn-soft btn-sm" type="button">Apply</button>
+            <button id="deleteBehaviorProfile" class="btn btn-soft btn-sm" type="button">Delete</button>
+          </div>
+          <div id="behaviorProfileStatus" class="small-muted"></div>
         </section>
       </div>
     </div>
@@ -1397,6 +1791,22 @@
           <div class="chart-title">Cost vs time (USD)</div>
           <canvas id="metricsCostChart" class="chart-canvas" width="520" height="180"></canvas>
         </div>
+      </div>
+
+      <div class="chart-wrap mt-2">
+        <div class="chart-title">Telemetry dashboard (Stage 4)</div>
+        <div class="metrics-grid">
+          <div class="metric-card"><div class="label">Uptime (s)</div><div id="metricTelemetryUptime" class="value">0</div></div>
+          <div class="metric-card"><div class="label">HTTP requests</div><div id="metricTelemetryRequests" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Tool failures (trace)</div><div id="metricTelemetryToolFailures" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Approval wait events</div><div id="metricTelemetryApprovalWaits" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Background jobs completed</div><div id="metricTelemetryJobsCompleted" class="value">0</div></div>
+          <div class="metric-card"><div class="label">Background jobs failed/timed out</div><div id="metricTelemetryJobsFailed" class="value">0</div></div>
+        </div>
+        <table class="metrics-table mt-2">
+          <thead><tr><th>Action</th><th>Count</th></tr></thead>
+          <tbody id="metricsTelemetryActions"></tbody>
+        </table>
       </div>
       <div class="chart-wrap">
         <div class="chart-title">Model breakdown</div>
@@ -1493,6 +1903,36 @@
     </div>
   </div>
 
+
+  <div id="helpModal" class="modal-backdrop-custom">
+    <div class="modal-card" style="width:min(820px,96vw)">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">HELP</h5>
+        <button id="closeHelpModal" class="btn btn-soft btn-sm">Close</button>
+      </div>
+      <div class="small-muted mb-2">Use this as a quick operator guide while working across Operate / Control / Review surfaces.</div>
+      <div class="d-flex justify-content-between align-items-center mb-1"><strong>Shortcuts</strong><span class="ui-badge success">Productivity</span></div>
+      <table class="ui-table mb-2">
+        <thead><tr><th>Action</th><th>Shortcut</th></tr></thead>
+        <tbody>
+          <tr><td>Send prompt</td><td>Ctrl/Cmd + Enter</td></tr>
+          <tr><td>Toggle sidebar</td><td>Ctrl/Cmd + B</td></tr>
+          <tr><td>Toggle metadata panel</td><td>Ctrl/Cmd + \</td></tr>
+          <tr><td>Open settings</td><td>Ctrl/Cmd + ,</td></tr>
+          <tr><td>Switch to Operate / Control / Review</td><td>Ctrl/Cmd + 1 / 2 / 3</td></tr>
+        </tbody>
+      </table>
+      <div class="d-flex justify-content-between align-items-center mb-1"><strong>Tooltips and controls</strong><span class="ui-badge warn">Clarity</span></div>
+      <div class="small-muted mb-2">Hover info icons to learn effect, when to use, and tradeoff of behavior toggles (agentic, research, condense).</div>
+      <div class="d-flex justify-content-between align-items-center mb-1"><strong>Effective workflow</strong><span class="ui-badge">Operate → Control → Review</span></div>
+      <ul class="small-muted mb-0">
+        <li><strong>Operate:</strong> choose session/workspace and run tasks.</li>
+        <li><strong>Control:</strong> tune runtime, tools, and model behavior before long runs.</li>
+        <li><strong>Review:</strong> inspect metadata, traces, and diffs before approvals.</li>
+      </ul>
+    </div>
+  </div>
+
   <div id="gitModal" class="modal-backdrop-custom">
     <div class="modal-card" style="width:min(900px,96vw)">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1515,7 +1955,19 @@
         <div class="small-muted" id="gitStatus">Select workspace to load repositories.</div>
         <button id="refreshGitDiff" class="btn btn-soft btn-sm" type="button">Refresh diff</button>
       </div>
+      <div id="gitDiffStats" class="git-diff-stats">files 0 · +0 · -0</div>
+      <div class="git-mode-toggle">
+        <button id="gitInlineMode" class="btn btn-soft btn-sm active" type="button">Inline</button>
+        <button id="gitSideMode" class="btn btn-soft btn-sm" type="button">Side-by-side</button>
+      </div>
       <div id="gitDiffBox" class="git-diff-box">No diff yet.</div>
+      <div class="small-muted mt-2">Hunk decisions (review-only)</div>
+      <div class="git-hunk-actions">
+        <button id="gitHunkAcceptAll" class="btn btn-soft btn-sm" type="button">Accept all</button>
+        <button id="gitHunkRejectAll" class="btn btn-soft btn-sm" type="button">Reject all</button>
+        <button id="gitHunkReset" class="btn btn-soft btn-sm" type="button">Reset</button>
+      </div>
+      <div id="gitHunkList" class="git-hunk-list"></div>
     </div>
   </div>
 

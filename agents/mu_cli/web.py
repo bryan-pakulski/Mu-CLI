@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import urllib.parse
 import uuid
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,6 +92,84 @@ class RetrieveConversationSummaryTool:
 def _default_usage() -> dict[str, float]:
     return default_usage()
 
+
+
+
+def _telemetry_path() -> Path:
+    path = Path('.mu_cli/telemetry.json')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _default_telemetry() -> dict[str, Any]:
+    return {
+        'started_at': datetime.now(timezone.utc).isoformat(),
+        'request_counts': {},
+        'action_counts': {},
+        'last_updated_at': datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _load_telemetry(runtime: WebRuntime) -> None:
+    path = _telemetry_path()
+    if not path.exists():
+        runtime.telemetry = _default_telemetry()
+        path.write_text(json.dumps(runtime.telemetry, indent=2), encoding='utf-8')
+        return
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError:
+        payload = _default_telemetry()
+    runtime.telemetry = {
+        'started_at': payload.get('started_at') or datetime.now(timezone.utc).isoformat(),
+        'request_counts': payload.get('request_counts') or {},
+        'action_counts': payload.get('action_counts') or {},
+        'last_updated_at': payload.get('last_updated_at') or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _persist_telemetry(runtime: WebRuntime) -> None:
+    runtime.telemetry['last_updated_at'] = datetime.now(timezone.utc).isoformat()
+    _telemetry_path().write_text(json.dumps(runtime.telemetry, indent=2), encoding='utf-8')
+
+
+def _record_telemetry(runtime: WebRuntime, category: str, key: str, count: int = 1) -> None:
+    bucket = runtime.telemetry.setdefault(category, {})
+    bucket[key] = int(bucket.get(key, 0)) + int(count)
+    _persist_telemetry(runtime)
+
+
+def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
+    req_counts = runtime.telemetry.get('request_counts') or {}
+    action_counts = runtime.telemetry.get('action_counts') or {}
+    total_requests = int(sum(int(v) for v in req_counts.values()))
+    tool_failures = len([line for line in (runtime.traces or []) if 'tool-run:' in str(line) and 'ok=False' in str(line)])
+    approval_waits = len([line for line in (runtime.traces or []) if 'approval' in str(line).lower()])
+    bg_jobs = runtime.background_jobs or {}
+    bg_completed = len([j for j in bg_jobs.values() if j.get('status') == 'completed'])
+    bg_failed = len([j for j in bg_jobs.values() if j.get('status') in {'failed', 'timed_out'}])
+
+    started_at = runtime.telemetry.get('started_at')
+    uptime_seconds = 0
+    if started_at:
+        try:
+            uptime_seconds = max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(started_at)).total_seconds()))
+        except ValueError:
+            uptime_seconds = 0
+
+    return {
+        'started_at': started_at,
+        'last_updated_at': runtime.telemetry.get('last_updated_at'),
+        'uptime_seconds': uptime_seconds,
+        'request_counts': req_counts,
+        'action_counts': action_counts,
+        'total_requests': total_requests,
+        'chat_turns': len(runtime.session_turns or []),
+        'tool_failures': tool_failures,
+        'approval_wait_events': approval_waits,
+        'background_jobs_completed': bg_completed,
+        'background_jobs_failed_or_timed_out': bg_failed,
+    }
 
 
 def _verification_policy_for_task(text: str) -> dict[str, Any]:
@@ -389,16 +469,16 @@ def _new_agent(runtime: WebRuntime) -> Agent:
 
         approved = decision == "approve"
         runtime.traces.append(
-            f"approval: id={request_id} tool={tool_name} decision={'approve' if approved else 'deny'}"
+            f"approval: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] id={request_id} tool={tool_name} decision={'approve' if approved else 'deny'}"
         )
         return approved
 
     def on_model_response(message: Message, calls: list[ToolCall]) -> None:
         if not runtime.debug:
             return
-        runtime.traces.append(f"model: {message.content}")
+        runtime.traces.append(f"model: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] {message.content}")
         for call in calls:
-            runtime.traces.append(f"tool-request: id={call.call_id} name={call.name} args={call.args}")
+            runtime.traces.append(f"tool-request: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] id={call.call_id} name={call.name} args={call.args}")
 
     def on_tool_run(name: str, args: dict, ok: bool, output: str) -> None:
         runtime.workspace_store.record_tool_run(name, args, output, ok)
@@ -406,7 +486,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         _update_tool_reliability(runtime, name, ok, latency_ms)
         if runtime.debug:
             latency_suffix = f" latency_ms={latency_ms}" if latency_ms is not None else ""
-            runtime.traces.append(f"tool-run: name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
+            runtime.traces.append(f"tool-run: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
 
     return Agent(
         provider=provider,
@@ -761,6 +841,7 @@ def _persist(runtime: WebRuntime) -> None:
             condense_window=runtime.condense_window,
             summary_index=runtime.summary_index,
             enabled_skills=runtime.enabled_skills,
+            traces=runtime.traces,
         )
     )
 
@@ -786,6 +867,7 @@ def _initialize_fresh_session_state(runtime: WebRuntime, *, reset_summary_index:
     runtime.session_turns = []
     runtime.uploads = []
     runtime.research_artifacts = {}
+    runtime.traces = []
     if reset_summary_index:
         runtime.summary_index = []
 
@@ -821,6 +903,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.condense_window = int(loaded.condense_window)
     runtime.summary_index = list(loaded.summary_index or [])
     runtime.enabled_skills = list(loaded.enabled_skills or [])
+    runtime.traces = list(loaded.traces or [])
     _attach_workspace_if_available(runtime)
 
     if runtime.agentic_planning:
@@ -831,6 +914,51 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     _sync_skill_prompts(runtime)
 
     return True
+
+
+
+def _clear_all_stored_data(runtime: WebRuntime) -> dict[str, int]:
+    session_dir = runtime.session_store.root_dir
+    uploads_dir = runtime.uploads_dir
+    workspace_dir = runtime.workspace_store.storage_dir
+
+    removed_sessions = 0
+    if session_dir.exists():
+        for path in session_dir.glob("*.json"):
+            path.unlink(missing_ok=True)
+            removed_sessions += 1
+
+    removed_upload_files = 0
+    if uploads_dir.exists():
+        for path in uploads_dir.rglob("*"):
+            if path.is_file():
+                removed_upload_files += 1
+        shutil.rmtree(uploads_dir, ignore_errors=True)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    removed_workspace_snapshots = 0
+    if workspace_dir.exists():
+        for path in workspace_dir.glob("workspace_*.json"):
+            path.unlink(missing_ok=True)
+            removed_workspace_snapshots += 1
+
+    runtime.background_jobs.clear()
+    runtime.pending_approval = None
+    runtime.workspace_path = None
+    runtime.workspace_store.snapshot = None
+    runtime.session_name = "default"
+    runtime.session_store.use("default")
+    _initialize_fresh_session_state(runtime, reset_summary_index=True)
+    _persist(runtime)
+    runtime.telemetry = _default_telemetry()
+    _persist_telemetry(runtime)
+
+    return {
+        "sessions": removed_sessions,
+        "upload_files": removed_upload_files,
+        "workspace_snapshots": removed_workspace_snapshots,
+    }
+
 
 
 
@@ -871,6 +999,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         summary_index=[],
         skill_store=base.skill_store,
         enabled_skills=list(base.enabled_skills),
+        telemetry=dict(base.telemetry or {}),
     )
     _refresh_tooling(runtime)
     if not _load_session(runtime, session_name):
@@ -1039,6 +1168,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             no_progress_streak = 0
             previous_step = None
             replan_count = 0
+            completed_by_plan = False
             policy = job.get("verification_policy") or _verification_policy_for_task(text)
             job["events"].append(
                 f"verification_policy: type={policy.get('task_type')} checks={','.join(policy.get('required_checks', []))}"
@@ -1110,6 +1240,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["checkpoints"] = job["checkpoints"][-30:]
 
                 if _is_plan_complete(reply.content):
+                    completed_by_plan = True
+                    job["events"].append("status: plan_complete_detected")
                     break
                 if not isolated.agentic_planning:
                     break
@@ -1150,6 +1282,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
 
             if job.get("status") == "killed":
                 pass
+            elif completed_by_plan or _is_plan_complete(job.get("last_step") or ""):
+                job["status"] = "completed"
             elif datetime.now(timezone.utc).timestamp() >= deadline:
                 job["status"] = "timed_out"
 
@@ -1246,7 +1380,7 @@ def create_app():
         system_prompt="You are a helpful coding assistant. Keep responses concise.",
         session_name="default",
         workspace_path=None,
-        debug=False,
+        debug=True,
         agentic_planning=True,
         research_mode=False,
         workspace_store=workspace_store,
@@ -1270,8 +1404,10 @@ def create_app():
         summary_index=[],
         skill_store=skill_store,
         enabled_skills=[],
+        telemetry={},
     )
     runtime.uploads_dir.mkdir(parents=True, exist_ok=True)
+    _load_telemetry(runtime)
     _refresh_tooling(runtime)
     runtime.agent = _new_agent(runtime)
     runtime.agent.add_system_prompt(runtime.system_prompt)
@@ -1281,6 +1417,13 @@ def create_app():
     _sync_skill_prompts(runtime)
     if not _load_session(runtime, runtime.session_name):
         _persist(runtime)
+
+
+    @app.before_request
+    def _telemetry_request_hook():
+        from flask import request
+        key = f"{request.method} {request.path}"
+        _record_telemetry(runtime, 'request_counts', key)
 
     runtime_mutation_deps = RuntimeMutationDeps(
         get_models=get_models,
@@ -1308,6 +1451,9 @@ def create_app():
             mutate_for_settings=lambda runtime_ref, payload: mutate_runtime_for_settings(runtime_ref, payload, runtime_mutation_deps),
             persist=_persist,
             remove_uploaded_entry=_remove_uploaded_entry,
+            clear_all_stored_data=_clear_all_stored_data,
+            telemetry_snapshot=_telemetry_snapshot,
+            record_telemetry_action=lambda runtime_ref, action: _record_telemetry(runtime_ref, "action_counts", action),
         ),
     )
 
@@ -1315,6 +1461,7 @@ def create_app():
         app,
         runtime,
         ChatRouteDeps(
+            record_telemetry_action=lambda runtime_ref, action: _record_telemetry(runtime_ref, "action_counts", action),
             run_turn_with_uploaded_context=_run_turn_with_uploaded_context,
             turn_report=_turn_report,
             record_turn=_record_turn,
@@ -1330,6 +1477,7 @@ def create_app():
         app,
         runtime,
         SessionRouteDeps(
+            record_telemetry_action=lambda runtime_ref, action: _record_telemetry(runtime_ref, "action_counts", action),
             load_session=_load_session,
             delete_session=lambda runtime_ref, name: runtime_ref.session_store.delete(name),
             persist=_persist,

@@ -45,6 +45,13 @@ inspect progress, and either open a PR when complete or continue iterating.
 - Architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Testing guide: [`docs/TESTING.md`](docs/TESTING.md)
 - ADR index: [`docs/adr/README.md`](docs/adr/README.md)
+- UX overhaul roadmap: [`docs/UX_OVERHAUL_ROADMAP.md`](docs/UX_OVERHAUL_ROADMAP.md)
+- Stage 0 UX foundation: [`docs/ux/stage0-foundation.md`](docs/ux/stage0-foundation.md)
+- Stage 1 shell slice: [`docs/ux/stage1-shell-slice.md`](docs/ux/stage1-shell-slice.md)
+- Stage 2 operational workflows: [`docs/ux/stage2-operational-workflows.md`](docs/ux/stage2-operational-workflows.md)
+- Stage 3 control-plane slice: [`docs/ux/stage3-control-plane-slice.md`](docs/ux/stage3-control-plane-slice.md)
+- Stage 4 analytics/hardening: [`docs/ux/stage4-analytics-hardening.md`](docs/ux/stage4-analytics-hardening.md)
+- UX design guidelines: [`docs/ux/design-guidelines.md`](docs/ux/design-guidelines.md)
 
 ## Makefile shortcuts
 
@@ -105,6 +112,8 @@ For architectural refactor plans (including backend route decomposition and fron
 - Right metadata panel is collapsible/resizable and groups compact debug/tool/research metadata.
 - Session usage panel includes `Metrics` and `Detailed stats` actions for per-session analytics.
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
+- Tool execution traces now persist in session storage and remain available after server restart.
+- Settings includes a **Clear all stored data** action to wipe persisted sessions/uploads/workspace cache and reset runtime state.
 
 ## Workspace context and memory
 
@@ -114,7 +123,7 @@ For architectural refactor plans (including backend route decomposition and fron
 
 ## Session persistence
 
-- Session state is saved in `.mu_cli/sessions/<session>.json`.
+- Session state is saved in `.mu_cli/sessions/<session>.json` (including debug traces/tool-call timeline snippets).
 - Resume is automatic by default; disable with `--no-resume`.
 
 ## Session management

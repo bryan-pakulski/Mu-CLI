@@ -1401,20 +1401,25 @@
 
         <label class="small-muted mb-1">Approval mode</label>
         <select id="approval" class="form-select mb-2"><option>ask</option><option>auto</option><option>deny</option></select>
-
-        <label class="small-muted mb-1">Workspace path</label>
-        <div class="input-group input-group-sm mb-2">
-          <input id="workspace" class="form-control" placeholder="/path/to/repo" />
-          <button id="browseWorkspace" class="btn btn-soft" type="button">Browse</button>
         </div>
+      </details>
 
-        <div class="small-muted mt-2 mb-1">Upload context files</div>
-        <input id="contextFiles" type="file" class="form-control mb-2" multiple />
-        <div class="d-flex gap-2 mb-2">
-          <button id="uploadFiles" class="btn btn-soft btn-sm">Upload</button>
-          <button id="clearUploads" class="btn btn-soft btn-sm">Clear store</button>
-        </div>
-        <div id="uploadList" class="upload-list small-muted state-empty">No uploaded context files.</div>
+      <details class="panel collapsible-panel" open>
+        <summary><h3>Workspace &amp; Context Store</h3></summary>
+        <div class="panel-body">
+          <label class="small-muted mb-1">Workspace path</label>
+          <div class="input-group input-group-sm mb-2">
+            <input id="workspace" class="form-control" placeholder="/path/to/repo" />
+            <button id="browseWorkspace" class="btn btn-soft" type="button">Browse</button>
+          </div>
+
+          <div class="small-muted mt-2 mb-1">Upload context files</div>
+          <input id="contextFiles" type="file" class="form-control mb-2" multiple />
+          <div class="d-flex gap-2 mb-2">
+            <button id="uploadFiles" class="btn btn-soft btn-sm">Upload</button>
+            <button id="clearUploads" class="btn btn-soft btn-sm">Clear store</button>
+          </div>
+          <div id="uploadList" class="upload-list small-muted state-empty">No uploaded context files.</div>
         </div>
       </details>
       <details id="gitPanel" class="panel collapsible-panel git-panel" open>
@@ -1442,36 +1447,6 @@
         <div id="sessionList" class="session-list mb-2"></div>
         <div class="session-recent"><div class="small-muted mb-1">Recent</div><div id="sessionRecent"></div></div>
         <div id="sessionActionStatus" class="small-muted mt-2"></div>
-        </div>
-      </details>
-
-      <details class="panel collapsible-panel" open>
-        <summary><h3>Skills</h3></summary>
-        <div class="panel-body">
-          <div id="skillToggleList" class="tool-visibility-list small-muted">Loading skills...</div>
-        </div>
-      </details>
-
-      <details class="panel collapsible-panel" open>
-        <summary><h3>Session behavior</h3></summary>
-        <div class="panel-body">
-          <label class="small-muted mb-1">Max session runtime (seconds)</label>
-          <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
-          <label class="small-muted mb-1">Condense window (raw messages)</label>
-          <input id="condenseWindow" type="number" min="2" step="1" class="form-control mb-2" value="12" />
-
-          <div class="form-check mb-1">
-            <input class="form-check-input" id="agentic" type="checkbox" checked />
-            <label class="form-check-label small-muted" for="agentic">Agentic planning <span class="meta-help" title="Enables autonomous multi-step planning/execution loops with tool usage.">i</span></label>
-          </div>
-          <div class="form-check mb-1">
-            <input class="form-check-input" id="researchMode" type="checkbox" />
-            <label class="form-check-label small-muted" for="researchMode">Research mode <span class="meta-help" title="Adds deeper source gathering/citation behavior and research-oriented prompts.">i</span></label>
-          </div>
-          <div class="form-check">
-            <input class="form-check-input" id="condenseEnabled" type="checkbox" />
-            <label class="form-check-label small-muted" for="condenseEnabled">Auto condense <span class="meta-help" title="Periodically compresses old context into summaries to reduce message window size.">i</span></label>
-          </div>
         </div>
       </details>
 
@@ -1699,6 +1674,27 @@
         </section>
 
         <section class="settings-section">
+          <h6>Session behavior</h6>
+          <label class="small-muted mb-1">Max session runtime (seconds)</label>
+          <input id="maxRuntime" type="number" min="30" step="30" class="form-control mb-2" value="900" />
+          <label class="small-muted mb-1">Condense window (raw messages)</label>
+          <input id="condenseWindow" type="number" min="2" step="1" class="form-control mb-2" value="12" />
+
+          <div class="form-check mb-1">
+            <input class="form-check-input" id="agentic" type="checkbox" checked />
+            <label class="form-check-label small-muted" for="agentic">Agentic planning <span class="meta-help" title="Enables autonomous multi-step planning/execution loops with tool usage.">i</span></label>
+          </div>
+          <div class="form-check mb-1">
+            <input class="form-check-input" id="researchMode" type="checkbox" />
+            <label class="form-check-label small-muted" for="researchMode">Research mode <span class="meta-help" title="Adds deeper source gathering/citation behavior and research-oriented prompts.">i</span></label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" id="condenseEnabled" type="checkbox" />
+            <label class="form-check-label small-muted" for="condenseEnabled">Auto condense <span class="meta-help" title="Periodically compresses old context into summaries to reduce message window size.">i</span></label>
+          </div>
+        </section>
+
+        <section class="settings-section">
           <h6>Pricing</h6>
           <div class="small-muted mb-2">Edit full pricing JSON document.</div>
           <textarea id="pricingJson" class="form-control mb-2" style="min-height:220px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"></textarea>
@@ -1726,6 +1722,11 @@
           <div id="customToolErrors" class="small-muted"></div>
         </section>
 
+
+        <section class="settings-section">
+          <h6>Skills</h6>
+          <div id="skillToggleList" class="tool-visibility-list small-muted mb-2">Loading skills...</div>
+        </section>
 
         <section class="settings-section">
           <h6>Skills presets</h6>

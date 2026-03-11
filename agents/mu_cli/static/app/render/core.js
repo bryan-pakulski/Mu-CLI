@@ -2098,8 +2098,10 @@ function buildToolVisibilityPayload() {
 }
 
 function buildEnabledSkillsPayload() {
+  const toggles = Array.from(document.querySelectorAll('[data-skill-enabled]'));
+  if (!toggles.length) return Array.isArray(state.enabledSkills) ? [...state.enabledSkills] : [];
   const enabled = [];
-  document.querySelectorAll('[data-skill-enabled]').forEach((el) => {
+  toggles.forEach((el) => {
     if (el.checked) enabled.push(el.getAttribute('data-skill-enabled'));
   });
   return enabled;
@@ -2140,6 +2142,7 @@ function renderSkillsLifecycleVisibility() {
 
 function renderSkillSettings() {
   const host = document.getElementById('skillToggleList');
+  if (!host) return;
   const skills = Array.isArray(state.skills) ? state.skills : [];
   const enabled = new Set(Array.isArray(state.enabledSkills) ? state.enabledSkills : []);
   if (!skills.length) {

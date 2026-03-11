@@ -1984,6 +1984,51 @@ function renderMessages() {
   const box = document.getElementById('messages');
   box.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
+  const chatJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
+    .slice()
+    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
+
+  function _appendLiveRunRows() {
+    chatJobs.forEach((job) => {
+      const row = document.createElement('div');
+      row.className = 'msg role-assistant';
+      row.innerHTML = '<div class="role">assistant</div>';
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      const jobStamp = formatTimestamp(job.started_at || job.finished_at || '') || formatTimestamp(new Date().toISOString());
+      meta.innerHTML = `${_tagPill('Live run activity', 'live-run')}<span class="msg-time">${escapeHtml(jobStamp)}</span>`;
+      row.appendChild(meta);
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      const status = escapeHtml(String(job.status || 'unknown'));
+      const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
+      const fallbackTimelineEvents = timelineEventsForActiveSession().slice(-40);
+      const eventLinesRaw = (Array.isArray(job.events) && job.events.length)
+        ? job.events
+        : fallbackTimelineEvents;
+      const events = eventLinesRaw.map((line) => escapeHtml(String(line || ''))).join('\n');
+      const plan = escapeHtml(String(job.plan || '(not drafted)'));
+      const stageLines = buildJobStageLines(job);
+      const fallbackStages = fallbackTimelineEvents
+        .filter((line) => String(line || '').startsWith('plan:') || String(line || '').startsWith('status:') || String(line || '').startsWith('tool-request:') || String(line || '').startsWith('tool-run:'));
+      const stages = (stageLines.length ? stageLines : fallbackStages).map((line) => escapeHtml(line)).join('\n');
+      const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
+      bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Plan</strong><pre><code>${plan}</code></pre><strong>Stages</strong><pre><code>${stages || '(no stages yet)'}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
+      row.appendChild(bubble);
+      box.appendChild(row);
+      anchor = row;
+    });
+  }
+
+  let lastAssistantIdx = -1;
+  for (let idx = 0; idx < state.messages.length; idx += 1) {
+    const m = state.messages[idx];
+    if (!m || m.role !== 'assistant') continue;
+    if (!shouldRenderMessage(m)) continue;
+    if (!String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) continue;
+    lastAssistantIdx = idx;
+  }
 
   let anchor = null;
   for (let idx = 0; idx < state.messages.length; idx += 1) {
@@ -2064,41 +2109,12 @@ function renderMessages() {
     row.appendChild(bubble);
     box.appendChild(row);
     anchor = row;
+
+    if (idx === lastAssistantIdx) {
+      _appendLiveRunRows();
+    }
   }
-
-
-  const chatJobs = (state.backgroundJobs || [])
-    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
-    .slice()
-    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
-  chatJobs.forEach((job) => {
-    const row = document.createElement('div');
-    row.className = 'msg role-assistant';
-    row.innerHTML = '<div class="role">assistant</div>';
-    const meta = document.createElement('div');
-    meta.className = 'msg-meta';
-    const jobStamp = formatTimestamp(job.started_at || job.finished_at || '') || formatTimestamp(new Date().toISOString());
-    meta.innerHTML = `${_tagPill('Live run activity', 'live-run')}<span class="msg-time">${escapeHtml(jobStamp)}</span>`;
-    row.appendChild(meta);
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    const status = escapeHtml(String(job.status || 'unknown'));
-    const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
-    const fallbackTimelineEvents = timelineEventsForActiveSession().slice(-40);
-    const eventLinesRaw = (Array.isArray(job.events) && job.events.length)
-      ? job.events
-      : fallbackTimelineEvents;
-    const events = eventLinesRaw.map((line) => escapeHtml(String(line || ''))).join('\n');
-    const plan = escapeHtml(String(job.plan || '(not drafted)'));
-    const stageLines = buildJobStageLines(job);
-    const fallbackStages = fallbackTimelineEvents
-      .filter((line) => String(line || '').startsWith('plan:') || String(line || '').startsWith('status:') || String(line || '').startsWith('tool-request:') || String(line || '').startsWith('tool-run:'));
-    const stages = (stageLines.length ? stageLines : fallbackStages).map((line) => escapeHtml(line)).join('\n');
-    const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
-    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Plan</strong><pre><code>${plan}</code></pre><strong>Stages</strong><pre><code>${stages || '(no stages yet)'}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
-    row.appendChild(bubble);
-    box.appendChild(row);
-  });
+  if (lastAssistantIdx < 0) _appendLiveRunRows();
 
   const notices = runNoticesBySession[state.activeSession || ''] || [];
   notices.forEach((notice) => {

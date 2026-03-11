@@ -18,6 +18,7 @@ class WebRuntime:
     model: str
     openai_api_key: str | None
     google_api_key: str | None
+    ollama_endpoint: str | None
     approval_mode: str
     system_prompt: str
     session_name: str

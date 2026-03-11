@@ -954,6 +954,7 @@
       opacity: .55;
       filter: grayscale(.15);
     }
+    .composer-disabled #killJob { opacity: 1; filter: none; }
 
     .tool-visibility-list {
       border: 1px solid var(--border);
@@ -1660,6 +1661,8 @@
           <input id="openaiApiKey" type="password" class="form-control mb-2" placeholder="sk-..." />
           <label class="small-muted mb-1">Google/Gemini API key (override env)</label>
           <input id="googleApiKey" type="password" class="form-control mb-2" placeholder="AIza..." />
+          <label class="small-muted mb-1">Ollama endpoint (override env)</label>
+          <input id="ollamaEndpoint" type="text" class="form-control mb-2" placeholder="http://127.0.0.1:11434" />
           <div class="toggles-grid">
             <div class="form-check">
               <input class="form-check-input" id="debug" type="checkbox" checked />

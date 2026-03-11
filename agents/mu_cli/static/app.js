@@ -15,6 +15,7 @@ let planApprovalResolver = null;
 const completedSeenSessions = new Set();
 let runtimeTick = null;
 let backgroundJobPoll = null;
+const metadataExpandedKeys = new Set();
 let sendingSession = null;
 const runNoticesBySession = {};
 const runDetailsById = {};
@@ -159,6 +160,7 @@ async function openSessionOverridesModal(sessionName) {
   const currentSession = state.activeSession || '';
   if (currentSession !== name) {
     await api('/api/session', 'POST', { action: 'switch', name });
+    flushStreamRender(true);
     await refreshState();
   }
 
@@ -1467,6 +1469,13 @@ function _metaRow(kind, label, value) {
 
   const details = document.createElement('details');
   details.className = 'meta-entry';
+  const metaKey = `${kind}|${label}|${raw.slice(0, 400)}`;
+  details.dataset.metaKey = metaKey;
+  if (metadataExpandedKeys.has(metaKey)) details.open = true;
+  details.addEventListener('toggle', () => {
+    if (details.open) metadataExpandedKeys.add(metaKey);
+    else metadataExpandedKeys.delete(metaKey);
+  });
 
   const summary = document.createElement('summary');
   const tag = document.createElement('span');
@@ -1555,6 +1564,7 @@ function _metaFilterAllows(kind, label, text) {
 
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
+  host.querySelectorAll('details.meta-entry[open][data-meta-key]').forEach((el) => metadataExpandedKeys.add(el.dataset.metaKey));
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
@@ -1745,7 +1755,7 @@ function renderMessages() {
   state.messages.forEach((m, idx) => {
     if (!shouldRenderMessage(m)) return;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim()) return;
+    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) return;
     if (m.role === 'tool_result' || m.role === 'tool_call') return;
 
     const row = document.createElement('div');
@@ -1755,7 +1765,8 @@ function renderMessages() {
     if (m.role === 'user' || m.role === 'assistant') {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
-      const tag = m.role === 'user' ? 'You' : 'AI';
+      let tag = m.role === 'user' ? 'You' : 'AI';
+      if (m.role === 'assistant' && m.metadata && m.metadata.kind === 'thinking_output') tag = 'thinking output';
       const stamp = formatTimestamp(messageTimes.get(idx));
       meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
       row.appendChild(meta);
@@ -1774,6 +1785,30 @@ function renderMessages() {
     box.appendChild(row);
     anchor = row;
 
+  });
+
+
+  const chatJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
+    .slice()
+    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
+  chatJobs.forEach((job) => {
+    const row = document.createElement('div');
+    row.className = 'msg role-assistant';
+    row.innerHTML = '<div class="role">assistant</div>';
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.innerHTML = '<span class="msg-tag">Live run activity</span><span class="msg-time">background</span>';
+    row.appendChild(meta);
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    const status = escapeHtml(String(job.status || 'unknown'));
+    const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
+    const events = Array.isArray(job.events) ? job.events.map((line) => escapeHtml(String(line || ''))).join('\n') : '';
+    const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
+    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
+    row.appendChild(bubble);
+    box.appendChild(row);
   });
 
   const notices = runNoticesBySession[state.activeSession || ''] || [];
@@ -2374,6 +2409,7 @@ function buildSettingsPayload() {
     model: document.getElementById('model').value,
     openai_api_key: document.getElementById('openaiApiKey').value || null,
     google_api_key: document.getElementById('googleApiKey').value || null,
+    ollama_endpoint: document.getElementById('ollamaEndpoint').value || null,
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
@@ -2593,6 +2629,9 @@ async function refreshState() {
   if (document.activeElement !== document.getElementById('googleApiKey')) {
     document.getElementById('googleApiKey').value = s.google_api_key || '';
   }
+  if (document.activeElement !== document.getElementById('ollamaEndpoint')) {
+    document.getElementById('ollamaEndpoint').value = s.ollama_endpoint || '';
+  }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
@@ -2650,6 +2689,7 @@ function updateBackgroundJobInState(job) {
 }
 
 
+
 function askPlanApproval(job) {
   return new Promise((resolve) => {
     planApprovalResolver = resolve;
@@ -2676,16 +2716,49 @@ async function sendPrompt(background = false) {
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
-  state.messages.push({ role: 'user', content: text });
-  let draft = { role: 'assistant', content: '', metadata: { typing: true } };
-  state.messages.push(draft);
+  let streamRenderTimer = null;
+  let streamRenderPending = false;
+  const flushStreamRender = (force = false) => {
+    if (streamRenderTimer) {
+      clearTimeout(streamRenderTimer);
+      streamRenderTimer = null;
+    }
+    streamRenderPending = false;
+    if (force) {
+      renderMessages();
+      renderMetadataPanel();
+      return;
+    }
+    streamRenderTimer = setTimeout(() => {
+      streamRenderTimer = null;
+      renderMessages();
+      renderMetadataPanel();
+    }, 70);
+  };
+  const scheduleStreamRender = () => {
+    if (streamRenderPending) return;
+    streamRenderPending = true;
+    flushStreamRender(false);
+  };
+
+  let draft = null;
+  let thinkingDraft = null;
+  let pendingThinking = null;
+  if (!background) {
+    state.messages.push({ role: 'user', content: text });
+    pendingThinking = { role: 'assistant', content: '', metadata: { typing: true, kind: 'thinking_output', ephemeral: true } };
+    state.messages.push(pendingThinking);
+    draft = { role: 'assistant', content: '', metadata: { typing: true } };
+    state.messages.push(draft);
+  }
   renderMessages();
   renderMetadataPanel();
 
   try {
     if (background) {
-      const active = selectedSessionName();
+      const active = selectedSessionName() || state.activeSession || '';
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
+      updateBackgroundJobInState({ id: bg.job_id, session: bg.session || active, status: 'running', iterations: 0, events: [], prompt: text });
       reportEl.textContent = `background job started: ${bg.job_id}`;
       const pollUntilDone = async () => {
         for (let i = 0; i < 120; i += 1) {
@@ -2739,14 +2812,29 @@ async function sendPrompt(background = false) {
         const event = JSON.parse(line);
         if (event.type === 'assistant_chunk') {
           updateThinking(false);
+          if (pendingThinking) {
+            state.messages = state.messages.filter((m) => m !== pendingThinking);
+            pendingThinking = null;
+          }
           if (!draft) {
             draft = { role: 'assistant', content: '' };
             state.messages.push(draft);
           }
           if (draft.metadata && draft.metadata.typing) delete draft.metadata.typing;
           draft.content += event.chunk;
-          renderMessages();
-          renderMetadataPanel();
+          scheduleStreamRender();
+        } else if (event.type === 'thinking_chunk') {
+          updateThinking(false);
+          if (pendingThinking) {
+            state.messages = state.messages.filter((m) => m !== pendingThinking);
+            pendingThinking = null;
+          }
+          if (!thinkingDraft) {
+            thinkingDraft = { role: 'assistant', content: '', metadata: { kind: 'thinking_output', tag: event.tag || 'thinking output' } };
+            state.messages.push(thinkingDraft);
+          }
+          thinkingDraft.content += event.chunk;
+          scheduleStreamRender();
         } else if (event.type === 'trace') {
           state.traces.push(event.line);
           state.traces = state.traces.slice(-50);
@@ -2762,6 +2850,7 @@ async function sendPrompt(background = false) {
       }
     }
 
+    flushStreamRender(true);
     await refreshState();
   } finally {
     if (approvalPoll) {
@@ -2769,6 +2858,16 @@ async function sendPrompt(background = false) {
       approvalPoll = null;
     }
     updateThinking(false);
+    if (streamRenderTimer) {
+      clearTimeout(streamRenderTimer);
+      streamRenderTimer = null;
+    }
+    if (pendingThinking) {
+      state.messages = state.messages.filter((m) => m !== pendingThinking);
+      pendingThinking = null;
+      renderMessages();
+      renderMetadataPanel();
+    }
     sending = false;
     sendingSession = null;
     updateChatBusyState();
@@ -2884,7 +2983,7 @@ function resolvePlanApproval(ok, revisedPlan = '') {
 
 // >>> app/events.js
 // --- event wiring -----------------------------------------------------------
-for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaEndpoint', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   const input = byId(id);
   if (!input) continue;
   input.addEventListener('change', () => {
@@ -2894,7 +2993,7 @@ for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'approval
     scheduleApplySettings();
     syncPricingEditor();
   });
-  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey') {
+  if (id === 'workspace' || id === 'openaiApiKey' || id === 'googleApiKey' || id === 'ollamaEndpoint') {
     input.addEventListener('blur', scheduleApplySettings);
   }
 }

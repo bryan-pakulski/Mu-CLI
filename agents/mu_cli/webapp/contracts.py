@@ -79,7 +79,7 @@ def parse_session_action_request(raw: Any) -> SessionActionRequest:
     name = (_opt_str(payload, "name") or "").strip()
 
     # typed checks for known mutable action fields
-    for key in ("provider", "model", "openai_api_key", "google_api_key", "approval_mode", "workspace"):
+    for key in ("provider", "model", "openai_api_key", "google_api_key", "ollama_endpoint", "approval_mode", "workspace"):
         _opt_str(payload, key)
     for key in ("agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)
@@ -96,7 +96,7 @@ def parse_session_action_request(raw: Any) -> SessionActionRequest:
 
 def parse_settings_update_request(raw: Any) -> SettingsUpdateRequest:
     payload = _expect_object(raw, route="/api/settings")
-    for key in ("provider", "model", "openai_api_key", "google_api_key", "approval_mode", "workspace"):
+    for key in ("provider", "model", "openai_api_key", "google_api_key", "ollama_endpoint", "approval_mode", "workspace"):
         _opt_str(payload, key)
     for key in ("debug", "agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)

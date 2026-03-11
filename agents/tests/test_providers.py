@@ -5,6 +5,7 @@ from unittest import mock
 
 from mu_cli.core.types import Message, Role
 from mu_cli.providers.gemini import GeminiProvider
+from mu_cli.providers.ollama import OllamaProvider
 from mu_cli.providers.openai import OpenAIProvider
 
 
@@ -103,6 +104,89 @@ class ProvidersTests(unittest.TestCase):
         req = mock_urlopen.call_args.args[0]
         payload = json.loads(req.data.decode("utf-8"))
         self.assertIn("tools", payload)
+
+
+
+    def test_ollama_provider_converts_assistant_tool_call_arguments_to_object(self) -> None:
+        provider = OllamaProvider(model="llama3.2", host="http://localhost:11434")
+        messages = [
+            Message(
+                role=Role.ASSISTANT,
+                content="",
+                metadata={
+                    "tool_calls": [
+                        {"id": "call_1", "name": "read_file", "arguments": '{"path":"a.py"}'},
+                    ]
+                },
+            )
+        ]
+
+        converted = provider._convert_messages(messages)
+
+        args = converted[0]["tool_calls"][0]["function"]["arguments"]
+        self.assertIsInstance(args, dict)
+        self.assertEqual("a.py", args["path"])
+
+    def test_ollama_provider_tool_result_message_omits_tool_call_id(self) -> None:
+        provider = OllamaProvider(model="llama3.2", host="http://localhost:11434")
+        messages = [
+            Message(
+                role=Role.TOOL_RESULT,
+                name="read_file",
+                content="ok",
+                metadata={"tool_call_id": "call_1"},
+            )
+        ]
+
+        converted = provider._convert_messages(messages)
+
+        self.assertEqual("tool", converted[0]["role"])
+        self.assertNotIn("tool_call_id", converted[0])
+
+    @mock.patch("mu_cli.providers.ollama.request.urlopen")
+    def test_ollama_provider_stream_emits_thinking_output_chunks(self, mock_urlopen: mock.Mock) -> None:
+        stream_lines = [
+            json.dumps({"message": {"content": "Thinking "}, "done": False}).encode("utf-8"),
+            json.dumps({"message": {"content": "more"}, "prompt_eval_count": 3, "eval_count": 2, "done": True}).encode("utf-8"),
+        ]
+        mock_urlopen.return_value.__enter__.return_value.__iter__.return_value = iter(stream_lines)
+
+        seen: list[dict] = []
+        provider = OllamaProvider(model="llama3.2", host="http://localhost:11434", stream_callback=seen.append)
+        reply = provider.generate([Message(role=Role.USER, content="ping")], stream=True)
+
+        self.assertEqual("Thinking more", reply.message.content)
+        self.assertEqual(2, len(seen))
+        self.assertTrue(all(item.get("kind") == "thinking_output" for item in seen))
+
+    @mock.patch("mu_cli.providers.ollama.request.urlopen")
+    def test_ollama_provider_generate_parses_tool_calls(self, mock_urlopen: mock.Mock) -> None:
+        mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {"name": "read_file", "arguments": {"path": "a.py"}},
+                        }
+                    ],
+                },
+                "prompt_eval_count": 11,
+                "eval_count": 4,
+            }
+        ).encode("utf-8")
+
+        provider = OllamaProvider(model="llama3.2", host="http://localhost:11434")
+        reply = provider.generate(
+            [Message(role=Role.USER, content="ping")],
+            tools=[{"name": "read_file", "description": "desc", "schema": {"type": "object"}}],
+        )
+
+        self.assertEqual("read_file", reply.tool_calls[0].name)
+        self.assertEqual("a.py", reply.tool_calls[0].args["path"])
+        req = mock_urlopen.call_args.args[0]
+        self.assertIn("/api/chat", req.full_url)
 
 
 if __name__ == "__main__":

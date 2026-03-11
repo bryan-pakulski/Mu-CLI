@@ -10,6 +10,9 @@ Provider-agnostic CLI scaffold intended for a **human-in-the-loop development wo
   - local `echo` provider (for development)
   - `openai` provider via Chat Completions API (with structured tool-calling)
   - `gemini` provider via Google Generative Language API (with structured tool-calling)
+  - dynamic Gemini model discovery when API key is configured
+- `ollama` provider via local Ollama `/api/chat` (with structured tool-calling where supported)
+  - dynamic local model discovery via Ollama `/api/tags`
 - tooling:
   - `read_file`
   - `write_file` (mutating; approval-gated)
@@ -66,6 +69,7 @@ make models
 make run-echo
 make run-openai   # requires OPENAI_API_KEY
 make run-gemini   # requires GEMINI_API_KEY or GOOGLE_API_KEY
+make run-ollama   # requires local Ollama server (default http://127.0.0.1:11434)
 make run-web      # Flask GUI on http://localhost:5000
 make docker-build
 make docker-run-web
@@ -170,6 +174,7 @@ For architectural refactor plans (including backend route decomposition and fron
 ## Debug mode
 
 - Start with `--debug` or toggle in app with `/debug on|off`.
+- Model context is automatically sliced to recent non-system messages for lower token overhead.
 - `/debug status` shows current debug mode.
 - When enabled, CLI prints model tool requests and tool execution traces.
 

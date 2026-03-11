@@ -22,6 +22,7 @@ from mu_cli.models import get_model_catalog, get_models
 from mu_cli.pricing import PricingCatalog, estimate_tokens
 from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
+from mu_cli.providers.ollama import OllamaProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
 from mu_cli.skills import SkillStore
@@ -257,13 +258,15 @@ def _tool_reliability_hint(runtime: WebRuntime) -> str:
         lines.append(f"{name}: score={float(data.get('score', 0.0)):.2f}, runs={int(data.get('runs', 0))}")
     return "Tool reliability preference (use higher-scored tools when equivalent): " + "; ".join(lines)
 
-def _build_provider(name: str, model: str, api_key: str | None):
+def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint: str | None = None):
     if name == "echo":
         return EchoProvider()
     if name == "openai":
         return OpenAIProvider(model=model, api_key=api_key)
     if name == "gemini":
         return GeminiProvider(model=model, api_key=api_key)
+    if name == "ollama":
+        return OllamaProvider(model=model, host=ollama_endpoint)
     raise ValueError(f"Unsupported provider: {name}")
 
 
@@ -274,6 +277,13 @@ def _provider_api_key(runtime: WebRuntime, provider_name: str | None = None) -> 
     if name == "gemini":
         return runtime.google_api_key
     return None
+
+def _provider_ollama_endpoint(runtime: WebRuntime, provider_name: str | None = None) -> str | None:
+    name = provider_name or runtime.provider
+    if name == "ollama":
+        return runtime.ollama_endpoint
+    return None
+
 
 
 def _is_git_repo(path: Path) -> bool:
@@ -439,7 +449,7 @@ def _git_agent_instruction(runtime: WebRuntime) -> str | None:
 
 
 def _new_agent(runtime: WebRuntime) -> Agent:
-    provider = _build_provider(runtime.provider, runtime.model, _provider_api_key(runtime))
+    provider = _build_provider(runtime.provider, runtime.model, _provider_api_key(runtime), _provider_ollama_endpoint(runtime))
 
     def on_approval(tool_name: str, args: dict) -> bool:
         mode = runtime.approval_mode
@@ -495,6 +505,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         on_model_response=on_model_response,
         on_tool_run=on_tool_run,
         strict_tool_usage=True,
+        max_model_messages=40,
     )
 
 
@@ -842,6 +853,7 @@ def _persist(runtime: WebRuntime) -> None:
             summary_index=runtime.summary_index,
             enabled_skills=runtime.enabled_skills,
             traces=runtime.traces,
+            ollama_endpoint=runtime.ollama_endpoint,
         )
     )
 
@@ -904,6 +916,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     runtime.summary_index = list(loaded.summary_index or [])
     runtime.enabled_skills = list(loaded.enabled_skills or [])
     runtime.traces = list(loaded.traces or [])
+    runtime.ollama_endpoint = loaded.ollama_endpoint
     _attach_workspace_if_available(runtime)
 
     if runtime.agentic_planning:
@@ -971,6 +984,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         model=base.model,
         openai_api_key=base.openai_api_key,
         google_api_key=base.google_api_key,
+        ollama_endpoint=base.ollama_endpoint,
         approval_mode=base.approval_mode,
         system_prompt=base.system_prompt,
         session_name=session_name,
@@ -1064,6 +1078,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0},
         "completed_flash_until": None,
         "events": [],
+        "prompt": text,
         "planner_critic": None,
         "verification_policy": _verification_policy_for_task(text),
         "checkpoints": [],
@@ -1376,6 +1391,7 @@ def create_app():
         model="echo",
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         google_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
+        ollama_endpoint=os.getenv("OLLAMA_HOST"),
         approval_mode="ask",
         system_prompt="You are a helpful coding assistant. Keep responses concise.",
         session_name="default",

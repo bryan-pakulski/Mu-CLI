@@ -27,6 +27,8 @@ def mutate_runtime_for_new_session(runtime: Any, payload: dict[str, Any], name: 
         runtime.openai_api_key = payload.get("openai_api_key") or None
     if "google_api_key" in payload:
         runtime.google_api_key = payload.get("google_api_key") or None
+    if "ollama_endpoint" in payload:
+        runtime.ollama_endpoint = payload.get("ollama_endpoint") or None
     available = deps.get_models(runtime.provider, deps.provider_api_key(runtime))
     runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)
     runtime.agentic_planning = bool(payload.get("agentic_planning", runtime.agentic_planning))
@@ -66,6 +68,8 @@ def mutate_runtime_for_settings(runtime: Any, payload: dict[str, Any], deps: Run
         runtime.openai_api_key = payload.get("openai_api_key") or None
     if "google_api_key" in payload:
         runtime.google_api_key = payload.get("google_api_key") or None
+    if "ollama_endpoint" in payload:
+        runtime.ollama_endpoint = payload.get("ollama_endpoint") or None
     selected_model = str(payload.get("model", runtime.model))
     available = deps.get_models(runtime.provider, deps.provider_api_key(runtime))
     runtime.model = selected_model if selected_model in available else (available[0] if available else runtime.model)

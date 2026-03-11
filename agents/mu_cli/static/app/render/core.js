@@ -1,6 +1,7 @@
 // --- render functions -------------------------------------------------------
 
-
+const pendingBackgroundPromptsBySession = globalThis.pendingBackgroundPromptsBySession || {};
+const metadataExpandedKeys = globalThis.metadataExpandedKeys || new Set();
 
 
 function _readStage3Store() {
@@ -1413,6 +1414,13 @@ function _metaRow(kind, label, value) {
 
   const details = document.createElement('details');
   details.className = 'meta-entry';
+  const metaKey = `${kind}|${label}|${raw.slice(0, 400)}`;
+  details.dataset.metaKey = metaKey;
+  if (metadataExpandedKeys.has(metaKey)) details.open = true;
+  details.addEventListener('toggle', () => {
+    if (details.open) metadataExpandedKeys.add(metaKey);
+    else metadataExpandedKeys.delete(metaKey);
+  });
 
   const summary = document.createElement('summary');
   const tag = document.createElement('span');
@@ -1501,6 +1509,7 @@ function _metaFilterAllows(kind, label, text) {
 
 function renderMetadataPanel() {
   const host = document.getElementById('metaFeed');
+  host.querySelectorAll('details.meta-entry[open][data-meta-key]').forEach((el) => metadataExpandedKeys.add(el.dataset.metaKey));
   host.innerHTML = '';
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
@@ -1691,7 +1700,7 @@ function renderMessages() {
   state.messages.forEach((m, idx) => {
     if (!shouldRenderMessage(m)) return;
 
-    if (m.role === 'assistant' && !String(m.content || '').trim()) return;
+    if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) return;
     if (m.role === 'tool_result' || m.role === 'tool_call') return;
 
     const row = document.createElement('div');
@@ -1701,7 +1710,8 @@ function renderMessages() {
     if (m.role === 'user' || m.role === 'assistant') {
       const meta = document.createElement('div');
       meta.className = 'msg-meta';
-      const tag = m.role === 'user' ? 'You' : 'AI';
+      let tag = m.role === 'user' ? 'You' : 'AI';
+      if (m.role === 'assistant' && m.metadata && m.metadata.kind === 'thinking_output') tag = 'thinking output';
       const stamp = formatTimestamp(messageTimes.get(idx));
       meta.innerHTML = `<span class="msg-tag">${tag}</span><span class="msg-time">${escapeHtml(stamp || '—')}</span>`;
       row.appendChild(meta);
@@ -1720,6 +1730,30 @@ function renderMessages() {
     box.appendChild(row);
     anchor = row;
 
+  });
+
+
+  const chatJobs = (state.backgroundJobs || [])
+    .filter((job) => job && job.session === (state.activeSession || '') && (job.prompt || (Array.isArray(job.events) && job.events.length)))
+    .slice()
+    .sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')));
+  chatJobs.forEach((job) => {
+    const row = document.createElement('div');
+    row.className = 'msg role-assistant';
+    row.innerHTML = '<div class="role">assistant</div>';
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.innerHTML = '<span class="msg-tag">Live run activity</span><span class="msg-time">background</span>';
+    row.appendChild(meta);
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    const status = escapeHtml(String(job.status || 'unknown'));
+    const prompt = escapeHtml(String(job.prompt || '(prompt unavailable)'));
+    const events = Array.isArray(job.events) ? job.events.map((line) => escapeHtml(String(line || ''))).join('\n') : '';
+    const openAttr = ['running', 'awaiting_plan_approval'].includes(job.status) ? ' open' : '';
+    bubble.innerHTML = `<details${openAttr}><summary>Live run activity · ${status} · ${escapeHtml(String(job.id || ''))}</summary><div class="small-muted mt-1"><strong>Prompt</strong><pre><code>${prompt}</code></pre><strong>Events</strong><pre><code>${events || '(no events yet)'}</code></pre></div></details>`;
+    row.appendChild(bubble);
+    box.appendChild(row);
   });
 
   const notices = runNoticesBySession[state.activeSession || ''] || [];
@@ -2320,6 +2354,7 @@ function buildSettingsPayload() {
     model: document.getElementById('model').value,
     openai_api_key: document.getElementById('openaiApiKey').value || null,
     google_api_key: document.getElementById('googleApiKey').value || null,
+    ollama_endpoint: document.getElementById('ollamaEndpoint').value || null,
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
     debug: document.getElementById('debug').checked,
@@ -2538,6 +2573,9 @@ async function refreshState() {
   }
   if (document.activeElement !== document.getElementById('googleApiKey')) {
     document.getElementById('googleApiKey').value = s.google_api_key || '';
+  }
+  if (document.activeElement !== document.getElementById('ollamaEndpoint')) {
+    document.getElementById('ollamaEndpoint').value = s.ollama_endpoint || '';
   }
   document.getElementById('debug').checked = !!s.debug;
   document.getElementById('agentic').checked = !!s.agentic_planning;

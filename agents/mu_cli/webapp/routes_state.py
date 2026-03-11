@@ -68,7 +68,7 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
                 "debug": runtime.debug,
                 "agentic_planning": runtime.agentic_planning,
                 "research_mode": runtime.research_mode,
-                "models": deps.get_model_catalog({"openai": runtime.openai_api_key, "gemini": runtime.google_api_key}),
+                "models": deps.get_model_catalog({"openai": runtime.openai_api_key, "gemini": runtime.google_api_key, "ollama": None}),
                 "sessions": sessions,
                 "messages": [asdict(m) for m in runtime.agent.state.messages if m.role is not Role.SYSTEM],
                 "traces": runtime.traces[-50:],
@@ -114,6 +114,7 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
                 ),
                 "openai_api_key": runtime.openai_api_key,
                 "google_api_key": runtime.google_api_key,
+                "ollama_endpoint": runtime.ollama_endpoint,
                 "telemetry": deps.telemetry_snapshot(runtime),
             }
         )

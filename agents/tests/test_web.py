@@ -385,6 +385,7 @@ class WebTests(unittest.TestCase):
         res = client.post('/api/settings', json={
             'openai_api_key': 'sk-test-1',
             'google_api_key': 'g-test-1',
+            'ollama_endpoint': 'http://localhost:11434',
         })
         self.assertEqual(200, res.status_code)
 
@@ -392,6 +393,7 @@ class WebTests(unittest.TestCase):
         assert state is not None
         self.assertEqual('sk-test-1', state['openai_api_key'])
         self.assertEqual('g-test-1', state['google_api_key'])
+        self.assertEqual('http://localhost:11434', state['ollama_endpoint'])
 
     def test_settings_enable_skills(self) -> None:
         from mu_cli.web import create_app

@@ -24,6 +24,7 @@ class SessionState:
     condense_enabled: bool | None = None
     condense_window: int | None = None
     ollama_context_window: int | None = None
+    debug_level: str | None = None
     summary_index: list[dict] | None = None
     enabled_skills: list[str] | None = None
     traces: list[str] | None = None
@@ -78,6 +79,7 @@ class SessionStore:
             condense_enabled=payload.get("condense_enabled"),
             condense_window=payload.get("condense_window"),
             ollama_context_window=payload.get("ollama_context_window"),
+            debug_level=payload.get("debug_level"),
             summary_index=payload.get("summary_index"),
             enabled_skills=payload.get("enabled_skills"),
             traces=payload.get("traces"),
@@ -101,6 +103,7 @@ class SessionStore:
             "condense_enabled": state.condense_enabled,
             "condense_window": state.condense_window,
             "ollama_context_window": state.ollama_context_window,
+            "debug_level": state.debug_level,
             "summary_index": state.summary_index or [],
             "enabled_skills": state.enabled_skills or [],
             "traces": state.traces or [],

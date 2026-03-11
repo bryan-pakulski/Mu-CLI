@@ -1,5 +1,5 @@
 // --- event wiring -----------------------------------------------------------
-for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaContextWindow', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaContextWindow', 'approval', 'workspace', 'debugLevel', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   const input = byId(id);
   if (!input) continue;
   input.addEventListener('change', () => {

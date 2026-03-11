@@ -41,6 +41,7 @@ def _runtime() -> SimpleNamespace:
         ollama_endpoint=None,
         approval_mode="auto",
         debug=False,
+        debug_level="info",
         agentic_planning=False,
         research_mode=False,
         max_runtime_seconds=60,
@@ -135,6 +136,7 @@ class RuntimeMutationServiceTests(unittest.TestCase):
                     "ollama_endpoint": "http://127.0.0.1:11434",
                     "ollama_context_window": 32768,
                     "workspace": td,
+                    "debug_level": "debug",
                     "agentic_planning": True,
                     "research_mode": True,
                 },
@@ -146,6 +148,7 @@ class RuntimeMutationServiceTests(unittest.TestCase):
         self.assertEqual([{"name": "x"}], runtime.custom_tool_specs)
         self.assertEqual(["s1", "s2"], runtime.enabled_skills)
         self.assertEqual("http://127.0.0.1:11434", runtime.ollama_endpoint)
+        self.assertEqual("debug", runtime.debug_level)
         self.assertEqual(32768, runtime.ollama_context_window)
         self.assertEqual(1, calls.get("refresh_tooling"))
         self.assertEqual(1, calls.get("inject_planning"))

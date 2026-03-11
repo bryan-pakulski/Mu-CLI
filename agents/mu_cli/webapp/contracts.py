@@ -79,12 +79,16 @@ def parse_session_action_request(raw: Any) -> SessionActionRequest:
     name = (_opt_str(payload, "name") or "").strip()
 
     # typed checks for known mutable action fields
-    for key in ("provider", "model", "openai_api_key", "google_api_key", "ollama_endpoint", "approval_mode", "workspace"):
+    for key in ("provider", "model", "openai_api_key", "google_api_key", "ollama_endpoint", "approval_mode", "workspace", "debug_level"):
         _opt_str(payload, key)
     for key in ("agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)
     for key in ("max_runtime_seconds", "condense_window", "ollama_context_window", "window"):
         _opt_int(payload, key)
+
+    debug_level = _opt_str(payload, "debug_level")
+    if debug_level is not None and debug_level not in {"debug", "info", "warn", "error"}:
+        raise ContractValidationError("debug_level must be one of: debug, info, warn, error")
 
     enabled_skills = payload.get("enabled_skills")
     if enabled_skills is not None:
@@ -96,12 +100,16 @@ def parse_session_action_request(raw: Any) -> SessionActionRequest:
 
 def parse_settings_update_request(raw: Any) -> SettingsUpdateRequest:
     payload = _expect_object(raw, route="/api/settings")
-    for key in ("provider", "model", "openai_api_key", "google_api_key", "ollama_endpoint", "approval_mode", "workspace"):
+    for key in ("provider", "model", "openai_api_key", "google_api_key", "ollama_endpoint", "approval_mode", "workspace", "debug_level"):
         _opt_str(payload, key)
     for key in ("debug", "agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)
     for key in ("max_runtime_seconds", "condense_window", "ollama_context_window"):
         _opt_int(payload, key)
+
+    debug_level = _opt_str(payload, "debug_level")
+    if debug_level is not None and debug_level not in {"debug", "info", "warn", "error"}:
+        raise ContractValidationError("debug_level must be one of: debug, info, warn, error")
 
     tool_visibility = payload.get("tool_visibility")
     if tool_visibility is not None:

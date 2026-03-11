@@ -270,6 +270,27 @@ def _build_provider(name: str, model: str, api_key: str | None, ollama_endpoint:
     raise ValueError(f"Unsupported provider: {name}")
 
 
+_DEBUG_LEVEL_ORDER = {"debug": 10, "info": 20, "warn": 30, "error": 40}
+
+
+def _normalize_debug_level(level: str | None) -> str:
+    candidate = str(level or "info").strip().lower()
+    return candidate if candidate in _DEBUG_LEVEL_ORDER else "info"
+
+
+def _should_log(runtime: WebRuntime, level: str) -> bool:
+    configured = _DEBUG_LEVEL_ORDER.get(_normalize_debug_level(getattr(runtime, "debug_level", "info")), 20)
+    current = _DEBUG_LEVEL_ORDER.get(_normalize_debug_level(level), 20)
+    return current >= configured
+
+
+def _log_trace(runtime: WebRuntime, level: str, message: str) -> None:
+    if not _should_log(runtime, level):
+        return
+    stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    runtime.traces.append(f"log/{_normalize_debug_level(level)}: [{stamp}] {message}")
+
+
 def _provider_api_key(runtime: WebRuntime, provider_name: str | None = None) -> str | None:
     name = provider_name or runtime.provider
     if name == "openai":
@@ -490,7 +511,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         return approved
 
     def on_model_response(message: Message, calls: list[ToolCall]) -> None:
-        if not runtime.debug:
+        if not _should_log(runtime, "debug"):
             return
         runtime.traces.append(f"model: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] {message.content}")
         for call in calls:
@@ -500,7 +521,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         runtime.workspace_store.record_tool_run(name, args, output, ok)
         latency_ms = _extract_latency_ms(output)
         _update_tool_reliability(runtime, name, ok, latency_ms)
-        if runtime.debug:
+        if _should_log(runtime, "debug"):
             latency_suffix = f" latency_ms={latency_ms}" if latency_ms is not None else ""
             runtime.traces.append(f"tool-run: [{datetime.now(timezone.utc).isoformat(timespec='seconds')}] name={name} ok={ok}{latency_suffix} args={args} output={output[:200]}")
 
@@ -854,6 +875,7 @@ def _persist(runtime: WebRuntime) -> None:
             agentic_planning=runtime.agentic_planning,
             research_mode=runtime.research_mode,
             max_runtime_seconds=runtime.max_runtime_seconds,
+            debug_level=runtime.debug_level,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
             ollama_context_window=runtime.ollama_context_window,
@@ -916,6 +938,8 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.research_mode = bool(loaded.research_mode)
     if loaded.max_runtime_seconds is not None:
         runtime.max_runtime_seconds = int(loaded.max_runtime_seconds)
+    if loaded.debug_level is not None:
+        runtime.debug_level = _normalize_debug_level(loaded.debug_level)
     if loaded.condense_enabled is not None:
         runtime.condense_enabled = bool(loaded.condense_enabled)
     if loaded.condense_window is not None:
@@ -999,6 +1023,7 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         session_name=session_name,
         workspace_path=None,
         debug=base.debug,
+        debug_level=base.debug_level,
         agentic_planning=base.agentic_planning,
         research_mode=base.research_mode,
         workspace_store=workspace_store,
@@ -1407,6 +1432,7 @@ def create_app():
         session_name="default",
         workspace_path=None,
         debug=True,
+        debug_level="info",
         agentic_planning=True,
         research_mode=False,
         workspace_store=workspace_store,
@@ -1448,9 +1474,28 @@ def create_app():
 
     @app.before_request
     def _telemetry_request_hook():
-        from flask import request
+        from flask import g, request
         key = f"{request.method} {request.path}"
         _record_telemetry(runtime, 'request_counts', key)
+        g._request_started_at = datetime.now(timezone.utc)
+        if _should_log(runtime, "debug"):
+            body = request.get_json(silent=True)
+            if body is not None:
+                _log_trace(runtime, "debug", f"incoming {request.method} {request.path} body={json.dumps(body, ensure_ascii=False)[:500]}")
+            else:
+                _log_trace(runtime, "debug", f"incoming {request.method} {request.path}")
+
+    @app.after_request
+    def _response_log_hook(response):
+        from flask import g, request
+        started = getattr(g, "_request_started_at", None)
+        elapsed_ms = 0
+        if started is not None:
+            elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        level = "error" if response.status_code >= 500 else ("warn" if response.status_code >= 400 else "info")
+        if _should_log(runtime, level):
+            _log_trace(runtime, level, f"outgoing {request.method} {request.path} status={response.status_code} duration_ms={elapsed_ms}")
+        return response
 
     runtime_mutation_deps = RuntimeMutationDeps(
         get_models=get_models,

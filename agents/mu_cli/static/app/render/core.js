@@ -721,7 +721,7 @@ function beginBackgroundPolling() {
       if (!job) return;
       const latest = await api(`/api/jobs/${job.id}`);
       updateBackgroundJobInState(latest);
-      await pollApproval();
+      if (latest.status === 'awaiting_plan_approval') await pollApproval();
       if (latest.usage) updateUsagePanel(latest.usage);
       const reportEl = document.getElementById('report');
       if (reportEl) {
@@ -732,7 +732,7 @@ function beginBackgroundPolling() {
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
-  }, 900);
+  }, 1500);
 }
 
 
@@ -2380,7 +2380,8 @@ function buildSettingsPayload() {
     ollama_context_window: Number(document.getElementById('ollamaContextWindow').value || 65536),
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
-    debug: document.getElementById('debug').checked,
+    debug: document.getElementById('debugLevel').value === 'debug',
+    debug_level: document.getElementById('debugLevel').value || 'info',
     agentic_planning: document.getElementById('agentic').checked,
     research_mode: document.getElementById('researchMode').checked,
     tool_visibility: buildToolVisibilityPayload(),
@@ -2607,7 +2608,7 @@ async function refreshState() {
     const ctxLabel = document.getElementById('ollamaContextWindowValue');
     if (ctxLabel) ctxLabel.textContent = String(ctxValue);
   }
-  document.getElementById('debug').checked = !!s.debug;
+  document.getElementById('debugLevel').value = s.debug_level || (s.debug ? 'debug' : 'info');
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
   document.getElementById('condenseEnabled').checked = !!s.condense_enabled;

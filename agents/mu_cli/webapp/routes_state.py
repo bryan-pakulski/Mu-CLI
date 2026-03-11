@@ -66,6 +66,7 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
                 "session": runtime.session_name,
                 "workspace": runtime.workspace_path,
                 "debug": runtime.debug,
+                "debug_level": runtime.debug_level,
                 "agentic_planning": runtime.agentic_planning,
                 "research_mode": runtime.research_mode,
                 "models": deps.get_model_catalog({"openai": runtime.openai_api_key, "gemini": runtime.google_api_key, "ollama": None}),

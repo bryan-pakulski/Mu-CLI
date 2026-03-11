@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from flask import jsonify, request
@@ -30,6 +31,20 @@ class ChatRouteDeps:
 def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
     job_deps = JobDeps(start_background_turn=deps.start_background_turn)
 
+    level_order = {"debug": 10, "info": 20, "warn": 30, "error": 40}
+
+    def _should_log(level: str) -> bool:
+        configured = str(getattr(runtime, "debug_level", "info") or "info").lower()
+        configured_score = level_order.get(configured, 20)
+        score = level_order.get(str(level).lower(), 20)
+        return score >= configured_score
+
+    def _trace_io(direction: str, payload: str, *, level: str = "debug") -> None:
+        if not _should_log(level):
+            return
+        stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        runtime.traces.append(f"io/{direction}: [{stamp}] {payload[:1200]}")
+
     @app.post("/api/chat")
     def chat():
         try:
@@ -38,6 +53,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             return jsonify({"error": str(exc)}), 400
 
         deps.record_telemetry_action(runtime, "chat_turn")
+        _trace_io("incoming", f"chat text={req.text}")
         result = execute_chat_turn(
             runtime,
             req.text,
@@ -49,6 +65,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
                 persist=deps.persist,
             ),
         )
+        _trace_io("outgoing", f"reply={result.reply.get('content', '')}")
         return jsonify({"reply": result.reply, "report": result.report, "traces": result.traces})
 
     @app.post("/api/chat/background")
@@ -59,6 +76,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             return jsonify({"error": str(exc)}), 400
         deps.record_telemetry_action(runtime, "chat_stream")
         session_name = req.session or runtime.session_name
+        _trace_io("incoming", f"chat/background session={session_name} text={req.text}")
         deps.record_telemetry_action(runtime, "chat_background_start")
         job_id = start_job(runtime, session_name, req.text, job_deps)
         return jsonify({"ok": True, "job_id": job_id, "session": session_name})
@@ -102,6 +120,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
             return jsonify({"error": str(exc)}), 400
         deps.record_telemetry_action(runtime, "chat_stream")
         session_name = req.session or runtime.session_name
+        _trace_io("incoming", f"chat/stream session={session_name} text={req.text}")
         service = ChatStreamingService(
             turn_deps=ChatTurnDeps(
                 run_turn_with_uploaded_context=deps.run_turn_with_uploaded_context,

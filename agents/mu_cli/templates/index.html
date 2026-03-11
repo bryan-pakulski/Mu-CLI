@@ -1671,9 +1671,14 @@
           <label class="small-muted mb-1">Ollama context window: <span id="ollamaContextWindowValue">65536</span> tokens</label>
           <input id="ollamaContextWindow" type="range" class="form-range mb-2" min="4096" max="131072" step="1024" value="65536" />
           <div class="toggles-grid">
-            <div class="form-check">
-              <input class="form-check-input" id="debug" type="checkbox" checked />
-              <label class="form-check-label small-muted" for="debug">Debug mode</label>
+            <div>
+              <label class="small-muted mb-1" for="debugLevel">Debug log level</label>
+              <select id="debugLevel" class="form-select form-select-sm">
+                <option value="error">error</option>
+                <option value="warn">warn</option>
+                <option value="info" selected>info</option>
+                <option value="debug">debug</option>
+              </select>
             </div>
             <div class="form-check">
               <input class="form-check-input" id="darkMode" type="checkbox" />

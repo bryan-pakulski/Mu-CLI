@@ -775,7 +775,7 @@ function beginBackgroundPolling() {
       if (!job) return;
       const latest = await api(`/api/jobs/${job.id}`);
       updateBackgroundJobInState(latest);
-      await pollApproval();
+      if (latest.status === 'awaiting_plan_approval') await pollApproval();
       if (latest.usage) updateUsagePanel(latest.usage);
       const reportEl = document.getElementById('report');
       if (reportEl) {
@@ -786,7 +786,7 @@ function beginBackgroundPolling() {
     } catch (_) {
       // ignored to avoid breaking UI polling loop
     }
-  }, 900);
+  }, 1500);
 }
 
 
@@ -2434,7 +2434,8 @@ function buildSettingsPayload() {
     ollama_context_window: Number(document.getElementById('ollamaContextWindow').value || 65536),
     approval_mode: document.getElementById('approval').value,
     workspace: document.getElementById('workspace').value || null,
-    debug: document.getElementById('debug').checked,
+    debug: document.getElementById('debugLevel').value === 'debug',
+    debug_level: document.getElementById('debugLevel').value || 'info',
     agentic_planning: document.getElementById('agentic').checked,
     research_mode: document.getElementById('researchMode').checked,
     tool_visibility: buildToolVisibilityPayload(),
@@ -2661,7 +2662,7 @@ async function refreshState() {
     const ctxLabel = document.getElementById('ollamaContextWindowValue');
     if (ctxLabel) ctxLabel.textContent = String(ctxValue);
   }
-  document.getElementById('debug').checked = !!s.debug;
+  document.getElementById('debugLevel').value = s.debug_level || (s.debug ? 'debug' : 'info');
   document.getElementById('agentic').checked = !!s.agentic_planning;
   document.getElementById('researchMode').checked = !!s.research_mode;
   document.getElementById('condenseEnabled').checked = !!s.condense_enabled;
@@ -2738,8 +2739,10 @@ async function sendPrompt(background = false) {
   updateChatBusyState();
   document.getElementById('prompt').value = '';
 
-  if (approvalPoll) clearInterval(approvalPoll);
-  approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1000);
+  if (!background) {
+    if (approvalPoll) clearInterval(approvalPoll);
+    approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1500);
+  }
 
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
@@ -2755,31 +2758,6 @@ async function sendPrompt(background = false) {
       const active = selectedSessionName();
       const bg = await api('/api/chat/background', 'POST', { text, session: active || undefined });
       reportEl.textContent = `background job started: ${bg.job_id}`;
-      const pollUntilDone = async () => {
-        for (let i = 0; i < 120; i += 1) {
-          const job = await api(`/api/jobs/${bg.job_id}`);
-          updateBackgroundJobInState(job);
-          if (job.session === state.activeSession) { renderBackgroundActivity(job); renderMetadataPanel(); }
-          if (job.usage && job.session === state.activeSession) updateUsagePanel(job.usage);
-          updateQueryRuntime();
-          if (job.last_step) reportEl.textContent = `background ${job.status}: ${job.last_step}`;
-          if (job.status === 'awaiting_plan_approval') {
-            const approval = await askPlanApproval(job);
-            await api(`/api/jobs/${bg.job_id}/plan`, 'POST', {
-              decision: approval.ok ? 'approve' : 'deny',
-              revised_plan: approval.revisedPlan || undefined,
-            });
-          }
-          if (['completed', 'failed', 'timed_out'].includes(job.status)) {
-            reportEl.textContent = `background ${job.status}: ${job.iterations || 0} iteration(s)`;
-            maybeRecordJobTerminalNotice(job);
-            await refreshState();
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-      };
-      pollUntilDone().catch(() => {});
       await refreshState();
       return;
     }
@@ -2952,7 +2930,7 @@ function resolvePlanApproval(ok, revisedPlan = '') {
 
 // >>> app/events.js
 // --- event wiring -----------------------------------------------------------
-for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaContextWindow', 'approval', 'workspace', 'debug', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
+for (const id of ['provider', 'model', 'openaiApiKey', 'googleApiKey', 'ollamaContextWindow', 'approval', 'workspace', 'debugLevel', 'agentic', 'researchMode', 'condenseEnabled', 'condenseWindow', 'maxRuntime', 'darkMode']) {
   const input = byId(id);
   if (!input) continue;
   input.addEventListener('change', () => {

@@ -291,7 +291,8 @@
     .timeline-filters { display:flex; gap:6px; margin:6px 0; flex-wrap:wrap; }
     .timeline-filters .btn { padding: 2px 8px; }
     .meta-sidebar-top { display:grid; gap:6px; min-width:0; }
-    .meta-sidebar-top .timeline-filters { margin: 0 0 2px; }
+    .meta-sidebar-bottom { margin-top: 2px; }
+    .meta-sidebar-bottom .timeline-filters { margin: 0; }
     .meta-summary { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:8px; }
     .meta-summary-chip { border:1px solid color-mix(in srgb, var(--border) 75%, transparent); border-radius:10px; background:linear-gradient(145deg, color-mix(in srgb, var(--surface) 92%, transparent), color-mix(in srgb, var(--surface-2) 88%, var(--primary-soft))); padding:8px 10px; min-width:0; box-shadow: inset 0 1px 0 color-mix(in srgb, white 40%, transparent); }
     .meta-summary-chip .label { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
@@ -1580,12 +1581,6 @@
             <div class="zone-label">Inspect</div>
             <h4>Run metadata</h4>
             <div id="metaSummary" class="meta-summary" aria-live="polite"></div>
-            <div class="timeline-filters" aria-label="Execution timeline filters">
-              <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
-              <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
-              <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
-              <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
-            </div>
           </div>
           <div class="meta-feed">
             <details class="trace-wrap" open>
@@ -1593,6 +1588,14 @@
               <div id="executionTimeline" class="timeline-panel"></div>
             </details>
             <div id="metaFeed" class="meta-cards"></div>
+          </div>
+          <div class="meta-sidebar-bottom">
+            <div class="timeline-filters" aria-label="Execution timeline filters">
+              <button id="timelineFilterAll" class="btn btn-soft btn-sm" type="button">All</button>
+              <button id="timelineFilterModel" class="btn btn-soft btn-sm" type="button">Model</button>
+              <button id="timelineFilterTool" class="btn btn-soft btn-sm" type="button">Tool</button>
+              <button id="timelineFilterStatus" class="btn btn-soft btn-sm" type="button">Status</button>
+            </div>
           </div>
           </aside>
         </div>

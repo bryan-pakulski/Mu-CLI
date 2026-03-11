@@ -1933,6 +1933,25 @@ function maybeRecordJobTerminalNotice(job) {
   runNoticesBySession[session] = notices;
 }
 
+function _systemEventLabel(message) {
+  const role = String((message && message.role) || '').toLowerCase();
+  if (role === 'tool_call') return 'TOOL CALL';
+  if (role === 'tool_result') return 'TOOL RESULT';
+  if (role === 'system') return 'SYSTEM';
+  if (!role) return 'SYSTEM EVENT';
+  return role.replace(/_/g, ' ').toUpperCase();
+}
+
+function _systemEventSummary(message) {
+  const label = _systemEventLabel(message);
+  const text = String((message && message.content) || '').trim();
+  const toolMatch = text.match(/\[tool=([^\]]+)\]/);
+  const toolName = toolMatch ? ` · ${toolMatch[1]}` : '';
+  const singleLine = text.replace(/\s+/g, ' ');
+  const preview = singleLine ? (singleLine.length > 120 ? `${singleLine.slice(0, 117)}...` : singleLine) : '(no content)';
+  return `${label}${toolName} · ${preview}`;
+}
+
 function openRunDetails(id, title = '') {
   const body = document.getElementById('runDetailsBody');
   const meta = document.getElementById('runDetailsMeta');
@@ -1952,7 +1971,26 @@ function renderMessages() {
     if (!shouldRenderMessage(m)) return;
 
     if (m.role === 'assistant' && !String(m.content || '').trim() && !(m.metadata && m.metadata.typing)) return;
-    if (m.role === 'tool_result' || m.role === 'tool_call') return;
+    if (m.role !== 'user' && m.role !== 'assistant') {
+      const row = document.createElement('div');
+      row.className = 'msg role-assistant role-system-event';
+      row.innerHTML = '<div class="role">assistant</div>';
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      const stamp = formatTimestamp(messageTimes.get(idx)) || formatTimestamp(new Date().toISOString());
+      meta.innerHTML = `<span class="msg-tag">SYSTEM</span><span class="msg-time">${escapeHtml(stamp)}</span>`;
+      row.appendChild(meta);
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble compact-system-bubble';
+      const summary = _systemEventSummary(m);
+      const body = escapeHtml(String(m.content || '(no content)'));
+      bubble.innerHTML = `<details class="system-event-details"><summary>${escapeHtml(summary)}</summary><pre><code>${body}</code></pre></details>`;
+      row.appendChild(bubble);
+      box.appendChild(row);
+      anchor = row;
+      return;
+    }
 
     const row = document.createElement('div');
     row.className = `msg role-${roleClass(m.role)}`;

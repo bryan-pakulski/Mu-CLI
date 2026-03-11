@@ -673,6 +673,35 @@
     @keyframes bubbleIn { from { opacity: .0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     .msg.role-user .bubble { background: transparent; }
     .msg.role-assistant .bubble { background: transparent; }
+    .msg.role-system-event {
+      padding-top: 2px;
+      padding-bottom: 2px;
+      border-bottom-style: dotted;
+    }
+    .compact-system-bubble {
+      padding-top: 2px;
+      padding-bottom: 2px;
+      font-size: var(--font-size-xs);
+      line-height: 1.25;
+    }
+    .system-event-details summary {
+      cursor: pointer;
+      color: var(--muted);
+      list-style: none;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--font-size-xs);
+    }
+    .system-event-details summary::-webkit-details-marker { display: none; }
+    .system-event-details summary::before {
+      content: '▸';
+      margin-right: 6px;
+    }
+    .system-event-details[open] summary::before { content: '▾'; }
+    .system-event-details pre {
+      margin-top: 4px;
+      max-height: 180px;
+      overflow: auto;
+    }
 
     .bubble p { margin: 0 0 8px; }
     .bubble p:last-child { margin-bottom: 0; }

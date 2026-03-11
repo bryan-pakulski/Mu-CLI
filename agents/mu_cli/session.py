@@ -25,6 +25,7 @@ class SessionState:
     condense_window: int | None = None
     summary_index: list[dict] | None = None
     enabled_skills: list[str] | None = None
+    traces: list[str] | None = None
 
 
 class SessionStore:
@@ -76,6 +77,7 @@ class SessionStore:
             condense_window=payload.get("condense_window"),
             summary_index=payload.get("summary_index"),
             enabled_skills=payload.get("enabled_skills"),
+            traces=payload.get("traces"),
         )
 
     def save(self, state: SessionState) -> None:
@@ -96,6 +98,7 @@ class SessionStore:
             "condense_window": state.condense_window,
             "summary_index": state.summary_index or [],
             "enabled_skills": state.enabled_skills or [],
+            "traces": state.traces or [],
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

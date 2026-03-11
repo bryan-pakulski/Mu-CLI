@@ -24,6 +24,7 @@ class SessionTests(unittest.TestCase):
                 research_mode=False,
                 max_runtime_seconds=1200,
                 enabled_skills=["code-review"],
+                traces=["tool-run: name=read_file ok=True"],
             )
             store.save(state)
 
@@ -40,6 +41,7 @@ class SessionTests(unittest.TestCase):
             self.assertFalse(loaded.research_mode)
             self.assertEqual(1200, loaded.max_runtime_seconds)
             self.assertEqual(["code-review"], loaded.enabled_skills)
+            self.assertEqual(["tool-run: name=read_file ok=True"], loaded.traces)
 
     def test_list_and_delete_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as td:

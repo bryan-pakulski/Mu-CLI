@@ -111,6 +111,8 @@ For architectural refactor plans (including backend route decomposition and fron
 - Right metadata panel is collapsible/resizable and groups compact debug/tool/research metadata.
 - Session usage panel includes `Metrics` and `Detailed stats` actions for per-session analytics.
 - Debug mode in GUI surfaces model tool requests and tool execution traces.
+- Tool execution traces now persist in session storage and remain available after server restart.
+- Settings includes a **Clear all stored data** action to wipe persisted sessions/uploads/workspace cache and reset runtime state.
 
 ## Workspace context and memory
 
@@ -120,7 +122,7 @@ For architectural refactor plans (including backend route decomposition and fron
 
 ## Session persistence
 
-- Session state is saved in `.mu_cli/sessions/<session>.json`.
+- Session state is saved in `.mu_cli/sessions/<session>.json` (including debug traces/tool-call timeline snippets).
 - Resume is automatic by default; disable with `--no-resume`.
 
 ## Session management

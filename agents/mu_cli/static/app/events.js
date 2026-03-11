@@ -49,6 +49,7 @@ bindChange('ctxExcludeTools', () => updateContextExcludesFromUI());
 bindClick('summarizeContextNow', () => summarizeContextRulesNow());
 bindClick('uploadFiles', () => uploadContextFiles());
 bindClick('clearUploads', () => clearUploadedStore());
+bindClick('clearAllStoredData', () => clearAllStoredDataFromUI());
 
 
 for (const id of ['systemPromptOverride', 'rulesChecklist', 'knobTemperature', 'knobTopP', 'knobToolBias', 'knobVerbosity']) {

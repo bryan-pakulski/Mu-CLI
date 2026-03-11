@@ -1682,6 +1682,13 @@
         </section>
 
         <section class="settings-section">
+          <h6>Data management</h6>
+          <div class="small-muted mb-2">Persisted runtime/session data is stored under <code>.mu_cli/</code> and survives restarts.</div>
+          <button id="clearAllStoredData" class="btn btn-soft btn-sm" type="button">Clear all stored data</button>
+          <div id="clearAllStoredDataStatus" class="small-muted mt-1"></div>
+        </section>
+
+        <section class="settings-section">
           <h6>Tool visibility</h6>
           <div id="toolVisibilityList" class="tool-visibility-list small-muted">Loading tools...</div>
           <div class="small-muted mt-2">Tools console</div>

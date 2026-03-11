@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import os
 import json
 import subprocess
 import tempfile
@@ -694,6 +695,71 @@ class WebTests(unittest.TestCase):
 
         cleared = client.post('/api/session', json={'action': 'clear'})
         self.assertEqual(200, cleared.status_code)
+
+    def test_traces_persist_across_app_restart(self) -> None:
+        from mu_cli.web import create_app
+
+        with tempfile.TemporaryDirectory() as td:
+            prev = Path.cwd()
+            os.chdir(td)
+            try:
+                app1 = create_app()
+                app1.testing = True
+                client1 = app1.test_client()
+
+                res = client1.post('/api/chat', json={'text': 'run a quick check'})
+                self.assertEqual(200, res.status_code)
+                state1 = client1.get('/api/state').get_json()
+                assert state1 is not None
+                self.assertGreater(len(state1['traces']), 0)
+
+                app2 = create_app()
+                app2.testing = True
+                client2 = app2.test_client()
+                state2 = client2.get('/api/state').get_json()
+                assert state2 is not None
+                self.assertGreater(len(state2['traces']), 0)
+            finally:
+                os.chdir(prev)
+
+    def test_clear_all_stored_data_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        with tempfile.TemporaryDirectory() as td:
+            prev = Path.cwd()
+            os.chdir(td)
+            try:
+                app = create_app()
+                app.testing = True
+                client = app.test_client()
+
+                client.post('/api/chat', json={'text': 'hello clear-all'})
+                client.post(
+                    '/api/uploads',
+                    data={'files': [(io.BytesIO(b'persisted note'), 'note.txt')]},
+                    content_type='multipart/form-data',
+                )
+
+                before = client.get('/api/state').get_json()
+                assert before is not None
+                self.assertGreater(len(before['traces']), 0)
+                self.assertGreaterEqual(len(before['uploads']), 1)
+
+                cleared = client.post('/api/state/clear-all', json={})
+                self.assertEqual(200, cleared.status_code)
+                cleared_body = cleared.get_json()
+                assert cleared_body is not None
+                self.assertTrue(cleared_body.get('ok'))
+
+                after = client.get('/api/state').get_json()
+                assert after is not None
+                self.assertEqual('default', after['session'])
+                self.assertEqual([], after['traces'])
+                self.assertEqual([], after['uploads'])
+                self.assertEqual([], after['messages'])
+            finally:
+                os.chdir(prev)
+
 
 
 if __name__ == '__main__':

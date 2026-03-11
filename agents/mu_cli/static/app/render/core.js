@@ -2382,6 +2382,22 @@ async function uploadPromptAttachmentFiles() {
   await refreshState();
 }
 
+
+async function clearAllStoredDataFromUI() {
+  const status = document.getElementById('clearAllStoredDataStatus');
+  const confirmed = window.confirm('Clear ALL persisted runtime data? This removes saved sessions, uploads, and workspace cache.');
+  if (!confirmed) return;
+  if (status) status.textContent = 'Clearing persisted data…';
+  const payload = await api('/api/state/clear-all', 'POST', {});
+
+  Object.keys(localStorage).forEach((key) => {
+    if (key.startsWith('mu_') || key === 'mu_cli_dark_mode') localStorage.removeItem(key);
+  });
+
+  if (status) status.textContent = `Cleared data (sessions: ${payload.cleared.sessions}, uploads: ${payload.cleared.upload_files}, workspace snapshots: ${payload.cleared.workspace_snapshots}).`;
+  await refreshState();
+}
+
 async function clearUploadedStore() {
   await fetch('/api/uploads', { method: 'DELETE' }).then(async (res) => {
     const json = await res.json();

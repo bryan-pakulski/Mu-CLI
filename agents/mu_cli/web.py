@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import urllib.parse
@@ -761,6 +762,7 @@ def _persist(runtime: WebRuntime) -> None:
             condense_window=runtime.condense_window,
             summary_index=runtime.summary_index,
             enabled_skills=runtime.enabled_skills,
+            traces=runtime.traces,
         )
     )
 
@@ -786,6 +788,7 @@ def _initialize_fresh_session_state(runtime: WebRuntime, *, reset_summary_index:
     runtime.session_turns = []
     runtime.uploads = []
     runtime.research_artifacts = {}
+    runtime.traces = []
     if reset_summary_index:
         runtime.summary_index = []
 
@@ -821,6 +824,7 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.condense_window = int(loaded.condense_window)
     runtime.summary_index = list(loaded.summary_index or [])
     runtime.enabled_skills = list(loaded.enabled_skills or [])
+    runtime.traces = list(loaded.traces or [])
     _attach_workspace_if_available(runtime)
 
     if runtime.agentic_planning:
@@ -831,6 +835,49 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
     _sync_skill_prompts(runtime)
 
     return True
+
+
+
+def _clear_all_stored_data(runtime: WebRuntime) -> dict[str, int]:
+    session_dir = runtime.session_store.root_dir
+    uploads_dir = runtime.uploads_dir
+    workspace_dir = runtime.workspace_store.storage_dir
+
+    removed_sessions = 0
+    if session_dir.exists():
+        for path in session_dir.glob("*.json"):
+            path.unlink(missing_ok=True)
+            removed_sessions += 1
+
+    removed_upload_files = 0
+    if uploads_dir.exists():
+        for path in uploads_dir.rglob("*"):
+            if path.is_file():
+                removed_upload_files += 1
+        shutil.rmtree(uploads_dir, ignore_errors=True)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    removed_workspace_snapshots = 0
+    if workspace_dir.exists():
+        for path in workspace_dir.glob("workspace_*.json"):
+            path.unlink(missing_ok=True)
+            removed_workspace_snapshots += 1
+
+    runtime.background_jobs.clear()
+    runtime.pending_approval = None
+    runtime.workspace_path = None
+    runtime.workspace_store.snapshot = None
+    runtime.session_name = "default"
+    runtime.session_store.use("default")
+    _initialize_fresh_session_state(runtime, reset_summary_index=True)
+    _persist(runtime)
+
+    return {
+        "sessions": removed_sessions,
+        "upload_files": removed_upload_files,
+        "workspace_snapshots": removed_workspace_snapshots,
+    }
+
 
 
 
@@ -1313,6 +1360,7 @@ def create_app():
             mutate_for_settings=lambda runtime_ref, payload: mutate_runtime_for_settings(runtime_ref, payload, runtime_mutation_deps),
             persist=_persist,
             remove_uploaded_entry=_remove_uploaded_entry,
+            clear_all_stored_data=_clear_all_stored_data,
         ),
     )
 

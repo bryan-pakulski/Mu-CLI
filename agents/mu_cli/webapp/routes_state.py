@@ -28,6 +28,7 @@ class StateRouteDeps:
     mutate_for_settings: Callable[[Any, dict[str, Any]], None]
     persist: Callable[[Any], None]
     remove_uploaded_entry: Callable[[Any, str], bool]
+    clear_all_stored_data: Callable[[Any], dict[str, int]]
 
 
 def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
@@ -113,6 +114,12 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
                 "google_api_key": runtime.google_api_key,
             }
         )
+
+
+    @app.post("/api/state/clear-all")
+    def clear_all_state():
+        stats = deps.clear_all_stored_data(runtime)
+        return jsonify({"ok": True, "cleared": stats, "session": runtime.session_name})
 
     @app.get("/api/skills/<name>")
     def skill_content(name: str):

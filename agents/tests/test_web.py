@@ -187,6 +187,20 @@ class WebTests(unittest.TestCase):
                 break
         self.assertTrue(got_status)
 
+    def test_approval_stream_endpoint(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        res = client.get('/api/approval/stream', buffered=False)
+        self.assertEqual(200, res.status_code)
+        first = next(iter(res.response)).decode('utf-8').strip()
+        event = json.loads(first)
+        self.assertEqual('approval', event.get('type'))
+        self.assertIn('pending', event)
+
     def test_web_approval_deny_mode_rejects_mutating_tool(self) -> None:
         from mu_cli.web import create_app
 

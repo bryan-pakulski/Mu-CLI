@@ -7,7 +7,6 @@ const state = { models: {}, messages: [], traces: [], pricing: {}, sessionTurns:
 let syncing = false;
 let applyTimer = null;
 let sending = false;
-let approvalPoll = null;
 let selectedDir = null;
 let lastApprovalPatchFingerprint = null;
 let openSessionMenuFor = null;
@@ -20,6 +19,7 @@ const runNoticesBySession = {};
 const runDetailsById = {};
 const backgroundStreamAbortByJob = {};
 const backgroundStreamDraftByJob = {};
+let approvalStreamAbort = null;
 
 // >>> app/network.js
 // --- networking helpers -----------------------------------------------------
@@ -808,35 +808,22 @@ function renderBackgroundActivity(job) {
 
 function beginBackgroundPolling() {
   if (backgroundJobPoll) return;
-  backgroundJobPoll = setInterval(async () => {
+  backgroundJobPoll = setInterval(() => {
     try {
-      const job = activeSearchingJob();
-      if (!job) return;
-      const latest = await api(`/api/jobs/${job.id}`);
-      updateBackgroundJobInState(latest);
-      if (['running', 'awaiting_plan_approval'].includes(String(latest.status || ''))) {
-        _terminalJobStateSynced.delete(String(latest.id || ''));
-      }
-      if (latest.status === 'awaiting_plan_approval') await pollApproval();
-      if (latest.usage) updateUsagePanel(latest.usage);
-      const reportEl = document.getElementById('report');
-      if (reportEl) {
-        if (latest.last_step) reportEl.textContent = `background ${latest.status}: ${latest.last_step}`;
-        else reportEl.textContent = `background ${latest.status}: ${latest.iterations || 0} iteration(s)`;
-      }
-      if (latest.session === state.activeSession) { renderBackgroundActivity(latest); renderMetadataPanel(); }
-      if (latest.session === state.activeSession && ['completed', 'failed', 'killed', 'timed_out'].includes(String(latest.status || ''))) {
-        const key = String(latest.id || '');
-        if (!_terminalJobStateSynced.has(key)) {
-          _terminalJobStateSynced.add(key);
-          await refreshState();
+      for (const job of (state.backgroundJobs || [])) {
+        const id = String((job && job.id) || '');
+        if (!id) continue;
+        const status = String((job && job.status) || '');
+        if (['running', 'awaiting_plan_approval'].includes(status)) {
+          startBackgroundJobStream(id, job.session || state.activeSession || '');
+        } else {
+          stopBackgroundJobStream(id);
         }
       }
-      if (['completed', 'failed', 'killed', 'timed_out'].includes(String(latest.status || ''))) stopBackgroundJobStream(String(latest.id || ''));
     } catch (_) {
-      // ignored to avoid breaking UI polling loop
+      // keep UI alive even if stream supervision fails
     }
-  }, 1500);
+  }, 2000);
 }
 
 function stopBackgroundJobStream(jobId) {
@@ -2785,22 +2772,63 @@ async function loadDirs(path='') {
   }
 }
 
-async function pollApproval() {
-  const payload = await api('/api/approval');
-  state.pendingApproval = payload.pending;
+function _renderApprovalFromState() {
   const pending = state.pendingApproval;
-
   if (!pending) {
     document.getElementById('approvalPatchPreview').innerHTML = '';
     lastApprovalPatchFingerprint = null;
     showModal('approvalModal', false);
+    renderMetadataPanel();
     return;
   }
-
   document.getElementById('approvalToolName').textContent = `Tool: ${pending.tool_name}`;
   renderApprovalArgs(pending.args);
   renderApprovalPatchPreview(pending.args);
   showModal('approvalModal', true);
+  renderMetadataPanel();
+}
+
+function startApprovalStream() {
+  if (approvalStreamAbort) return;
+  const controller = new AbortController();
+  approvalStreamAbort = controller;
+
+  (async () => {
+    try {
+      const res = await fetch('/api/approval/stream', { signal: controller.signal });
+      if (!res.ok || !res.body) throw new Error('approval stream unavailable');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.type === 'heartbeat') continue;
+          if (event.type === 'approval') {
+            state.pendingApproval = event.pending || null;
+            _renderApprovalFromState();
+          }
+        }
+      }
+    } catch (_) {
+      // one-shot fallback keeps approvals functional if stream is unavailable
+      try {
+        const payload = await api('/api/approval');
+        state.pendingApproval = payload.pending || null;
+        _renderApprovalFromState();
+      } catch (_) {
+        // ignore fallback errors
+      }
+    } finally {
+      approvalStreamAbort = null;
+    }
+  })();
 }
 
 async function sendApprovalDecision(decision) {
@@ -2810,7 +2838,7 @@ async function sendApprovalDecision(decision) {
     decision,
   });
   state.pendingApproval = null;
-  showModal('approvalModal', false);
+  _renderApprovalFromState();
 }
 
 async function refreshState() {
@@ -2917,16 +2945,8 @@ async function refreshState() {
   syncControlPlaneUIFromPrefs();
   renderContextBudgetPanel();
 
-  if (state.pendingApproval) {
-    document.getElementById('approvalToolName').textContent = `Tool: ${state.pendingApproval.tool_name}`;
-    renderApprovalArgs(state.pendingApproval.args);
-    renderApprovalPatchPreview(state.pendingApproval.args);
-    showModal('approvalModal', true);
-  } else {
-    document.getElementById('approvalPatchPreview').innerHTML = '';
-    lastApprovalPatchFingerprint = null;
-    showModal('approvalModal', false);
-  }
+  _renderApprovalFromState();
+  startApprovalStream();
 
   syncing = false;
 }
@@ -2963,11 +2983,6 @@ async function sendPrompt(background = false) {
   updateThinking(true);
   updateChatBusyState();
   document.getElementById('prompt').value = '';
-
-  if (!background) {
-    if (approvalPoll) clearInterval(approvalPoll);
-    approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1500);
-  }
 
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
@@ -3036,10 +3051,6 @@ async function sendPrompt(background = false) {
 
     await refreshState();
   } finally {
-    if (approvalPoll) {
-      clearInterval(approvalPoll);
-      approvalPoll = null;
-    }
     updateThinking(false);
     sending = false;
     sendingSession = null;

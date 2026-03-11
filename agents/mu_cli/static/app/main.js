@@ -30,11 +30,6 @@ async function sendPrompt(background = false) {
   updateChatBusyState();
   document.getElementById('prompt').value = '';
 
-  if (!background) {
-    if (approvalPoll) clearInterval(approvalPoll);
-    approvalPoll = setInterval(() => pollApproval().catch(() => {}), 1500);
-  }
-
   const reportEl = document.getElementById('report');
   reportEl.textContent = 'streaming...';
 
@@ -102,10 +97,6 @@ async function sendPrompt(background = false) {
 
     await refreshState();
   } finally {
-    if (approvalPoll) {
-      clearInterval(approvalPoll);
-      approvalPoll = null;
-    }
     updateThinking(false);
     sending = false;
     sendingSession = null;

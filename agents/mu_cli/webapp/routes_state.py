@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from flask import jsonify, render_template, request
+from flask import Response, jsonify, render_template, request, stream_with_context
 
 from mu_cli.core.types import Role
 from mu_cli.webapp.contracts import (
@@ -273,6 +275,26 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
             runtime.approval_condition.notify_all()
 
         return jsonify({"ok": True})
+
+    @app.get("/api/approval/stream")
+    def approval_stream():
+        @stream_with_context
+        def generate():
+            last_payload = ""
+            yield json.dumps({"type": "approval", "pending": runtime.pending_approval}, sort_keys=True) + "\n"
+            last_payload = json.dumps({"type": "approval", "pending": runtime.pending_approval}, sort_keys=True)
+            while True:
+                with runtime.approval_condition:
+                    runtime.approval_condition.wait(timeout=10)
+                    pending = runtime.pending_approval
+                payload = json.dumps({"type": "approval", "pending": pending}, sort_keys=True)
+                if payload != last_payload:
+                    last_payload = payload
+                    yield payload + "\n"
+                else:
+                    yield json.dumps({"type": "heartbeat", "at": time.time()}) + "\n"
+
+        return Response(generate(), mimetype="application/x-ndjson")
 
     @app.post("/api/uploads")
     def upload_files():

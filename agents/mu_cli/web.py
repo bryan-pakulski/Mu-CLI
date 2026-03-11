@@ -503,6 +503,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
             if runtime.pending_approval and runtime.pending_approval.get("id") == request_id:
                 decision = runtime.pending_approval.get("decision")
                 runtime.pending_approval = None
+                runtime.approval_condition.notify_all()
 
         approved = decision == "approve"
         runtime.traces.append(

@@ -1190,25 +1190,34 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         plan_text = revised_text
                         job["events"].append("plan: revised_after_critic")
                 job["plan"] = plan_text
-                job["last_step"] = "Plan drafted; waiting for approval"
                 job["events"].append("plan: drafted")
                 _persist(isolated)
-                job["status"] = "awaiting_plan_approval"
-                while datetime.now(timezone.utc).timestamp() < deadline:
+                if isolated.approval_mode == "auto":
+                    job["plan_approval"] = "approve"
+                    job["last_step"] = "Plan drafted; auto-approved"
+                    job["events"].append("plan: auto_approved")
+                elif isolated.approval_mode == "deny":
+                    job["plan_approval"] = "deny"
+                    job["events"].append("plan: denied_by_policy")
+                    raise RuntimeError("Plan denied by approval policy.")
+                else:
+                    job["last_step"] = "Plan drafted; waiting for approval"
+                    job["status"] = "awaiting_plan_approval"
+                    while datetime.now(timezone.utc).timestamp() < deadline:
+                        if _cancelled():
+                            _mark_cancelled("user requested stop")
+                            return
+                        decision = job.get("plan_approval")
+                        if decision in {"approve", "deny"}:
+                            break
+                        threading.Event().wait(0.4)
                     if _cancelled():
                         _mark_cancelled("user requested stop")
                         return
-                    decision = job.get("plan_approval")
-                    if decision in {"approve", "deny"}:
-                        break
-                    threading.Event().wait(0.4)
-                if _cancelled():
-                    _mark_cancelled("user requested stop")
-                    return
-                if job.get("plan_approval") != "approve":
-                    job["events"].append("plan: denied_or_timed_out")
-                    raise RuntimeError("Plan not approved before timeout or was denied.")
-                job["events"].append("plan: approved")
+                    if job.get("plan_approval") != "approve":
+                        job["events"].append("plan: denied_or_timed_out")
+                        raise RuntimeError("Plan not approved before timeout or was denied.")
+                    job["events"].append("plan: approved")
 
             total_input = 0
             total_output = 0

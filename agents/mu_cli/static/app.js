@@ -759,7 +759,9 @@ function renderBackgroundActivity(job) {
     body.innerHTML = recentEvents.map((line) => {
       const cls = classifyBackgroundEvent(line);
       const safe = escapeHtml(String(line));
-      return `<div class="bg-live-line ${cls}">${safe}</div>`;
+      const stamp = timestampFromEventLine(line);
+      const stampHtml = stamp ? `<span class="bg-live-time">${escapeHtml(stamp)}</span>` : '';
+      return `<div class="bg-live-line ${cls}">${stampHtml}<span>${safe}</span></div>`;
     }).join('');
     body.scrollTop = body.scrollHeight;
   }
@@ -983,7 +985,15 @@ function formatTimestamp(value) {
   const year = String(dt.getFullYear());
   const hours = String(dt.getHours()).padStart(2, '0');
   const minutes = String(dt.getMinutes()).padStart(2, '0');
-  return `${day}/${month}/${year} ${hours}:${minutes}`;
+  const seconds = String(dt.getSeconds()).padStart(2, '0');
+  return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+}
+
+function timestampFromEventLine(line) {
+  const text = String(line || '');
+  const match = text.match(/\[([^\]]+)\]/);
+  if (!match) return '';
+  return formatTimestamp(match[1]);
 }
 
 function inferMessageTimestamps(messages, turns) {
@@ -1569,8 +1579,9 @@ function renderMetadataPanel() {
   const messageTimes = inferMessageTimestamps(state.messages, state.sessionTurns);
   let cards = 0;
 
-  const liveTraceItems = (state.traces || []).slice(-20).filter((line) => {
-    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:');
+  const timelineEvents = timelineEventsForActiveSession();
+  const liveTraceItems = timelineEvents.slice(-36).filter((line) => {
+    return line.startsWith('tool-request:') || line.startsWith('tool-run:') || line.startsWith('model:') || line.startsWith('status:') || line.startsWith('plan:');
   });
 
   const assistantMetaCounts = { calls: 0, results: 0, citations: 0, research: 0 };
@@ -1584,18 +1595,21 @@ function renderMetadataPanel() {
     assistantMetaCounts.research += meta.researchSteps.length;
   }
 
+  const activeJob = (state.backgroundJobs || []).find((j) => j && j.session === state.activeSession && ['running', 'awaiting_plan_approval'].includes(j.status));
   if (summaryHost) {
     const latestEvent = liveTraceItems.length ? liveTraceItems[liveTraceItems.length - 1] : 'No live events yet';
+    const latestStamp = timestampFromEventLine(latestEvent);
     summaryHost.innerHTML = [
       `<div class="meta-summary-chip"><span class="label">Live events</span><span class="value">${liveTraceItems.length}</span></div>`,
+      `<div class="meta-summary-chip"><span class="label">Background</span><span class="value">${activeJob ? `${escapeHtml(activeJob.status || 'running')} · step ${Number(activeJob.iterations || 0)}` : 'idle'}</span></div>`,
       `<div class="meta-summary-chip"><span class="label">Tool calls/results</span><span class="value">${assistantMetaCounts.calls}/${assistantMetaCounts.results}</span></div>`,
-      `<div class="meta-summary-chip"><span class="label">Latest</span><span class="value">${escapeHtml(latestEvent)}</span></div>`,
+      `<div class="meta-summary-chip span-2"><span class="label">Latest event</span><span class="value">${escapeHtml(latestEvent)}</span><span class="stamp">${escapeHtml(latestStamp || '—')}</span></div>`,
     ].join('');
   }
 
   if (liveTraceItems.length) {
     const card = document.createElement('div');
-    card.className = 'meta-card';
+    card.className = 'meta-card meta-live-card';
     card.innerHTML = `<div class="meta-head"><span>Live execution stream</span><span>${liveTraceItems.length} events</span></div>`;
     const lines = document.createElement('div');
     lines.className = 'meta-lines';
@@ -1606,7 +1620,10 @@ function renderMetadataPanel() {
       else if (line.startsWith('tool-run:')) { kind = 'tool-result'; label = 'Tool result'; }
       else if (line.startsWith('status:')) { kind = 'status'; label = 'Status'; }
       else if (line.startsWith('model:')) { kind = 'automation'; label = 'Model'; }
-      if (_metaFilterAllows(kind, label, line)) lines.appendChild(_metaRow(kind, label, line));
+      else if (line.startsWith('plan:')) { kind = 'automation'; label = 'Plan'; }
+      const stamp = timestampFromEventLine(line);
+      const effectiveLabel = stamp ? `${label} · ${stamp}` : label;
+      if (_metaFilterAllows(kind, effectiveLabel, line)) lines.appendChild(_metaRow(kind, effectiveLabel, line));
     }
     if (lines.childElementCount) {
       card.appendChild(lines);

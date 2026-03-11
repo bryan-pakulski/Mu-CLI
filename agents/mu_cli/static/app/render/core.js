@@ -1844,6 +1844,7 @@ function renderMessages() {
 
 function renderTraces() {
   const el = document.getElementById('traces');
+  if (!el) return;
   const lines = timelineEventsForActiveSession();
   if (!lines.length) {
     el.textContent = 'debug traces will appear here';

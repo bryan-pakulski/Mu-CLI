@@ -1869,10 +1869,19 @@ function maybeRecordJobTerminalNotice(job) {
   if (notices.some((n) => n.id === id)) return;
   const details = _jobDetailsText(job);
   runDetailsById[id] = details;
+  const startedMs = Date.parse(String(job.started_at || ''));
+  const finishedMs = Date.parse(String(job.finished_at || ''));
+  const runtimeSeconds = (!Number.isNaN(startedMs) && !Number.isNaN(finishedMs) && finishedMs >= startedMs)
+    ? (finishedMs - startedMs) / 1000
+    : 0;
+  const startedLabel = formatTimestamp(job.started_at || '') || 'unknown';
+  const runtimeLabel = _formatRuntime(runtimeSeconds);
   notices.push({
     id,
-    text: 'Agent timed out before completing this run.',
-    timestamp: new Date().toISOString(),
+    text: `Agent timed out before completing this run.\nStarted: ${startedLabel}\nRuntime: ${runtimeLabel}`,
+    timestamp: job.finished_at || new Date().toISOString(),
+    started_at: startedLabel,
+    runtime: runtimeLabel,
   });
   runNoticesBySession[session] = notices;
 }
@@ -2068,7 +2077,10 @@ function renderMessages() {
     row.innerHTML = `<div class="role">assistant</div><div class="msg-meta">${_tagPill('SYSTEM', 'system')}<span class="msg-time">${escapeHtml(noticeStamp)}</span></div>`;
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.innerHTML = `<p>${escapeHtml(notice.text)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;
+    const noticeText = String(notice.text || '').split('\n')[0] || 'Agent timed out before completing this run.';
+    const startedText = String(notice.started_at || 'unknown');
+    const runtimeText = String(notice.runtime || '--:--');
+    bubble.innerHTML = `<p>${escapeHtml(noticeText)}</p><p class="small-muted">Started: ${escapeHtml(startedText)} · Runtime: ${escapeHtml(runtimeText)}</p><button class="btn btn-soft btn-sm" data-run-details="${_escapeAttr(notice.id)}">view details</button>`;
     row.appendChild(bubble);
     box.appendChild(row);
   });

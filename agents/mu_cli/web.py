@@ -1120,6 +1120,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "answer_contract": None,
         "cancel_requested": False,
         "cancel_reason": None,
+        "final_response": None,
     }
 
     def runner() -> None:
@@ -1262,6 +1263,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     prompt,
                     allow_citation_repair=(prompt == text),
                 )
+                job["final_response"] = str(reply.content or "")
                 turn_messages = isolated.agent.state.messages[before_len:]
                 had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
                 if _is_internal_agent_loop_prompt(prompt):

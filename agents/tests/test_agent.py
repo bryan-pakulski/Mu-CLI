@@ -138,5 +138,31 @@ class AgentTests(unittest.TestCase):
         self.assertEqual("call_1", tool_result.metadata["tool_call_id"])
 
 
+    def test_model_context_is_sliced_to_recent_non_system_messages(self) -> None:
+        class CaptureProvider:
+            name = "capture"
+            model = "capture"
+
+            def __init__(self) -> None:
+                self.last_messages = []
+
+            def generate(self, messages, tools=None, *, stream=False):
+                _ = (tools, stream)
+                self.last_messages = messages
+                return ModelResponse(message=Message(role=Role.ASSISTANT, content="ok"), tool_calls=[])
+
+        provider = CaptureProvider()
+        agent = Agent(provider=provider, tools=[], max_model_messages=4)
+        agent.add_system_prompt("sys")
+        for i in range(6):
+            role = Role.USER if i % 2 == 0 else Role.ASSISTANT
+            agent.state.messages.append(Message(role=role, content=f"m{i}"))
+
+        agent.step("latest")
+
+        model_contents = [m.content for m in provider.last_messages if m.role is not Role.SYSTEM]
+        self.assertEqual(["m3", "m4", "m5", "latest"], model_contents)
+
+
 if __name__ == "__main__":
     unittest.main()

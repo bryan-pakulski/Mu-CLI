@@ -22,6 +22,7 @@ from mu_cli.models import get_model_catalog, get_models
 from mu_cli.pricing import PricingCatalog, estimate_tokens
 from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
+from mu_cli.providers.ollama import OllamaProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
 from mu_cli.skills import SkillStore
@@ -264,6 +265,8 @@ def _build_provider(name: str, model: str, api_key: str | None):
         return OpenAIProvider(model=model, api_key=api_key)
     if name == "gemini":
         return GeminiProvider(model=model, api_key=api_key)
+    if name == "ollama":
+        return OllamaProvider(model=model)
     raise ValueError(f"Unsupported provider: {name}")
 
 
@@ -495,6 +498,7 @@ def _new_agent(runtime: WebRuntime) -> Agent:
         on_model_response=on_model_response,
         on_tool_run=on_tool_run,
         strict_tool_usage=True,
+        max_model_messages=40,
     )
 
 

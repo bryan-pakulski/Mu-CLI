@@ -37,5 +37,25 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertIn("gemini-3.1-pro-preview", models)
 
 
+    @mock.patch("mu_cli.models.request.urlopen")
+    def test_ollama_models_are_discovered_dynamically(self, mock_urlopen: mock.Mock) -> None:
+        mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "models": [
+                    {"name": "llama3.2:latest"},
+                    {"name": "qwen2.5-coder:7b"},
+                ]
+            }
+        ).encode("utf-8")
+
+        models = get_models("ollama")
+        self.assertEqual(["llama3.2:latest", "qwen2.5-coder:7b"], models)
+
+    @mock.patch("mu_cli.models.request.urlopen", side_effect=OSError("offline"))
+    def test_ollama_models_fallback_when_unreachable(self, _mock_urlopen: mock.Mock) -> None:
+        models = get_models("ollama")
+        self.assertEqual(["llama3.2"], models)
+
+
 if __name__ == "__main__":
     unittest.main()

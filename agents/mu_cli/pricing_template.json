@@ -36,5 +36,11 @@
       "input_per_1m": 0.0,
       "output_per_1m": 0.0
     }
+  },
+  "ollama": {
+    "llama3.2": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0
+    }
   }
 }

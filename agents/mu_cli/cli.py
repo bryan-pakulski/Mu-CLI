@@ -12,6 +12,7 @@ from mu_cli.policy import ApprovalPolicy
 from mu_cli.pricing import PricingCatalog, estimate_tokens
 from mu_cli.providers.echo import EchoProvider
 from mu_cli.providers.gemini import GeminiProvider
+from mu_cli.providers.ollama import OllamaProvider
 from mu_cli.providers.openai import OpenAIProvider
 from mu_cli.session import SessionState, SessionStore
 from mu_cli.skills import SkillStore
@@ -61,6 +62,7 @@ PLANNING_PROMPT_BASE = (
     "For any request involving repository state, files, diffs, or edits, tool usage is required before final claims. "
     "For mutating actions, clearly state intended edits before executing. "
     "Use an execution loop: plan -> act -> verify -> reflect -> finish. "
+    "For code changes, prefer diff-oriented outputs and avoid full-file rewrites unless explicitly requested. "
     "Do not mark tasks done until you run at least one direct verification command when possible (tests, lint, type-check, or targeted checks). "
     "If progress stalls, explicitly surface blockers, propose a fallback, and request approval before risky recovery actions."
 )
@@ -68,7 +70,7 @@ PLANNING_PROMPT_BASE = (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Provider-agnostic AI CLI (human-in-the-loop)")
-    parser.add_argument("--provider", default="echo", choices=["echo", "openai", "gemini"])
+    parser.add_argument("--provider", default="echo", choices=["echo", "openai", "gemini", "ollama"])
     parser.add_argument("--model", default=None)
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--system", default=DEFAULT_SYSTEM_PROMPT)
@@ -91,6 +93,8 @@ def _build_provider(name: str, model: str | None, api_key: str | None):
         return OpenAIProvider(model=model or "gpt-4o-mini", api_key=api_key)
     if name == "gemini":
         return GeminiProvider(model=model or "gemini-2.0-flash", api_key=api_key)
+    if name == "ollama":
+        return OllamaProvider(model=model or "llama3.2")
     raise ValueError(f"Unsupported provider: {name}")
 
 
@@ -319,6 +323,7 @@ def _make_agent(context: RuntimeContext) -> Agent:
             _debug_tool_run(context, name, args, ok, output),
         ),
         strict_tool_usage=True,
+        max_model_messages=40,
     )
 
 

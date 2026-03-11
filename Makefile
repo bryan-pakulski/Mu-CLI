@@ -12,7 +12,7 @@ APPROVAL_MODE ?= ask
 AGENTIC_PLANNING ?= 1
 DEBUG ?= 0
 
-.PHONY: test test-fast test-verbose test-web check build-frontend run run-web run-echo run-openai run-gemini models docker-build docker-run-web docker-run-cli docker-models help
+.PHONY: test test-fast test-verbose test-web check build-frontend run run-web run-echo run-openai run-gemini run-ollama models docker-build docker-run-web docker-run-cli docker-models help
 
 help:
 	@echo "Targets:"
@@ -25,6 +25,7 @@ help:
 	@echo "  make run-echo        - Start CLI with echo provider"
 	@echo "  make run-openai      - Start CLI with openai provider (uses OPENAI_API_KEY)"
 	@echo "  make run-gemini      - Start CLI with gemini provider (uses GEMINI_API_KEY/GOOGLE_API_KEY)"
+	@echo "  make run-ollama      - Start CLI with ollama provider (uses OLLAMA_HOST, default http://127.0.0.1:11434)"
 	@echo "  make run PROVIDER=<provider> MODEL=<model> [API_KEY=<key>] [WORKSPACE=<path>] [AGENTIC_PLANNING=0|1] [DEBUG=0|1]"
 	@echo "  make docker-build    - Build local container image (mu-cli:latest)"
 	@echo "  make docker-run-web  - Run Flask GUI in container on http://localhost:5000"
@@ -72,6 +73,9 @@ run-openai:
 run-gemini:
 	$(MAKE) run PROVIDER=gemini MODEL=$${MODEL:-gemini-2.0-flash}
 
+run-ollama:
+	$(MAKE) run PROVIDER=ollama MODEL=$${MODEL:-llama3.2}
+
 run-web:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mu_cli.web
 
@@ -85,6 +89,7 @@ docker-run-web:
 		-e OPENAI_API_KEY \
 		-e GEMINI_API_KEY \
 		-e GOOGLE_API_KEY \
+		-e OLLAMA_HOST \
 		mu-cli:latest web
 
 docker-run-cli:
@@ -94,6 +99,7 @@ docker-run-cli:
 		-e OPENAI_API_KEY \
 		-e GEMINI_API_KEY \
 		-e GOOGLE_API_KEY \
+		-e OLLAMA_HOST \
 		mu-cli:latest cli --provider echo --model echo --workspace /workspace
 
 docker-models:

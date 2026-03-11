@@ -31,6 +31,7 @@ class Agent:
         on_approval: ApprovalCallback | None = None,
         on_model_response: ModelResponseCallback | None = None,
         strict_tool_usage: bool = False,
+        max_model_messages: int | None = None,
     ) -> None:
         self.provider = provider
         self.tools = {tool.name: tool for tool in (tools or [])}
@@ -39,11 +40,24 @@ class Agent:
         self.on_approval = on_approval
         self.on_model_response = on_model_response
         self.strict_tool_usage = strict_tool_usage
+        self.max_model_messages = max_model_messages
         self.last_usage: UsageStats | None = None
         self.state = AgentState()
 
     def add_system_prompt(self, prompt: str) -> None:
         self.state.messages.append(Message(role=Role.SYSTEM, content=prompt))
+
+
+    def _slice_messages_for_model(self) -> list[Message]:
+        messages = [m for m in self.state.messages if not m.metadata.get("excluded_from_model")]
+        if not self.max_model_messages or self.max_model_messages <= 0:
+            return messages
+
+        system_messages = [m for m in messages if m.role is Role.SYSTEM]
+        non_system_messages = [m for m in messages if m.role is not Role.SYSTEM]
+        if len(non_system_messages) <= self.max_model_messages:
+            return messages
+        return [*system_messages, *non_system_messages[-self.max_model_messages :]]
 
     def step(self, user_input: str) -> Message:
         self.state.messages.append(Message(role=Role.USER, content=user_input))
@@ -53,7 +67,7 @@ class Agent:
         strict_retry_used = False
         rounds = 0
         while rounds < self.max_tool_rounds + 1:
-            model_messages = [m for m in self.state.messages if not m.metadata.get("excluded_from_model")]
+            model_messages = self._slice_messages_for_model()
             response = self.provider.generate(
                 model_messages,
                 tools=[self._tool_schema(tool) for tool in self.tools.values()],

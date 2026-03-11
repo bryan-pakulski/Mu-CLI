@@ -81,7 +81,7 @@
     <section class="hero">
       <span class="kpi info">mu_cli docs</span>
       <h1>mu_cli — Developer-in-the-Loop Assistant</h1>
-      <p>A practical guide to running, configuring, and safely using <code>mu_cli</code> with OpenAI/Gemini providers, workspace-aware context tools, approval gates, pricing reports, and session persistence.</p>
+      <p>A practical guide to running, configuring, and safely using <code>mu_cli</code> with OpenAI/Gemini/Ollama providers, workspace-aware context tools, approval gates, pricing reports, and session persistence.</p>
     </section>
 
     <section class="card toc">
@@ -113,6 +113,8 @@
 # or
 make run-gemini
 # or local
+make run-ollama
+# or local echo
 make run-echo
 # GUI
 make run-web</pre>
@@ -130,7 +132,7 @@ make run-web</pre>
       <pre>make docker-build
 make docker-run-web      # serves GUI on http://localhost:5000
 make docker-run-cli      # interactive CLI
-make docker-models       # list model catalog
+make docker-models       # list model catalog (includes dynamic local Ollama discovery when reachable)
 
 # compose variants
 docker compose up mu-cli-web
@@ -230,10 +232,11 @@ docker compose run --rm mu-cli-cli</pre>
 
     <h2 id="providers">Providers & Models</h2>
     <div class="card">
-      <p>Supported providers: <code>echo</code>, <code>openai</code>, <code>gemini</code>.</p>
+      <p>Supported providers: <code>echo</code>, <code>openai</code>, <code>gemini</code>, <code>ollama</code>.</p>
       <p>Use runtime flags:</p>
       <pre>--provider openai --model gpt-4o-mini
---provider gemini --model gemini-2.0-flash</pre>
+--provider gemini --model gemini-2.0-flash
+--provider ollama --model llama3.2</pre>
       <p>Tool-calling is native for OpenAI/Gemini where supported.</p>
     </div>
 

@@ -1862,9 +1862,10 @@ function _jobDetailsText(job) {
 
 function maybeRecordJobTerminalNotice(job) {
   if (!job || !job.id || !job.session) return;
-  if (job.status !== 'timed_out') return;
+  if (!['timed_out', 'completed'].includes(String(job.status || ''))) return;
   const session = String(job.session);
-  const id = `timeout-${job.id}`;
+  const isTimeout = job.status === 'timed_out';
+  const id = `${isTimeout ? 'timeout' : 'completed'}-${job.id}`;
   const notices = runNoticesBySession[session] || [];
   if (notices.some((n) => n.id === id)) return;
   const details = _jobDetailsText(job);
@@ -1878,7 +1879,9 @@ function maybeRecordJobTerminalNotice(job) {
   const runtimeLabel = _formatRuntime(runtimeSeconds);
   notices.push({
     id,
-    text: `Agent timed out before completing this run.\nStarted: ${startedLabel}\nRuntime: ${runtimeLabel}`,
+    text: isTimeout
+      ? `Agent timed out before completing this run.\nStarted: ${startedLabel}\nRuntime: ${runtimeLabel}`
+      : `Run completed successfully.\nStarted: ${startedLabel}\nRuntime: ${runtimeLabel}`,
     timestamp: job.finished_at || new Date().toISOString(),
     started_at: startedLabel,
     runtime: runtimeLabel,

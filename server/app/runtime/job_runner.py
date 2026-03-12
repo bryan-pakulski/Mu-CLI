@@ -17,6 +17,10 @@ class JobRunner:
         event = self._cancel_flags.get(job_id)
         return event.is_set() if event else False
 
+    def _cleanup(self, job_id: str) -> None:
+        self._cancel_flags.pop(job_id, None)
+        self._tasks.pop(job_id, None)
+
     async def _run(self, job_id: str) -> None:
         async with SessionLocal() as db:
             job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
@@ -83,7 +87,9 @@ class JobRunner:
         if job_id in self._tasks and not self._tasks[job_id].done():
             return
         self._cancel_flags[job_id] = asyncio.Event()
-        self._tasks[job_id] = asyncio.create_task(self._run(job_id))
+        task = asyncio.create_task(self._run(job_id))
+        self._tasks[job_id] = task
+        task.add_done_callback(lambda _: self._cleanup(job_id))
 
     async def cancel(self, job_id: str) -> None:
         if job_id not in self._cancel_flags:

@@ -41,6 +41,15 @@ class JobRead(BaseModel):
     created_at: datetime
 
 
+class EventRead(BaseModel):
+    id: str
+    session_id: str
+    job_id: str | None
+    event_type: str
+    payload: dict
+    created_at: datetime
+
+
 class ProviderRead(BaseModel):
     name: str
     supports_streaming: bool

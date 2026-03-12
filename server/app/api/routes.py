@@ -3,12 +3,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.app.persistence.db import get_db
-from server.app.persistence.models import JobModel, JobState, SessionModel
+from server.app.persistence.models import (
+    EventModel,
+    JobModel,
+    JobState,
+    SessionModel,
+    SessionStatus,
+)
 from server.app.providers.registry import provider_registry
 from server.app.runtime.event_bus import event_bus
 from server.app.runtime.job_runner import job_runner
 from server.app.runtime.orchestrator import emit_event
-from server.app.schemas import JobCreate, JobRead, ProviderRead, SessionCreate, SessionRead
+from server.app.schemas import (
+    EventRead,
+    JobCreate,
+    JobRead,
+    ProviderRead,
+    SessionCreate,
+    SessionRead,
+)
 
 router = APIRouter()
 
@@ -44,6 +57,54 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> Se
     return session
 
 
+@router.post("/sessions/{session_id}/pause", response_model=SessionRead)
+async def pause_session(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.status = SessionStatus.paused
+    await db.commit()
+    await db.refresh(session)
+    await emit_event(db, session.id, "session_state", {"status": session.status.value})
+    return session
+
+
+@router.post("/sessions/{session_id}/resume", response_model=SessionRead)
+async def resume_session(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.status = SessionStatus.active
+    await db.commit()
+    await db.refresh(session)
+    await emit_event(db, session.id, "session_state", {"status": session.status.value})
+    return session
+
+
+@router.post("/sessions/{session_id}/terminate", response_model=SessionRead)
+async def terminate_session(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    jobs = (
+        await db.scalars(
+            select(JobModel).where(
+                JobModel.session_id == session.id,
+                JobModel.state.in_([JobState.queued, JobState.running]),
+            )
+        )
+    ).all()
+    for job in jobs:
+        await job_runner.cancel(job.id)
+
+    session.status = SessionStatus.completed
+    await db.commit()
+    await db.refresh(session)
+    await emit_event(db, session.id, "session_state", {"status": session.status.value})
+    return session
+
+
 @router.post("/sessions/{session_id}/jobs", response_model=JobRead)
 async def create_job(
     session_id: str,
@@ -53,6 +114,8 @@ async def create_job(
     session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    if session.status != SessionStatus.active:
+        raise HTTPException(status_code=400, detail="Session must be active to create jobs")
 
     job = JobModel(
         session_id=session_id,
@@ -79,6 +142,21 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
     return job
 
 
+@router.get("/jobs/{job_id}/events", response_model=list[EventRead])
+async def get_job_events(job_id: str, db: AsyncSession = Depends(get_db)) -> list[EventModel]:
+    job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    events = (
+        await db.scalars(
+            select(EventModel)
+            .where(EventModel.job_id == job_id)
+            .order_by(EventModel.created_at)
+        )
+    ).all()
+    return list(events)
+
+
 @router.post("/jobs/{job_id}/run", response_model=JobRead)
 async def run_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
     job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
@@ -87,6 +165,8 @@ async def run_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
     if job.state == JobState.running:
         return job
     job.state = JobState.queued
+    job.checkpoints = {}
+    job.result_artifacts = {}
     await db.commit()
     await db.refresh(job)
     await emit_event(db, job.session_id, "job_state", {"state": job.state.value}, job_id=job.id)

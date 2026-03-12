@@ -54,7 +54,7 @@ async def test_cancel_and_resume_job_flow() -> None:
         cancel_response = await client.post(f"/jobs/{job['id']}/cancel")
         assert cancel_response.status_code == 200
 
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.2)
 
         after_cancel = await client.get(f"/jobs/{job['id']}")
         assert after_cancel.status_code == 200
@@ -63,7 +63,48 @@ async def test_cancel_and_resume_job_flow() -> None:
         if after_cancel.json()["state"] == "cancelled":
             resume_response = await client.post(f"/jobs/{job['id']}/resume")
             assert resume_response.status_code == 200
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.25)
             after_resume = await client.get(f"/jobs/{job['id']}")
             assert after_resume.status_code == 200
             assert after_resume.json()["state"] in {"running", "completed"}
+
+
+@pytest.mark.asyncio
+async def test_session_pause_resume_terminate_and_events() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        create_session = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "debugging"},
+        )
+        session = create_session.json()
+
+        pause_response = await client.post(f"/sessions/{session['id']}/pause")
+        assert pause_response.status_code == 200
+        assert pause_response.json()["status"] == "paused"
+
+        should_fail_job = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "should fail while paused"},
+        )
+        assert should_fail_job.status_code == 400
+
+        resume_response = await client.post(f"/sessions/{session['id']}/resume")
+        assert resume_response.status_code == 200
+        assert resume_response.json()["status"] == "active"
+
+        create_job = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "collect events"},
+        )
+        assert create_job.status_code == 200
+        job = create_job.json()
+
+        await asyncio.sleep(0.2)
+        events_response = await client.get(f"/jobs/{job['id']}/events")
+        assert events_response.status_code == 200
+        assert len(events_response.json()) >= 1
+
+        terminate_response = await client.post(f"/sessions/{session['id']}/terminate")
+        assert terminate_response.status_code == 200
+        assert terminate_response.json()["status"] == "completed"

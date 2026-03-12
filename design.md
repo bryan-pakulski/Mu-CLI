@@ -272,61 +272,65 @@ Output channels:
 
 ## 12) Implementation Plan
 
-## Phase 0 — Foundation (1–2 weeks)
-- Finalize architecture decisions and schemas.
-- Stand up repo structure, CI, formatting, linting, typing.
-- Define provider/tool/skill/policy interfaces.
+Status legend: `[ ]` not yet started, `[~]` in progress, `[x]` completed.
+
+## [x] Phase 0 — Foundation (1–2 weeks)
+- [x] Finalize architecture decisions and schemas.
+- [x] Stand up repo structure, CI, formatting, linting, typing.
+- [x] Define provider/tool/skill/policy interfaces.
 
 **Exit criteria**
-- Architecture decision record complete.
-- Baseline server boots with health endpoint.
+- [x] Architecture decision record complete.
+- [x] Baseline server boots with health endpoint.
 
-## Phase 1 — Core Server Runtime (2–4 weeks)
-- Build sessions/jobs persistence and lifecycle.
-- Implement agent loop engine with pluggable modes.
-- Implement event stream and job state transitions.
-
-**Exit criteria**
-- Run/resume/cancel job flow works end-to-end locally.
-
-## Phase 2 — Ollama First-Class + Provider Layer (2–3 weeks)
-- Implement Ollama adapter with streaming + tool-call handling.
-- Add generic provider interface + second provider adapter (for validation).
-- Add provider fallback routing.
+## [~] Phase 1 — Core Server Runtime (2–4 weeks)
+- [x] Build sessions/jobs persistence and baseline lifecycle.
+- [x] Implement agent loop engine with pluggable modes.
+- [x] Implement event stream and job state transitions.
+- [~] Harden end-to-end runtime behavior (idempotency, retries, failure handling).
 
 **Exit criteria**
-- Ollama-backed jobs run reliably with streaming and tool interactions.
+- [~] Run/resume/cancel job flow works end-to-end locally.
 
-## Phase 3 — Tools, Skills, Policy, Approvals (3–4 weeks)
-- Dynamic tool and skill discovery.
-- Policy engine with allow/deny/ask/escalate.
-- CLI/GUI approval flows.
-
-**Exit criteria**
-- Risky actions block for approval; audit trail complete.
-
-## Phase 4 — CLI MVP (2–3 weeks)
-- Build CLI commands for session/job lifecycle.
-- Add live rendering for tokens/events.
-- Add interactive prompts for approvals and user input.
+## [~] Phase 2 — Ollama First-Class + Provider Layer (2–3 weeks)
+- [x] Implement initial Ollama adapter with generate/stream/health.
+- [x] Add generic provider interface.
+- [ ] Add second provider adapter (for validation).
+- [ ] Add provider fallback routing.
 
 **Exit criteria**
-- CLI supports full local coding loop without GUI.
+- [~] Ollama-backed jobs run reliably with streaming and tool interactions.
 
-## Phase 5 — GUI MVP (3–5 weeks)
-- Build dashboard, job timeline, intervention controls.
-- Add provider/policy configuration pages.
-
-**Exit criteria**
-- GUI provides parity for core lifecycle + approvals.
-
-## Phase 6 — Observability, Hardening, and GA (2–4 weeks)
-- OpenTelemetry exporter, metrics dashboards, error budget tracking.
-- Load tests, failure injection, persistence recovery tests.
-- Security review of sandboxing and policy bypass resistance.
+## [ ] Phase 3 — Tools, Skills, Policy, Approvals (3–4 weeks)
+- [ ] Dynamic tool and skill discovery.
+- [ ] Policy engine with allow/deny/ask/escalate.
+- [ ] CLI/GUI approval flows.
 
 **Exit criteria**
-- Production-readiness checklist met.
+- [ ] Risky actions block for approval; audit trail complete.
+
+## [ ] Phase 4 — CLI MVP (2–3 weeks)
+- [ ] Build CLI commands for session/job lifecycle.
+- [ ] Add live rendering for tokens/events.
+- [ ] Add interactive prompts for approvals and user input.
+
+**Exit criteria**
+- [ ] CLI supports full local coding loop without GUI.
+
+## [ ] Phase 5 — GUI MVP (3–5 weeks)
+- [ ] Build dashboard, job timeline, intervention controls.
+- [ ] Add provider/policy configuration pages.
+
+**Exit criteria**
+- [ ] GUI provides parity for core lifecycle + approvals.
+
+## [ ] Phase 6 — Observability, Hardening, and GA (2–4 weeks)
+- [ ] OpenTelemetry exporter, metrics dashboards, error budget tracking.
+- [ ] Load tests, failure injection, persistence recovery tests.
+- [ ] Security review of sandboxing and policy bypass resistance.
+
+**Exit criteria**
+- [ ] Production-readiness checklist met.
 
 ---
 

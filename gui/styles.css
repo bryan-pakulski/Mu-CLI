@@ -10,17 +10,22 @@
   --user: #dbeafe;
 }
 * { box-sizing: border-box; }
+html, body {
+  height: 100%;
+}
 body {
   margin: 0;
   font-family: Inter, system-ui, Arial, sans-serif;
   font-size: 90%;
   background: var(--bg);
   color: var(--text);
+  overflow: hidden;
 }
 .app-shell {
   --left-size: 320px;
   --right-size: 420px;
-  height: 100vh;
+  min-height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: var(--left-size) minmax(0, 1fr) var(--right-size);
   transition: grid-template-columns 280ms ease;

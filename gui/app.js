@@ -17,6 +17,10 @@ const panelState = {
 const sessionIndicators = new Map();
 
 const el = (id) => document.getElementById(id);
+const setOnClick = (id, handler) => {
+  const node = el(id);
+  if (node) node.onclick = handler;
+};
 
 async function req(path, options = {}) {
   const res = await fetch(api + path, { headers: { "Content-Type": "application/json" }, ...options });
@@ -84,12 +88,27 @@ async function persistCurrentConfig() {
 }
 
 async function populateRuntimeOptions() {
-  const providers = await req("/providers");
-  const providerNames = providers.map((p) => p.name);
+  let providerNames = ["ollama"];
+  try {
+    const providers = await req("/providers");
+    providerNames = providers.map((p) => p.name).filter(Boolean);
+  } catch {
+    // fallback to defaults
+  }
+  if (providerNames.length === 0) providerNames = ["ollama"];
+
   fillSelect("providers", providerNames, providerNames[0]);
   fillSelect("modal-providers", providerNames, providerNames[0]);
 
-  const policyProfiles = await req("/policy-profiles");
+  let policyProfiles = ["default"];
+  try {
+    const profiles = await req("/policy-profiles");
+    policyProfiles = profiles.filter(Boolean);
+  } catch {
+    // fallback to defaults
+  }
+  if (policyProfiles.length === 0) policyProfiles = ["default"];
+
   fillSelect("policy", policyProfiles, policyProfiles[0]);
   fillSelect("modal-policy", policyProfiles, policyProfiles[0]);
 
@@ -516,7 +535,7 @@ async function refreshApprovals() {
   });
 }
 
-el("create-session").onclick = async () => {
+setOnClick("create-session", async () => {
   const workspace_path = el("workspace").value.trim();
   const sessionName = window.prompt("Session name", "new session") || "new session";
   const created = await req("/sessions", {
@@ -532,10 +551,11 @@ el("create-session").onclick = async () => {
   currentSession = created.id;
   currentJob = null;
   await refreshSessions();
-};
+});
 
-el("refresh-sessions").onclick = refreshSessions;
-el("session-quick-switch").addEventListener("keydown", async (event) => {
+setOnClick("refresh-sessions", refreshSessions);
+const quickSwitch = el("session-quick-switch");
+if (quickSwitch) quickSwitch.addEventListener("keydown", async (event) => {
   if (event.key !== "Enter") return;
   const prefix = event.target.value.trim().toLowerCase();
   const found = sessionsCache.find((s) => s.id.startsWith(prefix) || (s.name || "").toLowerCase().startsWith(prefix));
@@ -550,7 +570,7 @@ el("session-quick-switch").addEventListener("keydown", async (event) => {
   event.target.value = "";
 });
 
-el("browse-workspace").onclick = async () => {
+setOnClick("browse-workspace", async () => {
   if (window.showDirectoryPicker) {
     try {
       const handle = await window.showDirectoryPicker();
@@ -561,9 +581,10 @@ el("browse-workspace").onclick = async () => {
     }
   }
   el("workspace-picker").click();
-};
+});
 
-el("workspace-picker").addEventListener("change", (event) => {
+const workspacePicker = el("workspace-picker");
+if (workspacePicker) workspacePicker.addEventListener("change", (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
   const root = file.webkitRelativePath?.split("/")?.[0];
@@ -575,7 +596,7 @@ el("workspace-picker").addEventListener("change", (event) => {
   }
 });
 
-el("create-job").onclick = async () => {
+setOnClick("create-job", async () => {
   if (!currentSession) return;
   const goal = el("goal").value;
   if (!goal.trim()) return;
@@ -587,23 +608,23 @@ el("create-job").onclick = async () => {
   setSessionState("running");
   setIndicator(currentSession, "dot-running");
   el("goal").value = "";
-};
+});
 
-el("goal").addEventListener("keydown", (event) => {
+const goalInput = el("goal");
+if (goalInput) goalInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     el("create-job").click();
   }
 });
 
-
-el("refresh-approvals").onclick = refreshApprovals;
-el("toggle-left").onclick = () => togglePanel("left");
-el("toggle-right").onclick = () => togglePanel("right");
+setOnClick("refresh-approvals", refreshApprovals);
+setOnClick("toggle-left", () => togglePanel("left"));
+setOnClick("toggle-right", () => togglePanel("right"));
 applyPanelLayout();
 
-el("modal-cancel").onclick = closeSettingsModal;
-el("modal-save").onclick = async () => {
+setOnClick("modal-cancel", closeSettingsModal);
+setOnClick("modal-save", async () => {
   if (!currentSettingsSessionId) return;
   await req(`/sessions/${currentSettingsSessionId}`, {
     method: "PATCH",
@@ -616,9 +637,10 @@ el("modal-save").onclick = async () => {
   });
   closeSettingsModal();
   await refreshSessions();
-};
+});
 
-el("session-settings-modal").addEventListener("click", (event) => {
+const settingsModal = el("session-settings-modal");
+if (settingsModal) settingsModal.addEventListener("click", (event) => {
   if (event.target.id === "session-settings-modal") closeSettingsModal();
 });
 

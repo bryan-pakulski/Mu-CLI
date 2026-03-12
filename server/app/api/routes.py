@@ -1,13 +1,4 @@
-import asyncio
-
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Depends,
-    HTTPException,
-    WebSocket,
-    WebSocketDisconnect,
-)
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +6,8 @@ from server.app.persistence.db import get_db
 from server.app.persistence.models import JobModel, JobState, SessionModel
 from server.app.providers.registry import provider_registry
 from server.app.runtime.event_bus import event_bus
-from server.app.runtime.orchestrator import emit_event, update_job_state
+from server.app.runtime.job_runner import job_runner
+from server.app.runtime.orchestrator import emit_event
 from server.app.schemas import JobCreate, JobRead, ProviderRead, SessionCreate, SessionRead
 
 router = APIRouter()
@@ -52,23 +44,10 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> Se
     return session
 
 
-async def _run_job(job_id: str) -> None:
-    from server.app.persistence.db import SessionLocal
-
-    async with SessionLocal() as db:
-        job = await update_job_state(db, job_id, JobState.running)
-        await emit_event(db, job.session_id, "log", {"message": "job started"}, job_id=job.id)
-        await asyncio.sleep(0.05)
-        job.result_artifacts = {"summary": "Initial Phase 1 runtime execution completed."}
-        await db.commit()
-        await update_job_state(db, job_id, JobState.completed)
-
-
 @router.post("/sessions/{session_id}/jobs", response_model=JobRead)
 async def create_job(
     session_id: str,
     payload: JobCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> JobModel:
     session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
@@ -86,8 +65,9 @@ async def create_job(
     db.add(job)
     await db.commit()
     await db.refresh(job)
+
     await emit_event(db, session_id, "job_state", {"state": job.state.value}, job_id=job.id)
-    background_tasks.add_task(_run_job, job.id)
+    job_runner.start(job.id)
     return job
 
 
@@ -96,6 +76,48 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
     job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.post("/jobs/{job_id}/run", response_model=JobRead)
+async def run_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
+    job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.state == JobState.running:
+        return job
+    job.state = JobState.queued
+    await db.commit()
+    await db.refresh(job)
+    await emit_event(db, job.session_id, "job_state", {"state": job.state.value}, job_id=job.id)
+    job_runner.start(job.id)
+    return job
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobRead)
+async def cancel_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
+    job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await job_runner.cancel(job.id)
+    await emit_event(db, job.session_id, "log", {"message": "cancel requested"}, job_id=job.id)
+    await db.refresh(job)
+    return job
+
+
+@router.post("/jobs/{job_id}/resume", response_model=JobRead)
+async def resume_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
+    job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.state == JobState.running:
+        return job
+    if job.state not in {JobState.cancelled, JobState.failed, JobState.queued}:
+        raise HTTPException(status_code=400, detail="Only cancelled/failed/queued jobs can resume")
+
+    await job_runner.resume(job.id)
+    await emit_event(db, job.session_id, "log", {"message": "resume requested"}, job_id=job.id)
+    await db.refresh(job)
     return job
 
 

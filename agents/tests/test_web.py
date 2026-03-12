@@ -231,6 +231,15 @@ class WebTests(unittest.TestCase):
         self.assertIn('max_tool_calls', policy)
         self.assertIn('max_replans', policy)
         retry_policy = job.get('retry_policy') or {}
+        if not retry_policy:
+            for _ in range(20):
+                time.sleep(0.05)
+                poll = client.get(f'/api/jobs/{job_id}')
+                self.assertEqual(200, poll.status_code)
+                job = poll.get_json() or {}
+                retry_policy = job.get('retry_policy') or {}
+                if retry_policy or job.get('status') in {'completed', 'failed', 'timed_out', 'killed'}:
+                    break
         self.assertIn('max_stall_retries', retry_policy)
         self.assertIn('max_missing_evidence_retries', retry_policy)
         self.assertIn('max_tool_failure_retries', retry_policy)

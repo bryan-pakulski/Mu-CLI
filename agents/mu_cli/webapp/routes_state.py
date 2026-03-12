@@ -83,6 +83,12 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
                 "research_artifacts": runtime.research_artifacts,
                 "background_jobs": list(runtime.background_jobs.values())[-50:],
                 "max_runtime_seconds": runtime.max_runtime_seconds,
+                "budget_max_tokens": runtime.budget_max_tokens,
+                "budget_max_tool_calls": runtime.budget_max_tool_calls,
+                "budget_max_replans": runtime.budget_max_replans,
+                "retry_max_stall_retries": runtime.retry_max_stall_retries,
+                "retry_max_missing_evidence_retries": runtime.retry_max_missing_evidence_retries,
+                "retry_max_tool_failure_retries": runtime.retry_max_tool_failure_retries,
                 "condense_enabled": runtime.condense_enabled,
                 "condense_window": runtime.condense_window,
                 "tools": [

@@ -107,11 +107,11 @@ class BudgetPolicy:
     max_replans: int
 
 
-def _budget_policy_for_runtime(max_runtime_seconds: int) -> BudgetPolicy:
+def _budget_policy_for_runtime(max_runtime_seconds: int, *, max_tokens: int, max_tool_calls: int, max_replans: int) -> BudgetPolicy:
     runtime_s = max(30, int(max_runtime_seconds or 0))
-    token_budget = max(1200, min(120000, runtime_s * 120))
-    tool_budget = max(4, min(160, runtime_s // 8))
-    replan_budget = 2
+    token_budget = max(1200, min(120000, int(max_tokens or (runtime_s * 120))))
+    tool_budget = max(4, min(160, int(max_tool_calls or (runtime_s // 8))))
+    replan_budget = max(1, min(8, int(max_replans or 2)))
     return BudgetPolicy(
         max_runtime_s=runtime_s,
         max_tokens=token_budget,
@@ -128,12 +128,15 @@ class RetryPolicy:
     max_parser_retries: int
 
 
-def _retry_policy_for_task(task_type: str) -> RetryPolicy:
+def _retry_policy_for_task(task_type: str, *, stall: int, missing_evidence: int, tool_failure: int) -> RetryPolicy:
+    base_stall = max(1, min(8, int(stall or 2)))
+    base_missing = max(1, min(8, int(missing_evidence or 2)))
+    base_tool = max(1, min(8, int(tool_failure or 2)))
     if task_type == "security":
-        return RetryPolicy(max_stall_retries=3, max_missing_evidence_retries=3, max_tool_failure_retries=3, max_parser_retries=2)
+        return RetryPolicy(max_stall_retries=max(base_stall, 3), max_missing_evidence_retries=max(base_missing, 3), max_tool_failure_retries=max(base_tool, 3), max_parser_retries=2)
     if task_type == "bugfix":
-        return RetryPolicy(max_stall_retries=3, max_missing_evidence_retries=3, max_tool_failure_retries=2, max_parser_retries=2)
-    return RetryPolicy(max_stall_retries=2, max_missing_evidence_retries=2, max_tool_failure_retries=2, max_parser_retries=1)
+        return RetryPolicy(max_stall_retries=max(base_stall, 3), max_missing_evidence_retries=max(base_missing, 3), max_tool_failure_retries=max(base_tool, 2), max_parser_retries=2)
+    return RetryPolicy(max_stall_retries=base_stall, max_missing_evidence_retries=base_missing, max_tool_failure_retries=base_tool, max_parser_retries=1)
 
 
 def _telemetry_path() -> Path:
@@ -972,6 +975,12 @@ def _persist(runtime: WebRuntime) -> None:
             agentic_planning=runtime.agentic_planning,
             research_mode=runtime.research_mode,
             max_runtime_seconds=runtime.max_runtime_seconds,
+            budget_max_tokens=runtime.budget_max_tokens,
+            budget_max_tool_calls=runtime.budget_max_tool_calls,
+            budget_max_replans=runtime.budget_max_replans,
+            retry_max_stall_retries=runtime.retry_max_stall_retries,
+            retry_max_missing_evidence_retries=runtime.retry_max_missing_evidence_retries,
+            retry_max_tool_failure_retries=runtime.retry_max_tool_failure_retries,
             debug_level=runtime.debug_level,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
@@ -1035,6 +1044,18 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.research_mode = bool(loaded.research_mode)
     if loaded.max_runtime_seconds is not None:
         runtime.max_runtime_seconds = int(loaded.max_runtime_seconds)
+    if loaded.budget_max_tokens is not None:
+        runtime.budget_max_tokens = int(loaded.budget_max_tokens)
+    if loaded.budget_max_tool_calls is not None:
+        runtime.budget_max_tool_calls = int(loaded.budget_max_tool_calls)
+    if loaded.budget_max_replans is not None:
+        runtime.budget_max_replans = int(loaded.budget_max_replans)
+    if loaded.retry_max_stall_retries is not None:
+        runtime.retry_max_stall_retries = int(loaded.retry_max_stall_retries)
+    if loaded.retry_max_missing_evidence_retries is not None:
+        runtime.retry_max_missing_evidence_retries = int(loaded.retry_max_missing_evidence_retries)
+    if loaded.retry_max_tool_failure_retries is not None:
+        runtime.retry_max_tool_failure_retries = int(loaded.retry_max_tool_failure_retries)
     if loaded.debug_level is not None:
         runtime.debug_level = _normalize_debug_level(loaded.debug_level)
     if loaded.condense_enabled is not None:
@@ -1139,6 +1160,12 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         custom_tool_errors=list(base.custom_tool_errors),
         research_artifacts={},
         max_runtime_seconds=900,
+        budget_max_tokens=120000,
+        budget_max_tool_calls=160,
+        budget_max_replans=2,
+        retry_max_stall_retries=2,
+        retry_max_missing_evidence_retries=2,
+        retry_max_tool_failure_retries=2,
         condense_enabled=False,
         condense_window=12,
         ollama_context_window=65536,
@@ -1248,7 +1275,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "report": None,
         "iterations": 0,
         "runtime_budget_seconds": int(base_runtime.max_runtime_seconds),
-        "budget_policy": asdict(_budget_policy_for_runtime(int(base_runtime.max_runtime_seconds))),
+        "budget_policy": asdict(_budget_policy_for_runtime(int(base_runtime.max_runtime_seconds), max_tokens=int(base_runtime.budget_max_tokens), max_tool_calls=int(base_runtime.budget_max_tool_calls), max_replans=int(base_runtime.budget_max_replans))),
         "retry_policy": None,
         "retry_counts": {"stall": 0, "missing_evidence": 0, "tool_failure": 0, "parser": 0},
         "plan": None,
@@ -1306,7 +1333,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             isolated.debug = True
             _emit_stream_event("status", status="running", job_id=job_id)
             trace_cursor = len(isolated.traces)
-            budget = _budget_policy_for_runtime(int(isolated.max_runtime_seconds))
+            budget = _budget_policy_for_runtime(int(isolated.max_runtime_seconds), max_tokens=int(isolated.budget_max_tokens), max_tool_calls=int(isolated.budget_max_tool_calls), max_replans=int(isolated.budget_max_replans))
             job["budget_policy"] = asdict(budget)
             deadline = datetime.now(timezone.utc).timestamp() + budget.max_runtime_s
             checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
@@ -1402,7 +1429,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             unsatisfactory_nudges = 0
             max_unsatisfactory_nudges = 4
             policy = job.get("verification_policy") or _verification_policy_for_task(text)
-            retry_policy = _retry_policy_for_task(str(policy.get("task_type") or "general"))
+            retry_policy = _retry_policy_for_task(str(policy.get("task_type") or "general"), stall=int(isolated.retry_max_stall_retries), missing_evidence=int(isolated.retry_max_missing_evidence_retries), tool_failure=int(isolated.retry_max_tool_failure_retries))
             job["retry_policy"] = asdict(retry_policy)
             retry_counts = job.get("retry_counts") if isinstance(job.get("retry_counts"), dict) else {"stall": 0, "missing_evidence": 0, "tool_failure": 0, "parser": 0}
             job["retry_counts"] = retry_counts
@@ -1776,6 +1803,12 @@ def create_app():
         custom_tool_errors=[],
         research_artifacts={},
         max_runtime_seconds=900,
+        budget_max_tokens=120000,
+        budget_max_tool_calls=160,
+        budget_max_replans=2,
+        retry_max_stall_retries=2,
+        retry_max_missing_evidence_retries=2,
+        retry_max_tool_failure_retries=2,
         condense_enabled=False,
         condense_window=12,
         ollama_context_window=65536,

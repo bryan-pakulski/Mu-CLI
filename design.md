@@ -199,6 +199,51 @@ Output channels:
 
 ---
 
+## 9.1 Workspace Discovery and Codebase Indexing
+
+To improve first-pass codebase understanding, Mu-CLI includes a **Workspace Discovery Engine**.
+
+### Goals
+- Provide fast, broad awareness of repository structure without full AST parsing on every run.
+- Build and maintain a searchable index of workspace files.
+- Generate lightweight semantic descriptions to help the agent plan navigation before deep reads.
+
+### Core responsibilities
+- Crawl and index files by absolute + workspace-relative path.
+- Track metadata (size, extension, modified timestamp, hash/version marker).
+- Create per-file descriptions (e.g., purpose, likely subsystem, key symbols, and dependency hints).
+- Flag binary/large/generated files for skip or low-priority treatment.
+- Maintain incremental updates by detecting changed files only.
+
+### Discovery pipeline
+1. Enumerate workspace files with ignore rules (`.gitignore`, config excludes, generated dirs).
+2. Classify files (code/config/docs/tests/assets/generated/binary).
+3. Extract lightweight features (imports, top-level symbols, headings, test names, entrypoints).
+4. Generate/update file description records.
+5. Persist index snapshots and expose query APIs to runtime/CLI/GUI.
+
+### Stored index record (minimum)
+- `path`
+- `file_type`
+- `language`
+- `last_modified`
+- `content_hash`
+- `description`
+- `key_symbols`
+- `tags` (e.g., `entrypoint`, `test`, `config`, `generated`)
+
+### Runtime usage
+- Agent loop can request “map workspace” context to ground planning.
+- Retrieval can prioritize high-signal files from descriptions/tags before full content reads.
+- Resume flows can use cached index state for faster startup.
+
+### Extensibility
+- Pluggable analyzers per language/framework.
+- Optional deeper parsing and embeddings in later phases.
+- Policy hooks can restrict indexing for sensitive paths.
+
+---
+
 ## 10) API Surface (v1)
 
 ### Session APIs

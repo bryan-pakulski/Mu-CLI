@@ -260,4 +260,27 @@ async def test_gui_index_served() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/gui")
         assert response.status_code == 200
-        assert "Mu-CLI Dashboard" in response.text
+        assert "Mu-CLI Chat Console" in response.text
+
+
+@pytest.mark.asyncio
+async def test_clear_and_delete_session_endpoints() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        cleared = await client.post(f"/sessions/{session['id']}/clear")
+        assert cleared.status_code == 200
+        assert cleared.json()["context_state"]["messages"] == []
+
+        deleted = await client.delete(f"/sessions/{session['id']}")
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+
+        missing = await client.get(f"/sessions/{session['id']}")
+        assert missing.status_code == 404

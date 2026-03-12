@@ -177,6 +177,41 @@ async def terminate_session(session_id: str, db: AsyncSession = Depends(get_db))
     return session
 
 
+@router.post("/sessions/{session_id}/clear", response_model=SessionRead)
+async def clear_session_context(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session.context_state = {"messages": [], "summary": None, "memory_refs": []}
+    await db.commit()
+    await db.refresh(session)
+    await emit_event(db, session.id, "session_context_cleared", {"status": "ok"})
+    return session
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    jobs = (
+        await db.scalars(
+            select(JobModel).where(
+                JobModel.session_id == session.id,
+                JobModel.state.in_([JobState.queued, JobState.running]),
+            )
+        )
+    ).all()
+    for job in jobs:
+        await job_runner.cancel(job.id)
+
+    await db.delete(session)
+    await db.commit()
+    return {"deleted": True, "session_id": session_id}
+
+
 @router.post("/sessions/{session_id}/jobs", response_model=JobRead)
 async def create_job(
     session_id: str,

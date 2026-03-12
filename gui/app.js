@@ -4,11 +4,16 @@ let currentJob = null;
 let streamSocket = null;
 let selectedFilter = "all";
 let latestAssistantMessage = null;
+let currentSettingsSessionId = null;
+let openMenuForSession = null;
+let sessionsCache = [];
 
 const panelState = {
   left: { collapsed: false, width: 320, min: 220, max: 560 },
   right: { collapsed: false, width: 420, min: 280, max: 720 },
 };
+
+const sessionIndicators = new Map();
 
 const el = (id) => document.getElementById(id);
 
@@ -17,9 +22,7 @@ async function req(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  if (!res.ok) {
-    throw new Error(await res.text());
-  }
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
@@ -49,7 +52,6 @@ function setupResizer(resizerId, side) {
       panelState[side].collapsed = false;
       applyPanelLayout();
     }
-
     const shellRect = shell.getBoundingClientRect();
     resizer.classList.add("dragging");
     resizer.setPointerCapture(event.pointerId);
@@ -87,12 +89,7 @@ function setSessionState(state) {
       ? "blocked"
       : "idle";
 
-  const label =
-    normalized === "running"
-      ? "thinking"
-      : normalized === "awaiting_approval"
-      ? "awaiting approval"
-      : normalized;
+  const label = normalized === "running" ? "thinking" : normalized;
 
   ["session-state", "active-status"].forEach((id) => {
     const node = el(id);
@@ -138,9 +135,7 @@ function addTimeline(eventType, payload) {
   const li = document.createElement("li");
   li.dataset.eventType = eventType;
   li.textContent = `${new Date().toLocaleTimeString()}  ${formatTimelineLine(eventType, payload)}`;
-  if (!isVisibleForFilter(eventType)) {
-    li.classList.add("hidden");
-  }
+  if (!isVisibleForFilter(eventType)) li.classList.add("hidden");
   el("timeline").prepend(li);
 }
 
@@ -148,6 +143,24 @@ function applyTimelineFilter() {
   document.querySelectorAll("#timeline li").forEach((node) => {
     node.classList.toggle("hidden", !isVisibleForFilter(node.dataset.eventType || ""));
   });
+}
+
+function providerHintForError(rawError = "") {
+  if (!rawError.includes("/api/generate") || !rawError.includes("404")) return null;
+  return [
+    "Provider call failed (404 from Ollama).",
+    "Check your runtime provider settings and endpoint.",
+    "Expected Ollama generate endpoint at: http://localhost:11434/api/generate",
+    "If you run Ollama on another host/port, update server provider config accordingly.",
+  ].join("\n");
+}
+
+function setIndicator(sessionId, state) {
+  if (!sessionId) return;
+  sessionIndicators.set(sessionId, state);
+  const dot = document.querySelector(`.session-item[data-session-id='${sessionId}'] .session-dot`);
+  if (!dot) return;
+  dot.className = `session-dot ${state}`;
 }
 
 function updateSessionSummary(session) {
@@ -167,6 +180,126 @@ function updateSessionSummary(session) {
   setSessionState(session.status || "idle");
 }
 
+function closeAnySessionMenu() {
+  document.querySelectorAll(".session-menu").forEach((menu) => menu.remove());
+  openMenuForSession = null;
+}
+
+function createSessionMenu(session) {
+  const menu = document.createElement("div");
+  menu.className = "session-menu";
+
+  const settingsBtn = document.createElement("button");
+  settingsBtn.textContent = "Settings";
+  settingsBtn.onclick = () => openSessionSettings(session.id);
+
+  const clearBtn = document.createElement("button");
+  clearBtn.textContent = "Clear Session";
+  clearBtn.onclick = async () => {
+    closeAnySessionMenu();
+    if (!window.confirm("Clear context and messages for this session?")) return;
+    await req(`/sessions/${session.id}/clear`, { method: "POST" });
+    setIndicator(session.id, "dot-idle");
+    if (session.id === currentSession) {
+      pushChat("system", "Session context cleared.");
+    }
+  };
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.textContent = "Delete";
+  deleteBtn.onclick = async () => {
+    closeAnySessionMenu();
+    if (!window.confirm("Delete this session permanently?")) return;
+    await req(`/sessions/${session.id}`, { method: "DELETE" });
+    if (session.id === currentSession) {
+      currentSession = null;
+      currentJob = null;
+      updateSessionSummary(null);
+      if (streamSocket) streamSocket.close();
+    }
+    await refreshSessions();
+  };
+
+  menu.append(settingsBtn, clearBtn, deleteBtn);
+  return menu;
+}
+
+async function buildSessionIndicator(sessionId) {
+  try {
+    const jobs = await req(`/sessions/${sessionId}/jobs`);
+    const latest = jobs[0];
+    if (!latest) return "dot-idle";
+    if (["queued", "running", "awaiting_approval"].includes(latest.state)) return "dot-running";
+    if (latest.state === "completed") return "dot-success";
+    if (["failed", "blocked", "cancelled"].includes(latest.state)) return "dot-error";
+    return "dot-idle";
+  } catch {
+    return "dot-idle";
+  }
+}
+
+function renderSessionList() {
+  const ul = el("session-list");
+  ul.innerHTML = "";
+
+  sessionsCache.forEach((s) => {
+    const li = document.createElement("li");
+    li.className = `session-item ${s.id === currentSession ? "active" : ""}`;
+    li.dataset.sessionId = s.id;
+
+    const dot = document.createElement("span");
+    dot.className = `session-dot ${sessionIndicators.get(s.id) || "dot-idle"}`;
+
+    const main = document.createElement("div");
+    main.className = "session-main";
+    main.innerHTML = `
+      <div class="session-id">${s.id.slice(0, 12)}</div>
+      <div class="session-meta">${s.mode} · ${s.status}</div>
+    `;
+    main.onclick = async () => {
+      currentSession = s.id;
+      const details = await req(`/sessions/${currentSession}`);
+      updateSessionSummary(details);
+      connectStream();
+      renderSessionList();
+    };
+
+    const menuBtn = document.createElement("button");
+    menuBtn.className = "session-menu-btn";
+    menuBtn.textContent = "⋯";
+    menuBtn.onclick = (event) => {
+      event.stopPropagation();
+      if (openMenuForSession === s.id) {
+        closeAnySessionMenu();
+        return;
+      }
+      closeAnySessionMenu();
+      li.appendChild(createSessionMenu(s));
+      openMenuForSession = s.id;
+    };
+
+    li.append(dot, main, menuBtn);
+    ul.appendChild(li);
+  });
+}
+
+function openSessionSettings(sessionId) {
+  closeAnySessionMenu();
+  const session = sessionsCache.find((s) => s.id === sessionId);
+  if (!session) return;
+
+  currentSettingsSessionId = sessionId;
+  el("modal-mode").value = session.mode || "interactive";
+  el("modal-policy").value = session.policy_profile || "default";
+  el("modal-providers").value = (session.provider_preferences?.ordered || []).join(", ");
+  el("session-settings-modal").classList.remove("hidden");
+}
+
+function closeSettingsModal() {
+  currentSettingsSessionId = null;
+  el("session-settings-modal").classList.add("hidden");
+}
+
 function connectStream() {
   if (!currentSession) return;
   if (streamSocket) streamSocket.close();
@@ -176,14 +309,20 @@ function connectStream() {
 
   streamSocket.onmessage = (raw) => {
     const evt = JSON.parse(raw.data);
-    const { event_type: eventType, payload, job_id: jobId } = evt;
+    const { event_type: eventType, payload, job_id: jobId, session_id: sessionId } = evt;
     addTimeline(eventType, payload || {});
 
     if (eventType === "job_state") {
       setSessionState(payload?.state || "idle");
       if (jobId) currentJob = jobId;
 
-      if (["completed", "cancelled", "failed", "blocked"].includes(payload?.state)) {
+      if (["queued", "running", "awaiting_approval"].includes(payload?.state)) {
+        setIndicator(sessionId, "dot-running");
+      } else if (payload?.state === "completed") {
+        setIndicator(sessionId, "dot-success");
+        latestAssistantMessage = null;
+      } else if (["failed", "blocked", "cancelled"].includes(payload?.state)) {
+        setIndicator(sessionId, "dot-error");
         latestAssistantMessage = null;
       }
     }
@@ -198,6 +337,11 @@ function connectStream() {
       latestAssistantMessage = null;
     }
 
+    if (eventType === "log" && payload?.message === "job failed") {
+      const hint = providerHintForError(payload?.error || "");
+      if (hint) pushChat("system", hint);
+    }
+
     if (eventType === "approval_requested") {
       pushChat("system", `Approval needed for tool: ${payload?.tool_name}`);
       refreshApprovals().catch(console.error);
@@ -210,26 +354,22 @@ function connectStream() {
 }
 
 async function refreshSessions() {
-  const sessions = await req("/sessions");
-  const sel = el("session-select");
-  sel.innerHTML = "";
+  sessionsCache = await req("/sessions");
+  if (sessionsCache.length > 0 && (!currentSession || !sessionsCache.some((s) => s.id === currentSession))) {
+    currentSession = sessionsCache[0].id;
+  }
 
-  sessions.forEach((s) => {
-    const option = document.createElement("option");
-    option.value = s.id;
-    option.textContent = `${s.id.slice(0, 8)} · ${s.status} · ${s.mode}`;
-    sel.appendChild(option);
-  });
+  const statuses = await Promise.all(sessionsCache.map((s) => buildSessionIndicator(s.id)));
+  sessionsCache.forEach((s, idx) => sessionIndicators.set(s.id, statuses[idx]));
 
-  if (sessions.length > 0) {
-    if (!currentSession || !sessions.some((s) => s.id === currentSession)) {
-      currentSession = sessions[0].id;
-    }
-    sel.value = currentSession;
-    updateSessionSummary(sessions.find((s) => s.id === currentSession));
+  renderSessionList();
+
+  if (sessionsCache.length > 0) {
+    const active = sessionsCache.find((s) => s.id === currentSession) || sessionsCache[0];
+    currentSession = active.id;
+    updateSessionSummary(active);
     connectStream();
   } else {
-    currentSession = null;
     updateSessionSummary(null);
   }
 }
@@ -264,14 +404,6 @@ async function refreshApprovals() {
   });
 }
 
-el("session-select").onchange = async (event) => {
-  currentSession = event.target.value;
-  const session = await req(`/sessions/${currentSession}`);
-  updateSessionSummary(session);
-  connectStream();
-  addTimeline("status", { message: `session switched to ${currentSession.slice(0, 8)}` });
-};
-
 el("create-session").onclick = async () => {
   const workspace_path = el("workspace").value;
   const created = await req("/sessions", {
@@ -286,6 +418,20 @@ el("create-session").onclick = async () => {
 
 el("refresh-sessions").onclick = refreshSessions;
 
+el("session-quick-switch").addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") return;
+  const prefix = event.target.value.trim();
+  if (!prefix) return;
+  const found = sessionsCache.find((s) => s.id.startsWith(prefix));
+  if (!found) return;
+  currentSession = found.id;
+  const details = await req(`/sessions/${currentSession}`);
+  updateSessionSummary(details);
+  connectStream();
+  renderSessionList();
+  event.target.value = "";
+});
+
 el("create-job").onclick = async () => {
   if (!currentSession) return;
   const goal = el("goal").value;
@@ -299,6 +445,7 @@ el("create-job").onclick = async () => {
   });
   currentJob = job.id;
   setSessionState("running");
+  setIndicator(currentSession, "dot-running");
   el("goal").value = "";
 };
 
@@ -325,20 +472,14 @@ el("save-config").onclick = async () => {
   if (!currentSession) return;
   const mode = el("mode").value;
   const policy_profile = el("policy").value;
-  const ordered = el("providers")
-    .value.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const ordered = el("providers").value.split(",").map((s) => s.trim()).filter(Boolean);
 
   const updated = await req(`/sessions/${currentSession}`, {
     method: "PATCH",
-    body: JSON.stringify({
-      mode,
-      policy_profile,
-      provider_preferences: { ordered },
-    }),
+    body: JSON.stringify({ mode, policy_profile, provider_preferences: { ordered } }),
   });
   updateSessionSummary(updated);
+  await refreshSessions();
   pushChat("system", "Runtime settings updated");
 };
 
@@ -356,6 +497,31 @@ el("toggle-right").onclick = () => togglePanel("right");
 setupResizer("left-resizer", "left");
 setupResizer("right-resizer", "right");
 applyPanelLayout();
+
+el("modal-cancel").onclick = closeSettingsModal;
+el("modal-save").onclick = async () => {
+  if (!currentSettingsSessionId) return;
+  const mode = el("modal-mode").value;
+  const policy_profile = el("modal-policy").value;
+  const ordered = el("modal-providers").value.split(",").map((s) => s.trim()).filter(Boolean);
+
+  await req(`/sessions/${currentSettingsSessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ mode, policy_profile, provider_preferences: { ordered } }),
+  });
+  closeSettingsModal();
+  await refreshSessions();
+};
+
+el("session-settings-modal").addEventListener("click", (event) => {
+  if (event.target.id === "session-settings-modal") closeSettingsModal();
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".session-menu") && !event.target.closest(".session-menu-btn")) {
+    closeAnySessionMenu();
+  }
+});
 
 document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
   chip.addEventListener("click", () => {

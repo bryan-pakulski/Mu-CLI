@@ -34,19 +34,24 @@
         </section>
 
         <section class="block">
-          <h3>Session</h3>
+          <h3>Sessions</h3>
           <div class="row compact">
             <button id="create-session" class="btn">New</button>
             <button id="refresh-sessions" class="btn">Refresh</button>
           </div>
-          <label for="session-select">Active session</label>
-          <select id="session-select"></select>
+          <label for="session-quick-switch">Quick switch</label>
+          <input id="session-quick-switch" placeholder="Type + Enter to switch by id prefix" />
+          <ul id="session-list" class="session-list"></ul>
+          <div id="session-summary" class="muted">No session selected.</div>
+          <div id="session-state" class="state-pill idle">idle</div>
+        </section>
+
+        <section class="block">
+          <h3>Session actions</h3>
           <div class="session-actions">
             <button id="clear-chat" class="btn">Clear history</button>
             <button id="condense-chat" class="btn">Condense</button>
           </div>
-          <div id="session-summary" class="muted">No session selected.</div>
-          <div id="session-state" class="state-pill idle">idle</div>
         </section>
 
         <section class="block">
@@ -58,13 +63,7 @@
         </section>
       </aside>
 
-      <button
-        id="left-resizer"
-        class="resizer resizer-left"
-        type="button"
-        aria-label="Resize left panel"
-        title="Drag to resize"
-      ></button>
+      <button id="left-resizer" class="resizer resizer-left" type="button" aria-label="Resize left panel" title="Drag to resize"></button>
 
       <main class="panel center">
         <header class="chat-header">
@@ -92,13 +91,7 @@
         </section>
       </main>
 
-      <button
-        id="right-resizer"
-        class="resizer resizer-right"
-        type="button"
-        aria-label="Resize right panel"
-        title="Drag to resize"
-      ></button>
+      <button id="right-resizer" class="resizer resizer-right" type="button" aria-label="Resize right panel" title="Drag to resize"></button>
 
       <aside class="panel right">
         <div class="panel-title">Session metadata</div>
@@ -121,6 +114,31 @@
           <ul id="approvals" class="meta-list"></ul>
         </section>
       </aside>
+    </div>
+
+    <div id="session-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="session-settings-title">
+      <div class="modal-card">
+        <h3 id="session-settings-title">Session settings</h3>
+        <div class="modal-body">
+          <label for="modal-mode">Mode</label>
+          <select id="modal-mode">
+            <option value="interactive">interactive</option>
+            <option value="research">research</option>
+            <option value="debugging">debugging</option>
+            <option value="yolo">yolo</option>
+          </select>
+
+          <label for="modal-policy">Policy profile</label>
+          <input id="modal-policy" />
+
+          <label for="modal-providers">Providers (comma-separated)</label>
+          <input id="modal-providers" />
+        </div>
+        <div class="modal-actions">
+          <button id="modal-cancel" class="btn">Cancel</button>
+          <button id="modal-save" class="btn primary">Save</button>
+        </div>
+      </div>
     </div>
 
     <script src="/gui/assets/app.js"></script>

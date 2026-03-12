@@ -37,7 +37,7 @@ async def test_session_job_lifecycle_and_providers() -> None:
 
         tools = await client.get("/tools")
         assert tools.status_code == 200
-        assert any(t["name"] == "shell.exec" for t in tools.json())
+        assert any(t["name"] == "read_file" for t in tools.json())
 
         create_job = await client.post(
             f"/sessions/{session['id']}/jobs",
@@ -143,7 +143,7 @@ async def test_policy_approval_flow() -> None:
         session = create_session.json()
 
         eval_policy = await client.get(
-            "/policies/evaluate/shell.exec",
+            "/policies/evaluate/run_make_agent_job",
             params={"session_mode": "interactive"},
         )
         assert eval_policy.status_code == 200
@@ -151,7 +151,7 @@ async def test_policy_approval_flow() -> None:
 
         create_job = await client.post(
             f"/sessions/{session['id']}/jobs",
-            json={"goal": "risky tool run", "constraints": {"tool_name": "shell.exec"}},
+            json={"goal": "risky tool run", "constraints": {"tool_name": "run_make_agent_job"}},
         )
         assert create_job.status_code == 200
         job = create_job.json()
@@ -177,10 +177,6 @@ async def test_policy_approval_flow() -> None:
 async def test_workspace_index_and_skill_discovery_endpoints(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("# Test Workspace\n")
     (tmp_path / "app.py").write_text("print('hello')\n")
-    skill_dir = tmp_path / "demo-skill"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("# Demo Skill\n")
-
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         create_session = await client.post(
@@ -205,7 +201,7 @@ async def test_workspace_index_and_skill_discovery_endpoints(tmp_path: Path) -> 
 
         skills = await client.get("/skills", params={"session_id": session["id"]})
         assert skills.status_code == 200
-        assert any(item["name"] == "demo-skill" for item in skills.json())
+        assert any(item["name"] == "default" for item in skills.json())
 
 
 @pytest.mark.asyncio
@@ -360,10 +356,6 @@ async def test_session_context_isolation_across_sessions() -> None:
 
 @pytest.mark.asyncio
 async def test_tools_and_skills_config_endpoints(tmp_path: Path) -> None:
-    skills_dir = tmp_path / "skills" / "demo"
-    skills_dir.mkdir(parents=True)
-    (skills_dir / "SKILL.md").write_text("# Demo skill\n")
-
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post(
@@ -375,33 +367,40 @@ async def test_tools_and_skills_config_endpoints(tmp_path: Path) -> None:
 
         tools = await client.get(f"/sessions/{session['id']}/tools-config")
         assert tools.status_code == 200
-        assert any(item["name"] == "shell.exec" for item in tools.json())
+        assert any(item["name"] == "read_file" for item in tools.json())
 
         updated_tools = await client.patch(
             f"/sessions/{session['id']}/tools-config",
-            json={"enabled": ["workspace.write_file"]},
+            json={"enabled": ["write_file"]},
         )
         assert updated_tools.status_code == 200
-        assert any(item["name"] == "workspace.write_file" and item["enabled"] for item in updated_tools.json())
+        assert any(item["name"] == "write_file" and item["enabled"] for item in updated_tools.json())
 
         skills = await client.get(f"/sessions/{session['id']}/skills-config")
         assert skills.status_code == 200
-        assert any(item["name"] == "demo" for item in skills.json())
+        assert any(item["name"] == "default" for item in skills.json())
 
-        skill_content = await client.get(f"/sessions/{session['id']}/skills/demo/content")
+        skill_content = await client.get(f"/sessions/{session['id']}/skills/default/content")
         assert skill_content.status_code == 200
-        assert "Demo skill" in skill_content.json()["content"]
+        original_content = skill_content.json()["content"]
+        assert "Default local skill" in original_content
 
         write_content = await client.put(
-            f"/sessions/{session['id']}/skills/demo/content",
-            json={"content": "# Demo skill\nUpdated"},
+            f"/sessions/{session['id']}/skills/default/content",
+            json={"content": f"{original_content}\n<!-- test update -->\n"},
         )
         assert write_content.status_code == 200
-        assert "Updated" in write_content.json()["content"]
+        assert "test update" in write_content.json()["content"]
+
+        restore_content = await client.put(
+            f"/sessions/{session['id']}/skills/default/content",
+            json={"content": original_content},
+        )
+        assert restore_content.status_code == 200
 
         open_folder = await client.post(f"/sessions/{session['id']}/skills/open-folder")
         assert open_folder.status_code == 200
-        assert open_folder.json()["path"].endswith("skills")
+        assert open_folder.json()["path"].endswith("server/store/skills")
 
 
 @pytest.mark.asyncio

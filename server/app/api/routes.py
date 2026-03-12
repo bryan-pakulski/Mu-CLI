@@ -647,20 +647,21 @@ async def update_session_skills_config(
 
 @router.get("/sessions/{session_id}/skills/{skill_name}/content", response_model=SkillContentRead)
 async def get_skill_content(session_id: str, skill_name: str, db: AsyncSession = Depends(get_db)) -> SkillContentRead:
-    session = await _get_session_or_404(db, session_id)
-    discovered = skill_registry.discover(session.workspace_path)
+    await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover()
     skill = next((item for item in discovered if item.name == skill_name), None)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    workspace_root = Path(session.workspace_path).resolve()
-    skill_path = (workspace_root / skill.file_path).resolve()
-    if workspace_root not in skill_path.parents and skill_path != workspace_root:
-        raise HTTPException(status_code=400, detail="Invalid skill path")
-    if not skill_path.exists():
+    skill_path = skill_registry.get_skill_file(skill_name)
+    if not skill_path:
         raise HTTPException(status_code=404, detail="Skill file missing")
 
-    return SkillContentRead(name=skill.name, file_path=skill.file_path, content=skill_path.read_text(encoding="utf-8"))
+    return SkillContentRead(
+        name=skill.name,
+        file_path=skill.file_path,
+        content=skill_path.read_text(encoding="utf-8"),
+    )
 
 
 @router.put("/sessions/{session_id}/skills/{skill_name}/content", response_model=SkillContentRead)
@@ -670,16 +671,15 @@ async def update_skill_content(
     payload: SkillContentUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> SkillContentRead:
-    session = await _get_session_or_404(db, session_id)
-    discovered = skill_registry.discover(session.workspace_path)
+    await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover()
     skill = next((item for item in discovered if item.name == skill_name), None)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    workspace_root = Path(session.workspace_path).resolve()
-    skill_path = (workspace_root / skill.file_path).resolve()
-    if workspace_root not in skill_path.parents and skill_path != workspace_root:
-        raise HTTPException(status_code=400, detail="Invalid skill path")
+    skill_path = skill_registry.get_skill_file(skill_name)
+    if not skill_path:
+        raise HTTPException(status_code=404, detail="Skill file missing")
 
     skill_path.write_text(payload.content, encoding="utf-8")
     return SkillContentRead(name=skill.name, file_path=skill.file_path, content=payload.content)
@@ -687,11 +687,8 @@ async def update_skill_content(
 
 @router.post("/sessions/{session_id}/skills/open-folder")
 async def open_skills_folder(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
-    session = await _get_session_or_404(db, session_id)
-    workspace_root = Path(session.workspace_path)
-    skills_dir = workspace_root / "skills"
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    return {"path": str(skills_dir.resolve())}
+    await _get_session_or_404(db, session_id)
+    return {"path": str(skill_registry.root.resolve())}
 
 
 
@@ -731,16 +728,14 @@ async def list_skills(
     session_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[SkillRead]:
-    if not session_id:
-        return []
-
-    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    if session_id:
+        session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
     return [
         SkillRead(name=s.name, description=s.description, file_path=s.file_path)
-        for s in skill_registry.discover(session.workspace_path)
+        for s in skill_registry.discover()
     ]
 
 

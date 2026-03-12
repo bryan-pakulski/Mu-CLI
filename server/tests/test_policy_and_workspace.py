@@ -10,9 +10,9 @@ from server.app.workspace.discovery import _classify, _describe, _priority, _sho
 
 
 def test_policy_engine_decisions() -> None:
-    low = tool_registry.get("workspace.read_file")
-    medium = tool_registry.get("workspace.write_file")
-    high = tool_registry.get("shell.exec")
+    low = tool_registry.get("read_file")
+    medium = tool_registry.get("write_file")
+    high = tool_registry.get("run_make_agent_job")
 
     assert low is not None and medium is not None and high is not None
 

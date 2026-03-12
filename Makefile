@@ -18,8 +18,7 @@ help:
 	@echo "  run-gui      Launch GUI component (placeholder scaffold)"
 
 install-dev:
-	$(PYTHON) -m pip install --upgrade pip
-	$(PYTHON) -m pip install -e .[dev]
+	$(PYTHON) -m pip install -e .[dev] --no-build-isolation
 
 run-server:
 	$(UVICORN) $(APP_MODULE) --host $(HOST) --port $(PORT) --reload

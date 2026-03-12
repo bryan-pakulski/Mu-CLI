@@ -1,6 +1,6 @@
 import unittest
 
-from mu_cli.webapp.job_state import JobStatus, transition_job_status
+from mu_cli.webapp.job_state import JobStatus, JobTerminalReason, set_terminal_reason, transition_job_status
 
 
 class JobStateTests(unittest.TestCase):
@@ -26,6 +26,16 @@ class JobStateTests(unittest.TestCase):
         result = transition_job_status(job, JobStatus.RUNNING.value, reason="reopen")
         self.assertFalse(result.ok)
         self.assertEqual(JobStatus.COMPLETED.value, job["status"])
+
+
+    def test_set_terminal_reason_accepts_enum(self) -> None:
+        job: dict[str, str] = {}
+        set_terminal_reason(job, JobTerminalReason.BUDGET_EXHAUSTED)
+        self.assertEqual("budget_exhausted", job.get("terminal_reason"))
+
+    def test_set_terminal_reason_rejects_invalid_value(self) -> None:
+        with self.assertRaises(ValueError):
+            set_terminal_reason({}, "not_a_reason")
 
 
 if __name__ == "__main__":

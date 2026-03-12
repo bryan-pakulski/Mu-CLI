@@ -52,7 +52,7 @@ from mu_cli.webapp.runtime import WebRuntime, default_usage
 from mu_cli.webapp.routes_state import StateRouteDeps, register_state_routes
 from mu_cli.webapp.routes_chat import ChatRouteDeps, register_chat_routes
 from mu_cli.webapp.services_runtime import RuntimeMutationDeps, mutate_runtime_for_clear, mutate_runtime_for_new_session, mutate_runtime_for_settings
-from mu_cli.webapp.job_state import JobStatus, TERMINAL_STATUSES, transition_job_status
+from mu_cli.webapp.job_state import JobStatus, JobTerminalReason, TERMINAL_STATUSES, set_terminal_reason, transition_job_status
 
 
 
@@ -1323,7 +1323,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             if str(job.get("status") or "") in TERMINAL_STATUSES:
                 return
             transition_job_status(job, JobStatus.KILLED.value, reason="cancel_requested")
-            job["terminal_reason"] = "killed"
+            set_terminal_reason(job, JobTerminalReason.KILLED)
             job["cancel_reason"] = reason
             job["events"].append(f"status: killed ({reason})")
             _emit_stream_event("status", status="killed", reason=reason)
@@ -1547,13 +1547,13 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 }
                 if total_tokens >= budget.max_tokens:
                     job["events"].append(f"status: budget_exhausted(tokens={total_tokens},cap={budget.max_tokens})")
-                    job["terminal_reason"] = "budget_exhausted"
+                    set_terminal_reason(job, JobTerminalReason.BUDGET_EXHAUSTED)
                     _record_harness_counter(base_runtime, "budget_exhausted")
                     transition_job_status(job, JobStatus.TIMED_OUT.value, reason="token_budget_exhausted")
                     break
                 if tool_calls_used >= budget.max_tool_calls:
                     job["events"].append(f"status: budget_exhausted(tool_calls={tool_calls_used},cap={budget.max_tool_calls})")
-                    job["terminal_reason"] = "budget_exhausted"
+                    set_terminal_reason(job, JobTerminalReason.BUDGET_EXHAUSTED)
                     _record_harness_counter(base_runtime, "budget_exhausted")
                     transition_job_status(job, JobStatus.TIMED_OUT.value, reason="tool_budget_exhausted")
                     break
@@ -1584,7 +1584,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         job["events"].append(f"retry: missing_evidence #{retry_counts['missing_evidence']}")
                         if int(retry_counts.get("missing_evidence", 0)) > int(retry_policy.max_missing_evidence_retries):
                             job["events"].append("status: missing_evidence_retry_limit_reached")
-                            job["terminal_reason"] = "failed_unrecoverable"
+                            set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
                             transition_job_status(job, JobStatus.FAILED.value, reason="missing_evidence_retry_exhausted")
                             break
                     missing_parts: list[str] = []
@@ -1614,7 +1614,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     _record_harness_counter(base_runtime, "tool_failures")
                     if int(retry_counts.get("tool_failure", 0)) > int(retry_policy.max_tool_failure_retries):
                         job["events"].append("status: tool_failure_retry_limit_reached")
-                        job["terminal_reason"] = "failed_unrecoverable"
+                        set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
                         transition_job_status(job, JobStatus.FAILED.value, reason="tool_failure_retry_exhausted")
                         break
                 if not isolated.agentic_planning:
@@ -1628,7 +1628,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                         job["events"].append(f"retry: stall #{retry_counts['stall']}")
                         if int(retry_counts.get("stall", 0)) > int(retry_policy.max_stall_retries):
                             job["events"].append("status: stall_retry_limit_reached")
-                            job["terminal_reason"] = "failed_unrecoverable"
+                            set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
                             transition_job_status(job, JobStatus.FAILED.value, reason="stall_retry_exhausted")
                             break
                         if replan_count < int(budget.max_replans):
@@ -1673,12 +1673,12 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 transition_job_status(job, JobStatus.VERIFYING.value, reason="plan_complete_or_equivalent")
                 transition_job_status(job, JobStatus.COMPLETED.value, reason="verification_ready")
                 if isinstance(job.get("answer_contract"), dict) and job["answer_contract"].get("explicit_blockers") and not job["answer_contract"].get("verified"):
-                    job["terminal_reason"] = "completed_with_blockers"
+                    set_terminal_reason(job, JobTerminalReason.COMPLETED_WITH_BLOCKERS)
                 else:
-                    job["terminal_reason"] = "completed_satisfactory"
+                    set_terminal_reason(job, JobTerminalReason.COMPLETED_SATISFACTORY)
             elif datetime.now(timezone.utc).timestamp() >= deadline:
                 transition_job_status(job, JobStatus.TIMED_OUT.value, reason="deadline_elapsed")
-                job["terminal_reason"] = "timed_out"
+                set_terminal_reason(job, JobTerminalReason.TIMED_OUT)
 
             job["report"] = {
                 "provider": isolated.provider,
@@ -1696,9 +1696,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["answer_contract"] = contract
                 if not job.get("terminal_reason"):
                     if contract.get("explicit_blockers") and not contract.get("verified"):
-                        job["terminal_reason"] = "completed_with_blockers"
+                        set_terminal_reason(job, JobTerminalReason.COMPLETED_WITH_BLOCKERS)
                     else:
-                        job["terminal_reason"] = "completed_satisfactory"
+                        set_terminal_reason(job, JobTerminalReason.COMPLETED_SATISFACTORY)
                 _emit_stream_event("status", status="completed")
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
@@ -1716,10 +1716,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             job["error"] = str(exc)
             if _cancelled():
                 transition_job_status(job, JobStatus.KILLED.value, reason="cancelled_during_exception")
-                job["terminal_reason"] = "killed"
+                set_terminal_reason(job, JobTerminalReason.KILLED)
             elif str(job.get("status") or "") not in {JobStatus.TIMED_OUT.value, JobStatus.KILLED.value}:
                 transition_job_status(job, JobStatus.FAILED.value, reason="exception")
-                job["terminal_reason"] = "failed_unrecoverable"
+                set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
             job["events"].append(f"status: failed ({exc})")
             _record_harness_counter(base_runtime, "failures")
             _emit_stream_event("error", error=str(exc))

@@ -787,7 +787,7 @@ class WebTests(unittest.TestCase):
         self.assertTrue(transitions)
         self.assertEqual('queued', transitions[0].get('from'))
         self.assertEqual('planning', transitions[0].get('to'))
-        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'failed_unrecoverable', 'killed'})
+        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'budget_exhausted', 'failed_unrecoverable', 'killed'})
 
         telemetry = client.get('/api/telemetry')
         self.assertEqual(200, telemetry.status_code)

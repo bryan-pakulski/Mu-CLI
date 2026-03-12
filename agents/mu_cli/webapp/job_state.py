@@ -19,6 +19,26 @@ class JobStatus(str, Enum):
 
 TERMINAL_STATUSES = {JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.TIMED_OUT.value, JobStatus.KILLED.value}
 
+class JobTerminalReason(str, Enum):
+    COMPLETED_SATISFACTORY = "completed_satisfactory"
+    COMPLETED_WITH_BLOCKERS = "completed_with_blockers"
+    TIMED_OUT = "timed_out"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    KILLED = "killed"
+    FAILED_UNRECOVERABLE = "failed_unrecoverable"
+
+
+TERMINAL_REASONS = {item.value for item in JobTerminalReason}
+
+
+def set_terminal_reason(job: dict[str, Any], reason: JobTerminalReason | str) -> str:
+    value = reason.value if isinstance(reason, JobTerminalReason) else str(reason)
+    if value not in TERMINAL_REASONS:
+        raise ValueError(f"invalid terminal reason: {value}")
+    job["terminal_reason"] = value
+    return value
+
+
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     JobStatus.QUEUED.value: {JobStatus.PLANNING.value, JobStatus.KILLED.value},
     JobStatus.PLANNING.value: {JobStatus.AWAITING_PLAN_APPROVAL.value, JobStatus.RUNNING.value, JobStatus.FAILED.value, JobStatus.KILLED.value},

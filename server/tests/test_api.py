@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -7,6 +8,7 @@ httpx = pytest.importorskip("httpx")
 ASGITransport = httpx.ASGITransport
 AsyncClient = httpx.AsyncClient
 create_app = __import__("server.app.main", fromlist=["create_app"]).create_app
+
 
 @pytest.mark.asyncio
 async def test_session_job_lifecycle_and_providers() -> None:
@@ -156,29 +158,35 @@ async def test_policy_approval_flow() -> None:
 
 
 @pytest.mark.asyncio
-async def test_workspace_index_and_skill_discovery_endpoints() -> None:
+async def test_workspace_index_and_skill_discovery_endpoints(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# Test Workspace\n")
+    (tmp_path / "app.py").write_text("print('hello')\n")
+    skill_dir = tmp_path / "demo-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# Demo Skill\n")
+
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         create_session = await client.post(
             "/sessions",
-            json={"workspace_path": "/workspace/tools", "mode": "interactive"},
+            json={"workspace_path": str(tmp_path), "mode": "interactive"},
         )
         assert create_session.status_code == 200
         session = create_session.json()
 
         build = await client.post(f"/sessions/{session['id']}/workspace/index")
         assert build.status_code == 200
-        assert build.json()["indexed_files"] >= 1
+        assert build.json()["indexed_files"] >= 2
 
         indexed = await client.get(f"/sessions/{session['id']}/workspace/index")
         assert indexed.status_code == 200
-        assert len(indexed.json()) >= 1
+        assert len(indexed.json()) >= 2
 
         refreshed = await client.post(f"/sessions/{session['id']}/workspace/index/refresh")
         assert refreshed.status_code == 200
-        assert refreshed.json()["indexed_files"] >= 1
+        assert refreshed.json()["indexed_files"] >= 2
         assert refreshed.json()["next_refresh_after_s"] >= 1
 
         skills = await client.get("/skills", params={"session_id": session["id"]})
         assert skills.status_code == 200
-        assert isinstance(skills.json(), list)
+        assert any(item["name"] == "demo-skill" for item in skills.json())

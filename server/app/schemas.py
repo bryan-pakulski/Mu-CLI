@@ -106,8 +106,18 @@ class WorkspaceIndexRead(BaseModel):
     description: str
     key_symbols: list
     tags: list
+    priority_score: int
 
 
 class WorkspaceIndexBuildResponse(BaseModel):
     session_id: str
     indexed_files: int
+
+
+class WorkspaceIndexRefreshResponse(BaseModel):
+    session_id: str
+    indexed_files: int
+    added: int
+    updated: int
+    removed: int
+    next_refresh_after_s: int

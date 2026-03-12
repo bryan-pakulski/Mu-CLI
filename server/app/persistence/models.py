@@ -116,4 +116,5 @@ class WorkspaceFileIndexModel(Base):
         JSON().with_variant(SQLITE_JSON, "sqlite"),
         default=list,
     )
+    priority_score: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

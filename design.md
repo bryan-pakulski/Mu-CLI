@@ -354,14 +354,14 @@ Status legend: `[ ]` not yet started, `[~]` in progress, `[x]` completed.
 **Exit criteria**
 - [x] Risky actions block for approval; audit trail complete.
 
-## [~] Phase 3.5 — Workspace Discovery and Codebase Indexing (pre-CLI)
+## [x] Phase 3.5 — Workspace Discovery and Codebase Indexing (pre-CLI)
 - [x] Implement workspace discovery/indexing engine with filepath-centric records.
 - [x] Generate lightweight file descriptions for rapid codebase orientation.
 - [x] Expose index build/query APIs for session workflows.
-- [ ] Add incremental refresh + scheduling + prioritization heuristics.
+- [x] Add incremental refresh + scheduling + prioritization heuristics.
 
 **Exit criteria**
-- [~] Agents can map a workspace quickly without full-file parsing.
+- [x] Agents can map a workspace quickly without full-file parsing.
 
 ## [ ] Phase 4 — CLI MVP (2–3 weeks)
 - [ ] Build CLI commands for session/job lifecycle.

@@ -172,6 +172,11 @@ async def test_workspace_index_and_skill_discovery_endpoints() -> None:
         assert indexed.status_code == 200
         assert len(indexed.json()) >= 1
 
+        refreshed = await client.post(f"/sessions/{session['id']}/workspace/index/refresh")
+        assert refreshed.status_code == 200
+        assert refreshed.json()["indexed_files"] >= 1
+        assert refreshed.json()["next_refresh_after_s"] >= 1
+
         skills = await client.get("/skills", params={"session_id": session["id"]})
         assert skills.status_code == 200
         assert isinstance(skills.json(), list)

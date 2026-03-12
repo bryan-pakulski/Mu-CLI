@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.app.core.config import settings
 from server.app.persistence.db import get_db
 from server.app.persistence.models import (
     ApprovalModel,
@@ -31,10 +32,11 @@ from server.app.schemas import (
     ToolRead,
     WorkspaceIndexBuildResponse,
     WorkspaceIndexRead,
+    WorkspaceIndexRefreshResponse,
 )
 from server.app.skills.registry import skill_registry
 from server.app.tools.registry import tool_registry
-from server.app.workspace.discovery import index_workspace, list_index
+from server.app.workspace.discovery import index_workspace, list_index, refresh_workspace_index
 
 router = APIRouter()
 
@@ -363,16 +365,49 @@ async def build_workspace_index(
     return WorkspaceIndexBuildResponse(session_id=session.id, indexed_files=count)
 
 
+@router.post(
+    "/sessions/{session_id}/workspace/index/refresh",
+    response_model=WorkspaceIndexRefreshResponse,
+)
+async def refresh_index(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceIndexRefreshResponse:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    stats = await refresh_workspace_index(
+        session_id=session.id,
+        workspace_path=session.workspace_path,
+        db=db,
+    )
+    await emit_event(
+        db,
+        session.id,
+        "workspace_index_refreshed",
+        stats,
+    )
+    return WorkspaceIndexRefreshResponse(
+        session_id=session.id,
+        next_refresh_after_s=settings.workspace_index_refresh_interval_s,
+        **stats,
+    )
+
+
 @router.get("/sessions/{session_id}/workspace/index", response_model=list[WorkspaceIndexRead])
 async def get_workspace_index(
     session_id: str,
+    file_type: str | None = None,
+    tag: str | None = None,
+    limit: int | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[WorkspaceIndexRead]:
     session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    rows = await list_index(session_id=session.id, db=db)
+    rows = await list_index(session_id=session.id, db=db, file_type=file_type, tag=tag, limit=limit)
     return [
         WorkspaceIndexRead(
             path=r.path,
@@ -383,6 +418,7 @@ async def get_workspace_index(
             description=r.description,
             key_symbols=r.key_symbols,
             tags=r.tags,
+            priority_score=r.priority_score,
         )
         for r in rows
     ]

@@ -173,9 +173,9 @@ function setSessionState(state) {
   });
 }
 
-function addSessionMessage(sessionId, role, content) {
+function addSessionMessage(sessionId, role, content, extras = {}) {
   const existing = sessionMessages.get(sessionId) || [];
-  existing.push({ role, content });
+  existing.push({ role, content, ...extras });
   sessionMessages.set(sessionId, existing);
 }
 
@@ -192,7 +192,24 @@ function renderChatForSession(sessionId) {
   messages.forEach((msg) => {
     const node = document.createElement("div");
     node.className = `message ${msg.role}`;
-    node.innerHTML = `<div class="tag">${msg.role}</div><div>${msg.content}</div>`;
+
+    if (msg.role === "thinking") {
+      const steps = Array.isArray(msg.steps) ? msg.steps : [];
+      const stepsMarkup = steps.map((step) => `<li>${step}</li>`).join("");
+      node.innerHTML = `
+        <div class="tag">thinking</div>
+        <details class="thinking-details" ${msg.expanded ? "open" : ""}>
+          <summary>
+            Model reasoning in progress
+            <span class="thinking-dots${msg.active ? " active" : ""}"><span>.</span><span>.</span><span>.</span></span>
+          </summary>
+          <ul class="thinking-steps">${stepsMarkup || "<li>Waiting for first step…</li>"}</ul>
+        </details>
+      `;
+    } else {
+      node.innerHTML = `<div class="tag">${msg.role}</div><div>${msg.content}</div>`;
+    }
+
     chatWindow.appendChild(node);
   });
   chatWindow.scrollTop = chatWindow.scrollHeight;
@@ -214,6 +231,38 @@ function updateAssistantDraft(text) {
   latestAssistantMessage.querySelector("div:last-child").textContent = text;
   const messages = sessionMessages.get(currentSession) || [];
   if (messages.length > 0) messages[messages.length - 1].content = text;
+}
+
+function startThinkingBubble(sessionId) {
+  if (!sessionId) return;
+  const messages = sessionMessages.get(sessionId) || [];
+  const activeIndex = messages.findIndex((m) => m.role === "thinking" && m.active);
+  if (activeIndex >= 0) return;
+  addSessionMessage(sessionId, "thinking", "", { active: true, expanded: false, steps: [] });
+  if (sessionId === currentSession) renderChatForSession(sessionId);
+}
+
+function appendThinkingStep(sessionId, step) {
+  if (!sessionId) return;
+  const messages = sessionMessages.get(sessionId) || [];
+  let active = messages.find((m) => m.role === "thinking" && m.active);
+  if (!active) {
+    startThinkingBubble(sessionId);
+    active = (sessionMessages.get(sessionId) || []).find((m) => m.role === "thinking" && m.active);
+  }
+  active.steps = active.steps || [];
+  active.steps.push(step);
+  if (sessionId === currentSession) renderChatForSession(sessionId);
+}
+
+function finishThinkingBubble(sessionId) {
+  if (!sessionId) return;
+  const messages = sessionMessages.get(sessionId) || [];
+  const active = messages.find((m) => m.role === "thinking" && m.active);
+  if (!active) return;
+  active.active = false;
+  active.expanded = false;
+  if (sessionId === currentSession) renderChatForSession(sessionId);
 }
 
 function isVisibleForFilter(eventType) {
@@ -452,20 +501,25 @@ function connectStream() {
     if (eventType === "job_state") {
       setSessionState(payload?.state || "idle");
       if (jobId) currentJob = jobId;
-      if (["queued", "running", "awaiting_approval"].includes(payload?.state)) setIndicator(sessionId, "dot-running");
+      if (["queued", "running", "awaiting_approval"].includes(payload?.state)) {
+        setIndicator(sessionId, "dot-running");
+        startThinkingBubble(sessionId);
+      }
       if (payload?.state === "completed") {
         setIndicator(sessionId, "dot-success");
         latestAssistantMessage = null;
+        finishThinkingBubble(sessionId);
       }
       if (["failed", "blocked", "cancelled"].includes(payload?.state)) {
         setIndicator(sessionId, "dot-error");
         latestAssistantMessage = null;
+        finishThinkingBubble(sessionId);
       }
     }
 
     if (eventType === "loop_step") {
-      const draft = `Thinking · step ${payload?.index + 1} (${payload?.label}) via ${payload?.provider}\n${payload?.output_preview || ""}`;
-      updateAssistantDraft(draft);
+      const step = `Step ${payload?.index + 1}: ${payload?.label} via ${payload?.provider}${payload?.output_preview ? ` — ${payload.output_preview}` : ""}`;
+      appendThinkingStep(sessionId, step);
     }
 
     if (eventType === "log" && payload?.message === "job completed") {
@@ -605,6 +659,7 @@ setOnClick("create-job", async () => {
   latestAssistantMessage = null;
   const job = await req(`/sessions/${currentSession}/jobs`, { method: "POST", body: JSON.stringify({ goal }) });
   currentJob = job.id;
+  startThinkingBubble(currentSession);
   setSessionState("running");
   setIndicator(currentSession, "dot-running");
   el("goal").value = "";

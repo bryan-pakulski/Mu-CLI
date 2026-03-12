@@ -73,8 +73,13 @@ async def test_session_job_lifecycle_and_providers() -> None:
         ]
         assert system_prompt_events
         stage_payload = system_prompt_events[-1].get("payload") or {}
-        assert (stage_payload.get("stage") or {}).get("label")
-        assert (stage_payload.get("stage") or {}).get("max_attempts") == 2
+        stage_meta = stage_payload.get("stage") or {}
+        assert stage_meta.get("label")
+        assert stage_meta.get("max_attempts") == 2
+        assert stage_meta.get("objective")
+        assert isinstance(stage_meta.get("success_criteria"), list)
+        assert stage_meta.get("success_criteria")
+        assert "stage_success_criteria" in (stage_payload.get("prompt") or "")
 
         model_response_events = [
             item for item in events_payload if item.get("event_type") == "model_response"

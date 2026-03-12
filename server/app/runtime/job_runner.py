@@ -251,7 +251,10 @@ class JobRunner:
                 last_provider = ""
                 max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
                 for stage_attempt in range(1, max_stage_turns + 1):
+                    stage_success = "\n".join([f"- {item}" for item in step.success_criteria])
                     prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
+                    prompt += "\n\nstage_objective:\n" + step.objective
+                    prompt += "\n\nstage_success_criteria:\n" + stage_success
                     prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
                     prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
                     if context_block:
@@ -265,6 +268,7 @@ class JobRunner:
                         f"- When this stage is complete, prefix your response with {STAGE_READY_PREFIX}{step.label}::\n"
                         f"- If not complete, prefix with {STAGE_NEEDS_MORE_PREFIX}{step.label}:: and explain what is missing.\n"
                         "- Do not omit this prefix."
+                        "\n- Use STAGE_NEEDS_MORE when criteria are not yet satisfied; do not use STAGE_READY prematurely."
                     )
                     prompt += f"\ncurrent_stage_attempt={stage_attempt}/{max_stage_turns}"
                     if stage_feedback:
@@ -273,6 +277,8 @@ class JobRunner:
                     stage_meta = {
                         "index": step.index,
                         "label": step.label,
+                        "objective": step.objective,
+                        "success_criteria": step.success_criteria,
                         "attempt": stage_attempt,
                         "max_attempts": max_stage_turns,
                         "status": "in_progress",
@@ -358,6 +364,8 @@ class JobRunner:
                     stage_feedback = (
                         f"Previous model output did not confirm completion for stage '{step.label}'. "
                         f"Expected prefix: {STAGE_READY_PREFIX}{step.label}::\n"
+                        f"Stage objective: {step.objective}\n"
+                        f"Stage success criteria: {'; '.join(step.success_criteria)}\n"
                         f"Received signal: {signal}\n"
                         f"Previous output:\n{result.output}"
                     )

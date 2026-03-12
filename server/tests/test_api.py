@@ -97,6 +97,10 @@ async def test_system_prompt_includes_recent_conversation_context() -> None:
         assert "conversation_context" in prompt_text
         assert "first context message" in prompt_text
         assert "second context message" in prompt_text
+        assert "available_tools_by_name_and_usage" in prompt_text
+        assert "read_file: Read file contents from the workspace" in prompt_text
+        assert "constraints.tool_name=read_file" in prompt_text
+        assert "available_skills_by_name_and_usage" in prompt_text
 
 
 @pytest.mark.asyncio

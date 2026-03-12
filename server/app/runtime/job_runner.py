@@ -17,6 +17,7 @@ from server.app.policies.engine import policy_engine
 from server.app.providers.router import provider_router, resolve_ordered_providers
 from server.app.runtime.agent_loop import LoopStep, run_agent_loop
 from server.app.runtime.orchestrator import emit_event, update_job_state
+from server.app.skills.registry import skill_registry
 from server.app.tools.registry import tool_registry
 
 
@@ -198,13 +199,34 @@ class JobRunner:
                 ]
                 context_block = "\n".join(context_lines).strip()
 
+                all_tools = tool_registry.list_tools()
+                all_skills = skill_registry.discover(session.workspace_path)
+                tool_reference_lines = []
+                for tool in all_tools:
+                    approval = "requires approval" if tool.requires_approval else "no approval"
+                    tool_reference_lines.append(
+                        f"- {tool.name}: {tool.description}. Use when this capability is needed. "
+                        f"Call by setting constraints.tool_name={tool.name}. Risk={tool.risk_level}, {approval}."
+                    )
+                skill_reference_lines = []
+                for skill in all_skills:
+                    skill_reference_lines.append(
+                        f"- {skill.name}: {skill.description}. Use for specialized workflow instructions. "
+                        f"Call by explicitly referencing skill '{skill.name}' in your plan/tooling rationale."
+                    )
+
+                tools_reference_block = "\n".join(tool_reference_lines)
+                skills_reference_block = "\n".join(skill_reference_lines) if skill_reference_lines else "- none"
+
                 prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
+                prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
+                prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
                 if context_block:
-                    prompt += f"\nconversation_context:\n{context_block}"
+                    prompt += f"\n\nconversation_context:\n{context_block}"
                 if isinstance(system_prompt_override, str) and system_prompt_override.strip():
-                    prompt += f"\nsystem_prompt_override={system_prompt_override.strip()}"
+                    prompt += f"\n\nsystem_prompt_override={system_prompt_override.strip()}"
                 if isinstance(rules_checklist, str) and rules_checklist.strip():
-                    prompt += f"\nrules_checklist={rules_checklist.strip()}"
+                    prompt += f"\n\nrules_checklist={rules_checklist.strip()}"
 
                 await emit_event(
                     db,
@@ -219,6 +241,14 @@ class JobRunner:
                         "selected_model": selected_model,
                         "enabled_skills": enabled_skills if isinstance(enabled_skills, list) else [],
                         "enabled_tools": enabled_tools if isinstance(enabled_tools, list) else [],
+                        "available_tools": [
+                            {"name": t.name, "description": t.description}
+                            for t in all_tools
+                        ],
+                        "available_skills": [
+                            {"name": s.name, "description": s.description}
+                            for s in all_skills
+                        ],
                         "context_messages_count": len(context_messages),
                         "context_messages_window": history_window,
                         "system_prompt_override": system_prompt_override if isinstance(system_prompt_override, str) else "",

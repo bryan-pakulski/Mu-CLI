@@ -423,6 +423,17 @@ async def list_providers() -> list[ProviderRead]:
     ]
 
 
+
+
+@router.get("/providers/{provider_name}/models", response_model=list[str])
+async def list_provider_models(provider_name: str) -> list[str]:
+    try:
+        provider = provider_registry.get(provider_name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Provider not found") from None
+    return await provider.list_models()
+
+
 @router.get("/tools", response_model=list[ToolRead])
 async def list_tools() -> list[ToolRead]:
     return [

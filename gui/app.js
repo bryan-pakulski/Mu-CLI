@@ -35,6 +35,21 @@ function fillSelect(selectId, values, selected) {
   });
 }
 
+async function loadModelsForProvider(providerName, selectId, selectedModel = null) {
+  if (!providerName) {
+    fillSelect(selectId, ["default"], "default");
+    return;
+  }
+  try {
+    const models = await req(`/providers/${providerName}/models`);
+    const all = models.length > 0 ? models : ["default"];
+    const selected = selectedModel && all.includes(selectedModel) ? selectedModel : all[0];
+    fillSelect(selectId, all, selected);
+  } catch {
+    fillSelect(selectId, ["default"], "default");
+  }
+}
+
 async function populateRuntimeOptions() {
   const providers = await req("/providers");
   const providerNames = providers.map((p) => p.name);
@@ -44,6 +59,16 @@ async function populateRuntimeOptions() {
   const policyProfiles = await req("/policy-profiles");
   fillSelect("policy", policyProfiles, policyProfiles[0]);
   fillSelect("modal-policy", policyProfiles, policyProfiles[0]);
+
+  await loadModelsForProvider(providerNames[0], "model");
+  await loadModelsForProvider(providerNames[0], "modal-model");
+
+  el("providers").addEventListener("change", (event) => {
+    loadModelsForProvider(event.target.value, "model").catch(() => null);
+  });
+  el("modal-providers").addEventListener("change", (event) => {
+    loadModelsForProvider(event.target.value, "modal-model").catch(() => null);
+  });
 }
 
 function clamp(n, min, max) {
@@ -166,7 +191,7 @@ function setIndicator(sessionId, state) {
 
 function providerHintForError(rawError = "") {
   if (!rawError.includes("/api/generate") || !rawError.includes("404")) return null;
-  return "Provider call failed (404 from Ollama generate endpoint). Check Ollama availability/config for http://localhost:11434/api/generate.";
+  return "Provider call failed (404 from Ollama generate endpoint). Check selected model and Ollama availability/config for http://localhost:11434/api/generate.";
 }
 
 function updateSessionSummary(session) {
@@ -178,11 +203,13 @@ function updateSessionSummary(session) {
   }
 
   const provider = session.provider_preferences?.ordered?.[0] || "ollama";
-  el("session-summary").textContent = `mode=${session.mode} | policy=${session.policy_profile} | provider=${provider}`;
+  const model = session.provider_preferences?.model || "default";
+  el("session-summary").textContent = `mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
-  el("active-model").textContent = `provider: ${provider}`;
+  loadModelsForProvider(provider, "model", model).catch(() => null);
+  el("active-model").textContent = `provider: ${provider} · model: ${model}`;
   setSessionState(session.status || "idle");
 }
 
@@ -191,21 +218,29 @@ function closeAnySessionMenu() {
   openMenuForSession = null;
 }
 
-function openSessionSettings(sessionId) {
+async function openSessionSettings(sessionId) {
   closeAnySessionMenu();
   const session = sessionsCache.find((s) => s.id === sessionId);
   if (!session) return;
 
   currentSettingsSessionId = sessionId;
+  const provider = session.provider_preferences?.ordered?.[0] || "ollama";
+  const model = session.provider_preferences?.model || null;
+  el("modal-providers").value = provider;
+  await loadModelsForProvider(provider, "modal-model", model);
   el("modal-mode").value = session.mode || "interactive";
   el("modal-policy").value = session.policy_profile || "default";
-  el("modal-providers").value = session.provider_preferences?.ordered?.[0] || "ollama";
   el("session-settings-modal").classList.remove("hidden");
 }
 
-function createSessionMenu(session) {
+function showSessionMenu(anchorButton, session) {
+  closeAnySessionMenu();
+  const rect = anchorButton.getBoundingClientRect();
   const menu = document.createElement("div");
   menu.className = "session-menu";
+  menu.style.position = "fixed";
+  menu.style.top = `${rect.bottom + 6}px`;
+  menu.style.left = `${Math.max(8, rect.right - 140)}px`;
 
   const settingsBtn = document.createElement("button");
   settingsBtn.textContent = "Settings";
@@ -236,7 +271,8 @@ function createSessionMenu(session) {
   };
 
   menu.append(settingsBtn, clearBtn, deleteBtn);
-  return menu;
+  document.body.appendChild(menu);
+  openMenuForSession = session.id;
 }
 
 async function buildSessionIndicator(sessionId) {
@@ -281,9 +317,7 @@ function renderSessionList() {
     menuBtn.onclick = (event) => {
       event.stopPropagation();
       if (openMenuForSession === s.id) return closeAnySessionMenu();
-      closeAnySessionMenu();
-      li.appendChild(createSessionMenu(s));
-      openMenuForSession = s.id;
+      showSessionMenu(menuBtn, s);
     };
 
     li.append(dot, main, menuBtn);
@@ -385,7 +419,15 @@ async function refreshApprovals() {
 
 el("create-session").onclick = async () => {
   const workspace_path = el("workspace").value;
-  const created = await req("/sessions", { method: "POST", body: JSON.stringify({ workspace_path, mode: "interactive" }) });
+  const created = await req("/sessions", {
+    method: "POST",
+    body: JSON.stringify({
+      workspace_path,
+      mode: el("mode").value,
+      policy_profile: el("policy").value,
+      provider_preferences: { ordered: [el("providers").value], model: el("model").value },
+    }),
+  });
   currentSession = created.id;
   currentJob = null;
   pushChat("system", `Session created: ${created.id}`);
@@ -454,12 +496,13 @@ el("goal").addEventListener("keydown", (event) => {
 
 el("save-config").onclick = async () => {
   if (!currentSession) return;
-  const mode = el("mode").value;
-  const policy_profile = el("policy").value;
-  const provider = el("providers").value;
   const updated = await req(`/sessions/${currentSession}`, {
     method: "PATCH",
-    body: JSON.stringify({ mode, policy_profile, provider_preferences: { ordered: [provider] } }),
+    body: JSON.stringify({
+      mode: el("mode").value,
+      policy_profile: el("policy").value,
+      provider_preferences: { ordered: [el("providers").value], model: el("model").value },
+    }),
   });
   updateSessionSummary(updated);
   await refreshSessions();
@@ -481,7 +524,7 @@ el("modal-save").onclick = async () => {
     body: JSON.stringify({
       mode: el("modal-mode").value,
       policy_profile: el("modal-policy").value,
-      provider_preferences: { ordered: [el("modal-providers").value] },
+      provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value },
     }),
   });
   closeSettingsModal();

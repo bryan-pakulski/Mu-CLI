@@ -43,3 +43,14 @@ class OllamaAdapter(ProviderAdapter):
             return response.status_code == 200
         except httpx.HTTPError:
             return False
+
+
+    async def list_models(self) -> list[str]:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{settings.ollama_base_url}/api/tags")
+                response.raise_for_status()
+            models = [item.get("name") for item in response.json().get("models", []) if item.get("name")]
+            return models
+        except httpx.HTTPError:
+            return []

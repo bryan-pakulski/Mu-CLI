@@ -27,6 +27,10 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert "ollama" in provider_names
         assert "mock" in provider_names
 
+        provider_models = await client.get("/providers/mock/models")
+        assert provider_models.status_code == 200
+        assert "mock-default" in provider_models.json()
+
         policies = await client.get("/policy-profiles")
         assert policies.status_code == 200
         assert "default" in policies.json()

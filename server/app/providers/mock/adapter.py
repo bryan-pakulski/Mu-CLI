@@ -18,3 +18,7 @@ class MockAdapter(ProviderAdapter):
 
     async def health_check(self) -> bool:
         return True
+
+
+    async def list_models(self) -> list[str]:
+        return ["mock-default"]

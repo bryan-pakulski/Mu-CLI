@@ -151,14 +151,16 @@ class JobRunner:
                 job_id=job.id,
             )
 
-            ordered_providers = resolve_ordered_providers(session.provider_preferences)
+            provider_preferences = session.provider_preferences or {}
+            ordered_providers = resolve_ordered_providers(provider_preferences)
+            selected_model = provider_preferences.get("model")
 
             async def emit_step(step: LoopStep) -> None:
                 prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}"
                 result = await provider_router.generate_with_fallback(
                     prompt=prompt,
                     ordered_providers=ordered_providers,
-                    model=None,
+                    model=selected_model,
                     max_retries=settings.provider_max_retries,
                 )
 
@@ -168,6 +170,7 @@ class JobRunner:
                     "mode": session.mode,
                     "attempts": attempts,
                     "provider": last_provider,
+                    "model": selected_model,
                 }
                 await db.commit()
                 await emit_event(
@@ -179,6 +182,7 @@ class JobRunner:
                         "label": step.label,
                         "mode": session.mode,
                         "provider": last_provider,
+                        "model": selected_model,
                         "output_preview": result.output[:180],
                     },
                     job_id=job.id,
@@ -223,6 +227,7 @@ class JobRunner:
                     "steps": result["steps_executed"],
                     "attempts": attempts,
                     "provider": (job.checkpoints or {}).get("provider"),
+                    "model": (job.checkpoints or {}).get("model"),
                 }
                 await db.commit()
                 await update_job_state(db, job_id, JobState.completed)

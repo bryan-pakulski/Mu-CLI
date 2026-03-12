@@ -19,3 +19,8 @@ class ProviderAdapter(ABC):
     @abstractmethod
     async def health_check(self) -> bool:
         raise NotImplementedError
+
+
+    @abstractmethod
+    async def list_models(self) -> list[str]:
+        raise NotImplementedError

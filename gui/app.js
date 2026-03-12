@@ -33,6 +33,27 @@ function formatLocalTimestamp(value = null) {
   return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}.${dt.getFullYear()} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
 }
 
+
+
+function applyTheme(theme) {
+  document.body.dataset.theme = theme;
+  const toggle = el("theme-toggle");
+  if (toggle) toggle.textContent = theme === "dark" ? "☀" : "☾";
+}
+
+function initTheme() {
+  const stored = localStorage.getItem("mucli-theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const theme = stored || (prefersDark ? "dark" : "light");
+  applyTheme(theme);
+}
+
+function toggleTheme() {
+  const next = document.body.dataset.theme === "dark" ? "light" : "dark";
+  localStorage.setItem("mucli-theme", next);
+  applyTheme(next);
+}
+
 function getSessionLimits(session) {
   const maxTimeout = Number(session?.context_state?.max_timeout_s || 300);
   const maxContext = Number(session?.context_state?.max_context_messages || 40);
@@ -837,6 +858,7 @@ if (goalInput) goalInput.addEventListener("keydown", (event) => {
 setOnClick("refresh-approvals", refreshApprovals);
 setOnClick("toggle-left", () => togglePanel("left"));
 setOnClick("toggle-right", () => togglePanel("right"));
+setOnClick("theme-toggle", toggleTheme);
 applyPanelLayout();
 
 setOnClick("modal-cancel", closeSettingsModal);
@@ -919,6 +941,7 @@ document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
   });
 });
 
+initTheme();
 populateRuntimeOptions().then(refreshSessions).then(refreshApprovals).catch(console.error);
 setInterval(() => {
   refreshApprovals().catch(() => null);

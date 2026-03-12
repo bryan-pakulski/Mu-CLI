@@ -6,5 +6,5 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-os.environ.setdefault("MUCLI_TEST_MODE", "true")
+os.environ["MUCLI_TEST_MODE"] = "true"
 

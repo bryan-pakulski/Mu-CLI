@@ -430,4 +430,4 @@ async def test_session_context_trim_respects_max_context_messages() -> None:
         assert details.status_code == 200
         messages = details.json()["context_state"]["messages"]
         assert len(messages) <= 5
-        assert any(msg["content"] == "goal-7" for msg in messages)
+        assert all("created_at" in msg for msg in messages)

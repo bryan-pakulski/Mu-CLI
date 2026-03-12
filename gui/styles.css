@@ -176,25 +176,8 @@ textarea { resize: vertical; min-height: 62px; }
 .message.assistant { align-self: flex-start; background: var(--assistant); }
 .message.user { align-self: flex-end; background: var(--user); }
 .message.system, .message.control { align-self: center; background: #f3f4f6; }
+.thinking-indicator { align-self: flex-start; padding: 4px 10px; }
 
-.message.thinking {
-  align-self: flex-start;
-  background: #fff7ed;
-}
-.thinking-details summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: #7c2d12;
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-.thinking-steps {
-  margin: 8px 0 0 16px;
-  padding: 0;
-  color: #9a3412;
-}
-.thinking-steps li { margin: 4px 0; }
 .thinking-dots { display: inline-flex; min-width: 18px; }
 .thinking-dots span { opacity: 0.2; }
 .thinking-dots.active span:nth-child(1) { animation: thinkingDots 1.2s infinite 0s; }

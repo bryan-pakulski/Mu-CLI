@@ -905,6 +905,33 @@ class WebTests(unittest.TestCase):
         self.assertTrue(any('iteration_cap_reached' in str(event) or 'stall_retry_limit_reached' in str(event) or 'unsatisfactory_answer_limit_reached' in str(event) for event in events))
         self.assertLessEqual(int(job.get('iterations') or 0), 8)
 
+
+    def test_background_job_emits_context_checkpoint_when_condense_enabled(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'approval_mode': 'auto', 'max_runtime_seconds': 60, 'condense_enabled': True, 'condense_window': 6})
+        res = client.post('/api/chat/background', json={'text': 'run iterative checklist and keep going'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 8
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            events = job.get('events') or []
+            if any('context_checkpoint:' in str(line) for line in events) or job.get('status') in {'completed', 'failed', 'timed_out', 'killed'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertTrue(any('context_checkpoint:' in str(line) for line in (job.get('events') or [])))
+
     def test_background_job_nudges_until_satisfactory_contract(self) -> None:
         from mu_cli.web import create_app
 

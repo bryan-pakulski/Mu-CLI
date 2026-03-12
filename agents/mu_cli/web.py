@@ -1619,6 +1619,22 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if len(job["checkpoints"]) > 30:
                     job["checkpoints"] = job["checkpoints"][-30:]
 
+                checkpoint_every = max(2, min(8, int(isolated.condense_window or 12) // 3 or 4))
+                if bool(isolated.condense_enabled) and int(job["iterations"]) % checkpoint_every == 0:
+                    condense_result = _condense_session_context(isolated, window_size=isolated.condense_window)
+                    if isinstance(condense_result, dict) and condense_result.get("ok"):
+                        checkpoint_meta = {
+                            "iteration": int(job["iterations"]),
+                            "summary_index_size": len(isolated.summary_index),
+                            "window": int(isolated.condense_window or 12),
+                            "unchanged": bool(condense_result.get("unchanged", False)),
+                        }
+                        job["events"].append(
+                            f"context_checkpoint: iteration={checkpoint_meta['iteration']} summaries={checkpoint_meta['summary_index_size']} unchanged={checkpoint_meta['unchanged']}"
+                        )
+                        _emit_stream_event("context_checkpoint", checkpoint=checkpoint_meta)
+                        _persist(isolated)
+
                 if not (reply.content or "").strip():
                     retry_counts["parser"] = int(retry_counts.get("parser", 0)) + 1
                     job["events"].append(f"retry: parser #{retry_counts['parser']}")

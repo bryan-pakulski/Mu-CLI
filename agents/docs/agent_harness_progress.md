@@ -49,3 +49,4 @@ Phase 0 is now functionally complete from a backend/runtime perspective (state l
 
 - ContextAssembler baseline introduced (`mu_cli/context_assembler.py`) with pinned/active/archived memory tiers.
 - Planning/approval stream status visibility expanded with frequent status events and shorter stream heartbeats.
+- Automatic context checkpoints now condense session state during long background runs and emit stream/events metadata.

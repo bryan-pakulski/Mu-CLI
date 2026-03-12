@@ -29,6 +29,18 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertLessEqual(len(result.text), 900)
         self.assertLessEqual(result.stats.get("actual_chars", 0), 900)
 
+    def test_importance_ranking_prioritizes_tool_results_and_signals(self) -> None:
+        messages = [
+            Message(role=Role.USER, content="small prompt", metadata={}),
+            Message(role=Role.ASSISTANT, content="working", metadata={}),
+            Message(role=Role.TOOL_RESULT, content="[error] tests failed for auth path", metadata={}),
+            Message(role=Role.USER, content="another request", metadata={}),
+        ]
+        result = assemble_context_block(messages, [], max_chars=1600)
+        self.assertIn("importance-ranked", result.text)
+        self.assertIn("tool_result", result.text)
+        self.assertEqual(1, result.stats.get("importance_ranked"))
+
 
 if __name__ == "__main__":
     unittest.main()

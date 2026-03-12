@@ -3,65 +3,95 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mu-CLI GUI MVP</title>
+    <title>Mu-CLI Operate Console</title>
     <link rel="stylesheet" href="/gui/assets/styles.css" />
   </head>
   <body>
-    <header>
-      <h1>Mu-CLI Dashboard</h1>
-      <p>Phase 5 GUI MVP</p>
-    </header>
+    <div class="app-shell">
+      <aside class="panel left">
+        <div class="panel-title">Navigate & Scope</div>
 
-    <main>
-      <section class="card">
-        <h2>Session</h2>
-        <div class="row">
-          <input id="workspace" placeholder="Workspace path" value="/tmp/work" />
-          <button id="create-session">Create Session</button>
-        </div>
-        <div class="row">
-          <select id="session-select"></select>
-          <button id="refresh-sessions">Refresh</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Job lifecycle + interventions</h2>
-        <div class="row">
-          <input id="goal" placeholder="Job goal" />
-          <button id="create-job">Start Job</button>
-          <button id="cancel-job">Cancel</button>
-          <button id="resume-job">Resume</button>
-        </div>
-        <pre id="job-state"></pre>
-      </section>
-
-      <section class="card">
-        <h2>Timeline</h2>
-        <ul id="timeline"></ul>
-      </section>
-
-      <section class="card">
-        <h2>Approvals</h2>
-        <button id="refresh-approvals">Refresh pending</button>
-        <ul id="approvals"></ul>
-      </section>
-
-      <section class="card">
-        <h2>Provider/Policy Configuration</h2>
-        <div class="row">
+        <section class="block">
+          <h3>Runtime</h3>
+          <label>Provider</label>
           <input id="providers" value="ollama" />
+          <label>Mode</label>
           <select id="mode">
             <option value="interactive">interactive</option>
             <option value="research">research</option>
             <option value="debugging">debugging</option>
             <option value="yolo">yolo</option>
           </select>
+          <label>Policy profile</label>
           <input id="policy" value="default" />
-          <button id="save-config">Save Config</button>
-        </div>
-      </section>
-    </main>
+          <button id="save-config" class="btn primary">Apply runtime config</button>
+        </section>
+
+        <section class="block">
+          <h3>Workspace & Session</h3>
+          <label>Workspace path</label>
+          <input id="workspace" value="/tmp/work" />
+          <div class="row">
+            <button id="create-session" class="btn">New session</button>
+            <button id="refresh-sessions" class="btn">Refresh</button>
+          </div>
+          <label>Sessions</label>
+          <select id="session-select"></select>
+          <div id="session-summary" class="muted">No session selected.</div>
+        </section>
+
+        <section class="block">
+          <h3>Interventions</h3>
+          <div class="row">
+            <button id="cancel-job" class="btn warn">Cancel job</button>
+            <button id="resume-job" class="btn">Resume job</button>
+          </div>
+        </section>
+      </aside>
+
+      <main class="panel center">
+        <header class="topbar">
+          <div class="brand">mu_cli</div>
+          <nav>
+            <span class="pill active">Operate</span>
+            <span class="pill">Control</span>
+            <span class="pill">Review</span>
+            <span class="pill">Settings</span>
+          </nav>
+        </header>
+
+        <section class="chat-window" id="chat-window"></section>
+
+        <section class="composer">
+          <input id="goal" placeholder="Ask anything / define a job goal..." />
+          <div class="row">
+            <button id="create-job" class="btn primary">Send</button>
+            <button id="refresh-approvals" class="btn">Refresh approvals</button>
+          </div>
+          <pre id="job-state"></pre>
+        </section>
+      </main>
+
+      <aside class="panel right">
+        <div class="panel-title">Inspect</div>
+
+        <section class="block">
+          <h3>Run metadata</h3>
+          <div class="meta-filters">
+            <button class="chip active">All</button>
+            <button class="chip">Model</button>
+            <button class="chip">Tool</button>
+            <button class="chip">Status</button>
+          </div>
+          <ul id="timeline" class="meta-list"></ul>
+        </section>
+
+        <section class="block">
+          <h3>Pending approvals</h3>
+          <ul id="approvals" class="meta-list"></ul>
+        </section>
+      </aside>
+    </div>
 
     <script src="/gui/assets/app.js"></script>
   </body>

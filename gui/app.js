@@ -5,6 +5,11 @@ let streamSocket = null;
 let selectedFilter = "all";
 let latestAssistantMessage = null;
 
+const panelState = {
+  left: { collapsed: false, width: 320, min: 220, max: 560 },
+  right: { collapsed: false, width: 420, min: 280, max: 720 },
+};
+
 const el = (id) => document.getElementById(id);
 
 async function req(path, options = {}) {
@@ -16,6 +21,59 @@ async function req(path, options = {}) {
     throw new Error(await res.text());
   }
   return res.json();
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function applyPanelLayout() {
+  const shell = el("app-shell");
+  shell.style.setProperty("--left-size", panelState.left.collapsed ? "0px" : `${panelState.left.width}px`);
+  shell.style.setProperty("--right-size", panelState.right.collapsed ? "0px" : `${panelState.right.width}px`);
+  shell.classList.toggle("left-collapsed", panelState.left.collapsed);
+  shell.classList.toggle("right-collapsed", panelState.right.collapsed);
+}
+
+function togglePanel(side) {
+  panelState[side].collapsed = !panelState[side].collapsed;
+  applyPanelLayout();
+}
+
+function setupResizer(resizerId, side) {
+  const resizer = el(resizerId);
+  const shell = el("app-shell");
+
+  resizer.addEventListener("pointerdown", (event) => {
+    if (panelState[side].collapsed) {
+      panelState[side].collapsed = false;
+      applyPanelLayout();
+    }
+
+    const shellRect = shell.getBoundingClientRect();
+    resizer.classList.add("dragging");
+    resizer.setPointerCapture(event.pointerId);
+
+    const onMove = (moveEvent) => {
+      if (side === "left") {
+        panelState.left.width = clamp(moveEvent.clientX - shellRect.left, panelState.left.min, panelState.left.max);
+      } else {
+        panelState.right.width = clamp(shellRect.right - moveEvent.clientX, panelState.right.min, panelState.right.max);
+      }
+      applyPanelLayout();
+    };
+
+    const onStop = () => {
+      resizer.classList.remove("dragging");
+      resizer.removeEventListener("pointermove", onMove);
+      resizer.removeEventListener("pointerup", onStop);
+      resizer.removeEventListener("pointercancel", onStop);
+    };
+
+    resizer.addEventListener("pointermove", onMove);
+    resizer.addEventListener("pointerup", onStop);
+    resizer.addEventListener("pointercancel", onStop);
+  });
 }
 
 function setSessionState(state) {
@@ -292,6 +350,12 @@ el("clear-chat").onclick = () => {
 el("condense-chat").onclick = () => {
   pushChat("system", "Condense requested (UI placeholder). Hook this to a backend summarization endpoint.");
 };
+
+el("toggle-left").onclick = () => togglePanel("left");
+el("toggle-right").onclick = () => togglePanel("right");
+setupResizer("left-resizer", "left");
+setupResizer("right-resizer", "right");
+applyPanelLayout();
 
 document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
   chip.addEventListener("click", () => {

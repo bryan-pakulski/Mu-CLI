@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/gui/assets/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" id="app-shell">
       <aside class="panel left">
         <div class="panel-title">Control panel</div>
 
@@ -58,13 +58,25 @@
         </section>
       </aside>
 
+      <button
+        id="left-resizer"
+        class="resizer resizer-left"
+        type="button"
+        aria-label="Resize left panel"
+        title="Drag to resize"
+      ></button>
+
       <main class="panel center">
         <header class="chat-header">
           <div class="brand-wrap">
+            <button id="toggle-left" class="icon-btn" type="button" aria-label="Toggle left panel">☰</button>
             <div class="brand">mu_cli</div>
             <span id="active-model" class="pill">provider: ollama</span>
           </div>
-          <div id="active-status" class="state-pill idle">idle</div>
+          <div class="header-actions">
+            <div id="active-status" class="state-pill idle">idle</div>
+            <button id="toggle-right" class="icon-btn" type="button" aria-label="Toggle right panel">☷</button>
+          </div>
         </header>
 
         <section class="chat-window" id="chat-window">
@@ -79,6 +91,14 @@
           </div>
         </section>
       </main>
+
+      <button
+        id="right-resizer"
+        class="resizer resizer-right"
+        type="button"
+        aria-label="Resize right panel"
+        title="Drag to resize"
+      ></button>
 
       <aside class="panel right">
         <div class="panel-title">Session metadata</div>

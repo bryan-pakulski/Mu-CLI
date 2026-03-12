@@ -77,25 +77,11 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function applySyntaxHighlight(code, language) {
-  let html = escapeHtml(code);
-  const lang = (language || "").toLowerCase();
-
-  const highlight = (pattern, cls) => {
-    html = html.replace(pattern, `<span class="${cls}">$1</span>`);
-  };
-
-  highlight(/(\/\/.*?$)/gm, "tok-comment");
-  highlight(/(#.*?$)/gm, "tok-comment");
-  highlight(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, "tok-string");
-  highlight(/\b(\d+(?:\.\d+)?)\b/g, "tok-number");
-
-  if (["js", "javascript", "ts", "typescript", "py", "python", "json", "bash", "sh"].includes(lang)) {
-    highlight(/\b(const|let|var|function|return|if|else|for|while|class|import|from|export|async|await|try|catch|def|lambda|True|False|None|null|new|in|and|or|not)\b/g, "tok-keyword");
-    highlight(/([=+\-*/%<>!&|]+)/g, "tok-operator");
-  }
-
-  return html;
+function highlightCodeBlocks(container) {
+  if (!container || !window.hljs) return;
+  container.querySelectorAll("pre.md-code-block code").forEach((node) => {
+    window.hljs.highlightElement(node);
+  });
 }
 
 function renderInlineMarkdown(text) {
@@ -116,8 +102,7 @@ function renderMarkdown(value) {
       const firstBreak = segment.indexOf("\n");
       const language = firstBreak === -1 ? "" : segment.slice(0, firstBreak).trim();
       const code = firstBreak === -1 ? segment : segment.slice(firstBreak + 1);
-      const highlighted = applySyntaxHighlight(code, language);
-      html += `<pre class="md-code-block"><button class="code-copy-btn" type="button" data-code="${escapeHtml(code)}">Copy</button><code class="language-${escapeHtml(language || "plain")}">${highlighted}</code></pre>`;
+      html += `<pre class="md-code-block"><button class="code-copy-btn" type="button" data-code="${escapeHtml(code)}">Copy</button><code class="language-${escapeHtml(language || "plaintext")}">${escapeHtml(code)}</code></pre>`;
       return;
     }
 
@@ -141,6 +126,10 @@ function formatLocalTimestamp(value = null) {
 
 function applyTheme(theme) {
   document.body.dataset.theme = theme;
+  const darkTheme = el("hljs-theme-dark");
+  const lightTheme = el("hljs-theme-light");
+  if (darkTheme) darkTheme.disabled = theme !== "dark";
+  if (lightTheme) lightTheme.disabled = theme === "dark";
   const toggle = el("theme-toggle");
   if (toggle) toggle.textContent = theme === "dark" ? "☀" : "☾";
 }
@@ -384,6 +373,8 @@ function renderChatForSession(sessionId) {
     chatWindow.appendChild(node);
   });
 
+  highlightCodeBlocks(chatWindow);
+
   if (thinkingStatus.get(sessionId)) {
     const indicator = document.createElement("div");
     indicator.className = "thinking-indicator";
@@ -410,7 +401,10 @@ function updateAssistantDraft(text, sessionId = currentSession) {
     return;
   }
   const contentNode = latestAssistantMessage.querySelector(".message-content");
-  if (contentNode) contentNode.innerHTML = renderMarkdown(text);
+  if (contentNode) {
+    contentNode.innerHTML = renderMarkdown(text);
+    highlightCodeBlocks(contentNode);
+  }
   const messages = sessionMessages.get(sessionId) || [];
   if (messages.length > 0) messages[messages.length - 1].content = text;
 }

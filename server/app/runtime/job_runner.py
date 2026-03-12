@@ -28,8 +28,8 @@ DEFAULT_MAX_STAGE_TURNS = 3
 
 def _extract_stage_signal(output: str, expected_stage: str) -> tuple[bool, str, str]:
     text = (output or "").strip()
-    ready_pattern = re.compile(r"^STAGE_READY::([^:]+)::\\s*(.*)$", re.IGNORECASE | re.DOTALL)
-    needs_more_pattern = re.compile(r"^STAGE_NEEDS_MORE::([^:]+)::\\s*(.*)$", re.IGNORECASE | re.DOTALL)
+    ready_pattern = re.compile(r"^\s*STAGE_READY::([^:]+)::\s*(.*)$", re.IGNORECASE | re.DOTALL)
+    needs_more_pattern = re.compile(r"^\s*STAGE_NEEDS_MORE::([^:]+)::\s*(.*)$", re.IGNORECASE | re.DOTALL)
 
     ready_match = ready_pattern.match(text)
     if ready_match:

@@ -283,20 +283,20 @@ Status legend: `[ ]` not yet started, `[~]` in progress, `[x]` completed.
 - [x] Architecture decision record complete.
 - [x] Baseline server boots with health endpoint.
 
-## [~] Phase 1 — Core Server Runtime (2–4 weeks)
+## [x] Phase 1 — Core Server Runtime (2–4 weeks)
 - [x] Build sessions/jobs persistence and baseline lifecycle.
 - [x] Implement agent loop engine with pluggable modes.
 - [x] Implement event stream and job state transitions.
-- [~] Harden end-to-end runtime behavior (idempotency, retries, failure handling).
+- [x] Harden end-to-end runtime behavior (idempotency, retries, failure handling).
 
 **Exit criteria**
-- [~] Run/resume/cancel job flow works end-to-end locally.
+- [x] Run/resume/cancel job flow works end-to-end locally.
 
 ## [~] Phase 2 — Ollama First-Class + Provider Layer (2–3 weeks)
 - [x] Implement initial Ollama adapter with generate/stream/health.
 - [x] Add generic provider interface.
-- [ ] Add second provider adapter (for validation).
-- [ ] Add provider fallback routing.
+- [x] Add second provider adapter (for validation).
+- [x] Add provider fallback routing.
 
 **Exit criteria**
 - [~] Ollama-backed jobs run reliably with streaming and tool interactions.

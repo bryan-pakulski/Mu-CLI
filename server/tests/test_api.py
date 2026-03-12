@@ -19,7 +19,9 @@ async def test_session_job_lifecycle_and_providers() -> None:
 
         providers = await client.get("/providers")
         assert providers.status_code == 200
-        assert any(item["name"] == "ollama" for item in providers.json())
+        provider_names = {item["name"] for item in providers.json()}
+        assert "ollama" in provider_names
+        assert "mock" in provider_names
 
         create_job = await client.post(
             f"/sessions/{session['id']}/jobs",

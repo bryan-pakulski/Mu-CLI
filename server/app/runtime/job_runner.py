@@ -2,8 +2,10 @@ import asyncio
 
 from sqlalchemy import select
 
+from server.app.core.config import settings
 from server.app.persistence.db import SessionLocal
 from server.app.persistence.models import JobModel, JobState, SessionModel
+from server.app.providers.router import provider_router
 from server.app.runtime.agent_loop import LoopStep, run_agent_loop
 from server.app.runtime.orchestrator import emit_event, update_job_state
 
@@ -32,26 +34,73 @@ class JobRunner:
                 await update_job_state(db, job_id, JobState.failed)
                 return
 
+            checkpoints = job.checkpoints or {}
+            attempts = int(checkpoints.get("attempts", 0)) + 1
+            checkpoints["attempts"] = attempts
+            job.checkpoints = checkpoints
+            await db.commit()
+
             await update_job_state(db, job_id, JobState.running)
-            await emit_event(db, job.session_id, "log", {"message": "job started"}, job_id=job.id)
+            await emit_event(
+                db,
+                job.session_id,
+                "log",
+                {"message": "job started", "attempt": attempts},
+                job_id=job.id,
+            )
+
+            ordered_providers = (session.provider_preferences or {}).get(
+                "ordered", ["ollama", "mock"]
+            )
 
             async def emit_step(step: LoopStep) -> None:
-                job.checkpoints = {"last_completed_step": step.index, "mode": session.mode}
+                prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}"
+                result = await provider_router.generate_with_fallback(
+                    prompt=prompt,
+                    ordered_providers=ordered_providers,
+                    model=None,
+                    max_retries=settings.provider_max_retries,
+                )
+
+                last_provider = result.provider_name
+                job.checkpoints = {
+                    "last_completed_step": step.index,
+                    "mode": session.mode,
+                    "attempts": attempts,
+                    "provider": last_provider,
+                }
                 await db.commit()
                 await emit_event(
                     db,
                     job.session_id,
                     "loop_step",
-                    {"index": step.index, "label": step.label, "mode": session.mode},
+                    {
+                        "index": step.index,
+                        "label": step.label,
+                        "mode": session.mode,
+                        "provider": last_provider,
+                        "output_preview": result.output[:180],
+                    },
                     job_id=job.id,
                 )
 
-            result = await run_agent_loop(
-                session=session,
-                job=job,
-                emit_step=emit_step,
-                is_cancelled=lambda: self._cancelled(job_id),
-            )
+            try:
+                result = await run_agent_loop(
+                    session=session,
+                    job=job,
+                    emit_step=emit_step,
+                    is_cancelled=lambda: self._cancelled(job_id),
+                )
+            except Exception as exc:  # noqa: BLE001
+                await emit_event(
+                    db,
+                    job.session_id,
+                    "log",
+                    {"message": "job failed", "error": str(exc), "attempt": attempts},
+                    job_id=job.id,
+                )
+                await update_job_state(db, job_id, JobState.failed)
+                return
 
             if result["status"] == "cancelled":
                 job.result_artifacts = {
@@ -72,6 +121,8 @@ class JobRunner:
                     "summary": "Job completed successfully",
                     "mode": result["mode"],
                     "steps": result["steps_executed"],
+                    "attempts": attempts,
+                    "provider": (job.checkpoints or {}).get("provider"),
                 }
                 await db.commit()
                 await update_job_state(db, job_id, JobState.completed)
@@ -79,7 +130,11 @@ class JobRunner:
                     db,
                     job.session_id,
                     "log",
-                    {"message": "job completed"},
+                    {
+                        "message": "job completed",
+                        "attempt": attempts,
+                        "provider": (job.checkpoints or {}).get("provider"),
+                    },
                     job_id=job.id,
                 )
 

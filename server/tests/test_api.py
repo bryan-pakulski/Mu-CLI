@@ -52,11 +52,19 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert fetched_job.status_code == 200
         assert fetched_job.json()["state"] in {"running", "completed", "failed", "cancelled"}
 
-        session_events = await client.get(f"/sessions/{session['id']}/events")
-        assert session_events.status_code == 200
-        events_payload = session_events.json()
+        events_payload = []
+        for _ in range(10):
+            session_events = await client.get(f"/sessions/{session['id']}/events")
+            assert session_events.status_code == 200
+            events_payload = session_events.json()
+            if any(item["event_type"] == "model_response" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
         assert any(item["event_type"] == "job_state" for item in events_payload)
         assert any(item["event_type"] == "system_prompt" and "prompt" in (item.get("payload") or {}) for item in events_payload)
+        assert any(item["event_type"] == "model_request" and "prompt" in (item.get("payload") or {}) for item in events_payload)
+        assert any(item["event_type"] == "model_response" and "text" in (item.get("payload") or {}) for item in events_payload) or any(item["event_type"] == "log" and (item.get("payload") or {}).get("message") == "job failed" for item in events_payload)
 
 
 @pytest.mark.asyncio

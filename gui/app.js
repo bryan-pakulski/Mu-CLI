@@ -424,14 +424,13 @@ function setThinkingState(sessionId, active) {
 function isVisibleForFilter(eventType) {
   if (selectedFilter === "all") return true;
   if (selectedFilter === "approval") return eventType.startsWith("approval");
+  if (selectedFilter === "model_io") return ["model_request", "model_response"].includes(eventType);
   return eventType === selectedFilter;
 }
 
 function addTimeline(eventType, payload, createdAt = null) {
-  if (eventType === "system_prompt") {
-    addSystemPromptEntry(payload, createdAt);
-    return;
-  }
+  if (eventType === "system_prompt") addSystemPromptEntry(payload, createdAt);
+  if (eventType === "model_request" || eventType === "model_response") addModelIoEntry(eventType, payload, createdAt);
   el("timeline").prepend(buildTimelineNode(eventType, payload, createdAt));
 }
 
@@ -466,6 +465,43 @@ function addSystemPromptEntry(payload, createdAt = null) {
   list.prepend(li);
 }
 
+
+function addModelIoEntry(eventType, payload, createdAt = null) {
+  const list = el("model-io");
+  if (!list) return;
+  const li = document.createElement("li");
+  const details = document.createElement("details");
+  details.className = "meta-details";
+
+  const summary = document.createElement("summary");
+  const ts = document.createElement("span");
+  ts.className = "meta-time";
+  ts.textContent = formatLocalTimestamp(createdAt);
+
+  const tag = document.createElement("span");
+  tag.className = `meta-tag ${eventType}`;
+  tag.textContent = eventType;
+
+  const headline = document.createElement("span");
+  headline.className = "meta-headline";
+  headline.textContent = eventType === "model_request"
+    ? `${payload?.label || "step"} · request sent`
+    : `${payload?.label || "step"} · response received`;
+
+  summary.append(ts, tag, headline);
+  details.appendChild(summary);
+
+  const pre = document.createElement("pre");
+  pre.className = "meta-payload";
+  pre.textContent = eventType === "model_request"
+    ? (payload?.prompt || JSON.stringify(payload || {}, null, 2))
+    : (payload?.text || JSON.stringify(payload || {}, null, 2));
+  details.appendChild(pre);
+
+  li.appendChild(details);
+  list.prepend(li);
+}
+
 function applyTimelineFilter() {
   document.querySelectorAll("#timeline li").forEach((node) => {
     node.classList.toggle("hidden", !isVisibleForFilter(node.dataset.eventType || ""));
@@ -478,8 +514,10 @@ async function loadSessionTimeline(sessionId) {
     const events = await req(`/sessions/${sessionId}/events?limit=250`);
     const timeline = el("timeline");
     const systemPrompts = el("system-prompts");
+    const modelIo = el("model-io");
     timeline.innerHTML = "";
     if (systemPrompts) systemPrompts.innerHTML = "";
+    if (modelIo) modelIo.innerHTML = "";
     events.forEach((evt) => {
       addTimeline(evt.event_type, evt.payload || {}, evt.created_at);
     });

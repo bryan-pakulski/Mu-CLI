@@ -231,6 +231,20 @@ class JobRunner:
                 await emit_event(
                     db,
                     job.session_id,
+                    "model_request",
+                    {
+                        "step": step.index,
+                        "label": step.label,
+                        "provider_order": ordered_providers,
+                        "selected_model": selected_model,
+                        "prompt": prompt,
+                    },
+                    job_id=job.id,
+                )
+
+                await emit_event(
+                    db,
+                    job.session_id,
                     "system_prompt",
                     {
                         "step": step.index,
@@ -263,6 +277,21 @@ class JobRunner:
                     ordered_providers=ordered_providers,
                     model=selected_model,
                     max_retries=settings.provider_max_retries,
+                )
+
+                await emit_event(
+                    db,
+                    job.session_id,
+                    "model_response",
+                    {
+                        "step": step.index,
+                        "label": step.label,
+                        "provider": result.provider_name,
+                        "model": selected_model,
+                        "text": result.output,
+                        "output_chars": len(result.output or ""),
+                    },
+                    job_id=job.id,
                 )
 
                 last_provider = result.provider_name

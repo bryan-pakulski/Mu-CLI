@@ -116,6 +116,7 @@
               <button class="chip" data-filter="log">Logs</button>
               <button class="chip" data-filter="policy">Policy</button>
               <button class="chip" data-filter="system_prompt">System</button>
+              <button class="chip" data-filter="model_io">Model I/O</button>
               <button class="chip" data-filter="approval">Approval</button>
             </div>
             <ul id="timeline" class="meta-list"></ul>
@@ -127,6 +128,13 @@
           <button class="section-toggle" type="button" data-target="right-system" aria-expanded="true">System prompts <span>▾</span></button>
           <div class="section-body" id="right-system">
             <ul id="system-prompts" class="meta-list"></ul>
+          </div>
+        </section>
+
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="right-model-io" aria-expanded="true">Model I/O <span>▾</span></button>
+          <div class="section-body" id="right-model-io">
+            <ul id="model-io" class="meta-list"></ul>
           </div>
         </section>
 

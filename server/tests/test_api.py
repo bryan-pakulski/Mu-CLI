@@ -60,6 +60,46 @@ async def test_session_job_lifecycle_and_providers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_system_prompt_includes_recent_conversation_context() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        first = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "first context message"},
+        )
+        assert first.status_code == 200
+        await asyncio.sleep(0.25)
+
+        second = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "second context message"},
+        )
+        assert second.status_code == 200
+        second_job = second.json()
+        await asyncio.sleep(0.25)
+
+        events = await client.get(f"/sessions/{session['id']}/events?limit=300")
+        assert events.status_code == 200
+
+        second_prompts = [
+            item for item in events.json()
+            if item.get("event_type") == "system_prompt" and item.get("job_id") == second_job["id"]
+        ]
+        assert second_prompts
+        prompt_text = second_prompts[-1].get("payload", {}).get("prompt", "")
+        assert "conversation_context" in prompt_text
+        assert "first context message" in prompt_text
+        assert "second context message" in prompt_text
+
+
+@pytest.mark.asyncio
 async def test_cancel_and_resume_job_flow() -> None:
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

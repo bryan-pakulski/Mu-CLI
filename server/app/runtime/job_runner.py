@@ -186,7 +186,21 @@ class JobRunner:
                 tools_hint = ",".join(enabled_tools) if isinstance(enabled_tools, list) and enabled_tools else "all"
                 system_prompt_override = context_state.get("system_prompt_override")
                 rules_checklist = context_state.get("rules_checklist")
+
+                context_messages = context_state.get("messages") if isinstance(context_state.get("messages"), list) else []
+                max_context_messages = max(5, int(context_state.get("max_context_messages", 40)))
+                history_window = min(20, max_context_messages)
+                recent_context = context_messages[-history_window:] if history_window else []
+                context_lines = [
+                    f"{(item.get('role') or 'unknown')}: {item.get('content') or ''}"
+                    for item in recent_context
+                    if isinstance(item, dict)
+                ]
+                context_block = "\n".join(context_lines).strip()
+
                 prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
+                if context_block:
+                    prompt += f"\nconversation_context:\n{context_block}"
                 if isinstance(system_prompt_override, str) and system_prompt_override.strip():
                     prompt += f"\nsystem_prompt_override={system_prompt_override.strip()}"
                 if isinstance(rules_checklist, str) and rules_checklist.strip():
@@ -205,6 +219,8 @@ class JobRunner:
                         "selected_model": selected_model,
                         "enabled_skills": enabled_skills if isinstance(enabled_skills, list) else [],
                         "enabled_tools": enabled_tools if isinstance(enabled_tools, list) else [],
+                        "context_messages_count": len(context_messages),
+                        "context_messages_window": history_window,
                         "system_prompt_override": system_prompt_override if isinstance(system_prompt_override, str) else "",
                         "rules_checklist": rules_checklist if isinstance(rules_checklist, str) else "",
                         "prompt": prompt,

@@ -4,7 +4,7 @@ This tracker records implemented workstreams so we can measure progress against 
 
 ## Snapshot
 
-- Last updated: 2026-03-11
+- Last updated: 2026-03-12
 - Current focus: **Phase 1 — Reliable Long-Running Loop**
 
 ## Phase 0 checklist
@@ -30,10 +30,9 @@ Phase 0 is now functionally complete from a backend/runtime perspective (state l
 
 ## Next up
 
-1. Begin Phase 1: add explicit `BudgetPolicy` object and enforce token/tool-call budgets.
-2. Add policy-driven retry matrix and terminal reasons for budget exhaustion.
-3. Add UI dashboard cards that consume the new telemetry metrics.
-
+1. Add UI dashboard cards that consume retries/replans/verifier-gap telemetry metrics.
+2. Validate adversarial no-progress scenarios for loop-exit guarantees.
+3. Prepare readiness review for Phase 2 context-memory implementation.
 
 ## Phase 1 early progress
 
@@ -41,5 +40,6 @@ Phase 0 is now functionally complete from a backend/runtime perspective (state l
 - [x] Wired budget policy into background job payloads (`budget_policy`) for visibility.
 - [x] Enforced token/tool-call budget exhaustion with explicit terminal reason `budget_exhausted`.
 - [x] Added tests for budget policy helper and job budget-policy exposure.
-
 - [x] Added policy-driven retry controls for stall/missing-evidence/tool-failure triggers.
+- [x] Added `JobTerminalReason` enum + validation helper and wired terminal reason assignment paths.
+- [x] Enforced parser-failure retry caps with deterministic terminal behavior.

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mu_cli.webapp.job_state import JobStatus, TERMINAL_STATUSES, transition_job_status
+from mu_cli.webapp.job_state import JobStatus, JobTerminalReason, TERMINAL_STATUSES, set_terminal_reason, transition_job_status
 
 
 @dataclass(slots=True)
@@ -33,7 +33,7 @@ def request_kill(runtime: Any, job_id: str, reason: str) -> tuple[int, dict[str,
     job["cancel_requested"] = True
     job["cancel_reason"] = reason
     transition_job_status(job, JobStatus.KILLED.value, reason="kill_requested_via_api")
-    job["terminal_reason"] = "killed"
+    set_terminal_reason(job, JobTerminalReason.KILLED)
     events = job.setdefault("events", [])
     if isinstance(events, list):
         events.append(f"cancel_requested: {reason}")

@@ -1568,6 +1568,22 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if len(job["checkpoints"]) > 30:
                     job["checkpoints"] = job["checkpoints"][-30:]
 
+                if not (reply.content or "").strip():
+                    retry_counts["parser"] = int(retry_counts.get("parser", 0)) + 1
+                    job["events"].append(f"retry: parser #{retry_counts['parser']}")
+                    _record_harness_counter(base_runtime, "parser_failures")
+                    if int(retry_counts.get("parser", 0)) > int(retry_policy.max_parser_retries):
+                        job["events"].append("status: parser_retry_limit_reached")
+                        set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
+                        transition_job_status(job, JobStatus.FAILED.value, reason="parser_retry_exhausted")
+                        break
+                    prompt = (
+                        "Your last response was empty or unparsable. Continue execution and return either "
+                        "(1) a concrete next action, or (2) a final answer beginning with 'PLAN_COMPLETE' "
+                        "plus Confidence and Evidence sections."
+                    )
+                    continue
+
                 if _is_plan_complete(reply.content):
                     completed_by_plan = True
                     job["events"].append("status: plan_complete_detected")

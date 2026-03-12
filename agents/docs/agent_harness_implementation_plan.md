@@ -164,7 +164,7 @@ Track completed implementation items in `agents/docs/agent_harness_progress.md`.
 
 ## Initial Backlog (ready to implement next)
 
-- [ ] Introduce `JobTerminalReason` enum and wire to job payload.
+- [x] Introduce `JobTerminalReason` enum and wire to job payload.
 - [x] Add `BudgetPolicy` to runtime settings and enforcement in background loop.
 - [ ] Implement `ContextAssembler` interface with pluggable packers.
 - [ ] Add `EvidenceLedger` model and persistence.

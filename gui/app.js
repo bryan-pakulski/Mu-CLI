@@ -14,6 +14,7 @@ let skillsConfigCache = [];
 let skillEditorSessionId = null;
 let skillEditorName = null;
 const thinkingStatus = new Map();
+const assistantDraftBuffers = new Map();
 
 const panelState = {
   left: { collapsed: false, width: 320, min: 220, max: 560 },
@@ -298,13 +299,15 @@ function pushChat(tag, message) {
   return messages[messages.length - 1] || null;
 }
 
-function updateAssistantDraft(text) {
+function updateAssistantDraft(text, sessionId = currentSession) {
+  if (!sessionId) return;
+  if (sessionId !== currentSession) return;
   if (!latestAssistantMessage) {
     latestAssistantMessage = pushChat("assistant", text);
     return;
   }
   latestAssistantMessage.querySelector("div:last-child").textContent = text;
-  const messages = sessionMessages.get(currentSession) || [];
+  const messages = sessionMessages.get(sessionId) || [];
   if (messages.length > 0) messages[messages.length - 1].content = text;
 }
 
@@ -687,13 +690,23 @@ function connectStream() {
       if (payload?.state === "completed") {
         setIndicator(sessionId, "dot-success");
         latestAssistantMessage = null;
+        assistantDraftBuffers.delete(sessionId);
         setThinkingState(sessionId, false);
       }
       if (["failed", "blocked", "cancelled"].includes(payload?.state)) {
         setIndicator(sessionId, "dot-error");
         latestAssistantMessage = null;
+        assistantDraftBuffers.delete(sessionId);
         setThinkingState(sessionId, false);
       }
+    }
+
+    if (eventType === "assistant_chunk") {
+      const existing = assistantDraftBuffers.get(sessionId) || "";
+      const next = `${existing}${existing ? "\n\n" : ""}${payload?.text || ""}`;
+      assistantDraftBuffers.set(sessionId, next);
+      updateAssistantDraft(next, sessionId);
+      setThinkingState(sessionId, true);
     }
 
     if (eventType === "loop_step") {
@@ -729,7 +742,10 @@ async function refreshSessions() {
   }
 
   const statuses = await Promise.all(sessionsCache.map((s) => buildSessionIndicator(s.id)));
-  sessionsCache.forEach((s, idx) => sessionIndicators.set(s.id, statuses[idx]));
+  sessionsCache.forEach((s, idx) => {
+    sessionIndicators.set(s.id, statuses[idx]);
+    thinkingStatus.set(s.id, statuses[idx] === "dot-running");
+  });
   renderSessionList();
 
   if (sessionsCache.length > 0) {
@@ -839,6 +855,7 @@ setOnClick("create-job", async () => {
 
   pushChat("user", goal);
   latestAssistantMessage = null;
+  assistantDraftBuffers.delete(currentSession);
   const job = await req(`/sessions/${currentSession}/jobs`, { method: "POST", body: JSON.stringify({ goal }) });
   currentJob = job.id;
   setThinkingState(currentSession, true);

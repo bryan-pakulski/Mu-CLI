@@ -214,6 +214,19 @@ class JobRunner:
                     },
                     job_id=job.id,
                 )
+                await emit_event(
+                    db,
+                    job.session_id,
+                    "assistant_chunk",
+                    {
+                        "step": step.index,
+                        "label": step.label,
+                        "text": result.output,
+                        "provider": last_provider,
+                        "model": selected_model,
+                    },
+                    job_id=job.id,
+                )
 
             try:
                 timeout_s = max(30, int((session.context_state or {}).get("max_timeout_s", 300)))

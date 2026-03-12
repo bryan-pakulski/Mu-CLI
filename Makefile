@@ -35,8 +35,7 @@ lint:
 check: lint test
 
 run-cli:
-	@echo "CLI scaffold is present; runtime command will be added in a future phase."
-	@cat cli/README.md
+	$(PYTHON) cli/mu_cli.py --help
 
 run-gui:
 	@echo "GUI scaffold is present; runtime command will be added in a future phase."

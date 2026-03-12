@@ -363,13 +363,13 @@ Status legend: `[ ]` not yet started, `[~]` in progress, `[x]` completed.
 **Exit criteria**
 - [x] Agents can map a workspace quickly without full-file parsing.
 
-## [ ] Phase 4 — CLI MVP (2–3 weeks)
-- [ ] Build CLI commands for session/job lifecycle.
-- [ ] Add live rendering for tokens/events.
-- [ ] Add interactive prompts for approvals and user input.
+## [~] Phase 4 — CLI MVP (2–3 weeks)
+- [x] Build CLI commands for session/job lifecycle.
+- [x] Add live rendering for tokens/events (event polling stream view in CLI).
+- [x] Add interactive prompts for approvals and user input.
 
 **Exit criteria**
-- [ ] CLI supports full local coding loop without GUI.
+- [~] CLI supports full local coding loop without GUI.
 
 ## [ ] Phase 5 — GUI MVP (3–5 weeks)
 - [ ] Build dashboard, job timeline, intervention controls.

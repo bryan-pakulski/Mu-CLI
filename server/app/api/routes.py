@@ -238,6 +238,39 @@ async def decide_approval(
     return approval
 
 
+
+
+@router.post("/jobs/{job_id}/input", response_model=JobRead)
+async def add_job_input(
+    job_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+) -> JobModel:
+    job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == job.session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    context_state = session.context_state or {"messages": [], "summary": None, "memory_refs": []}
+    context_state.setdefault("messages", []).append(
+        {"role": "user", "content": payload.get("message", "")}
+    )
+    session.context_state = context_state
+    await db.commit()
+
+    await emit_event(
+        db,
+        job.session_id,
+        "user_input",
+        {"message": payload.get("message", "")},
+        job_id=job.id,
+    )
+    await db.refresh(job)
+    return job
+
 @router.post("/jobs/{job_id}/run", response_model=JobRead)
 async def run_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
     job = await db.scalar(select(JobModel).where(JobModel.id == job_id))

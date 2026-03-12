@@ -1,5 +1,23 @@
-# Mu-CLI CLI (Scaffold)
+# Mu-CLI CLI
 
-Planned CLI client for session/job lifecycle control, streaming output, and approval workflows.
+Phase 4 CLI MVP entrypoint:
 
-Initial scaffold delivered in Phase 0.
+```bash
+python cli/mu_cli.py --help
+```
+
+Examples:
+
+```bash
+# Create session
+python cli/mu_cli.py session-create /path/to/workspace --mode interactive
+
+# Start a job and watch events
+python cli/mu_cli.py job-start <session_id> "implement feature" --watch
+
+# Submit user input to a job
+python cli/mu_cli.py job-input <job_id> "continue with option B"
+
+# Review/decide approvals
+python cli/mu_cli.py approvals <session_id> --interactive
+```

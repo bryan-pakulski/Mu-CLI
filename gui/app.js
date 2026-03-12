@@ -26,6 +26,54 @@ const setOnClick = (id, handler) => {
   if (node) node.onclick = handler;
 };
 
+function formatLocalTimestamp(value = null) {
+  const dt = value ? new Date(value) : new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}.${dt.getFullYear()} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+}
+
+function getSessionLimits(session) {
+  const maxTimeout = Number(session?.context_state?.max_timeout_s || 300);
+  const maxContext = Number(session?.context_state?.max_context_messages || 40);
+  return {
+    maxTimeout: Number.isFinite(maxTimeout) ? maxTimeout : 300,
+    maxContext: Number.isFinite(maxContext) ? maxContext : 40,
+  };
+}
+
+function buildTimelineNode(eventType, payload, createdAt = null) {
+  const li = document.createElement("li");
+  li.dataset.eventType = eventType;
+  if (!isVisibleForFilter(eventType)) li.classList.add("hidden");
+
+  const details = document.createElement("details");
+  details.className = "meta-details";
+
+  const summary = document.createElement("summary");
+  const ts = document.createElement("span");
+  ts.className = "meta-time";
+  ts.textContent = formatLocalTimestamp(createdAt);
+
+  const tag = document.createElement("span");
+  tag.className = `meta-tag ${eventType.replace(/[^a-z0-9_-]/gi, "-").toLowerCase()}`;
+  tag.textContent = eventType;
+
+  const headline = document.createElement("span");
+  headline.className = "meta-headline";
+  headline.textContent = typeof payload?.message === "string" ? payload.message : JSON.stringify(payload || {});
+
+  summary.append(ts, tag, headline);
+  details.appendChild(summary);
+
+  const pre = document.createElement("pre");
+  pre.className = "meta-payload";
+  pre.textContent = JSON.stringify(payload || {}, null, 2);
+  details.appendChild(pre);
+
+  li.appendChild(details);
+  return li;
+}
+
 async function req(path, options = {}) {
   const res = await fetch(api + path, { headers: { "Content-Type": "application/json" }, ...options });
   if (!res.ok) throw new Error(await res.text());
@@ -76,6 +124,8 @@ async function persistCurrentConfig() {
         name: activeSession.name || "default",
         mode: el("mode").value,
         policy_profile: el("policy").value,
+        max_timeout_s: Number(el("max-timeout").value || 300),
+        max_context_messages: Number(el("max-context").value || 40),
         provider_preferences: {
           ordered: [el("providers").value],
           model: el("model").value || "default",
@@ -136,6 +186,14 @@ async function populateRuntimeOptions() {
     persistCurrentConfig().catch(() => null);
   });
 
+  el("max-timeout").addEventListener("change", () => {
+    persistCurrentConfig().catch(() => null);
+  });
+
+  el("max-context").addEventListener("change", () => {
+    persistCurrentConfig().catch(() => null);
+  });
+
   el("modal-providers").addEventListener("change", (event) => {
     loadModelsForProvider(event.target.value, "modal-model").catch(() => null);
   });
@@ -179,7 +237,7 @@ function setSessionState(state) {
 
 function addSessionMessage(sessionId, role, content, extras = {}) {
   const existing = sessionMessages.get(sessionId) || [];
-  existing.push({ role, content, ...extras });
+  existing.push({ role, content, created_at: formatLocalTimestamp(), ...extras });
   sessionMessages.set(sessionId, existing);
 }
 
@@ -201,7 +259,7 @@ function renderChatForSession(sessionId) {
       const steps = Array.isArray(msg.steps) ? msg.steps : [];
       const stepsMarkup = steps.map((step) => `<li>${step}</li>`).join("");
       node.innerHTML = `
-        <div class="tag">thinking</div>
+        <div class="tag-row"><div class="tag">thinking</div><div class="timestamp">${msg.created_at || formatLocalTimestamp()}</div></div>
         <details class="thinking-details" ${msg.expanded ? "open" : ""}>
           <summary>
             Model reasoning in progress
@@ -211,7 +269,7 @@ function renderChatForSession(sessionId) {
         </details>
       `;
     } else {
-      node.innerHTML = `<div class="tag">${msg.role}</div><div>${msg.content}</div>`;
+      node.innerHTML = `<div class="tag-row"><div class="tag">${msg.role}</div><div class="timestamp">${msg.created_at || formatLocalTimestamp()}</div></div><div>${msg.content}</div>`;
     }
 
     chatWindow.appendChild(node);
@@ -276,11 +334,7 @@ function isVisibleForFilter(eventType) {
 }
 
 function addTimeline(eventType, payload) {
-  const li = document.createElement("li");
-  li.dataset.eventType = eventType;
-  li.textContent = `${new Date().toLocaleTimeString()}  ${eventType}: ${JSON.stringify(payload)}`;
-  if (!isVisibleForFilter(eventType)) li.classList.add("hidden");
-  el("timeline").prepend(li);
+  el("timeline").prepend(buildTimelineNode(eventType, payload));
 }
 
 function applyTimelineFilter() {
@@ -296,11 +350,7 @@ async function loadSessionTimeline(sessionId) {
     const timeline = el("timeline");
     timeline.innerHTML = "";
     events.forEach((evt) => {
-      const li = document.createElement("li");
-      li.dataset.eventType = evt.event_type;
-      li.textContent = `${new Date(evt.created_at).toLocaleTimeString()}  ${evt.event_type}: ${JSON.stringify(evt.payload || {})}`;
-      if (!isVisibleForFilter(evt.event_type)) li.classList.add("hidden");
-      timeline.appendChild(li);
+      timeline.appendChild(buildTimelineNode(evt.event_type, evt.payload || {}, evt.created_at));
     });
   } catch {
     // no-op
@@ -455,6 +505,7 @@ function hydrateSessionMessages(session) {
     .map((m) => ({
       role: m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
       content: m.content,
+      created_at: m.created_at ? formatLocalTimestamp(m.created_at) : formatLocalTimestamp(),
     }));
   sessionMessages.set(session.id, items);
 }
@@ -472,10 +523,13 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
   let model = session.provider_preferences?.model || null;
   const name = session.name || "default";
 
-  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"}`;
+  const limits = getSessionLimits(session);
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${limits.maxContext}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
+  el("max-timeout").value = limits.maxTimeout;
+  el("max-context").value = limits.maxContext;
   model = await loadModelsForProvider(provider, "model", model);
 
   if (options.autoPersistIfMissingModel && !session.provider_preferences?.model) {
@@ -514,8 +568,11 @@ async function openSessionSettings(sessionId) {
   el("modal-session-name").value = session.name || "default";
   el("modal-providers").value = provider;
   await loadModelsForProvider(provider, "modal-model", model);
+  const limits = getSessionLimits(session);
   el("modal-mode").value = session.mode || "interactive";
   el("modal-policy").value = session.policy_profile || "default";
+  el("modal-max-timeout").value = limits.maxTimeout;
+  el("modal-max-context").value = limits.maxContext;
   el("session-settings-modal").classList.remove("hidden");
 }
 
@@ -736,6 +793,8 @@ setOnClick("create-session", async () => {
       name: sessionName,
       mode: el("mode").value,
       policy_profile: el("policy").value,
+      max_timeout_s: Number(el("max-timeout").value || 300),
+      max_context_messages: Number(el("max-context").value || 40),
       provider_preferences: { ordered: [el("providers").value], model: el("model").value || "default" },
     }),
   });
@@ -824,6 +883,8 @@ setOnClick("modal-save", async () => {
       name: el("modal-session-name").value,
       mode: el("modal-mode").value,
       policy_profile: el("modal-policy").value,
+      max_timeout_s: Number(el("modal-max-timeout").value || 300),
+      max_context_messages: Number(el("modal-max-context").value || 40),
       provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value || "default" },
     }),
   });

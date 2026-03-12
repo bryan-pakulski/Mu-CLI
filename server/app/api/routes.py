@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -54,6 +55,38 @@ def _normalize_session_name(name: str | None) -> str:
     return value or "default"
 
 
+def _base_context_state(name: str, *, max_timeout_s: int = 300, max_context_messages: int = 40) -> dict:
+    return {
+        "name": _normalize_session_name(name),
+        "messages": [],
+        "summary": None,
+        "memory_refs": [],
+        "max_timeout_s": max(30, int(max_timeout_s)),
+        "max_context_messages": max(5, int(max_context_messages)),
+    }
+
+
+def _trim_context_messages(context_state: dict) -> dict:
+    max_messages = max(5, int(context_state.get("max_context_messages", 40)))
+    messages = context_state.get("messages") or []
+    if len(messages) > max_messages:
+        context_state["messages"] = messages[-max_messages:]
+    return context_state
+
+
+def _append_message(context_state: dict, role: str, content: str) -> dict:
+    enriched = dict(context_state or {})
+    enriched.setdefault("messages", [])
+    enriched.setdefault("max_context_messages", 40)
+    enriched.setdefault("max_timeout_s", 300)
+    enriched["messages"].append({
+        "role": role,
+        "content": content,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    return _trim_context_messages(enriched)
+
+
 async def _ensure_default_session(db: AsyncSession) -> None:
     sessions = (await db.scalars(select(SessionModel))).all()
     if sessions:
@@ -63,7 +96,7 @@ async def _ensure_default_session(db: AsyncSession) -> None:
         mode="interactive",
         provider_preferences={"ordered": ["ollama"]},
         policy_profile="default",
-        context_state={"name": "default", "messages": [], "summary": None, "memory_refs": []},
+        context_state=_base_context_state("default"),
     )
     db.add(session)
     await db.commit()
@@ -84,12 +117,7 @@ async def create_session(
         mode=payload.mode,
         provider_preferences=payload.provider_preferences,
         policy_profile=payload.policy_profile,
-        context_state={
-            "name": _normalize_session_name(payload.name),
-            "messages": [],
-            "summary": None,
-            "memory_refs": [],
-        },
+        context_state=_base_context_state(payload.name, max_timeout_s=payload.max_timeout_s, max_context_messages=payload.max_context_messages),
     )
     db.add(session)
     await db.commit()
@@ -142,6 +170,14 @@ async def update_session(
     if payload.policy_profile is not None:
         session.policy_profile = payload.policy_profile
 
+    context_state = dict(session.context_state or _base_context_state(session.name))
+    if payload.max_timeout_s is not None:
+        context_state["max_timeout_s"] = max(30, int(payload.max_timeout_s))
+    if payload.max_context_messages is not None:
+        context_state["max_context_messages"] = max(5, int(payload.max_context_messages))
+        context_state = _trim_context_messages(context_state)
+    session.context_state = context_state
+
     await db.commit()
     await db.refresh(session)
     await emit_event(
@@ -153,6 +189,8 @@ async def update_session(
             "mode": session.mode,
             "provider_preferences": session.provider_preferences,
             "policy_profile": session.policy_profile,
+            "max_timeout_s": (session.context_state or {}).get("max_timeout_s", 300),
+            "max_context_messages": (session.context_state or {}).get("max_context_messages", 40),
         },
     )
     return session
@@ -220,7 +258,12 @@ async def clear_session_context(session_id: str, db: AsyncSession = Depends(get_
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    session.context_state = {"name": session.name, "messages": [], "summary": None, "memory_refs": []}
+    existing = dict(session.context_state or {})
+    session.context_state = _base_context_state(
+        session.name,
+        max_timeout_s=existing.get("max_timeout_s", 300),
+        max_context_messages=existing.get("max_context_messages", 40),
+    )
     await db.commit()
     await db.refresh(session)
     await emit_event(db, session.id, "session_context_cleared", {"status": "ok"})
@@ -262,9 +305,8 @@ async def create_job(
     if session.status != SessionStatus.active:
         raise HTTPException(status_code=400, detail="Session must be active to create jobs")
 
-    context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": []})
-    context_state.setdefault("messages", []).append({"role": "user", "content": payload.goal})
-    session.context_state = context_state
+    context_state = copy.deepcopy(session.context_state or _base_context_state(session.name))
+    session.context_state = _append_message(context_state, "user", payload.goal)
     db.add(session)
 
     job = JobModel(
@@ -411,11 +453,8 @@ async def add_job_input(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": []})
-    context_state.setdefault("messages", []).append(
-        {"role": "user", "content": payload.get("message", "")}
-    )
-    session.context_state = context_state
+    context_state = copy.deepcopy(session.context_state or _base_context_state(session.name))
+    session.context_state = _append_message(context_state, "user", payload.get("message", ""))
     db.add(session)
     await db.commit()
 

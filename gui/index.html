@@ -26,6 +26,10 @@
           </select>
           <label for="policy">Policy profile</label>
           <select id="policy"></select>
+          <label for="max-timeout">Max timeout (s)</label>
+          <input id="max-timeout" type="number" min="30" step="30" value="300" />
+          <label for="max-context">Max session context messages</label>
+          <input id="max-context" type="number" min="5" step="1" value="40" />
         </section>
 
         <section class="block">
@@ -136,6 +140,12 @@
 
           <label for="modal-policy">Policy profile</label>
           <select id="modal-policy"></select>
+
+          <label for="modal-max-timeout">Max timeout (s)</label>
+          <input id="modal-max-timeout" type="number" min="30" step="30" value="300" />
+
+          <label for="modal-max-context">Max session context messages</label>
+          <input id="modal-max-context" type="number" min="5" step="1" value="40" />
 
           <label for="modal-providers">Provider</label>
           <select id="modal-providers"></select>

@@ -156,11 +156,15 @@ async def test_policy_approval_flow() -> None:
         assert create_job.status_code == 200
         job = create_job.json()
 
-        await asyncio.sleep(0.2)
-        approvals = await client.get(f"/jobs/{job['id']}/approvals")
-        assert approvals.status_code == 200
-        assert len(approvals.json()) >= 1
-        approval_id = approvals.json()[0]["id"]
+        approval_id = None
+        for _ in range(10):
+            await asyncio.sleep(0.1)
+            approvals = await client.get(f"/jobs/{job['id']}/approvals")
+            assert approvals.status_code == 200
+            if approvals.json():
+                approval_id = approvals.json()[0]["id"]
+                break
+        assert approval_id is not None
 
         decision = await client.post(
             f"/jobs/{job['id']}/approvals/{approval_id}",
@@ -259,11 +263,15 @@ async def test_list_sessions_and_update_session_config() -> None:
                 "mode": "research",
                 "policy_profile": "strict",
                 "provider_preferences": {"ordered": ["ollama"]},
+                "max_timeout_s": 420,
+                "max_context_messages": 12,
             },
         )
         assert updated.status_code == 200
         assert updated.json()["mode"] == "research"
         assert updated.json()["policy_profile"] == "strict"
+        assert updated.json()["context_state"]["max_timeout_s"] == 420
+        assert updated.json()["context_state"]["max_context_messages"] == 12
 
 
 @pytest.mark.asyncio
@@ -394,3 +402,32 @@ async def test_tools_and_skills_config_endpoints(tmp_path: Path) -> None:
         open_folder = await client.post(f"/sessions/{session['id']}/skills/open-folder")
         assert open_folder.status_code == 200
         assert open_folder.json()["path"].endswith("skills")
+
+
+@pytest.mark.asyncio
+async def test_session_context_trim_respects_max_context_messages() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={
+                "workspace_path": "/tmp/work",
+                "mode": "interactive",
+                "max_context_messages": 5,
+            },
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        for idx in range(8):
+            posted = await client.post(
+                f"/sessions/{session['id']}/jobs",
+                json={"goal": f"goal-{idx}"},
+            )
+            assert posted.status_code == 200
+
+        details = await client.get(f"/sessions/{session['id']}")
+        assert details.status_code == 200
+        messages = details.json()["context_state"]["messages"]
+        assert len(messages) <= 5
+        assert any(msg["content"] == "goal-7" for msg in messages)

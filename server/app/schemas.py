@@ -11,6 +11,8 @@ class SessionCreate(BaseModel):
     mode: str = "interactive"
     provider_preferences: dict = Field(default_factory=lambda: {"ordered": ["ollama"]})
     policy_profile: str = "default"
+    max_timeout_s: int = 300
+    max_context_messages: int = 40
 
 
 class SessionRead(BaseModel):
@@ -30,6 +32,8 @@ class SessionUpdate(BaseModel):
     mode: str | None = None
     provider_preferences: dict | None = None
     policy_profile: str | None = None
+    max_timeout_s: int | None = None
+    max_context_messages: int | None = None
 
 
 class JobCreate(BaseModel):

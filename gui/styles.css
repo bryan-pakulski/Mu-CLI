@@ -171,6 +171,8 @@ textarea { resize: vertical; min-height: 62px; }
 .empty-state { margin: auto; color: var(--muted); font-size: 14px; }
 .message { max-width: min(800px, 90%); padding: 10px 12px; border-radius: 14px; border: 1px solid var(--border); white-space: pre-wrap; }
 .message .tag { font-size: 10px; text-transform: uppercase; color: #6b7280; margin-bottom: 4px; letter-spacing: 0.05em; }
+.tag-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.timestamp { font-size: 10px; color: #64748b; }
 .message.assistant { align-self: flex-start; background: var(--assistant); }
 .message.user { align-self: flex-end; background: var(--user); }
 .message.system, .message.control { align-self: center; background: #f3f4f6; }
@@ -208,7 +210,24 @@ textarea { resize: vertical; min-height: 62px; }
 .chip { border: 1px solid var(--border); background: #f3f4f6; border-radius: 999px; padding: 4px 10px; cursor: pointer; }
 .chip.active { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
 .meta-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; }
-.meta-list li { border: 1px solid var(--border); background: #f8fafc; border-radius: 8px; padding: 8px; margin-bottom: 6px; font-size: 12px; white-space: pre-wrap; }
+.meta-list li { border: 1px solid var(--border); background: #f8fafc; border-radius: 8px; margin-bottom: 6px; font-size: 12px; }
+.meta-details { padding: 6px 8px; }
+.meta-details summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.meta-details summary::-webkit-details-marker { display: none; }
+.meta-time { color: #64748b; font-size: 11px; min-width: 142px; }
+.meta-tag { border-radius: 999px; padding: 2px 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; background: #fff; }
+.meta-headline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #334155; }
+.meta-payload { margin: 8px 0 0; padding: 8px; background: #ffffff; border: 1px dashed #cbd5e1; border-radius: 8px; white-space: pre-wrap; overflow: auto; }
+.meta-tag.loop_step { color: #0ea5e9; }
+.meta-tag.job_state { color: #2563eb; }
+.meta-tag.log { color: #64748b; }
+.meta-tag.policy { color: #f59e0b; }
+.meta-tag.approval,
+.meta-tag.approval_requested,
+.meta-tag.approval_decision { color: #a855f7; }
+.meta-tag.session_config { color: #14b8a6; }
+.meta-tag.user_input { color: #22c55e; }
+.meta-tag.status { color: #ef4444; }
 
 .modal {
   position: fixed;

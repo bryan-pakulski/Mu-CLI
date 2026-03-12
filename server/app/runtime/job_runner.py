@@ -1,5 +1,6 @@
 import copy
 import asyncio
+from datetime import datetime
 
 from sqlalchemy import select
 
@@ -170,8 +171,11 @@ class JobRunner:
             selected_model = provider_preferences.get("model")
 
             def append_context_message(role: str, content: str) -> None:
-                context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": []})
-                context_state.setdefault("messages", []).append({"role": role, "content": content})
+                context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": [], "max_context_messages": 40})
+                context_state.setdefault("messages", []).append({"role": role, "content": content, "created_at": datetime.now().isoformat(timespec="seconds")})
+                max_messages = max(5, int(context_state.get("max_context_messages", 40)))
+                if len(context_state["messages"]) > max_messages:
+                    context_state["messages"] = context_state["messages"][-max_messages:]
                 session.context_state = context_state
 
             async def emit_step(step: LoopStep) -> None:
@@ -212,12 +216,29 @@ class JobRunner:
                 )
 
             try:
-                result = await run_agent_loop(
-                    session=session,
-                    job=job,
-                    emit_step=emit_step,
-                    is_cancelled=lambda: self._cancelled(job_id),
+                timeout_s = max(30, int((session.context_state or {}).get("max_timeout_s", 300)))
+                result = await asyncio.wait_for(
+                    run_agent_loop(
+                        session=session,
+                        job=job,
+                        emit_step=emit_step,
+                        is_cancelled=lambda: self._cancelled(job_id),
+                    ),
+                    timeout=timeout_s,
                 )
+            except asyncio.TimeoutError:
+                append_context_message("assistant", "Job timed out before completion")
+                await db.commit()
+                await update_job_state(db, job.id, JobState.failed)
+                await emit_event(
+                    db,
+                    job.session_id,
+                    "log",
+                    {"message": "job failed", "error": "timeout exceeded", "attempt": attempts},
+                    job_id=job.id,
+                )
+                return
+
             except Exception as exc:  # noqa: BLE001
                 append_context_message("assistant", f"Job failed: {exc}")
                 await db.commit()

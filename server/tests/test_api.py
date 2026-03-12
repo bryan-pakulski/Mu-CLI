@@ -430,3 +430,19 @@ async def test_session_context_trim_respects_max_context_messages() -> None:
         messages = details.json()["context_state"]["messages"]
         assert len(messages) <= 5
         assert all("created_at" in msg for msg in messages)
+
+
+@pytest.mark.asyncio
+async def test_workspace_browser_endpoint(tmp_path: Path) -> None:
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "beta").mkdir()
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        listed = await client.get("/workspace/browse", params={"path": str(tmp_path)})
+        assert listed.status_code == 200
+        payload = listed.json()
+        assert payload["cwd"] == str(tmp_path.resolve())
+        names = {item["name"] for item in payload["entries"]}
+        assert {"alpha", "beta"}.issubset(names)
+

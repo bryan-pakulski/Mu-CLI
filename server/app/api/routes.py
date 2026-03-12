@@ -739,6 +739,31 @@ async def list_skills(
     ]
 
 
+
+
+@router.get("/workspace/browse")
+async def browse_workspace(path: str | None = None) -> dict:
+    requested = (path or "/workspace").strip() or "/workspace"
+    root = Path(requested).expanduser()
+    try:
+        cwd = root.resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid path: {exc}") from exc
+
+    if not cwd.exists() or not cwd.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    entries: list[dict] = []
+    for child in sorted(cwd.iterdir(), key=lambda item: item.name.lower()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith('.'):
+            continue
+        entries.append({"name": child.name, "path": str(child.resolve())})
+
+    parent = str(cwd.parent.resolve()) if cwd.parent != cwd else str(cwd)
+    return {"cwd": str(cwd), "parent": parent, "entries": entries}
+
 @router.post("/sessions/{session_id}/workspace/index", response_model=WorkspaceIndexBuildResponse)
 async def build_workspace_index(
     session_id: str,

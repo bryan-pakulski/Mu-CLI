@@ -39,9 +39,7 @@
             <input id="workspace" value="" placeholder="Optional workspace path" />
             <button id="browse-workspace" class="btn" type="button">Browse</button>
           </div>
-          <input id="workspace-picker" type="file" webkitdirectory directory multiple class="hidden" />
         </section>
-
 
         <section class="block">
           <h3>Tools & Skills</h3>
@@ -76,16 +74,10 @@
           <div class="brand-wrap">
             <button id="toggle-left" class="icon-btn" type="button" aria-label="Toggle left panel">☰</button>
             <div class="brand">mu_cli</div>
-            <nav class="top-nav">
-              <button class="nav-pill active" type="button">Operate</button>
-              <button class="nav-pill" type="button">Control</button>
-              <button class="nav-pill" type="button">Review</button>
-              <button class="nav-pill" type="button">Settings</button>
-              <button class="nav-pill" type="button">Help</button>
-            </nav>
             <span id="active-model" class="pill">provider: ollama</span>
           </div>
           <div class="header-actions">
+            <button id="open-help" class="btn" type="button">Help</button>
             <div id="active-status" class="state-pill idle">idle</div>
             <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme">◐</button>
             <button id="toggle-right" class="icon-btn" type="button" aria-label="Toggle right panel">☷</button>
@@ -131,7 +123,7 @@
     <div id="session-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="session-settings-title">
       <div class="modal-card modal-wide">
         <div class="modal-header-row">
-          <h3 id="session-settings-title">Session overrides</h3>
+          <h3 id="session-settings-title">Session Settings</h3>
           <button id="modal-cancel" class="btn">Close</button>
         </div>
         <div class="modal-body modal-grid">
@@ -155,11 +147,7 @@
 
           <div class="field-group">
             <label for="modal-approval-mode">Approval mode</label>
-            <select id="modal-approval-mode">
-              <option value="default">auto</option>
-              <option value="strict">strict</option>
-              <option value="lenient">lenient</option>
-            </select>
+            <select id="modal-approval-mode"></select>
           </div>
           <div class="field-group">
             <label for="modal-mode">Mode</label>
@@ -172,7 +160,7 @@
           </div>
 
           <div class="field-group">
-            <label for="modal-condense-window">Condense window</label>
+            <label for="modal-condense-window">Context window</label>
             <input id="modal-condense-window" type="number" min="5" step="1" value="40" />
           </div>
           <div class="field-group">
@@ -180,29 +168,13 @@
             <input id="modal-max-timeout" type="number" min="30" step="30" value="300" />
           </div>
 
-          <div class="field-group checks-row">
-            <label><input id="modal-agentic-planning" type="checkbox" /> Agentic planning</label>
-            <label><input id="modal-research-mode" type="checkbox" /> Research mode</label>
-            <label><input id="modal-auto-condense" type="checkbox" /> Auto condense</label>
-          </div>
-
           <div class="field-group full">
-            <label for="modal-system-prompt">System prompt override (session)</label>
-            <textarea id="modal-system-prompt" rows="4"></textarea>
-          </div>
-
-          <div class="field-group full">
-            <label for="modal-rules-checklist">Rules checklist (session)</label>
-            <textarea id="modal-rules-checklist" rows="3"></textarea>
-          </div>
-
-          <div class="field-group full">
-            <label>Enabled skills override</label>
+            <label>Enabled skills</label>
             <div id="modal-enabled-skills" class="override-list"></div>
           </div>
 
           <div class="field-group full">
-            <label>Tool visibility override</label>
+            <label>Enabled tools</label>
             <div id="modal-enabled-tools" class="override-list"></div>
           </div>
         </div>
@@ -211,8 +183,43 @@
         </div>
       </div>
     </div>
-</div>
 
+    <div id="workspace-browser-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workspace-browser-title">
+      <div class="modal-card modal-wide">
+        <div class="modal-header-row">
+          <h3 id="workspace-browser-title">Pick workspace folder</h3>
+          <button id="workspace-browser-close" class="btn">Close</button>
+        </div>
+        <div class="modal-body">
+          <div class="row compact">
+            <input id="workspace-browser-path" placeholder="/path/to/workspace" />
+            <button id="workspace-browser-go" class="btn" type="button">Go</button>
+          </div>
+          <div id="workspace-browser-cwd" class="muted"></div>
+          <ul id="workspace-browser-list" class="meta-list"></ul>
+        </div>
+        <div class="modal-actions">
+          <button id="workspace-browser-select" class="btn primary">Use selected</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="help-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <div class="modal-card">
+        <div class="modal-header-row">
+          <h3 id="help-title">Help</h3>
+          <button id="help-close" class="btn">Close</button>
+        </div>
+        <div class="modal-body">
+          <ul class="help-list">
+            <li>Create/select a session, then send prompts from the composer.</li>
+            <li>Use Session Settings from a session menu (⋯) to adjust runtime and enabled tools/skills.</li>
+            <li>Use Browse in the workspace section to pick a workspace directory from the built-in modal.</li>
+            <li>Use the right panel filters to inspect tool loop, status, policy, and approvals.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
 
     <div id="skill-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="skill-editor-title">
       <div class="modal-card">

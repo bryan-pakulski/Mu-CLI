@@ -13,6 +13,8 @@ let toolsConfigCache = [];
 let skillsConfigCache = [];
 let skillEditorSessionId = null;
 let skillEditorName = null;
+let workspaceBrowserPath = "";
+let workspaceBrowserSelection = "";
 const thinkingStatus = new Map();
 const assistantDraftBuffers = new Map();
 
@@ -27,6 +29,26 @@ const setOnClick = (id, handler) => {
   const node = el(id);
   if (node) node.onclick = handler;
 };
+
+
+function refreshModalOpenState() {
+  const hasVisibleModal = Array.from(document.querySelectorAll(".modal")).some((node) => !node.classList.contains("hidden"));
+  document.body.classList.toggle("modal-open", hasVisibleModal);
+}
+
+function openModal(id) {
+  const node = el(id);
+  if (!node) return;
+  node.classList.remove("hidden");
+  refreshModalOpenState();
+}
+
+function closeModal(id) {
+  const node = el(id);
+  if (!node) return;
+  node.classList.add("hidden");
+  refreshModalOpenState();
+}
 
 function formatLocalTimestamp(value = null) {
   const dt = value ? new Date(value) : new Date();
@@ -425,7 +447,7 @@ function openSkillEditor(skill, canEdit) {
       el("skill-editor-content").value = payload.content;
       el("skill-editor-content").readOnly = !canEdit;
       el("skill-editor-save").classList.toggle("hidden", !canEdit);
-      el("skill-editor-modal").classList.remove("hidden");
+      openModal("skill-editor-modal");
     })
     .catch((err) => window.alert(`Unable to open skill: ${err.message}`));
 }
@@ -575,7 +597,6 @@ async function openSessionSettings(sessionId) {
   currentSettingsSessionId = sessionId;
   const provider = session.provider_preferences?.ordered?.[0] || "ollama";
   const model = session.provider_preferences?.model || null;
-  const context = session.context_state || {};
 
   el("modal-session-name").value = session.name || "default";
   el("modal-workspace").value = session.workspace_path || "";
@@ -588,18 +609,13 @@ async function openSessionSettings(sessionId) {
   el("modal-max-timeout").value = limits.maxTimeout;
   el("modal-condense-window").value = limits.maxContext;
 
-  el("modal-agentic-planning").checked = Boolean(context.agentic_planning);
-  el("modal-research-mode").checked = Boolean(context.research_mode);
-  el("modal-auto-condense").checked = Boolean(context.auto_condense);
-  el("modal-system-prompt").value = context.system_prompt_override || "";
-  el("modal-rules-checklist").value = context.rules_checklist || "";
 
   const tools = await req(`/sessions/${sessionId}/tools-config`);
   const skills = await req(`/sessions/${sessionId}/skills-config`);
   renderOverrideList("modal-enabled-tools", tools, new Set(tools.filter((t) => t.enabled).map((t) => t.name)));
   renderOverrideList("modal-enabled-skills", skills, new Set(skills.filter((sk) => sk.enabled).map((sk) => sk.name)));
 
-  el("session-settings-modal").classList.remove("hidden");
+  openModal("session-settings-modal");
 }
 
 function showSessionMenu(anchorButton, session) {
@@ -701,7 +717,7 @@ function renderSessionList() {
 
 function closeSettingsModal() {
   currentSettingsSessionId = null;
-  el("session-settings-modal").classList.add("hidden");
+  closeModal("session-settings-modal");
 }
 
 function connectStream() {
@@ -859,30 +875,61 @@ if (quickSwitch) quickSwitch.addEventListener("keydown", async (event) => {
 });
 
 setOnClick("browse-workspace", async () => {
-  if (window.showDirectoryPicker) {
-    try {
-      const handle = await window.showDirectoryPicker();
-      el("workspace").value = handle.name;
-      return;
-    } catch {
-      // continue to fallback
-    }
-  }
-  el("workspace-picker").click();
+  const current = el("workspace").value.trim();
+  workspaceBrowserPath = current || "/workspace";
+  workspaceBrowserSelection = workspaceBrowserPath;
+  el("workspace-browser-path").value = workspaceBrowserPath;
+  await loadWorkspaceBrowser(workspaceBrowserPath);
+  openModal("workspace-browser-modal");
 });
 
-const workspacePicker = el("workspace-picker");
-if (workspacePicker) workspacePicker.addEventListener("change", (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const root = file.webkitRelativePath?.split("/")?.[0];
-  if (root) {
-    el("workspace").value = root;
-  } else {
-    const manual = window.prompt("Enter workspace path", el("workspace").value);
-    if (manual) el("workspace").value = manual;
+async function loadWorkspaceBrowser(pathValue) {
+  try {
+    const payload = await req(`/workspace/browse?path=${encodeURIComponent(pathValue || "/workspace")}`);
+    workspaceBrowserPath = payload.cwd;
+    workspaceBrowserSelection = payload.cwd;
+    el("workspace-browser-path").value = payload.cwd;
+    el("workspace-browser-cwd").textContent = `cwd: ${payload.cwd}`;
+
+    const list = el("workspace-browser-list");
+    list.innerHTML = "";
+    const entries = [{ name: "..", path: payload.parent || payload.cwd }, ...payload.entries];
+    entries.forEach((entry) => {
+      const item = document.createElement("li");
+      item.className = "workspace-entry";
+      const button = document.createElement("button");
+      button.className = "workspace-entry-btn";
+      button.type = "button";
+      button.textContent = entry.name;
+      button.onclick = () => loadWorkspaceBrowser(entry.path);
+
+      const selectBtn = document.createElement("button");
+      selectBtn.className = "btn";
+      selectBtn.type = "button";
+      selectBtn.textContent = "Select";
+      selectBtn.onclick = () => {
+        workspaceBrowserSelection = entry.path;
+        el("workspace-browser-cwd").textContent = `cwd: ${payload.cwd} · selected: ${workspaceBrowserSelection}`;
+      };
+
+      item.append(button, selectBtn);
+      list.appendChild(item);
+    });
+  } catch (err) {
+    window.alert(`Unable to browse workspace: ${err.message}`);
   }
+}
+
+setOnClick("workspace-browser-go", async () => {
+  const requested = el("workspace-browser-path").value.trim();
+  await loadWorkspaceBrowser(requested);
 });
+
+setOnClick("workspace-browser-select", () => {
+  if (workspaceBrowserSelection) el("workspace").value = workspaceBrowserSelection;
+  closeModal("workspace-browser-modal");
+});
+setOnClick("workspace-browser-close", () => closeModal("workspace-browser-modal"));
 
 setOnClick("create-job", async () => {
   if (!currentSession) return;
@@ -928,11 +975,6 @@ setOnClick("modal-save", async () => {
       max_timeout_s: Number(el("modal-max-timeout").value || 300),
       max_context_messages: Number(el("modal-condense-window").value || 40),
       provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value || "default" },
-      agentic_planning: el("modal-agentic-planning").checked,
-      research_mode: el("modal-research-mode").checked,
-      auto_condense: el("modal-auto-condense").checked,
-      system_prompt_override: el("modal-system-prompt").value,
-      rules_checklist: el("modal-rules-checklist").value,
     }),
   });
 
@@ -965,7 +1007,7 @@ document.addEventListener("click", (event) => {
 function closeSkillEditor() {
   skillEditorSessionId = null;
   skillEditorName = null;
-  el("skill-editor-modal").classList.add("hidden");
+  closeModal("skill-editor-modal");
 }
 
 setOnClick("refresh-capabilities", () => {
@@ -1003,6 +1045,17 @@ if (skillEditorModal) skillEditorModal.addEventListener("click", (event) => {
   if (event.target.id === "skill-editor-modal") closeSkillEditor();
 });
 
+const workspaceBrowserModal = el("workspace-browser-modal");
+if (workspaceBrowserModal) workspaceBrowserModal.addEventListener("click", (event) => {
+  if (event.target.id === "workspace-browser-modal") closeModal("workspace-browser-modal");
+});
+
+setOnClick("open-help", () => openModal("help-modal"));
+setOnClick("help-close", () => closeModal("help-modal"));
+const helpModal = el("help-modal");
+if (helpModal) helpModal.addEventListener("click", (event) => {
+  if (event.target.id === "help-modal") closeModal("help-modal");
+});
 
 document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
   chip.addEventListener("click", () => {

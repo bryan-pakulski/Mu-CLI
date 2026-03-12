@@ -38,6 +38,12 @@ body {
   color: var(--text);
   overflow: hidden;
 }
+
+body.modal-open #app-shell {
+  filter: blur(4px);
+  pointer-events: none;
+  user-select: none;
+}
 .app-shell {
   --left-size: 320px;
   --right-size: 420px;
@@ -182,9 +188,6 @@ textarea { resize: vertical; min-height: 54px; }
 .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 85%, transparent); }
 .brand-wrap, .header-actions { display: flex; align-items: center; gap: 10px; }
 .brand { font-weight: 700; }
-.top-nav { display: flex; gap: 4px; margin-left: 6px; }
-.nav-pill { border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 3px 10px; font-size: 11px; }
-.nav-pill.active { color: var(--text); border-color: color-mix(in srgb, var(--primary) 60%, var(--border)); background: color-mix(in srgb, var(--primary) 20%, var(--surface)); }
 .icon-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 10px; width: 28px; height: 28px; cursor: pointer; }
 .pill { background: var(--surface); border-radius: 999px; padding: 3px 9px; font-size: 11px; color: var(--muted); border: 1px solid var(--border); }
 .chat-window { padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 7px; }
@@ -235,7 +238,9 @@ textarea { resize: vertical; min-height: 54px; }
 .modal {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.38);
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -266,6 +271,11 @@ body[data-theme="light"] {
 }
 
 @media (max-width: 1100px) {
-  .top-nav { display: none; }
   .modal-grid { grid-template-columns: 1fr; }
 }
+
+.help-list { margin: 0; padding-left: 18px; color: var(--text); line-height: 1.45; }
+
+.workspace-entry { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.workspace-entry:last-child { border-bottom: 0; }
+.workspace-entry-btn { flex: 1; text-align: left; border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px; background: var(--surface); color: var(--text); cursor: pointer; }

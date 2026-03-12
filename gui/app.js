@@ -135,41 +135,6 @@ function togglePanel(side) {
   applyPanelLayout();
 }
 
-function setupResizer(resizerId, side) {
-  const resizer = el(resizerId);
-  const shell = el("app-shell");
-
-  resizer.addEventListener("pointerdown", (event) => {
-    if (panelState[side].collapsed) {
-      panelState[side].collapsed = false;
-      applyPanelLayout();
-    }
-    const shellRect = shell.getBoundingClientRect();
-    resizer.classList.add("dragging");
-    resizer.setPointerCapture(event.pointerId);
-
-    const onMove = (moveEvent) => {
-      if (side === "left") {
-        panelState.left.width = clamp(moveEvent.clientX - shellRect.left, panelState.left.min, panelState.left.max);
-      } else {
-        panelState.right.width = clamp(shellRect.right - moveEvent.clientX, panelState.right.min, panelState.right.max);
-      }
-      applyPanelLayout();
-    };
-
-    const onStop = () => {
-      resizer.classList.remove("dragging");
-      resizer.removeEventListener("pointermove", onMove);
-      resizer.removeEventListener("pointerup", onStop);
-      resizer.removeEventListener("pointercancel", onStop);
-    };
-
-    resizer.addEventListener("pointermove", onMove);
-    resizer.addEventListener("pointerup", onStop);
-    resizer.addEventListener("pointercancel", onStop);
-  });
-}
-
 function setSessionState(state) {
   const normalized = state || "idle";
   const className =
@@ -509,8 +474,7 @@ async function refreshSessions() {
   });
 
   if (sessionsCache.length > 0 && (!currentSession || !sessionsCache.some((s) => s.id === currentSession))) {
-    const defaultSession = sessionsCache.find((s) => (s.name || "").toLowerCase() === "default");
-    currentSession = (defaultSession || sessionsCache[0]).id;
+    currentSession = sessionsCache[0].id;
   }
 
   const statuses = await Promise.all(sessionsCache.map((s) => buildSessionIndicator(s.id)));
@@ -553,7 +517,7 @@ async function refreshApprovals() {
 }
 
 el("create-session").onclick = async () => {
-  const workspace_path = el("workspace").value;
+  const workspace_path = el("workspace").value.trim();
   const sessionName = window.prompt("Session name", "new session") || "new session";
   const created = await req("/sessions", {
     method: "POST",
@@ -632,15 +596,10 @@ el("goal").addEventListener("keydown", (event) => {
   }
 });
 
-el("save-config").onclick = () => {
-  persistCurrentConfig().catch(console.error);
-};
 
 el("refresh-approvals").onclick = refreshApprovals;
 el("toggle-left").onclick = () => togglePanel("left");
 el("toggle-right").onclick = () => togglePanel("right");
-setupResizer("left-resizer", "left");
-setupResizer("right-resizer", "right");
 applyPanelLayout();
 
 el("modal-cancel").onclick = closeSettingsModal;

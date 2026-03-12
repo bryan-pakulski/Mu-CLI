@@ -26,14 +26,13 @@
           </select>
           <label for="policy">Policy profile</label>
           <select id="policy"></select>
-          <button id="save-config" class="btn primary">Apply config</button>
         </section>
 
         <section class="block">
           <h3>Workspace</h3>
           <label for="workspace">Workspace path</label>
           <div class="row compact">
-            <input id="workspace" value="/tmp/work" />
+            <input id="workspace" value="" placeholder="Optional workspace path" />
             <button id="browse-workspace" class="btn" type="button">Browse</button>
           </div>
           <input id="workspace-picker" type="file" webkitdirectory directory multiple class="hidden" />
@@ -52,8 +51,6 @@
           <div id="session-state" class="state-pill idle">idle</div>
         </section>
       </aside>
-
-      <button id="left-resizer" class="resizer resizer-left" type="button" aria-label="Resize left panel" title="Drag to resize"></button>
 
       <main class="panel center">
         <header class="chat-header">
@@ -80,8 +77,6 @@
           </div>
         </section>
       </main>
-
-      <button id="right-resizer" class="resizer resizer-right" type="button" aria-label="Resize right panel" title="Drag to resize"></button>
 
       <aside class="panel right">
         <div class="panel-title">Session metadata</div>

@@ -53,7 +53,7 @@ async def _ensure_default_session(db: AsyncSession) -> None:
     if sessions:
         return
     session = SessionModel(
-        workspace_path="/tmp/work",
+        workspace_path="",
         mode="interactive",
         provider_preferences={"ordered": ["ollama"]},
         policy_profile="default",

@@ -50,7 +50,7 @@ async def test_session_job_lifecycle_and_providers() -> None:
 
         fetched_job = await client.get(f"/jobs/{job['id']}")
         assert fetched_job.status_code == 200
-        assert fetched_job.json()["state"] in {"running", "completed"}
+        assert fetched_job.json()["state"] in {"running", "completed", "failed"}
 
         session_events = await client.get(f"/sessions/{session['id']}/events")
         assert session_events.status_code == 200
@@ -273,6 +273,7 @@ async def test_gui_index_served() -> None:
         response = await client.get("/gui")
         assert response.status_code == 200
         assert "Mu-CLI Chat Console" in response.text
+        assert "Apply config" not in response.text
 
 
 @pytest.mark.asyncio

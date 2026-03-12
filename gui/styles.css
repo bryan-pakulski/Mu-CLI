@@ -13,43 +13,27 @@
 body {
   margin: 0;
   font-family: Inter, system-ui, Arial, sans-serif;
+  font-size: 90%;
   background: var(--bg);
   color: var(--text);
 }
 .app-shell {
   --left-size: 320px;
   --right-size: 420px;
-  --splitter-size: 10px;
   height: 100vh;
   display: grid;
-  grid-template-columns: var(--left-size) var(--splitter-size) minmax(0, 1fr) var(--splitter-size) var(--right-size);
+  grid-template-columns: var(--left-size) minmax(0, 1fr) var(--right-size);
   transition: grid-template-columns 280ms ease;
 }
 .app-shell.left-collapsed { --left-size: 0px; }
 .app-shell.right-collapsed { --right-size: 0px; }
 .panel { overflow: auto; background: var(--panel); border-right: 1px solid var(--border); transition: opacity 220ms ease; min-width: 0; }
 .panel.left { grid-column: 1; }
-.panel.center { grid-column: 3; background: var(--panel-alt); display: grid; grid-template-rows: auto 1fr auto; }
-.panel.right { grid-column: 5; border-right: 0; border-left: 1px solid var(--border); }
+.panel.center { grid-column: 2; background: var(--panel-alt); display: grid; grid-template-rows: auto 1fr auto; }
+.panel.right { grid-column: 3; border-right: 0; border-left: 1px solid var(--border); }
 .app-shell.left-collapsed .panel.left,
 .app-shell.right-collapsed .panel.right { opacity: 0; pointer-events: none; overflow: hidden; border-width: 0; }
 
-.resizer {
-  border: 0;
-  padding: 0;
-  width: var(--splitter-size);
-  cursor: col-resize;
-  background: linear-gradient(180deg, rgba(148, 163, 184, 0.2), rgba(100, 116, 139, 0.24));
-  transition: background 160ms ease;
-}
-.resizer:hover,
-.resizer.dragging {
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.35), rgba(37, 99, 235, 0.45));
-}
-.resizer-left { grid-column: 2; }
-.resizer-right { grid-column: 4; }
-.app-shell.left-collapsed .resizer-left,
-.app-shell.right-collapsed .resizer-right { background: transparent; }
 
 .panel-title { padding: 14px 16px; font-size: 12px; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.08em; }
 .block { border-top: 1px solid var(--border); padding: 12px 14px; }

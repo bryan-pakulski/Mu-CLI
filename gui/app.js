@@ -50,6 +50,23 @@ function closeModal(id) {
   refreshModalOpenState();
 }
 
+
+function initSectionToggles() {
+  document.querySelectorAll(".section-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.dataset.target;
+      if (!targetId) return;
+      const body = el(targetId);
+      if (!body) return;
+      const nextHidden = !body.classList.contains("hidden") ? true : false;
+      body.classList.toggle("hidden", nextHidden);
+      btn.setAttribute("aria-expanded", String(!nextHidden));
+      const chevron = btn.querySelector("span");
+      if (chevron) chevron.textContent = nextHidden ? "▸" : "▾";
+    });
+  });
+}
+
 function formatLocalTimestamp(value = null) {
   const dt = value ? new Date(value) : new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -1104,6 +1121,7 @@ document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
 });
 
 initTheme();
+initSectionToggles();
 populateRuntimeOptions().then(refreshSessions).then(refreshApprovals).catch(console.error);
 setInterval(() => {
   refreshApprovals().catch(() => null);

@@ -11,61 +11,67 @@
       <aside class="panel left">
         <div class="panel-title">Control panel</div>
 
-        <section class="block">
-          <h3>Runtime</h3>
-          <label for="providers">Provider</label>
-          <select id="providers"></select>
-          <label for="model">Model</label>
-          <select id="model"></select>
-          <label for="mode">Mode</label>
-          <select id="mode">
-            <option value="interactive">interactive</option>
-            <option value="research">research</option>
-            <option value="debugging">debugging</option>
-            <option value="yolo">yolo</option>
-          </select>
-          <label for="policy">Policy profile</label>
-          <select id="policy"></select>
-          <label for="max-timeout">Max timeout (s)</label>
-          <input id="max-timeout" type="number" min="30" step="30" value="300" />
-          <label for="max-context">Max session context messages</label>
-          <input id="max-context" type="number" min="5" step="1" value="40" />
-        </section>
-
-        <section class="block">
-          <h3>Workspace</h3>
-          <label for="workspace">Workspace path</label>
-          <div class="row compact">
-            <input id="workspace" value="" placeholder="Optional workspace path" />
-            <button id="browse-workspace" class="btn" type="button">Browse</button>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-runtime" aria-expanded="true">Runtime <span>▾</span></button>
+          <div class="section-body" id="left-runtime">
+            <label for="providers">Provider</label>
+            <select id="providers"></select>
+            <label for="model">Model</label>
+            <select id="model"></select>
+            <label for="mode">Mode</label>
+            <select id="mode">
+              <option value="interactive">interactive</option>
+              <option value="research">research</option>
+              <option value="debugging">debugging</option>
+              <option value="yolo">yolo</option>
+            </select>
+            <label for="policy">Policy profile</label>
+            <select id="policy"></select>
+            <label for="max-timeout">Max timeout (s)</label>
+            <input id="max-timeout" type="number" min="30" step="30" value="300" />
+            <label for="max-context">Max session context messages</label>
+            <input id="max-context" type="number" min="5" step="1" value="40" />
           </div>
         </section>
 
-        <section class="block">
-          <h3>Tools & Skills</h3>
-          <div class="row compact">
-            <button id="refresh-capabilities" class="btn" type="button">Refresh</button>
-            <button id="open-skills-folder" class="btn" type="button">Add skill</button>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-workspace" aria-expanded="true">Workspace & context store <span>▾</span></button>
+          <div class="section-body" id="left-workspace">
+            <label for="workspace">Workspace path</label>
+            <div class="row compact">
+              <input id="workspace" value="" placeholder="Optional workspace path" />
+              <button id="browse-workspace" class="btn" type="button">Browse</button>
+            </div>
           </div>
-
-          <label>Tools</label>
-          <ul id="tools-list" class="capability-list"></ul>
-
-          <label>Skills</label>
-          <ul id="skills-list" class="capability-list"></ul>
         </section>
 
-        <section class="block">
-          <h3>Sessions</h3>
-          <div class="row compact">
-            <button id="create-session" class="btn">New</button>
-            <button id="refresh-sessions" class="btn">Refresh</button>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-tools" aria-expanded="false">Tools & skills <span>▸</span></button>
+          <div class="section-body hidden" id="left-tools">
+            <div class="row compact">
+              <button id="refresh-capabilities" class="btn" type="button">Refresh</button>
+              <button id="open-skills-folder" class="btn" type="button">Add skill</button>
+            </div>
+            <label>Tools</label>
+            <ul id="tools-list" class="capability-list"></ul>
+            <label>Skills</label>
+            <ul id="skills-list" class="capability-list"></ul>
           </div>
-          <label for="session-quick-switch">Quick switch</label>
-          <input id="session-quick-switch" placeholder="Type + Enter to switch by id prefix" />
-          <ul id="session-list" class="session-list"></ul>
-          <div id="session-summary" class="muted">No session selected.</div>
-          <div id="session-state" class="state-pill idle">idle</div>
+        </section>
+
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-sessions" aria-expanded="true">Sessions <span>▾</span></button>
+          <div class="section-body" id="left-sessions">
+            <div class="row compact">
+              <button id="create-session" class="btn">New</button>
+              <button id="refresh-sessions" class="btn">Refresh</button>
+            </div>
+            <label for="session-quick-switch">Quick switch</label>
+            <input id="session-quick-switch" placeholder="Type + Enter to switch by id prefix" />
+            <ul id="session-list" class="session-list"></ul>
+            <div id="session-summary" class="muted">No session selected.</div>
+            <div id="session-state" class="state-pill idle">idle</div>
+          </div>
         </section>
       </aside>
 
@@ -100,29 +106,35 @@
       <aside class="panel right">
         <div class="panel-title">Session metadata</div>
 
-        <section class="block">
-          <h3>Live backend feed</h3>
-          <div class="meta-filters" id="meta-filters">
-            <button class="chip active" data-filter="all">All</button>
-            <button class="chip" data-filter="loop_step">Tool loop</button>
-            <button class="chip" data-filter="job_state">Status</button>
-            <button class="chip" data-filter="log">Logs</button>
-            <button class="chip" data-filter="policy">Policy</button>
-            <button class="chip" data-filter="system_prompt">System</button>
-            <button class="chip" data-filter="approval">Approval</button>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="right-feed" aria-expanded="true">Live backend feed <span>▾</span></button>
+          <div class="section-body" id="right-feed">
+            <div class="meta-filters" id="meta-filters">
+              <button class="chip active" data-filter="all">All</button>
+              <button class="chip" data-filter="loop_step">Tool loop</button>
+              <button class="chip" data-filter="job_state">Status</button>
+              <button class="chip" data-filter="log">Logs</button>
+              <button class="chip" data-filter="policy">Policy</button>
+              <button class="chip" data-filter="system_prompt">System</button>
+              <button class="chip" data-filter="approval">Approval</button>
+            </div>
+            <ul id="timeline" class="meta-list"></ul>
           </div>
-          <ul id="timeline" class="meta-list"></ul>
         </section>
 
 
-        <section class="block">
-          <h3>System prompts</h3>
-          <ul id="system-prompts" class="meta-list"></ul>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="right-system" aria-expanded="true">System prompts <span>▾</span></button>
+          <div class="section-body" id="right-system">
+            <ul id="system-prompts" class="meta-list"></ul>
+          </div>
         </section>
 
-        <section class="block">
-          <h3>Pending approvals</h3>
-          <ul id="approvals" class="meta-list"></ul>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="right-approvals" aria-expanded="true">Pending approvals <span>▾</span></button>
+          <div class="section-body" id="right-approvals">
+            <ul id="approvals" class="meta-list"></ul>
+          </div>
         </section>
       </aside>
     </div>

@@ -1,2 +1,0 @@
-# Dependencies for mu_cli runtime and GUI.
-flask>=3.0.0

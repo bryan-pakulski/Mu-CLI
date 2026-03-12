@@ -1,106 +1,53 @@
-PYTHON ?= python
-PYTHONPATH ?= agents
+PYTHON ?= python3
+UVICORN ?= uvicorn
+APP_MODULE ?= server.app.main:app
+HOST ?= 0.0.0.0
+PORT ?= 8000
+GUI_URL ?= http://127.0.0.1:$(PORT)/gui
+GUI_STATIC_PORT ?= 4173
 
-PROVIDER ?= echo
-MODEL ?=
-API_KEY ?=
-SYSTEM ?= You are a helpful coding assistant. Keep responses concise.
-WORKSPACE ?=
-PRICING_CONFIG ?= .mu_cli/pricing.json
-SESSION ?= default
-APPROVAL_MODE ?= ask
-AGENTIC_PLANNING ?= 1
-DEBUG ?= 0
-
-.PHONY: test test-fast test-verbose test-web check build-frontend run run-web run-echo run-openai run-gemini run-ollama models docker-build docker-run-web docker-run-cli docker-models help
+.PHONY: help install-dev run-server run-server-no-reload test-server test lint format check run-cli run-gui run-gui-static
 
 help:
-	@echo "Targets:"
-	@echo "  make test            - Run unit tests"
-	@echo "  make test-fast       - Run unit tests (fast local alias)"
-	@echo "  make test-verbose    - Run unit tests (verbose)"
-	@echo "  make test-web        - Run only web/API tests"
-	@echo "  make check           - Run full local verification"
-	@echo "  make models          - Show supported model catalog"
-	@echo "  make run-echo        - Start CLI with echo provider"
-	@echo "  make run-openai      - Start CLI with openai provider (uses OPENAI_API_KEY)"
-	@echo "  make run-gemini      - Start CLI with gemini provider (uses GEMINI_API_KEY/GOOGLE_API_KEY)"
-	@echo "  make run-ollama      - Start CLI with ollama provider (uses OLLAMA_HOST, default http://127.0.0.1:11434)"
-	@echo "  make run PROVIDER=<provider> MODEL=<model> [API_KEY=<key>] [WORKSPACE=<path>] [AGENTIC_PLANNING=0|1] [DEBUG=0|1]"
-	@echo "  make docker-build    - Build local container image (mu-cli:latest)"
-	@echo "  make docker-run-web  - Run Flask GUI in container on http://localhost:5000"
-	@echo "  make docker-run-cli  - Start interactive CLI in container"
-	@echo "  make docker-models   - Print model catalog from container"
+	@echo "Mu-CLI developer targets"
+	@echo "  install-dev     Install project + dev dependencies"
+	@echo "  run-server      Start FastAPI server with reload"
+	@echo "  run-server-no-reload Start FastAPI server without reload"
+	@echo "  test-server     Run server test suite"
+	@echo "  test            Run full test suite"
+	@echo "  lint            Run Ruff linting"
+	@echo "  check           Run lint + tests"
+	@echo "  run-cli         Show CLI help"
+	@echo "  run-gui         Start server and serve GUI at $(GUI_URL)"
+	@echo "  run-gui-static  Serve gui/ statically on localhost:$(GUI_STATIC_PORT)"
+
+install-dev:
+	$(PYTHON) -m pip install -e .[dev] --no-build-isolation
+
+run-server:
+	$(UVICORN) $(APP_MODULE) --host $(HOST) --port $(PORT) --reload
+
+run-server-no-reload:
+	$(UVICORN) $(APP_MODULE) --host $(HOST) --port $(PORT)
+
+test-server:
+	pytest -q server/tests || test $$? -eq 5
 
 test:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s agents/tests
+	pytest -q || test $$? -eq 5
 
-test-fast: test
+lint:
+	ruff check .
 
-test-verbose:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s agents/tests -v
+check: lint test
 
-test-web:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest agents.tests.test_web
+run-cli:
+	$(PYTHON) cli/mu_cli.py --help
 
-check: test
+run-gui:
+	@echo "Starting Mu-CLI server with GUI available at $(GUI_URL)"
+	$(UVICORN) $(APP_MODULE) --host $(HOST) --port $(PORT) --reload
 
-build-frontend:
-	$(PYTHON) scripts/build_frontend_bundle.py
-
-models:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mu_cli.cli --list-models
-
-run:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mu_cli.cli \
-		--provider "$(PROVIDER)" \
-		$(if $(MODEL),--model "$(MODEL)") \
-		$(if $(API_KEY),--api-key "$(API_KEY)") \
-		$(if $(WORKSPACE),--workspace "$(WORKSPACE)") \
-		--pricing-config "$(PRICING_CONFIG)" \
-		--session "$(SESSION)" \
-		--approval-mode "$(APPROVAL_MODE)" \
-		$(if $(filter 0,$(AGENTIC_PLANNING)),--no-agentic-planning) \
-		$(if $(filter 1,$(DEBUG)),--debug) \
-		--system "$(SYSTEM)"
-
-run-echo:
-	$(MAKE) run PROVIDER=echo MODEL=echo
-
-run-openai:
-	$(MAKE) run PROVIDER=openai MODEL=$${MODEL:-gpt-4o-mini}
-
-run-gemini:
-	$(MAKE) run PROVIDER=gemini MODEL=$${MODEL:-gemini-2.0-flash}
-
-run-ollama:
-	$(MAKE) run PROVIDER=ollama MODEL=$${MODEL:-llama3.2}
-
-run-web:
-	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mu_cli.web
-
-docker-build:
-	docker build -t mu-cli:latest -f Dockerfile .
-
-docker-run-web:
-	docker run --rm -p 5000:5000 \
-		-v "$(CURDIR)/.mu_cli:/app/.mu_cli" \
-		-v "$(CURDIR):/workspace" \
-		-e OPENAI_API_KEY \
-		-e GEMINI_API_KEY \
-		-e GOOGLE_API_KEY \
-		-e OLLAMA_HOST \
-		mu-cli:latest web
-
-docker-run-cli:
-	docker run --rm -it \
-		-v "$(CURDIR)/.mu_cli:/app/.mu_cli" \
-		-v "$(CURDIR):/workspace" \
-		-e OPENAI_API_KEY \
-		-e GEMINI_API_KEY \
-		-e GOOGLE_API_KEY \
-		-e OLLAMA_HOST \
-		mu-cli:latest cli --provider echo --model echo --workspace /workspace
-
-docker-models:
-	docker run --rm mu-cli:latest models
+run-gui-static:
+	@echo "Serving static GUI preview at http://127.0.0.1:$(GUI_STATIC_PORT)"
+	$(PYTHON) -m http.server $(GUI_STATIC_PORT) --directory gui

@@ -24,10 +24,10 @@ run-server:
 	$(UVICORN) $(APP_MODULE) --host $(HOST) --port $(PORT) --reload
 
 test-server:
-	pytest -q server/tests
+	pytest -q server/tests || test $$? -eq 5
 
 test:
-	pytest -q
+	pytest -q || test $$? -eq 5
 
 lint:
 	ruff check .

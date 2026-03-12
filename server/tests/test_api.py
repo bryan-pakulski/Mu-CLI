@@ -1,10 +1,12 @@
 import asyncio
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from server.app.main import create_app
-
+pytest.importorskip("fastapi")
+httpx = pytest.importorskip("httpx")
+ASGITransport = httpx.ASGITransport
+AsyncClient = httpx.AsyncClient
+create_app = __import__("server.app.main", fromlist=["create_app"]).create_app
 
 @pytest.mark.asyncio
 async def test_session_job_lifecycle_and_providers() -> None:

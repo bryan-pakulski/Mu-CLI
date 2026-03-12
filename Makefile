@@ -37,7 +37,7 @@ test:
 	pytest -q || test $$? -eq 5
 
 lint:
-	ruff check .
+	ruff check . --fix
 
 check: lint test
 

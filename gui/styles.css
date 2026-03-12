@@ -11,6 +11,13 @@
   --user: #1a2130;
   --surface: #121722;
   --surface-2: #0f141d;
+  --code-bg: #111827;
+  --code-fg: #e5e7eb;
+  --tok-keyword: #93c5fd;
+  --tok-string: #86efac;
+  --tok-number: #fca5a5;
+  --tok-comment: #94a3b8;
+  --tok-operator: #c4b5fd;
 }
 
 body[data-theme="light"] {
@@ -25,6 +32,13 @@ body[data-theme="light"] {
   --user: #e7efff;
   --surface: #f4f7fd;
   --surface-2: #eef3fc;
+  --code-bg: #f1f5f9;
+  --code-fg: #0f172a;
+  --tok-keyword: #1d4ed8;
+  --tok-string: #166534;
+  --tok-number: #b45309;
+  --tok-comment: #64748b;
+  --tok-operator: #6d28d9;
 }
 
 * { box-sizing: border-box; }
@@ -38,7 +52,6 @@ body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
-  zoom: var(--ui-scale);
 }
 
 body.modal-open #app-shell {
@@ -49,8 +62,11 @@ body.modal-open #app-shell {
 .app-shell {
   --left-size: 320px;
   --right-size: 420px;
-  min-height: 100vh;
-  height: 100dvh;
+  min-height: calc(100vh / var(--ui-scale));
+  height: calc(100dvh / var(--ui-scale));
+  width: calc(100% / var(--ui-scale));
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
   display: grid;
   grid-template-columns: var(--left-size) minmax(0, 1fr) var(--right-size);
   transition: grid-template-columns 280ms ease;
@@ -191,7 +207,7 @@ textarea { resize: vertical; min-height: 54px; }
 .pill { background: var(--surface); border-radius: 999px; padding: 3px 9px; font-size: 11px; color: var(--muted); border: 1px solid var(--border); }
 .chat-window { padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 7px; }
 .empty-state { margin: auto; color: var(--muted); font-size: 14px; }
-.message { max-width: min(860px, 92%); padding: 7px 9px; border-radius: 12px; border: 1px solid var(--border); white-space: pre-wrap; backdrop-filter: blur(2px); }
+.message { max-width: min(860px, 92%); padding: 7px 9px; border-radius: 12px; border: 1px solid var(--border); backdrop-filter: blur(2px); }
 .message .tag { font-size: 10px; text-transform: uppercase; color: #6b7280; margin-bottom: 4px; letter-spacing: 0.05em; }
 .tag-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .timestamp { font-size: 10px; color: #64748b; }
@@ -278,12 +294,12 @@ textarea { resize: vertical; min-height: 54px; }
 
 .message-content p { margin: 0 0 8px; }
 .message-content p:last-child { margin-bottom: 0; }
-.message-content code.inline-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; background: color-mix(in srgb, var(--surface) 80%, #000 20%); border: 1px solid var(--border); border-radius: 6px; padding: 1px 5px; }
-.md-code-block { position: relative; margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--surface) 85%, #000 15%); overflow: auto; max-height: 340px; }
-.md-code-block code { display: block; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; line-height: 1.45; color: #e5e7eb; }
+.message-content code.inline-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 5px; }
+.md-code-block { position: relative; margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg); overflow: auto; max-height: 340px; }
+.md-code-block code { display: block; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; line-height: 1.45; color: var(--code-fg); }
 .code-copy-btn { position: sticky; top: 0; float: right; margin-left: 8px; border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--text); border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer; z-index: 2; }
-.tok-keyword { color: #93c5fd; }
-.tok-string { color: #86efac; }
-.tok-number { color: #fca5a5; }
-.tok-comment { color: #94a3b8; font-style: italic; }
-.tok-operator { color: #c4b5fd; }
+.tok-keyword { color: var(--tok-keyword); }
+.tok-string { color: var(--tok-string); }
+.tok-number { color: var(--tok-number); }
+.tok-comment { color: var(--tok-comment); font-style: italic; }
+.tok-operator { color: var(--tok-operator); }

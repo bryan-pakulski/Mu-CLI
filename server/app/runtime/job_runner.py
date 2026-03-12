@@ -1,5 +1,6 @@
-import copy
 import asyncio
+import copy
+import re
 from datetime import datetime
 
 from sqlalchemy import select
@@ -19,6 +20,30 @@ from server.app.runtime.agent_loop import LoopStep, run_agent_loop
 from server.app.runtime.orchestrator import emit_event, update_job_state
 from server.app.skills.registry import skill_registry
 from server.app.tools.registry import tool_registry
+
+STAGE_READY_PREFIX = "STAGE_READY::"
+STAGE_NEEDS_MORE_PREFIX = "STAGE_NEEDS_MORE::"
+MAX_STAGE_REPROMPTS = 3
+
+
+def _extract_stage_signal(output: str, expected_stage: str) -> tuple[bool, str, str]:
+    text = (output or "").strip()
+    ready_pattern = re.compile(r"^STAGE_READY::([^:]+)::\\s*(.*)$", re.IGNORECASE | re.DOTALL)
+    needs_more_pattern = re.compile(r"^STAGE_NEEDS_MORE::([^:]+)::\\s*(.*)$", re.IGNORECASE | re.DOTALL)
+
+    ready_match = ready_pattern.match(text)
+    if ready_match:
+        stage_name = (ready_match.group(1) or "").strip()
+        body = (ready_match.group(2) or "").strip()
+        stage_matches = stage_name.lower() == expected_stage.lower()
+        return stage_matches, "ready", body or text
+
+    needs_more_match = needs_more_pattern.match(text)
+    if needs_more_match:
+        body = (needs_more_match.group(2) or "").strip()
+        return False, "needs_more", body or text
+
+    return False, "missing", text
 
 
 class JobRunner:
@@ -218,90 +243,134 @@ class JobRunner:
                 tools_reference_block = "\n".join(tool_reference_lines)
                 skills_reference_block = "\n".join(skill_reference_lines) if skill_reference_lines else "- none"
 
-                prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
-                prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
-                prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
-                if context_block:
-                    prompt += f"\n\nconversation_context:\n{context_block}"
-                if isinstance(system_prompt_override, str) and system_prompt_override.strip():
-                    prompt += f"\n\nsystem_prompt_override={system_prompt_override.strip()}"
-                if isinstance(rules_checklist, str) and rules_checklist.strip():
-                    prompt += f"\n\nrules_checklist={rules_checklist.strip()}"
+                stage_output = ""
+                stage_feedback = ""
+                last_provider = ""
+                for stage_attempt in range(1, MAX_STAGE_REPROMPTS + 1):
+                    prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
+                    prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
+                    prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
+                    if context_block:
+                        prompt += f"\n\nconversation_context:\n{context_block}"
+                    if isinstance(system_prompt_override, str) and system_prompt_override.strip():
+                        prompt += f"\n\nsystem_prompt_override={system_prompt_override.strip()}"
+                    if isinstance(rules_checklist, str) and rules_checklist.strip():
+                        prompt += f"\n\nrules_checklist={rules_checklist.strip()}"
+                    prompt += (
+                        "\n\nstage_protocol:\n"
+                        f"- When this stage is complete, prefix your response with {STAGE_READY_PREFIX}{step.label}::\n"
+                        f"- If not complete, prefix with {STAGE_NEEDS_MORE_PREFIX}{step.label}:: and explain what is missing.\n"
+                        "- Do not omit this prefix."
+                    )
+                    prompt += f"\ncurrent_stage_attempt={stage_attempt}/{MAX_STAGE_REPROMPTS}"
+                    if stage_feedback:
+                        prompt += f"\n\nstage_feedback:\n{stage_feedback}"
 
-                await emit_event(
-                    db,
-                    job.session_id,
-                    "model_request",
-                    {
-                        "step": step.index,
+                    stage_meta = {
+                        "index": step.index,
                         "label": step.label,
-                        "provider_order": ordered_providers,
-                        "selected_model": selected_model,
-                        "prompt": prompt,
-                    },
-                    job_id=job.id,
-                )
+                        "attempt": stage_attempt,
+                        "max_attempts": MAX_STAGE_REPROMPTS,
+                        "status": "in_progress",
+                    }
 
-                await emit_event(
-                    db,
-                    job.session_id,
-                    "system_prompt",
-                    {
-                        "step": step.index,
-                        "label": step.label,
-                        "goal": job.goal,
-                        "mode": session.mode,
-                        "provider_order": ordered_providers,
-                        "selected_model": selected_model,
-                        "enabled_skills": enabled_skills if isinstance(enabled_skills, list) else [],
-                        "enabled_tools": enabled_tools if isinstance(enabled_tools, list) else [],
-                        "available_tools": [
-                            {"name": t.name, "description": t.description}
-                            for t in all_tools
-                        ],
-                        "available_skills": [
-                            {"name": s.name, "description": s.description}
-                            for s in all_skills
-                        ],
-                        "context_messages_count": len(context_messages),
-                        "context_messages_window": history_window,
-                        "system_prompt_override": system_prompt_override if isinstance(system_prompt_override, str) else "",
-                        "rules_checklist": rules_checklist if isinstance(rules_checklist, str) else "",
-                        "prompt": prompt,
-                    },
-                    job_id=job.id,
-                )
+                    await emit_event(
+                        db,
+                        job.session_id,
+                        "model_request",
+                        {
+                            "step": step.index,
+                            "label": step.label,
+                            "stage": stage_meta,
+                            "provider_order": ordered_providers,
+                            "selected_model": selected_model,
+                            "prompt": prompt,
+                        },
+                        job_id=job.id,
+                    )
 
-                result = await provider_router.generate_with_fallback(
-                    prompt=prompt,
-                    ordered_providers=ordered_providers,
-                    model=selected_model,
-                    max_retries=settings.provider_max_retries,
-                )
+                    await emit_event(
+                        db,
+                        job.session_id,
+                        "system_prompt",
+                        {
+                            "step": step.index,
+                            "label": step.label,
+                            "stage": stage_meta,
+                            "goal": job.goal,
+                            "mode": session.mode,
+                            "provider_order": ordered_providers,
+                            "selected_model": selected_model,
+                            "enabled_skills": enabled_skills if isinstance(enabled_skills, list) else [],
+                            "enabled_tools": enabled_tools if isinstance(enabled_tools, list) else [],
+                            "available_tools": [
+                                {"name": t.name, "description": t.description}
+                                for t in all_tools
+                            ],
+                            "available_skills": [
+                                {"name": s.name, "description": s.description}
+                                for s in all_skills
+                            ],
+                            "context_messages_count": len(context_messages),
+                            "context_messages_window": history_window,
+                            "system_prompt_override": system_prompt_override if isinstance(system_prompt_override, str) else "",
+                            "rules_checklist": rules_checklist if isinstance(rules_checklist, str) else "",
+                            "prompt": prompt,
+                        },
+                        job_id=job.id,
+                    )
 
-                await emit_event(
-                    db,
-                    job.session_id,
-                    "model_response",
-                    {
-                        "step": step.index,
-                        "label": step.label,
-                        "provider": result.provider_name,
-                        "model": selected_model,
-                        "text": result.output,
-                        "output_chars": len(result.output or ""),
-                    },
-                    job_id=job.id,
-                )
+                    result = await provider_router.generate_with_fallback(
+                        prompt=prompt,
+                        ordered_providers=ordered_providers,
+                        model=selected_model,
+                        max_retries=settings.provider_max_retries,
+                    )
 
-                last_provider = result.provider_name
+                    is_ready, signal, cleaned_output = _extract_stage_signal(result.output, step.label)
+                    await emit_event(
+                        db,
+                        job.session_id,
+                        "model_response",
+                        {
+                            "step": step.index,
+                            "label": step.label,
+                            "stage": stage_meta,
+                            "stage_signal": signal,
+                            "stage_ready": is_ready,
+                            "provider": result.provider_name,
+                            "model": selected_model,
+                            "text": result.output,
+                            "output_chars": len(result.output or ""),
+                        },
+                        job_id=job.id,
+                    )
+
+                    if is_ready:
+                        stage_output = cleaned_output
+                        last_provider = result.provider_name
+                        break
+
+                    stage_feedback = (
+                        f"Previous model output did not confirm completion for stage '{step.label}'. "
+                        f"Expected prefix: {STAGE_READY_PREFIX}{step.label}::\n"
+                        f"Received signal: {signal}\n"
+                        f"Previous output:\n{result.output}"
+                    )
+
+                if not stage_output:
+                    raise RuntimeError(
+                        f"Stage '{step.label}' did not provide required readiness confirmation "
+                        f"after {MAX_STAGE_REPROMPTS} attempts"
+                    )
+
                 job.checkpoints = {
                     "last_completed_step": step.index,
                     "mode": session.mode,
                     "attempts": attempts,
                     "provider": last_provider,
                     "model": selected_model,
-                    "last_output": result.output,
+                    "last_output": stage_output,
                 }
                 await db.commit()
                 await emit_event(
@@ -311,10 +380,15 @@ class JobRunner:
                     {
                         "index": step.index,
                         "label": step.label,
+                        "stage": {
+                            "index": step.index,
+                            "label": step.label,
+                            "status": "completed",
+                        },
                         "mode": session.mode,
                         "provider": last_provider,
                         "model": selected_model,
-                        "output_preview": result.output[:180],
+                        "output_preview": stage_output[:180],
                     },
                     job_id=job.id,
                 )
@@ -325,7 +399,12 @@ class JobRunner:
                     {
                         "step": step.index,
                         "label": step.label,
-                        "text": result.output,
+                        "stage": {
+                            "index": step.index,
+                            "label": step.label,
+                            "status": "completed",
+                        },
+                        "text": stage_output,
                         "provider": last_provider,
                         "model": selected_model,
                     },

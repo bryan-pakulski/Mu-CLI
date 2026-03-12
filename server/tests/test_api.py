@@ -66,6 +66,20 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert any(item["event_type"] == "model_request" and "prompt" in (item.get("payload") or {}) for item in events_payload)
         assert any(item["event_type"] == "model_response" and "text" in (item.get("payload") or {}) for item in events_payload) or any(item["event_type"] == "log" and (item.get("payload") or {}).get("message") == "job failed" for item in events_payload)
 
+        system_prompt_events = [
+            item for item in events_payload if item.get("event_type") == "system_prompt"
+        ]
+        assert system_prompt_events
+        stage_payload = system_prompt_events[-1].get("payload") or {}
+        assert (stage_payload.get("stage") or {}).get("label")
+
+        model_response_events = [
+            item for item in events_payload if item.get("event_type") == "model_response"
+        ]
+        if model_response_events:
+            response_payload = model_response_events[-1].get("payload") or {}
+            assert "stage_ready" in response_payload
+
 
 @pytest.mark.asyncio
 async def test_system_prompt_includes_recent_conversation_context() -> None:
@@ -499,4 +513,3 @@ async def test_workspace_browser_endpoint(tmp_path: Path) -> None:
         assert payload["cwd"] == str(tmp_path.resolve())
         names = {item["name"] for item in payload["entries"]}
         assert {"alpha", "beta"}.issubset(names)
-

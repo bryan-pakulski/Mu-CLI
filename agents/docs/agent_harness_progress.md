@@ -43,3 +43,6 @@ Phase 0 is now functionally complete from a backend/runtime perspective (state l
 - [x] Added policy-driven retry controls for stall/missing-evidence/tool-failure triggers.
 - [x] Added `JobTerminalReason` enum + validation helper and wired terminal reason assignment paths.
 - [x] Enforced parser-failure retry caps with deterministic terminal behavior.
+
+- Adaptive iteration budgets now use multi-signal caps (time/token/tool + retry headroom) with explicit event trail.
+- Job terminalization path now enforces `RUNNING -> VERIFYING -> (completed|failed|timed_out)` for non-kill outcomes.

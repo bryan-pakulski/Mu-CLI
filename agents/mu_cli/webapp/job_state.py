@@ -43,7 +43,7 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     JobStatus.QUEUED.value: {JobStatus.PLANNING.value, JobStatus.KILLED.value},
     JobStatus.PLANNING.value: {JobStatus.AWAITING_PLAN_APPROVAL.value, JobStatus.RUNNING.value, JobStatus.FAILED.value, JobStatus.KILLED.value},
     JobStatus.AWAITING_PLAN_APPROVAL.value: {JobStatus.RUNNING.value, JobStatus.FAILED.value, JobStatus.KILLED.value, JobStatus.TIMED_OUT.value},
-    JobStatus.RUNNING.value: {JobStatus.VERIFYING.value, JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.TIMED_OUT.value, JobStatus.KILLED.value},
+    JobStatus.RUNNING.value: {JobStatus.VERIFYING.value, JobStatus.KILLED.value},
     JobStatus.VERIFYING.value: {JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.TIMED_OUT.value, JobStatus.KILLED.value},
     JobStatus.COMPLETED.value: set(),
     JobStatus.FAILED.value: set(),

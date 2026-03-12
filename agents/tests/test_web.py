@@ -247,6 +247,7 @@ class WebTests(unittest.TestCase):
         retry_counts = job.get('retry_counts') or {}
         self.assertIn('stall', retry_counts)
         self.assertIn('missing_evidence', retry_counts)
+        self.assertTrue(any('adaptive_iteration_cap=' in str(event) for event in (job.get('events') or [])))
 
     def test_background_job_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
@@ -789,6 +790,10 @@ class WebTests(unittest.TestCase):
         self.assertEqual('queued', transitions[0].get('from'))
         self.assertEqual('planning', transitions[0].get('to'))
         self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'budget_exhausted', 'failed_unrecoverable', 'killed'})
+        terminal_reason = job.get('terminal_reason')
+        if terminal_reason != 'killed':
+            tos = [item.get('to') for item in transitions]
+            self.assertIn('verifying', tos)
 
         telemetry = client.get('/api/telemetry')
         self.assertEqual(200, telemetry.status_code)
@@ -863,8 +868,8 @@ class WebTests(unittest.TestCase):
         self.assertIn(job.get('status'), {'completed', 'failed', 'timed_out', 'killed'})
         self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'budget_exhausted', 'failed_unrecoverable', 'killed'})
         events = job.get('events') or []
-        self.assertTrue(any('iteration_cap_reached' in str(event) or 'stall_retry_limit_reached' in str(event) for event in events))
-        self.assertLessEqual(int(job.get('iterations') or 0), 3)
+        self.assertTrue(any('iteration_cap_reached' in str(event) or 'stall_retry_limit_reached' in str(event) or 'unsatisfactory_answer_limit_reached' in str(event) for event in events))
+        self.assertLessEqual(int(job.get('iterations') or 0), 8)
 
     def test_background_job_nudges_until_satisfactory_contract(self) -> None:
         from mu_cli.web import create_app

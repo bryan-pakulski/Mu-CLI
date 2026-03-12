@@ -38,5 +38,12 @@ class JobStateTests(unittest.TestCase):
             set_terminal_reason({}, "not_a_reason")
 
 
+    def test_running_must_transition_via_verifying_for_terminal_states(self) -> None:
+        job = {"status": JobStatus.RUNNING.value}
+        result = transition_job_status(job, JobStatus.TIMED_OUT.value, reason="direct_timeout")
+        self.assertFalse(result.ok)
+        self.assertEqual(JobStatus.RUNNING.value, job["status"])
+
+
 if __name__ == "__main__":
     unittest.main()

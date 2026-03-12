@@ -49,9 +49,11 @@ class JobRunner:
                 job_id=job.id,
             )
 
-            ordered_providers = (session.provider_preferences or {}).get(
-                "ordered", ["ollama", "mock"]
+            ordered_providers = list(
+                (session.provider_preferences or {}).get("ordered", ["ollama", "mock"])
             )
+            if "mock" not in ordered_providers:
+                ordered_providers.append("mock")
 
             async def emit_step(step: LoopStep) -> None:
                 prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}"

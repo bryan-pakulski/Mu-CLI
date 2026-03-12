@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,8 +31,13 @@ from server.app.schemas import (
     SessionCreate,
     SessionRead,
     SessionUpdate,
+    SkillConfigRead,
+    SkillContentRead,
+    SkillContentUpdate,
     SkillRead,
+    ToolConfigRead,
     ToolRead,
+    EnabledItemsUpdate,
     WorkspaceIndexBuildResponse,
     WorkspaceIndexRead,
     WorkspaceIndexRefreshResponse,
@@ -492,6 +498,146 @@ async def list_provider_models(provider_name: str) -> list[str]:
     except KeyError:
         raise HTTPException(status_code=404, detail="Provider not found") from None
     return await provider.list_models()
+
+
+def _session_enabled_tools(session: SessionModel) -> set[str]:
+    context_state = dict(session.context_state or {})
+    enabled_tools = context_state.get("enabled_tools")
+    if isinstance(enabled_tools, list):
+        return {str(name) for name in enabled_tools}
+    return {tool.name for tool in tool_registry.list_tools()}
+
+
+def _session_enabled_skills(session: SessionModel, discovered: list) -> set[str]:
+    context_state = dict(session.context_state or {})
+    enabled_skills = context_state.get("enabled_skills")
+    if isinstance(enabled_skills, list):
+        return {str(name) for name in enabled_skills}
+    return {skill.name for skill in discovered}
+
+
+async def _get_session_or_404(db: AsyncSession, session_id: str) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@router.get("/sessions/{session_id}/tools-config", response_model=list[ToolConfigRead])
+async def list_session_tools_config(session_id: str, db: AsyncSession = Depends(get_db)) -> list[ToolConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    enabled_tools = _session_enabled_tools(session)
+    return [
+        ToolConfigRead(
+            name=t.name,
+            description=t.description,
+            risk_level=t.risk_level,
+            requires_approval=t.requires_approval,
+            enabled=t.name in enabled_tools,
+        )
+        for t in tool_registry.list_tools()
+    ]
+
+
+@router.patch("/sessions/{session_id}/tools-config", response_model=list[ToolConfigRead])
+async def update_session_tools_config(
+    session_id: str,
+    payload: EnabledItemsUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> list[ToolConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    valid_tool_names = {t.name for t in tool_registry.list_tools()}
+    enabled = [name for name in payload.enabled if name in valid_tool_names]
+    context_state = dict(session.context_state or {})
+    context_state["enabled_tools"] = enabled
+    session.context_state = context_state
+    await db.commit()
+    await db.refresh(session)
+    return await list_session_tools_config(session_id, db)
+
+
+@router.get("/sessions/{session_id}/skills-config", response_model=list[SkillConfigRead])
+async def list_session_skills_config(session_id: str, db: AsyncSession = Depends(get_db)) -> list[SkillConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover(session.workspace_path)
+    enabled_skills = _session_enabled_skills(session, discovered)
+    return [
+        SkillConfigRead(
+            name=skill.name,
+            description=skill.description,
+            file_path=skill.file_path,
+            enabled=skill.name in enabled_skills,
+        )
+        for skill in discovered
+    ]
+
+
+@router.patch("/sessions/{session_id}/skills-config", response_model=list[SkillConfigRead])
+async def update_session_skills_config(
+    session_id: str,
+    payload: EnabledItemsUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> list[SkillConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover(session.workspace_path)
+    valid_skill_names = {skill.name for skill in discovered}
+    enabled = [name for name in payload.enabled if name in valid_skill_names]
+    context_state = dict(session.context_state or {})
+    context_state["enabled_skills"] = enabled
+    session.context_state = context_state
+    await db.commit()
+    await db.refresh(session)
+    return await list_session_skills_config(session_id, db)
+
+
+@router.get("/sessions/{session_id}/skills/{skill_name}/content", response_model=SkillContentRead)
+async def get_skill_content(session_id: str, skill_name: str, db: AsyncSession = Depends(get_db)) -> SkillContentRead:
+    session = await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover(session.workspace_path)
+    skill = next((item for item in discovered if item.name == skill_name), None)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    workspace_root = Path(session.workspace_path).resolve()
+    skill_path = (workspace_root / skill.file_path).resolve()
+    if workspace_root not in skill_path.parents and skill_path != workspace_root:
+        raise HTTPException(status_code=400, detail="Invalid skill path")
+    if not skill_path.exists():
+        raise HTTPException(status_code=404, detail="Skill file missing")
+
+    return SkillContentRead(name=skill.name, file_path=skill.file_path, content=skill_path.read_text(encoding="utf-8"))
+
+
+@router.put("/sessions/{session_id}/skills/{skill_name}/content", response_model=SkillContentRead)
+async def update_skill_content(
+    session_id: str,
+    skill_name: str,
+    payload: SkillContentUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> SkillContentRead:
+    session = await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover(session.workspace_path)
+    skill = next((item for item in discovered if item.name == skill_name), None)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    workspace_root = Path(session.workspace_path).resolve()
+    skill_path = (workspace_root / skill.file_path).resolve()
+    if workspace_root not in skill_path.parents and skill_path != workspace_root:
+        raise HTTPException(status_code=400, detail="Invalid skill path")
+
+    skill_path.write_text(payload.content, encoding="utf-8")
+    return SkillContentRead(name=skill.name, file_path=skill.file_path, content=payload.content)
+
+
+@router.post("/sessions/{session_id}/skills/open-folder")
+async def open_skills_folder(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    session = await _get_session_or_404(db, session_id)
+    workspace_root = Path(session.workspace_path)
+    skills_dir = workspace_root / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    return {"path": str(skills_dir.resolve())}
+
 
 
 @router.get("/tools", response_model=list[ToolRead])

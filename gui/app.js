@@ -9,6 +9,10 @@ let openMenuForSession = null;
 let sessionsCache = [];
 let applyingConfig = false;
 const sessionMessages = new Map();
+let toolsConfigCache = [];
+let skillsConfigCache = [];
+let skillEditorSessionId = null;
+let skillEditorName = null;
 
 const panelState = {
   left: { collapsed: false, width: 320, min: 220, max: 560 },
@@ -303,6 +307,137 @@ async function loadSessionTimeline(sessionId) {
   }
 }
 
+async function refreshCapabilitiesPanel() {
+  const toolsList = el("tools-list");
+  const skillsList = el("skills-list");
+  if (!toolsList || !skillsList) return;
+
+  if (!currentSession) {
+    toolsList.innerHTML = '<li class="capability-empty">Select a session to view tools.</li>';
+    skillsList.innerHTML = '<li class="capability-empty">Select a session to view skills.</li>';
+    return;
+  }
+
+  const [tools, skills] = await Promise.all([
+    req(`/sessions/${currentSession}/tools-config`),
+    req(`/sessions/${currentSession}/skills-config`),
+  ]);
+  toolsConfigCache = tools;
+  skillsConfigCache = skills;
+  renderToolsConfig();
+  renderSkillsConfig();
+}
+
+function renderToolsConfig() {
+  const ul = el("tools-list");
+  if (!ul) return;
+  ul.innerHTML = "";
+  if (toolsConfigCache.length === 0) {
+    ul.innerHTML = '<li class="capability-empty">No tools discovered.</li>';
+    return;
+  }
+
+  toolsConfigCache.forEach((tool) => {
+    const li = document.createElement("li");
+    li.className = "capability-item";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = Boolean(tool.enabled);
+    checkbox.onchange = async () => {
+      const enabled = toolsConfigCache.filter((t) => (t.name === tool.name ? checkbox.checked : t.enabled)).map((t) => t.name);
+      toolsConfigCache = await req(`/sessions/${currentSession}/tools-config`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      renderToolsConfig();
+    };
+
+    const main = document.createElement("div");
+    main.className = "capability-main";
+    main.innerHTML = `<div class="capability-name">${tool.name}</div><div class="capability-meta">${tool.risk_level} risk · ${tool.requires_approval ? "requires approval" : "auto"}</div>`;
+
+    const actions = document.createElement("div");
+    actions.className = "capability-actions";
+    const view = document.createElement("button");
+    view.className = "btn";
+    view.textContent = "View";
+    view.onclick = () => {
+      window.alert(`${tool.name}
+
+${tool.description}`);
+    };
+    actions.appendChild(view);
+
+    li.append(checkbox, main, actions);
+    ul.appendChild(li);
+  });
+}
+
+function openSkillEditor(skill, canEdit) {
+  if (!currentSession) return;
+  req(`/sessions/${currentSession}/skills/${encodeURIComponent(skill.name)}/content`)
+    .then((payload) => {
+      skillEditorSessionId = currentSession;
+      skillEditorName = skill.name;
+      el("skill-editor-title").textContent = canEdit ? `Edit skill: ${skill.name}` : `View skill: ${skill.name}`;
+      el("skill-editor-path").textContent = payload.file_path;
+      el("skill-editor-content").value = payload.content;
+      el("skill-editor-content").readOnly = !canEdit;
+      el("skill-editor-save").classList.toggle("hidden", !canEdit);
+      el("skill-editor-modal").classList.remove("hidden");
+    })
+    .catch((err) => window.alert(`Unable to open skill: ${err.message}`));
+}
+
+function renderSkillsConfig() {
+  const ul = el("skills-list");
+  if (!ul) return;
+  ul.innerHTML = "";
+  if (skillsConfigCache.length === 0) {
+    ul.innerHTML = '<li class="capability-empty">No skills found in workspace.</li>';
+    return;
+  }
+
+  skillsConfigCache.forEach((skill) => {
+    const li = document.createElement("li");
+    li.className = "capability-item";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = Boolean(skill.enabled);
+    checkbox.onchange = async () => {
+      const enabled = skillsConfigCache.filter((s) => (s.name === skill.name ? checkbox.checked : s.enabled)).map((s) => s.name);
+      skillsConfigCache = await req(`/sessions/${currentSession}/skills-config`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      renderSkillsConfig();
+    };
+
+    const main = document.createElement("div");
+    main.className = "capability-main";
+    main.innerHTML = `<div class="capability-name">${skill.name}</div><div class="capability-meta">${skill.file_path}</div>`;
+
+    const actions = document.createElement("div");
+    actions.className = "capability-actions";
+
+    const view = document.createElement("button");
+    view.className = "btn";
+    view.textContent = "View";
+    view.onclick = () => openSkillEditor(skill, false);
+
+    const edit = document.createElement("button");
+    edit.className = "btn";
+    edit.textContent = "Edit";
+    edit.onclick = () => openSkillEditor(skill, true);
+
+    actions.append(view, edit);
+    li.append(checkbox, main, actions);
+    ul.appendChild(li);
+  });
+}
+
 function setIndicator(sessionId, state) {
   sessionIndicators.set(sessionId, state);
   const dot = document.querySelector(`.session-item[data-session-id='${sessionId}'] .session-dot`);
@@ -560,9 +695,11 @@ async function refreshSessions() {
     hydrateSessionMessages(active);
     await updateSessionSummary(active);
     await loadSessionTimeline(currentSession);
+    await refreshCapabilitiesPanel();
     connectStream();
   } else {
     await updateSessionSummary(null);
+    await refreshCapabilitiesPanel();
   }
 }
 
@@ -702,6 +839,50 @@ if (settingsModal) settingsModal.addEventListener("click", (event) => {
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".session-menu") && !event.target.closest(".session-menu-btn")) closeAnySessionMenu();
 });
+
+
+
+function closeSkillEditor() {
+  skillEditorSessionId = null;
+  skillEditorName = null;
+  el("skill-editor-modal").classList.add("hidden");
+}
+
+setOnClick("refresh-capabilities", () => {
+  refreshCapabilitiesPanel().catch(console.error);
+});
+
+setOnClick("open-skills-folder", async () => {
+  if (!currentSession) return;
+  const payload = await req(`/sessions/${currentSession}/skills/open-folder`, { method: "POST" });
+  const path = payload.path || "";
+  try {
+    await navigator.clipboard.writeText(path);
+  } catch {
+    // clipboard unavailable
+  }
+  const opened = window.open(`file://${path}`, "_blank");
+  if (!opened) window.alert(`Skills folder: ${path}
+(Path copied when clipboard access is available)`);
+});
+
+setOnClick("skill-editor-cancel", closeSkillEditor);
+setOnClick("skill-editor-save", async () => {
+  if (!skillEditorSessionId || !skillEditorName) return;
+  const content = el("skill-editor-content").value;
+  await req(`/sessions/${skillEditorSessionId}/skills/${encodeURIComponent(skillEditorName)}/content`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+  closeSkillEditor();
+  await refreshCapabilitiesPanel();
+});
+
+const skillEditorModal = el("skill-editor-modal");
+if (skillEditorModal) skillEditorModal.addEventListener("click", (event) => {
+  if (event.target.id === "skill-editor-modal") closeSkillEditor();
+});
+
 
 document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
   chip.addEventListener("click", () => {

@@ -42,6 +42,19 @@ class JobRunner:
         if not requested_tool:
             return True
 
+        context_state = session.context_state or {}
+        enabled_tools = context_state.get("enabled_tools")
+        if isinstance(enabled_tools, list) and requested_tool not in enabled_tools:
+            await emit_event(
+                db,
+                job.session_id,
+                "policy",
+                {"tool_name": requested_tool, "decision": "deny", "reason": "tool disabled for session"},
+                job_id=job.id,
+            )
+            await update_job_state(db, job.id, JobState.blocked)
+            return False
+
         tool = tool_registry.get(requested_tool)
         if not tool:
             await emit_event(
@@ -162,7 +175,10 @@ class JobRunner:
                 session.context_state = context_state
 
             async def emit_step(step: LoopStep) -> None:
-                prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}"
+                context_state = session.context_state or {}
+                enabled_skills = context_state.get("enabled_skills")
+                skills_hint = ",".join(enabled_skills) if isinstance(enabled_skills, list) and enabled_skills else "none"
+                prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}"
                 result = await provider_router.generate_with_fallback(
                     prompt=prompt,
                     ordered_providers=ordered_providers,

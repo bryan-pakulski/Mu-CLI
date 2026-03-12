@@ -38,6 +38,21 @@
           <input id="workspace-picker" type="file" webkitdirectory directory multiple class="hidden" />
         </section>
 
+
+        <section class="block">
+          <h3>Tools & Skills</h3>
+          <div class="row compact">
+            <button id="refresh-capabilities" class="btn" type="button">Refresh</button>
+            <button id="open-skills-folder" class="btn" type="button">Add skill</button>
+          </div>
+
+          <label>Tools</label>
+          <ul id="tools-list" class="capability-list"></ul>
+
+          <label>Skills</label>
+          <ul id="skills-list" class="capability-list"></ul>
+        </section>
+
         <section class="block">
           <h3>Sessions</h3>
           <div class="row compact">
@@ -128,6 +143,21 @@
         <div class="modal-actions">
           <button id="modal-cancel" class="btn">Cancel</button>
           <button id="modal-save" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="skill-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="skill-editor-title">
+      <div class="modal-card">
+        <h3 id="skill-editor-title">Skill editor</h3>
+        <div class="modal-body">
+          <div id="skill-editor-path" class="muted"></div>
+          <textarea id="skill-editor-content" rows="14"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button id="skill-editor-cancel" class="btn">Close</button>
+          <button id="skill-editor-save" class="btn primary">Save</button>
         </div>
       </div>
     </div>

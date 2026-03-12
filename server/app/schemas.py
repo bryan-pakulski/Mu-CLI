@@ -106,6 +106,29 @@ class SkillRead(BaseModel):
     file_path: str
 
 
+
+
+class EnabledItemsUpdate(BaseModel):
+    enabled: list[str] = Field(default_factory=list)
+
+
+class ToolConfigRead(ToolRead):
+    enabled: bool
+
+
+class SkillConfigRead(SkillRead):
+    enabled: bool
+
+
+class SkillContentRead(BaseModel):
+    name: str
+    file_path: str
+    content: str
+
+
+class SkillContentUpdate(BaseModel):
+    content: str
+
 class WorkspaceIndexRead(BaseModel):
     path: str
     file_type: str

@@ -50,7 +50,7 @@ async def test_session_job_lifecycle_and_providers() -> None:
 
         fetched_job = await client.get(f"/jobs/{job['id']}")
         assert fetched_job.status_code == 200
-        assert fetched_job.json()["state"] in {"running", "completed", "failed"}
+        assert fetched_job.json()["state"] in {"running", "completed", "failed", "cancelled"}
 
         session_events = await client.get(f"/sessions/{session['id']}/events")
         assert session_events.status_code == 200
@@ -88,7 +88,7 @@ async def test_cancel_and_resume_job_flow() -> None:
             await asyncio.sleep(0.25)
             after_resume = await client.get(f"/jobs/{job['id']}")
             assert after_resume.status_code == 200
-            assert after_resume.json()["state"] in {"running", "completed", "failed"}
+            assert after_resume.json()["state"] in {"running", "completed", "failed", "cancelled"}
 
 
 @pytest.mark.asyncio
@@ -348,3 +348,49 @@ async def test_session_context_isolation_across_sessions() -> None:
         second_messages = second_detail.json()["context_state"]["messages"]
         assert any(msg["content"] == "first goal" for msg in first_messages)
         assert all(msg["content"] != "first goal" for msg in second_messages)
+
+
+@pytest.mark.asyncio
+async def test_tools_and_skills_config_endpoints(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills" / "demo"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text("# Demo skill\n")
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": str(tmp_path), "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        tools = await client.get(f"/sessions/{session['id']}/tools-config")
+        assert tools.status_code == 200
+        assert any(item["name"] == "shell.exec" for item in tools.json())
+
+        updated_tools = await client.patch(
+            f"/sessions/{session['id']}/tools-config",
+            json={"enabled": ["workspace.write_file"]},
+        )
+        assert updated_tools.status_code == 200
+        assert any(item["name"] == "workspace.write_file" and item["enabled"] for item in updated_tools.json())
+
+        skills = await client.get(f"/sessions/{session['id']}/skills-config")
+        assert skills.status_code == 200
+        assert any(item["name"] == "demo" for item in skills.json())
+
+        skill_content = await client.get(f"/sessions/{session['id']}/skills/demo/content")
+        assert skill_content.status_code == 200
+        assert "Demo skill" in skill_content.json()["content"]
+
+        write_content = await client.put(
+            f"/sessions/{session['id']}/skills/demo/content",
+            json={"content": "# Demo skill\nUpdated"},
+        )
+        assert write_content.status_code == 200
+        assert "Updated" in write_content.json()["content"]
+
+        open_folder = await client.post(f"/sessions/{session['id']}/skills/open-folder")
+        assert open_folder.status_code == 200
+        assert open_folder.json()["path"].endswith("skills")

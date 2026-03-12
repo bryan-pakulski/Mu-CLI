@@ -1,6 +1,13 @@
 import asyncio
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +27,10 @@ async def health() -> dict:
 
 
 @router.post("/sessions", response_model=SessionRead)
-async def create_session(payload: SessionCreate, db: AsyncSession = Depends(get_db)) -> SessionModel:
+async def create_session(
+    payload: SessionCreate,
+    db: AsyncSession = Depends(get_db),
+) -> SessionModel:
     session = SessionModel(
         workspace_path=payload.workspace_path,
         mode=payload.mode,

@@ -47,6 +47,7 @@ from mu_cli.tools.filesystem import (
     WriteFileTool,
 )
 from mu_cli.workspace import WorkspaceStore
+from mu_cli.context_assembler import assemble_context_block
 from mu_cli.webapp.routes_session import SessionRouteDeps, register_session_routes
 from mu_cli.webapp.runtime import WebRuntime, default_usage
 from mu_cli.webapp.routes_state import StateRouteDeps, register_state_routes
@@ -1351,9 +1352,10 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             transition_job_status(job, status, reason=reason)
 
         try:
+            _emit_stream_event("status", status="planning", job_id=job_id, step="runner_started")
             isolated = _build_session_runtime(base_runtime, session_name)
             isolated.debug = True
-            _emit_stream_event("status", status="running", job_id=job_id)
+            _emit_stream_event("status", status="planning", job_id=job_id, step="runtime_isolated")
             trace_cursor = len(isolated.traces)
             budget = _budget_policy_for_runtime(int(isolated.max_runtime_seconds), max_tokens=int(isolated.budget_max_tokens), max_tool_calls=int(isolated.budget_max_tool_calls), max_replans=int(isolated.budget_max_replans))
             job["budget_policy"] = asdict(budget)
@@ -1365,6 +1367,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["events"].append(f"checkpoint: restored {len(restored_checkpoints[-8:])}")
 
             if isolated.agentic_planning:
+                _emit_stream_event("status", status="planning", step="plan_draft")
+                job["events"].append("plan: drafting")
                 plan_reply = _step_internal(
                     isolated,
                     "Create an execution plan for the task below. Keep it short and actionable as numbered steps. "
@@ -1392,12 +1396,14 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "Respond in exactly two lines: 'CRITIQUE: ...' and 'PLAN_OK: yes|no'.\n\n"
                     f"Task:\n{text}\n\nProposed plan:\n{plan_text}"
                 )
+                _emit_stream_event("status", status="planning", step="plan_critic")
                 critic_reply = _step_internal(isolated, critic_prompt, kind="plan_critic")
                 critic_text = (critic_reply.content or "").strip()
                 plan_ok = "plan_ok: yes" in critic_text.lower()
                 job["planner_critic"] = critic_text[:1200]
                 job["events"].append("plan: critic_passed" if plan_ok else "plan: critic_failed")
                 if not plan_ok:
+                    _emit_stream_event("status", status="planning", step="plan_revise")
                     revise_reply = _step_internal(
                         isolated,
                         "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'.",
@@ -1414,28 +1420,40 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["plan_approval"] = "approve"
                     job["last_step"] = "Plan drafted; auto-approved"
                     job["events"].append("plan: auto_approved")
+                    _emit_stream_event("status", status="planning", step="plan_auto_approved")
                 elif isolated.approval_mode == "deny":
                     job["plan_approval"] = "deny"
                     job["events"].append("plan: denied_by_policy")
+                    _emit_stream_event("status", status="planning", step="plan_denied_by_policy")
                     raise RuntimeError("Plan denied by approval policy.")
                 else:
                     job["last_step"] = "Plan drafted; waiting for approval"
                     transition_job_status(job, JobStatus.AWAITING_PLAN_APPROVAL.value, reason="plan_waiting_for_approval")
-                    while datetime.now(timezone.utc).timestamp() < deadline:
+                    _emit_stream_event("status", status="awaiting_plan_approval", step="waiting_for_user_approval")
+                    approval_wait_deadline = min(deadline, datetime.now(timezone.utc).timestamp() + max(20, min(120, int(budget.max_runtime_s // 3) or 30)))
+                    last_wait_emit = 0.0
+                    while datetime.now(timezone.utc).timestamp() < approval_wait_deadline:
                         if _cancelled():
                             _mark_cancelled("user requested stop")
                             return
                         decision = job.get("plan_approval")
                         if decision in {"approve", "deny"}:
                             break
-                        threading.Event().wait(0.4)
+                        now_ts = datetime.now(timezone.utc).timestamp()
+                        if now_ts - last_wait_emit >= 1.0:
+                            last_wait_emit = now_ts
+                            remaining = max(0, int(approval_wait_deadline - now_ts))
+                            _emit_stream_event("status", status="awaiting_plan_approval", step="waiting_for_user_approval", remaining_seconds=remaining)
+                        threading.Event().wait(0.2)
                     if _cancelled():
                         _mark_cancelled("user requested stop")
                         return
                     if job.get("plan_approval") != "approve":
                         job["events"].append("plan: denied_or_timed_out")
+                        _emit_stream_event("status", status="awaiting_plan_approval", step="approval_not_granted")
                         raise RuntimeError("Plan not approved before timeout or was denied.")
                     job["events"].append("plan: approved")
+                    _emit_stream_event("status", status="planning", step="plan_approved")
 
             total_input = 0
             total_output = 0
@@ -1468,20 +1486,29 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if approved_plan
                 else ""
             )
+            memory = assemble_context_block(isolated.agent.state.messages, isolated.summary_index, max_chars=3200)
+            job["context_assembly"] = memory.stats
+            job["events"].append(
+                f"context: pinned={memory.stats.get('pinned_count', 0)} active={memory.stats.get('active_count', 0)} archived={memory.stats.get('archived_count', 0)} chars={memory.stats.get('actual_chars', 0)}"
+            )
             prompt = (
                 text
                 + plan_context
+                + memory.text
                 + "\nExecution requirements:\n"
                 + f"- {reliability_hint}\n"
                 + "- Decompose work into checkpoints and report checkpoint completion as you progress.\n"
                 + "- Final answer must include: Confidence: <high|medium|low> and Evidence: bullets linked to tool outputs."
             )
+
+            _emit_stream_event("status", status="running", step="execution_started")
             while datetime.now(timezone.utc).timestamp() < deadline:
                 if _cancelled():
                     _mark_cancelled("user requested stop")
                     break
                 if int(job["iterations"]) >= max_iterations:
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
+                    _emit_stream_event("status", status="running", step="iteration_cap_reached", iterations=int(job.get("iterations") or 0), cap=max_iterations)
                     _record_harness_counter(base_runtime, "iteration_caps")
                     break
                 transition_job_status(job, JobStatus.RUNNING.value, reason="execution_iteration")
@@ -1685,6 +1712,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                                 job["plan"] = replanned
                                 job["events"].append(f"plan: replan_triggered #{replan_count}")
                                 job["events"].append(f"plan: replan_generated summary={replanned[:120]}")
+                                _emit_stream_event("status", status="running", step="replan_triggered", replan_count=replan_count)
                                 _record_harness_counter(base_runtime, "replans")
                                 prompt = (
                                     "Execute the REPLAN. Complete the next concrete tool action now. "
@@ -1714,6 +1742,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 pass
             elif completed_by_plan or _is_plan_complete(job.get("last_step") or ""):
                 transition_job_status(job, JobStatus.VERIFYING.value, reason="plan_complete_or_equivalent")
+                _emit_stream_event("status", status="verifying", step="plan_complete")
                 _transition_to_terminal(JobStatus.COMPLETED.value, reason="verification_ready")
                 if isinstance(job.get("answer_contract"), dict) and job["answer_contract"].get("explicit_blockers") and not job["answer_contract"].get("verified"):
                     set_terminal_reason(job, JobTerminalReason.COMPLETED_WITH_BLOCKERS)
@@ -1734,6 +1763,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             if str(job.get("status") or "") not in {JobStatus.TIMED_OUT.value, JobStatus.KILLED.value}:
                 if str(job.get("status") or "") != JobStatus.COMPLETED.value:
                     transition_job_status(job, JobStatus.VERIFYING.value, reason="final_contract_check")
+                    _emit_stream_event("status", status="verifying", step="final_contract_check")
                     _transition_to_terminal(JobStatus.COMPLETED.value, reason="finalized")
                 contract = _satisfactory_assessment(job.get("last_step"), job.get("events", []), policy)
                 job["answer_contract"] = contract

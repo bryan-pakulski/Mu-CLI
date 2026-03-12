@@ -265,6 +265,7 @@ class WebTests(unittest.TestCase):
         res = client.get(f'/api/jobs/{job_id}/stream', buffered=False)
         self.assertEqual(200, res.status_code)
         got_status = False
+        saw_planning_or_running = False
         for idx, chunk in enumerate(res.response):
             text = chunk.decode('utf-8').strip()
             if not text:
@@ -272,11 +273,44 @@ class WebTests(unittest.TestCase):
             event = json.loads(text)
             if event.get('type') == 'status':
                 got_status = True
-                break
-            if idx > 30:
+                if event.get('status') in {'planning', 'running', 'awaiting_plan_approval', 'verifying'}:
+                    saw_planning_or_running = True
+                    break
+            if idx > 60:
                 break
         self.assertTrue(got_status)
+        self.assertTrue(saw_planning_or_running)
 
+
+    def test_background_job_stream_shows_planning_visibility(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'approval_mode': 'auto', 'max_runtime_seconds': 45})
+        start = client.post('/api/chat/background', json={'text': 'stream planning visibility'})
+        self.assertEqual(200, start.status_code)
+        payload = start.get_json()
+        assert payload is not None
+        job_id = payload['job_id']
+
+        res = client.get(f'/api/jobs/{job_id}/stream', buffered=False)
+        self.assertEqual(200, res.status_code)
+        statuses: list[str] = []
+        for idx, chunk in enumerate(res.response):
+            text = chunk.decode('utf-8').strip()
+            if not text:
+                continue
+            event = json.loads(text)
+            if event.get('type') == 'status':
+                statuses.append(str(event.get('status') or ''))
+            if 'running' in statuses or 'completed' in statuses:
+                break
+            if idx > 120:
+                break
+        self.assertTrue(any(status in {'planning', 'awaiting_plan_approval', 'running'} for status in statuses))
     def test_approval_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 

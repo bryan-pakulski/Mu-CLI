@@ -46,3 +46,6 @@ Phase 0 is now functionally complete from a backend/runtime perspective (state l
 
 - Adaptive iteration budgets now use multi-signal caps (time/token/tool + retry headroom) with explicit event trail.
 - Job terminalization path now enforces `RUNNING -> VERIFYING -> (completed|failed|timed_out)` for non-kill outcomes.
+
+- ContextAssembler baseline introduced (`mu_cli/context_assembler.py`) with pinned/active/archived memory tiers.
+- Planning/approval stream status visibility expanded with frequent status events and shorter stream heartbeats.

@@ -108,7 +108,7 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
         @stream_with_context
         def generate():
             local_cursor = cursor
-            heartbeat_deadline = time.monotonic() + 10.0
+            heartbeat_deadline = time.monotonic() + 2.0
             while True:
                 current = get_job(runtime, job_id)
                 if current is None:
@@ -125,12 +125,12 @@ def register_chat_routes(app, runtime: Any, deps: ChatRouteDeps) -> None:
                     emitted = True
                     yield json.dumps(row) + "\n"
                 if emitted:
-                    heartbeat_deadline = time.monotonic() + 10.0
+                    heartbeat_deadline = time.monotonic() + 2.0
                 status = str(current.get("status") or "")
                 if status in {"completed", "failed", "timed_out", "killed"} and not emitted:
                     break
                 if time.monotonic() >= heartbeat_deadline:
-                    heartbeat_deadline = time.monotonic() + 10.0
+                    heartbeat_deadline = time.monotonic() + 2.0
                     yield json.dumps({"type": "heartbeat", "cursor": local_cursor}) + "\n"
                 time.sleep(0.15)
 

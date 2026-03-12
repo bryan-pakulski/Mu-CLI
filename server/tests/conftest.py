@@ -8,3 +8,12 @@ if str(ROOT) not in sys.path:
 
 os.environ["MUCLI_TEST_MODE"] = "true"
 
+
+
+import pytest
+from server.app.persistence.db import init_db
+
+
+@pytest.fixture(autouse=True)
+async def _init_db_for_tests() -> None:
+    await init_db()

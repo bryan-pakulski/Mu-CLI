@@ -7,6 +7,7 @@ from server.app.persistence.models import ApprovalState, JobState, SessionStatus
 
 class SessionCreate(BaseModel):
     workspace_path: str
+    name: str = "default"
     mode: str = "interactive"
     provider_preferences: dict = Field(default_factory=lambda: {"ordered": ["ollama"]})
     policy_profile: str = "default"
@@ -14,6 +15,7 @@ class SessionCreate(BaseModel):
 
 class SessionRead(BaseModel):
     id: str
+    name: str
     workspace_path: str
     mode: str
     provider_preferences: dict
@@ -24,6 +26,7 @@ class SessionRead(BaseModel):
 
 
 class SessionUpdate(BaseModel):
+    name: str | None = None
     mode: str | None = None
     provider_preferences: dict | None = None
     policy_profile: str | None = None

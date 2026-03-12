@@ -1,3 +1,4 @@
+import copy
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,26 @@ from server.app.workspace.discovery import index_workspace, list_index, refresh_
 router = APIRouter()
 
 
+def _normalize_session_name(name: str | None) -> str:
+    value = (name or "default").strip()
+    return value or "default"
+
+
+async def _ensure_default_session(db: AsyncSession) -> None:
+    sessions = (await db.scalars(select(SessionModel))).all()
+    if sessions:
+        return
+    session = SessionModel(
+        workspace_path="/tmp/work",
+        mode="interactive",
+        provider_preferences={"ordered": ["ollama"]},
+        policy_profile="default",
+        context_state={"name": "default", "messages": [], "summary": None, "memory_refs": []},
+    )
+    db.add(session)
+    await db.commit()
+
+
 @router.get("/health")
 async def health() -> dict:
     return {"ok": True}
@@ -57,7 +78,12 @@ async def create_session(
         mode=payload.mode,
         provider_preferences=payload.provider_preferences,
         policy_profile=payload.policy_profile,
-        context_state={"messages": [], "summary": None, "memory_refs": []},
+        context_state={
+            "name": _normalize_session_name(payload.name),
+            "messages": [],
+            "summary": None,
+            "memory_refs": [],
+        },
     )
     db.add(session)
     await db.commit()
@@ -69,6 +95,7 @@ async def create_session(
 
 @router.get("/sessions", response_model=list[SessionRead])
 async def list_sessions(db: AsyncSession = Depends(get_db)) -> list[SessionModel]:
+    await _ensure_default_session(db)
     sessions = (
         await db.scalars(select(SessionModel).order_by(SessionModel.created_at.desc()))
     ).all()
@@ -100,6 +127,8 @@ async def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if payload.name is not None:
+        session.name = _normalize_session_name(payload.name)
     if payload.mode is not None:
         session.mode = payload.mode
     if payload.provider_preferences is not None:
@@ -114,6 +143,7 @@ async def update_session(
         session.id,
         "session_config",
         {
+            "name": session.name,
             "mode": session.mode,
             "provider_preferences": session.provider_preferences,
             "policy_profile": session.policy_profile,
@@ -123,6 +153,7 @@ async def update_session(
 
 @router.get("/sessions/{session_id}", response_model=SessionRead)
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:
+    await _ensure_default_session(db)
     session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -183,7 +214,7 @@ async def clear_session_context(session_id: str, db: AsyncSession = Depends(get_
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    session.context_state = {"messages": [], "summary": None, "memory_refs": []}
+    session.context_state = {"name": session.name, "messages": [], "summary": None, "memory_refs": []}
     await db.commit()
     await db.refresh(session)
     await emit_event(db, session.id, "session_context_cleared", {"status": "ok"})
@@ -209,6 +240,7 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)) ->
 
     await db.delete(session)
     await db.commit()
+    await _ensure_default_session(db)
     return {"deleted": True, "session_id": session_id}
 
 
@@ -223,6 +255,11 @@ async def create_job(
         raise HTTPException(status_code=404, detail="Session not found")
     if session.status != SessionStatus.active:
         raise HTTPException(status_code=400, detail="Session must be active to create jobs")
+
+    context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": []})
+    context_state.setdefault("messages", []).append({"role": "user", "content": payload.goal})
+    session.context_state = context_state
+    db.add(session)
 
     job = JobModel(
         session_id=session_id,
@@ -346,11 +383,12 @@ async def add_job_input(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    context_state = session.context_state or {"messages": [], "summary": None, "memory_refs": []}
+    context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": []})
     context_state.setdefault("messages", []).append(
         {"role": "user", "content": payload.get("message", "")}
     )
     session.context_state = context_state
+    db.add(session)
     await db.commit()
 
     await emit_event(

@@ -7,6 +7,7 @@ let latestAssistantMessage = null;
 let currentSettingsSessionId = null;
 let openMenuForSession = null;
 let sessionsCache = [];
+const sessionMessages = new Map();
 
 const panelState = {
   left: { collapsed: false, width: 320, min: 220, max: 560 },
@@ -140,19 +141,37 @@ function setSessionState(state) {
   });
 }
 
-function removeEmptyState() {
-  const empty = document.querySelector(".empty-state");
-  if (empty) empty.remove();
+function addSessionMessage(sessionId, role, content) {
+  const existing = sessionMessages.get(sessionId) || [];
+  existing.push({ role, content });
+  sessionMessages.set(sessionId, existing);
+}
+
+function renderChatForSession(sessionId) {
+  const chatWindow = el("chat-window");
+  chatWindow.innerHTML = "";
+
+  const messages = sessionMessages.get(sessionId) || [];
+  if (messages.length === 0) {
+    chatWindow.innerHTML = '<div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>';
+    return;
+  }
+
+  messages.forEach((msg) => {
+    const node = document.createElement("div");
+    node.className = `message ${msg.role}`;
+    node.innerHTML = `<div class="tag">${msg.role}</div><div>${msg.content}</div>`;
+    chatWindow.appendChild(node);
+  });
+  chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
 function pushChat(tag, message) {
-  removeEmptyState();
-  const node = document.createElement("div");
-  node.className = `message ${tag}`;
-  node.innerHTML = `<div class="tag">${tag}</div><div>${message}</div>`;
-  el("chat-window").appendChild(node);
-  el("chat-window").scrollTop = el("chat-window").scrollHeight;
-  return node;
+  if (!currentSession) return null;
+  addSessionMessage(currentSession, tag, message);
+  renderChatForSession(currentSession);
+  const messages = el("chat-window").querySelectorAll(".message");
+  return messages[messages.length - 1] || null;
 }
 
 function updateAssistantDraft(text) {
@@ -161,6 +180,8 @@ function updateAssistantDraft(text) {
     return;
   }
   latestAssistantMessage.querySelector("div:last-child").textContent = text;
+  const messages = sessionMessages.get(currentSession) || [];
+  if (messages.length > 0) messages[messages.length - 1].content = text;
 }
 
 function addTimeline(eventType, payload) {
@@ -194,23 +215,36 @@ function providerHintForError(rawError = "") {
   return "Provider call failed (404 from Ollama generate endpoint). Check selected model and Ollama availability/config for http://localhost:11434/api/generate.";
 }
 
+function hydrateSessionMessages(session) {
+  const items = (session?.context_state?.messages || [])
+    .filter((m) => typeof m.content === "string")
+    .map((m) => ({
+      role: m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
+      content: m.content,
+    }));
+  sessionMessages.set(session.id, items);
+}
+
 function updateSessionSummary(session) {
   if (!session) {
     el("session-summary").textContent = "No session selected.";
     el("active-model").textContent = "provider: n/a";
     setSessionState("idle");
+    el("chat-window").innerHTML = '<div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>';
     return;
   }
 
   const provider = session.provider_preferences?.ordered?.[0] || "ollama";
   const model = session.provider_preferences?.model || "default";
-  el("session-summary").textContent = `mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model}`;
+  const name = session.name || "default";
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
   loadModelsForProvider(provider, "model", model).catch(() => null);
-  el("active-model").textContent = `provider: ${provider} · model: ${model}`;
+  el("active-model").textContent = `${name} · ${provider} · ${model}`;
   setSessionState(session.status || "idle");
+  renderChatForSession(session.id);
 }
 
 function closeAnySessionMenu() {
@@ -226,6 +260,7 @@ async function openSessionSettings(sessionId) {
   currentSettingsSessionId = sessionId;
   const provider = session.provider_preferences?.ordered?.[0] || "ollama";
   const model = session.provider_preferences?.model || null;
+  el("modal-session-name").value = session.name || "default";
   el("modal-providers").value = provider;
   await loadModelsForProvider(provider, "modal-model", model);
   el("modal-mode").value = session.mode || "interactive";
@@ -252,8 +287,9 @@ function showSessionMenu(anchorButton, session) {
     closeAnySessionMenu();
     if (!window.confirm("Clear context and messages for this session?")) return;
     await req(`/sessions/${session.id}/clear`, { method: "POST" });
+    sessionMessages.set(session.id, []);
     setIndicator(session.id, "dot-idle");
-    if (session.id === currentSession) pushChat("system", "Session context cleared.");
+    if (session.id === currentSession) renderChatForSession(session.id);
   };
 
   const deleteBtn = document.createElement("button");
@@ -262,6 +298,7 @@ function showSessionMenu(anchorButton, session) {
     closeAnySessionMenu();
     if (!window.confirm("Delete this session permanently?")) return;
     await req(`/sessions/${session.id}`, { method: "DELETE" });
+    sessionMessages.delete(session.id);
     if (session.id === currentSession) {
       currentSession = null;
       if (streamSocket) streamSocket.close();
@@ -302,10 +339,12 @@ function renderSessionList() {
 
     const main = document.createElement("div");
     main.className = "session-main";
-    main.innerHTML = `<div class="session-id">${s.id.slice(0, 12)}</div><div class="session-meta">${s.mode} · ${s.status}</div>`;
+    main.innerHTML = `<div class="session-id">${s.name || "default"}</div><div class="session-meta">${s.mode} · ${s.status}</div>`;
     main.onclick = async () => {
       currentSession = s.id;
+      latestAssistantMessage = null;
       const details = await req(`/sessions/${currentSession}`);
+      hydrateSessionMessages(details);
       updateSessionSummary(details);
       renderSessionList();
       connectStream();
@@ -356,7 +395,7 @@ function connectStream() {
     }
 
     if (eventType === "log" && payload?.message === "job completed") {
-      pushChat("assistant", "Completed. Review run metadata for full execution details.");
+      pushChat("assistant", "Job completed successfully");
       latestAssistantMessage = null;
     }
 
@@ -376,8 +415,13 @@ function connectStream() {
 
 async function refreshSessions() {
   sessionsCache = await req("/sessions");
+  sessionsCache.forEach((s) => {
+    if (!sessionMessages.has(s.id)) hydrateSessionMessages(s);
+  });
+
   if (sessionsCache.length > 0 && (!currentSession || !sessionsCache.some((s) => s.id === currentSession))) {
-    currentSession = sessionsCache[0].id;
+    const defaultSession = sessionsCache.find((s) => (s.name || "").toLowerCase() === "default");
+    currentSession = (defaultSession || sessionsCache[0]).id;
   }
 
   const statuses = await Promise.all(sessionsCache.map((s) => buildSessionIndicator(s.id)));
@@ -387,6 +431,7 @@ async function refreshSessions() {
   if (sessionsCache.length > 0) {
     const active = sessionsCache.find((s) => s.id === currentSession) || sessionsCache[0];
     currentSession = active.id;
+    hydrateSessionMessages(active);
     updateSessionSummary(active);
     connectStream();
   } else {
@@ -419,10 +464,12 @@ async function refreshApprovals() {
 
 el("create-session").onclick = async () => {
   const workspace_path = el("workspace").value;
+  const sessionName = window.prompt("Session name", "new session") || "new session";
   const created = await req("/sessions", {
     method: "POST",
     body: JSON.stringify({
       workspace_path,
+      name: sessionName,
       mode: el("mode").value,
       policy_profile: el("policy").value,
       provider_preferences: { ordered: [el("providers").value], model: el("model").value },
@@ -430,18 +477,18 @@ el("create-session").onclick = async () => {
   });
   currentSession = created.id;
   currentJob = null;
-  pushChat("system", `Session created: ${created.id}`);
   await refreshSessions();
 };
 
 el("refresh-sessions").onclick = refreshSessions;
 el("session-quick-switch").addEventListener("keydown", async (event) => {
   if (event.key !== "Enter") return;
-  const prefix = event.target.value.trim();
-  const found = sessionsCache.find((s) => s.id.startsWith(prefix));
+  const prefix = event.target.value.trim().toLowerCase();
+  const found = sessionsCache.find((s) => s.id.startsWith(prefix) || (s.name || "").toLowerCase().startsWith(prefix));
   if (!found) return;
   currentSession = found.id;
   const details = await req(`/sessions/${currentSession}`);
+  hydrateSessionMessages(details);
   updateSessionSummary(details);
   connectStream();
   renderSessionList();
@@ -496,9 +543,11 @@ el("goal").addEventListener("keydown", (event) => {
 
 el("save-config").onclick = async () => {
   if (!currentSession) return;
+  const activeSession = sessionsCache.find((s) => s.id === currentSession);
   const updated = await req(`/sessions/${currentSession}`, {
     method: "PATCH",
     body: JSON.stringify({
+      name: activeSession?.name || "default",
       mode: el("mode").value,
       policy_profile: el("policy").value,
       provider_preferences: { ordered: [el("providers").value], model: el("model").value },
@@ -506,7 +555,6 @@ el("save-config").onclick = async () => {
   });
   updateSessionSummary(updated);
   await refreshSessions();
-  pushChat("system", "Runtime settings updated");
 };
 
 el("refresh-approvals").onclick = refreshApprovals;
@@ -522,6 +570,7 @@ el("modal-save").onclick = async () => {
   await req(`/sessions/${currentSettingsSessionId}`, {
     method: "PATCH",
     body: JSON.stringify({
+      name: el("modal-session-name").value,
       mode: el("modal-mode").value,
       policy_profile: el("modal-policy").value,
       provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value },
@@ -548,11 +597,7 @@ document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
   });
 });
 
-populateRuntimeOptions()
-  .then(refreshSessions)
-  .then(refreshApprovals)
-  .catch(console.error);
-
+populateRuntimeOptions().then(refreshSessions).then(refreshApprovals).catch(console.error);
 setInterval(() => {
   refreshApprovals().catch(() => null);
 }, 2000);

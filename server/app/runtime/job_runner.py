@@ -1,3 +1,4 @@
+import copy
 import asyncio
 
 from sqlalchemy import select
@@ -155,6 +156,11 @@ class JobRunner:
             ordered_providers = resolve_ordered_providers(provider_preferences)
             selected_model = provider_preferences.get("model")
 
+            def append_context_message(role: str, content: str) -> None:
+                context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": []})
+                context_state.setdefault("messages", []).append({"role": role, "content": content})
+                session.context_state = context_state
+
             async def emit_step(step: LoopStep) -> None:
                 prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}"
                 result = await provider_router.generate_with_fallback(
@@ -196,6 +202,8 @@ class JobRunner:
                     is_cancelled=lambda: self._cancelled(job_id),
                 )
             except Exception as exc:  # noqa: BLE001
+                append_context_message("assistant", f"Job failed: {exc}")
+                await db.commit()
                 await emit_event(
                     db,
                     job.session_id,
@@ -211,6 +219,7 @@ class JobRunner:
                     "summary": "Job cancelled by user",
                     "mode": result["mode"],
                 }
+                append_context_message("assistant", "Job cancelled by user")
                 await db.commit()
                 await update_job_state(db, job_id, JobState.cancelled)
                 await emit_event(
@@ -229,6 +238,7 @@ class JobRunner:
                     "provider": (job.checkpoints or {}).get("provider"),
                     "model": (job.checkpoints or {}).get("model"),
                 }
+                append_context_message("assistant", "Job completed successfully")
                 await db.commit()
                 await update_job_state(db, job_id, JobState.completed)
                 await emit_event(

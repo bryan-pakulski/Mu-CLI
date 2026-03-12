@@ -151,3 +151,27 @@ async def test_policy_approval_flow() -> None:
             json={"decision": "approved"},
         )
         assert decision.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_workspace_index_and_skill_discovery_endpoints() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        create_session = await client.post(
+            "/sessions",
+            json={"workspace_path": "/workspace/tools", "mode": "interactive"},
+        )
+        assert create_session.status_code == 200
+        session = create_session.json()
+
+        build = await client.post(f"/sessions/{session['id']}/workspace/index")
+        assert build.status_code == 200
+        assert build.json()["indexed_files"] >= 1
+
+        indexed = await client.get(f"/sessions/{session['id']}/workspace/index")
+        assert indexed.status_code == 200
+        assert len(indexed.json()) >= 1
+
+        skills = await client.get("/skills", params={"session_id": session["id"]})
+        assert skills.status_code == 200
+        assert isinstance(skills.json(), list)

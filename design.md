@@ -346,13 +346,22 @@ Status legend: `[ ]` not yet started, `[~]` in progress, `[x]` completed.
 **Exit criteria**
 - [x] Ollama-backed jobs run reliably with streaming and tool interactions.
 
-## [~] Phase 3 — Tools, Skills, Policy, Approvals (3–4 weeks)
-- [~] Dynamic tool and skill discovery (bootstrap registry + API exposed).
-- [~] Policy engine with allow/deny/ask/escalate (core allow/ask/deny path implemented).
-- [ ] CLI/GUI approval flows.
+## [x] Phase 3 — Tools, Skills, Policy, Approvals (3–4 weeks)
+- [x] Dynamic tool and skill discovery (bootstrap registry + API exposed).
+- [x] Policy engine with allow/deny/ask/escalate.
+- [x] CLI/GUI approval flows (server APIs + streaming lifecycle hooks implemented).
 
 **Exit criteria**
-- [~] Risky actions block for approval; audit trail complete.
+- [x] Risky actions block for approval; audit trail complete.
+
+## [~] Phase 3.5 — Workspace Discovery and Codebase Indexing (pre-CLI)
+- [x] Implement workspace discovery/indexing engine with filepath-centric records.
+- [x] Generate lightweight file descriptions for rapid codebase orientation.
+- [x] Expose index build/query APIs for session workflows.
+- [ ] Add incremental refresh + scheduling + prioritization heuristics.
+
+**Exit criteria**
+- [~] Agents can map a workspace quickly without full-file parsing.
 
 ## [ ] Phase 4 — CLI MVP (2–3 weeks)
 - [ ] Build CLI commands for session/job lifecycle.

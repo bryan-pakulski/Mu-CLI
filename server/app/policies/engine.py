@@ -16,6 +16,12 @@ class PolicyEngine:
         if mode == "yolo" and tool.risk_level in {"low", "medium"}:
             return PolicyDecision(decision="allow", reason="yolo mode allows low/medium risk tools")
 
+        if tool.risk_level == "high" and mode in {"yolo", "autonomous"}:
+            return PolicyDecision(
+                decision="escalate",
+                reason="high risk tool in high autonomy mode requires escalation",
+            )
+
         if tool.risk_level == "high":
             return PolicyDecision(decision="ask", reason="high risk tool requires approval")
 

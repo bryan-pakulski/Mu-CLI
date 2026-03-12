@@ -27,9 +27,14 @@ from server.app.schemas import (
     ProviderRead,
     SessionCreate,
     SessionRead,
+    SkillRead,
     ToolRead,
+    WorkspaceIndexBuildResponse,
+    WorkspaceIndexRead,
 )
+from server.app.skills.registry import skill_registry
 from server.app.tools.registry import tool_registry
+from server.app.workspace.discovery import index_workspace, list_index
 
 router = APIRouter()
 
@@ -180,6 +185,27 @@ async def get_job_approvals(job_id: str, db: AsyncSession = Depends(get_db)) -> 
     return list(approvals)
 
 
+@router.get("/sessions/{session_id}/approvals/pending", response_model=list[ApprovalRead])
+async def get_pending_approvals(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[ApprovalModel]:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    approvals = (
+        await db.scalars(
+            select(ApprovalModel)
+            .where(
+                ApprovalModel.session_id == session_id,
+                ApprovalModel.state == ApprovalState.pending,
+            )
+            .order_by(ApprovalModel.created_at)
+        )
+    ).all()
+    return list(approvals)
+
+
 @router.post("/jobs/{job_id}/approvals/{approval_id}", response_model=ApprovalRead)
 async def decide_approval(
     job_id: str,
@@ -294,6 +320,72 @@ async def evaluate_policy(tool_name: str, session_mode: str = "interactive") -> 
         decision=decision.decision,
         reason=decision.reason,
     )
+
+
+@router.get("/skills", response_model=list[SkillRead])
+async def list_skills(
+    session_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[SkillRead]:
+    if not session_id:
+        return []
+
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return [
+        SkillRead(name=s.name, description=s.description, file_path=s.file_path)
+        for s in skill_registry.discover(session.workspace_path)
+    ]
+
+
+@router.post("/sessions/{session_id}/workspace/index", response_model=WorkspaceIndexBuildResponse)
+async def build_workspace_index(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceIndexBuildResponse:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    count = await index_workspace(
+        session_id=session.id,
+        workspace_path=session.workspace_path,
+        db=db,
+    )
+    await emit_event(
+        db,
+        session.id,
+        "workspace_indexed",
+        {"indexed_files": count},
+    )
+    return WorkspaceIndexBuildResponse(session_id=session.id, indexed_files=count)
+
+
+@router.get("/sessions/{session_id}/workspace/index", response_model=list[WorkspaceIndexRead])
+async def get_workspace_index(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[WorkspaceIndexRead]:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    rows = await list_index(session_id=session.id, db=db)
+    return [
+        WorkspaceIndexRead(
+            path=r.path,
+            file_type=r.file_type,
+            language=r.language,
+            last_modified=r.last_modified,
+            content_hash=r.content_hash,
+            description=r.description,
+            key_symbols=r.key_symbols,
+            tags=r.tags,
+        )
+        for r in rows
+    ]
 
 
 @router.websocket("/stream/sessions/{session_id}")

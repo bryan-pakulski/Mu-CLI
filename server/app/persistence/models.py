@@ -95,3 +95,25 @@ class ApprovalModel(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     state: Mapped[ApprovalState] = mapped_column(Enum(ApprovalState), default=ApprovalState.pending)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkspaceFileIndexModel(Base):
+    __tablename__ = "workspace_file_index"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), nullable=False)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    file_type: Mapped[str] = mapped_column(String, nullable=False)
+    language: Mapped[str] = mapped_column(String, nullable=False)
+    last_modified: Mapped[int] = mapped_column(nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    key_symbols: Mapped[list] = mapped_column(
+        JSON().with_variant(SQLITE_JSON, "sqlite"),
+        default=list,
+    )
+    tags: Mapped[list] = mapped_column(
+        JSON().with_variant(SQLITE_JSON, "sqlite"),
+        default=list,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

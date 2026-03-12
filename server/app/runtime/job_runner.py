@@ -73,6 +73,10 @@ class JobRunner:
             await update_job_state(db, job.id, JobState.blocked)
             return False
 
+        if decision.decision not in {"ask", "escalate"}:
+            await update_job_state(db, job.id, JobState.blocked)
+            return False
+
         approval = ApprovalModel(
             session_id=job.session_id,
             job_id=job.id,
@@ -93,6 +97,7 @@ class JobRunner:
                 "approval_id": approval.id,
                 "tool_name": tool.name,
                 "reason": approval.reason,
+                "decision": decision.decision,
             },
             job_id=job.id,
         )

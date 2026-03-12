@@ -89,3 +89,25 @@ class StreamEvent(BaseModel):
     session_id: str
     job_id: str | None = None
     payload: dict
+
+
+class SkillRead(BaseModel):
+    name: str
+    description: str
+    file_path: str
+
+
+class WorkspaceIndexRead(BaseModel):
+    path: str
+    file_type: str
+    language: str
+    last_modified: int
+    content_hash: str
+    description: str
+    key_symbols: list
+    tags: list
+
+
+class WorkspaceIndexBuildResponse(BaseModel):
+    session_id: str
+    indexed_files: int

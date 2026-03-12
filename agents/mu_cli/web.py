@@ -9,7 +9,7 @@ import threading
 import urllib.parse
 import uuid
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,11 +47,13 @@ from mu_cli.tools.filesystem import (
     WriteFileTool,
 )
 from mu_cli.workspace import WorkspaceStore
+from mu_cli.context_assembler import assemble_context_block
 from mu_cli.webapp.routes_session import SessionRouteDeps, register_session_routes
 from mu_cli.webapp.runtime import WebRuntime, default_usage
 from mu_cli.webapp.routes_state import StateRouteDeps, register_state_routes
 from mu_cli.webapp.routes_chat import ChatRouteDeps, register_chat_routes
 from mu_cli.webapp.services_runtime import RuntimeMutationDeps, mutate_runtime_for_clear, mutate_runtime_for_new_session, mutate_runtime_for_settings
+from mu_cli.webapp.job_state import JobStatus, JobTerminalReason, TERMINAL_STATUSES, set_terminal_reason, transition_job_status
 
 
 
@@ -96,6 +98,48 @@ def _default_usage() -> dict[str, float]:
 
 
 
+
+
+@dataclass(slots=True)
+class BudgetPolicy:
+    max_runtime_s: int
+    max_tokens: int
+    max_tool_calls: int
+    max_replans: int
+
+
+def _budget_policy_for_runtime(max_runtime_seconds: int, *, max_tokens: int, max_tool_calls: int, max_replans: int) -> BudgetPolicy:
+    runtime_s = max(30, int(max_runtime_seconds or 0))
+    token_budget = max(1200, min(120000, int(max_tokens or (runtime_s * 120))))
+    tool_budget = max(4, min(160, int(max_tool_calls or (runtime_s // 8))))
+    replan_budget = max(1, min(8, int(max_replans or 2)))
+    return BudgetPolicy(
+        max_runtime_s=runtime_s,
+        max_tokens=token_budget,
+        max_tool_calls=tool_budget,
+        max_replans=replan_budget,
+    )
+
+
+@dataclass(slots=True)
+class RetryPolicy:
+    max_stall_retries: int
+    max_missing_evidence_retries: int
+    max_tool_failure_retries: int
+    max_parser_retries: int
+
+
+def _retry_policy_for_task(task_type: str, *, stall: int, missing_evidence: int, tool_failure: int) -> RetryPolicy:
+    base_stall = max(1, min(8, int(stall or 2)))
+    base_missing = max(1, min(8, int(missing_evidence or 2)))
+    base_tool = max(1, min(8, int(tool_failure or 2)))
+    if task_type == "security":
+        return RetryPolicy(max_stall_retries=max(base_stall, 3), max_missing_evidence_retries=max(base_missing, 3), max_tool_failure_retries=max(base_tool, 3), max_parser_retries=2)
+    if task_type == "bugfix":
+        return RetryPolicy(max_stall_retries=max(base_stall, 3), max_missing_evidence_retries=max(base_missing, 3), max_tool_failure_retries=max(base_tool, 2), max_parser_retries=2)
+    return RetryPolicy(max_stall_retries=base_stall, max_missing_evidence_retries=base_missing, max_tool_failure_retries=base_tool, max_parser_retries=1)
+
+
 def _telemetry_path() -> Path:
     path = Path('.mu_cli/telemetry.json')
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,6 +151,8 @@ def _default_telemetry() -> dict[str, Any]:
         'started_at': datetime.now(timezone.utc).isoformat(),
         'request_counts': {},
         'action_counts': {},
+        'harness_counts': {},
+        'job_outcomes': [],
         'last_updated_at': datetime.now(timezone.utc).isoformat(),
     }
 
@@ -125,6 +171,8 @@ def _load_telemetry(runtime: WebRuntime) -> None:
         'started_at': payload.get('started_at') or datetime.now(timezone.utc).isoformat(),
         'request_counts': payload.get('request_counts') or {},
         'action_counts': payload.get('action_counts') or {},
+        'harness_counts': payload.get('harness_counts') or {},
+        'job_outcomes': payload.get('job_outcomes') or [],
         'last_updated_at': payload.get('last_updated_at') or datetime.now(timezone.utc).isoformat(),
     }
 
@@ -140,9 +188,52 @@ def _record_telemetry(runtime: WebRuntime, category: str, key: str, count: int =
     _persist_telemetry(runtime)
 
 
+def _record_harness_counter(runtime: WebRuntime, key: str, count: int = 1) -> None:
+    _record_telemetry(runtime, "harness_counts", key, count=count)
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    rank = max(0, min(len(ordered) - 1, int(round((pct / 100.0) * (len(ordered) - 1)))))
+    return float(ordered[rank])
+
+
+def _record_job_outcome(runtime: WebRuntime, job: dict[str, Any]) -> None:
+    outcomes = runtime.telemetry.setdefault("job_outcomes", [])
+    if not isinstance(outcomes, list):
+        outcomes = []
+        runtime.telemetry["job_outcomes"] = outcomes
+    started_at = str(job.get("started_at") or "")
+    finished_at = str(job.get("finished_at") or "")
+    duration_seconds = 0.0
+    try:
+        if started_at and finished_at:
+            duration_seconds = max(0.0, (datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)).total_seconds())
+    except ValueError:
+        duration_seconds = 0.0
+    contract = job.get("answer_contract") if isinstance(job.get("answer_contract"), dict) else {}
+    outcome = {
+        "job_id": str(job.get("id") or ""),
+        "status": str(job.get("status") or "unknown"),
+        "terminal_reason": str(job.get("terminal_reason") or ""),
+        "duration_seconds": float(round(duration_seconds, 3)),
+        "verified": bool(contract.get("verified")) if contract else None,
+        "missing_checks_count": len(contract.get("missing_checks", [])) if contract else 0,
+        "timestamp": finished_at or datetime.now(timezone.utc).isoformat(),
+    }
+    outcomes.append(outcome)
+    if len(outcomes) > 300:
+        runtime.telemetry["job_outcomes"] = outcomes[-300:]
+    _persist_telemetry(runtime)
+
+
 def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
     req_counts = runtime.telemetry.get('request_counts') or {}
     action_counts = runtime.telemetry.get('action_counts') or {}
+    harness_counts = runtime.telemetry.get('harness_counts') or {}
+    job_outcomes = runtime.telemetry.get('job_outcomes') or []
     total_requests = int(sum(int(v) for v in req_counts.values()))
     tool_failures = len([line for line in (runtime.traces or []) if 'tool-run:' in str(line) and 'ok=False' in str(line)])
     approval_waits = len([line for line in (runtime.traces or []) if 'approval' in str(line).lower()])
@@ -158,18 +249,32 @@ def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
         except ValueError:
             uptime_seconds = 0
 
+    durations = [float(item.get("duration_seconds", 0.0)) for item in job_outcomes if isinstance(item, dict)]
+    verified_samples = [item for item in job_outcomes if isinstance(item, dict) and item.get("verified") is not None]
+    verifier_gaps = len([item for item in verified_samples if not bool(item.get("verified"))])
+    retry_events_total = int(harness_counts.get('stalls', 0)) + int(harness_counts.get('tool_failures', 0)) + int(harness_counts.get('parser_failures', 0))
+
     return {
         'started_at': started_at,
         'last_updated_at': runtime.telemetry.get('last_updated_at'),
         'uptime_seconds': uptime_seconds,
         'request_counts': req_counts,
         'action_counts': action_counts,
+        'harness_counts': harness_counts,
+        'job_outcomes_count': len(job_outcomes),
         'total_requests': total_requests,
         'chat_turns': len(runtime.session_turns or []),
         'tool_failures': tool_failures,
         'approval_wait_events': approval_waits,
         'background_jobs_completed': bg_completed,
         'background_jobs_failed_or_timed_out': bg_failed,
+        'job_runtime_p50_seconds': round(_percentile(durations, 50), 3),
+        'job_runtime_p95_seconds': round(_percentile(durations, 95), 3),
+        'verifier_gap_rate': round((verifier_gaps / len(verified_samples)), 4) if verified_samples else 0.0,
+        'retry_events_total': retry_events_total,
+        'replans': int(harness_counts.get('replans', 0)),
+        'stalls': int(harness_counts.get('stalls', 0)),
+        'verification_failures': int(harness_counts.get('verification_failures', 0)),
     }
 
 
@@ -876,6 +981,12 @@ def _persist(runtime: WebRuntime) -> None:
             agentic_planning=runtime.agentic_planning,
             research_mode=runtime.research_mode,
             max_runtime_seconds=runtime.max_runtime_seconds,
+            budget_max_tokens=runtime.budget_max_tokens,
+            budget_max_tool_calls=runtime.budget_max_tool_calls,
+            budget_max_replans=runtime.budget_max_replans,
+            retry_max_stall_retries=runtime.retry_max_stall_retries,
+            retry_max_missing_evidence_retries=runtime.retry_max_missing_evidence_retries,
+            retry_max_tool_failure_retries=runtime.retry_max_tool_failure_retries,
             debug_level=runtime.debug_level,
             condense_enabled=runtime.condense_enabled,
             condense_window=runtime.condense_window,
@@ -939,6 +1050,18 @@ def _load_session(runtime: WebRuntime, session_name: str) -> bool:
         runtime.research_mode = bool(loaded.research_mode)
     if loaded.max_runtime_seconds is not None:
         runtime.max_runtime_seconds = int(loaded.max_runtime_seconds)
+    if loaded.budget_max_tokens is not None:
+        runtime.budget_max_tokens = int(loaded.budget_max_tokens)
+    if loaded.budget_max_tool_calls is not None:
+        runtime.budget_max_tool_calls = int(loaded.budget_max_tool_calls)
+    if loaded.budget_max_replans is not None:
+        runtime.budget_max_replans = int(loaded.budget_max_replans)
+    if loaded.retry_max_stall_retries is not None:
+        runtime.retry_max_stall_retries = int(loaded.retry_max_stall_retries)
+    if loaded.retry_max_missing_evidence_retries is not None:
+        runtime.retry_max_missing_evidence_retries = int(loaded.retry_max_missing_evidence_retries)
+    if loaded.retry_max_tool_failure_retries is not None:
+        runtime.retry_max_tool_failure_retries = int(loaded.retry_max_tool_failure_retries)
     if loaded.debug_level is not None:
         runtime.debug_level = _normalize_debug_level(loaded.debug_level)
     if loaded.condense_enabled is not None:
@@ -1043,6 +1166,12 @@ def _build_session_runtime(base: WebRuntime, session_name: str) -> WebRuntime:
         custom_tool_errors=list(base.custom_tool_errors),
         research_artifacts={},
         max_runtime_seconds=900,
+        budget_max_tokens=120000,
+        budget_max_tool_calls=160,
+        budget_max_replans=2,
+        retry_max_stall_retries=2,
+        retry_max_missing_evidence_retries=2,
+        retry_max_tool_failure_retries=2,
         condense_enabled=False,
         condense_window=12,
         ollama_context_window=65536,
@@ -1071,13 +1200,36 @@ def _mark_messages_as_metadata(messages: list[Message], *, kind: str) -> None:
 
 def _is_internal_agent_loop_prompt(prompt: str) -> bool:
     normalized = " ".join((prompt or "").strip().split()).lower()
-    return normalized.startswith("continue executing the approved plan.") or normalized.startswith("execute the replan.") or normalized.startswith("you appear stalled.")
+    return (
+        normalized.startswith("continue executing the approved plan.")
+        or normalized.startswith("execute the replan.")
+        or normalized.startswith("you appear stalled.")
+        or normalized.startswith("your previous response is not yet satisfactory.")
+    )
 
 def _step_internal(runtime: WebRuntime, prompt: str, kind: str) -> Message:
     before = len(runtime.agent.state.messages)
     reply = runtime.agent.step(prompt)
     _mark_messages_as_metadata(runtime.agent.state.messages[before:], kind=kind)
     return reply
+
+
+def _trim_internal_loop_messages(agent: Agent, *, max_automation_messages: int = 14) -> None:
+    messages = agent.state.messages
+    automation_indexes = [
+        idx
+        for idx, message in enumerate(messages)
+        if message.role in {Role.USER, Role.ASSISTANT} and message.metadata.get("metadata_group") == "automation"
+    ]
+    if len(automation_indexes) <= max_automation_messages:
+        return
+    keep = set(automation_indexes[-max_automation_messages:])
+    trimmed: list[Message] = []
+    for idx, message in enumerate(messages):
+        if idx in automation_indexes and idx not in keep:
+            continue
+        trimmed.append(message)
+    agent.state.messages = trimmed
 
 
 def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: str) -> str:
@@ -1097,17 +1249,49 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             return True
         return cur in {"continue", "continuing", "working on it", "still working"}
 
+    def _adaptive_iteration_budget(budget: BudgetPolicy, retry_policy: RetryPolicy) -> int:
+        time_based = max(2, min(80, int(budget.max_runtime_s // 20) or 2))
+        token_based = max(2, min(80, int(budget.max_tokens // 1800) or 2))
+        tool_based = max(2, min(80, int(budget.max_tool_calls * 2) or 2))
+        retry_headroom = int(retry_policy.max_stall_retries) + int(retry_policy.max_missing_evidence_retries) + int(retry_policy.max_tool_failure_retries) + int(retry_policy.max_parser_retries)
+        retry_bonus = max(0, min(10, int(retry_headroom // 2)))
+        return max(2, min(80, min(time_based, token_based, tool_based) + retry_bonus))
+
+    def _satisfactory_assessment(last_step: str | None, events: list[str], policy: dict[str, Any]) -> dict[str, Any]:
+        answer_text = str(last_step or "")
+        lowered = answer_text.lower()
+        required_checks = list((policy or {}).get("required_checks", []))
+        verified, missing = _has_verification_evidence(events, required_checks)
+        has_confidence = "confidence:" in lowered
+        has_evidence = "evidence:" in lowered
+        explicit_blockers = any(token in lowered for token in ("blocker", "blocked", "unable to", "could not"))
+        plan_complete = _is_plan_complete(answer_text)
+        satisfactory = plan_complete and has_confidence and has_evidence and (verified or explicit_blockers)
+        return {
+            "confidence": "high" if verified and satisfactory else ("medium" if verified else "low"),
+            "has_confidence_section": has_confidence,
+            "has_evidence_section": has_evidence,
+            "verified": verified,
+            "missing_checks": missing,
+            "plan_complete": plan_complete,
+            "explicit_blockers": explicit_blockers,
+            "satisfactory": satisfactory,
+        }
+
     job_id = uuid.uuid4().hex
     base_runtime.background_jobs[job_id] = {
         "id": job_id,
         "session": session_name,
-        "status": "running",
+        "status": JobStatus.QUEUED.value,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "finished_at": None,
         "error": None,
         "report": None,
         "iterations": 0,
         "runtime_budget_seconds": int(base_runtime.max_runtime_seconds),
+        "budget_policy": asdict(_budget_policy_for_runtime(int(base_runtime.max_runtime_seconds), max_tokens=int(base_runtime.budget_max_tokens), max_tool_calls=int(base_runtime.budget_max_tool_calls), max_replans=int(base_runtime.budget_max_replans))),
+        "retry_policy": None,
+        "retry_counts": {"stall": 0, "missing_evidence": 0, "tool_failure": 0, "parser": 0},
         "plan": None,
         "plan_approval": None,
         "last_step": None,
@@ -1122,12 +1306,14 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
         "cancel_requested": False,
         "cancel_reason": None,
         "final_response": None,
+        "terminal_reason": None,
         "stream_seq": 0,
         "stream_events": [],
     }
 
     def runner() -> None:
         job = base_runtime.background_jobs[job_id]
+        transition_job_status(job, JobStatus.PLANNING.value, reason="runner_started")
 
         def _emit_stream_event(event_type: str, **payload: Any) -> None:
             seq = int(job.get("stream_seq") or 0) + 1
@@ -1148,19 +1334,32 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             return bool(job.get("cancel_requested"))
 
         def _mark_cancelled(reason: str) -> None:
-            if job.get("status") in {"killed", "completed", "failed", "timed_out"}:
+            if str(job.get("status") or "") in TERMINAL_STATUSES:
                 return
-            job["status"] = "killed"
+            transition_job_status(job, JobStatus.KILLED.value, reason="cancel_requested")
+            set_terminal_reason(job, JobTerminalReason.KILLED)
             job["cancel_reason"] = reason
             job["events"].append(f"status: killed ({reason})")
             _emit_stream_event("status", status="killed", reason=reason)
 
+        def _transition_to_terminal(status: str, *, reason: str) -> None:
+            if status == JobStatus.KILLED.value:
+                transition_job_status(job, status, reason=reason)
+                return
+            current = str(job.get("status") or "")
+            if current not in TERMINAL_STATUSES and current != JobStatus.VERIFYING.value:
+                transition_job_status(job, JobStatus.VERIFYING.value, reason=f"pre_terminal:{reason}")
+            transition_job_status(job, status, reason=reason)
+
         try:
+            _emit_stream_event("status", status="planning", job_id=job_id, step="runner_started")
             isolated = _build_session_runtime(base_runtime, session_name)
             isolated.debug = True
-            _emit_stream_event("status", status="running", job_id=job_id)
+            _emit_stream_event("status", status="planning", job_id=job_id, step="runtime_isolated")
             trace_cursor = len(isolated.traces)
-            deadline = datetime.now(timezone.utc).timestamp() + max(30, int(isolated.max_runtime_seconds))
+            budget = _budget_policy_for_runtime(int(isolated.max_runtime_seconds), max_tokens=int(isolated.budget_max_tokens), max_tool_calls=int(isolated.budget_max_tool_calls), max_replans=int(isolated.budget_max_replans))
+            job["budget_policy"] = asdict(budget)
+            deadline = datetime.now(timezone.utc).timestamp() + budget.max_runtime_s
             checkpoint_store = isolated.research_artifacts.setdefault("checkpoints", {})
             restored_checkpoints = list(checkpoint_store.get(session_name, []))
             if restored_checkpoints:
@@ -1168,6 +1367,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["events"].append(f"checkpoint: restored {len(restored_checkpoints[-8:])}")
 
             if isolated.agentic_planning:
+                _emit_stream_event("status", status="planning", step="plan_draft")
+                job["events"].append("plan: drafting")
                 plan_reply = _step_internal(
                     isolated,
                     "Create an execution plan for the task below. Keep it short and actionable as numbered steps. "
@@ -1195,12 +1396,14 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "Respond in exactly two lines: 'CRITIQUE: ...' and 'PLAN_OK: yes|no'.\n\n"
                     f"Task:\n{text}\n\nProposed plan:\n{plan_text}"
                 )
+                _emit_stream_event("status", status="planning", step="plan_critic")
                 critic_reply = _step_internal(isolated, critic_prompt, kind="plan_critic")
                 critic_text = (critic_reply.content or "").strip()
                 plan_ok = "plan_ok: yes" in critic_text.lower()
                 job["planner_critic"] = critic_text[:1200]
                 job["events"].append("plan: critic_passed" if plan_ok else "plan: critic_failed")
                 if not plan_ok:
+                    _emit_stream_event("status", status="planning", step="plan_revise")
                     revise_reply = _step_internal(
                         isolated,
                         "Revise the prior plan to address critique gaps. Return only a numbered plan starting with 'PLAN:'.",
@@ -1217,39 +1420,61 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     job["plan_approval"] = "approve"
                     job["last_step"] = "Plan drafted; auto-approved"
                     job["events"].append("plan: auto_approved")
+                    _emit_stream_event("status", status="planning", step="plan_auto_approved")
                 elif isolated.approval_mode == "deny":
                     job["plan_approval"] = "deny"
                     job["events"].append("plan: denied_by_policy")
+                    _emit_stream_event("status", status="planning", step="plan_denied_by_policy")
                     raise RuntimeError("Plan denied by approval policy.")
                 else:
                     job["last_step"] = "Plan drafted; waiting for approval"
-                    job["status"] = "awaiting_plan_approval"
-                    while datetime.now(timezone.utc).timestamp() < deadline:
+                    transition_job_status(job, JobStatus.AWAITING_PLAN_APPROVAL.value, reason="plan_waiting_for_approval")
+                    _emit_stream_event("status", status="awaiting_plan_approval", step="waiting_for_user_approval")
+                    approval_wait_deadline = min(deadline, datetime.now(timezone.utc).timestamp() + max(20, min(120, int(budget.max_runtime_s // 3) or 30)))
+                    last_wait_emit = 0.0
+                    while datetime.now(timezone.utc).timestamp() < approval_wait_deadline:
                         if _cancelled():
                             _mark_cancelled("user requested stop")
                             return
                         decision = job.get("plan_approval")
                         if decision in {"approve", "deny"}:
                             break
-                        threading.Event().wait(0.4)
+                        now_ts = datetime.now(timezone.utc).timestamp()
+                        if now_ts - last_wait_emit >= 1.0:
+                            last_wait_emit = now_ts
+                            remaining = max(0, int(approval_wait_deadline - now_ts))
+                            _emit_stream_event("status", status="awaiting_plan_approval", step="waiting_for_user_approval", remaining_seconds=remaining)
+                        threading.Event().wait(0.2)
                     if _cancelled():
                         _mark_cancelled("user requested stop")
                         return
                     if job.get("plan_approval") != "approve":
                         job["events"].append("plan: denied_or_timed_out")
+                        _emit_stream_event("status", status="awaiting_plan_approval", step="approval_not_granted")
                         raise RuntimeError("Plan not approved before timeout or was denied.")
                     job["events"].append("plan: approved")
+                    _emit_stream_event("status", status="planning", step="plan_approved")
 
             total_input = 0
             total_output = 0
             total_tokens = 0
             total_cost = 0.0
-            max_iterations = max(2, min(60, int(isolated.max_runtime_seconds // 25) or 24))
+            tool_calls_used = 0
             no_progress_streak = 0
+            no_tool_turns_streak = 0
             previous_step = None
             replan_count = 0
             completed_by_plan = False
+            satisfactory_submitted = False
+            unsatisfactory_nudges = 0
+            max_unsatisfactory_nudges = 4
             policy = job.get("verification_policy") or _verification_policy_for_task(text)
+            retry_policy = _retry_policy_for_task(str(policy.get("task_type") or "general"), stall=int(isolated.retry_max_stall_retries), missing_evidence=int(isolated.retry_max_missing_evidence_retries), tool_failure=int(isolated.retry_max_tool_failure_retries))
+            job["retry_policy"] = asdict(retry_policy)
+            max_iterations = _adaptive_iteration_budget(budget, retry_policy)
+            job["events"].append(f"budget: adaptive_iteration_cap={max_iterations}")
+            retry_counts = job.get("retry_counts") if isinstance(job.get("retry_counts"), dict) else {"stall": 0, "missing_evidence": 0, "tool_failure": 0, "parser": 0}
+            job["retry_counts"] = retry_counts
             job["events"].append(
                 f"verification_policy: type={policy.get('task_type')} checks={','.join(policy.get('required_checks', []))}"
             )
@@ -1261,22 +1486,32 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if approved_plan
                 else ""
             )
+            memory = assemble_context_block(isolated.agent.state.messages, isolated.summary_index, max_chars=3200)
+            job["context_assembly"] = memory.stats
+            job["events"].append(
+                f"context: pinned={memory.stats.get('pinned_count', 0)} active={memory.stats.get('active_count', 0)} archived={memory.stats.get('archived_count', 0)} chars={memory.stats.get('actual_chars', 0)}"
+            )
             prompt = (
                 text
                 + plan_context
+                + memory.text
                 + "\nExecution requirements:\n"
                 + f"- {reliability_hint}\n"
                 + "- Decompose work into checkpoints and report checkpoint completion as you progress.\n"
                 + "- Final answer must include: Confidence: <high|medium|low> and Evidence: bullets linked to tool outputs."
             )
+
+            _emit_stream_event("status", status="running", step="execution_started")
             while datetime.now(timezone.utc).timestamp() < deadline:
                 if _cancelled():
                     _mark_cancelled("user requested stop")
                     break
                 if int(job["iterations"]) >= max_iterations:
                     job["events"].append(f"status: iteration_cap_reached ({max_iterations})")
+                    _emit_stream_event("status", status="running", step="iteration_cap_reached", iterations=int(job.get("iterations") or 0), cap=max_iterations)
+                    _record_harness_counter(base_runtime, "iteration_caps")
                     break
-                job["status"] = "running"
+                transition_job_status(job, JobStatus.RUNNING.value, reason="execution_iteration")
                 original_model_response = isolated.agent.on_model_response
                 original_model_stream = getattr(isolated.agent, "on_model_stream", None)
                 original_tool_run = isolated.agent.on_tool_run
@@ -1311,6 +1546,8 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 isolated.agent.on_model_response = _on_model_response
                 isolated.agent.on_model_stream = _on_model_stream
                 isolated.agent.on_tool_run = _on_tool_run
+                before_event_len = len(job.get("events", []))
+                _trim_internal_loop_messages(isolated.agent)
                 before_len = len(isolated.agent.state.messages)
                 try:
                     reply = _run_turn_with_uploaded_context(
@@ -1325,7 +1562,11 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 job["final_response"] = str(reply.content or "")
                 _emit_stream_event("assistant_message", content=str(reply.content or ""))
                 turn_messages = isolated.agent.state.messages[before_len:]
-                had_tool_activity = any(message.role is Role.TOOL_RESULT for message in turn_messages)
+                turn_tool_calls = len([message for message in turn_messages if message.role is Role.TOOL_RESULT])
+                tool_calls_used += turn_tool_calls
+                had_tool_activity = turn_tool_calls > 0
+                new_events = list((job.get("events") or [])[before_event_len:])
+                turn_tool_failure = any("tool-run:" in str(line) and "ok=False" in str(line) for line in new_events)
                 if _is_internal_agent_loop_prompt(prompt):
                     _mark_messages_as_metadata(turn_messages, kind="agent_loop")
                 report = _turn_report(isolated, prompt, reply.content)
@@ -1353,7 +1594,20 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     "output_tokens": total_output,
                     "total_tokens": total_tokens,
                     "estimated_cost_usd": total_cost,
+                    "tool_calls": tool_calls_used,
                 }
+                if total_tokens >= budget.max_tokens:
+                    job["events"].append(f"status: budget_exhausted(tokens={total_tokens},cap={budget.max_tokens})")
+                    set_terminal_reason(job, JobTerminalReason.BUDGET_EXHAUSTED)
+                    _record_harness_counter(base_runtime, "budget_exhausted")
+                    _transition_to_terminal(JobStatus.TIMED_OUT.value, reason="token_budget_exhausted")
+                    break
+                if tool_calls_used >= budget.max_tool_calls:
+                    job["events"].append(f"status: budget_exhausted(tool_calls={tool_calls_used},cap={budget.max_tool_calls})")
+                    set_terminal_reason(job, JobTerminalReason.BUDGET_EXHAUSTED)
+                    _record_harness_counter(base_runtime, "budget_exhausted")
+                    _transition_to_terminal(JobStatus.TIMED_OUT.value, reason="tool_budget_exhausted")
+                    break
                 checkpoint = {
                     "iteration": int(job["iterations"]),
                     "status": job.get("status"),
@@ -1365,17 +1619,103 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 if len(job["checkpoints"]) > 30:
                     job["checkpoints"] = job["checkpoints"][-30:]
 
+                checkpoint_every = max(2, min(8, int(isolated.condense_window or 12) // 3 or 4))
+                if bool(isolated.condense_enabled) and int(job["iterations"]) % checkpoint_every == 0:
+                    condense_result = _condense_session_context(isolated, window_size=isolated.condense_window)
+                    if isinstance(condense_result, dict) and condense_result.get("ok"):
+                        checkpoint_meta = {
+                            "iteration": int(job["iterations"]),
+                            "summary_index_size": len(isolated.summary_index),
+                            "window": int(isolated.condense_window or 12),
+                            "unchanged": bool(condense_result.get("unchanged", False)),
+                        }
+                        job["events"].append(
+                            f"context_checkpoint: iteration={checkpoint_meta['iteration']} summaries={checkpoint_meta['summary_index_size']} unchanged={checkpoint_meta['unchanged']}"
+                        )
+                        _emit_stream_event("context_checkpoint", checkpoint=checkpoint_meta)
+                        _persist(isolated)
+
+                if not (reply.content or "").strip():
+                    retry_counts["parser"] = int(retry_counts.get("parser", 0)) + 1
+                    job["events"].append(f"retry: parser #{retry_counts['parser']}")
+                    _record_harness_counter(base_runtime, "parser_failures")
+                    if int(retry_counts.get("parser", 0)) > int(retry_policy.max_parser_retries):
+                        job["events"].append("status: parser_retry_limit_reached")
+                        set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
+                        _transition_to_terminal(JobStatus.FAILED.value, reason="parser_retry_exhausted")
+                        break
+                    prompt = (
+                        "Your last response was empty or unparsable. Continue execution and return either "
+                        "(1) a concrete next action, or (2) a final answer beginning with 'PLAN_COMPLETE' "
+                        "plus Confidence and Evidence sections."
+                    )
+                    continue
+
                 if _is_plan_complete(reply.content):
                     completed_by_plan = True
                     job["events"].append("status: plan_complete_detected")
+                assessment = _satisfactory_assessment(job.get("last_step"), job.get("events", []), policy)
+                job["answer_contract"] = assessment
+                if assessment["satisfactory"]:
+                    satisfactory_submitted = True
+                    job["events"].append("status: satisfactory_answer_submitted")
                     break
+                if unsatisfactory_nudges < max_unsatisfactory_nudges:
+                    unsatisfactory_nudges += 1
+                    if assessment["missing_checks"]:
+                        retry_counts["missing_evidence"] = int(retry_counts.get("missing_evidence", 0)) + 1
+                        job["events"].append(f"retry: missing_evidence #{retry_counts['missing_evidence']}")
+                        if int(retry_counts.get("missing_evidence", 0)) > int(retry_policy.max_missing_evidence_retries):
+                            job["events"].append("status: missing_evidence_retry_limit_reached")
+                            set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
+                            _transition_to_terminal(JobStatus.FAILED.value, reason="missing_evidence_retry_exhausted")
+                            break
+                    missing_parts: list[str] = []
+                    if not assessment["plan_complete"]:
+                        missing_parts.append("begin with PLAN_COMPLETE")
+                    if not assessment["has_confidence_section"]:
+                        missing_parts.append("add a Confidence: section")
+                    if not assessment["has_evidence_section"]:
+                        missing_parts.append("add an Evidence: section")
+                    if assessment["missing_checks"]:
+                        missing_parts.append(
+                            "include verification evidence for: " + ", ".join(assessment["missing_checks"])
+                        )
+                    if assessment["verified"] is False and not assessment["explicit_blockers"]:
+                        missing_parts.append("if blocked, explicitly state blockers")
+                    guidance = "; ".join(missing_parts) or "finish with complete validated answer"
+                    job["events"].append(f"status: unsatisfactory_answer_nudge #{unsatisfactory_nudges}")
+                    _record_harness_counter(base_runtime, "nudges")
+                    prompt = (
+                        "Your previous response is not yet satisfactory. "
+                        f"Please {guidance}. Keep progressing execution with tools when needed."
+                    )
+                    continue
+                if turn_tool_failure:
+                    retry_counts["tool_failure"] = int(retry_counts.get("tool_failure", 0)) + 1
+                    job["events"].append(f"retry: tool_failure #{retry_counts['tool_failure']}")
+                    _record_harness_counter(base_runtime, "tool_failures")
+                    if int(retry_counts.get("tool_failure", 0)) > int(retry_policy.max_tool_failure_retries):
+                        job["events"].append("status: tool_failure_retry_limit_reached")
+                        set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
+                        _transition_to_terminal(JobStatus.FAILED.value, reason="tool_failure_retry_exhausted")
+                        break
                 if not isolated.agentic_planning:
                     break
                 if not had_tool_activity:
+                    no_tool_turns_streak += 1
                     no_progress_streak = no_progress_streak + 1 if stalled else 0
-                    if no_progress_streak >= 2:
+                    if no_progress_streak >= 2 or no_tool_turns_streak >= 3:
                         job["events"].append("status: stalled_no_tool_progress")
-                        if replan_count < 2:
+                        _record_harness_counter(base_runtime, "stalls")
+                        retry_counts["stall"] = int(retry_counts.get("stall", 0)) + 1
+                        job["events"].append(f"retry: stall #{retry_counts['stall']}")
+                        if int(retry_counts.get("stall", 0)) > int(retry_policy.max_stall_retries):
+                            job["events"].append("status: stall_retry_limit_reached")
+                            set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
+                            _transition_to_terminal(JobStatus.FAILED.value, reason="stall_retry_exhausted")
+                            break
+                        if replan_count < int(budget.max_replans):
                             replan_count += 1
                             replan_reply = _step_internal(
                                 isolated,
@@ -1387,6 +1727,9 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                             if replanned:
                                 job["plan"] = replanned
                                 job["events"].append(f"plan: replan_triggered #{replan_count}")
+                                job["events"].append(f"plan: replan_generated summary={replanned[:120]}")
+                                _emit_stream_event("status", status="running", step="replan_triggered", replan_count=replan_count)
+                                _record_harness_counter(base_runtime, "replans")
                                 prompt = (
                                     "Execute the REPLAN. Complete the next concrete tool action now. "
                                     "When done, return 'PLAN_COMPLETE' with Confidence and Evidence sections."
@@ -1401,17 +1744,29 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                     # Prevent repetitive continue loops when the model is already giving a final synthesis.
                     break
                 no_progress_streak = 0
+                no_tool_turns_streak = 0
                 prompt = (
                     "Continue executing the approved plan. Use tools as needed. "
                     "When all tasks are complete, begin your response with 'PLAN_COMPLETE'."
                 )
 
-            if job.get("status") == "killed":
+            if not satisfactory_submitted and unsatisfactory_nudges >= max_unsatisfactory_nudges:
+                job["events"].append("status: unsatisfactory_answer_limit_reached")
+                _record_harness_counter(base_runtime, "unsatisfactory_limits")
+
+            if job.get("status") == JobStatus.KILLED.value:
                 pass
             elif completed_by_plan or _is_plan_complete(job.get("last_step") or ""):
-                job["status"] = "completed"
+                transition_job_status(job, JobStatus.VERIFYING.value, reason="plan_complete_or_equivalent")
+                _emit_stream_event("status", status="verifying", step="plan_complete")
+                _transition_to_terminal(JobStatus.COMPLETED.value, reason="verification_ready")
+                if isinstance(job.get("answer_contract"), dict) and job["answer_contract"].get("explicit_blockers") and not job["answer_contract"].get("verified"):
+                    set_terminal_reason(job, JobTerminalReason.COMPLETED_WITH_BLOCKERS)
+                else:
+                    set_terminal_reason(job, JobTerminalReason.COMPLETED_SATISFACTORY)
             elif datetime.now(timezone.utc).timestamp() >= deadline:
-                job["status"] = "timed_out"
+                _transition_to_terminal(JobStatus.TIMED_OUT.value, reason="deadline_elapsed")
+                set_terminal_reason(job, JobTerminalReason.TIMED_OUT)
 
             job["report"] = {
                 "provider": isolated.provider,
@@ -1421,39 +1776,41 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
                 "total_tokens": total_tokens,
                 "estimated_cost_usd": total_cost,
             }
-            if job["status"] not in {"timed_out", "killed"}:
-                job["status"] = "completed"
+            if str(job.get("status") or "") not in {JobStatus.TIMED_OUT.value, JobStatus.KILLED.value}:
+                if str(job.get("status") or "") != JobStatus.COMPLETED.value:
+                    transition_job_status(job, JobStatus.VERIFYING.value, reason="final_contract_check")
+                    _emit_stream_event("status", status="verifying", step="final_contract_check")
+                    _transition_to_terminal(JobStatus.COMPLETED.value, reason="finalized")
+                contract = _satisfactory_assessment(job.get("last_step"), job.get("events", []), policy)
+                job["answer_contract"] = contract
+                if not job.get("terminal_reason"):
+                    if contract.get("explicit_blockers") and not contract.get("verified"):
+                        set_terminal_reason(job, JobTerminalReason.COMPLETED_WITH_BLOCKERS)
+                    else:
+                        set_terminal_reason(job, JobTerminalReason.COMPLETED_SATISFACTORY)
                 _emit_stream_event("status", status="completed")
                 job["completed_flash_until"] = (
                     datetime.now(timezone.utc).timestamp() + 45
                 )
-                required_checks = list((policy or {}).get("required_checks", []))
-                verified, missing = _has_verification_evidence(job.get("events", []), required_checks)
-                answer_text = str(job.get("last_step") or "")
-                has_confidence = "confidence:" in answer_text.lower()
-                has_evidence = "evidence:" in answer_text.lower()
-                confidence = "medium" if verified else "low"
-                contract = {
-                    "confidence": confidence,
-                    "has_confidence_section": has_confidence,
-                    "has_evidence_section": has_evidence,
-                    "verified": verified,
-                    "missing_checks": missing,
-                }
-                job["answer_contract"] = contract
-                if verified:
+                if contract["verified"]:
                     job["events"].append("verification: passed")
                 else:
-                    job["events"].append("verification: gaps=" + ",".join(missing))
+                    job["events"].append("verification: gaps=" + ",".join(contract["missing_checks"]))
+                    _record_harness_counter(base_runtime, "verification_failures")
                 if _is_plan_complete(job.get("last_step")):
                     job["events"].append("status: completed")
                 else:
                     job["events"].append("status: completed_without_explicit_plan_complete")
         except Exception as exc:
             job["error"] = str(exc)
-            if job.get("status") not in {"timed_out", "killed"}:
-                job["status"] = "failed"
+            if _cancelled():
+                transition_job_status(job, JobStatus.KILLED.value, reason="cancelled_during_exception")
+                set_terminal_reason(job, JobTerminalReason.KILLED)
+            elif str(job.get("status") or "") not in {JobStatus.TIMED_OUT.value, JobStatus.KILLED.value}:
+                _transition_to_terminal(JobStatus.FAILED.value, reason="exception")
+                set_terminal_reason(job, JobTerminalReason.FAILED_UNRECOVERABLE)
             job["events"].append(f"status: failed ({exc})")
+            _record_harness_counter(base_runtime, "failures")
             _emit_stream_event("error", error=str(exc))
         finally:
             try:
@@ -1468,6 +1825,7 @@ def _start_background_turn(base_runtime: WebRuntime, session_name: str, text: st
             except Exception:
                 pass
             job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _record_job_outcome(base_runtime, job)
             _emit_stream_event("done", status=str(job.get("status") or "unknown"))
 
     thread = threading.Thread(target=runner, daemon=True)
@@ -1534,6 +1892,12 @@ def create_app():
         custom_tool_errors=[],
         research_artifacts={},
         max_runtime_seconds=900,
+        budget_max_tokens=120000,
+        budget_max_tool_calls=160,
+        budget_max_replans=2,
+        retry_max_stall_retries=2,
+        retry_max_missing_evidence_retries=2,
+        retry_max_tool_failure_retries=2,
         condense_enabled=False,
         condense_window=12,
         ollama_context_window=65536,
@@ -1571,6 +1935,8 @@ def create_app():
     @app.after_request
     def _response_log_hook(response):
         from flask import g, request
+        if request.path == "/api/state/clear-all":
+            return response
         started = getattr(g, "_request_started_at", None)
         elapsed_ms = 0
         if started is not None:

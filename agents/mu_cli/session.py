@@ -21,6 +21,12 @@ class SessionState:
     agentic_planning: bool | None = None
     research_mode: bool | None = None
     max_runtime_seconds: int | None = None
+    budget_max_tokens: int | None = None
+    budget_max_tool_calls: int | None = None
+    budget_max_replans: int | None = None
+    retry_max_stall_retries: int | None = None
+    retry_max_missing_evidence_retries: int | None = None
+    retry_max_tool_failure_retries: int | None = None
     condense_enabled: bool | None = None
     condense_window: int | None = None
     ollama_context_window: int | None = None
@@ -76,6 +82,12 @@ class SessionStore:
             agentic_planning=payload.get("agentic_planning"),
             research_mode=payload.get("research_mode"),
             max_runtime_seconds=payload.get("max_runtime_seconds"),
+            budget_max_tokens=payload.get("budget_max_tokens"),
+            budget_max_tool_calls=payload.get("budget_max_tool_calls"),
+            budget_max_replans=payload.get("budget_max_replans"),
+            retry_max_stall_retries=payload.get("retry_max_stall_retries"),
+            retry_max_missing_evidence_retries=payload.get("retry_max_missing_evidence_retries"),
+            retry_max_tool_failure_retries=payload.get("retry_max_tool_failure_retries"),
             condense_enabled=payload.get("condense_enabled"),
             condense_window=payload.get("condense_window"),
             ollama_context_window=payload.get("ollama_context_window"),
@@ -100,6 +112,12 @@ class SessionStore:
             "agentic_planning": state.agentic_planning,
             "research_mode": state.research_mode,
             "max_runtime_seconds": state.max_runtime_seconds,
+            "budget_max_tokens": state.budget_max_tokens,
+            "budget_max_tool_calls": state.budget_max_tool_calls,
+            "budget_max_replans": state.budget_max_replans,
+            "retry_max_stall_retries": state.retry_max_stall_retries,
+            "retry_max_missing_evidence_retries": state.retry_max_missing_evidence_retries,
+            "retry_max_tool_failure_retries": state.retry_max_tool_failure_retries,
             "condense_enabled": state.condense_enabled,
             "condense_window": state.condense_window,
             "ollama_context_window": state.ollama_context_window,

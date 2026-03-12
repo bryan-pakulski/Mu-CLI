@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -159,6 +160,95 @@ class WebTests(unittest.TestCase):
         self.assertEqual(200, status.status_code)
         self.assertEqual('stream-session', status.get_json()['session'])
 
+    def test_health_endpoint_reports_background_backlog(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        start = client.post('/api/chat/background', json={'text': 'health backlog check'})
+        self.assertEqual(200, start.status_code)
+
+        health = client.get('/api/health')
+        self.assertEqual(200, health.status_code)
+        payload = health.get_json() or {}
+        self.assertTrue(payload.get('ok'))
+        self.assertIn('background_jobs_backlog', payload)
+        self.assertIn('queue_depth', payload)
+        self.assertIn('background_jobs_by_status', payload)
+
+    def test_telemetry_exposes_runtime_percentiles_and_verifier_gap_rate(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 30, 'approval_mode': 'auto'})
+        started = []
+        for prompt in ('telemetry run one', 'telemetry run two'):
+            res = client.post('/api/chat/background', json={'text': prompt})
+            self.assertEqual(200, res.status_code)
+            started.append(res.get_json()['job_id'])
+
+        deadline = time.time() + 6
+        pending = set(started)
+        while time.time() < deadline and pending:
+            for job_id in list(pending):
+                poll = client.get(f'/api/jobs/{job_id}')
+                self.assertEqual(200, poll.status_code)
+                job = poll.get_json()
+                if job['status'] in {'completed', 'failed', 'timed_out', 'killed'}:
+                    pending.discard(job_id)
+            time.sleep(0.05)
+
+        telemetry = client.get('/api/telemetry')
+        self.assertEqual(200, telemetry.status_code)
+        payload = (telemetry.get_json() or {}).get('telemetry') or {}
+        self.assertIn('job_runtime_p50_seconds', payload)
+        self.assertIn('job_runtime_p95_seconds', payload)
+        self.assertIn('verifier_gap_rate', payload)
+        self.assertIn('job_outcomes_count', payload)
+
+    def test_background_job_exposes_budget_policy(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 35, 'approval_mode': 'auto'})
+        res = client.post('/api/chat/background', json={'text': 'budget policy check'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        poll = client.get(f'/api/jobs/{job_id}')
+        self.assertEqual(200, poll.status_code)
+        job = poll.get_json() or {}
+        policy = job.get('budget_policy') or {}
+        self.assertIn('max_runtime_s', policy)
+        self.assertIn('max_tokens', policy)
+        self.assertIn('max_tool_calls', policy)
+        self.assertIn('max_replans', policy)
+        retry_policy = job.get('retry_policy') or {}
+        if not retry_policy:
+            for _ in range(20):
+                time.sleep(0.05)
+                poll = client.get(f'/api/jobs/{job_id}')
+                self.assertEqual(200, poll.status_code)
+                job = poll.get_json() or {}
+                retry_policy = job.get('retry_policy') or {}
+                if retry_policy or job.get('status') in {'completed', 'failed', 'timed_out', 'killed'}:
+                    break
+        self.assertIn('max_stall_retries', retry_policy)
+        self.assertIn('max_missing_evidence_retries', retry_policy)
+        self.assertIn('max_tool_failure_retries', retry_policy)
+        retry_counts = job.get('retry_counts') or {}
+        self.assertIn('stall', retry_counts)
+        self.assertIn('missing_evidence', retry_counts)
+        self.assertTrue(any('adaptive_iteration_cap=' in str(event) for event in (job.get('events') or [])))
+
     def test_background_job_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 
@@ -175,6 +265,7 @@ class WebTests(unittest.TestCase):
         res = client.get(f'/api/jobs/{job_id}/stream', buffered=False)
         self.assertEqual(200, res.status_code)
         got_status = False
+        saw_planning_or_running = False
         for idx, chunk in enumerate(res.response):
             text = chunk.decode('utf-8').strip()
             if not text:
@@ -182,11 +273,44 @@ class WebTests(unittest.TestCase):
             event = json.loads(text)
             if event.get('type') == 'status':
                 got_status = True
-                break
-            if idx > 30:
+                if event.get('status') in {'planning', 'running', 'awaiting_plan_approval', 'verifying'}:
+                    saw_planning_or_running = True
+                    break
+            if idx > 60:
                 break
         self.assertTrue(got_status)
+        self.assertTrue(saw_planning_or_running)
 
+
+    def test_background_job_stream_shows_planning_visibility(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'approval_mode': 'auto', 'max_runtime_seconds': 45})
+        start = client.post('/api/chat/background', json={'text': 'stream planning visibility'})
+        self.assertEqual(200, start.status_code)
+        payload = start.get_json()
+        assert payload is not None
+        job_id = payload['job_id']
+
+        res = client.get(f'/api/jobs/{job_id}/stream', buffered=False)
+        self.assertEqual(200, res.status_code)
+        statuses: list[str] = []
+        for idx, chunk in enumerate(res.response):
+            text = chunk.decode('utf-8').strip()
+            if not text:
+                continue
+            event = json.loads(text)
+            if event.get('type') == 'status':
+                statuses.append(str(event.get('status') or ''))
+            if 'running' in statuses or 'completed' in statuses:
+                break
+            if idx > 120:
+                break
+        self.assertTrue(any(status in {'planning', 'awaiting_plan_approval', 'running'} for status in statuses))
     def test_approval_stream_endpoint(self) -> None:
         from mu_cli.web import create_app
 
@@ -672,6 +796,44 @@ class WebTests(unittest.TestCase):
         self.assertTrue(job.get('cancel_requested'))
         self.assertTrue(any('killed' in event for event in job.get('events', [])))
 
+    def test_background_job_records_status_transitions(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': False, 'max_runtime_seconds': 30, 'approval_mode': 'auto'})
+        res = client.post('/api/chat/background', json={'text': 'transition check'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 5
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] in {'completed', 'failed', 'timed_out', 'killed'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        transitions = job.get('status_transitions', [])
+        self.assertTrue(transitions)
+        self.assertEqual('queued', transitions[0].get('from'))
+        self.assertEqual('planning', transitions[0].get('to'))
+        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'budget_exhausted', 'failed_unrecoverable', 'killed'})
+        terminal_reason = job.get('terminal_reason')
+        if terminal_reason != 'killed':
+            tos = [item.get('to') for item in transitions]
+            self.assertIn('verifying', tos)
+
+        telemetry = client.get('/api/telemetry')
+        self.assertEqual(200, telemetry.status_code)
+        payload = telemetry.get_json() or {}
+        self.assertIn('harness_counts', (payload.get('telemetry') or {}))
+
     def test_background_job_tracks_terminal_event(self) -> None:
         from mu_cli.web import create_app
 
@@ -701,6 +863,102 @@ class WebTests(unittest.TestCase):
         self.assertIn('checkpoints', job)
         self.assertIsInstance(job.get('checkpoints', []), list)
         self.assertIn('answer_contract', job)
+
+
+    def test_background_job_no_progress_exits_with_bounded_iterations(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        class _FakeReply:
+            def __init__(self, content: str) -> None:
+                self.content = content
+
+        with patch('mu_cli.web._run_turn_with_uploaded_context', return_value=_FakeReply('NO_PROGRESS')):
+            client.post('/api/settings', json={
+                'agentic_planning': True,
+                'approval_mode': 'auto',
+                'max_runtime_seconds': 60,
+                'budget_max_replans': 0,
+                'retry_max_stall_retries': 1,
+            })
+            res = client.post('/api/chat/background', json={'text': 'adversarial no progress loop'})
+            self.assertEqual(200, res.status_code)
+            job_id = res.get_json()['job_id']
+
+            deadline = time.time() + 8
+            job = None
+            while time.time() < deadline:
+                poll = client.get(f'/api/jobs/{job_id}')
+                self.assertEqual(200, poll.status_code)
+                job = poll.get_json()
+                if job['status'] in {'completed', 'failed', 'timed_out', 'killed'}:
+                    break
+                time.sleep(0.05)
+
+        assert job is not None
+        self.assertIn(job.get('status'), {'completed', 'failed', 'timed_out', 'killed'})
+        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'budget_exhausted', 'failed_unrecoverable', 'killed'})
+        events = job.get('events') or []
+        self.assertTrue(any('iteration_cap_reached' in str(event) or 'stall_retry_limit_reached' in str(event) or 'unsatisfactory_answer_limit_reached' in str(event) for event in events))
+        self.assertLessEqual(int(job.get('iterations') or 0), 8)
+
+
+    def test_background_job_emits_context_checkpoint_when_condense_enabled(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'approval_mode': 'auto', 'max_runtime_seconds': 60, 'condense_enabled': True, 'condense_window': 6})
+        res = client.post('/api/chat/background', json={'text': 'run iterative checklist and keep going'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 8
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            events = job.get('events') or []
+            if any('context_checkpoint:' in str(line) for line in events) or job.get('status') in {'completed', 'failed', 'timed_out', 'killed'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertTrue(any('context_checkpoint:' in str(line) for line in (job.get('events') or [])))
+
+    def test_background_job_nudges_until_satisfactory_contract(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        client.post('/api/settings', json={'agentic_planning': True, 'max_runtime_seconds': 45, 'approval_mode': 'auto'})
+        res = client.post('/api/chat/background', json={'text': 'Please summarize status updates only.'})
+        self.assertEqual(200, res.status_code)
+        job_id = res.get_json()['job_id']
+
+        deadline = time.time() + 6
+        job = None
+        while time.time() < deadline:
+            poll = client.get(f'/api/jobs/{job_id}')
+            self.assertEqual(200, poll.status_code)
+            job = poll.get_json()
+            if job['status'] in {'completed', 'failed', 'timed_out'}:
+                break
+            time.sleep(0.05)
+
+        assert job is not None
+        self.assertIn(job['status'], {'completed', 'failed', 'timed_out'})
+        self.assertTrue(any('unsatisfactory_answer_nudge' in event for event in job.get('events', [])))
+        contract = job.get('answer_contract') or {}
+        self.assertIn('satisfactory', contract)
 
 
     def test_user_journey_new_chat_stream_clear_happy_path(self) -> None:
@@ -778,6 +1036,9 @@ class WebTests(unittest.TestCase):
         telemetry = state.get('telemetry') or {}
         self.assertIn('total_requests', telemetry)
         self.assertIn('action_counts', telemetry)
+        self.assertIn('retry_events_total', telemetry)
+        self.assertIn('replans', telemetry)
+        self.assertIn('verifier_gap_rate', telemetry)
 
     def test_telemetry_action_counts_increment_for_chat_and_session(self) -> None:
         from mu_cli.web import create_app

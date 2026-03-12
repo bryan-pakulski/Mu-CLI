@@ -83,7 +83,7 @@ def parse_session_action_request(raw: Any) -> SessionActionRequest:
         _opt_str(payload, key)
     for key in ("agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)
-    for key in ("max_runtime_seconds", "condense_window", "ollama_context_window", "window"):
+    for key in ("max_runtime_seconds", "condense_window", "ollama_context_window", "window", "budget_max_tokens", "budget_max_tool_calls", "budget_max_replans", "retry_max_stall_retries", "retry_max_missing_evidence_retries", "retry_max_tool_failure_retries"):
         _opt_int(payload, key)
 
     debug_level = _opt_str(payload, "debug_level")
@@ -104,7 +104,7 @@ def parse_settings_update_request(raw: Any) -> SettingsUpdateRequest:
         _opt_str(payload, key)
     for key in ("debug", "agentic_planning", "research_mode", "condense_enabled"):
         _opt_bool(payload, key)
-    for key in ("max_runtime_seconds", "condense_window", "ollama_context_window"):
+    for key in ("max_runtime_seconds", "condense_window", "ollama_context_window", "budget_max_tokens", "budget_max_tool_calls", "budget_max_replans", "retry_max_stall_retries", "retry_max_missing_evidence_retries", "retry_max_tool_failure_retries"):
         _opt_int(payload, key)
 
     debug_level = _opt_str(payload, "debug_level")

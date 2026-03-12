@@ -293,7 +293,10 @@ class ListWorkspaceFilesTool:
             if query:
                 suffix = " Try a broader query or call list_workspace_files without query."
             return ToolResult(ok=True, output=f"{prefix}\nNo indexed files matched.{suffix}")
-        lines = [f"- {item.path} ({item.size_bytes} bytes)" for item in items]
+        lines = [
+            f"- {item.path} ({item.size_bytes} bytes) :: {(item.purpose or 'no description')[:140]}"
+            for item in items
+        ]
         return ToolResult(ok=True, output=f"{prefix}\n" + "\n".join(lines))
 
 

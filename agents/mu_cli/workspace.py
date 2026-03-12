@@ -18,11 +18,14 @@ EXCLUDED_DIRS = {
     ".mypy_cache",
 }
 
+
 @dataclass(slots=True)
 class WorkspaceFile:
     path: str
     size_bytes: int
     preview: str
+    fingerprint: str = ""
+    purpose: str = ""
 
 
 @dataclass(slots=True)
@@ -42,20 +45,22 @@ class WorkspaceStore:
 
     def attach(self, root: Path) -> WorkspaceSnapshot:
         root = root.resolve()
-        files, stats = self._index_files(root)
-        self.snapshot = WorkspaceSnapshot(root=str(root), files=files, index_stats=stats)
 
         digest = hashlib.sha1(str(root).encode("utf-8")).hexdigest()[:12]
         self._db_path = self.storage_dir / f"workspace_{digest}.json"
+        persisted: dict = {}
         if self._db_path.exists():
-            saved = json.loads(self._db_path.read_text(encoding="utf-8"))
-            self.snapshot.tool_runs = saved.get("tool_runs", [])
-            self.snapshot.index_stats = saved.get("index_stats", self.snapshot.index_stats)
+            persisted = json.loads(self._db_path.read_text(encoding="utf-8"))
+
+        files, stats = self._index_files(root, persisted_files=persisted.get("files", []))
+        self.snapshot = WorkspaceSnapshot(root=str(root), files=files, index_stats=stats)
+        self.snapshot.tool_runs = persisted.get("tool_runs", [])
         self._persist()
         return self.snapshot
 
-    def _index_files(self, root: Path) -> tuple[list[WorkspaceFile], dict[str, int]]:
+    def _index_files(self, root: Path, *, persisted_files: list[dict] | None = None) -> tuple[list[WorkspaceFile], dict[str, int]]:
         ignore_patterns = self._read_gitignore(root)
+        persisted_by_path = {str(item.get("path") or ""): item for item in (persisted_files or [])}
         indexed: list[WorkspaceFile] = []
         stats = {
             "seen": 0,
@@ -63,6 +68,8 @@ class WorkspaceStore:
             "ignored_by_gitignore": 0,
             "excluded_dirs": 0,
             "non_utf8_or_unreadable": 0,
+            "reused_descriptions": 0,
+            "recomputed_descriptions": 0,
         }
 
         for path in root.rglob("*"):
@@ -88,11 +95,67 @@ class WorkspaceStore:
                 continue
 
             preview = "\n".join(content.splitlines()[:8])[:1000]
-            indexed.append(WorkspaceFile(path=rel, size_bytes=path.stat().st_size, preview=preview))
+            fingerprint = self._fingerprint_content(content)
+
+            persisted = persisted_by_path.get(rel, {})
+            persisted_fingerprint = str(persisted.get("fingerprint") or "")
+            persisted_purpose = str(persisted.get("purpose") or "").strip()
+            if persisted_fingerprint and persisted_fingerprint == fingerprint and persisted_purpose:
+                purpose = persisted_purpose
+                stats["reused_descriptions"] += 1
+            else:
+                purpose = self._infer_file_purpose(path=path, rel_path=rel, preview=preview)
+                stats["recomputed_descriptions"] += 1
+
+            indexed.append(
+                WorkspaceFile(
+                    path=rel,
+                    size_bytes=path.stat().st_size,
+                    preview=preview,
+                    fingerprint=fingerprint,
+                    purpose=purpose,
+                )
+            )
             stats["indexed"] += 1
 
         indexed.sort(key=lambda item: item.path)
         return indexed, stats
+
+    @staticmethod
+    def _fingerprint_content(content: str) -> str:
+        return hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _infer_file_purpose(*, path: Path, rel_path: str, preview: str) -> str:
+        name = path.name.lower()
+        suffix = path.suffix.lower()
+        first = ""
+        for line in preview.splitlines():
+            if line.strip():
+                first = line.strip()
+                break
+
+        if name in {"readme.md", "readme"}:
+            return "Project documentation and onboarding details."
+        if name.startswith("test_") or "/tests/" in rel_path or rel_path.startswith("tests/"):
+            return "Automated tests that validate behavior and guard regressions."
+        if suffix in {".md", ".rst"}:
+            return "Human-readable documentation for workflows or architecture."
+        if suffix in {".json", ".yaml", ".yml", ".toml", ".ini"}:
+            return "Configuration and structured project metadata."
+        if suffix in {".html", ".css", ".js", ".ts", ".tsx", ".jsx"}:
+            return "Frontend/UI asset used for rendering or browser interactions."
+        if suffix in {".py", ".go", ".rs", ".java", ".kt", ".rb", ".php", ".c", ".cpp", ".h"}:
+            if first.startswith("class "):
+                return f"Source module defining classes; starts with: {first[:100]}"
+            if first.startswith("def ") or first.startswith("func "):
+                return f"Source module exposing functions; starts with: {first[:100]}"
+            if "if __name__ == \"__main__\"" in preview:
+                return "Executable entrypoint/module for command-line usage."
+            return "Source module implementing runtime behavior."
+        if suffix in {".sh", ".bash", ".zsh"}:
+            return "Shell automation script for local/dev workflows."
+        return "Repository file indexed for retrieval and targeted context expansion."
 
     def _read_gitignore(self, root: Path) -> list[str]:
         gitignore = root / ".gitignore"
@@ -111,7 +174,7 @@ class WorkspaceStore:
         files = self.snapshot.files
         if query:
             q = query.lower()
-            files = [item for item in files if q in item.path.lower()]
+            files = [item for item in files if q in item.path.lower() or q in item.purpose.lower()]
         return files[:limit]
 
     def get_file_context(self, path: str, max_chars: int = 4000) -> str:
@@ -155,7 +218,8 @@ class WorkspaceStore:
             f"Indexed files: {len(self.snapshot.files)}\n"
             f"Index stats: seen={self.snapshot.index_stats.get('seen', 0)} "
             f"gitignored={self.snapshot.index_stats.get('ignored_by_gitignore', 0)} "
-            f"non_utf8_or_unreadable={self.snapshot.index_stats.get('non_utf8_or_unreadable', 0)}\n"
+            f"non_utf8_or_unreadable={self.snapshot.index_stats.get('non_utf8_or_unreadable', 0)} "
+            f"reused_descriptions={self.snapshot.index_stats.get('reused_descriptions', 0)}\n"
             f"Recorded tool runs: {len(self.snapshot.tool_runs)}"
         )
 

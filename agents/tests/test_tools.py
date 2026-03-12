@@ -91,6 +91,7 @@ class WorkspaceToolsTests(unittest.TestCase):
             listed = list_tool.run({"query": "a.py"})
             self.assertTrue(listed.ok)
             self.assertIn("a.py", listed.output)
+            self.assertIn("::", listed.output)
 
             ctx = get_tool.run({"path": "a.py", "max_chars": 20})
             self.assertTrue(ctx.ok)

@@ -1025,6 +1025,11 @@ function renderMetrics() {
   setMetric('metricTelemetryApprovalWaits', telemetry.approval_wait_events || 0);
   setMetric('metricTelemetryJobsCompleted', telemetry.background_jobs_completed || 0);
   setMetric('metricTelemetryJobsFailed', telemetry.background_jobs_failed_or_timed_out || 0);
+  setMetric('metricTelemetryRetryEvents', telemetry.retry_events_total || 0);
+  setMetric('metricTelemetryReplans', telemetry.replans || 0);
+  setMetric('metricTelemetryVerificationFailures', telemetry.verification_failures || 0);
+  const verifierGap = Number(telemetry.verifier_gap_rate || 0);
+  setMetric('metricTelemetryVerifierGap', `${(verifierGap * 100).toFixed(1)}%`);
 
   const actionsBody = document.getElementById('metricsTelemetryActions');
   if (actionsBody) {

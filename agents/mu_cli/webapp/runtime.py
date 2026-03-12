@@ -45,6 +45,12 @@ class WebRuntime:
     pending_approval: dict[str, Any] | None = None
     background_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_runtime_seconds: int = 900
+    budget_max_tokens: int = 120000
+    budget_max_tool_calls: int = 160
+    budget_max_replans: int = 2
+    retry_max_stall_retries: int = 2
+    retry_max_missing_evidence_retries: int = 2
+    retry_max_tool_failure_retries: int = 2
     debug_level: str = "info"
     ollama_context_window: int = 65536
     condense_enabled: bool = False

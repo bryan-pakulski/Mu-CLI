@@ -83,6 +83,12 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
                 "research_artifacts": runtime.research_artifacts,
                 "background_jobs": list(runtime.background_jobs.values())[-50:],
                 "max_runtime_seconds": runtime.max_runtime_seconds,
+                "budget_max_tokens": runtime.budget_max_tokens,
+                "budget_max_tool_calls": runtime.budget_max_tool_calls,
+                "budget_max_replans": runtime.budget_max_replans,
+                "retry_max_stall_retries": runtime.retry_max_stall_retries,
+                "retry_max_missing_evidence_retries": runtime.retry_max_missing_evidence_retries,
+                "retry_max_tool_failure_retries": runtime.retry_max_tool_failure_retries,
                 "condense_enabled": runtime.condense_enabled,
                 "condense_window": runtime.condense_window,
                 "tools": [
@@ -129,6 +135,24 @@ def register_state_routes(app, runtime: Any, deps: StateRouteDeps) -> None:
         deps.record_telemetry_action(runtime, "state_clear_all")
         stats = deps.clear_all_stored_data(runtime)
         return jsonify({"ok": True, "cleared": stats, "session": runtime.session_name})
+
+
+    @app.get("/api/health")
+    def health_state():
+        jobs = runtime.background_jobs or {}
+        statuses = [str(item.get("status") or "unknown") for item in jobs.values()]
+        by_status: dict[str, int] = {}
+        for status in statuses:
+            by_status[status] = int(by_status.get(status, 0)) + 1
+        backlog = sum(1 for status in statuses if status not in {"completed", "failed", "timed_out", "killed"})
+        return jsonify({
+            "ok": True,
+            "uptime_seconds": deps.telemetry_snapshot(runtime).get("uptime_seconds", 0),
+            "background_jobs_total": len(statuses),
+            "background_jobs_backlog": backlog,
+            "queue_depth": backlog,
+            "background_jobs_by_status": by_status,
+        })
 
     @app.get("/api/telemetry")
     def telemetry_state():

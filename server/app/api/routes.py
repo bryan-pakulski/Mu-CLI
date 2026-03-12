@@ -28,6 +28,7 @@ from server.app.schemas import (
     ProviderRead,
     SessionCreate,
     SessionRead,
+    SessionUpdate,
     SkillRead,
     ToolRead,
     WorkspaceIndexBuildResponse,
@@ -63,6 +64,62 @@ async def create_session(
     await db.refresh(session)
     return session
 
+
+
+
+@router.get("/sessions", response_model=list[SessionRead])
+async def list_sessions(db: AsyncSession = Depends(get_db)) -> list[SessionModel]:
+    sessions = (
+        await db.scalars(select(SessionModel).order_by(SessionModel.created_at.desc()))
+    ).all()
+    return list(sessions)
+
+
+@router.get("/sessions/{session_id}/jobs", response_model=list[JobRead])
+async def list_session_jobs(session_id: str, db: AsyncSession = Depends(get_db)) -> list[JobModel]:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    jobs = (
+        await db.scalars(
+            select(JobModel)
+            .where(JobModel.session_id == session_id)
+            .order_by(JobModel.created_at.desc())
+        )
+    ).all()
+    return list(jobs)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionRead)
+async def update_session(
+    session_id: str,
+    payload: SessionUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if payload.mode is not None:
+        session.mode = payload.mode
+    if payload.provider_preferences is not None:
+        session.provider_preferences = payload.provider_preferences
+    if payload.policy_profile is not None:
+        session.policy_profile = payload.policy_profile
+
+    await db.commit()
+    await db.refresh(session)
+    await emit_event(
+        db,
+        session.id,
+        "session_config",
+        {
+            "mode": session.mode,
+            "provider_preferences": session.provider_preferences,
+            "policy_profile": session.policy_profile,
+        },
+    )
+    return session
 
 @router.get("/sessions/{session_id}", response_model=SessionRead)
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:

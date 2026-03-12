@@ -224,3 +224,40 @@ async def test_session_with_legacy_mock_preference_does_not_attempt_unknown_prov
             if event["event_type"] == "log"
         ]
         assert all("Unknown provider: mock" not in str(payload) for payload in log_payloads)
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_and_update_session_config() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        listed = await client.get("/sessions")
+        assert listed.status_code == 200
+        assert any(item["id"] == session["id"] for item in listed.json())
+
+        updated = await client.patch(
+            f"/sessions/{session['id']}",
+            json={
+                "mode": "research",
+                "policy_profile": "strict",
+                "provider_preferences": {"ordered": ["ollama"]},
+            },
+        )
+        assert updated.status_code == 200
+        assert updated.json()["mode"] == "research"
+        assert updated.json()["policy_profile"] == "strict"
+
+
+@pytest.mark.asyncio
+async def test_gui_index_served() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/gui")
+        assert response.status_code == 200
+        assert "Mu-CLI Dashboard" in response.text

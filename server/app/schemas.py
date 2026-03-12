@@ -23,6 +23,12 @@ class SessionRead(BaseModel):
     created_at: datetime
 
 
+class SessionUpdate(BaseModel):
+    mode: str | None = None
+    provider_preferences: dict | None = None
+    policy_profile: str | None = None
+
+
 class JobCreate(BaseModel):
     goal: str
     constraints: dict = Field(default_factory=dict)

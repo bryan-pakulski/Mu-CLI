@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mu-CLI GUI MVP</title>
+    <link rel="stylesheet" href="/gui/assets/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Mu-CLI Dashboard</h1>
+      <p>Phase 5 GUI MVP</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Session</h2>
+        <div class="row">
+          <input id="workspace" placeholder="Workspace path" value="/tmp/work" />
+          <button id="create-session">Create Session</button>
+        </div>
+        <div class="row">
+          <select id="session-select"></select>
+          <button id="refresh-sessions">Refresh</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Job lifecycle + interventions</h2>
+        <div class="row">
+          <input id="goal" placeholder="Job goal" />
+          <button id="create-job">Start Job</button>
+          <button id="cancel-job">Cancel</button>
+          <button id="resume-job">Resume</button>
+        </div>
+        <pre id="job-state"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Timeline</h2>
+        <ul id="timeline"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Approvals</h2>
+        <button id="refresh-approvals">Refresh pending</button>
+        <ul id="approvals"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Provider/Policy Configuration</h2>
+        <div class="row">
+          <input id="providers" value="ollama" />
+          <select id="mode">
+            <option value="interactive">interactive</option>
+            <option value="research">research</option>
+            <option value="debugging">debugging</option>
+            <option value="yolo">yolo</option>
+          </select>
+          <input id="policy" value="default" />
+          <button id="save-config">Save Config</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/gui/assets/app.js"></script>
+  </body>
+</html>

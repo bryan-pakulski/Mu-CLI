@@ -4,7 +4,6 @@ import json
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 
@@ -42,30 +41,94 @@ class Client:
 def watch_job_events(
     client: Client,
     job_id: str,
-    poll_s: float = 0.75,
-    timeout_s: int = 60,
+    seen_ids: set[str] | None = None,
+) -> set[str]:
+    seen = seen_ids or set()
+    events = client.get(f"/jobs/{job_id}/events")
+    if not isinstance(events, list):
+        print("unexpected events payload")
+        return seen
+
+    for event in events:
+        event_id = event.get("id")
+        if event_id in seen:
+            continue
+        seen.add(event_id)
+        print(f"[{event.get('event_type')}] {event.get('payload')}")
+    return seen
+
+
+def _prompt_job_input(client: Client, job_id: str) -> None:
+    user_msg = input("message to agent (blank to skip): ").strip()
+    if not user_msg:
+        return
+    out = client.post(f"/jobs/{job_id}/input", {"message": user_msg})
+    print(json.dumps(out, indent=2))
+
+
+def _process_pending_approvals(client: Client, session_id: str, interactive: bool) -> int:
+    pending = client.get(f"/sessions/{session_id}/approvals/pending")
+    if not isinstance(pending, list):
+        return 0
+
+    handled = 0
+    for item in pending:
+        print(
+            f"approval={item['id']} job={item['job_id']} "
+            f"tool={item['tool_name']} reason={item['reason']}"
+        )
+        if not interactive:
+            continue
+
+        while True:
+            choice = input("approve? [y/n/s(skip)] ").strip().lower()
+            if choice in {"s", "skip", ""}:
+                break
+            if choice in {"y", "yes", "n", "no"}:
+                decision = "approved" if choice.startswith("y") else "denied"
+                result = client.post(
+                    f"/jobs/{item['job_id']}/approvals/{item['id']}",
+                    {"decision": decision},
+                )
+                print(json.dumps(result, indent=2))
+                handled += 1
+                break
+    return handled
+
+
+def interactive_loop(
+    client: Client,
+    session_id: str,
+    job_id: str,
+    timeout_s: int,
+    poll_s: float,
 ) -> None:
-    seen_ids: set[str] = set()
+    seen: set[str] = set()
     start = time.time()
+
     while time.time() - start < timeout_s:
-        events = client.get(f"/jobs/{job_id}/events")
-        if not isinstance(events, list):
-            print("unexpected events payload")
-            return
-
-        for event in events:
-            event_id = event.get("id")
-            if event_id in seen_ids:
-                continue
-            seen_ids.add(event_id)
-            print(f"[{event.get('event_type')}] {event.get('payload')}")
-
+        seen = watch_job_events(client, job_id, seen_ids=seen)
         job = client.get(f"/jobs/{job_id}")
         state = job.get("state")
-        if state in {"completed", "failed", "cancelled", "blocked"}:
+
+        _process_pending_approvals(client, session_id, interactive=True)
+
+        if state in {"awaiting_approval", "blocked"}:
+            print(f"job is {state}; you can provide input to unblock planning")
+            _prompt_job_input(client, job_id)
+            if state == "blocked":
+                resume = input("resume blocked job now? [y/N] ").strip().lower()
+                if resume in {"y", "yes"}:
+                    out = client.post(f"/jobs/{job_id}/resume")
+                    print(json.dumps(out, indent=2))
+
+        if state in {"completed", "failed", "cancelled"}:
             print(f"job ended with state={state}")
             return
+
         time.sleep(poll_s)
+
+    print("interactive loop timeout reached")
 
 
 def cmd_session_create(args: argparse.Namespace, client: Client) -> None:
@@ -87,10 +150,17 @@ def cmd_job_start(args: argparse.Namespace, client: Client) -> None:
     }
     if args.tool:
         payload["constraints"]["tool_name"] = args.tool
+
     out = client.post(f"/sessions/{args.session_id}/jobs", payload)
     print(json.dumps(out, indent=2))
     if args.watch:
-        watch_job_events(client, out["id"], timeout_s=args.timeout)
+        interactive_loop(
+            client,
+            session_id=args.session_id,
+            job_id=out["id"],
+            timeout_s=args.timeout,
+            poll_s=args.poll,
+        )
 
 
 def cmd_job_control(args: argparse.Namespace, client: Client) -> None:
@@ -104,29 +174,39 @@ def cmd_job_input(args: argparse.Namespace, client: Client) -> None:
 
 
 def cmd_approvals(args: argparse.Namespace, client: Client) -> None:
-    pending = client.get(f"/sessions/{args.session_id}/approvals/pending")
-    if not isinstance(pending, list) or not pending:
-        print("no pending approvals")
-        return
+    handled = _process_pending_approvals(client, args.session_id, interactive=args.interactive)
+    if handled == 0 and args.interactive:
+        print("no approvals decided")
 
-    for item in pending:
-        print(
-            f"approval={item['id']} job={item['job_id']} "
-            f"tool={item['tool_name']} reason={item['reason']}"
-        )
-        if args.interactive:
-            while True:
-                choice = input("approve? [y/n/s(skip)] ").strip().lower()
-                if choice in {"s", "skip", ""}:
-                    break
-                if choice in {"y", "yes", "n", "no"}:
-                    decision = "approved" if choice.startswith("y") else "denied"
-                    result = client.post(
-                        f"/jobs/{item['job_id']}/approvals/{item['id']}",
-                        {"decision": decision},
-                    )
-                    print(json.dumps(result, indent=2))
-                    break
+
+def cmd_loop(args: argparse.Namespace, client: Client) -> None:
+    session_payload = {
+        "workspace_path": args.workspace,
+        "mode": args.mode,
+        "provider_preferences": {"ordered": args.providers.split(",")},
+        "policy_profile": args.policy,
+    }
+    session = client.post("/sessions", session_payload)
+    session_id = session["id"]
+    print(f"session={session_id}")
+
+    job_payload = {
+        "goal": args.goal,
+        "constraints": {},
+        "acceptance_criteria": {},
+    }
+    if args.tool:
+        job_payload["constraints"]["tool_name"] = args.tool
+
+    job = client.post(f"/sessions/{session_id}/jobs", job_payload)
+    print(f"job={job['id']}")
+    interactive_loop(
+        client,
+        session_id=session_id,
+        job_id=job["id"],
+        timeout_s=args.timeout,
+        poll_s=args.poll,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -145,7 +225,18 @@ def build_parser() -> argparse.ArgumentParser:
     job_start.add_argument("goal")
     job_start.add_argument("--tool")
     job_start.add_argument("--watch", action="store_true")
-    job_start.add_argument("--timeout", type=int, default=60)
+    job_start.add_argument("--timeout", type=int, default=300)
+    job_start.add_argument("--poll", type=float, default=0.75)
+
+    loop = sub.add_parser("loop")
+    loop.add_argument("workspace")
+    loop.add_argument("goal")
+    loop.add_argument("--mode", default="interactive")
+    loop.add_argument("--providers", default="ollama,mock")
+    loop.add_argument("--policy", default="default")
+    loop.add_argument("--tool")
+    loop.add_argument("--timeout", type=int, default=300)
+    loop.add_argument("--poll", type=float, default=0.75)
 
     for action in ["run", "cancel", "resume"]:
         jp = sub.add_parser(f"job-{action}")
@@ -171,6 +262,8 @@ def main() -> int:
         cmd_session_create(args, client)
     elif args.command == "job-start":
         cmd_job_start(args, client)
+    elif args.command == "loop":
+        cmd_loop(args, client)
     elif args.command in {"job-run", "job-cancel", "job-resume"}:
         args.action = args.command.split("-", 1)[1]
         cmd_job_control(args, client)

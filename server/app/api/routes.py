@@ -286,6 +286,28 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
     return job
 
 
+
+
+@router.get("/sessions/{session_id}/events", response_model=list[EventRead])
+async def get_session_events(
+    session_id: str,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+) -> list[EventModel]:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    events = (
+        await db.scalars(
+            select(EventModel)
+            .where(EventModel.session_id == session_id)
+            .order_by(EventModel.created_at.desc())
+            .limit(max(1, min(limit, 1000)))
+        )
+    ).all()
+    return list(reversed(list(events)))
+
 @router.get("/jobs/{job_id}/events", response_model=list[EventRead])
 async def get_job_events(job_id: str, db: AsyncSession = Depends(get_db)) -> list[EventModel]:
     job = await db.scalar(select(JobModel).where(JobModel.id == job_id))

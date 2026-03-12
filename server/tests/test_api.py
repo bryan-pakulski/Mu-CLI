@@ -52,6 +52,10 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert fetched_job.status_code == 200
         assert fetched_job.json()["state"] in {"running", "completed"}
 
+        session_events = await client.get(f"/sessions/{session['id']}/events")
+        assert session_events.status_code == 200
+        assert any(item["event_type"] == "job_state" for item in session_events.json())
+
 
 @pytest.mark.asyncio
 async def test_cancel_and_resume_job_flow() -> None:

@@ -7,6 +7,7 @@ let latestAssistantMessage = null;
 let currentSettingsSessionId = null;
 let openMenuForSession = null;
 let sessionsCache = [];
+let applyingConfig = false;
 const sessionMessages = new Map();
 
 const panelState = {
@@ -28,26 +29,57 @@ function fillSelect(selectId, values, selected) {
   const node = el(selectId);
   node.innerHTML = "";
   values.forEach((v) => {
-    const opt = document.createElement("option");
-    opt.value = v;
-    opt.textContent = v;
-    if (v === selected) opt.selected = true;
-    node.appendChild(opt);
+    const option = document.createElement("option");
+    option.value = v;
+    option.textContent = v;
+    if (v === selected) option.selected = true;
+    node.appendChild(option);
   });
 }
 
 async function loadModelsForProvider(providerName, selectId, selectedModel = null) {
   if (!providerName) {
     fillSelect(selectId, ["default"], "default");
-    return;
+    return "default";
   }
+
   try {
     const models = await req(`/providers/${providerName}/models`);
-    const all = models.length > 0 ? models : ["default"];
-    const selected = selectedModel && all.includes(selectedModel) ? selectedModel : all[0];
-    fillSelect(selectId, all, selected);
+    const available = models.length > 0 ? models : ["default"];
+    const selected = selectedModel && available.includes(selectedModel) ? selectedModel : available[0];
+    fillSelect(selectId, available, selected);
+    return selected;
   } catch {
     fillSelect(selectId, ["default"], "default");
+    return "default";
+  }
+}
+
+async function persistCurrentConfig() {
+  if (!currentSession || applyingConfig) return;
+  const activeSession = sessionsCache.find((s) => s.id === currentSession);
+  if (!activeSession) return;
+
+  applyingConfig = true;
+  try {
+    const updated = await req(`/sessions/${currentSession}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: activeSession.name || "default",
+        mode: el("mode").value,
+        policy_profile: el("policy").value,
+        provider_preferences: {
+          ordered: [el("providers").value],
+          model: el("model").value || "default",
+        },
+      }),
+    });
+
+    const idx = sessionsCache.findIndex((s) => s.id === updated.id);
+    if (idx >= 0) sessionsCache[idx] = updated;
+    updateSessionSummary(updated, { autoPersistIfMissingModel: false });
+  } finally {
+    applyingConfig = false;
   }
 }
 
@@ -64,9 +96,23 @@ async function populateRuntimeOptions() {
   await loadModelsForProvider(providerNames[0], "model");
   await loadModelsForProvider(providerNames[0], "modal-model");
 
-  el("providers").addEventListener("change", (event) => {
-    loadModelsForProvider(event.target.value, "model").catch(() => null);
+  el("providers").addEventListener("change", async (event) => {
+    await loadModelsForProvider(event.target.value, "model");
+    await persistCurrentConfig();
   });
+
+  el("model").addEventListener("change", () => {
+    persistCurrentConfig().catch(() => null);
+  });
+
+  el("mode").addEventListener("change", () => {
+    persistCurrentConfig().catch(() => null);
+  });
+
+  el("policy").addEventListener("change", () => {
+    persistCurrentConfig().catch(() => null);
+  });
+
   el("modal-providers").addEventListener("change", (event) => {
     loadModelsForProvider(event.target.value, "modal-model").catch(() => null);
   });
@@ -92,6 +138,7 @@ function togglePanel(side) {
 function setupResizer(resizerId, side) {
   const resizer = el(resizerId);
   const shell = el("app-shell");
+
   resizer.addEventListener("pointerdown", (event) => {
     if (panelState[side].collapsed) {
       panelState[side].collapsed = false;
@@ -134,6 +181,7 @@ function setSessionState(state) {
       ? "blocked"
       : "idle";
   const label = normalized === "running" ? "thinking" : normalized;
+
   ["session-state", "active-status"].forEach((id) => {
     const node = el(id);
     node.className = `state-pill ${className}`;
@@ -150,8 +198,8 @@ function addSessionMessage(sessionId, role, content) {
 function renderChatForSession(sessionId) {
   const chatWindow = el("chat-window");
   chatWindow.innerHTML = "";
-
   const messages = sessionMessages.get(sessionId) || [];
+
   if (messages.length === 0) {
     chatWindow.innerHTML = '<div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>';
     return;
@@ -184,6 +232,12 @@ function updateAssistantDraft(text) {
   if (messages.length > 0) messages[messages.length - 1].content = text;
 }
 
+function isVisibleForFilter(eventType) {
+  if (selectedFilter === "all") return true;
+  if (selectedFilter === "approval") return eventType.startsWith("approval");
+  return eventType === selectedFilter;
+}
+
 function addTimeline(eventType, payload) {
   const li = document.createElement("li");
   li.dataset.eventType = eventType;
@@ -192,16 +246,28 @@ function addTimeline(eventType, payload) {
   el("timeline").prepend(li);
 }
 
-function isVisibleForFilter(eventType) {
-  if (selectedFilter === "all") return true;
-  if (selectedFilter === "approval") return eventType.startsWith("approval");
-  return eventType === selectedFilter;
-}
-
 function applyTimelineFilter() {
   document.querySelectorAll("#timeline li").forEach((node) => {
     node.classList.toggle("hidden", !isVisibleForFilter(node.dataset.eventType || ""));
   });
+}
+
+async function loadSessionTimeline(sessionId) {
+  if (!sessionId) return;
+  try {
+    const events = await req(`/sessions/${sessionId}/events?limit=250`);
+    const timeline = el("timeline");
+    timeline.innerHTML = "";
+    events.forEach((evt) => {
+      const li = document.createElement("li");
+      li.dataset.eventType = evt.event_type;
+      li.textContent = `${new Date(evt.created_at).toLocaleTimeString()}  ${evt.event_type}: ${JSON.stringify(evt.payload || {})}`;
+      if (!isVisibleForFilter(evt.event_type)) li.classList.add("hidden");
+      timeline.appendChild(li);
+    });
+  } catch {
+    // no-op
+  }
 }
 
 function setIndicator(sessionId, state) {
@@ -225,7 +291,7 @@ function hydrateSessionMessages(session) {
   sessionMessages.set(session.id, items);
 }
 
-function updateSessionSummary(session) {
+async function updateSessionSummary(session, options = { autoPersistIfMissingModel: true }) {
   if (!session) {
     el("session-summary").textContent = "No session selected.";
     el("active-model").textContent = "provider: n/a";
@@ -235,13 +301,30 @@ function updateSessionSummary(session) {
   }
 
   const provider = session.provider_preferences?.ordered?.[0] || "ollama";
-  const model = session.provider_preferences?.model || "default";
+  let model = session.provider_preferences?.model || null;
   const name = session.name || "default";
-  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model}`;
+
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
-  loadModelsForProvider(provider, "model", model).catch(() => null);
+  model = await loadModelsForProvider(provider, "model", model);
+
+  if (options.autoPersistIfMissingModel && !session.provider_preferences?.model) {
+    const idx = sessionsCache.findIndex((s) => s.id === session.id);
+    if (idx >= 0) {
+      sessionsCache[idx] = {
+        ...sessionsCache[idx],
+        provider_preferences: {
+          ...(sessionsCache[idx].provider_preferences || {}),
+          ordered: [provider],
+          model,
+        },
+      };
+    }
+    await persistCurrentConfig();
+  }
+
   el("active-model").textContent = `${name} · ${provider} · ${model}`;
   setSessionState(session.status || "idle");
   renderChatForSession(session.id);
@@ -302,7 +385,7 @@ function showSessionMenu(anchorButton, session) {
     if (session.id === currentSession) {
       currentSession = null;
       if (streamSocket) streamSocket.close();
-      updateSessionSummary(null);
+      await updateSessionSummary(null);
     }
     await refreshSessions();
   };
@@ -345,7 +428,8 @@ function renderSessionList() {
       latestAssistantMessage = null;
       const details = await req(`/sessions/${currentSession}`);
       hydrateSessionMessages(details);
-      updateSessionSummary(details);
+      await updateSessionSummary(details);
+      await loadSessionTimeline(currentSession);
       renderSessionList();
       connectStream();
     };
@@ -385,17 +469,22 @@ function connectStream() {
       setSessionState(payload?.state || "idle");
       if (jobId) currentJob = jobId;
       if (["queued", "running", "awaiting_approval"].includes(payload?.state)) setIndicator(sessionId, "dot-running");
-      if (payload?.state === "completed") setIndicator(sessionId, "dot-success");
-      if (["failed", "blocked", "cancelled"].includes(payload?.state)) setIndicator(sessionId, "dot-error");
+      if (payload?.state === "completed") {
+        setIndicator(sessionId, "dot-success");
+        latestAssistantMessage = null;
+      }
+      if (["failed", "blocked", "cancelled"].includes(payload?.state)) {
+        setIndicator(sessionId, "dot-error");
+        latestAssistantMessage = null;
+      }
     }
 
     if (eventType === "loop_step") {
-      const draft = `Step ${payload?.index + 1} (${payload?.label}) via ${payload?.provider}\n${payload?.output_preview || ""}`;
+      const draft = `Thinking · step ${payload?.index + 1} (${payload?.label}) via ${payload?.provider}\n${payload?.output_preview || ""}`;
       updateAssistantDraft(draft);
     }
 
     if (eventType === "log" && payload?.message === "job completed") {
-      pushChat("assistant", "Job completed successfully");
       latestAssistantMessage = null;
     }
 
@@ -432,10 +521,11 @@ async function refreshSessions() {
     const active = sessionsCache.find((s) => s.id === currentSession) || sessionsCache[0];
     currentSession = active.id;
     hydrateSessionMessages(active);
-    updateSessionSummary(active);
+    await updateSessionSummary(active);
+    await loadSessionTimeline(currentSession);
     connectStream();
   } else {
-    updateSessionSummary(null);
+    await updateSessionSummary(null);
   }
 }
 
@@ -472,7 +562,7 @@ el("create-session").onclick = async () => {
       name: sessionName,
       mode: el("mode").value,
       policy_profile: el("policy").value,
-      provider_preferences: { ordered: [el("providers").value], model: el("model").value },
+      provider_preferences: { ordered: [el("providers").value], model: el("model").value || "default" },
     }),
   });
   currentSession = created.id;
@@ -489,7 +579,8 @@ el("session-quick-switch").addEventListener("keydown", async (event) => {
   currentSession = found.id;
   const details = await req(`/sessions/${currentSession}`);
   hydrateSessionMessages(details);
-  updateSessionSummary(details);
+  await updateSessionSummary(details);
+  await loadSessionTimeline(currentSession);
   connectStream();
   renderSessionList();
   event.target.value = "";
@@ -541,20 +632,8 @@ el("goal").addEventListener("keydown", (event) => {
   }
 });
 
-el("save-config").onclick = async () => {
-  if (!currentSession) return;
-  const activeSession = sessionsCache.find((s) => s.id === currentSession);
-  const updated = await req(`/sessions/${currentSession}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      name: activeSession?.name || "default",
-      mode: el("mode").value,
-      policy_profile: el("policy").value,
-      provider_preferences: { ordered: [el("providers").value], model: el("model").value },
-    }),
-  });
-  updateSessionSummary(updated);
-  await refreshSessions();
+el("save-config").onclick = () => {
+  persistCurrentConfig().catch(console.error);
 };
 
 el("refresh-approvals").onclick = refreshApprovals;
@@ -573,7 +652,7 @@ el("modal-save").onclick = async () => {
       name: el("modal-session-name").value,
       mode: el("modal-mode").value,
       policy_profile: el("modal-policy").value,
-      provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value },
+      provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value || "default" },
     }),
   });
   closeSettingsModal();

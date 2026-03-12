@@ -177,6 +177,7 @@ class JobRunner:
                     "attempts": attempts,
                     "provider": last_provider,
                     "model": selected_model,
+                    "last_output": result.output,
                 }
                 await db.commit()
                 await emit_event(
@@ -238,7 +239,10 @@ class JobRunner:
                     "provider": (job.checkpoints or {}).get("provider"),
                     "model": (job.checkpoints or {}).get("model"),
                 }
-                append_context_message("assistant", "Job completed successfully")
+                append_context_message(
+                    "assistant",
+                    (job.checkpoints or {}).get("last_output") or "Job completed successfully",
+                )
                 await db.commit()
                 await update_job_state(db, job_id, JobState.completed)
                 await emit_event(

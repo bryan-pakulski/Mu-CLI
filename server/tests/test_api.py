@@ -54,7 +54,9 @@ async def test_session_job_lifecycle_and_providers() -> None:
 
         session_events = await client.get(f"/sessions/{session['id']}/events")
         assert session_events.status_code == 200
-        assert any(item["event_type"] == "job_state" for item in session_events.json())
+        events_payload = session_events.json()
+        assert any(item["event_type"] == "job_state" for item in events_payload)
+        assert any(item["event_type"] == "system_prompt" and "prompt" in (item.get("payload") or {}) for item in events_payload)
 
 
 @pytest.mark.asyncio

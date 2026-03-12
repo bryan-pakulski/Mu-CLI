@@ -181,8 +181,37 @@ class JobRunner:
             async def emit_step(step: LoopStep) -> None:
                 context_state = session.context_state or {}
                 enabled_skills = context_state.get("enabled_skills")
+                enabled_tools = context_state.get("enabled_tools")
                 skills_hint = ",".join(enabled_skills) if isinstance(enabled_skills, list) and enabled_skills else "none"
-                prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}"
+                tools_hint = ",".join(enabled_tools) if isinstance(enabled_tools, list) and enabled_tools else "all"
+                system_prompt_override = context_state.get("system_prompt_override")
+                rules_checklist = context_state.get("rules_checklist")
+                prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
+                if isinstance(system_prompt_override, str) and system_prompt_override.strip():
+                    prompt += f"\nsystem_prompt_override={system_prompt_override.strip()}"
+                if isinstance(rules_checklist, str) and rules_checklist.strip():
+                    prompt += f"\nrules_checklist={rules_checklist.strip()}"
+
+                await emit_event(
+                    db,
+                    job.session_id,
+                    "system_prompt",
+                    {
+                        "step": step.index,
+                        "label": step.label,
+                        "goal": job.goal,
+                        "mode": session.mode,
+                        "provider_order": ordered_providers,
+                        "selected_model": selected_model,
+                        "enabled_skills": enabled_skills if isinstance(enabled_skills, list) else [],
+                        "enabled_tools": enabled_tools if isinstance(enabled_tools, list) else [],
+                        "system_prompt_override": system_prompt_override if isinstance(system_prompt_override, str) else "",
+                        "rules_checklist": rules_checklist if isinstance(rules_checklist, str) else "",
+                        "prompt": prompt,
+                    },
+                    job_id=job.id,
+                )
+
                 result = await provider_router.generate_with_fallback(
                     prompt=prompt,
                     ordered_providers=ordered_providers,

@@ -345,8 +345,43 @@ function isVisibleForFilter(eventType) {
   return eventType === selectedFilter;
 }
 
-function addTimeline(eventType, payload) {
-  el("timeline").prepend(buildTimelineNode(eventType, payload));
+function addTimeline(eventType, payload, createdAt = null) {
+  if (eventType === "system_prompt") {
+    addSystemPromptEntry(payload, createdAt);
+    return;
+  }
+  el("timeline").prepend(buildTimelineNode(eventType, payload, createdAt));
+}
+
+function addSystemPromptEntry(payload, createdAt = null) {
+  const list = el("system-prompts");
+  if (!list) return;
+  const li = document.createElement("li");
+  const details = document.createElement("details");
+  details.className = "meta-details";
+
+  const summary = document.createElement("summary");
+  const ts = document.createElement("span");
+  ts.className = "meta-time";
+  ts.textContent = formatLocalTimestamp(createdAt);
+  const tag = document.createElement("span");
+  tag.className = "meta-tag system_prompt";
+  tag.textContent = "system_prompt";
+  const headline = document.createElement("span");
+  headline.className = "meta-headline";
+  const mode = payload?.mode || "interactive";
+  const step = payload?.label || "step";
+  headline.textContent = `${step} · mode=${mode}`;
+  summary.append(ts, tag, headline);
+  details.appendChild(summary);
+
+  const pre = document.createElement("pre");
+  pre.className = "meta-payload";
+  pre.textContent = payload?.prompt || JSON.stringify(payload || {}, null, 2);
+  details.appendChild(pre);
+
+  li.appendChild(details);
+  list.prepend(li);
 }
 
 function applyTimelineFilter() {
@@ -360,9 +395,11 @@ async function loadSessionTimeline(sessionId) {
   try {
     const events = await req(`/sessions/${sessionId}/events?limit=250`);
     const timeline = el("timeline");
+    const systemPrompts = el("system-prompts");
     timeline.innerHTML = "";
+    if (systemPrompts) systemPrompts.innerHTML = "";
     events.forEach((evt) => {
-      timeline.appendChild(buildTimelineNode(evt.event_type, evt.payload || {}, evt.created_at));
+      addTimeline(evt.event_type, evt.payload || {}, evt.created_at);
     });
   } catch {
     // no-op
@@ -729,8 +766,8 @@ function connectStream() {
 
   streamSocket.onmessage = (raw) => {
     const evt = JSON.parse(raw.data);
-    const { event_type: eventType, payload, job_id: jobId, session_id: sessionId } = evt;
-    addTimeline(eventType, payload || {});
+    const { event_type: eventType, payload, job_id: jobId, session_id: sessionId, created_at: createdAt } = evt;
+    addTimeline(eventType, payload || {}, createdAt);
 
     if (eventType === "job_state") {
       setSessionState(payload?.state || "idle");

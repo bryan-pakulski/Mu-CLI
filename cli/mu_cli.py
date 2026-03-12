@@ -217,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_create = sub.add_parser("session-create")
     session_create.add_argument("workspace")
     session_create.add_argument("--mode", default="interactive")
-    session_create.add_argument("--providers", default="ollama,mock")
+    session_create.add_argument("--providers", default="ollama")
     session_create.add_argument("--policy", default="default")
 
     job_start = sub.add_parser("job-start")
@@ -232,7 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
     loop.add_argument("workspace")
     loop.add_argument("goal")
     loop.add_argument("--mode", default="interactive")
-    loop.add_argument("--providers", default="ollama,mock")
+    loop.add_argument("--providers", default="ollama")
     loop.add_argument("--policy", default="default")
     loop.add_argument("--tool")
     loop.add_argument("--timeout", type=int, default=300)

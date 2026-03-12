@@ -1,13 +1,13 @@
+from server.app.core.config import settings
 from server.app.providers.mock.adapter import MockAdapter
 from server.app.providers.ollama.adapter import OllamaAdapter
 
 
 class ProviderRegistry:
     def __init__(self) -> None:
-        self._providers = {
-            "ollama": OllamaAdapter(),
-            "mock": MockAdapter(),
-        }
+        self._providers = {"ollama": OllamaAdapter()}
+        if settings.test_mode:
+            self._providers["mock"] = MockAdapter()
 
     def list_providers(self) -> list:
         return list(self._providers.values())

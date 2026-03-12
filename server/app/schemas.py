@@ -8,7 +8,7 @@ from server.app.persistence.models import ApprovalState, JobState, SessionStatus
 class SessionCreate(BaseModel):
     workspace_path: str
     mode: str = "interactive"
-    provider_preferences: dict = Field(default_factory=lambda: {"ordered": ["ollama", "mock"]})
+    provider_preferences: dict = Field(default_factory=lambda: {"ordered": ["ollama"]})
     policy_profile: str = "default"
 
 

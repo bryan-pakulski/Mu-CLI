@@ -9,6 +9,15 @@ class ProviderResult:
     output: str
 
 
+def resolve_ordered_providers(provider_preferences: dict | None) -> list[str]:
+    configured = list((provider_preferences or {}).get("ordered", ["ollama"]))
+    available = {provider.name for provider in provider_registry.list_providers()}
+    ordered = [name for name in configured if name in available]
+    if ordered:
+        return ordered
+    return ["ollama"] if "ollama" in available else sorted(available)
+
+
 class ProviderRouter:
     async def generate_with_fallback(
         self,

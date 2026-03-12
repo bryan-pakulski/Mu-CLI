@@ -190,3 +190,37 @@ async def test_workspace_index_and_skill_discovery_endpoints(tmp_path: Path) -> 
         skills = await client.get("/skills", params={"session_id": session["id"]})
         assert skills.status_code == 200
         assert any(item["name"] == "demo-skill" for item in skills.json())
+
+
+@pytest.mark.asyncio
+async def test_session_with_legacy_mock_preference_does_not_attempt_unknown_provider() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        create_session = await client.post(
+            "/sessions",
+            json={
+                "workspace_path": "/tmp/work",
+                "mode": "interactive",
+                "provider_preferences": {"ordered": ["ollama", "mock"]},
+            },
+        )
+        assert create_session.status_code == 200
+        session = create_session.json()
+
+        create_job = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "legacy provider preference compatibility"},
+        )
+        assert create_job.status_code == 200
+        job = create_job.json()
+
+        await asyncio.sleep(0.35)
+
+        events_response = await client.get(f"/jobs/{job['id']}/events")
+        assert events_response.status_code == 200
+        log_payloads = [
+            event["payload"]
+            for event in events_response.json()
+            if event["event_type"] == "log"
+        ]
+        assert all("Unknown provider: mock" not in str(payload) for payload in log_payloads)

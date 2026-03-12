@@ -12,7 +12,7 @@ from server.app.persistence.models import (
     SessionModel,
 )
 from server.app.policies.engine import policy_engine
-from server.app.providers.router import provider_router
+from server.app.providers.router import provider_router, resolve_ordered_providers
 from server.app.runtime.agent_loop import LoopStep, run_agent_loop
 from server.app.runtime.orchestrator import emit_event, update_job_state
 from server.app.tools.registry import tool_registry
@@ -151,9 +151,7 @@ class JobRunner:
                 job_id=job.id,
             )
 
-            ordered_providers = list(
-                (session.provider_preferences or {}).get("ordered", ["ollama"])
-            )
+            ordered_providers = resolve_ordered_providers(session.provider_preferences)
 
             async def emit_step(step: LoopStep) -> None:
                 prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}"

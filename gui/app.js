@@ -67,6 +67,70 @@ function initSectionToggles() {
   });
 }
 
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function applySyntaxHighlight(code, language) {
+  let html = escapeHtml(code);
+  const lang = (language || "").toLowerCase();
+
+  const highlight = (pattern, cls) => {
+    html = html.replace(pattern, `<span class="${cls}">$1</span>`);
+  };
+
+  highlight(/(\/\/.*?$)/gm, "tok-comment");
+  highlight(/(#.*?$)/gm, "tok-comment");
+  highlight(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, "tok-string");
+  highlight(/\b(\d+(?:\.\d+)?)\b/g, "tok-number");
+
+  if (["js", "javascript", "ts", "typescript", "py", "python", "json", "bash", "sh"].includes(lang)) {
+    highlight(/\b(const|let|var|function|return|if|else|for|while|class|import|from|export|async|await|try|catch|def|lambda|True|False|None|null|new|in|and|or|not)\b/g, "tok-keyword");
+    highlight(/([=+\-*/%<>!&|]+)/g, "tok-operator");
+  }
+
+  return html;
+}
+
+function renderInlineMarkdown(text) {
+  let html = escapeHtml(text || "");
+  html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  return html;
+}
+
+function renderMarkdown(value) {
+  const raw = String(value || "");
+  const segments = raw.split(/```/g);
+  let html = "";
+
+  segments.forEach((segment, index) => {
+    if (index % 2 === 1) {
+      const firstBreak = segment.indexOf("\n");
+      const language = firstBreak === -1 ? "" : segment.slice(0, firstBreak).trim();
+      const code = firstBreak === -1 ? segment : segment.slice(firstBreak + 1);
+      const highlighted = applySyntaxHighlight(code, language);
+      html += `<pre class="md-code-block"><button class="code-copy-btn" type="button" data-code="${escapeHtml(code)}">Copy</button><code class="language-${escapeHtml(language || "plain")}">${highlighted}</code></pre>`;
+      return;
+    }
+
+    segment.split(/\n{2,}/).forEach((para) => {
+      const trimmed = para.trim();
+      if (!trimmed) return;
+      html += `<p>${renderInlineMarkdown(trimmed).replace(/\n/g, "<br />")}</p>`;
+    });
+  });
+
+  return html || `<p>${renderInlineMarkdown(raw)}</p>`;
+}
+
 function formatLocalTimestamp(value = null) {
   const dt = value ? new Date(value) : new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -316,7 +380,7 @@ function renderChatForSession(sessionId) {
   messages.forEach((msg) => {
     const node = document.createElement("div");
     node.className = `message ${msg.role}`;
-    node.innerHTML = `<div class="tag-row"><div class="tag">${msg.role}</div><div class="timestamp">${msg.created_at || formatLocalTimestamp()}</div></div><div>${msg.content}</div>`;
+    node.innerHTML = `<div class="tag-row"><div class="tag">${msg.role}</div><div class="timestamp">${msg.created_at || formatLocalTimestamp()}</div></div><div class="message-content">${renderMarkdown(msg.content)}</div>`;
     chatWindow.appendChild(node);
   });
 
@@ -345,7 +409,8 @@ function updateAssistantDraft(text, sessionId = currentSession) {
     latestAssistantMessage = pushChat("assistant", text);
     return;
   }
-  latestAssistantMessage.querySelector("div:last-child").textContent = text;
+  const contentNode = latestAssistantMessage.querySelector(".message-content");
+  if (contentNode) contentNode.innerHTML = renderMarkdown(text);
   const messages = sessionMessages.get(sessionId) || [];
   if (messages.length > 0) messages[messages.length - 1].content = text;
 }
@@ -1109,6 +1174,24 @@ setOnClick("help-close", () => closeModal("help-modal"));
 const helpModal = el("help-modal");
 if (helpModal) helpModal.addEventListener("click", (event) => {
   if (event.target.id === "help-modal") closeModal("help-modal");
+});
+
+
+const chatWindowNode = el("chat-window");
+if (chatWindowNode) chatWindowNode.addEventListener("click", async (event) => {
+  const button = event.target.closest(".code-copy-btn");
+  if (!button) return;
+  const rawCode = button.getAttribute("data-code") || "";
+  try {
+    await navigator.clipboard.writeText(rawCode);
+    const original = button.textContent;
+    button.textContent = "Copied";
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1200);
+  } catch {
+    window.alert("Unable to copy code block");
+  }
 });
 
 document.querySelectorAll("#meta-filters .chip").forEach((chip) => {

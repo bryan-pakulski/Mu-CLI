@@ -1,4 +1,5 @@
 :root {
+  --ui-scale: 0.9;
   --bg: #090b10;
   --panel: #0d1016;
   --panel-alt: #0b0f15;
@@ -37,6 +38,7 @@ body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+  zoom: var(--ui-scale);
 }
 
 body.modal-open #app-shell {
@@ -272,3 +274,16 @@ textarea { resize: vertical; min-height: 54px; }
 .workspace-entry { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .workspace-entry:last-child { border-bottom: 0; }
 .workspace-entry-btn { flex: 1; text-align: left; border: 0; border-radius: 0; padding: 6px 2px; background: transparent; color: var(--text); cursor: pointer; }
+
+
+.message-content p { margin: 0 0 8px; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content code.inline-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; background: color-mix(in srgb, var(--surface) 80%, #000 20%); border: 1px solid var(--border); border-radius: 6px; padding: 1px 5px; }
+.md-code-block { position: relative; margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--surface) 85%, #000 15%); overflow: auto; max-height: 340px; }
+.md-code-block code { display: block; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; line-height: 1.45; color: #e5e7eb; }
+.code-copy-btn { position: sticky; top: 0; float: right; margin-left: 8px; border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--text); border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer; z-index: 2; }
+.tok-keyword { color: #93c5fd; }
+.tok-string { color: #86efac; }
+.tok-number { color: #fca5a5; }
+.tok-comment { color: #94a3b8; font-style: italic; }
+.tok-operator { color: #c4b5fd; }

@@ -16,10 +16,12 @@ async def test_session_job_lifecycle_and_providers() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         create_session = await client.post(
             "/sessions",
-            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+            json={"workspace_path": "/tmp/work", "mode": "interactive", "max_stage_turns": 2, "max_context_chars": 6000},
         )
         assert create_session.status_code == 200
         session = create_session.json()
+        assert session["context_state"]["max_stage_turns"] == 2
+        assert session["context_state"]["max_context_chars"] == 6000
 
         providers = await client.get("/providers")
         assert providers.status_code == 200
@@ -72,6 +74,7 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert system_prompt_events
         stage_payload = system_prompt_events[-1].get("payload") or {}
         assert (stage_payload.get("stage") or {}).get("label")
+        assert (stage_payload.get("stage") or {}).get("max_attempts") == 2
 
         model_response_events = [
             item for item in events_payload if item.get("event_type") == "model_response"

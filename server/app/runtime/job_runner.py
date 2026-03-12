@@ -23,7 +23,7 @@ from server.app.tools.registry import tool_registry
 
 STAGE_READY_PREFIX = "STAGE_READY::"
 STAGE_NEEDS_MORE_PREFIX = "STAGE_NEEDS_MORE::"
-MAX_STAGE_REPROMPTS = 3
+DEFAULT_MAX_STAGE_TURNS = 3
 
 
 def _extract_stage_signal(output: str, expected_stage: str) -> tuple[bool, str, str]:
@@ -223,6 +223,9 @@ class JobRunner:
                     if isinstance(item, dict)
                 ]
                 context_block = "\n".join(context_lines).strip()
+                max_context_chars = max(1000, int(context_state.get("max_context_chars", 8000)))
+                if len(context_block) > max_context_chars:
+                    context_block = context_block[-max_context_chars:]
 
                 all_tools = tool_registry.list_tools()
                 all_skills = skill_registry.discover(session.workspace_path)
@@ -246,7 +249,8 @@ class JobRunner:
                 stage_output = ""
                 stage_feedback = ""
                 last_provider = ""
-                for stage_attempt in range(1, MAX_STAGE_REPROMPTS + 1):
+                max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
+                for stage_attempt in range(1, max_stage_turns + 1):
                     prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
                     prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
                     prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
@@ -262,7 +266,7 @@ class JobRunner:
                         f"- If not complete, prefix with {STAGE_NEEDS_MORE_PREFIX}{step.label}:: and explain what is missing.\n"
                         "- Do not omit this prefix."
                     )
-                    prompt += f"\ncurrent_stage_attempt={stage_attempt}/{MAX_STAGE_REPROMPTS}"
+                    prompt += f"\ncurrent_stage_attempt={stage_attempt}/{max_stage_turns}"
                     if stage_feedback:
                         prompt += f"\n\nstage_feedback:\n{stage_feedback}"
 
@@ -270,7 +274,7 @@ class JobRunner:
                         "index": step.index,
                         "label": step.label,
                         "attempt": stage_attempt,
-                        "max_attempts": MAX_STAGE_REPROMPTS,
+                        "max_attempts": max_stage_turns,
                         "status": "in_progress",
                     }
 
@@ -361,7 +365,7 @@ class JobRunner:
                 if not stage_output:
                     raise RuntimeError(
                         f"Stage '{step.label}' did not provide required readiness confirmation "
-                        f"after {MAX_STAGE_REPROMPTS} attempts"
+                        f"after {max_stage_turns} attempts"
                     )
 
                 job.checkpoints = {

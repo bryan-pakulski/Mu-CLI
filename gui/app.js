@@ -150,9 +150,13 @@ function toggleTheme() {
 function getSessionLimits(session) {
   const maxTimeout = Number(session?.context_state?.max_timeout_s || 300);
   const maxContext = Number(session?.context_state?.max_context_messages || 40);
+  const maxContextChars = Number(session?.context_state?.max_context_chars || 8000);
+  const maxStageTurns = Number(session?.context_state?.max_stage_turns || 3);
   return {
     maxTimeout: Number.isFinite(maxTimeout) ? maxTimeout : 300,
     maxContext: Number.isFinite(maxContext) ? maxContext : 40,
+    maxContextChars: Number.isFinite(maxContextChars) ? maxContextChars : 8000,
+    maxStageTurns: Number.isFinite(maxStageTurns) ? maxStageTurns : 3,
   };
 }
 
@@ -241,6 +245,8 @@ async function persistCurrentConfig() {
         policy_profile: el("policy").value,
         max_timeout_s: Number(el("max-timeout").value || 300),
         max_context_messages: Number(el("max-context").value || 40),
+        max_context_chars: Number(el("max-context-chars").value || 8000),
+        max_stage_turns: Number(el("max-stage-turns").value || 3),
         provider_preferences: {
           ordered: [el("providers").value],
           model: el("model").value || "default",
@@ -306,6 +312,14 @@ async function populateRuntimeOptions() {
   });
 
   el("max-context").addEventListener("change", () => {
+    persistCurrentConfig().catch(() => null);
+  });
+
+  el("max-context-chars").addEventListener("change", () => {
+    persistCurrentConfig().catch(() => null);
+  });
+
+  el("max-stage-turns").addEventListener("change", () => {
     persistCurrentConfig().catch(() => null);
   });
 
@@ -707,12 +721,14 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
   const name = session.name || "default";
 
   const limits = getSessionLimits(session);
-  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${limits.maxContext}`;
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${limits.maxContext} msgs/${limits.maxContextChars} chars | stage_turns=${limits.maxStageTurns}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
   el("max-timeout").value = limits.maxTimeout;
   el("max-context").value = limits.maxContext;
+  el("max-context-chars").value = limits.maxContextChars;
+  el("max-stage-turns").value = limits.maxStageTurns;
   model = await loadModelsForProvider(provider, "model", model);
 
   if (options.autoPersistIfMissingModel && !session.provider_preferences?.model) {
@@ -759,7 +775,8 @@ async function openSessionSettings(sessionId) {
   el("modal-approval-mode").value = session.policy_profile || "default";
   el("modal-max-timeout").value = limits.maxTimeout;
   el("modal-condense-window").value = limits.maxContext;
-
+  el("modal-context-chars").value = limits.maxContextChars;
+  el("modal-max-stage-turns").value = limits.maxStageTurns;
 
   const tools = await req(`/sessions/${sessionId}/tools-config`);
   const skills = await req(`/sessions/${sessionId}/skills-config`);
@@ -1000,6 +1017,8 @@ setOnClick("create-session", async () => {
       policy_profile: el("policy").value,
       max_timeout_s: Number(el("max-timeout").value || 300),
       max_context_messages: Number(el("max-context").value || 40),
+      max_context_chars: Number(el("max-context-chars").value || 8000),
+      max_stage_turns: Number(el("max-stage-turns").value || 3),
       provider_preferences: { ordered: [el("providers").value], model: el("model").value || "default" },
     }),
   });
@@ -1125,6 +1144,8 @@ setOnClick("modal-save", async () => {
       policy_profile: el("modal-approval-mode").value,
       max_timeout_s: Number(el("modal-max-timeout").value || 300),
       max_context_messages: Number(el("modal-condense-window").value || 40),
+      max_context_chars: Number(el("modal-context-chars").value || 8000),
+      max_stage_turns: Number(el("modal-max-stage-turns").value || 3),
       provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value || "default" },
     }),
   });

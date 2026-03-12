@@ -13,6 +13,8 @@ class SessionCreate(BaseModel):
     policy_profile: str = "default"
     max_timeout_s: int = 300
     max_context_messages: int = 40
+    max_context_chars: int = 8000
+    max_stage_turns: int = 3
 
 
 class SessionRead(BaseModel):
@@ -35,6 +37,8 @@ class SessionUpdate(BaseModel):
     policy_profile: str | None = None
     max_timeout_s: int | None = None
     max_context_messages: int | None = None
+    max_context_chars: int | None = None
+    max_stage_turns: int | None = None
     agentic_planning: bool | None = None
     research_mode: bool | None = None
     auto_condense: bool | None = None

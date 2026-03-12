@@ -1,6 +1,7 @@
 import copy
 from datetime import datetime
 from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,7 @@ from server.app.runtime.orchestrator import emit_event
 from server.app.schemas import (
     ApprovalDecisionWrite,
     ApprovalRead,
+    EnabledItemsUpdate,
     EventRead,
     JobCreate,
     JobRead,
@@ -38,7 +40,6 @@ from server.app.schemas import (
     SkillRead,
     ToolConfigRead,
     ToolRead,
-    EnabledItemsUpdate,
     WorkspaceIndexBuildResponse,
     WorkspaceIndexRead,
     WorkspaceIndexRefreshResponse,
@@ -55,7 +56,14 @@ def _normalize_session_name(name: str | None) -> str:
     return value or "default"
 
 
-def _base_context_state(name: str, *, max_timeout_s: int = 300, max_context_messages: int = 40) -> dict:
+def _base_context_state(
+    name: str,
+    *,
+    max_timeout_s: int = 300,
+    max_context_messages: int = 40,
+    max_context_chars: int = 8000,
+    max_stage_turns: int = 3,
+) -> dict:
     return {
         "name": _normalize_session_name(name),
         "messages": [],
@@ -63,14 +71,31 @@ def _base_context_state(name: str, *, max_timeout_s: int = 300, max_context_mess
         "memory_refs": [],
         "max_timeout_s": max(30, int(max_timeout_s)),
         "max_context_messages": max(5, int(max_context_messages)),
+        "max_context_chars": max(1000, int(max_context_chars)),
+        "max_stage_turns": max(1, int(max_stage_turns)),
     }
 
 
 def _trim_context_messages(context_state: dict) -> dict:
     max_messages = max(5, int(context_state.get("max_context_messages", 40)))
+    max_chars = max(1000, int(context_state.get("max_context_chars", 8000)))
     messages = context_state.get("messages") or []
     if len(messages) > max_messages:
-        context_state["messages"] = messages[-max_messages:]
+        messages = messages[-max_messages:]
+
+    running_chars = 0
+    trimmed_reversed = []
+    for item in reversed(messages):
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "")
+        item_chars = len(content)
+        if trimmed_reversed and running_chars + item_chars > max_chars:
+            break
+        trimmed_reversed.append(item)
+        running_chars += item_chars
+
+    context_state["messages"] = list(reversed(trimmed_reversed))
     return context_state
 
 
@@ -79,6 +104,8 @@ def _append_message(context_state: dict, role: str, content: str) -> dict:
     enriched.setdefault("messages", [])
     enriched.setdefault("max_context_messages", 40)
     enriched.setdefault("max_timeout_s", 300)
+    enriched.setdefault("max_context_chars", 8000)
+    enriched.setdefault("max_stage_turns", 3)
     enriched["messages"].append({
         "role": role,
         "content": content,
@@ -117,7 +144,13 @@ async def create_session(
         mode=payload.mode,
         provider_preferences=payload.provider_preferences,
         policy_profile=payload.policy_profile,
-        context_state=_base_context_state(payload.name, max_timeout_s=payload.max_timeout_s, max_context_messages=payload.max_context_messages),
+        context_state=_base_context_state(
+            payload.name,
+            max_timeout_s=payload.max_timeout_s,
+            max_context_messages=payload.max_context_messages,
+            max_context_chars=payload.max_context_chars,
+            max_stage_turns=payload.max_stage_turns,
+        ),
     )
     db.add(session)
     await db.commit()
@@ -178,6 +211,11 @@ async def update_session(
     if payload.max_context_messages is not None:
         context_state["max_context_messages"] = max(5, int(payload.max_context_messages))
         context_state = _trim_context_messages(context_state)
+    if payload.max_context_chars is not None:
+        context_state["max_context_chars"] = max(1000, int(payload.max_context_chars))
+        context_state = _trim_context_messages(context_state)
+    if payload.max_stage_turns is not None:
+        context_state["max_stage_turns"] = max(1, int(payload.max_stage_turns))
     if payload.agentic_planning is not None:
         context_state["agentic_planning"] = payload.agentic_planning
     if payload.research_mode is not None:
@@ -203,6 +241,8 @@ async def update_session(
             "policy_profile": session.policy_profile,
             "max_timeout_s": (session.context_state or {}).get("max_timeout_s", 300),
             "max_context_messages": (session.context_state or {}).get("max_context_messages", 40),
+            "max_context_chars": (session.context_state or {}).get("max_context_chars", 8000),
+            "max_stage_turns": (session.context_state or {}).get("max_stage_turns", 3),
             "workspace_path": session.workspace_path,
             "agentic_planning": (session.context_state or {}).get("agentic_planning", False),
             "research_mode": (session.context_state or {}).get("research_mode", False),
@@ -279,6 +319,8 @@ async def clear_session_context(session_id: str, db: AsyncSession = Depends(get_
         session.name,
         max_timeout_s=existing.get("max_timeout_s", 300),
         max_context_messages=existing.get("max_context_messages", 40),
+        max_context_chars=existing.get("max_context_chars", 8000),
+        max_stage_turns=existing.get("max_stage_turns", 3),
     )
     await db.commit()
     await db.refresh(session)

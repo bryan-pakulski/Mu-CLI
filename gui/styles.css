@@ -62,6 +62,7 @@ input, select, textarea {
 textarea { resize: vertical; min-height: 62px; }
 .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .row.compact { margin-top: 4px; }
+.row.compact input { flex: 1; min-width: 0; }
 .btn { border: 1px solid #a7afbd; border-radius: 999px; background: #f9fafb; padding: 7px 12px; cursor: pointer; }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 .btn.warn { border-color: #f59e0b; color: #92400e; }

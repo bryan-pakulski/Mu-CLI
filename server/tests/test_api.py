@@ -27,6 +27,10 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert "ollama" in provider_names
         assert "mock" in provider_names
 
+        policies = await client.get("/policy-profiles")
+        assert policies.status_code == 200
+        assert "default" in policies.json()
+
         tools = await client.get("/tools")
         assert tools.status_code == 200
         assert any(t["name"] == "shell.exec" for t in tools.json())

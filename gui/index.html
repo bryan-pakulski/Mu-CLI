@@ -14,7 +14,7 @@
         <section class="block">
           <h3>Runtime</h3>
           <label for="providers">Provider</label>
-          <input id="providers" value="ollama" />
+          <select id="providers"></select>
           <label for="mode">Mode</label>
           <select id="mode">
             <option value="interactive">interactive</option>
@@ -23,14 +23,18 @@
             <option value="yolo">yolo</option>
           </select>
           <label for="policy">Policy profile</label>
-          <input id="policy" value="default" />
+          <select id="policy"></select>
           <button id="save-config" class="btn primary">Apply config</button>
         </section>
 
         <section class="block">
           <h3>Workspace</h3>
           <label for="workspace">Workspace path</label>
-          <input id="workspace" value="/tmp/work" />
+          <div class="row compact">
+            <input id="workspace" value="/tmp/work" />
+            <button id="browse-workspace" class="btn" type="button">Browse</button>
+          </div>
+          <input id="workspace-picker" type="file" webkitdirectory directory multiple class="hidden" />
         </section>
 
         <section class="block">
@@ -44,22 +48,6 @@
           <ul id="session-list" class="session-list"></ul>
           <div id="session-summary" class="muted">No session selected.</div>
           <div id="session-state" class="state-pill idle">idle</div>
-        </section>
-
-        <section class="block">
-          <h3>Session actions</h3>
-          <div class="session-actions">
-            <button id="clear-chat" class="btn">Clear history</button>
-            <button id="condense-chat" class="btn">Condense</button>
-          </div>
-        </section>
-
-        <section class="block">
-          <h3>Interventions</h3>
-          <div class="row compact">
-            <button id="cancel-job" class="btn warn">Cancel</button>
-            <button id="resume-job" class="btn">Resume</button>
-          </div>
         </section>
       </aside>
 
@@ -129,10 +117,10 @@
           </select>
 
           <label for="modal-policy">Policy profile</label>
-          <input id="modal-policy" />
+          <select id="modal-policy"></select>
 
-          <label for="modal-providers">Providers (comma-separated)</label>
-          <input id="modal-providers" />
+          <label for="modal-providers">Provider</label>
+          <select id="modal-providers"></select>
         </div>
         <div class="modal-actions">
           <button id="modal-cancel" class="btn">Cancel</button>

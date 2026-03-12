@@ -12,18 +12,38 @@ const panelState = {
   left: { collapsed: false, width: 320, min: 220, max: 560 },
   right: { collapsed: false, width: 420, min: 280, max: 720 },
 };
-
 const sessionIndicators = new Map();
 
 const el = (id) => document.getElementById(id);
 
 async function req(path, options = {}) {
-  const res = await fetch(api + path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const res = await fetch(api + path, { headers: { "Content-Type": "application/json" }, ...options });
   if (!res.ok) throw new Error(await res.text());
+  if (res.status === 204) return null;
   return res.json();
+}
+
+function fillSelect(selectId, values, selected) {
+  const node = el(selectId);
+  node.innerHTML = "";
+  values.forEach((v) => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    if (v === selected) opt.selected = true;
+    node.appendChild(opt);
+  });
+}
+
+async function populateRuntimeOptions() {
+  const providers = await req("/providers");
+  const providerNames = providers.map((p) => p.name);
+  fillSelect("providers", providerNames, providerNames[0]);
+  fillSelect("modal-providers", providerNames, providerNames[0]);
+
+  const policyProfiles = await req("/policy-profiles");
+  fillSelect("policy", policyProfiles, policyProfiles[0]);
+  fillSelect("modal-policy", policyProfiles, policyProfiles[0]);
 }
 
 function clamp(n, min, max) {
@@ -46,7 +66,6 @@ function togglePanel(side) {
 function setupResizer(resizerId, side) {
   const resizer = el(resizerId);
   const shell = el("app-shell");
-
   resizer.addEventListener("pointerdown", (event) => {
     if (panelState[side].collapsed) {
       panelState[side].collapsed = false;
@@ -88,9 +107,7 @@ function setSessionState(state) {
       : normalized === "blocked" || normalized === "failed"
       ? "blocked"
       : "idle";
-
   const label = normalized === "running" ? "thinking" : normalized;
-
   ["session-state", "active-status"].forEach((id) => {
     const node = el(id);
     node.className = `state-pill ${className}`;
@@ -121,8 +138,12 @@ function updateAssistantDraft(text) {
   latestAssistantMessage.querySelector("div:last-child").textContent = text;
 }
 
-function formatTimelineLine(eventType, payload) {
-  return `${eventType}: ${JSON.stringify(payload)}`;
+function addTimeline(eventType, payload) {
+  const li = document.createElement("li");
+  li.dataset.eventType = eventType;
+  li.textContent = `${new Date().toLocaleTimeString()}  ${eventType}: ${JSON.stringify(payload)}`;
+  if (!isVisibleForFilter(eventType)) li.classList.add("hidden");
+  el("timeline").prepend(li);
 }
 
 function isVisibleForFilter(eventType) {
@@ -131,36 +152,21 @@ function isVisibleForFilter(eventType) {
   return eventType === selectedFilter;
 }
 
-function addTimeline(eventType, payload) {
-  const li = document.createElement("li");
-  li.dataset.eventType = eventType;
-  li.textContent = `${new Date().toLocaleTimeString()}  ${formatTimelineLine(eventType, payload)}`;
-  if (!isVisibleForFilter(eventType)) li.classList.add("hidden");
-  el("timeline").prepend(li);
-}
-
 function applyTimelineFilter() {
   document.querySelectorAll("#timeline li").forEach((node) => {
     node.classList.toggle("hidden", !isVisibleForFilter(node.dataset.eventType || ""));
   });
 }
 
-function providerHintForError(rawError = "") {
-  if (!rawError.includes("/api/generate") || !rawError.includes("404")) return null;
-  return [
-    "Provider call failed (404 from Ollama).",
-    "Check your runtime provider settings and endpoint.",
-    "Expected Ollama generate endpoint at: http://localhost:11434/api/generate",
-    "If you run Ollama on another host/port, update server provider config accordingly.",
-  ].join("\n");
-}
-
 function setIndicator(sessionId, state) {
-  if (!sessionId) return;
   sessionIndicators.set(sessionId, state);
   const dot = document.querySelector(`.session-item[data-session-id='${sessionId}'] .session-dot`);
-  if (!dot) return;
-  dot.className = `session-dot ${state}`;
+  if (dot) dot.className = `session-dot ${state}`;
+}
+
+function providerHintForError(rawError = "") {
+  if (!rawError.includes("/api/generate") || !rawError.includes("404")) return null;
+  return "Provider call failed (404 from Ollama generate endpoint). Check Ollama availability/config for http://localhost:11434/api/generate.";
 }
 
 function updateSessionSummary(session) {
@@ -171,18 +177,30 @@ function updateSessionSummary(session) {
     return;
   }
 
-  const providers = (session.provider_preferences?.ordered || []).join(", ");
-  el("session-summary").textContent = `mode=${session.mode} | policy=${session.policy_profile} | providers=${providers || "ollama"}`;
+  const provider = session.provider_preferences?.ordered?.[0] || "ollama";
+  el("session-summary").textContent = `mode=${session.mode} | policy=${session.policy_profile} | provider=${provider}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
-  el("providers").value = providers || "ollama";
-  el("active-model").textContent = `provider: ${providers || "ollama"}`;
+  el("providers").value = provider;
+  el("active-model").textContent = `provider: ${provider}`;
   setSessionState(session.status || "idle");
 }
 
 function closeAnySessionMenu() {
   document.querySelectorAll(".session-menu").forEach((menu) => menu.remove());
   openMenuForSession = null;
+}
+
+function openSessionSettings(sessionId) {
+  closeAnySessionMenu();
+  const session = sessionsCache.find((s) => s.id === sessionId);
+  if (!session) return;
+
+  currentSettingsSessionId = sessionId;
+  el("modal-mode").value = session.mode || "interactive";
+  el("modal-policy").value = session.policy_profile || "default";
+  el("modal-providers").value = session.provider_preferences?.ordered?.[0] || "ollama";
+  el("session-settings-modal").classList.remove("hidden");
 }
 
 function createSessionMenu(session) {
@@ -200,9 +218,7 @@ function createSessionMenu(session) {
     if (!window.confirm("Clear context and messages for this session?")) return;
     await req(`/sessions/${session.id}/clear`, { method: "POST" });
     setIndicator(session.id, "dot-idle");
-    if (session.id === currentSession) {
-      pushChat("system", "Session context cleared.");
-    }
+    if (session.id === currentSession) pushChat("system", "Session context cleared.");
   };
 
   const deleteBtn = document.createElement("button");
@@ -213,9 +229,8 @@ function createSessionMenu(session) {
     await req(`/sessions/${session.id}`, { method: "DELETE" });
     if (session.id === currentSession) {
       currentSession = null;
-      currentJob = null;
-      updateSessionSummary(null);
       if (streamSocket) streamSocket.close();
+      updateSessionSummary(null);
     }
     await refreshSessions();
   };
@@ -232,16 +247,15 @@ async function buildSessionIndicator(sessionId) {
     if (["queued", "running", "awaiting_approval"].includes(latest.state)) return "dot-running";
     if (latest.state === "completed") return "dot-success";
     if (["failed", "blocked", "cancelled"].includes(latest.state)) return "dot-error";
-    return "dot-idle";
   } catch {
     return "dot-idle";
   }
+  return "dot-idle";
 }
 
 function renderSessionList() {
   const ul = el("session-list");
   ul.innerHTML = "";
-
   sessionsCache.forEach((s) => {
     const li = document.createElement("li");
     li.className = `session-item ${s.id === currentSession ? "active" : ""}`;
@@ -252,16 +266,13 @@ function renderSessionList() {
 
     const main = document.createElement("div");
     main.className = "session-main";
-    main.innerHTML = `
-      <div class="session-id">${s.id.slice(0, 12)}</div>
-      <div class="session-meta">${s.mode} · ${s.status}</div>
-    `;
+    main.innerHTML = `<div class="session-id">${s.id.slice(0, 12)}</div><div class="session-meta">${s.mode} · ${s.status}</div>`;
     main.onclick = async () => {
       currentSession = s.id;
       const details = await req(`/sessions/${currentSession}`);
       updateSessionSummary(details);
-      connectStream();
       renderSessionList();
+      connectStream();
     };
 
     const menuBtn = document.createElement("button");
@@ -269,10 +280,7 @@ function renderSessionList() {
     menuBtn.textContent = "⋯";
     menuBtn.onclick = (event) => {
       event.stopPropagation();
-      if (openMenuForSession === s.id) {
-        closeAnySessionMenu();
-        return;
-      }
+      if (openMenuForSession === s.id) return closeAnySessionMenu();
       closeAnySessionMenu();
       li.appendChild(createSessionMenu(s));
       openMenuForSession = s.id;
@@ -281,18 +289,6 @@ function renderSessionList() {
     li.append(dot, main, menuBtn);
     ul.appendChild(li);
   });
-}
-
-function openSessionSettings(sessionId) {
-  closeAnySessionMenu();
-  const session = sessionsCache.find((s) => s.id === sessionId);
-  if (!session) return;
-
-  currentSettingsSessionId = sessionId;
-  el("modal-mode").value = session.mode || "interactive";
-  el("modal-policy").value = session.policy_profile || "default";
-  el("modal-providers").value = (session.provider_preferences?.ordered || []).join(", ");
-  el("session-settings-modal").classList.remove("hidden");
 }
 
 function closeSettingsModal() {
@@ -315,16 +311,9 @@ function connectStream() {
     if (eventType === "job_state") {
       setSessionState(payload?.state || "idle");
       if (jobId) currentJob = jobId;
-
-      if (["queued", "running", "awaiting_approval"].includes(payload?.state)) {
-        setIndicator(sessionId, "dot-running");
-      } else if (payload?.state === "completed") {
-        setIndicator(sessionId, "dot-success");
-        latestAssistantMessage = null;
-      } else if (["failed", "blocked", "cancelled"].includes(payload?.state)) {
-        setIndicator(sessionId, "dot-error");
-        latestAssistantMessage = null;
-      }
+      if (["queued", "running", "awaiting_approval"].includes(payload?.state)) setIndicator(sessionId, "dot-running");
+      if (payload?.state === "completed") setIndicator(sessionId, "dot-success");
+      if (["failed", "blocked", "cancelled"].includes(payload?.state)) setIndicator(sessionId, "dot-error");
     }
 
     if (eventType === "loop_step") {
@@ -348,9 +337,7 @@ function connectStream() {
     }
   };
 
-  streamSocket.onerror = () => {
-    addTimeline("status", { message: "stream disconnected" });
-  };
+  streamSocket.onerror = () => addTimeline("status", { message: "stream disconnected" });
 }
 
 async function refreshSessions() {
@@ -361,7 +348,6 @@ async function refreshSessions() {
 
   const statuses = await Promise.all(sessionsCache.map((s) => buildSessionIndicator(s.id)));
   sessionsCache.forEach((s, idx) => sessionIndicators.set(s.id, statuses[idx]));
-
   renderSessionList();
 
   if (sessionsCache.length > 0) {
@@ -376,28 +362,21 @@ async function refreshSessions() {
 
 async function refreshApprovals() {
   if (!currentSession) return;
-
   const approvals = await req(`/sessions/${currentSession}/approvals/pending`);
   const ul = el("approvals");
   ul.innerHTML = "";
-
   approvals.forEach((a) => {
     const li = document.createElement("li");
     li.textContent = `${a.tool_name}\n${a.reason}`;
-
     const approve = document.createElement("button");
     approve.className = "btn";
     approve.textContent = "approve";
     approve.onclick = async () => {
-      await req(`/jobs/${a.job_id}/approvals/${a.id}`, {
-        method: "POST",
-        body: JSON.stringify({ decision: "approved" }),
-      });
+      await req(`/jobs/${a.job_id}/approvals/${a.id}`, { method: "POST", body: JSON.stringify({ decision: "approved" }) });
       addTimeline("approval", { id: a.id, status: "approved" });
       pushChat("system", `${a.tool_name} approved`);
       refreshApprovals();
     };
-
     li.appendChild(document.createElement("br"));
     li.appendChild(approve);
     ul.appendChild(li);
@@ -406,10 +385,7 @@ async function refreshApprovals() {
 
 el("create-session").onclick = async () => {
   const workspace_path = el("workspace").value;
-  const created = await req("/sessions", {
-    method: "POST",
-    body: JSON.stringify({ workspace_path, mode: "interactive" }),
-  });
+  const created = await req("/sessions", { method: "POST", body: JSON.stringify({ workspace_path, mode: "interactive" }) });
   currentSession = created.id;
   currentJob = null;
   pushChat("system", `Session created: ${created.id}`);
@@ -417,11 +393,9 @@ el("create-session").onclick = async () => {
 };
 
 el("refresh-sessions").onclick = refreshSessions;
-
 el("session-quick-switch").addEventListener("keydown", async (event) => {
   if (event.key !== "Enter") return;
   const prefix = event.target.value.trim();
-  if (!prefix) return;
   const found = sessionsCache.find((s) => s.id.startsWith(prefix));
   if (!found) return;
   currentSession = found.id;
@@ -432,6 +406,31 @@ el("session-quick-switch").addEventListener("keydown", async (event) => {
   event.target.value = "";
 });
 
+el("browse-workspace").onclick = async () => {
+  if (window.showDirectoryPicker) {
+    try {
+      const handle = await window.showDirectoryPicker();
+      el("workspace").value = handle.name;
+      return;
+    } catch {
+      // continue to fallback
+    }
+  }
+  el("workspace-picker").click();
+};
+
+el("workspace-picker").addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const root = file.webkitRelativePath?.split("/")?.[0];
+  if (root) {
+    el("workspace").value = root;
+  } else {
+    const manual = window.prompt("Enter workspace path", el("workspace").value);
+    if (manual) el("workspace").value = manual;
+  }
+});
+
 el("create-job").onclick = async () => {
   if (!currentSession) return;
   const goal = el("goal").value;
@@ -439,10 +438,7 @@ el("create-job").onclick = async () => {
 
   pushChat("user", goal);
   latestAssistantMessage = null;
-  const job = await req(`/sessions/${currentSession}/jobs`, {
-    method: "POST",
-    body: JSON.stringify({ goal }),
-  });
+  const job = await req(`/sessions/${currentSession}/jobs`, { method: "POST", body: JSON.stringify({ goal }) });
   currentJob = job.id;
   setSessionState("running");
   setIndicator(currentSession, "dot-running");
@@ -456,27 +452,14 @@ el("goal").addEventListener("keydown", (event) => {
   }
 });
 
-el("cancel-job").onclick = async () => {
-  if (!currentJob) return;
-  await req(`/jobs/${currentJob}/cancel`, { method: "POST" });
-  pushChat("control", "Cancel requested");
-};
-
-el("resume-job").onclick = async () => {
-  if (!currentJob) return;
-  await req(`/jobs/${currentJob}/resume`, { method: "POST" });
-  pushChat("control", "Resume requested");
-};
-
 el("save-config").onclick = async () => {
   if (!currentSession) return;
   const mode = el("mode").value;
   const policy_profile = el("policy").value;
-  const ordered = el("providers").value.split(",").map((s) => s.trim()).filter(Boolean);
-
+  const provider = el("providers").value;
   const updated = await req(`/sessions/${currentSession}`, {
     method: "PATCH",
-    body: JSON.stringify({ mode, policy_profile, provider_preferences: { ordered } }),
+    body: JSON.stringify({ mode, policy_profile, provider_preferences: { ordered: [provider] } }),
   });
   updateSessionSummary(updated);
   await refreshSessions();
@@ -484,14 +467,6 @@ el("save-config").onclick = async () => {
 };
 
 el("refresh-approvals").onclick = refreshApprovals;
-el("clear-chat").onclick = () => {
-  el("chat-window").innerHTML = '<div class="empty-state">Chat history cleared for this view.</div>';
-  latestAssistantMessage = null;
-};
-el("condense-chat").onclick = () => {
-  pushChat("system", "Condense requested (UI placeholder). Hook this to a backend summarization endpoint.");
-};
-
 el("toggle-left").onclick = () => togglePanel("left");
 el("toggle-right").onclick = () => togglePanel("right");
 setupResizer("left-resizer", "left");
@@ -501,13 +476,13 @@ applyPanelLayout();
 el("modal-cancel").onclick = closeSettingsModal;
 el("modal-save").onclick = async () => {
   if (!currentSettingsSessionId) return;
-  const mode = el("modal-mode").value;
-  const policy_profile = el("modal-policy").value;
-  const ordered = el("modal-providers").value.split(",").map((s) => s.trim()).filter(Boolean);
-
   await req(`/sessions/${currentSettingsSessionId}`, {
     method: "PATCH",
-    body: JSON.stringify({ mode, policy_profile, provider_preferences: { ordered } }),
+    body: JSON.stringify({
+      mode: el("modal-mode").value,
+      policy_profile: el("modal-policy").value,
+      provider_preferences: { ordered: [el("modal-providers").value] },
+    }),
   });
   closeSettingsModal();
   await refreshSessions();
@@ -518,9 +493,7 @@ el("session-settings-modal").addEventListener("click", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-  if (!event.target.closest(".session-menu") && !event.target.closest(".session-menu-btn")) {
-    closeAnySessionMenu();
-  }
+  if (!event.target.closest(".session-menu") && !event.target.closest(".session-menu-btn")) closeAnySessionMenu();
 });
 
 document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
@@ -532,7 +505,11 @@ document.querySelectorAll("#meta-filters .chip").forEach((chip) => {
   });
 });
 
-refreshSessions().then(refreshApprovals).catch(console.error);
+populateRuntimeOptions()
+  .then(refreshSessions)
+  .then(refreshApprovals)
+  .catch(console.error);
+
 setInterval(() => {
   refreshApprovals().catch(() => null);
 }, 2000);

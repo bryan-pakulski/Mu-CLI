@@ -436,6 +436,11 @@ async def list_tools() -> list[ToolRead]:
     ]
 
 
+@router.get("/policy-profiles", response_model=list[str])
+async def list_policy_profiles() -> list[str]:
+    return ["default", "strict", "lenient"]
+
+
 @router.get("/policies/evaluate/{tool_name}", response_model=PolicyDecisionRead)
 async def evaluate_policy(tool_name: str, session_mode: str = "interactive") -> PolicyDecisionRead:
     tool = tool_registry.get(tool_name)

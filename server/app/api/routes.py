@@ -4,24 +4,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.app.persistence.db import get_db
 from server.app.persistence.models import (
+    ApprovalModel,
+    ApprovalState,
     EventModel,
     JobModel,
     JobState,
     SessionModel,
     SessionStatus,
 )
+from server.app.policies.engine import policy_engine
 from server.app.providers.registry import provider_registry
 from server.app.runtime.event_bus import event_bus
 from server.app.runtime.job_runner import job_runner
 from server.app.runtime.orchestrator import emit_event
 from server.app.schemas import (
+    ApprovalDecisionWrite,
+    ApprovalRead,
     EventRead,
     JobCreate,
     JobRead,
+    PolicyDecisionRead,
     ProviderRead,
     SessionCreate,
     SessionRead,
+    ToolRead,
 )
+from server.app.tools.registry import tool_registry
 
 router = APIRouter()
 
@@ -157,6 +165,51 @@ async def get_job_events(job_id: str, db: AsyncSession = Depends(get_db)) -> lis
     return list(events)
 
 
+@router.get("/jobs/{job_id}/approvals", response_model=list[ApprovalRead])
+async def get_job_approvals(job_id: str, db: AsyncSession = Depends(get_db)) -> list[ApprovalModel]:
+    job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    approvals = (
+        await db.scalars(
+            select(ApprovalModel)
+            .where(ApprovalModel.job_id == job_id)
+            .order_by(ApprovalModel.created_at)
+        )
+    ).all()
+    return list(approvals)
+
+
+@router.post("/jobs/{job_id}/approvals/{approval_id}", response_model=ApprovalRead)
+async def decide_approval(
+    job_id: str,
+    approval_id: str,
+    payload: ApprovalDecisionWrite,
+    db: AsyncSession = Depends(get_db),
+) -> ApprovalModel:
+    approval = await db.scalar(
+        select(ApprovalModel).where(ApprovalModel.id == approval_id, ApprovalModel.job_id == job_id)
+    )
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.state != ApprovalState.pending:
+        return approval
+    if payload.decision not in {ApprovalState.approved, ApprovalState.denied}:
+        raise HTTPException(status_code=400, detail="Only approved/denied are valid decisions")
+
+    approval.state = payload.decision
+    await db.commit()
+    await db.refresh(approval)
+    await emit_event(
+        db,
+        approval.session_id,
+        "approval_decision",
+        {"approval_id": approval.id, "state": approval.state.value},
+        job_id=approval.job_id,
+    )
+    return approval
+
+
 @router.post("/jobs/{job_id}/run", response_model=JobRead)
 async def run_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
     job = await db.scalar(select(JobModel).where(JobModel.id == job_id))
@@ -192,8 +245,11 @@ async def resume_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobMode
         raise HTTPException(status_code=404, detail="Job not found")
     if job.state == JobState.running:
         return job
-    if job.state not in {JobState.cancelled, JobState.failed, JobState.queued}:
-        raise HTTPException(status_code=400, detail="Only cancelled/failed/queued jobs can resume")
+    if job.state not in {JobState.cancelled, JobState.failed, JobState.queued, JobState.blocked}:
+        raise HTTPException(
+            status_code=400,
+            detail="Only cancelled/failed/queued/blocked jobs can resume",
+        )
 
     await job_runner.resume(job.id)
     await emit_event(db, job.session_id, "log", {"message": "resume requested"}, job_id=job.id)
@@ -212,6 +268,32 @@ async def list_providers() -> list[ProviderRead]:
         )
         for p in provider_registry.list_providers()
     ]
+
+
+@router.get("/tools", response_model=list[ToolRead])
+async def list_tools() -> list[ToolRead]:
+    return [
+        ToolRead(
+            name=t.name,
+            description=t.description,
+            risk_level=t.risk_level,
+            requires_approval=t.requires_approval,
+        )
+        for t in tool_registry.list_tools()
+    ]
+
+
+@router.get("/policies/evaluate/{tool_name}", response_model=PolicyDecisionRead)
+async def evaluate_policy(tool_name: str, session_mode: str = "interactive") -> PolicyDecisionRead:
+    tool = tool_registry.get(tool_name)
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    decision = policy_engine.evaluate(session_mode, tool)
+    return PolicyDecisionRead(
+        tool_name=tool.name,
+        decision=decision.decision,
+        reason=decision.reason,
+    )
 
 
 @router.websocket("/stream/sessions/{session_id}")

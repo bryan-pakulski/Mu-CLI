@@ -26,6 +26,12 @@ class JobState(str, enum.Enum):
     cancelled = "cancelled"
 
 
+class ApprovalState(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    denied = "denied"
+
+
 class SessionModel(Base):
     __tablename__ = "sessions"
 
@@ -76,4 +82,16 @@ class EventModel(Base):
     job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
     event_type: Mapped[str] = mapped_column(String, nullable=False)
     payload: Mapped[dict] = mapped_column(JSON().with_variant(SQLITE_JSON, "sqlite"), default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ApprovalModel(Base):
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), nullable=False)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[ApprovalState] = mapped_column(Enum(ApprovalState), default=ApprovalState.pending)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

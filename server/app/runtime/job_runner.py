@@ -4,10 +4,18 @@ from sqlalchemy import select
 
 from server.app.core.config import settings
 from server.app.persistence.db import SessionLocal
-from server.app.persistence.models import JobModel, JobState, SessionModel
+from server.app.persistence.models import (
+    ApprovalModel,
+    ApprovalState,
+    JobModel,
+    JobState,
+    SessionModel,
+)
+from server.app.policies.engine import policy_engine
 from server.app.providers.router import provider_router
 from server.app.runtime.agent_loop import LoopStep, run_agent_loop
 from server.app.runtime.orchestrator import emit_event, update_job_state
+from server.app.tools.registry import tool_registry
 
 
 class JobRunner:
@@ -22,6 +30,92 @@ class JobRunner:
     def _cleanup(self, job_id: str) -> None:
         self._cancel_flags.pop(job_id, None)
         self._tasks.pop(job_id, None)
+
+    async def _handle_tool_policy(
+        self,
+        db,
+        session: SessionModel,
+        job: JobModel,
+    ) -> bool:
+        requested_tool = (job.constraints or {}).get("tool_name")
+        if not requested_tool:
+            return True
+
+        tool = tool_registry.get(requested_tool)
+        if not tool:
+            await emit_event(
+                db,
+                job.session_id,
+                "policy",
+                {"tool_name": requested_tool, "decision": "deny", "reason": "unknown tool"},
+                job_id=job.id,
+            )
+            await update_job_state(db, job.id, JobState.failed)
+            return False
+
+        decision = policy_engine.evaluate(session.mode, tool)
+        await emit_event(
+            db,
+            job.session_id,
+            "policy",
+            {
+                "tool_name": tool.name,
+                "decision": decision.decision,
+                "reason": decision.reason,
+            },
+            job_id=job.id,
+        )
+
+        if decision.decision == "allow":
+            return True
+
+        if decision.decision == "deny":
+            await update_job_state(db, job.id, JobState.blocked)
+            return False
+
+        approval = ApprovalModel(
+            session_id=job.session_id,
+            job_id=job.id,
+            tool_name=tool.name,
+            reason=decision.reason,
+            state=ApprovalState.pending,
+        )
+        db.add(approval)
+        await db.commit()
+        await db.refresh(approval)
+
+        await update_job_state(db, job.id, JobState.awaiting_approval)
+        await emit_event(
+            db,
+            job.session_id,
+            "approval_requested",
+            {
+                "approval_id": approval.id,
+                "tool_name": tool.name,
+                "reason": approval.reason,
+            },
+            job_id=job.id,
+        )
+
+        for _ in range(300):
+            if self._cancelled(job.id):
+                return False
+            latest_approval = await db.scalar(
+                select(ApprovalModel).where(ApprovalModel.id == approval.id)
+            )
+            if not latest_approval:
+                await update_job_state(db, job.id, JobState.blocked)
+                return False
+            if latest_approval.state == ApprovalState.approved:
+                await update_job_state(db, job.id, JobState.queued)
+                return True
+            if latest_approval.state == ApprovalState.denied:
+                await update_job_state(db, job.id, JobState.blocked)
+                return False
+            await asyncio.sleep(0.1)
+
+        await update_job_state(db, job.id, JobState.blocked)
+        return False
 
     async def _run(self, job_id: str) -> None:
         async with SessionLocal() as db:
@@ -39,6 +133,9 @@ class JobRunner:
             checkpoints["attempts"] = attempts
             job.checkpoints = checkpoints
             await db.commit()
+
+            if not await self._handle_tool_policy(db, session, job):
+                return
 
             await update_job_state(db, job_id, JobState.running)
             await emit_event(

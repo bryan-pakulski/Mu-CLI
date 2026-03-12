@@ -292,22 +292,22 @@ Status legend: `[ ]` not yet started, `[~]` in progress, `[x]` completed.
 **Exit criteria**
 - [x] Run/resume/cancel job flow works end-to-end locally.
 
-## [~] Phase 2 — Ollama First-Class + Provider Layer (2–3 weeks)
+## [x] Phase 2 — Ollama First-Class + Provider Layer (2–3 weeks)
 - [x] Implement initial Ollama adapter with generate/stream/health.
 - [x] Add generic provider interface.
 - [x] Add second provider adapter (for validation).
 - [x] Add provider fallback routing.
 
 **Exit criteria**
-- [~] Ollama-backed jobs run reliably with streaming and tool interactions.
+- [x] Ollama-backed jobs run reliably with streaming and tool interactions.
 
-## [ ] Phase 3 — Tools, Skills, Policy, Approvals (3–4 weeks)
-- [ ] Dynamic tool and skill discovery.
-- [ ] Policy engine with allow/deny/ask/escalate.
+## [~] Phase 3 — Tools, Skills, Policy, Approvals (3–4 weeks)
+- [~] Dynamic tool and skill discovery (bootstrap registry + API exposed).
+- [~] Policy engine with allow/deny/ask/escalate (core allow/ask/deny path implemented).
 - [ ] CLI/GUI approval flows.
 
 **Exit criteria**
-- [ ] Risky actions block for approval; audit trail complete.
+- [~] Risky actions block for approval; audit trail complete.
 
 ## [ ] Phase 4 — CLI MVP (2–3 weeks)
 - [ ] Build CLI commands for session/job lifecycle.

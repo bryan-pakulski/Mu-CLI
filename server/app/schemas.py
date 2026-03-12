@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from server.app.persistence.models import JobState, SessionStatus
+from server.app.persistence.models import ApprovalState, JobState, SessionStatus
 
 
 class SessionCreate(BaseModel):
@@ -50,11 +50,38 @@ class EventRead(BaseModel):
     created_at: datetime
 
 
+class ApprovalRead(BaseModel):
+    id: str
+    session_id: str
+    job_id: str
+    tool_name: str
+    reason: str
+    state: ApprovalState
+    created_at: datetime
+
+
+class ApprovalDecisionWrite(BaseModel):
+    decision: ApprovalState
+
+
 class ProviderRead(BaseModel):
     name: str
     supports_streaming: bool
     supports_tools: bool
     supports_thinking: bool
+
+
+class ToolRead(BaseModel):
+    name: str
+    description: str
+    risk_level: str
+    requires_approval: bool
+
+
+class PolicyDecisionRead(BaseModel):
+    tool_name: str
+    decision: str
+    reason: str
 
 
 class StreamEvent(BaseModel):

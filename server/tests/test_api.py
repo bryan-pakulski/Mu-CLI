@@ -23,6 +23,10 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert "ollama" in provider_names
         assert "mock" in provider_names
 
+        tools = await client.get("/tools")
+        assert tools.status_code == 200
+        assert any(t["name"] == "shell.exec" for t in tools.json())
+
         create_job = await client.post(
             f"/sessions/{session['id']}/jobs",
             json={"goal": "Create scaffold"},
@@ -110,3 +114,40 @@ async def test_session_pause_resume_terminate_and_events() -> None:
         terminate_response = await client.post(f"/sessions/{session['id']}/terminate")
         assert terminate_response.status_code == 200
         assert terminate_response.json()["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_policy_approval_flow() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        create_session = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        session = create_session.json()
+
+        eval_policy = await client.get(
+            "/policies/evaluate/shell.exec",
+            params={"session_mode": "interactive"},
+        )
+        assert eval_policy.status_code == 200
+        assert eval_policy.json()["decision"] == "ask"
+
+        create_job = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "risky tool run", "constraints": {"tool_name": "shell.exec"}},
+        )
+        assert create_job.status_code == 200
+        job = create_job.json()
+
+        await asyncio.sleep(0.2)
+        approvals = await client.get(f"/jobs/{job['id']}/approvals")
+        assert approvals.status_code == 200
+        assert len(approvals.json()) >= 1
+        approval_id = approvals.json()[0]["id"]
+
+        decision = await client.post(
+            f"/jobs/{job['id']}/approvals/{approval_id}",
+            json={"decision": "approved"},
+        )
+        assert decision.status_code == 200

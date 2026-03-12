@@ -187,7 +187,7 @@ async function populateRuntimeOptions() {
   if (policyProfiles.length === 0) policyProfiles = ["default"];
 
   fillSelect("policy", policyProfiles, policyProfiles[0]);
-  fillSelect("modal-policy", policyProfiles, policyProfiles[0]);
+  fillSelect("modal-approval-mode", policyProfiles, policyProfiles[0]);
 
   await loadModelsForProvider(providerNames[0], "model");
   await loadModelsForProvider(providerNames[0], "modal-model");
@@ -478,6 +478,26 @@ function renderSkillsConfig() {
   });
 }
 
+
+function renderOverrideList(containerId, items, enabledNames) {
+  const node = el(containerId);
+  if (!node) return;
+  node.innerHTML = "";
+  items.forEach((item) => {
+    const row = document.createElement("label");
+    row.className = "override-item";
+    const checked = enabledNames.has(item.name);
+    row.innerHTML = `<input type="checkbox" data-name="${item.name}" ${checked ? "checked" : ""} /> <span>${item.name}</span>`;
+    node.appendChild(row);
+  });
+}
+
+function getCheckedNames(containerId) {
+  const node = el(containerId);
+  if (!node) return [];
+  return [...node.querySelectorAll('input[type="checkbox"]:checked')].map((n) => n.dataset.name);
+}
+
 function setIndicator(sessionId, state) {
   sessionIndicators.set(sessionId, state);
   const dot = document.querySelector(`.session-item[data-session-id='${sessionId}'] .session-dot`);
@@ -555,14 +575,30 @@ async function openSessionSettings(sessionId) {
   currentSettingsSessionId = sessionId;
   const provider = session.provider_preferences?.ordered?.[0] || "ollama";
   const model = session.provider_preferences?.model || null;
+  const context = session.context_state || {};
+
   el("modal-session-name").value = session.name || "default";
+  el("modal-workspace").value = session.workspace_path || "";
   el("modal-providers").value = provider;
   await loadModelsForProvider(provider, "modal-model", model);
+
   const limits = getSessionLimits(session);
   el("modal-mode").value = session.mode || "interactive";
-  el("modal-policy").value = session.policy_profile || "default";
+  el("modal-approval-mode").value = session.policy_profile || "default";
   el("modal-max-timeout").value = limits.maxTimeout;
-  el("modal-max-context").value = limits.maxContext;
+  el("modal-condense-window").value = limits.maxContext;
+
+  el("modal-agentic-planning").checked = Boolean(context.agentic_planning);
+  el("modal-research-mode").checked = Boolean(context.research_mode);
+  el("modal-auto-condense").checked = Boolean(context.auto_condense);
+  el("modal-system-prompt").value = context.system_prompt_override || "";
+  el("modal-rules-checklist").value = context.rules_checklist || "";
+
+  const tools = await req(`/sessions/${sessionId}/tools-config`);
+  const skills = await req(`/sessions/${sessionId}/skills-config`);
+  renderOverrideList("modal-enabled-tools", tools, new Set(tools.filter((t) => t.enabled).map((t) => t.name)));
+  renderOverrideList("modal-enabled-skills", skills, new Set(skills.filter((sk) => sk.enabled).map((sk) => sk.name)));
+
   el("session-settings-modal").classList.remove("hidden");
 }
 
@@ -881,19 +917,38 @@ applyPanelLayout();
 setOnClick("modal-cancel", closeSettingsModal);
 setOnClick("modal-save", async () => {
   if (!currentSettingsSessionId) return;
+
   await req(`/sessions/${currentSettingsSessionId}`, {
     method: "PATCH",
     body: JSON.stringify({
       name: el("modal-session-name").value,
+      workspace_path: el("modal-workspace").value,
       mode: el("modal-mode").value,
-      policy_profile: el("modal-policy").value,
+      policy_profile: el("modal-approval-mode").value,
       max_timeout_s: Number(el("modal-max-timeout").value || 300),
-      max_context_messages: Number(el("modal-max-context").value || 40),
+      max_context_messages: Number(el("modal-condense-window").value || 40),
       provider_preferences: { ordered: [el("modal-providers").value], model: el("modal-model").value || "default" },
+      agentic_planning: el("modal-agentic-planning").checked,
+      research_mode: el("modal-research-mode").checked,
+      auto_condense: el("modal-auto-condense").checked,
+      system_prompt_override: el("modal-system-prompt").value,
+      rules_checklist: el("modal-rules-checklist").value,
     }),
   });
+
+  await req(`/sessions/${currentSettingsSessionId}/tools-config`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled: getCheckedNames("modal-enabled-tools") }),
+  });
+
+  await req(`/sessions/${currentSettingsSessionId}/skills-config`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled: getCheckedNames("modal-enabled-skills") }),
+  });
+
   closeSettingsModal();
   await refreshSessions();
+  await refreshCapabilitiesPanel();
 });
 
 const settingsModal = el("session-settings-modal");

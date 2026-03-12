@@ -76,6 +76,13 @@
           <div class="brand-wrap">
             <button id="toggle-left" class="icon-btn" type="button" aria-label="Toggle left panel">☰</button>
             <div class="brand">mu_cli</div>
+            <nav class="top-nav">
+              <button class="nav-pill active" type="button">Operate</button>
+              <button class="nav-pill" type="button">Control</button>
+              <button class="nav-pill" type="button">Review</button>
+              <button class="nav-pill" type="button">Settings</button>
+              <button class="nav-pill" type="button">Help</button>
+            </nav>
             <span id="active-model" class="pill">provider: ollama</span>
           </div>
           <div class="header-actions">
@@ -122,41 +129,89 @@
     </div>
 
     <div id="session-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="session-settings-title">
-      <div class="modal-card">
-        <h3 id="session-settings-title">Session settings</h3>
-        <div class="modal-body">
-          <label for="modal-session-name">Session name</label>
-          <input id="modal-session-name" />
+      <div class="modal-card modal-wide">
+        <div class="modal-header-row">
+          <h3 id="session-settings-title">Session overrides</h3>
+          <button id="modal-cancel" class="btn">Close</button>
+        </div>
+        <div class="modal-body modal-grid">
+          <div class="field-group">
+            <label for="modal-session-name">Session</label>
+            <input id="modal-session-name" />
+          </div>
+          <div class="field-group">
+            <label for="modal-workspace">Workspace</label>
+            <input id="modal-workspace" />
+          </div>
 
-          <label for="modal-model">Model</label>
-          <select id="modal-model"></select>
+          <div class="field-group">
+            <label for="modal-providers">Provider</label>
+            <select id="modal-providers"></select>
+          </div>
+          <div class="field-group">
+            <label for="modal-model">Model</label>
+            <select id="modal-model"></select>
+          </div>
 
-          <label for="modal-mode">Mode</label>
-          <select id="modal-mode">
-            <option value="interactive">interactive</option>
-            <option value="research">research</option>
-            <option value="debugging">debugging</option>
-            <option value="yolo">yolo</option>
-          </select>
+          <div class="field-group">
+            <label for="modal-approval-mode">Approval mode</label>
+            <select id="modal-approval-mode">
+              <option value="default">auto</option>
+              <option value="strict">strict</option>
+              <option value="lenient">lenient</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="modal-mode">Mode</label>
+            <select id="modal-mode">
+              <option value="interactive">interactive</option>
+              <option value="research">research</option>
+              <option value="debugging">debugging</option>
+              <option value="yolo">yolo</option>
+            </select>
+          </div>
 
-          <label for="modal-policy">Policy profile</label>
-          <select id="modal-policy"></select>
+          <div class="field-group">
+            <label for="modal-condense-window">Condense window</label>
+            <input id="modal-condense-window" type="number" min="5" step="1" value="40" />
+          </div>
+          <div class="field-group">
+            <label for="modal-max-timeout">Max runtime (s)</label>
+            <input id="modal-max-timeout" type="number" min="30" step="30" value="300" />
+          </div>
 
-          <label for="modal-max-timeout">Max timeout (s)</label>
-          <input id="modal-max-timeout" type="number" min="30" step="30" value="300" />
+          <div class="field-group checks-row">
+            <label><input id="modal-agentic-planning" type="checkbox" /> Agentic planning</label>
+            <label><input id="modal-research-mode" type="checkbox" /> Research mode</label>
+            <label><input id="modal-auto-condense" type="checkbox" /> Auto condense</label>
+          </div>
 
-          <label for="modal-max-context">Max session context messages</label>
-          <input id="modal-max-context" type="number" min="5" step="1" value="40" />
+          <div class="field-group full">
+            <label for="modal-system-prompt">System prompt override (session)</label>
+            <textarea id="modal-system-prompt" rows="4"></textarea>
+          </div>
 
-          <label for="modal-providers">Provider</label>
-          <select id="modal-providers"></select>
+          <div class="field-group full">
+            <label for="modal-rules-checklist">Rules checklist (session)</label>
+            <textarea id="modal-rules-checklist" rows="3"></textarea>
+          </div>
+
+          <div class="field-group full">
+            <label>Enabled skills override</label>
+            <div id="modal-enabled-skills" class="override-list"></div>
+          </div>
+
+          <div class="field-group full">
+            <label>Tool visibility override</label>
+            <div id="modal-enabled-tools" class="override-list"></div>
+          </div>
         </div>
         <div class="modal-actions">
-          <button id="modal-cancel" class="btn">Cancel</button>
           <button id="modal-save" class="btn primary">Save</button>
         </div>
       </div>
     </div>
+</div>
 
 
     <div id="skill-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="skill-editor-title">

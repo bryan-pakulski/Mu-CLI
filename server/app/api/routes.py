@@ -163,6 +163,8 @@ async def update_session(
 
     if payload.name is not None:
         session.name = _normalize_session_name(payload.name)
+    if payload.workspace_path is not None:
+        session.workspace_path = payload.workspace_path
     if payload.mode is not None:
         session.mode = payload.mode
     if payload.provider_preferences is not None:
@@ -176,6 +178,16 @@ async def update_session(
     if payload.max_context_messages is not None:
         context_state["max_context_messages"] = max(5, int(payload.max_context_messages))
         context_state = _trim_context_messages(context_state)
+    if payload.agentic_planning is not None:
+        context_state["agentic_planning"] = payload.agentic_planning
+    if payload.research_mode is not None:
+        context_state["research_mode"] = payload.research_mode
+    if payload.auto_condense is not None:
+        context_state["auto_condense"] = payload.auto_condense
+    if payload.system_prompt_override is not None:
+        context_state["system_prompt_override"] = payload.system_prompt_override
+    if payload.rules_checklist is not None:
+        context_state["rules_checklist"] = payload.rules_checklist
     session.context_state = context_state
 
     await db.commit()
@@ -191,6 +203,10 @@ async def update_session(
             "policy_profile": session.policy_profile,
             "max_timeout_s": (session.context_state or {}).get("max_timeout_s", 300),
             "max_context_messages": (session.context_state or {}).get("max_context_messages", 40),
+            "workspace_path": session.workspace_path,
+            "agentic_planning": (session.context_state or {}).get("agentic_planning", False),
+            "research_mode": (session.context_state or {}).get("research_mode", False),
+            "auto_condense": (session.context_state or {}).get("auto_condense", False),
         },
     )
     return session

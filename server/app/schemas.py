@@ -29,11 +29,17 @@ class SessionRead(BaseModel):
 
 class SessionUpdate(BaseModel):
     name: str | None = None
+    workspace_path: str | None = None
     mode: str | None = None
     provider_preferences: dict | None = None
     policy_profile: str | None = None
     max_timeout_s: int | None = None
     max_context_messages: int | None = None
+    agentic_planning: bool | None = None
+    research_mode: bool | None = None
+    auto_condense: bool | None = None
+    system_prompt_override: str | None = None
+    rules_checklist: str | None = None
 
 
 class JobCreate(BaseModel):

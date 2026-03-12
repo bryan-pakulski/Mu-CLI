@@ -8,7 +8,11 @@ The goal of Mu-CLI is to provide a flexible and extensible framework for running
 - Agents have access to **context** and **memory** that is **persisted** across runs in a **workspace** and maintained in real time.
 - Agents have access to different frameworks that dictate their **execution** behavior i.e. Research Mode v.s Interactive Mode v.s. Debugging Mode v.s YOLO mode etc..
 - Agent actions are visible and **auditable** all actions are **logged** and **traced**.
+- Agents respcect **approval** policies that govern **tool usage**
+- Approval policies are **customizable** and **extensible**
 
+- There is a strong analytics backend that traces telemetry i.e. tokens, tool usage, latency, failures, loop interactions (i.e. reprompts by system) etc..
+- There is a high visbility into the inner workins of the agents.
 
 - The core of Mu-CLI should be a server that exposes a API for CLI / GUI's to interact with.
 - The server should maintain a session manager which allows for **persistance**, **resumption**, **multi-session** support

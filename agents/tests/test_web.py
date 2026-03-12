@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -824,6 +825,47 @@ class WebTests(unittest.TestCase):
         self.assertIsInstance(job.get('checkpoints', []), list)
         self.assertIn('answer_contract', job)
 
+
+    def test_background_job_no_progress_exits_with_bounded_iterations(self) -> None:
+        from mu_cli.web import create_app
+
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        class _FakeReply:
+            def __init__(self, content: str) -> None:
+                self.content = content
+
+        with patch('mu_cli.web._run_turn_with_uploaded_context', return_value=_FakeReply('NO_PROGRESS')):
+            client.post('/api/settings', json={
+                'agentic_planning': True,
+                'approval_mode': 'auto',
+                'max_runtime_seconds': 60,
+                'budget_max_replans': 0,
+                'retry_max_stall_retries': 1,
+            })
+            res = client.post('/api/chat/background', json={'text': 'adversarial no progress loop'})
+            self.assertEqual(200, res.status_code)
+            job_id = res.get_json()['job_id']
+
+            deadline = time.time() + 8
+            job = None
+            while time.time() < deadline:
+                poll = client.get(f'/api/jobs/{job_id}')
+                self.assertEqual(200, poll.status_code)
+                job = poll.get_json()
+                if job['status'] in {'completed', 'failed', 'timed_out', 'killed'}:
+                    break
+                time.sleep(0.05)
+
+        assert job is not None
+        self.assertIn(job.get('status'), {'completed', 'failed', 'timed_out', 'killed'})
+        self.assertIn(job.get('terminal_reason'), {'completed_satisfactory', 'completed_with_blockers', 'timed_out', 'budget_exhausted', 'failed_unrecoverable', 'killed'})
+        events = job.get('events') or []
+        self.assertTrue(any('iteration_cap_reached' in str(event) or 'stall_retry_limit_reached' in str(event) for event in events))
+        self.assertLessEqual(int(job.get('iterations') or 0), 3)
+
     def test_background_job_nudges_until_satisfactory_contract(self) -> None:
         from mu_cli.web import create_app
 
@@ -928,6 +970,9 @@ class WebTests(unittest.TestCase):
         telemetry = state.get('telemetry') or {}
         self.assertIn('total_requests', telemetry)
         self.assertIn('action_counts', telemetry)
+        self.assertIn('retry_events_total', telemetry)
+        self.assertIn('replans', telemetry)
+        self.assertIn('verifier_gap_rate', telemetry)
 
     def test_telemetry_action_counts_increment_for_chat_and_session(self) -> None:
         from mu_cli.web import create_app

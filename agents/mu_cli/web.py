@@ -251,6 +251,7 @@ def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
     durations = [float(item.get("duration_seconds", 0.0)) for item in job_outcomes if isinstance(item, dict)]
     verified_samples = [item for item in job_outcomes if isinstance(item, dict) and item.get("verified") is not None]
     verifier_gaps = len([item for item in verified_samples if not bool(item.get("verified"))])
+    retry_events_total = int(harness_counts.get('stalls', 0)) + int(harness_counts.get('tool_failures', 0)) + int(harness_counts.get('parser_failures', 0))
 
     return {
         'started_at': started_at,
@@ -269,6 +270,10 @@ def _telemetry_snapshot(runtime: WebRuntime) -> dict[str, Any]:
         'job_runtime_p50_seconds': round(_percentile(durations, 50), 3),
         'job_runtime_p95_seconds': round(_percentile(durations, 95), 3),
         'verifier_gap_rate': round((verifier_gaps / len(verified_samples)), 4) if verified_samples else 0.0,
+        'retry_events_total': retry_events_total,
+        'replans': int(harness_counts.get('replans', 0)),
+        'stalls': int(harness_counts.get('stalls', 0)),
+        'verification_failures': int(harness_counts.get('verification_failures', 0)),
     }
 
 

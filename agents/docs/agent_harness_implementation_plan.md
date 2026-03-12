@@ -160,7 +160,7 @@ This plan operationalizes `agent_harness_architecture.md` into phased delivery s
 
 ## Progress Tracking
 
-Track completed implementation items in `agents/docs/agent_harness_progress.md`.
+Track completed implementation items in `agents/docs/agent_harness_progress.md` and handoff gating in `agents/docs/phase2_readiness_review.md`.
 
 ## Initial Backlog (ready to implement next)
 

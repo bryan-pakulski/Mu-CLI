@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,3 +16,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def is_test_mode_enabled() -> bool:
+    raw = os.getenv("MUCLI_TEST_MODE")
+    if raw is None:
+        return settings.test_mode
+    return raw.strip().lower() in {"1", "true", "yes", "on"}

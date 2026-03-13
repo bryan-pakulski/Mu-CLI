@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from server.app.runtime.job_runner import (
     _citations_required,
     _extract_requested_tool_name,
+    _extract_tool_calls,
     _run_tool,
     _should_force_stage_progress,
 )
@@ -25,6 +26,17 @@ def _session(tmp_path):
 def test_extract_requested_tool_name() -> None:
     assert _extract_requested_tool_name("constraints.tool_name=read_file") == "read_file"
     assert _extract_requested_tool_name("nothing here") is None
+
+
+def test_extract_tool_calls_from_xml_blocks() -> None:
+    output = """<tool_call><tool_name>search_arxiv_papers</tool_name><parameters>{"query":"potato","max_results":3}</parameters></tool_call>
+<tool_call><tool_name>write_file</tool_name><parameters>{"file_path":"note.md","content":"hello"}</parameters></tool_call>"""
+    calls = _extract_tool_calls(output)
+    assert len(calls) == 2
+    assert calls[0]["tool_name"] == "search_arxiv_papers"
+    assert calls[0]["constraints"]["query"] == "potato"
+    assert calls[1]["tool_name"] == "write_file"
+    assert calls[1]["constraints"]["file_path"] == "note.md"
 
 
 def test_run_tool_builtin_execute_command(monkeypatch, tmp_path) -> None:
@@ -162,3 +174,26 @@ def test_citations_required_with_internet_tool_enabled() -> None:
 
 def test_citations_not_required_for_local_only_tools() -> None:
     assert not _citations_required("interactive", ["read_file", "write_file"], {"read_file", "write_file"})
+
+
+def test_run_tool_uses_call_constraints_over_job_constraints(monkeypatch, tmp_path) -> None:
+    from server.app.runtime import job_runner as job_runner_module
+
+    monkeypatch.setattr(
+        job_runner_module.tool_registry,
+        "get",
+        lambda _name: _Tool({"kind": "builtin", "name": "write_file"}),
+    )
+    session = _session(tmp_path)
+    job = SimpleNamespace(constraints={"file_path": "old.txt", "content": "old"})
+
+    result = asyncio.run(
+        _run_tool(
+            "write_file",
+            session,
+            job,
+            call_constraints={"file_path": "new.txt", "content": "new"},
+        )
+    )
+    assert result["file_path"] == "new.txt"
+    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "new"

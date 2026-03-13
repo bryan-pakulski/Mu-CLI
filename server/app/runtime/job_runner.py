@@ -82,10 +82,41 @@ def _is_user_facing_context_message(item: dict) -> bool:
 
 
 def _extract_requested_tool_name(output: str) -> str | None:
-    match = re.search(r"constraints\.tool_name\s*=\s*([a-zA-Z0-9_-]+)", output or "")
-    if not match:
+    calls = _extract_tool_calls(output)
+    if not calls:
         return None
-    return match.group(1)
+    return str(calls[0].get("tool_name") or "") or None
+
+
+def _extract_tool_calls(output: str) -> list[dict]:
+    text = output or ""
+    calls: list[dict] = []
+
+    xml_pattern = re.compile(
+        r"<tool_call>\s*<tool_name>([^<]+)</tool_name>\s*<parameters>([\s\S]*?)</parameters>\s*</tool_call>",
+        re.IGNORECASE,
+    )
+    for match in xml_pattern.finditer(text):
+        tool_name = (match.group(1) or "").strip()
+        raw_params = (match.group(2) or "").strip()
+        params = {}
+        if raw_params:
+            try:
+                parsed = json.loads(raw_params)
+                if isinstance(parsed, dict):
+                    params = parsed
+            except json.JSONDecodeError:
+                params = {"raw_parameters": raw_params}
+        if tool_name:
+            calls.append({"tool_name": tool_name, "constraints": params})
+
+    inline_match = re.search(r"constraints\.tool_name\s*=\s*([a-zA-Z0-9_-]+)", text)
+    if inline_match:
+        tool_name = inline_match.group(1)
+        if tool_name and not any(item.get("tool_name") == tool_name for item in calls):
+            calls.append({"tool_name": tool_name, "constraints": {}})
+
+    return calls
 
 
 def _safe_workspace_path(workspace_path: str | None) -> Path:
@@ -424,9 +455,16 @@ def _render_shell_command(template: str, constraints: dict, workspace: Path) -> 
     return template.format_map(_Default(values)).strip()
 
 
-async def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dict:
+async def _run_tool(
+    tool_name: str,
+    session: SessionModel,
+    job: JobModel,
+    call_constraints: dict | None = None,
+) -> dict:
     workspace = _safe_workspace_path(session.workspace_path)
-    constraints = job.constraints or {}
+    constraints = dict(job.constraints or {})
+    if isinstance(call_constraints, dict):
+        constraints.update(call_constraints)
     tool = tool_registry.get(tool_name)
     executor = tool.executor if tool else None
 
@@ -891,40 +929,58 @@ class JobRunner:
                     if normalized_output:
                         prior_normalized_outputs.append(normalized_output)
 
-                    requested_tool_name = None if chat_mode else _extract_requested_tool_name(result.output)
-                    if requested_tool_name:
-                        await emit_event(
-                            db,
-                            job.session_id,
-                            "tool_call",
-                            {
-                                "query": query_meta,
-                                "step": step.index,
-                                "label": step.label,
-                                "tool_name": requested_tool_name,
-                                "constraints": job.constraints or {},
-                            },
-                            job_id=job.id,
-                        )
-                        tool_result = await _run_tool(requested_tool_name, session, job)
-                        await emit_event(
-                            db,
-                            job.session_id,
-                            "tool_result",
-                            {
-                                "query": query_meta,
-                                "step": step.index,
-                                "label": step.label,
-                                "tool_name": requested_tool_name,
-                                "result": tool_result,
-                            },
-                            job_id=job.id,
-                        )
-                        stage_feedback = (
-                            f"Tool '{requested_tool_name}' was executed. Review the output and continue this stage.\n"
-                            f"tool_result={json.dumps(tool_result, ensure_ascii=False)}"
-                        )
-                        continue
+                    requested_tool_calls = [] if chat_mode else _extract_tool_calls(result.output)
+                    if requested_tool_calls:
+                        tool_results: list[dict] = []
+                        for tool_call in requested_tool_calls:
+                            requested_tool_name = str(tool_call.get("tool_name") or "").strip()
+                            call_constraints = tool_call.get("constraints") if isinstance(tool_call.get("constraints"), dict) else {}
+                            if not requested_tool_name:
+                                continue
+                            await emit_event(
+                                db,
+                                job.session_id,
+                                "tool_call",
+                                {
+                                    "query": query_meta,
+                                    "step": step.index,
+                                    "label": step.label,
+                                    "tool_name": requested_tool_name,
+                                    "constraints": call_constraints,
+                                },
+                                job_id=job.id,
+                            )
+                            tool_result = await _run_tool(
+                                requested_tool_name,
+                                session,
+                                job,
+                                call_constraints=call_constraints,
+                            )
+                            tool_results.append(tool_result)
+                            await emit_event(
+                                db,
+                                job.session_id,
+                                "tool_result",
+                                {
+                                    "query": query_meta,
+                                    "step": step.index,
+                                    "label": step.label,
+                                    "tool_name": requested_tool_name,
+                                    "result": tool_result,
+                                },
+                                job_id=job.id,
+                            )
+
+                        if tool_results:
+                            if is_ready:
+                                stage_output = cleaned_output
+                                last_provider = result.provider_name
+                                break
+                            stage_feedback = (
+                                "Requested tools were executed. Review results and continue this stage.\n"
+                                f"tool_results={json.dumps(tool_results, ensure_ascii=False)}"
+                            )
+                            continue
 
                     if is_ready:
                         stage_output = cleaned_output

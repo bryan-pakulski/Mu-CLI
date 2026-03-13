@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     default_model: str = "llama3.1"
     provider_max_retries: int = 2
+    ollama_max_prompt_chars: int = 18000
     test_mode: bool = False
     workspace_index_refresh_interval_s: int = 300
 

@@ -73,6 +73,9 @@ async def test_session_job_lifecycle_and_providers() -> None:
         ]
         assert system_prompt_events
         stage_payload = system_prompt_events[-1].get("payload") or {}
+        query_meta = stage_payload.get("query") or {}
+        assert query_meta.get("id") == job["id"]
+        assert query_meta.get("goal") == "Create scaffold"
         stage_meta = stage_payload.get("stage") or {}
         assert stage_meta.get("label")
         assert stage_meta.get("max_attempts") == 2
@@ -86,6 +89,7 @@ async def test_session_job_lifecycle_and_providers() -> None:
         ]
         if model_response_events:
             response_payload = model_response_events[-1].get("payload") or {}
+            assert (response_payload.get("query") or {}).get("id") == job["id"]
             assert "stage_ready" in response_payload
 
 

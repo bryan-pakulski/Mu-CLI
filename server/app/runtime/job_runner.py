@@ -315,12 +315,19 @@ class JobRunner:
                         "max_attempts": max_stage_turns,
                         "status": "in_progress",
                     }
+                    query_meta = {
+                        "id": job.id,
+                        "goal": job.goal,
+                        "mode": session.mode,
+                        "attempt": attempts,
+                    }
 
                     await emit_event(
                         db,
                         job.session_id,
                         "model_request",
                         {
+                            "query": query_meta,
                             "step": step.index,
                             "label": step.label,
                             "stage": stage_meta,
@@ -336,6 +343,7 @@ class JobRunner:
                         job.session_id,
                         "system_prompt",
                         {
+                            "query": query_meta,
                             "step": step.index,
                             "label": step.label,
                             "stage": stage_meta,
@@ -375,6 +383,7 @@ class JobRunner:
                         job.session_id,
                         "model_response",
                         {
+                            "query": query_meta,
                             "step": step.index,
                             "label": step.label,
                             "stage": stage_meta,
@@ -422,6 +431,12 @@ class JobRunner:
                     job.session_id,
                     "loop_step",
                     {
+                        "query": {
+                            "id": job.id,
+                            "goal": job.goal,
+                            "mode": session.mode,
+                            "attempt": attempts,
+                        },
                         "index": step.index,
                         "label": step.label,
                         "stage": {
@@ -441,6 +456,12 @@ class JobRunner:
                     job.session_id,
                     "assistant_chunk",
                     {
+                        "query": {
+                            "id": job.id,
+                            "goal": job.goal,
+                            "mode": session.mode,
+                            "attempt": attempts,
+                        },
                         "step": step.index,
                         "label": step.label,
                         "stage": {

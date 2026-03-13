@@ -23,49 +23,81 @@
     "name": "apply_patch",
     "description": "Apply a structured patch to workspace files",
     "risk_level": "medium",
-    "requires_approval": true
+    "requires_approval": true,
+    "executor": {
+      "kind": "builtin",
+      "name": "apply_patch"
+    }
   },
   {
     "name": "git",
     "description": "Run non-modifying git commands (status, log, diff, show)",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "git"
+    }
   },
   {
     "name": "fetch_url_context",
     "description": "Fetch page content and extract textual context from a URL",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "fetch_url_context"
+    }
   },
   {
     "name": "fetch_pdf_context",
     "description": "Fetch and extract text context from PDF resources",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "fetch_pdf_context"
+    }
   },
   {
     "name": "extract_links_context",
     "description": "Extract and summarize links from a web page",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "extract_links_context"
+    }
   },
   {
     "name": "search_web_context",
     "description": "Search the web and return contextual snippets",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "search_web_context"
+    }
   },
   {
     "name": "search_arxiv_papers",
     "description": "Search arXiv papers and return relevant metadata/context",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "search_arxiv_papers"
+    }
   },
   {
     "name": "score_sources",
     "description": "Score and rank gathered context sources",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "score_sources"
+    }
   },
   {
     "name": "list_workspace_files",
@@ -91,31 +123,51 @@
     "name": "run_make_agent_job",
     "description": "Queue a nested make-agent job",
     "risk_level": "high",
-    "requires_approval": true
+    "requires_approval": true,
+    "executor": {
+      "kind": "builtin",
+      "name": "run_make_agent_job"
+    }
   },
   {
     "name": "list_uploaded_context_files",
     "description": "List uploaded context files available to the session",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "list_uploaded_context_files"
+    }
   },
   {
     "name": "get_uploaded_context_file",
     "description": "Read a specific uploaded context file",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "get_uploaded_context_file"
+    }
   },
   {
     "name": "clear_uploaded_context_store",
     "description": "Clear uploaded context file storage",
     "risk_level": "medium",
-    "requires_approval": true
+    "requires_approval": true,
+    "executor": {
+      "kind": "builtin",
+      "name": "clear_uploaded_context_store"
+    }
   },
   {
     "name": "retrieve_conversation_summary",
     "description": "Retrieve condensed summary for prior conversation state",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "retrieve_conversation_summary"
+    }
   },
   {
     "name": "execute_command",

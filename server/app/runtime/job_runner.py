@@ -2,6 +2,10 @@ import asyncio
 import copy
 import json
 import re
+import subprocess
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 
@@ -82,7 +86,29 @@ def _safe_workspace_target(workspace: Path, file_path: str) -> Path | None:
     return target
 
 
-def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict) -> dict:
+def _safe_upload_store(workspace: Path) -> Path:
+    store = (workspace / ".mu" / "uploaded_context").resolve()
+    store.mkdir(parents=True, exist_ok=True)
+    return store
+
+
+def _text_from_html(html: str) -> str:
+    cleaned = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<style[\s\S]*?</style>", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _fetch_url(url: str, timeout_s: int = 20) -> tuple[str, str]:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mu-CLI/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout_s) as response:  # noqa: S310
+        payload = response.read()
+        ctype = str(response.headers.get("content-type") or "")
+    return ctype, payload.decode("utf-8", errors="replace")
+
+
+def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict, session: SessionModel, job: JobModel) -> dict:
     if tool_name == "list_workspace_files":
         files = [str(path.relative_to(workspace)) for path in workspace.rglob("*") if path.is_file()][:200]
         return {"tool_name": tool_name, "workspace": str(workspace), "files": files}
@@ -94,7 +120,11 @@ def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict) -> dic
             return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
         if not target.exists() or not target.is_file():
             return {"tool_name": tool_name, "error": "file does not exist"}
-        return {"tool_name": tool_name, "file_path": rel, "content": target.read_text(encoding="utf-8", errors="replace")[:12000]}
+        return {
+            "tool_name": tool_name,
+            "file_path": rel,
+            "content": target.read_text(encoding="utf-8", errors="replace")[:12000],
+        }
 
     if tool_name == "write_file":
         rel = str(constraints.get("file_path") or "")
@@ -104,7 +134,11 @@ def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict) -> dic
             return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        return {"tool_name": tool_name, "file_path": rel, "bytes_written": len(content.encode("utf-8"))}
+        return {
+            "tool_name": tool_name,
+            "file_path": rel,
+            "bytes_written": len(content.encode("utf-8")),
+        }
 
     if tool_name == "get_workspace_file_context":
         rel = str(constraints.get("file_path") or "")
@@ -116,7 +150,246 @@ def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict) -> dic
         text = target.read_text(encoding="utf-8", errors="replace")
         return {"tool_name": tool_name, "file_path": rel, "snippet": text[:2000]}
 
-    return {"tool_name": tool_name, "status": "not_implemented", "message": "builtin tool handler not implemented"}
+    if tool_name == "execute_command":
+        command = str(constraints.get("command") or "").strip()
+        if not command:
+            return {"tool_name": tool_name, "error": "command is required"}
+        timeout_s = min(60, max(1, int(constraints.get("timeout_s") or 15)))
+        completed = subprocess.run(
+            command,
+            cwd=str(workspace),
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+        return {
+            "tool_name": tool_name,
+            "command": command,
+            "exit_code": completed.returncode,
+            "stdout": (completed.stdout or "")[:12000],
+            "stderr": (completed.stderr or "")[:8000],
+        }
+
+    if tool_name == "git":
+        command = str(constraints.get("command") or "status --short")
+        allowed = ["status", "log", "diff", "show", "branch", "rev-parse"]
+        if not any(command.strip().startswith(item) for item in allowed):
+            return {"tool_name": tool_name, "error": "only read-only git commands are allowed"}
+        completed = subprocess.run(
+            ["git", *command.split()],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return {
+            "tool_name": tool_name,
+            "command": f"git {command}",
+            "exit_code": completed.returncode,
+            "stdout": (completed.stdout or "")[:12000],
+            "stderr": (completed.stderr or "")[:8000],
+        }
+
+    if tool_name == "apply_patch":
+        patch_text = str(constraints.get("patch") or "")
+        if not patch_text:
+            return {"tool_name": tool_name, "error": "patch is required"}
+        target_file = workspace / ".mu" / "pending.patch"
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.write_text(patch_text, encoding="utf-8")
+        completed = subprocess.run(
+            ["git", "apply", "--whitespace=nowarn", str(target_file)],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return {
+            "tool_name": tool_name,
+            "exit_code": completed.returncode,
+            "stdout": (completed.stdout or "")[:12000],
+            "stderr": (completed.stderr or "")[:8000],
+        }
+
+    if tool_name == "fetch_url_context":
+        url = str(constraints.get("url") or "").strip()
+        if not url:
+            return {"tool_name": tool_name, "error": "url is required"}
+        try:
+            ctype, text = _fetch_url(url)
+            return {
+                "tool_name": tool_name,
+                "url": url,
+                "content_type": ctype,
+                "content": _text_from_html(text)[:6000],
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"tool_name": tool_name, "url": url, "error": str(exc)}
+
+    if tool_name == "extract_links_context":
+        url = str(constraints.get("url") or "").strip()
+        if not url:
+            return {"tool_name": tool_name, "error": "url is required"}
+        try:
+            _, text = _fetch_url(url)
+            links = re.findall(r'href=["\']([^"\']+)["\']', text, flags=re.IGNORECASE)
+            normalized = []
+            for link in links:
+                normalized.append(urllib.parse.urljoin(url, link))
+            unique = []
+            seen = set()
+            for link in normalized:
+                if link in seen:
+                    continue
+                seen.add(link)
+                unique.append(link)
+            return {"tool_name": tool_name, "url": url, "links": unique[:100]}
+        except Exception as exc:  # noqa: BLE001
+            return {"tool_name": tool_name, "url": url, "error": str(exc)}
+
+    if tool_name == "fetch_pdf_context":
+        url = str(constraints.get("url") or "").strip()
+        if not url:
+            return {"tool_name": tool_name, "error": "url is required"}
+        try:
+            _, payload = _fetch_url(url)
+            text = re.sub(r"\s+", " ", payload)
+            return {"tool_name": tool_name, "url": url, "content": text[:6000]}
+        except Exception as exc:  # noqa: BLE001
+            return {"tool_name": tool_name, "url": url, "error": str(exc)}
+
+    if tool_name == "search_web_context":
+        query = str(constraints.get("query") or "").strip()
+        if not query:
+            return {"tool_name": tool_name, "error": "query is required"}
+        search_url = f"https://duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
+        try:
+            _, html = _fetch_url(search_url)
+            titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', html, flags=re.IGNORECASE)
+            snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>|class="result__snippet"[^>]*>(.*?)</div>', html, flags=re.IGNORECASE)
+            parsed = []
+            for idx, title in enumerate(titles[:5]):
+                snip = ""
+                if idx < len(snippets):
+                    snip = (snippets[idx][0] or snippets[idx][1] or "")
+                parsed.append({"title": _text_from_html(title), "snippet": _text_from_html(snip)})
+            return {"tool_name": tool_name, "query": query, "results": parsed}
+        except Exception as exc:  # noqa: BLE001
+            return {"tool_name": tool_name, "query": query, "error": str(exc)}
+
+    if tool_name == "search_arxiv_papers":
+        query = str(constraints.get("query") or "").strip()
+        if not query:
+            return {"tool_name": tool_name, "error": "query is required"}
+        max_results = min(10, max(1, int(constraints.get("max_results") or 5)))
+        endpoint = (
+            "http://export.arxiv.org/api/query?search_query="
+            + urllib.parse.quote_plus(query)
+            + f"&start=0&max_results={max_results}"
+        )
+        try:
+            _, xml_text = _fetch_url(endpoint)
+            root = ET.fromstring(xml_text)
+            ns = {"a": "http://www.w3.org/2005/Atom"}
+            items = []
+            for entry in root.findall("a:entry", ns):
+                items.append(
+                    {
+                        "id": (entry.findtext("a:id", default="", namespaces=ns) or "").strip(),
+                        "title": (entry.findtext("a:title", default="", namespaces=ns) or "").strip(),
+                        "summary": (entry.findtext("a:summary", default="", namespaces=ns) or "").strip()[:1200],
+                    }
+                )
+            return {"tool_name": tool_name, "query": query, "results": items}
+        except Exception as exc:  # noqa: BLE001
+            return {"tool_name": tool_name, "query": query, "error": str(exc)}
+
+    if tool_name == "score_sources":
+        sources = constraints.get("sources") or []
+        if not isinstance(sources, list):
+            return {"tool_name": tool_name, "error": "sources must be a list"}
+        scored = []
+        for source in sources:
+            if isinstance(source, dict):
+                title = str(source.get("title") or "")
+                summary = str(source.get("summary") or source.get("snippet") or "")
+            else:
+                title = str(source)
+                summary = str(source)
+            score = min(100, max(1, len(summary) // 40 + (20 if "arxiv" in title.lower() else 0)))
+            scored.append({"title": title, "score": score, "summary": summary[:300]})
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return {"tool_name": tool_name, "results": scored[:20]}
+
+    if tool_name == "run_make_agent_job":
+        nested_goal = str(constraints.get("goal") or "").strip()
+        if not nested_goal:
+            return {"tool_name": tool_name, "error": "goal is required"}
+        return {
+            "tool_name": tool_name,
+            "status": "queued",
+            "session_id": session.id,
+            "goal": nested_goal,
+            "note": "nested job creation is currently advisory in runtime tool mode",
+        }
+
+    if tool_name == "list_uploaded_context_files":
+        store = _safe_upload_store(workspace)
+        files = [
+            {
+                "name": path.name,
+                "size": path.stat().st_size,
+            }
+            for path in sorted(store.glob("*"))
+            if path.is_file()
+        ]
+        return {"tool_name": tool_name, "files": files}
+
+    if tool_name == "get_uploaded_context_file":
+        name = str(constraints.get("name") or "").strip()
+        target = _safe_workspace_target(_safe_upload_store(workspace), name)
+        if not target or not target.exists() or not target.is_file():
+            return {"tool_name": tool_name, "error": "uploaded context file not found"}
+        return {
+            "tool_name": tool_name,
+            "name": name,
+            "content": target.read_text(encoding="utf-8", errors="replace")[:12000],
+        }
+
+    if tool_name == "clear_uploaded_context_store":
+        store = _safe_upload_store(workspace)
+        deleted = 0
+        for path in store.glob("*"):
+            if path.is_file():
+                path.unlink(missing_ok=True)
+                deleted += 1
+        return {"tool_name": tool_name, "deleted_files": deleted}
+
+    if tool_name == "retrieve_conversation_summary":
+        context_state = session.context_state or {}
+        summary = context_state.get("summary")
+        messages = context_state.get("messages") if isinstance(context_state.get("messages"), list) else []
+        preview = []
+        for item in messages[-5:]:
+            role = str(item.get("role") or "")
+            content = str(item.get("content") or "")
+            if role and content:
+                preview.append(f"{role}: {content[:240]}")
+        return {
+            "tool_name": tool_name,
+            "summary": summary,
+            "recent_messages": preview,
+        }
+
+    return {
+        "tool_name": tool_name,
+        "status": "not_implemented",
+        "message": "builtin tool handler not implemented",
+    }
 
 
 def _render_shell_command(template: str, constraints: dict, workspace: Path) -> str:
@@ -150,33 +423,7 @@ async def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dic
     exec_kind = str(executor.get("kind") or "builtin")
     if exec_kind == "builtin":
         builtin_name = str(executor.get("name") or tool_name)
-        if builtin_name != "execute_command":
-            return _run_builtin_tool(builtin_name, workspace, constraints)
-
-        command = str(constraints.get("command") or "").strip()
-        if not command:
-            return {"tool_name": tool_name, "error": "command is required"}
-        timeout_s = min(60, max(1, int(constraints.get("timeout_s") or 15)))
-        process = await asyncio.create_subprocess_shell(
-            command,
-            cwd=str(workspace),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
-        except TimeoutError:
-            process.kill()
-            await process.communicate()
-            return {"tool_name": tool_name, "command": command, "error": f"command timed out after {timeout_s}s"}
-
-        return {
-            "tool_name": tool_name,
-            "command": command,
-            "exit_code": process.returncode,
-            "stdout": (stdout or b"").decode("utf-8", errors="replace")[:12000],
-            "stderr": (stderr or b"").decode("utf-8", errors="replace")[:8000],
-        }
+        return _run_builtin_tool(builtin_name, workspace, constraints, session, job)
 
     if exec_kind == "shell":
         template = str(executor.get("command") or "").strip()
@@ -185,7 +432,10 @@ async def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dic
         command = _render_shell_command(template, constraints, workspace)
         if not command:
             return {"tool_name": tool_name, "error": "rendered command was empty"}
-        timeout_s = min(120, max(1, int(executor.get("timeout_s") or constraints.get("timeout_s") or 30)))
+        timeout_s = min(
+            120,
+            max(1, int(executor.get("timeout_s") or constraints.get("timeout_s") or 30)),
+        )
         process = await asyncio.create_subprocess_shell(
             command,
             cwd=str(workspace),
@@ -197,7 +447,11 @@ async def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dic
         except TimeoutError:
             process.kill()
             await process.communicate()
-            return {"tool_name": tool_name, "command": command, "error": f"command timed out after {timeout_s}s"}
+            return {
+                "tool_name": tool_name,
+                "command": command,
+                "error": f"command timed out after {timeout_s}s",
+            }
 
         return {
             "tool_name": tool_name,
@@ -207,7 +461,12 @@ async def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dic
             "stderr": (stderr or b"").decode("utf-8", errors="replace")[:8000],
         }
 
-    return {"tool_name": tool_name, "status": "not_implemented", "message": f"unsupported executor kind: {exec_kind}"}
+    return {
+        "tool_name": tool_name,
+        "status": "not_implemented",
+        "message": f"unsupported executor kind: {exec_kind}",
+    }
+
 
 def _normalize_stage_output(output: str) -> str:
     return re.sub(r"\s+", " ", (output or "").strip()).lower()

@@ -164,6 +164,52 @@ function getSessionLimits(session) {
   };
 }
 
+function toolHeadline(eventType, payload) {
+  const name = payload?.tool_name || payload?.result?.tool_name || "tool";
+  if (eventType === "tool_call") return `call ${name}`;
+  if (eventType === "tool_result") {
+    const result = payload?.result || {};
+    const status = result.status || (typeof result.exit_code === "number" ? (result.exit_code === 0 ? "ok" : `exit ${result.exit_code}`) : (result.error ? "error" : "ok"));
+    return `result ${name} (${status})`;
+  }
+  return "tool";
+}
+
+function appendToolMetadata(details, eventType, payload) {
+  if (!["tool_call", "tool_result"].includes(eventType)) return;
+
+  const box = document.createElement("div");
+  box.className = "meta-tool-box";
+
+  const title = document.createElement("div");
+  title.className = "meta-tool-title";
+  title.textContent = payload?.tool_name || payload?.result?.tool_name || "tool";
+  box.appendChild(title);
+
+  if (eventType === "tool_call") {
+    const paramsPre = document.createElement("pre");
+    paramsPre.className = "meta-tool-json";
+    paramsPre.textContent = JSON.stringify(payload?.constraints || {}, null, 2);
+    box.appendChild(paramsPre);
+  }
+
+  if (eventType === "tool_result") {
+    const status = document.createElement("div");
+    status.className = "meta-tool-status";
+    const result = payload?.result || {};
+    const statusText = result.status || (result.error ? "error" : (typeof result.exit_code === "number" ? `exit_code=${result.exit_code}` : "ok"));
+    status.textContent = `status: ${statusText}`;
+    box.appendChild(status);
+
+    const resultPre = document.createElement("pre");
+    resultPre.className = "meta-tool-json";
+    resultPre.textContent = JSON.stringify(result, null, 2);
+    box.appendChild(resultPre);
+  }
+
+  details.appendChild(box);
+}
+
 function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = null) {
   const wrapper = document.createElement("div");
   wrapper.className = "meta-entry";
@@ -186,15 +232,19 @@ function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = 
   delta.className = "meta-delta";
   delta.textContent = `+${deltaS}s`;
 
-  const description = typeof payload?.message === "string"
-    ? payload.message
-    : (payload?.stage?.label ? `${payload.stage.label}` : "details");
+  const description = ["tool_call", "tool_result"].includes(eventType)
+    ? toolHeadline(eventType, payload)
+    : (typeof payload?.message === "string"
+      ? payload.message
+      : (payload?.stage?.label ? `${payload.stage.label}` : "details"));
   const headline = document.createElement("span");
   headline.className = "meta-headline";
   headline.textContent = description;
 
   summary.append(tag, delta, headline);
   details.appendChild(summary);
+
+  appendToolMetadata(details, eventType, payload);
 
   const pre = document.createElement("pre");
   pre.className = "meta-payload";
@@ -446,6 +496,7 @@ function isVisibleForFilter(eventType) {
   if (selectedFilter === "all") return true;
   if (selectedFilter === "approval") return eventType.startsWith("approval");
   if (selectedFilter === "model_io") return ["model_request", "model_response"].includes(eventType);
+  if (selectedFilter === "tool") return ["tool_call", "tool_result"].includes(eventType);
   return eventType === selectedFilter;
 }
 

@@ -248,6 +248,38 @@ textarea { resize: vertical; min-height: 54px; }
 .meta-tag.user_input { color: #22c55e; }
 .meta-tag.status { color: #ef4444; }
 
+.meta-tag.tool_call,
+.meta-tag.tool_result,
+.meta-tag.tool { color: #10b981; }
+
+.meta-tool-box {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+}
+
+.meta-tool-title {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.meta-tool-status {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.meta-tool-json {
+  margin: 0;
+  font-size: 12px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+
 .modal {
   position: fixed;
   inset: 0;

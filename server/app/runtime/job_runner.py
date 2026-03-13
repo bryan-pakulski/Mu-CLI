@@ -127,6 +127,14 @@ MODE_PROMPT_BASES = {
 
 def _mode_prompt_base(mode: str) -> str:
     return MODE_PROMPT_BASES.get((mode or "interactive").lower(), INTERACTIVE_PROMPT_BASE)
+
+
+def _requires_tool_usage(session_mode: str, step_label: str) -> bool:
+    mode = (session_mode or "").lower()
+    step = (step_label or "").lower()
+    return (mode == "research" and step in {"explore", "summarize"}) or (
+        mode in {"interactive", "debugging"} and step in {"act", "verify", "reproduce", "test"}
+    )
 WORKSPACE_ACTION_KEYWORDS = (
     "file",
     "code",
@@ -281,7 +289,8 @@ def _build_stage_prompt(
             "- For tools use one of:\n"
             "  1) <tool_call><tool_name>NAME</tool_name><parameters>{...}</parameters></tool_call>\n"
             "  2) TOOL_CALL::NAME::{\"key\":\"value\"}\n"
-            "- Parameters must be valid JSON object.\n\n"
+            "- Parameters must be valid JSON object.\n"
+            "- If the task requires evidence or workspace changes, call at least one relevant tool before STAGE_READY.\n\n"
             "available_tools:\n"
             f"{tools_block}\n\n"
             "available_skills:\n"
@@ -1059,6 +1068,7 @@ class JobRunner:
                 stage_feedback = ""
                 last_provider = ""
                 prior_normalized_outputs: list[str] = []
+                stage_tool_calls_made = 0
                 max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
                 for stage_attempt in range(1, max_stage_turns + 1):
                     prompt = _build_stage_prompt(
@@ -1204,6 +1214,7 @@ class JobRunner:
                         )
                         continue
                     if requested_tool_calls:
+                        stage_tool_calls_made += len(requested_tool_calls)
                         tool_results: list[dict] = []
                         for tool_call in requested_tool_calls:
                             requested_tool_name = str(tool_call.get("tool_name") or "").strip()
@@ -1254,6 +1265,13 @@ class JobRunner:
                                 f"tool_results={_clip_text(json.dumps(tool_results, ensure_ascii=False), 3000)}"
                             )
                             continue
+
+                    if is_ready and _requires_tool_usage(session.mode, step.label) and stage_tool_calls_made == 0:
+                        stage_feedback = (
+                            "This stage requires tool-backed evidence before completion. "
+                            "Call at least one relevant tool now, then continue."
+                        )
+                        continue
 
                     if is_ready:
                         stage_output = cleaned_output

@@ -5,6 +5,7 @@ from server.app.runtime.job_runner import (
     RESEARCH_PROMPT_BASE,
     _extract_tool_calls,
     _fallback_tool_calls,
+    _requires_tool_usage,
     _mode_prompt_base,
     _build_stage_prompt,
     _build_weighted_context_block,
@@ -102,3 +103,9 @@ def test_fallback_tool_calls_for_research_explore() -> None:
         max_stage_turns=3,
     )
     assert [call["tool_name"] for call in calls] == ["search_web_context", "search_arxiv_papers"]
+
+
+
+def test_requires_tool_usage_for_research_explore() -> None:
+    assert _requires_tool_usage("research", "explore") is True
+    assert _requires_tool_usage("research", "plan") is False

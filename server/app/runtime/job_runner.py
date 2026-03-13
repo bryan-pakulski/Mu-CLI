@@ -2,6 +2,7 @@ import asyncio
 import copy
 import re
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -55,6 +56,59 @@ def _is_user_facing_context_message(item: dict) -> bool:
         return False
     return True
 
+
+
+
+def _extract_requested_tool_name(output: str) -> str | None:
+    match = re.search(r"constraints\.tool_name\s*=\s*([a-zA-Z0-9_-]+)", output or "")
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _safe_workspace_path(workspace_path: str | None) -> Path:
+    base = Path(workspace_path or ".").expanduser().resolve()
+    return base if base.exists() else Path(".").resolve()
+
+
+def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dict:
+    workspace = _safe_workspace_path(session.workspace_path)
+    constraints = job.constraints or {}
+
+    if tool_name == "list_workspace_files":
+        files = [str(path.relative_to(workspace)) for path in workspace.rglob("*") if path.is_file()][:200]
+        return {"tool_name": tool_name, "workspace": str(workspace), "files": files}
+
+    if tool_name == "read_file":
+        rel = str(constraints.get("file_path") or "")
+        target = (workspace / rel).resolve()
+        if not rel or workspace not in target.parents and target != workspace:
+            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
+        if not target.exists() or not target.is_file():
+            return {"tool_name": tool_name, "error": "file does not exist"}
+        return {"tool_name": tool_name, "file_path": rel, "content": target.read_text(encoding="utf-8", errors="replace")[:12000]}
+
+    if tool_name == "write_file":
+        rel = str(constraints.get("file_path") or "")
+        content = str(constraints.get("content") or "")
+        target = (workspace / rel).resolve()
+        if not rel or workspace not in target.parents and target != workspace:
+            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return {"tool_name": tool_name, "file_path": rel, "bytes_written": len(content.encode("utf-8"))}
+
+    if tool_name == "get_workspace_file_context":
+        rel = str(constraints.get("file_path") or "")
+        target = (workspace / rel).resolve()
+        if not rel or workspace not in target.parents and target != workspace:
+            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
+        if not target.exists() or not target.is_file():
+            return {"tool_name": tool_name, "error": "file does not exist"}
+        text = target.read_text(encoding="utf-8", errors="replace")
+        return {"tool_name": tool_name, "file_path": rel, "snippet": text[:2000]}
+
+    return {"tool_name": tool_name, "status": "not_implemented", "message": "tool execution handler not implemented"}
 
 def _extract_stage_signal(output: str, expected_stage: str) -> tuple[bool, str, str]:
     text = (output or "").strip()

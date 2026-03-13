@@ -234,7 +234,7 @@ function appendToolMetadata(details, eventType, payload) {
   details.appendChild(box);
 }
 
-function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = null) {
+function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = null, detailKey = "", openKeys = new Set()) {
   const wrapper = document.createElement("div");
   wrapper.className = "meta-entry";
   wrapper.dataset.eventType = eventType;
@@ -242,6 +242,8 @@ function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = 
 
   const details = document.createElement("details");
   details.className = "meta-details";
+  if (detailKey) details.dataset.detailKey = detailKey;
+  details.open = openKeys.has(detailKey);
 
   const summary = document.createElement("summary");
   const tag = document.createElement("span");
@@ -530,9 +532,23 @@ function eventQueryKey(payload = {}) {
   return payload?.query?.id || "ungrouped";
 }
 
+function captureTimelineUiState(timelineNode) {
+  const openKeys = new Set();
+  if (timelineNode) {
+    timelineNode.querySelectorAll("details[data-detail-key]").forEach((detailsNode) => {
+      if (detailsNode.open) openKeys.add(detailsNode.dataset.detailKey);
+    });
+  }
+  return {
+    openKeys,
+    scrollTop: timelineNode ? timelineNode.scrollTop : 0,
+  };
+}
+
 function renderTimeline() {
   const timeline = el("timeline");
   if (!timeline) return;
+  const uiState = captureTimelineUiState(timeline);
   timeline.innerHTML = "";
 
   const grouped = new Map();
@@ -554,6 +570,9 @@ function renderTimeline() {
     group.className = "block collapsible query-separator";
 
     const details = document.createElement("details");
+    const queryDetailKey = `query:${queryId}`;
+    details.dataset.detailKey = queryDetailKey;
+    details.open = uiState.openKeys.has(queryDetailKey) || events.length <= 3;
 
     const summary = document.createElement("summary");
     summary.className = "meta-group-summary";
@@ -564,8 +583,16 @@ function renderTimeline() {
 
     const eventsWrap = document.createElement("div");
     eventsWrap.className = "meta-group-events";
-    events.forEach((evt) => {
-      const node = buildTimelineNode(evt.event_type, evt.payload || {}, evt.created_at, queryStartMs);
+    events.forEach((evt, index) => {
+      const eventDetailKey = `event:${queryId}:${evt.created_at || "na"}:${evt.event_type}:${index}`;
+      const node = buildTimelineNode(
+        evt.event_type,
+        evt.payload || {},
+        evt.created_at,
+        queryStartMs,
+        eventDetailKey,
+        uiState.openKeys,
+      );
       eventsWrap.appendChild(node);
     });
 
@@ -575,6 +602,7 @@ function renderTimeline() {
   });
 
   applyTimelineFilter();
+  timeline.scrollTop = Math.min(uiState.scrollTop, timeline.scrollHeight);
 }
 
 

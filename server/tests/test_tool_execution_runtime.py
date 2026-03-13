@@ -197,3 +197,40 @@ def test_run_tool_uses_call_constraints_over_job_constraints(monkeypatch, tmp_pa
     )
     assert result["file_path"] == "new.txt"
     assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "new"
+
+
+def test_run_tool_read_write_supports_path_alias(monkeypatch, tmp_path) -> None:
+    from server.app.runtime import job_runner as job_runner_module
+
+    monkeypatch.setattr(
+        job_runner_module.tool_registry,
+        "get",
+        lambda _name: _Tool({"kind": "builtin", "name": "write_file"}),
+    )
+    session = _session(tmp_path)
+    write_job = SimpleNamespace(constraints={"path": "nested/note.txt", "content": "hello"})
+    write_result = asyncio.run(_run_tool("write_file", session, write_job))
+    assert write_result["path"] == "nested/note.txt"
+
+    monkeypatch.setattr(
+        job_runner_module.tool_registry,
+        "get",
+        lambda _name: _Tool({"kind": "builtin", "name": "read_file"}),
+    )
+    read_job = SimpleNamespace(constraints={"path": "nested/note.txt"})
+    read_result = asyncio.run(_run_tool("read_file", session, read_job))
+    assert read_result["content"] == "hello"
+
+
+def test_run_tool_rejects_workspace_escape_paths(monkeypatch, tmp_path) -> None:
+    from server.app.runtime import job_runner as job_runner_module
+
+    monkeypatch.setattr(
+        job_runner_module.tool_registry,
+        "get",
+        lambda _name: _Tool({"kind": "builtin", "name": "read_file"}),
+    )
+    session = _session(tmp_path)
+    job = SimpleNamespace(constraints={"path": "../outside.txt"})
+    result = asyncio.run(_run_tool("read_file", session, job))
+    assert "outside attached workspace" in result["error"]

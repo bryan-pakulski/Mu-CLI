@@ -3,6 +3,7 @@ import copy
 import json
 import re
 import subprocess
+import textwrap
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -387,17 +388,23 @@ def _extract_tool_calls(output: str) -> list[dict]:
 
 
 def _safe_workspace_path(workspace_path: str | None) -> Path:
-    base = Path(workspace_path or ".").expanduser().resolve()
-    return base if base.exists() else Path(".").resolve()
+    return Path(workspace_path or ".").expanduser().resolve()
+
+
+def _resolve_workspace_target(workspace: Path, path_value: str) -> tuple[Path | None, str | None]:
+    raw_value = str(path_value or "").strip()
+    if not raw_value:
+        return None, "path is required"
+    raw = Path(raw_value).expanduser()
+    target = (workspace / raw).resolve() if not raw.is_absolute() else raw.resolve()
+    workspace_resolved = workspace.resolve()
+    if target != workspace_resolved and workspace_resolved not in target.parents:
+        return None, f"path is outside attached workspace: {target}"
+    return target, None
 
 
 def _safe_workspace_target(workspace: Path, file_path: str) -> Path | None:
-    rel = str(file_path or "").strip()
-    if not rel:
-        return None
-    target = (workspace / rel).resolve()
-    if workspace not in target.parents and target != workspace:
-        return None
+    target, _ = _resolve_workspace_target(workspace, file_path)
     return target
 
 
@@ -405,6 +412,37 @@ def _safe_upload_store(workspace: Path) -> Path:
     store = (workspace / ".mu" / "uploaded_context").resolve()
     store.mkdir(parents=True, exist_ok=True)
     return store
+
+
+def _normalize_patch_text(raw_patch: str) -> str:
+    patch = textwrap.dedent(str(raw_patch or ""))
+
+    fenced = re.match(r"^```(?:diff|patch)?\s*\n([\s\S]*?)\n```\s*$", patch.strip())
+    if fenced:
+        patch = fenced.group(1)
+
+    lines = patch.splitlines()
+    if lines and lines[0].strip().lower() in {"diff", "patch"}:
+        patch = "\n".join(lines[1:])
+
+    expanded: list[str] = []
+    for line in patch.splitlines():
+        if line and line[0] in {"+", "-", " "} and "\\n" in line:
+            marker = line[0]
+            parts = line[1:].split("\\n")
+            expanded.extend(f"{marker}{part}" for part in parts)
+            continue
+        expanded.append(line)
+    patch = "\n".join(expanded)
+
+    if "\\n" in patch and patch.count("\\n") > patch.count("\n"):
+        patch = patch.replace("\\n", "\n")
+    if "\\t" in patch and patch.count("\\t") > patch.count("\t"):
+        patch = patch.replace("\\t", "\t")
+
+    if patch and not patch.endswith("\n"):
+        patch += "\n"
+    return patch
 
 
 def _text_from_html(html: str) -> str:
@@ -429,41 +467,55 @@ def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict, sessio
         return {"tool_name": tool_name, "workspace": str(workspace), "files": files}
 
     if tool_name == "read_file":
-        rel = str(constraints.get("file_path") or "")
-        target = _safe_workspace_target(workspace, rel)
-        if not target:
-            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
+        path_value = str(constraints.get("path") or constraints.get("file_path") or "")
+        target, err = _resolve_workspace_target(workspace, path_value)
+        if err:
+            return {"tool_name": tool_name, "error": err}
+        assert target is not None
         if not target.exists() or not target.is_file():
-            return {"tool_name": tool_name, "error": "file does not exist"}
+            return {"tool_name": tool_name, "error": f"Path not found: {target}"}
+        if target.is_dir():
+            return {"tool_name": tool_name, "error": f"Path is a directory: {target}"}
+        try:
+            content = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return {"tool_name": tool_name, "error": f"File is not UTF-8 text: {target}"}
         return {
             "tool_name": tool_name,
-            "file_path": rel,
-            "content": target.read_text(encoding="utf-8", errors="replace")[:12000],
+            "path": path_value,
+            "file_path": path_value,
+            "content": content[:12000],
         }
 
     if tool_name == "write_file":
-        rel = str(constraints.get("file_path") or "")
+        path_value = str(constraints.get("path") or constraints.get("file_path") or "")
         content = str(constraints.get("content") or "")
-        target = _safe_workspace_target(workspace, rel)
-        if not target:
-            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
+        target, err = _resolve_workspace_target(workspace, path_value)
+        if err:
+            return {"tool_name": tool_name, "error": err}
+        assert target is not None
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return {
             "tool_name": tool_name,
-            "file_path": rel,
+            "path": path_value,
+            "file_path": path_value,
             "bytes_written": len(content.encode("utf-8")),
         }
 
     if tool_name == "get_workspace_file_context":
-        rel = str(constraints.get("file_path") or "")
-        target = _safe_workspace_target(workspace, rel)
-        if not target:
-            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
+        path_value = str(constraints.get("path") or constraints.get("file_path") or "")
+        target, err = _resolve_workspace_target(workspace, path_value)
+        if err:
+            return {"tool_name": tool_name, "error": err}
+        assert target is not None
         if not target.exists() or not target.is_file():
-            return {"tool_name": tool_name, "error": "file does not exist"}
-        text = target.read_text(encoding="utf-8", errors="replace")
-        return {"tool_name": tool_name, "file_path": rel, "snippet": text[:2000]}
+            return {"tool_name": tool_name, "error": f"Path not found: {target}"}
+        try:
+            text = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return {"tool_name": tool_name, "error": f"File is not UTF-8 text: {target}"}
+        return {"tool_name": tool_name, "path": path_value, "file_path": path_value, "snippet": text[:2000]}
 
     if tool_name == "execute_command":
         command = str(constraints.get("command") or "").strip()
@@ -509,14 +561,12 @@ def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict, sessio
         }
 
     if tool_name == "apply_patch":
-        patch_text = str(constraints.get("patch") or "")
+        patch_text = _normalize_patch_text(str(constraints.get("patch") or ""))
         if not patch_text:
             return {"tool_name": tool_name, "error": "patch is required"}
-        target_file = workspace / ".mu" / "pending.patch"
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        target_file.write_text(patch_text, encoding="utf-8")
         completed = subprocess.run(
-            ["git", "apply", "--whitespace=nowarn", str(target_file)],
+            ["git", "apply", "--whitespace=nowarn", "-"],
+            input=patch_text,
             cwd=str(workspace),
             capture_output=True,
             text=True,

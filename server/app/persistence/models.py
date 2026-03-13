@@ -46,6 +46,20 @@ class SessionModel(Base):
 
     jobs: Mapped[list["JobModel"]] = relationship(back_populates="session", cascade="all, delete")
 
+    @property
+    def name(self) -> str:
+        context_state = self.context_state or {}
+        return context_state.get("name") or "default"
+
+    @name.setter
+    def name(self, value: str) -> None:
+        context_state = dict(self.context_state or {})
+        context_state["name"] = value
+        context_state.setdefault("messages", [])
+        context_state.setdefault("summary", None)
+        context_state.setdefault("memory_refs", [])
+        self.context_state = context_state
+
 
 class JobModel(Base):
     __tablename__ = "jobs"

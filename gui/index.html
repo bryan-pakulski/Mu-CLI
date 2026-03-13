@@ -3,96 +3,282 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mu-CLI Operate Console</title>
+    <title>Mu-CLI Chat Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      id="hljs-theme-dark"
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
+    />
+    <link
+      id="hljs-theme-light"
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css"
+    />
     <link rel="stylesheet" href="/gui/assets/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" id="app-shell">
       <aside class="panel left">
-        <div class="panel-title">Navigate & Scope</div>
+        <div class="panel-title">Control panel</div>
 
-        <section class="block">
-          <h3>Runtime</h3>
-          <label>Provider</label>
-          <input id="providers" value="ollama" />
-          <label>Mode</label>
-          <select id="mode">
-            <option value="interactive">interactive</option>
-            <option value="research">research</option>
-            <option value="debugging">debugging</option>
-            <option value="yolo">yolo</option>
-          </select>
-          <label>Policy profile</label>
-          <input id="policy" value="default" />
-          <button id="save-config" class="btn primary">Apply runtime config</button>
-        </section>
-
-        <section class="block">
-          <h3>Workspace & Session</h3>
-          <label>Workspace path</label>
-          <input id="workspace" value="/tmp/work" />
-          <div class="row">
-            <button id="create-session" class="btn">New session</button>
-            <button id="refresh-sessions" class="btn">Refresh</button>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-runtime" aria-expanded="true">Runtime <span>▾</span></button>
+          <div class="section-body" id="left-runtime">
+            <label for="providers">Provider</label>
+            <select id="providers"></select>
+            <label for="model">Model</label>
+            <select id="model"></select>
+            <label for="mode">Mode</label>
+            <select id="mode">
+              <option value="chat">chat</option>
+              <option value="interactive">interactive</option>
+              <option value="research">research</option>
+              <option value="debugging">debugging</option>
+              <option value="yolo">yolo</option>
+            </select>
+            <label for="policy">Policy profile</label>
+            <select id="policy"></select>
+            <label for="max-timeout">Max timeout (s)</label>
+            <input id="max-timeout" type="number" min="30" step="30" value="300" />
+            <label for="max-context">Max session context messages</label>
+            <input id="max-context" type="number" min="5" step="1" value="40" />
+            <label for="max-context-chars">Max session context chars</label>
+            <input id="max-context-chars" type="number" min="1000" step="250" value="8000" />
+            <label for="max-stage-turns">Max stage turns before give up</label>
+            <input id="max-stage-turns" type="number" min="1" step="1" value="3" />
           </div>
-          <label>Sessions</label>
-          <select id="session-select"></select>
-          <div id="session-summary" class="muted">No session selected.</div>
         </section>
 
-        <section class="block">
-          <h3>Interventions</h3>
-          <div class="row">
-            <button id="cancel-job" class="btn warn">Cancel job</button>
-            <button id="resume-job" class="btn">Resume job</button>
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-workspace" aria-expanded="true">Workspace & context store <span>▾</span></button>
+          <div class="section-body" id="left-workspace">
+            <label for="workspace">Workspace path</label>
+            <div class="row compact">
+              <input id="workspace" value="" placeholder="Optional workspace path" />
+              <button id="browse-workspace" class="btn" type="button">Browse</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-tools" aria-expanded="false">Tools & skills <span>▸</span></button>
+          <div class="section-body hidden" id="left-tools">
+            <div class="row compact">
+              <button id="refresh-capabilities" class="btn" type="button">Refresh</button>
+              <button id="open-skills-folder" class="btn" type="button">Add skill</button>
+            </div>
+            <label>Tools</label>
+            <ul id="tools-list" class="capability-list"></ul>
+            <label>Skills</label>
+            <ul id="skills-list" class="capability-list"></ul>
+          </div>
+        </section>
+
+        <section class="block collapsible">
+          <button class="section-toggle" type="button" data-target="left-sessions" aria-expanded="true">Sessions <span>▾</span></button>
+          <div class="section-body" id="left-sessions">
+            <div class="row compact">
+              <button id="create-session" class="btn">New</button>
+              <button id="refresh-sessions" class="btn">Refresh</button>
+            </div>
+            <label for="session-quick-switch">Quick switch</label>
+            <input id="session-quick-switch" placeholder="Type + Enter to switch by id prefix" />
+            <ul id="session-list" class="session-list"></ul>
+            <div id="session-summary" class="muted">No session selected.</div>
+            <div id="session-state" class="state-pill idle">idle</div>
           </div>
         </section>
       </aside>
 
       <main class="panel center">
-        <header class="topbar">
-          <div class="brand">mu_cli</div>
-          <nav>
-            <span class="pill active">Operate</span>
-            <span class="pill">Control</span>
-            <span class="pill">Review</span>
-            <span class="pill">Settings</span>
-          </nav>
+        <header class="chat-header">
+          <div class="brand-wrap">
+            <button id="toggle-left" class="icon-btn" type="button" aria-label="Toggle left panel">☰</button>
+            <div class="brand">mu_cli</div>
+            <span id="active-model" class="pill">provider: ollama</span>
+          </div>
+          <div class="header-actions">
+            <button id="open-help" class="btn" type="button">Help</button>
+            <div id="active-status" class="state-pill idle">idle</div>
+            <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme">◐</button>
+            <button id="toggle-right" class="icon-btn" type="button" aria-label="Toggle right panel">☷</button>
+          </div>
         </header>
 
-        <section class="chat-window" id="chat-window"></section>
+        <section class="chat-window" id="chat-window">
+          <div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>
+        </section>
 
         <section class="composer">
-          <input id="goal" placeholder="Ask anything / define a job goal..." />
+          <textarea id="goal" rows="3" placeholder="Message mu_cli..."></textarea>
           <div class="row">
             <button id="create-job" class="btn primary">Send</button>
             <button id="refresh-approvals" class="btn">Refresh approvals</button>
           </div>
-          <pre id="job-state"></pre>
         </section>
       </main>
 
-      <aside class="panel right">
-        <div class="panel-title">Inspect</div>
+      <aside class="panel right panel-right-layout">
+        <div class="panel-title">Session metadata</div>
 
-        <section class="block">
-          <h3>Run metadata</h3>
-          <div class="meta-filters">
-            <button class="chip active">All</button>
-            <button class="chip">Model</button>
-            <button class="chip">Tool</button>
-            <button class="chip">Status</button>
+        <section class="block collapsible right-top">
+          <button class="section-toggle" type="button" data-target="right-feed" aria-expanded="true">Live backend feed <span>▾</span></button>
+          <div class="section-body" id="right-feed">
+            <div class="meta-filters" id="meta-filters">
+              <button class="chip active" data-filter="all">All</button>
+              <button class="chip" data-filter="loop_step">Tool loop</button>
+              <button class="chip" data-filter="tool">Tools</button>
+              <button class="chip" data-filter="job_state">Status</button>
+              <button class="chip" data-filter="log">Logs</button>
+              <button class="chip" data-filter="policy">Policy</button>
+              <button class="chip" data-filter="system_prompt">System</button>
+              <button class="chip" data-filter="model_io">Model I/O</button>
+              <button class="chip" data-filter="approval">Approval</button>
+            </div>
+            <div id="timeline" class="meta-list"></div>
           </div>
-          <ul id="timeline" class="meta-list"></ul>
         </section>
 
-        <section class="block">
-          <h3>Pending approvals</h3>
-          <ul id="approvals" class="meta-list"></ul>
+
+        <section class="block collapsible right-bottom">
+          <button class="section-toggle" type="button" data-target="right-approvals" aria-expanded="true">Pending approvals <span>▾</span></button>
+          <div class="section-body" id="right-approvals">
+            <ul id="approvals" class="meta-list"></ul>
+          </div>
         </section>
       </aside>
     </div>
 
+    <div id="session-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="session-settings-title">
+      <div class="modal-card modal-wide">
+        <div class="modal-header-row">
+          <h3 id="session-settings-title">Session Settings</h3>
+          <button id="modal-cancel" class="btn">Close</button>
+        </div>
+        <div class="modal-body modal-grid">
+          <div class="field-group">
+            <label for="modal-session-name">Session</label>
+            <input id="modal-session-name" />
+          </div>
+          <div class="field-group">
+            <label for="modal-workspace">Workspace</label>
+            <input id="modal-workspace" />
+          </div>
+
+          <div class="field-group">
+            <label for="modal-providers">Provider</label>
+            <select id="modal-providers"></select>
+          </div>
+          <div class="field-group">
+            <label for="modal-model">Model</label>
+            <select id="modal-model"></select>
+          </div>
+
+          <div class="field-group">
+            <label for="modal-approval-mode">Approval mode</label>
+            <select id="modal-approval-mode"></select>
+          </div>
+          <div class="field-group">
+            <label for="modal-mode">Mode</label>
+            <select id="modal-mode">
+              <option value="chat">chat</option>
+              <option value="interactive">interactive</option>
+              <option value="research">research</option>
+              <option value="debugging">debugging</option>
+              <option value="yolo">yolo</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="modal-condense-window">Context window (messages)</label>
+            <input id="modal-condense-window" type="number" min="5" step="1" value="40" />
+          </div>
+          <div class="field-group">
+            <label for="modal-context-chars">Context length (chars)</label>
+            <input id="modal-context-chars" type="number" min="1000" step="250" value="8000" />
+          </div>
+          <div class="field-group">
+            <label for="modal-max-stage-turns">Max stage turns before give up</label>
+            <input id="modal-max-stage-turns" type="number" min="1" step="1" value="3" />
+          </div>
+          <div class="field-group">
+            <label for="modal-max-timeout">Max runtime (s)</label>
+            <input id="modal-max-timeout" type="number" min="30" step="30" value="300" />
+          </div>
+
+          <div class="field-group full">
+            <label>Enabled skills</label>
+            <div id="modal-enabled-skills" class="override-list"></div>
+          </div>
+
+          <div class="field-group full">
+            <label>Enabled tools</label>
+            <div id="modal-enabled-tools" class="override-list"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="modal-save" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="workspace-browser-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workspace-browser-title">
+      <div class="modal-card modal-wide">
+        <div class="modal-header-row">
+          <h3 id="workspace-browser-title">Pick workspace folder</h3>
+          <button id="workspace-browser-close" class="btn">Close</button>
+        </div>
+        <div class="modal-body">
+          <div class="row compact">
+            <input id="workspace-browser-path" placeholder="/path/to/workspace" />
+            <button id="workspace-browser-go" class="btn" type="button">Go</button>
+          </div>
+          <div id="workspace-browser-cwd" class="muted"></div>
+          <ul id="workspace-browser-list" class="meta-list"></ul>
+        </div>
+        <div class="modal-actions">
+          <button id="workspace-browser-select" class="btn primary">Use selected</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="help-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <div class="modal-card">
+        <div class="modal-header-row">
+          <h3 id="help-title">Help</h3>
+          <button id="help-close" class="btn">Close</button>
+        </div>
+        <div class="modal-body">
+          <ul class="help-list">
+            <li>Create/select a session, then send prompts from the composer.</li>
+            <li>Use Session Settings from a session menu (⋯) to adjust runtime and enabled tools/skills.</li>
+            <li>Use Browse in the workspace section to pick a workspace directory from the built-in modal.</li>
+            <li>Use the right panel filters to inspect tool loop, status, policy, and approvals.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div id="skill-editor-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="skill-editor-title">
+      <div class="modal-card">
+        <h3 id="skill-editor-title">Skill editor</h3>
+        <div class="modal-body">
+          <div id="skill-editor-path" class="muted"></div>
+          <textarea id="skill-editor-content" rows="14"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button id="skill-editor-cancel" class="btn">Close</button>
+          <button id="skill-editor-save" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="/gui/assets/app.js"></script>
   </body>
 </html>

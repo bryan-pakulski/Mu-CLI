@@ -1,3 +1,7 @@
+import copy
+from datetime import datetime
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +25,7 @@ from server.app.runtime.orchestrator import emit_event
 from server.app.schemas import (
     ApprovalDecisionWrite,
     ApprovalRead,
+    EnabledItemsUpdate,
     EventRead,
     JobCreate,
     JobRead,
@@ -29,7 +34,11 @@ from server.app.schemas import (
     SessionCreate,
     SessionRead,
     SessionUpdate,
+    SkillConfigRead,
+    SkillContentRead,
+    SkillContentUpdate,
     SkillRead,
+    ToolConfigRead,
     ToolRead,
     WorkspaceIndexBuildResponse,
     WorkspaceIndexRead,
@@ -40,6 +49,84 @@ from server.app.tools.registry import tool_registry
 from server.app.workspace.discovery import index_workspace, list_index, refresh_workspace_index
 
 router = APIRouter()
+
+
+def _normalize_session_name(name: str | None) -> str:
+    value = (name or "default").strip()
+    return value or "default"
+
+
+def _base_context_state(
+    name: str,
+    *,
+    max_timeout_s: int = 300,
+    max_context_messages: int = 40,
+    max_context_chars: int = 8000,
+    max_stage_turns: int = 3,
+) -> dict:
+    return {
+        "name": _normalize_session_name(name),
+        "messages": [],
+        "summary": None,
+        "memory_refs": [],
+        "max_timeout_s": max(30, int(max_timeout_s)),
+        "max_context_messages": max(5, int(max_context_messages)),
+        "max_context_chars": max(1000, int(max_context_chars)),
+        "max_stage_turns": max(1, int(max_stage_turns)),
+    }
+
+
+def _trim_context_messages(context_state: dict) -> dict:
+    max_messages = max(5, int(context_state.get("max_context_messages", 40)))
+    max_chars = max(1000, int(context_state.get("max_context_chars", 8000)))
+    messages = context_state.get("messages") or []
+    if len(messages) > max_messages:
+        messages = messages[-max_messages:]
+
+    running_chars = 0
+    trimmed_reversed = []
+    for item in reversed(messages):
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "")
+        item_chars = len(content)
+        if trimmed_reversed and running_chars + item_chars > max_chars:
+            break
+        trimmed_reversed.append(item)
+        running_chars += item_chars
+
+    context_state["messages"] = list(reversed(trimmed_reversed))
+    return context_state
+
+
+def _append_message(context_state: dict, role: str, content: str) -> dict:
+    enriched = dict(context_state or {})
+    enriched.setdefault("messages", [])
+    enriched.setdefault("max_context_messages", 40)
+    enriched.setdefault("max_timeout_s", 300)
+    enriched.setdefault("max_context_chars", 8000)
+    enriched.setdefault("max_stage_turns", 3)
+    enriched["messages"].append({
+        "role": role,
+        "content": content,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    return _trim_context_messages(enriched)
+
+
+async def _ensure_default_session(db: AsyncSession) -> None:
+    sessions = (await db.scalars(select(SessionModel))).all()
+    if sessions:
+        return
+    session = SessionModel(
+        workspace_path="",
+        mode="interactive",
+        provider_preferences={"ordered": ["ollama"]},
+        policy_profile="default",
+        context_state=_base_context_state("default"),
+    )
+    db.add(session)
+    await db.commit()
 
 
 @router.get("/health")
@@ -57,7 +144,13 @@ async def create_session(
         mode=payload.mode,
         provider_preferences=payload.provider_preferences,
         policy_profile=payload.policy_profile,
-        context_state={"messages": [], "summary": None, "memory_refs": []},
+        context_state=_base_context_state(
+            payload.name,
+            max_timeout_s=payload.max_timeout_s,
+            max_context_messages=payload.max_context_messages,
+            max_context_chars=payload.max_context_chars,
+            max_stage_turns=payload.max_stage_turns,
+        ),
     )
     db.add(session)
     await db.commit()
@@ -69,6 +162,7 @@ async def create_session(
 
 @router.get("/sessions", response_model=list[SessionRead])
 async def list_sessions(db: AsyncSession = Depends(get_db)) -> list[SessionModel]:
+    await _ensure_default_session(db)
     sessions = (
         await db.scalars(select(SessionModel).order_by(SessionModel.created_at.desc()))
     ).all()
@@ -100,12 +194,39 @@ async def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if payload.name is not None:
+        session.name = _normalize_session_name(payload.name)
+    if payload.workspace_path is not None:
+        session.workspace_path = payload.workspace_path
     if payload.mode is not None:
         session.mode = payload.mode
     if payload.provider_preferences is not None:
         session.provider_preferences = payload.provider_preferences
     if payload.policy_profile is not None:
         session.policy_profile = payload.policy_profile
+
+    context_state = dict(session.context_state or _base_context_state(session.name))
+    if payload.max_timeout_s is not None:
+        context_state["max_timeout_s"] = max(30, int(payload.max_timeout_s))
+    if payload.max_context_messages is not None:
+        context_state["max_context_messages"] = max(5, int(payload.max_context_messages))
+        context_state = _trim_context_messages(context_state)
+    if payload.max_context_chars is not None:
+        context_state["max_context_chars"] = max(1000, int(payload.max_context_chars))
+        context_state = _trim_context_messages(context_state)
+    if payload.max_stage_turns is not None:
+        context_state["max_stage_turns"] = max(1, int(payload.max_stage_turns))
+    if payload.agentic_planning is not None:
+        context_state["agentic_planning"] = payload.agentic_planning
+    if payload.research_mode is not None:
+        context_state["research_mode"] = payload.research_mode
+    if payload.auto_condense is not None:
+        context_state["auto_condense"] = payload.auto_condense
+    if payload.system_prompt_override is not None:
+        context_state["system_prompt_override"] = payload.system_prompt_override
+    if payload.rules_checklist is not None:
+        context_state["rules_checklist"] = payload.rules_checklist
+    session.context_state = context_state
 
     await db.commit()
     await db.refresh(session)
@@ -114,15 +235,25 @@ async def update_session(
         session.id,
         "session_config",
         {
+            "name": session.name,
             "mode": session.mode,
             "provider_preferences": session.provider_preferences,
             "policy_profile": session.policy_profile,
+            "max_timeout_s": (session.context_state or {}).get("max_timeout_s", 300),
+            "max_context_messages": (session.context_state or {}).get("max_context_messages", 40),
+            "max_context_chars": (session.context_state or {}).get("max_context_chars", 8000),
+            "max_stage_turns": (session.context_state or {}).get("max_stage_turns", 3),
+            "workspace_path": session.workspace_path,
+            "agentic_planning": (session.context_state or {}).get("agentic_planning", False),
+            "research_mode": (session.context_state or {}).get("research_mode", False),
+            "auto_condense": (session.context_state or {}).get("auto_condense", False),
         },
     )
     return session
 
 @router.get("/sessions/{session_id}", response_model=SessionRead)
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:
+    await _ensure_default_session(db)
     session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -177,6 +308,62 @@ async def terminate_session(session_id: str, db: AsyncSession = Depends(get_db))
     return session
 
 
+@router.post("/sessions/{session_id}/clear", response_model=SessionRead)
+async def clear_session_context(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    jobs = (
+        await db.scalars(
+            select(JobModel).where(
+                JobModel.session_id == session.id,
+                JobModel.state.in_([JobState.queued, JobState.running, JobState.awaiting_approval]),
+            )
+        )
+    ).all()
+    for job in jobs:
+        await job_runner.cancel(job.id)
+
+    existing = dict(session.context_state or {})
+    session.context_state = _base_context_state(
+        session.name,
+        max_timeout_s=existing.get("max_timeout_s", 300),
+        max_context_messages=existing.get("max_context_messages", 40),
+        max_context_chars=existing.get("max_context_chars", 8000),
+        max_stage_turns=existing.get("max_stage_turns", 3),
+    )
+    session.status = SessionStatus.active
+
+    await db.commit()
+    await db.refresh(session)
+    await emit_event(db, session.id, "session_context_cleared", {"status": "ok"})
+    return session
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    jobs = (
+        await db.scalars(
+            select(JobModel).where(
+                JobModel.session_id == session.id,
+                JobModel.state.in_([JobState.queued, JobState.running]),
+            )
+        )
+    ).all()
+    for job in jobs:
+        await job_runner.cancel(job.id)
+
+    await db.delete(session)
+    await db.commit()
+    await _ensure_default_session(db)
+    return {"deleted": True, "session_id": session_id}
+
+
 @router.post("/sessions/{session_id}/jobs", response_model=JobRead)
 async def create_job(
     session_id: str,
@@ -188,6 +375,10 @@ async def create_job(
         raise HTTPException(status_code=404, detail="Session not found")
     if session.status != SessionStatus.active:
         raise HTTPException(status_code=400, detail="Session must be active to create jobs")
+
+    context_state = copy.deepcopy(session.context_state or _base_context_state(session.name))
+    session.context_state = _append_message(context_state, "user", payload.goal)
+    db.add(session)
 
     job = JobModel(
         session_id=session_id,
@@ -213,6 +404,28 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)) -> JobModel:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
+
+
+
+@router.get("/sessions/{session_id}/events", response_model=list[EventRead])
+async def get_session_events(
+    session_id: str,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+) -> list[EventModel]:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    events = (
+        await db.scalars(
+            select(EventModel)
+            .where(EventModel.session_id == session_id)
+            .order_by(EventModel.created_at.desc())
+            .limit(max(1, min(limit, 1000)))
+        )
+    ).all()
+    return list(reversed(list(events)))
 
 @router.get("/jobs/{job_id}/events", response_model=list[EventRead])
 async def get_job_events(job_id: str, db: AsyncSession = Depends(get_db)) -> list[EventModel]:
@@ -311,11 +524,9 @@ async def add_job_input(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    context_state = session.context_state or {"messages": [], "summary": None, "memory_refs": []}
-    context_state.setdefault("messages", []).append(
-        {"role": "user", "content": payload.get("message", "")}
-    )
-    session.context_state = context_state
+    context_state = copy.deepcopy(session.context_state or _base_context_state(session.name))
+    session.context_state = _append_message(context_state, "user", payload.get("message", ""))
+    db.add(session)
     await db.commit()
 
     await emit_event(
@@ -388,6 +599,154 @@ async def list_providers() -> list[ProviderRead]:
     ]
 
 
+
+
+@router.get("/providers/{provider_name}/models", response_model=list[str])
+async def list_provider_models(provider_name: str) -> list[str]:
+    try:
+        provider = provider_registry.get(provider_name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Provider not found") from None
+    return await provider.list_models()
+
+
+def _session_enabled_tools(session: SessionModel) -> set[str]:
+    context_state = dict(session.context_state or {})
+    enabled_tools = context_state.get("enabled_tools")
+    if isinstance(enabled_tools, list):
+        return {str(name) for name in enabled_tools}
+    return {tool.name for tool in tool_registry.list_tools()}
+
+
+def _session_enabled_skills(session: SessionModel, discovered: list) -> set[str]:
+    context_state = dict(session.context_state or {})
+    enabled_skills = context_state.get("enabled_skills")
+    if isinstance(enabled_skills, list):
+        return {str(name) for name in enabled_skills}
+    return {skill.name for skill in discovered}
+
+
+async def _get_session_or_404(db: AsyncSession, session_id: str) -> SessionModel:
+    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@router.get("/sessions/{session_id}/tools-config", response_model=list[ToolConfigRead])
+async def list_session_tools_config(session_id: str, db: AsyncSession = Depends(get_db)) -> list[ToolConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    enabled_tools = _session_enabled_tools(session)
+    return [
+        ToolConfigRead(
+            name=t.name,
+            description=t.description,
+            risk_level=t.risk_level,
+            requires_approval=t.requires_approval,
+            enabled=t.name in enabled_tools,
+        )
+        for t in tool_registry.list_tools()
+    ]
+
+
+@router.patch("/sessions/{session_id}/tools-config", response_model=list[ToolConfigRead])
+async def update_session_tools_config(
+    session_id: str,
+    payload: EnabledItemsUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> list[ToolConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    valid_tool_names = {t.name for t in tool_registry.list_tools()}
+    enabled = [name for name in payload.enabled if name in valid_tool_names]
+    context_state = dict(session.context_state or {})
+    context_state["enabled_tools"] = enabled
+    session.context_state = context_state
+    await db.commit()
+    await db.refresh(session)
+    return await list_session_tools_config(session_id, db)
+
+
+@router.get("/sessions/{session_id}/skills-config", response_model=list[SkillConfigRead])
+async def list_session_skills_config(session_id: str, db: AsyncSession = Depends(get_db)) -> list[SkillConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover(session.workspace_path)
+    enabled_skills = _session_enabled_skills(session, discovered)
+    return [
+        SkillConfigRead(
+            name=skill.name,
+            description=skill.description,
+            file_path=skill.file_path,
+            enabled=skill.name in enabled_skills,
+        )
+        for skill in discovered
+    ]
+
+
+@router.patch("/sessions/{session_id}/skills-config", response_model=list[SkillConfigRead])
+async def update_session_skills_config(
+    session_id: str,
+    payload: EnabledItemsUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> list[SkillConfigRead]:
+    session = await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover(session.workspace_path)
+    valid_skill_names = {skill.name for skill in discovered}
+    enabled = [name for name in payload.enabled if name in valid_skill_names]
+    context_state = dict(session.context_state or {})
+    context_state["enabled_skills"] = enabled
+    session.context_state = context_state
+    await db.commit()
+    await db.refresh(session)
+    return await list_session_skills_config(session_id, db)
+
+
+@router.get("/sessions/{session_id}/skills/{skill_name}/content", response_model=SkillContentRead)
+async def get_skill_content(session_id: str, skill_name: str, db: AsyncSession = Depends(get_db)) -> SkillContentRead:
+    await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover()
+    skill = next((item for item in discovered if item.name == skill_name), None)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    skill_path = skill_registry.get_skill_file(skill_name)
+    if not skill_path:
+        raise HTTPException(status_code=404, detail="Skill file missing")
+
+    return SkillContentRead(
+        name=skill.name,
+        file_path=skill.file_path,
+        content=skill_path.read_text(encoding="utf-8"),
+    )
+
+
+@router.put("/sessions/{session_id}/skills/{skill_name}/content", response_model=SkillContentRead)
+async def update_skill_content(
+    session_id: str,
+    skill_name: str,
+    payload: SkillContentUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> SkillContentRead:
+    await _get_session_or_404(db, session_id)
+    discovered = skill_registry.discover()
+    skill = next((item for item in discovered if item.name == skill_name), None)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    skill_path = skill_registry.get_skill_file(skill_name)
+    if not skill_path:
+        raise HTTPException(status_code=404, detail="Skill file missing")
+
+    skill_path.write_text(payload.content, encoding="utf-8")
+    return SkillContentRead(name=skill.name, file_path=skill.file_path, content=payload.content)
+
+
+@router.post("/sessions/{session_id}/skills/open-folder")
+async def open_skills_folder(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    await _get_session_or_404(db, session_id)
+    return {"path": str(skill_registry.root.resolve())}
+
+
+
 @router.get("/tools", response_model=list[ToolRead])
 async def list_tools() -> list[ToolRead]:
     return [
@@ -399,6 +758,11 @@ async def list_tools() -> list[ToolRead]:
         )
         for t in tool_registry.list_tools()
     ]
+
+
+@router.get("/policy-profiles", response_model=list[str])
+async def list_policy_profiles() -> list[str]:
+    return ["default", "strict", "lenient"]
 
 
 @router.get("/policies/evaluate/{tool_name}", response_model=PolicyDecisionRead)
@@ -419,18 +783,41 @@ async def list_skills(
     session_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[SkillRead]:
-    if not session_id:
-        return []
-
-    session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    if session_id:
+        session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
     return [
         SkillRead(name=s.name, description=s.description, file_path=s.file_path)
-        for s in skill_registry.discover(session.workspace_path)
+        for s in skill_registry.discover()
     ]
 
+
+
+
+@router.get("/workspace/browse")
+async def browse_workspace(path: str | None = None) -> dict:
+    requested = (path or "/workspace").strip() or "/workspace"
+    root = Path(requested).expanduser()
+    try:
+        cwd = root.resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid path: {exc}") from exc
+
+    if not cwd.exists() or not cwd.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    entries: list[dict] = []
+    for child in sorted(cwd.iterdir(), key=lambda item: item.name.lower()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith('.'):
+            continue
+        entries.append({"name": child.name, "path": str(child.resolve())})
+
+    parent = str(cwd.parent.resolve()) if cwd.parent != cwd else str(cwd)
+    return {"cwd": str(cwd), "parent": parent, "entries": entries}
 
 @router.post("/sessions/{session_id}/workspace/index", response_model=WorkspaceIndexBuildResponse)
 async def build_workspace_index(

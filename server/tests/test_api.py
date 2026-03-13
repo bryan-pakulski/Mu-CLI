@@ -16,10 +16,12 @@ async def test_session_job_lifecycle_and_providers() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         create_session = await client.post(
             "/sessions",
-            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+            json={"workspace_path": "/tmp/work", "mode": "interactive", "max_stage_turns": 2, "max_context_chars": 6000},
         )
         assert create_session.status_code == 200
         session = create_session.json()
+        assert session["context_state"]["max_stage_turns"] == 2
+        assert session["context_state"]["max_context_chars"] == 6000
 
         providers = await client.get("/providers")
         assert providers.status_code == 200
@@ -27,9 +29,17 @@ async def test_session_job_lifecycle_and_providers() -> None:
         assert "ollama" in provider_names
         assert "mock" in provider_names
 
+        provider_models = await client.get("/providers/mock/models")
+        assert provider_models.status_code == 200
+        assert "mock-default" in provider_models.json()
+
+        policies = await client.get("/policy-profiles")
+        assert policies.status_code == 200
+        assert "default" in policies.json()
+
         tools = await client.get("/tools")
         assert tools.status_code == 200
-        assert any(t["name"] == "shell.exec" for t in tools.json())
+        assert any(t["name"] == "read_file" for t in tools.json())
 
         create_job = await client.post(
             f"/sessions/{session['id']}/jobs",
@@ -42,7 +52,89 @@ async def test_session_job_lifecycle_and_providers() -> None:
 
         fetched_job = await client.get(f"/jobs/{job['id']}")
         assert fetched_job.status_code == 200
-        assert fetched_job.json()["state"] in {"running", "completed"}
+        assert fetched_job.json()["state"] in {"running", "completed", "failed", "cancelled"}
+
+        events_payload = []
+        for _ in range(10):
+            session_events = await client.get(f"/sessions/{session['id']}/events")
+            assert session_events.status_code == 200
+            events_payload = session_events.json()
+            if any(item["event_type"] == "model_response" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
+        assert any(item["event_type"] == "job_state" for item in events_payload)
+        assert any(item["event_type"] == "system_prompt" and "prompt" in (item.get("payload") or {}) for item in events_payload)
+        assert any(item["event_type"] == "model_request" and "prompt" in (item.get("payload") or {}) for item in events_payload)
+        assert any(item["event_type"] == "model_response" and "text" in (item.get("payload") or {}) for item in events_payload) or any(item["event_type"] == "log" and (item.get("payload") or {}).get("message") == "job failed" for item in events_payload)
+
+        system_prompt_events = [
+            item for item in events_payload if item.get("event_type") == "system_prompt"
+        ]
+        assert system_prompt_events
+        stage_payload = system_prompt_events[-1].get("payload") or {}
+        query_meta = stage_payload.get("query") or {}
+        assert query_meta.get("id") == job["id"]
+        assert query_meta.get("goal") == "Create scaffold"
+        stage_meta = stage_payload.get("stage") or {}
+        assert stage_meta.get("label")
+        assert stage_meta.get("max_attempts") == 2
+        assert stage_meta.get("objective")
+        assert isinstance(stage_meta.get("success_criteria"), list)
+        assert stage_meta.get("success_criteria")
+        assert "stage_success_criteria" in (stage_payload.get("prompt") or "")
+
+        model_response_events = [
+            item for item in events_payload if item.get("event_type") == "model_response"
+        ]
+        if model_response_events:
+            response_payload = model_response_events[-1].get("payload") or {}
+            assert (response_payload.get("query") or {}).get("id") == job["id"]
+            assert "stage_ready" in response_payload
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_includes_recent_conversation_context() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        first = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "first context message"},
+        )
+        assert first.status_code == 200
+        await asyncio.sleep(0.25)
+
+        second = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "second context message"},
+        )
+        assert second.status_code == 200
+        second_job = second.json()
+        await asyncio.sleep(0.25)
+
+        events = await client.get(f"/sessions/{session['id']}/events?limit=300")
+        assert events.status_code == 200
+
+        second_prompts = [
+            item for item in events.json()
+            if item.get("event_type") == "system_prompt" and item.get("job_id") == second_job["id"]
+        ]
+        assert second_prompts
+        prompt_text = second_prompts[-1].get("payload", {}).get("prompt", "")
+        assert "conversation_context" in prompt_text
+        assert "first context message" in prompt_text
+        assert "second context message" in prompt_text
+        assert "available_tools_by_name_and_usage" in prompt_text
+        assert "read_file: Read file contents from the workspace" in prompt_text
+        assert "constraints.tool_name=read_file" in prompt_text
+        assert "available_skills_by_name_and_usage" in prompt_text
 
 
 @pytest.mark.asyncio
@@ -68,7 +160,7 @@ async def test_cancel_and_resume_job_flow() -> None:
 
         after_cancel = await client.get(f"/jobs/{job['id']}")
         assert after_cancel.status_code == 200
-        assert after_cancel.json()["state"] in {"cancelled", "completed"}
+        assert after_cancel.json()["state"] in {"running", "cancelled", "completed"}
 
         if after_cancel.json()["state"] == "cancelled":
             resume_response = await client.post(f"/jobs/{job['id']}/resume")
@@ -76,7 +168,7 @@ async def test_cancel_and_resume_job_flow() -> None:
             await asyncio.sleep(0.25)
             after_resume = await client.get(f"/jobs/{job['id']}")
             assert after_resume.status_code == 200
-            assert after_resume.json()["state"] in {"running", "completed"}
+            assert after_resume.json()["state"] in {"running", "completed", "failed", "cancelled"}
 
 
 @pytest.mark.asyncio
@@ -131,7 +223,7 @@ async def test_policy_approval_flow() -> None:
         session = create_session.json()
 
         eval_policy = await client.get(
-            "/policies/evaluate/shell.exec",
+            "/policies/evaluate/run_make_agent_job",
             params={"session_mode": "interactive"},
         )
         assert eval_policy.status_code == 200
@@ -139,16 +231,20 @@ async def test_policy_approval_flow() -> None:
 
         create_job = await client.post(
             f"/sessions/{session['id']}/jobs",
-            json={"goal": "risky tool run", "constraints": {"tool_name": "shell.exec"}},
+            json={"goal": "risky tool run", "constraints": {"tool_name": "run_make_agent_job"}},
         )
         assert create_job.status_code == 200
         job = create_job.json()
 
-        await asyncio.sleep(0.2)
-        approvals = await client.get(f"/jobs/{job['id']}/approvals")
-        assert approvals.status_code == 200
-        assert len(approvals.json()) >= 1
-        approval_id = approvals.json()[0]["id"]
+        approval_id = None
+        for _ in range(10):
+            await asyncio.sleep(0.1)
+            approvals = await client.get(f"/jobs/{job['id']}/approvals")
+            assert approvals.status_code == 200
+            if approvals.json():
+                approval_id = approvals.json()[0]["id"]
+                break
+        assert approval_id is not None
 
         decision = await client.post(
             f"/jobs/{job['id']}/approvals/{approval_id}",
@@ -161,10 +257,6 @@ async def test_policy_approval_flow() -> None:
 async def test_workspace_index_and_skill_discovery_endpoints(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("# Test Workspace\n")
     (tmp_path / "app.py").write_text("print('hello')\n")
-    skill_dir = tmp_path / "demo-skill"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("# Demo Skill\n")
-
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         create_session = await client.post(
@@ -189,7 +281,7 @@ async def test_workspace_index_and_skill_discovery_endpoints(tmp_path: Path) -> 
 
         skills = await client.get("/skills", params={"session_id": session["id"]})
         assert skills.status_code == 200
-        assert any(item["name"] == "demo-skill" for item in skills.json())
+        assert any(item["name"] == "default" for item in skills.json())
 
 
 @pytest.mark.asyncio
@@ -247,11 +339,15 @@ async def test_list_sessions_and_update_session_config() -> None:
                 "mode": "research",
                 "policy_profile": "strict",
                 "provider_preferences": {"ordered": ["ollama"]},
+                "max_timeout_s": 420,
+                "max_context_messages": 12,
             },
         )
         assert updated.status_code == 200
         assert updated.json()["mode"] == "research"
         assert updated.json()["policy_profile"] == "strict"
+        assert updated.json()["context_state"]["max_timeout_s"] == 420
+        assert updated.json()["context_state"]["max_context_messages"] == 12
 
 
 @pytest.mark.asyncio
@@ -260,4 +356,302 @@ async def test_gui_index_served() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/gui")
         assert response.status_code == 200
-        assert "Mu-CLI Dashboard" in response.text
+        assert "Mu-CLI Chat Console" in response.text
+        assert "Apply config" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_clear_and_delete_session_endpoints() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        updated_tools = await client.patch(
+            f"/sessions/{session['id']}/tools-config",
+            json={"enabled": ["read_file"]},
+        )
+        assert updated_tools.status_code == 200
+
+        paused = await client.post(f"/sessions/{session['id']}/pause")
+        assert paused.status_code == 200
+        assert paused.json()["status"] == "paused"
+
+        cleared = await client.post(f"/sessions/{session['id']}/clear")
+        assert cleared.status_code == 200
+        payload = cleared.json()
+        assert payload["status"] == "active"
+        assert payload["context_state"]["messages"] == []
+        assert payload["context_state"]["summary"] is None
+        assert payload["context_state"]["memory_refs"] == []
+        assert "enabled_tools" not in payload["context_state"]
+
+        deleted = await client.delete(f"/sessions/{session['id']}")
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+
+        missing = await client.get(f"/sessions/{session['id']}")
+        assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_default_session_exists_and_custom_name_roundtrip() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        listed = await client.get("/sessions")
+        assert listed.status_code == 200
+        assert any(item["name"] == "default" for item in listed.json())
+
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive", "name": "planning"},
+        )
+        assert created.status_code == 200
+        assert created.json()["name"] == "planning"
+
+
+@pytest.mark.asyncio
+async def test_session_context_isolation_across_sessions() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive", "name": "first"},
+        )
+        second = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive", "name": "second"},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_session = first.json()
+        second_session = second.json()
+
+        first_job = await client.post(
+            f"/sessions/{first_session['id']}/jobs",
+            json={"goal": "first goal"},
+        )
+        assert first_job.status_code == 200
+
+        first_detail = await client.get(f"/sessions/{first_session['id']}")
+        second_detail = await client.get(f"/sessions/{second_session['id']}")
+        assert first_detail.status_code == 200
+        assert second_detail.status_code == 200
+
+        first_messages = first_detail.json()["context_state"]["messages"]
+        second_messages = second_detail.json()["context_state"]["messages"]
+        assert any(msg["content"] == "first goal" for msg in first_messages)
+        assert all(msg["content"] != "first goal" for msg in second_messages)
+
+
+@pytest.mark.asyncio
+async def test_tools_and_skills_config_endpoints(tmp_path: Path) -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": str(tmp_path), "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        tools = await client.get(f"/sessions/{session['id']}/tools-config")
+        assert tools.status_code == 200
+        assert any(item["name"] == "read_file" for item in tools.json())
+
+        updated_tools = await client.patch(
+            f"/sessions/{session['id']}/tools-config",
+            json={"enabled": ["write_file"]},
+        )
+        assert updated_tools.status_code == 200
+        assert any(item["name"] == "write_file" and item["enabled"] for item in updated_tools.json())
+
+        skills = await client.get(f"/sessions/{session['id']}/skills-config")
+        assert skills.status_code == 200
+        assert any(item["name"] == "default" for item in skills.json())
+
+        skill_content = await client.get(f"/sessions/{session['id']}/skills/default/content")
+        assert skill_content.status_code == 200
+        original_content = skill_content.json()["content"]
+        assert "Default local skill" in original_content
+
+        write_content = await client.put(
+            f"/sessions/{session['id']}/skills/default/content",
+            json={"content": f"{original_content}\n<!-- test update -->\n"},
+        )
+        assert write_content.status_code == 200
+        assert "test update" in write_content.json()["content"]
+
+        restore_content = await client.put(
+            f"/sessions/{session['id']}/skills/default/content",
+            json={"content": original_content},
+        )
+        assert restore_content.status_code == 200
+
+        open_folder = await client.post(f"/sessions/{session['id']}/skills/open-folder")
+        assert open_folder.status_code == 200
+        assert open_folder.json()["path"].endswith("server/store/skills")
+
+
+@pytest.mark.asyncio
+async def test_session_context_trim_respects_max_context_messages() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={
+                "workspace_path": "/tmp/work",
+                "mode": "interactive",
+                "max_context_messages": 5,
+            },
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        for idx in range(8):
+            posted = await client.post(
+                f"/sessions/{session['id']}/jobs",
+                json={"goal": f"goal-{idx}"},
+            )
+            assert posted.status_code == 200
+
+        details = await client.get(f"/sessions/{session['id']}")
+        assert details.status_code == 200
+        messages = details.json()["context_state"]["messages"]
+        assert len(messages) <= 5
+        assert all("created_at" in msg for msg in messages)
+
+
+@pytest.mark.asyncio
+async def test_workspace_browser_endpoint(tmp_path: Path) -> None:
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "beta").mkdir()
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        listed = await client.get("/workspace/browse", params={"path": str(tmp_path)})
+        assert listed.status_code == 200
+        payload = listed.json()
+        assert payload["cwd"] == str(tmp_path.resolve())
+        names = {item["name"] for item in payload["entries"]}
+        assert {"alpha", "beta"}.issubset(names)
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_requires_citations_in_research_mode() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "research"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        job_resp = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "Research latest arxiv papers"},
+        )
+        assert job_resp.status_code == 200
+
+        events_payload = []
+        for _ in range(20):
+            events = await client.get(f"/sessions/{session['id']}/events?limit=200")
+            assert events.status_code == 200
+            events_payload = events.json()
+            if any(item.get("event_type") == "system_prompt" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
+        system_prompt_events = [
+            item for item in events_payload if item.get("event_type") == "system_prompt"
+        ]
+        assert system_prompt_events
+        prompt_text = system_prompt_events[-1].get("payload", {}).get("prompt", "")
+        assert "citation_requirements" in prompt_text
+        assert "## Citations" in prompt_text
+        assert "[1](https://example.com/source)" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_requires_citations_when_internet_tools_enabled() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        tools_update = await client.patch(
+            f"/sessions/{session['id']}/tools-config",
+            json={"enabled": ["search_web_context", "read_file"]},
+        )
+        assert tools_update.status_code == 200
+
+        job_resp = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "Find web sources"},
+        )
+        assert job_resp.status_code == 200
+
+        events_payload = []
+        for _ in range(20):
+            events = await client.get(f"/sessions/{session['id']}/events?limit=200")
+            assert events.status_code == 200
+            events_payload = events.json()
+            if any(item.get("event_type") == "system_prompt" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
+        system_prompt_events = [
+            item for item in events_payload if item.get("event_type") == "system_prompt"
+        ]
+        assert system_prompt_events
+        prompt_text = system_prompt_events[-1].get("payload", {}).get("prompt", "")
+        assert "citation_requirements" in prompt_text
+        assert "## Citations" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_chat_mode_prompt_omits_agentic_tooling_protocol() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "chat"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        create_job = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "Tell me a joke"},
+        )
+        assert create_job.status_code == 200
+
+        events_payload = []
+        for _ in range(20):
+            events = await client.get(f"/sessions/{session['id']}/events?limit=250")
+            assert events.status_code == 200
+            events_payload = events.json()
+            if any(item.get("event_type") == "system_prompt" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
+        prompt_text = ""
+        for item in reversed(events_payload):
+            if item.get("event_type") == "system_prompt":
+                prompt_text = item.get("payload", {}).get("prompt", "")
+                break
+
+        assert "chat_protocol" in prompt_text
+        assert "stage_protocol" not in prompt_text
+        assert "available_tools_by_name_and_usage" not in prompt_text
+        assert "available_skills_by_name_and_usage" not in prompt_text

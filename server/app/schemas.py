@@ -7,13 +7,19 @@ from server.app.persistence.models import ApprovalState, JobState, SessionStatus
 
 class SessionCreate(BaseModel):
     workspace_path: str
+    name: str = "default"
     mode: str = "interactive"
     provider_preferences: dict = Field(default_factory=lambda: {"ordered": ["ollama"]})
     policy_profile: str = "default"
+    max_timeout_s: int = 300
+    max_context_messages: int = 40
+    max_context_chars: int = 8000
+    max_stage_turns: int = 3
 
 
 class SessionRead(BaseModel):
     id: str
+    name: str
     workspace_path: str
     mode: str
     provider_preferences: dict
@@ -24,9 +30,20 @@ class SessionRead(BaseModel):
 
 
 class SessionUpdate(BaseModel):
+    name: str | None = None
+    workspace_path: str | None = None
     mode: str | None = None
     provider_preferences: dict | None = None
     policy_profile: str | None = None
+    max_timeout_s: int | None = None
+    max_context_messages: int | None = None
+    max_context_chars: int | None = None
+    max_stage_turns: int | None = None
+    agentic_planning: bool | None = None
+    research_mode: bool | None = None
+    auto_condense: bool | None = None
+    system_prompt_override: str | None = None
+    rules_checklist: str | None = None
 
 
 class JobCreate(BaseModel):
@@ -102,6 +119,29 @@ class SkillRead(BaseModel):
     description: str
     file_path: str
 
+
+
+
+class EnabledItemsUpdate(BaseModel):
+    enabled: list[str] = Field(default_factory=list)
+
+
+class ToolConfigRead(ToolRead):
+    enabled: bool
+
+
+class SkillConfigRead(SkillRead):
+    enabled: bool
+
+
+class SkillContentRead(BaseModel):
+    name: str
+    file_path: str
+    content: str
+
+
+class SkillContentUpdate(BaseModel):
+    content: str
 
 class WorkspaceIndexRead(BaseModel):
     path: str

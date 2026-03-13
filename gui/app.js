@@ -151,6 +151,30 @@ function toggleTheme() {
   applyTheme(next);
 }
 
+function formatNumber(value) {
+  const num = Number(value || 0);
+  return Number.isFinite(num) ? num.toLocaleString("en-US") : "0";
+}
+
+function estimateSessionContextChars(sessionId) {
+  const messages = sessionMessages.get(sessionId) || [];
+  return messages.reduce((sum, msg) => sum + String(msg?.content || "").length, 0);
+}
+
+function updateContextSizeIndicator(sessionId = currentSession) {
+  const indicator = el("context-size-indicator");
+  if (!indicator) return;
+  if (!sessionId) {
+    indicator.textContent = "context: 0 / 0";
+    return;
+  }
+
+  const session = sessionsCache.find((s) => s.id === sessionId);
+  const maxChars = Number(session?.context_state?.max_context_chars || 0);
+  const usedChars = estimateSessionContextChars(sessionId);
+  indicator.textContent = `context: ${formatNumber(usedChars)} / ${formatNumber(maxChars)}`;
+}
+
 function getSessionLimits(session) {
   const maxTimeout = Number(session?.context_state?.max_timeout_s || 300);
   const maxContext = Number(session?.context_state?.max_context_messages || 40);
@@ -440,6 +464,7 @@ function renderChatForSession(sessionId) {
 
   if (messages.length === 0) {
     chatWindow.innerHTML = '<div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>';
+    updateContextSizeIndicator(sessionId);
     return;
   }
 
@@ -460,6 +485,7 @@ function renderChatForSession(sessionId) {
   }
 
   chatWindow.scrollTop = chatWindow.scrollHeight;
+  updateContextSizeIndicator(sessionId);
 }
 
 function pushChat(tag, message) {
@@ -754,6 +780,7 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
     el("active-model").textContent = "provider: n/a";
     setSessionState("idle");
     el("chat-window").innerHTML = '<div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>';
+    updateContextSizeIndicator(null);
     return;
   }
 

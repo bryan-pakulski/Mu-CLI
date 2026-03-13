@@ -314,6 +314,17 @@ async def clear_session_context(session_id: str, db: AsyncSession = Depends(get_
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    jobs = (
+        await db.scalars(
+            select(JobModel).where(
+                JobModel.session_id == session.id,
+                JobModel.state.in_([JobState.queued, JobState.running, JobState.awaiting_approval]),
+            )
+        )
+    ).all()
+    for job in jobs:
+        await job_runner.cancel(job.id)
+
     existing = dict(session.context_state or {})
     session.context_state = _base_context_state(
         session.name,
@@ -322,6 +333,8 @@ async def clear_session_context(session_id: str, db: AsyncSession = Depends(get_
         max_context_chars=existing.get("max_context_chars", 8000),
         max_stage_turns=existing.get("max_stage_turns", 3),
     )
+    session.status = SessionStatus.active
+
     await db.commit()
     await db.refresh(session)
     await emit_event(db, session.id, "session_context_cleared", {"status": "ok"})

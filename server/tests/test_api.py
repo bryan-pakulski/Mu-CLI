@@ -371,9 +371,24 @@ async def test_clear_and_delete_session_endpoints() -> None:
         assert created.status_code == 200
         session = created.json()
 
+        updated_tools = await client.patch(
+            f"/sessions/{session['id']}/tools-config",
+            json={"enabled": ["read_file"]},
+        )
+        assert updated_tools.status_code == 200
+
+        paused = await client.post(f"/sessions/{session['id']}/pause")
+        assert paused.status_code == 200
+        assert paused.json()["status"] == "paused"
+
         cleared = await client.post(f"/sessions/{session['id']}/clear")
         assert cleared.status_code == 200
-        assert cleared.json()["context_state"]["messages"] == []
+        payload = cleared.json()
+        assert payload["status"] == "active"
+        assert payload["context_state"]["messages"] == []
+        assert payload["context_state"]["summary"] is None
+        assert payload["context_state"]["memory_refs"] == []
+        assert "enabled_tools" not in payload["context_state"]
 
         deleted = await client.delete(f"/sessions/{session['id']}")
         assert deleted.status_code == 200

@@ -42,8 +42,71 @@ INTERNET_ENABLED_TOOLS = {
 INTERNAL_PROMPT_MARKERS = (
     "available_tools_by_name_and_usage:",
     "available_skills_by_name_and_usage:",
+    "available_tools:",
+    "available_skills:",
     "stage_protocol:",
+    "response_protocol:",
     "stage_success_criteria:",
+    "working_memory:",
+)
+
+
+RESEARCH_PROMPT_BASE = (
+    "Research mode is enabled. For research requests, proactively use web and paper tools to gather evidence. "
+    "Prefer search_web_context/search_arxiv_papers for discovery, fetch_url_context/fetch_pdf_context for reading, "
+    "and extract_links_context to follow references. "
+    "When writing findings, cite claims inline with numbered references like [1] [2]. "
+    "In every research response, include a clear 'Citations' section with numbered clickable URLs used. "
+    "For each key claim, include a short confidence line (high/medium/low) with a reason."
+)
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a coding agent running in MU-CLI, a terminal-gui coding assistant. "
+    "MU-CLI is an open source project led by Bryan Pakulski. You are expected to be precise, safe, and helpful.\n\n"
+    "Your capabilities:\n\n"
+    "- Receive user prompts and other context provided by the harness, such as files in the workspace.\n"
+    "- Communicate with the user by streaming thinking and responses, and by making and updating plans.\n"
+    "- Emit function calls to run terminal commands and apply patches. Depending on how this run is configured, "
+    "you can request these calls be escalated for approval before running.\n\n"
+    "How you work\n\n"
+    "Personality\n"
+    "- Keep responses concise, direct, and friendly.\n"
+    "- Communicate efficiently and keep the user informed about ongoing actions without unnecessary detail.\n"
+    "- Prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps.\n"
+    "- Unless explicitly asked, avoid excessively verbose explanations."
+)
+
+PLANNING_PROMPT_BASE = (
+    "You are operating in human-in-the-loop developer mode. "
+    "Before significant actions, provide a short plan and rationale. "
+    "Prefer smallest safe changes and explain what tool(s) you need. "
+    "For workspace tasks: first discover with list_workspace_files, then read only specific files with "
+    "get_workspace_file_context. Do not request the whole codebase unless explicitly asked. "
+    "When modifying existing files, prefer apply_patch for targeted edits; use write_file for new files or "
+    "full rewrites only when explicitly requested. "
+    "Before and after mutating edits, use git diff (or equivalent) to verify minimal changes. "
+    "For any request involving repository state, files, diffs, or edits, tool usage is required before final "
+    "claims. For mutating actions, clearly state intended edits before executing. "
+    "Use an execution loop: plan -> act -> verify -> reflect -> finish. "
+    "For code changes, prefer diff-oriented outputs and avoid full-file rewrites unless explicitly requested. "
+    "Do not mark tasks done until you run at least one direct verification command when possible (tests, lint, "
+    "type-check, or targeted checks). "
+    "If progress stalls, explicitly surface blockers, propose a fallback, and request approval before risky "
+    "recovery actions."
+)
+WORKSPACE_ACTION_KEYWORDS = (
+    "file",
+    "code",
+    "implement",
+    "fix",
+    "edit",
+    "update",
+    "refactor",
+    "write",
+    "test",
+    "run",
+    "workspace",
+    "repository",
 )
 
 
@@ -78,6 +141,137 @@ def _is_user_facing_context_message(item: dict) -> bool:
         return False
     return True
 
+
+def _clip_text(text: str, limit: int) -> str:
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)] + "…"
+
+
+def _context_importance_score(message: dict, index: int, total: int) -> int:
+    role = str(message.get("role") or "").strip().lower()
+    content = str(message.get("content") or "")
+    score = min(40, len(content) // 20)
+    if role == "assistant":
+        score += 12
+    if role == "user":
+        score += 8
+    lowered = content.lower()
+    if any(
+        flag in lowered
+        for flag in ("error", "failed", "exception", "blocker", "verify", "evidence", "test", "tool")
+    ):
+        score += 25
+    recency_bonus = max(0, index - max(0, total - 10))
+    return score + recency_bonus
+
+
+def _build_weighted_context_block(messages: list[dict], max_chars: int) -> str:
+    user_facing = [item for item in messages if _is_user_facing_context_message(item)]
+    if not user_facing:
+        return ""
+
+    ranked_rows: list[tuple[int, str]] = []
+    total = len(user_facing)
+    for index, item in enumerate(user_facing):
+        role = str(item.get("role") or "unknown").strip().lower()
+        content = _clip_text(str(item.get("content") or ""), 260)
+        if not content:
+            continue
+        ranked_rows.append((_context_importance_score(item, index, total), f"- {role}: {content}"))
+
+    ranked_rows.sort(key=lambda row: row[0], reverse=True)
+    selected = [row for _, row in ranked_rows[:8]]
+    context_block = "\n".join(selected)
+    return _clip_text(context_block, max(600, max_chars))
+
+
+def _should_enforce_tool_first(goal: str, step: LoopStep, available_tools: list[str], mode: str) -> bool:
+    if mode.lower() in {"chat", "research"}:
+        return False
+    if step.label.lower() in {"plan", "summarize", "chat"}:
+        return False
+    if not available_tools:
+        return False
+    lowered_goal = (goal or "").lower()
+    return any(keyword in lowered_goal for keyword in WORKSPACE_ACTION_KEYWORDS)
+
+
+def _build_stage_prompt(
+    *,
+    goal: str,
+    mode: str,
+    step: LoopStep,
+    chat_mode: bool,
+    stage_attempt: int,
+    max_stage_turns: int,
+    tool_reference_lines: list[str],
+    skill_reference_lines: list[str],
+    stage_feedback: str,
+    citations_required: bool,
+    context_block: str,
+    system_prompt_override: str | None,
+    rules_checklist: str | None,
+) -> str:
+    mode_lower = (mode or "interactive").lower()
+    base_sections = [DEFAULT_SYSTEM_PROMPT]
+
+    if not chat_mode:
+        base_sections.append(PLANNING_PROMPT_BASE)
+        if mode_lower == "research":
+            base_sections.append(RESEARCH_PROMPT_BASE)
+
+    if chat_mode:
+        stage_protocol = (
+            "chat_protocol:\n"
+            "- Respond directly to the user in normal chat form.\n"
+            "- Do not include stage markers.\n"
+            "- Do not simulate tool calls unless explicitly asked."
+        )
+        stage_body = f"goal={goal}\nmode={mode}\n\n{stage_protocol}"
+    else:
+        criteria = "\n".join(f"- {item}" for item in step.success_criteria)
+        tools_block = "\n".join(tool_reference_lines) if tool_reference_lines else "- none"
+        skills_block = "\n".join(skill_reference_lines) if skill_reference_lines else "- none"
+        stage_body = (
+            f"goal={goal}\n"
+            f"mode={mode}\n"
+            f"step={step.label}\n"
+            f"attempt={stage_attempt}/{max_stage_turns}\n\n"
+            "stage_objective:\n"
+            f"{step.objective}\n\n"
+            "stage_success_criteria:\n"
+            f"{criteria}\n\n"
+            "response_protocol:\n"
+            f"- Complete stage: {STAGE_READY_PREFIX}{step.label}::\n"
+            f"- Need more work: {STAGE_NEEDS_MORE_PREFIX}{step.label}::\n"
+            "- Do not omit the prefix.\n"
+            "- If using a tool, emit a <tool_call> block with <tool_name> and JSON <parameters>.\n\n"
+            "available_tools:\n"
+            f"{tools_block}\n\n"
+            "available_skills:\n"
+            f"{skills_block}"
+        )
+
+    prompt_parts = [*base_sections, stage_body]
+
+    if stage_feedback:
+        prompt_parts.append(f"stage_feedback:\n{stage_feedback}")
+    if citations_required:
+        prompt_parts.append(
+            "citation_requirements:\n"
+            "- Claims from external sources must include inline markdown citations.\n"
+            "- Add a `## Citations` section listing referenced URLs."
+        )
+    if context_block:
+        prompt_parts.append(f"working_memory:\n{context_block}")
+    if isinstance(system_prompt_override, str) and system_prompt_override.strip():
+        prompt_parts.append(f"system_prompt_override={system_prompt_override.strip()}")
+    if isinstance(rules_checklist, str) and rules_checklist.strip():
+        prompt_parts.append(f"rules_checklist={rules_checklist.strip()}")
+
+    return "\n\n".join(prompt_parts)
 
 
 
@@ -740,8 +934,6 @@ class JobRunner:
                 context_state = session.context_state or {}
                 enabled_skills = context_state.get("enabled_skills")
                 enabled_tools = context_state.get("enabled_tools")
-                skills_hint = ",".join(enabled_skills) if isinstance(enabled_skills, list) and enabled_skills else "none"
-                tools_hint = ",".join(enabled_tools) if isinstance(enabled_tools, list) and enabled_tools else "all"
                 system_prompt_override = context_state.get("system_prompt_override")
                 rules_checklist = context_state.get("rules_checklist")
                 chat_mode = (session.mode or "").lower() == "chat"
@@ -757,15 +949,8 @@ class JobRunner:
                 max_context_messages = max(5, int(context_state.get("max_context_messages", 40)))
                 history_window = min(20, max_context_messages)
                 recent_context = context_messages[-history_window:] if history_window else []
-                context_lines = [
-                    f"{(item.get('role') or 'unknown')}: {item.get('content') or ''}"
-                    for item in recent_context
-                    if _is_user_facing_context_message(item)
-                ]
-                context_block = "\n".join(context_lines).strip()
                 max_context_chars = max(1000, int(context_state.get("max_context_chars", 8000)))
-                if len(context_block) > max_context_chars:
-                    context_block = context_block[-max_context_chars:]
+                context_block = _build_weighted_context_block(recent_context, max_context_chars)
 
                 all_skills = skill_registry.discover(session.workspace_path)
                 tool_reference_lines = []
@@ -782,53 +967,27 @@ class JobRunner:
                         f"Call by explicitly referencing skill '{skill.name}' in your plan/tooling rationale."
                     )
 
-                tools_reference_block = "\n".join(tool_reference_lines)
-                skills_reference_block = "\n".join(skill_reference_lines) if skill_reference_lines else "- none"
-
                 stage_output = ""
                 stage_feedback = ""
                 last_provider = ""
                 prior_normalized_outputs: list[str] = []
                 max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
                 for stage_attempt in range(1, max_stage_turns + 1):
-                    stage_success = "\n".join([f"- {item}" for item in step.success_criteria])
-                    if chat_mode:
-                        prompt = f"goal={job.goal}\nmode={session.mode}"
-                        prompt += "\n\nchat_protocol:\n"
-                        prompt += "- Respond directly to the user in normal chat form.\n"
-                        prompt += "- Do not include stage markers or agent loop narration.\n"
-                        prompt += "- Do not suggest or simulate tool calls unless explicitly asked for that behavior."
-                    else:
-                        prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
-                        prompt += "\n\nstage_objective:\n" + step.objective
-                        prompt += "\n\nstage_success_criteria:\n" + stage_success
-                        prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
-                        prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
-                        prompt += (
-                            "\n\nstage_protocol:\n"
-                            f"- When this stage is complete, prefix your response with {STAGE_READY_PREFIX}{step.label}::\n"
-                            f"- If not complete, prefix with {STAGE_NEEDS_MORE_PREFIX}{step.label}:: and explain what is missing.\n"
-                            "- Do not omit this prefix."
-                            "\n- Use STAGE_NEEDS_MORE when criteria are not yet satisfied; do not use STAGE_READY prematurely."
-                        )
-                        prompt += f"\ncurrent_stage_attempt={stage_attempt}/{max_stage_turns}"
-                        if stage_feedback:
-                            prompt += f"\n\nstage_feedback:\n{stage_feedback}"
-
-                    if citations_required:
-                        prompt += (
-                            "\n\ncitation_requirements:\n"
-                            "- Any claim derived from external web/PDF/arXiv/link sources MUST include an inline citation like [1].\n"
-                            "- Inline citations must use markdown links to the source URL, e.g. [1](https://example.com/source).\n"
-                            "- Include a separate `## Citations` section at the end listing each referenced URL.\n"
-                            "- Do not present externally sourced claims without citations."
-                        )
-                    if context_block:
-                        prompt += f"\n\nconversation_context:\n{context_block}"
-                    if isinstance(system_prompt_override, str) and system_prompt_override.strip():
-                        prompt += f"\n\nsystem_prompt_override={system_prompt_override.strip()}"
-                    if isinstance(rules_checklist, str) and rules_checklist.strip():
-                        prompt += f"\n\nrules_checklist={rules_checklist.strip()}"
+                    prompt = _build_stage_prompt(
+                        goal=job.goal,
+                        mode=session.mode,
+                        step=step,
+                        chat_mode=chat_mode,
+                        stage_attempt=stage_attempt,
+                        max_stage_turns=max_stage_turns,
+                        tool_reference_lines=tool_reference_lines,
+                        skill_reference_lines=skill_reference_lines,
+                        stage_feedback=stage_feedback,
+                        citations_required=citations_required,
+                        context_block=context_block,
+                        system_prompt_override=system_prompt_override if isinstance(system_prompt_override, str) else None,
+                        rules_checklist=rules_checklist if isinstance(rules_checklist, str) else None,
+                    )
 
                     stage_meta = {
                         "index": step.index,
@@ -930,6 +1089,22 @@ class JobRunner:
                         prior_normalized_outputs.append(normalized_output)
 
                     requested_tool_calls = [] if chat_mode else _extract_tool_calls(result.output)
+                    if (
+                        _should_enforce_tool_first(
+                            goal=job.goal,
+                            step=step,
+                            available_tools=[tool.name for tool in all_tools],
+                            mode=session.mode,
+                        )
+                        and stage_attempt < max_stage_turns
+                        and not requested_tool_calls
+                        and signal != "ready"
+                    ):
+                        stage_feedback = (
+                            "Tool-first reminder: before finalizing this stage, call a workspace tool when the goal "
+                            "requires file/code changes. Emit a <tool_call> request, then continue."
+                        )
+                        continue
                     if requested_tool_calls:
                         tool_results: list[dict] = []
                         for tool_call in requested_tool_calls:
@@ -978,7 +1153,7 @@ class JobRunner:
                                 break
                             stage_feedback = (
                                 "Requested tools were executed. Review results and continue this stage.\n"
-                                f"tool_results={json.dumps(tool_results, ensure_ascii=False)}"
+                                f"tool_results={_clip_text(json.dumps(tool_results, ensure_ascii=False), 3000)}"
                             )
                             continue
 

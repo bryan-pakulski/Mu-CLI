@@ -94,6 +94,39 @@ PLANNING_PROMPT_BASE = (
     "If progress stalls, explicitly surface blockers, propose a fallback, and request approval before risky "
     "recovery actions."
 )
+
+INTERACTIVE_PROMPT_BASE = (
+    "Interactive mode is enabled. Follow a strict plan -> act -> verify loop. "
+    "For file/repo tasks, use tools before making final claims. "
+    "Prefer minimal, reversible edits and validate outcomes with direct checks."
+)
+
+CHAT_PROMPT_BASE = (
+    "Chat mode is enabled. Respond directly and conversationally without workflow narration "
+    "or stage/tool protocol unless explicitly requested by the user."
+)
+
+DEBUGGING_PROMPT_BASE = (
+    "Debugging mode is enabled. Prioritize reproducibility and root-cause analysis. "
+    "Capture evidence first, apply focused fixes second, and validate with targeted tests."
+)
+
+YOLO_PROMPT_BASE = (
+    "YOLO mode is enabled. Execute quickly but stay coherent and explicit about risks. "
+    "If blocked, surface blockers immediately and provide the best safe fallback."
+)
+
+MODE_PROMPT_BASES = {
+    "chat": CHAT_PROMPT_BASE,
+    "interactive": INTERACTIVE_PROMPT_BASE,
+    "research": RESEARCH_PROMPT_BASE,
+    "debugging": DEBUGGING_PROMPT_BASE,
+    "yolo": YOLO_PROMPT_BASE,
+}
+
+
+def _mode_prompt_base(mode: str) -> str:
+    return MODE_PROMPT_BASES.get((mode or "interactive").lower(), INTERACTIVE_PROMPT_BASE)
 WORKSPACE_ACTION_KEYWORDS = (
     "file",
     "code",
@@ -215,12 +248,10 @@ def _build_stage_prompt(
     rules_checklist: str | None,
 ) -> str:
     mode_lower = (mode or "interactive").lower()
-    base_sections = [DEFAULT_SYSTEM_PROMPT]
+    base_sections = [DEFAULT_SYSTEM_PROMPT, _mode_prompt_base(mode_lower)]
 
-    if not chat_mode:
+    if not chat_mode and mode_lower != "research":
         base_sections.append(PLANNING_PROMPT_BASE)
-        if mode_lower == "research":
-            base_sections.append(RESEARCH_PROMPT_BASE)
 
     if chat_mode:
         stage_protocol = (
@@ -247,7 +278,10 @@ def _build_stage_prompt(
             f"- Complete stage: {STAGE_READY_PREFIX}{step.label}::\n"
             f"- Need more work: {STAGE_NEEDS_MORE_PREFIX}{step.label}::\n"
             "- Do not omit the prefix.\n"
-            "- If using a tool, emit a <tool_call> block with <tool_name> and JSON <parameters>.\n\n"
+            "- For tools use one of:\n"
+            "  1) <tool_call><tool_name>NAME</tool_name><parameters>{...}</parameters></tool_call>\n"
+            "  2) TOOL_CALL::NAME::{\"key\":\"value\"}\n"
+            "- Parameters must be valid JSON object.\n\n"
             "available_tools:\n"
             f"{tools_block}\n\n"
             "available_skills:\n"
@@ -286,6 +320,14 @@ def _extract_tool_calls(output: str) -> list[dict]:
     text = output or ""
     calls: list[dict] = []
 
+    def _append_call(tool_name: str, params: dict | None = None) -> None:
+        name = (tool_name or "").strip()
+        if not name:
+            return
+        if any(item.get("tool_name") == name for item in calls):
+            return
+        calls.append({"tool_name": name, "constraints": params if isinstance(params, dict) else {}})
+
     xml_pattern = re.compile(
         r"<tool_call>\s*<tool_name>([^<]+)</tool_name>\s*<parameters>([\s\S]*?)</parameters>\s*</tool_call>",
         re.IGNORECASE,
@@ -301,14 +343,35 @@ def _extract_tool_calls(output: str) -> list[dict]:
                     params = parsed
             except json.JSONDecodeError:
                 params = {"raw_parameters": raw_params}
-        if tool_name:
-            calls.append({"tool_name": tool_name, "constraints": params})
+        _append_call(tool_name, params)
+
+    simple_pattern = re.compile(r"TOOL_CALL::([a-zA-Z0-9_-]+)::(\{[\s\S]*?\})", re.IGNORECASE)
+    for match in simple_pattern.finditer(text):
+        tool_name = match.group(1)
+        raw_params = (match.group(2) or "{}").strip()
+        params: dict = {}
+        try:
+            parsed = json.loads(raw_params)
+            if isinstance(parsed, dict):
+                params = parsed
+        except json.JSONDecodeError:
+            params = {"raw_parameters": raw_params}
+        _append_call(tool_name, params)
+
+    fenced_json = re.search(r"```json\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fenced_json:
+        try:
+            parsed = json.loads(fenced_json.group(1))
+            if isinstance(parsed, dict):
+                tool_name = str(parsed.get("tool_name") or parsed.get("name") or "").strip()
+                params = parsed.get("parameters") or parsed.get("constraints") or {}
+                _append_call(tool_name, params if isinstance(params, dict) else {})
+        except json.JSONDecodeError:
+            pass
 
     inline_match = re.search(r"constraints\.tool_name\s*=\s*([a-zA-Z0-9_-]+)", text)
     if inline_match:
-        tool_name = inline_match.group(1)
-        if tool_name and not any(item.get("tool_name") == tool_name for item in calls):
-            calls.append({"tool_name": tool_name, "constraints": {}})
+        _append_call(inline_match.group(1), {})
 
     return calls
 
@@ -717,6 +780,31 @@ async def _run_tool(
     }
 
 
+def _fallback_tool_calls(
+    *,
+    session_mode: str,
+    step_label: str,
+    goal: str,
+    stage_attempt: int,
+    max_stage_turns: int,
+) -> list[dict]:
+    mode = (session_mode or "").lower()
+    label = (step_label or "").lower()
+    if mode != "research" or label != "explore":
+        return []
+    if stage_attempt >= max_stage_turns:
+        return []
+
+    query = (goal or "").strip()
+    if not query:
+        return []
+
+    return [
+        {"tool_name": "search_web_context", "constraints": {"query": query}},
+        {"tool_name": "search_arxiv_papers", "constraints": {"query": query, "max_results": 5}},
+    ]
+
+
 def _normalize_stage_output(output: str) -> str:
     return re.sub(r"\s+", " ", (output or "").strip()).lower()
 
@@ -1089,6 +1177,15 @@ class JobRunner:
                         prior_normalized_outputs.append(normalized_output)
 
                     requested_tool_calls = [] if chat_mode else _extract_tool_calls(result.output)
+                    if not requested_tool_calls and not chat_mode:
+                        requested_tool_calls = _fallback_tool_calls(
+                            session_mode=session.mode,
+                            step_label=step.label,
+                            goal=job.goal,
+                            stage_attempt=stage_attempt,
+                            max_stage_turns=max_stage_turns,
+                        )
+
                     if (
                         _should_enforce_tool_first(
                             goal=job.goal,
@@ -1101,8 +1198,9 @@ class JobRunner:
                         and signal != "ready"
                     ):
                         stage_feedback = (
-                            "Tool-first reminder: before finalizing this stage, call a workspace tool when the goal "
-                            "requires file/code changes. Emit a <tool_call> request, then continue."
+                            "Tool-first reminder: call at least one workspace tool before concluding this stage.\n"
+                            "Use exact format: <tool_call><tool_name>read_file</tool_name>"
+                            "<parameters>{\"file_path\":\"path/to/file\"}</parameters></tool_call>"
                         )
                         continue
                     if requested_tool_calls:

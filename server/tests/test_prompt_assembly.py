@@ -3,6 +3,9 @@ from server.app.runtime.job_runner import (
     DEFAULT_SYSTEM_PROMPT,
     PLANNING_PROMPT_BASE,
     RESEARCH_PROMPT_BASE,
+    _extract_tool_calls,
+    _fallback_tool_calls,
+    _mode_prompt_base,
     _build_stage_prompt,
     _build_weighted_context_block,
     _should_enforce_tool_first,
@@ -73,5 +76,29 @@ def test_stage_prompt_includes_base_prompts_by_mode() -> None:
         rules_checklist=None,
     )
     assert DEFAULT_SYSTEM_PROMPT in prompt
-    assert PLANNING_PROMPT_BASE in prompt
+    assert PLANNING_PROMPT_BASE not in prompt
     assert RESEARCH_PROMPT_BASE in prompt
+
+
+
+def test_mode_prompt_base_exists_for_each_mode() -> None:
+    for mode in ["chat", "interactive", "research", "debugging", "yolo"]:
+        assert _mode_prompt_base(mode).strip()
+
+
+def test_extract_tool_calls_supports_simple_tool_call_syntax() -> None:
+    calls = _extract_tool_calls('TOOL_CALL::search_web_context::{"query":"potato deep learning"}')
+    assert calls
+    assert calls[0]["tool_name"] == "search_web_context"
+    assert calls[0]["constraints"]["query"] == "potato deep learning"
+
+
+def test_fallback_tool_calls_for_research_explore() -> None:
+    calls = _fallback_tool_calls(
+        session_mode="research",
+        step_label="explore",
+        goal="latest potato farming deep learning paper",
+        stage_attempt=1,
+        max_stage_turns=3,
+    )
+    assert [call["tool_name"] for call in calls] == ["search_web_context", "search_arxiv_papers"]

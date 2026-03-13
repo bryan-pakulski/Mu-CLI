@@ -171,17 +171,26 @@ function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = 
   details.className = "meta-details";
 
   const summary = document.createElement("summary");
-  const tagLabel = String(eventType || "event").toUpperCase();
+  const tag = document.createElement("span");
+  tag.className = `meta-tag ${String(eventType || "event").replace(/[^a-z0-9_-]/gi, "-").toLowerCase()}`;
+  tag.textContent = String(eventType || "event").toUpperCase();
 
   const eventMs = createdAt ? Date.parse(createdAt) : Date.now();
   const baseMs = Number.isFinite(queryStartMs) ? queryStartMs : eventMs;
   const deltaS = Math.max(0, (eventMs - baseMs) / 1000).toFixed(1);
 
+  const delta = document.createElement("span");
+  delta.className = "meta-delta";
+  delta.textContent = `+${deltaS}s`;
+
   const description = typeof payload?.message === "string"
     ? payload.message
     : (payload?.stage?.label ? `${payload.stage.label}` : "details");
+  const headline = document.createElement("span");
+  headline.className = "meta-headline";
+  headline.textContent = description;
 
-  summary.textContent = `${tagLabel} - +${deltaS}s - ${description}`;
+  summary.append(tag, delta, headline);
   details.appendChild(summary);
 
   const pre = document.createElement("pre");
@@ -465,13 +474,12 @@ function renderTimeline() {
     group.className = "block collapsible query-separator";
 
     const details = document.createElement("details");
-    details.open = true;
 
     const summary = document.createElement("summary");
     summary.className = "meta-group-summary";
     const idLabel = queryId === "ungrouped" ? "GENERAL" : queryId.slice(0, 8).toUpperCase();
     const startLabel = formatLocalTimestamp(new Date(queryStartMs).toISOString());
-    summary.textContent = `QUERY ${idLabel} ${events.length} EVENTS ${startLabel}`;
+    summary.textContent = `QUERY ${idLabel}       ${events.length} EVENTS       ${startLabel}`;
     details.appendChild(summary);
 
     const eventsWrap = document.createElement("div");

@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from server.app.runtime.job_runner import (
+    _citations_required,
     _extract_requested_tool_name,
     _run_tool,
     _should_force_stage_progress,
@@ -149,3 +150,15 @@ def test_should_not_force_stage_progress_when_needs_more() -> None:
         max_stage_turns=3,
         repeated_count=2,
     )
+
+
+def test_citations_required_in_research_mode() -> None:
+    assert _citations_required("research", None, {"read_file"})
+
+
+def test_citations_required_with_internet_tool_enabled() -> None:
+    assert _citations_required("interactive", ["search_web_context"], {"read_file", "search_web_context"})
+
+
+def test_citations_not_required_for_local_only_tools() -> None:
+    assert not _citations_required("interactive", ["read_file", "write_file"], {"read_file", "write_file"})

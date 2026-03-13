@@ -540,3 +540,80 @@ async def test_workspace_browser_endpoint(tmp_path: Path) -> None:
         assert payload["cwd"] == str(tmp_path.resolve())
         names = {item["name"] for item in payload["entries"]}
         assert {"alpha", "beta"}.issubset(names)
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_requires_citations_in_research_mode() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "research"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        job_resp = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "Research latest arxiv papers"},
+        )
+        assert job_resp.status_code == 200
+
+        events_payload = []
+        for _ in range(20):
+            events = await client.get(f"/sessions/{session['id']}/events?limit=200")
+            assert events.status_code == 200
+            events_payload = events.json()
+            if any(item.get("event_type") == "system_prompt" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
+        system_prompt_events = [
+            item for item in events_payload if item.get("event_type") == "system_prompt"
+        ]
+        assert system_prompt_events
+        prompt_text = system_prompt_events[-1].get("payload", {}).get("prompt", "")
+        assert "citation_requirements" in prompt_text
+        assert "## Citations" in prompt_text
+        assert "[1](https://example.com/source)" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_requires_citations_when_internet_tools_enabled() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "interactive"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        tools_update = await client.patch(
+            f"/sessions/{session['id']}/tools-config",
+            json={"enabled": ["search_web_context", "read_file"]},
+        )
+        assert tools_update.status_code == 200
+
+        job_resp = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "Find web sources"},
+        )
+        assert job_resp.status_code == 200
+
+        events_payload = []
+        for _ in range(20):
+            events = await client.get(f"/sessions/{session['id']}/events?limit=200")
+            assert events.status_code == 200
+            events_payload = events.json()
+            if any(item.get("event_type") == "system_prompt" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
+        system_prompt_events = [
+            item for item in events_payload if item.get("event_type") == "system_prompt"
+        ]
+        assert system_prompt_events
+        prompt_text = system_prompt_events[-1].get("payload", {}).get("prompt", "")
+        assert "citation_requirements" in prompt_text
+        assert "## Citations" in prompt_text

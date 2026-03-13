@@ -31,12 +31,29 @@ STAGE_READY_PREFIX = "STAGE_READY::"
 STAGE_NEEDS_MORE_PREFIX = "STAGE_NEEDS_MORE::"
 DEFAULT_MAX_STAGE_TURNS = 3
 
+INTERNET_ENABLED_TOOLS = {
+    "fetch_url_context",
+    "fetch_pdf_context",
+    "extract_links_context",
+    "search_web_context",
+    "search_arxiv_papers",
+}
+
 INTERNAL_PROMPT_MARKERS = (
     "available_tools_by_name_and_usage:",
     "available_skills_by_name_and_usage:",
     "stage_protocol:",
     "stage_success_criteria:",
 )
+
+
+def _citations_required(
+    session_mode: str,
+    enabled_tools: list[str] | None,
+    all_tool_names: set[str],
+) -> bool:
+    active_tool_names = set(enabled_tools) if isinstance(enabled_tools, list) and enabled_tools else all_tool_names
+    return session_mode == "research" or bool(active_tool_names & INTERNET_ENABLED_TOOLS)
 
 
 def _looks_like_internal_prompt_echo(content: str) -> bool:
@@ -690,6 +707,13 @@ class JobRunner:
                 system_prompt_override = context_state.get("system_prompt_override")
                 rules_checklist = context_state.get("rules_checklist")
 
+                all_tools = tool_registry.list_tools()
+                citations_required = _citations_required(
+                    session.mode,
+                    enabled_tools if isinstance(enabled_tools, list) else None,
+                    {tool.name for tool in all_tools},
+                )
+
                 context_messages = context_state.get("messages") if isinstance(context_state.get("messages"), list) else []
                 max_context_messages = max(5, int(context_state.get("max_context_messages", 40)))
                 history_window = min(20, max_context_messages)
@@ -704,7 +728,6 @@ class JobRunner:
                 if len(context_block) > max_context_chars:
                     context_block = context_block[-max_context_chars:]
 
-                all_tools = tool_registry.list_tools()
                 all_skills = skill_registry.discover(session.workspace_path)
                 tool_reference_lines = []
                 for tool in all_tools:
@@ -735,6 +758,14 @@ class JobRunner:
                     prompt += "\n\nstage_success_criteria:\n" + stage_success
                     prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
                     prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
+                    if citations_required:
+                        prompt += (
+                            "\n\ncitation_requirements:\n"
+                            "- Any claim derived from external web/PDF/arXiv/link sources MUST include an inline citation like [1].\n"
+                            "- Inline citations must use markdown links to the source URL, e.g. [1](https://example.com/source).\n"
+                            "- Include a separate `## Citations` section at the end listing each referenced URL.\n"
+                            "- Do not present externally sourced claims without citations."
+                        )
                     if context_block:
                         prompt += f"\n\nconversation_context:\n{context_block}"
                     if isinstance(system_prompt_override, str) and system_prompt_override.strip():

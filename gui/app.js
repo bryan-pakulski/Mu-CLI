@@ -161,28 +161,27 @@ function getSessionLimits(session) {
   };
 }
 
-function buildTimelineNode(eventType, payload, createdAt = null) {
-  const li = document.createElement("li");
-  li.dataset.eventType = eventType;
-  if (!isVisibleForFilter(eventType)) li.classList.add("hidden");
+function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = null) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "meta-entry";
+  wrapper.dataset.eventType = eventType;
+  if (!isVisibleForFilter(eventType)) wrapper.classList.add("hidden");
 
   const details = document.createElement("details");
   details.className = "meta-details";
 
   const summary = document.createElement("summary");
-  const ts = document.createElement("span");
-  ts.className = "meta-time";
-  ts.textContent = formatLocalTimestamp(createdAt);
+  const tagLabel = String(eventType || "event").toUpperCase();
 
-  const tag = document.createElement("span");
-  tag.className = `meta-tag ${eventType.replace(/[^a-z0-9_-]/gi, "-").toLowerCase()}`;
-  tag.textContent = eventType;
+  const eventMs = createdAt ? Date.parse(createdAt) : Date.now();
+  const baseMs = Number.isFinite(queryStartMs) ? queryStartMs : eventMs;
+  const deltaS = Math.max(0, (eventMs - baseMs) / 1000).toFixed(1);
 
-  const headline = document.createElement("span");
-  headline.className = "meta-headline";
-  headline.textContent = typeof payload?.message === "string" ? payload.message : JSON.stringify(payload || {});
+  const description = typeof payload?.message === "string"
+    ? payload.message
+    : (payload?.stage?.label ? `${payload.stage.label}` : "details");
 
-  summary.append(ts, tag, headline);
+  summary.textContent = `${tagLabel} - +${deltaS}s - ${description}`;
   details.appendChild(summary);
 
   const pre = document.createElement("pre");
@@ -190,9 +189,10 @@ function buildTimelineNode(eventType, payload, createdAt = null) {
   pre.textContent = JSON.stringify(payload || {}, null, 2);
   details.appendChild(pre);
 
-  li.appendChild(details);
-  return li;
+  wrapper.appendChild(details);
+  return wrapper;
 }
+
 
 async function req(path, options = {}) {
   const res = await fetch(api + path, { headers: { "Content-Type": "application/json" }, ...options });
@@ -454,39 +454,41 @@ function renderTimeline() {
   });
 
   [...grouped.entries()].forEach(([queryId, events]) => {
-    const wrapper = document.createElement("li");
-    wrapper.className = "meta-group";
+    const queryStartMs = Math.min(
+      ...events.map((evt) => {
+        const ms = evt.created_at ? Date.parse(evt.created_at) : Date.now();
+        return Number.isFinite(ms) ? ms : Date.now();
+      }),
+    );
+
+    const group = document.createElement("section");
+    group.className = "block collapsible query-separator";
 
     const details = document.createElement("details");
     details.open = true;
 
     const summary = document.createElement("summary");
     summary.className = "meta-group-summary";
-
-    const title = document.createElement("span");
-    title.className = "meta-group-title";
-    title.textContent = queryId === "ungrouped" ? "General" : `Query ${queryId.slice(0, 8)}`;
-
-    const headline = document.createElement("span");
-    headline.className = "meta-group-headline";
-    headline.textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
-
-    summary.append(title, headline);
+    const idLabel = queryId === "ungrouped" ? "GENERAL" : queryId.slice(0, 8).toUpperCase();
+    const startLabel = formatLocalTimestamp(new Date(queryStartMs).toISOString());
+    summary.textContent = `QUERY ${idLabel} ${events.length} EVENTS ${startLabel}`;
     details.appendChild(summary);
 
-    const ul = document.createElement("ul");
-    ul.className = "meta-group-events";
+    const eventsWrap = document.createElement("div");
+    eventsWrap.className = "meta-group-events";
     events.forEach((evt) => {
-      const node = buildTimelineNode(evt.event_type, evt.payload || {}, evt.created_at);
-      ul.appendChild(node);
+      const node = buildTimelineNode(evt.event_type, evt.payload || {}, evt.created_at, queryStartMs);
+      eventsWrap.appendChild(node);
     });
-    details.appendChild(ul);
-    wrapper.appendChild(details);
-    timeline.appendChild(wrapper);
+
+    details.appendChild(eventsWrap);
+    group.appendChild(details);
+    timeline.appendChild(group);
   });
 
   applyTimelineFilter();
 }
+
 
 function addTimeline(eventType, payload, createdAt = null) {
   timelineCache.unshift({ event_type: eventType, payload: payload || {}, created_at: createdAt });

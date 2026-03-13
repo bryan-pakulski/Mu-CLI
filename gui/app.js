@@ -85,37 +85,40 @@ function highlightCodeBlocks(container) {
   });
 }
 
-function renderInlineMarkdown(text) {
-  let html = escapeHtml(text || "");
-  html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  return html;
+function createMarkdownRenderer() {
+  if (!window.marked) return null;
+
+  const renderer = new window.marked.Renderer();
+  renderer.code = (code, infostring = "") => {
+    const language = String(infostring || "").trim().split(/\s+/)[0] || "plaintext";
+    const rawCode = typeof code === "string" ? code : String(code?.text || "");
+    return `<pre class="md-code-block"><button class="code-copy-btn" type="button" data-code="${escapeHtml(rawCode)}">Copy</button><code class="language-${escapeHtml(language)}">${escapeHtml(rawCode)}</code></pre>`;
+  };
+
+  window.marked.setOptions({
+    gfm: true,
+    breaks: true,
+    renderer,
+  });
+
+  return renderer;
 }
+
+const markdownRenderer = createMarkdownRenderer();
 
 function renderMarkdown(value) {
   const raw = String(value || "");
-  const segments = raw.split(/```/g);
-  let html = "";
+  if (!window.marked || !markdownRenderer) {
+        return `<p>${escapeHtml(raw).replace(/\n/g, "<br />")}</p>`;
+  }
 
-  segments.forEach((segment, index) => {
-    if (index % 2 === 1) {
-      const firstBreak = segment.indexOf("\n");
-      const language = firstBreak === -1 ? "" : segment.slice(0, firstBreak).trim();
-      const code = firstBreak === -1 ? segment : segment.slice(firstBreak + 1);
-      html += `<pre class="md-code-block"><button class="code-copy-btn" type="button" data-code="${escapeHtml(code)}">Copy</button><code class="language-${escapeHtml(language || "plaintext")}">${escapeHtml(code)}</code></pre>`;
-      return;
-    }
-
-    segment.split(/\n{2,}/).forEach((para) => {
-      const trimmed = para.trim();
-      if (!trimmed) return;
-      html += `<p>${renderInlineMarkdown(trimmed).replace(/\n/g, "<br />")}</p>`;
-    });
-  });
-
-  return html || `<p>${renderInlineMarkdown(raw)}</p>`;
+  const parsed = window.marked.parse(raw);
+  if (window.DOMPurify) {
+    return window.DOMPurify.sanitize(parsed);
+  }
+  return parsed;
 }
+
 
 function formatLocalTimestamp(value = null) {
   const dt = value ? new Date(value) : new Date();

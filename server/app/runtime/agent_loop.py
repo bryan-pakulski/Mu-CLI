@@ -13,6 +13,17 @@ class LoopStep:
 
 
 _MODE_STEP_DEFINITIONS: dict[str, list[dict[str, object]]] = {
+    "chat": [
+        {
+            "label": "chat",
+            "objective": "Respond directly to the user request in conversational form.",
+            "success_criteria": [
+                "Response addresses the user goal clearly.",
+                "Tone is concise, helpful, and conversational.",
+                "No agentic planning or tool workflow narration is included.",
+            ],
+        },
+    ],
     "interactive": [
         {
             "label": "plan",

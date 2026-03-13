@@ -706,6 +706,7 @@ class JobRunner:
                 tools_hint = ",".join(enabled_tools) if isinstance(enabled_tools, list) and enabled_tools else "all"
                 system_prompt_override = context_state.get("system_prompt_override")
                 rules_checklist = context_state.get("rules_checklist")
+                chat_mode = (session.mode or "").lower() == "chat"
 
                 all_tools = tool_registry.list_tools()
                 citations_required = _citations_required(
@@ -753,11 +754,29 @@ class JobRunner:
                 max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
                 for stage_attempt in range(1, max_stage_turns + 1):
                     stage_success = "\n".join([f"- {item}" for item in step.success_criteria])
-                    prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
-                    prompt += "\n\nstage_objective:\n" + step.objective
-                    prompt += "\n\nstage_success_criteria:\n" + stage_success
-                    prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
-                    prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
+                    if chat_mode:
+                        prompt = f"goal={job.goal}\nmode={session.mode}"
+                        prompt += "\n\nchat_protocol:\n"
+                        prompt += "- Respond directly to the user in normal chat form.\n"
+                        prompt += "- Do not include stage markers or agent loop narration.\n"
+                        prompt += "- Do not suggest or simulate tool calls unless explicitly asked for that behavior."
+                    else:
+                        prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
+                        prompt += "\n\nstage_objective:\n" + step.objective
+                        prompt += "\n\nstage_success_criteria:\n" + stage_success
+                        prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
+                        prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
+                        prompt += (
+                            "\n\nstage_protocol:\n"
+                            f"- When this stage is complete, prefix your response with {STAGE_READY_PREFIX}{step.label}::\n"
+                            f"- If not complete, prefix with {STAGE_NEEDS_MORE_PREFIX}{step.label}:: and explain what is missing.\n"
+                            "- Do not omit this prefix."
+                            "\n- Use STAGE_NEEDS_MORE when criteria are not yet satisfied; do not use STAGE_READY prematurely."
+                        )
+                        prompt += f"\ncurrent_stage_attempt={stage_attempt}/{max_stage_turns}"
+                        if stage_feedback:
+                            prompt += f"\n\nstage_feedback:\n{stage_feedback}"
+
                     if citations_required:
                         prompt += (
                             "\n\ncitation_requirements:\n"
@@ -772,16 +791,6 @@ class JobRunner:
                         prompt += f"\n\nsystem_prompt_override={system_prompt_override.strip()}"
                     if isinstance(rules_checklist, str) and rules_checklist.strip():
                         prompt += f"\n\nrules_checklist={rules_checklist.strip()}"
-                    prompt += (
-                        "\n\nstage_protocol:\n"
-                        f"- When this stage is complete, prefix your response with {STAGE_READY_PREFIX}{step.label}::\n"
-                        f"- If not complete, prefix with {STAGE_NEEDS_MORE_PREFIX}{step.label}:: and explain what is missing.\n"
-                        "- Do not omit this prefix."
-                        "\n- Use STAGE_NEEDS_MORE when criteria are not yet satisfied; do not use STAGE_READY prematurely."
-                    )
-                    prompt += f"\ncurrent_stage_attempt={stage_attempt}/{max_stage_turns}"
-                    if stage_feedback:
-                        prompt += f"\n\nstage_feedback:\n{stage_feedback}"
 
                     stage_meta = {
                         "index": step.index,
@@ -854,7 +863,10 @@ class JobRunner:
                         max_retries=settings.provider_max_retries,
                     )
 
-                    is_ready, signal, cleaned_output = _extract_stage_signal(result.output, step.label)
+                    if chat_mode:
+                        is_ready, signal, cleaned_output = True, "chat", (result.output or "").strip()
+                    else:
+                        is_ready, signal, cleaned_output = _extract_stage_signal(result.output, step.label)
                     await emit_event(
                         db,
                         job.session_id,
@@ -879,7 +891,7 @@ class JobRunner:
                     if normalized_output:
                         prior_normalized_outputs.append(normalized_output)
 
-                    requested_tool_name = _extract_requested_tool_name(result.output)
+                    requested_tool_name = None if chat_mode else _extract_requested_tool_name(result.output)
                     if requested_tool_name:
                         await emit_event(
                             db,

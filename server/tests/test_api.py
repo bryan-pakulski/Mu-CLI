@@ -617,3 +617,41 @@ async def test_system_prompt_requires_citations_when_internet_tools_enabled() ->
         prompt_text = system_prompt_events[-1].get("payload", {}).get("prompt", "")
         assert "citation_requirements" in prompt_text
         assert "## Citations" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_chat_mode_prompt_omits_agentic_tooling_protocol() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/sessions",
+            json={"workspace_path": "/tmp/work", "mode": "chat"},
+        )
+        assert created.status_code == 200
+        session = created.json()
+
+        create_job = await client.post(
+            f"/sessions/{session['id']}/jobs",
+            json={"goal": "Tell me a joke"},
+        )
+        assert create_job.status_code == 200
+
+        events_payload = []
+        for _ in range(20):
+            events = await client.get(f"/sessions/{session['id']}/events?limit=250")
+            assert events.status_code == 200
+            events_payload = events.json()
+            if any(item.get("event_type") == "system_prompt" for item in events_payload):
+                break
+            await asyncio.sleep(0.1)
+
+        prompt_text = ""
+        for item in reversed(events_payload):
+            if item.get("event_type") == "system_prompt":
+                prompt_text = item.get("payload", {}).get("prompt", "")
+                break
+
+        assert "chat_protocol" in prompt_text
+        assert "stage_protocol" not in prompt_text
+        assert "available_tools_by_name_and_usage" not in prompt_text
+        assert "available_skills_by_name_and_usage" not in prompt_text

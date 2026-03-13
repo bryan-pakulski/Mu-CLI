@@ -387,3 +387,37 @@ body[data-theme="light"] .panel {
 body[data-theme="light"] .meta-entry {
   background: color-mix(in srgb, var(--surface) 72%, transparent);
 }
+
+
+.stream-footer {
+  margin-top: 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+}
+
+.stream-footer summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.stream-footer-body {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.stream-footer-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+}
+
+.stream-footer-index {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}

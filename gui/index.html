@@ -45,7 +45,7 @@
             <input id="max-timeout" type="number" min="30" step="30" value="300" />
             <label for="max-context">Max session context messages</label>
             <input id="max-context" type="number" min="5" step="1" value="40" />
-            <label for="max-context-chars">Max session context tokens (est)</label>
+            <label for="max-context-chars">Max session context chars</label>
             <input id="max-context-chars" type="number" min="1000" step="250" value="8000" />
             <label for="max-stage-turns">Max stage turns before give up</label>
             <input id="max-stage-turns" type="number" min="1" step="1" value="3" />
@@ -111,7 +111,7 @@
         <section class="chat-window" id="chat-window">
           <div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>
         </section>
-        <div id="context-size-indicator" class="context-size-indicator">context: 0 / 0 tokens</div>
+        <div id="context-size-indicator" class="context-size-indicator">context: 0 / 0 msgs</div>
 
         <section class="composer">
           <textarea id="goal" rows="3" placeholder="Message mu_cli..."></textarea>
@@ -198,7 +198,7 @@
             <input id="modal-condense-window" type="number" min="5" step="1" value="40" />
           </div>
           <div class="field-group">
-            <label for="modal-context-chars">Context length (tokens est)</label>
+            <label for="modal-context-chars">Context length (chars)</label>
             <input id="modal-context-chars" type="number" min="1000" step="250" value="8000" />
           </div>
           <div class="field-group">

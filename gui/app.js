@@ -161,12 +161,6 @@ function estimateSessionContextChars(sessionId) {
   return messages.reduce((sum, msg) => sum + String(msg?.content || "").length, 0);
 }
 
-function estimateTokenCount(charCount) {
-  const chars = Number(charCount || 0);
-  if (!Number.isFinite(chars) || chars <= 0) return 0;
-  return Math.ceil(chars / 4);
-}
-
 function estimateSessionContextMessages(sessionId) {
   return (sessionMessages.get(sessionId) || []).length;
 }
@@ -175,15 +169,14 @@ function updateContextSizeIndicator(sessionId = currentSession) {
   const indicator = el("context-size-indicator");
   if (!indicator) return;
   if (!sessionId) {
-    indicator.textContent = "context: 0 / 0 tokens";
+    indicator.textContent = "context: 0 / 0 msgs";
     return;
   }
 
   const session = sessionsCache.find((s) => s.id === sessionId);
-  const maxChars = Number(session?.context_state?.max_context_chars || 0);
-  const usedTokens = estimateTokenCount(estimateSessionContextChars(sessionId));
-  const maxTokens = estimateTokenCount(maxChars);
-  indicator.textContent = `context: ${formatNumber(usedTokens)} / ${formatNumber(maxTokens)} tokens`;
+  const maxMessages = Number(session?.context_state?.max_context_messages || 0);
+  const usedMessages = estimateSessionContextMessages(sessionId);
+  indicator.textContent = `context: ${formatNumber(usedMessages)} / ${formatNumber(maxMessages)} msgs`;
 }
 
 function getSessionLimits(session) {
@@ -464,6 +457,59 @@ function setSessionState(state) {
   });
 }
 
+
+function lastSessionMessage(sessionId) {
+  const messages = sessionMessages.get(sessionId) || [];
+  return messages.length > 0 ? messages[messages.length - 1] : null;
+}
+
+function appendAssistantStreamChunk(chunk, sessionId = currentSession) {
+  if (!sessionId || !String(chunk || "").trim()) return;
+  const messages = sessionMessages.get(sessionId) || [];
+  const last = messages.length > 0 ? messages[messages.length - 1] : null;
+  if (!last || last.role !== "assistant" || !last.is_streaming) {
+    messages.push({
+      role: "assistant",
+      content: String(chunk || ""),
+      created_at: formatLocalTimestamp(),
+      is_streaming: true,
+      stream_chunks: [String(chunk || "")],
+    });
+  } else {
+    last.content = String(chunk || "");
+    last.stream_chunks = [...(last.stream_chunks || []), String(chunk || "")];
+  }
+  sessionMessages.set(sessionId, messages);
+  if (sessionId === currentSession) {
+    renderChatForSession(sessionId);
+    const nodes = el("chat-window")?.querySelectorAll?.(".message.assistant");
+    latestAssistantMessage = nodes && nodes.length ? nodes[nodes.length - 1] : null;
+  }
+}
+
+function finalizeAssistantMessage(finalText, sessionId = currentSession) {
+  if (!sessionId) return;
+  const content = String(finalText || "").trim();
+  if (!content) return;
+  const messages = sessionMessages.get(sessionId) || [];
+  const last = messages.length > 0 ? messages[messages.length - 1] : null;
+
+  if (last && last.role === "assistant" && last.is_streaming) {
+    last.content = content;
+    last.is_streaming = false;
+    last.stream_chunks = Array.isArray(last.stream_chunks) ? last.stream_chunks : [];
+  } else {
+    messages.push({ role: "assistant", content, created_at: formatLocalTimestamp(), is_streaming: false, stream_chunks: [] });
+  }
+
+  sessionMessages.set(sessionId, messages);
+  if (sessionId === currentSession) {
+    renderChatForSession(sessionId);
+    const nodes = el("chat-window")?.querySelectorAll?.(".message.assistant");
+    latestAssistantMessage = nodes && nodes.length ? nodes[nodes.length - 1] : null;
+  }
+}
+
 function addSessionMessage(sessionId, role, content, extras = {}) {
   const existing = sessionMessages.get(sessionId) || [];
   existing.push({ role, content, created_at: formatLocalTimestamp(), ...extras });
@@ -485,6 +531,26 @@ function renderChatForSession(sessionId) {
     const node = document.createElement("div");
     node.className = `message ${msg.role}`;
     node.innerHTML = `<div class="tag-row"><div class="tag">${msg.role}</div><div class="timestamp">${msg.created_at || formatLocalTimestamp()}</div></div><div class="message-content">${renderMarkdown(msg.content)}</div>`;
+
+    if (msg.role === "assistant" && Array.isArray(msg.stream_chunks) && msg.stream_chunks.length > 0 && !msg.is_streaming) {
+      const footer = document.createElement("details");
+      footer.className = "stream-footer";
+      const summary = document.createElement("summary");
+      summary.textContent = `View streamed updates (${msg.stream_chunks.length})`;
+      footer.appendChild(summary);
+
+      const body = document.createElement("div");
+      body.className = "stream-footer-body";
+      msg.stream_chunks.forEach((chunk, idx) => {
+        const item = document.createElement("div");
+        item.className = "stream-footer-item";
+        item.innerHTML = `<div class="stream-footer-index">Update ${idx + 1}</div><div>${renderMarkdown(chunk)}</div>`;
+        body.appendChild(item);
+      });
+      footer.appendChild(body);
+      node.appendChild(footer);
+    }
+
     chatWindow.appendChild(node);
   });
 
@@ -510,19 +576,7 @@ function pushChat(tag, message) {
 }
 
 function updateAssistantDraft(text, sessionId = currentSession) {
-  if (!sessionId) return;
-  if (sessionId !== currentSession) return;
-  if (!latestAssistantMessage) {
-    latestAssistantMessage = pushChat("assistant", text);
-    return;
-  }
-  const contentNode = latestAssistantMessage.querySelector(".message-content");
-  if (contentNode) {
-    contentNode.innerHTML = renderMarkdown(text);
-    highlightCodeBlocks(contentNode);
-  }
-  const messages = sessionMessages.get(sessionId) || [];
-  if (messages.length > 0) messages[messages.length - 1].content = text;
+  appendAssistantStreamChunk(text, sessionId);
 }
 
 function setThinkingState(sessionId, active) {
@@ -838,9 +892,7 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
 
   const limits = getSessionLimits(session);
   const contextMsgCount = estimateSessionContextMessages(session.id);
-  const contextTokenCount = estimateTokenCount(estimateSessionContextChars(session.id));
-  const maxContextTokens = estimateTokenCount(limits.maxContextChars);
-  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${contextMsgCount}/${limits.maxContext} msgs, ${formatNumber(contextTokenCount)}/${formatNumber(maxContextTokens)} tokens | stage_turns=${limits.maxStageTurns}`;
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${contextMsgCount}/${limits.maxContext} msgs | stage_turns=${limits.maxStageTurns}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
@@ -1042,11 +1094,17 @@ function connectStream() {
     }
 
     if (eventType === "assistant_chunk") {
-      const existing = assistantDraftBuffers.get(sessionId) || "";
-      const next = `${existing}${existing ? "\n\n" : ""}${payload?.text || ""}`;
-      assistantDraftBuffers.set(sessionId, next);
-      updateAssistantDraft(next, sessionId);
+      finalizeAssistantMessage(payload?.text || "", sessionId);
+      assistantDraftBuffers.delete(sessionId);
       setThinkingState(sessionId, true);
+    }
+
+    if (eventType === "model_response") {
+      const chunk = String(payload?.text || "").trim();
+      const isReady = Boolean(payload?.stage_ready);
+      if (chunk && !isReady) {
+        appendAssistantStreamChunk(chunk, sessionId);
+      }
     }
 
     if (eventType === "loop_step") {

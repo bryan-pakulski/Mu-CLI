@@ -161,6 +161,12 @@ function estimateSessionContextChars(sessionId) {
   return messages.reduce((sum, msg) => sum + String(msg?.content || "").length, 0);
 }
 
+function estimateTokenCount(charCount) {
+  const chars = Number(charCount || 0);
+  if (!Number.isFinite(chars) || chars <= 0) return 0;
+  return Math.ceil(chars / 4);
+}
+
 function estimateSessionContextMessages(sessionId) {
   return (sessionMessages.get(sessionId) || []).length;
 }
@@ -169,14 +175,15 @@ function updateContextSizeIndicator(sessionId = currentSession) {
   const indicator = el("context-size-indicator");
   if (!indicator) return;
   if (!sessionId) {
-    indicator.textContent = "context: 0 / 0";
+    indicator.textContent = "context: 0 / 0 tokens";
     return;
   }
 
   const session = sessionsCache.find((s) => s.id === sessionId);
   const maxChars = Number(session?.context_state?.max_context_chars || 0);
-  const usedChars = estimateSessionContextChars(sessionId);
-  indicator.textContent = `context: ${formatNumber(usedChars)} / ${formatNumber(maxChars)}`;
+  const usedTokens = estimateTokenCount(estimateSessionContextChars(sessionId));
+  const maxTokens = estimateTokenCount(maxChars);
+  indicator.textContent = `context: ${formatNumber(usedTokens)} / ${formatNumber(maxTokens)} tokens`;
 }
 
 function getSessionLimits(session) {
@@ -831,8 +838,9 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
 
   const limits = getSessionLimits(session);
   const contextMsgCount = estimateSessionContextMessages(session.id);
-  const contextCharCount = estimateSessionContextChars(session.id);
-  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${contextMsgCount}/${limits.maxContext} msgs, ${formatNumber(contextCharCount)}/${formatNumber(limits.maxContextChars)} chars | stage_turns=${limits.maxStageTurns}`;
+  const contextTokenCount = estimateTokenCount(estimateSessionContextChars(session.id));
+  const maxContextTokens = estimateTokenCount(limits.maxContextChars);
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${contextMsgCount}/${limits.maxContext} msgs, ${formatNumber(contextTokenCount)}/${formatNumber(maxContextTokens)} tokens | stage_turns=${limits.maxStageTurns}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
@@ -904,7 +912,8 @@ function showSessionMenu(anchorButton, session) {
   menu.className = "session-menu";
   menu.style.position = "fixed";
   menu.style.top = `${rect.bottom + 6}px`;
-  menu.style.left = `${Math.max(8, rect.right - 140)}px`;
+  menu.style.left = `${Math.max(8, rect.right - 160)}px`;
+  menu.style.width = "160px";
 
   const settingsBtn = document.createElement("button");
   settingsBtn.textContent = "Settings";

@@ -161,6 +161,10 @@ function estimateSessionContextChars(sessionId) {
   return messages.reduce((sum, msg) => sum + String(msg?.content || "").length, 0);
 }
 
+function estimateSessionContextMessages(sessionId) {
+  return (sessionMessages.get(sessionId) || []).length;
+}
+
 function updateContextSizeIndicator(sessionId = currentSession) {
   const indicator = el("context-size-indicator");
   if (!indicator) return;
@@ -558,13 +562,22 @@ function renderTimeline() {
     grouped.get(key).push(evt);
   });
 
-  [...grouped.entries()].forEach(([queryId, events]) => {
+  const groupedEntries = [...grouped.entries()].map(([queryId, events]) => {
     const queryStartMs = Math.min(
       ...events.map((evt) => {
         const ms = evt.created_at ? Date.parse(evt.created_at) : Date.now();
         return Number.isFinite(ms) ? ms : Date.now();
       }),
     );
+    return { queryId, events, queryStartMs };
+  });
+
+  groupedEntries.sort((a, b) => {
+    if (a.queryStartMs !== b.queryStartMs) return a.queryStartMs - b.queryStartMs;
+    return String(a.queryId).localeCompare(String(b.queryId));
+  });
+
+  groupedEntries.forEach(({ queryId, events, queryStartMs }) => {
 
     const group = document.createElement("section");
     group.className = "block collapsible query-separator";
@@ -817,7 +830,9 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
   const name = session.name || "default";
 
   const limits = getSessionLimits(session);
-  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${limits.maxContext} msgs/${limits.maxContextChars} chars | stage_turns=${limits.maxStageTurns}`;
+  const contextMsgCount = estimateSessionContextMessages(session.id);
+  const contextCharCount = estimateSessionContextChars(session.id);
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${contextMsgCount}/${limits.maxContext} msgs, ${formatNumber(contextCharCount)}/${formatNumber(limits.maxContextChars)} chars | stage_turns=${limits.maxStageTurns}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;

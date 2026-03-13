@@ -35,3 +35,23 @@ def test_extract_stage_signal_wrong_stage_name_not_ready() -> None:
     assert is_ready is False
     assert signal == "ready"
     assert cleaned == "Did act"
+
+
+def test_extract_stage_signal_ready_marker_at_end() -> None:
+    output = """Implemented requested answer.
+
+STAGE_READY::act::"""
+    is_ready, signal, cleaned = _extract_stage_signal(output, "act")
+    assert is_ready is True
+    assert signal == "ready"
+    assert cleaned == "Implemented requested answer."
+
+
+def test_extract_stage_signal_needs_more_marker_in_middle() -> None:
+    output = """Prelude
+STAGE_NEEDS_MORE::plan::Need path
+Tail"""
+    is_ready, signal, cleaned = _extract_stage_signal(output, "plan")
+    assert is_ready is False
+    assert signal == "needs_more"
+    assert "Need path" in cleaned

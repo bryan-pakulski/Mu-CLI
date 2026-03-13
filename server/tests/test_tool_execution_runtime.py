@@ -1,7 +1,11 @@
 import asyncio
 from types import SimpleNamespace
 
-from server.app.runtime.job_runner import _extract_requested_tool_name, _run_tool
+from server.app.runtime.job_runner import (
+    _extract_requested_tool_name,
+    _run_tool,
+    _should_force_stage_progress,
+)
 
 
 class _Tool:
@@ -44,3 +48,33 @@ def test_run_tool_dynamic_shell_executor(monkeypatch, tmp_path) -> None:
     result = asyncio.run(_run_tool("custom_tool", session, job))
     assert result["exit_code"] == 0
     assert result["stdout"] == "dynamic"
+
+
+def test_should_force_stage_progress_on_final_missing_signal() -> None:
+    assert _should_force_stage_progress(
+        signal="missing",
+        cleaned_output="A useful answer",
+        stage_attempt=3,
+        max_stage_turns=3,
+        repeated_count=0,
+    )
+
+
+def test_should_force_stage_progress_on_repeated_missing_signal() -> None:
+    assert _should_force_stage_progress(
+        signal="missing",
+        cleaned_output="Same answer",
+        stage_attempt=2,
+        max_stage_turns=5,
+        repeated_count=2,
+    )
+
+
+def test_should_not_force_stage_progress_when_needs_more() -> None:
+    assert not _should_force_stage_progress(
+        signal="needs_more",
+        cleaned_output="Need more info",
+        stage_attempt=3,
+        max_stage_turns=3,
+        repeated_count=2,
+    )

@@ -209,24 +209,57 @@ async def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dic
 
     return {"tool_name": tool_name, "status": "not_implemented", "message": f"unsupported executor kind: {exec_kind}"}
 
+def _normalize_stage_output(output: str) -> str:
+    return re.sub(r"\s+", " ", (output or "").strip()).lower()
+
+
+def _should_force_stage_progress(
+    *,
+    signal: str,
+    cleaned_output: str,
+    stage_attempt: int,
+    max_stage_turns: int,
+    repeated_count: int,
+) -> bool:
+    if signal == "ready":
+        return False
+    if signal == "needs_more":
+        return False
+    if not (cleaned_output or "").strip():
+        return False
+    return stage_attempt >= max_stage_turns or repeated_count >= 2
+
+
 def _extract_stage_signal(output: str, expected_stage: str) -> tuple[bool, str, str]:
     text = (output or "").strip()
-    ready_pattern = re.compile(r"^\s*STAGE_READY::([^:]+)::\s*(.*)$", re.IGNORECASE | re.DOTALL)
-    needs_more_pattern = re.compile(r"^\s*STAGE_NEEDS_MORE::([^:]+)::\s*(.*)$", re.IGNORECASE | re.DOTALL)
+    if not text:
+        return False, "missing", ""
 
-    ready_match = ready_pattern.match(text)
-    if ready_match:
-        stage_name = (ready_match.group(1) or "").strip()
-        body = (ready_match.group(2) or "").strip()
-        stage_matches = stage_name.lower() == expected_stage.lower()
-        return stage_matches, "ready", body or text
+    marker_pattern = re.compile(
+        r"STAGE_(READY|NEEDS_MORE)::([^:]+)::",
+        re.IGNORECASE,
+    )
+    matches = list(marker_pattern.finditer(text))
+    if not matches:
+        return False, "missing", text
 
-    needs_more_match = needs_more_pattern.match(text)
-    if needs_more_match:
-        body = (needs_more_match.group(2) or "").strip()
-        return False, "needs_more", body or text
+    for match in reversed(matches):
+        signal = (match.group(1) or "").lower()
+        stage_name = (match.group(2) or "").strip()
+        if stage_name.lower() != expected_stage.lower():
+            continue
 
-    return False, "missing", text
+        before = text[: match.start()].strip()
+        after = text[match.end() :].strip()
+        body = after or before or text
+        return signal == "ready", signal, body
+
+    last = matches[-1]
+    signal = (last.group(1) or "").lower()
+    before = text[: last.start()].strip()
+    after = text[last.end() :].strip()
+    body = after or before or text
+    return False, signal, body
 
 
 class JobRunner:
@@ -434,6 +467,7 @@ class JobRunner:
                 stage_output = ""
                 stage_feedback = ""
                 last_provider = ""
+                prior_normalized_outputs: list[str] = []
                 max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
                 for stage_attempt in range(1, max_stage_turns + 1):
                     stage_success = "\n".join([f"- {item}" for item in step.success_criteria])
@@ -550,6 +584,11 @@ class JobRunner:
                         job_id=job.id,
                     )
 
+                    normalized_output = _normalize_stage_output(cleaned_output or result.output or "")
+                    repeated_count = prior_normalized_outputs.count(normalized_output) if normalized_output else 0
+                    if normalized_output:
+                        prior_normalized_outputs.append(normalized_output)
+
                     requested_tool_name = _extract_requested_tool_name(result.output)
                     if requested_tool_name:
                         await emit_event(
@@ -588,6 +627,33 @@ class JobRunner:
                     if is_ready:
                         stage_output = cleaned_output
                         last_provider = result.provider_name
+                        break
+
+                    if _should_force_stage_progress(
+                        signal=signal,
+                        cleaned_output=cleaned_output,
+                        stage_attempt=stage_attempt,
+                        max_stage_turns=max_stage_turns,
+                        repeated_count=repeated_count,
+                    ):
+                        stage_output = cleaned_output
+                        last_provider = result.provider_name
+                        await emit_event(
+                            db,
+                            job.session_id,
+                            "stage_forced_progress",
+                            {
+                                "query": query_meta,
+                                "step": step.index,
+                                "label": step.label,
+                                "attempt": stage_attempt,
+                                "max_attempts": max_stage_turns,
+                                "signal": signal,
+                                "reason": "repeated_or_missing_stage_signal",
+                                "repeated_count": repeated_count,
+                            },
+                            job_id=job.id,
+                        )
                         break
 
                     stage_feedback = (

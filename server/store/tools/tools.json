@@ -3,13 +3,21 @@
     "name": "read_file",
     "description": "Read file contents from the workspace",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "read_file"
+    }
   },
   {
     "name": "write_file",
     "description": "Write or overwrite a file in the workspace",
     "risk_level": "medium",
-    "requires_approval": true
+    "requires_approval": true,
+    "executor": {
+      "kind": "builtin",
+      "name": "write_file"
+    }
   },
   {
     "name": "apply_patch",
@@ -63,13 +71,21 @@
     "name": "list_workspace_files",
     "description": "List files in the configured workspace",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "list_workspace_files"
+    }
   },
   {
     "name": "get_workspace_file_context",
     "description": "Get contextual snippet(s) for a workspace file",
     "risk_level": "low",
-    "requires_approval": false
+    "requires_approval": false,
+    "executor": {
+      "kind": "builtin",
+      "name": "get_workspace_file_context"
+    }
   },
   {
     "name": "run_make_agent_job",
@@ -100,5 +116,15 @@
     "description": "Retrieve condensed summary for prior conversation state",
     "risk_level": "low",
     "requires_approval": false
+  },
+  {
+    "name": "execute_command",
+    "description": "Run a command in the workspace and capture stdout/stderr",
+    "risk_level": "high",
+    "requires_approval": true,
+    "executor": {
+      "kind": "builtin",
+      "name": "execute_command"
+    }
   }
 ]

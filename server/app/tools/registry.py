@@ -9,11 +9,24 @@ class ToolDefinition:
     description: str
     risk_level: str
     requires_approval: bool
+    executor: dict | None = None
 
 
 _DEFAULT_TOOLS: list[ToolDefinition] = [
-    ToolDefinition("read_file", "Read file contents from the workspace", "low", False),
-    ToolDefinition("write_file", "Write or overwrite a file in the workspace", "medium", True),
+    ToolDefinition(
+        "read_file",
+        "Read file contents from the workspace",
+        "low",
+        False,
+        {"kind": "builtin", "name": "read_file"},
+    ),
+    ToolDefinition(
+        "write_file",
+        "Write or overwrite a file in the workspace",
+        "medium",
+        True,
+        {"kind": "builtin", "name": "write_file"},
+    ),
     ToolDefinition("apply_patch", "Apply a structured patch to workspace files", "medium", True),
     ToolDefinition("git", "Run non-modifying git commands (status, log, diff, show)", "low", False),
     ToolDefinition("fetch_url_context", "Fetch page content and extract textual context from a URL", "low", False),
@@ -22,8 +35,27 @@ _DEFAULT_TOOLS: list[ToolDefinition] = [
     ToolDefinition("search_web_context", "Search the web and return contextual snippets", "low", False),
     ToolDefinition("search_arxiv_papers", "Search arXiv papers and return relevant metadata/context", "low", False),
     ToolDefinition("score_sources", "Score and rank gathered context sources", "low", False),
-    ToolDefinition("list_workspace_files", "List files in the configured workspace", "low", False),
-    ToolDefinition("get_workspace_file_context", "Get contextual snippet(s) for a workspace file", "low", False),
+    ToolDefinition(
+        "list_workspace_files",
+        "List files in the configured workspace",
+        "low",
+        False,
+        {"kind": "builtin", "name": "list_workspace_files"},
+    ),
+    ToolDefinition(
+        "get_workspace_file_context",
+        "Get contextual snippet(s) for a workspace file",
+        "low",
+        False,
+        {"kind": "builtin", "name": "get_workspace_file_context"},
+    ),
+    ToolDefinition(
+        "execute_command",
+        "Run a command in the workspace and capture stdout/stderr",
+        "high",
+        True,
+        {"kind": "builtin", "name": "execute_command"},
+    ),
     ToolDefinition("run_make_agent_job", "Queue a nested make-agent job", "high", True),
     ToolDefinition("list_uploaded_context_files", "List uploaded context files available to the session", "low", False),
     ToolDefinition("get_uploaded_context_file", "Read a specific uploaded context file", "low", False),
@@ -67,6 +99,7 @@ class ToolRegistry:
                 description=str(item.get("description", "")),
                 risk_level=str(item.get("risk_level", "low")),
                 requires_approval=bool(item.get("requires_approval", False)),
+                executor=item.get("executor") if isinstance(item.get("executor"), dict) else None,
             )
 
         if not parsed:

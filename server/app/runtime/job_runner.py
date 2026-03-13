@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -71,18 +72,25 @@ def _safe_workspace_path(workspace_path: str | None) -> Path:
     return base if base.exists() else Path(".").resolve()
 
 
-def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dict:
-    workspace = _safe_workspace_path(session.workspace_path)
-    constraints = job.constraints or {}
+def _safe_workspace_target(workspace: Path, file_path: str) -> Path | None:
+    rel = str(file_path or "").strip()
+    if not rel:
+        return None
+    target = (workspace / rel).resolve()
+    if workspace not in target.parents and target != workspace:
+        return None
+    return target
 
+
+def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict) -> dict:
     if tool_name == "list_workspace_files":
         files = [str(path.relative_to(workspace)) for path in workspace.rglob("*") if path.is_file()][:200]
         return {"tool_name": tool_name, "workspace": str(workspace), "files": files}
 
     if tool_name == "read_file":
         rel = str(constraints.get("file_path") or "")
-        target = (workspace / rel).resolve()
-        if not rel or workspace not in target.parents and target != workspace:
+        target = _safe_workspace_target(workspace, rel)
+        if not target:
             return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
         if not target.exists() or not target.is_file():
             return {"tool_name": tool_name, "error": "file does not exist"}
@@ -91,8 +99,8 @@ def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dict:
     if tool_name == "write_file":
         rel = str(constraints.get("file_path") or "")
         content = str(constraints.get("content") or "")
-        target = (workspace / rel).resolve()
-        if not rel or workspace not in target.parents and target != workspace:
+        target = _safe_workspace_target(workspace, rel)
+        if not target:
             return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
@@ -100,15 +108,106 @@ def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dict:
 
     if tool_name == "get_workspace_file_context":
         rel = str(constraints.get("file_path") or "")
-        target = (workspace / rel).resolve()
-        if not rel or workspace not in target.parents and target != workspace:
+        target = _safe_workspace_target(workspace, rel)
+        if not target:
             return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
         if not target.exists() or not target.is_file():
             return {"tool_name": tool_name, "error": "file does not exist"}
         text = target.read_text(encoding="utf-8", errors="replace")
         return {"tool_name": tool_name, "file_path": rel, "snippet": text[:2000]}
 
-    return {"tool_name": tool_name, "status": "not_implemented", "message": "tool execution handler not implemented"}
+    return {"tool_name": tool_name, "status": "not_implemented", "message": "builtin tool handler not implemented"}
+
+
+def _render_shell_command(template: str, constraints: dict, workspace: Path) -> str:
+    values = {"workspace": str(workspace)}
+    for key, value in (constraints or {}).items():
+        if isinstance(value, (dict, list)):
+            values[key] = json.dumps(value)
+        else:
+            values[key] = str(value)
+
+    class _Default(dict):
+        def __missing__(self, key):
+            return ""
+
+    return template.format_map(_Default(values)).strip()
+
+
+async def _run_tool(tool_name: str, session: SessionModel, job: JobModel) -> dict:
+    workspace = _safe_workspace_path(session.workspace_path)
+    constraints = job.constraints or {}
+    tool = tool_registry.get(tool_name)
+    executor = tool.executor if tool else None
+
+    if not isinstance(executor, dict):
+        return {
+            "tool_name": tool_name,
+            "status": "not_implemented",
+            "message": "missing executor config in tools registry",
+        }
+
+    exec_kind = str(executor.get("kind") or "builtin")
+    if exec_kind == "builtin":
+        builtin_name = str(executor.get("name") or tool_name)
+        if builtin_name != "execute_command":
+            return _run_builtin_tool(builtin_name, workspace, constraints)
+
+        command = str(constraints.get("command") or "").strip()
+        if not command:
+            return {"tool_name": tool_name, "error": "command is required"}
+        timeout_s = min(60, max(1, int(constraints.get("timeout_s") or 15)))
+        process = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(workspace),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
+        except TimeoutError:
+            process.kill()
+            await process.communicate()
+            return {"tool_name": tool_name, "command": command, "error": f"command timed out after {timeout_s}s"}
+
+        return {
+            "tool_name": tool_name,
+            "command": command,
+            "exit_code": process.returncode,
+            "stdout": (stdout or b"").decode("utf-8", errors="replace")[:12000],
+            "stderr": (stderr or b"").decode("utf-8", errors="replace")[:8000],
+        }
+
+    if exec_kind == "shell":
+        template = str(executor.get("command") or "").strip()
+        if not template:
+            return {"tool_name": tool_name, "error": "executor.command is required for shell tools"}
+        command = _render_shell_command(template, constraints, workspace)
+        if not command:
+            return {"tool_name": tool_name, "error": "rendered command was empty"}
+        timeout_s = min(120, max(1, int(executor.get("timeout_s") or constraints.get("timeout_s") or 30)))
+        process = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(workspace),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
+        except TimeoutError:
+            process.kill()
+            await process.communicate()
+            return {"tool_name": tool_name, "command": command, "error": f"command timed out after {timeout_s}s"}
+
+        return {
+            "tool_name": tool_name,
+            "command": command,
+            "exit_code": process.returncode,
+            "stdout": (stdout or b"").decode("utf-8", errors="replace")[:12000],
+            "stderr": (stderr or b"").decode("utf-8", errors="replace")[:8000],
+        }
+
+    return {"tool_name": tool_name, "status": "not_implemented", "message": f"unsupported executor kind: {exec_kind}"}
 
 def _extract_stage_signal(output: str, expected_stage: str) -> tuple[bool, str, str]:
     text = (output or "").strip()
@@ -450,6 +549,41 @@ class JobRunner:
                         },
                         job_id=job.id,
                     )
+
+                    requested_tool_name = _extract_requested_tool_name(result.output)
+                    if requested_tool_name:
+                        await emit_event(
+                            db,
+                            job.session_id,
+                            "tool_call",
+                            {
+                                "query": query_meta,
+                                "step": step.index,
+                                "label": step.label,
+                                "tool_name": requested_tool_name,
+                                "constraints": job.constraints or {},
+                            },
+                            job_id=job.id,
+                        )
+                        tool_result = await _run_tool(requested_tool_name, session, job)
+                        await emit_event(
+                            db,
+                            job.session_id,
+                            "tool_result",
+                            {
+                                "query": query_meta,
+                                "step": step.index,
+                                "label": step.label,
+                                "tool_name": requested_tool_name,
+                                "result": tool_result,
+                            },
+                            job_id=job.id,
+                        )
+                        stage_feedback = (
+                            f"Tool '{requested_tool_name}' was executed. Review the output and continue this stage.\n"
+                            f"tool_result={json.dumps(tool_result, ensure_ascii=False)}"
+                        )
+                        continue
 
                     if is_ready:
                         stage_output = cleaned_output

@@ -5,6 +5,7 @@ from server.app.runtime.job_runner import (
     RESEARCH_PROMPT_BASE,
     _extract_tool_calls,
     _fallback_tool_calls,
+    _forced_stage_wrap_output,
     _requires_tool_usage,
     _mode_prompt_base,
     _build_stage_prompt,
@@ -109,3 +110,11 @@ def test_fallback_tool_calls_for_research_explore() -> None:
 def test_requires_tool_usage_for_research_explore() -> None:
     assert _requires_tool_usage("research", "explore") is True
     assert _requires_tool_usage("research", "plan") is False
+
+
+
+def test_forced_stage_wrap_output_is_decisive() -> None:
+    step = LoopStep(index=1, label="explore", objective="gather", success_criteria=["evidence"])
+    out = _forced_stage_wrap_output(step, last_signal="missing", last_output="", stage_attempts=3)
+    assert "auto-wrapped" in out
+    assert "explore" in out

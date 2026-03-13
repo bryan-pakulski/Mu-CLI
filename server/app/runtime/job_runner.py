@@ -290,7 +290,8 @@ def _build_stage_prompt(
             "  1) <tool_call><tool_name>NAME</tool_name><parameters>{...}</parameters></tool_call>\n"
             "  2) TOOL_CALL::NAME::{\"key\":\"value\"}\n"
             "- Parameters must be valid JSON object.\n"
-            "- If the task requires evidence or workspace changes, call at least one relevant tool before STAGE_READY.\n\n"
+            "- If the task requires evidence or workspace changes, call at least one relevant tool before STAGE_READY.\n"
+            f"- Final attempt policy: if attempt={stage_attempt}/{max_stage_turns}, wrap up with a decisive STAGE_READY or STAGE_NEEDS_MORE.\n\n"
             "available_tools:\n"
             f"{tools_block}\n\n"
             "available_skills:\n"
@@ -814,6 +815,16 @@ def _fallback_tool_calls(
     ]
 
 
+
+
+def _forced_stage_wrap_output(step: LoopStep, last_signal: str, last_output: str, stage_attempts: int) -> str:
+    summary = (last_output or "").strip() or "No substantive model output was returned."
+    return (
+        f"Stage '{step.label}' auto-wrapped after {stage_attempts} attempts. "
+        f"Last signal={last_signal or 'missing'}. "
+        f"Best-effort summary: {summary}"
+    )
+
 def _normalize_stage_output(output: str) -> str:
     return re.sub(r"\s+", " ", (output or "").strip()).lower()
 
@@ -1067,6 +1078,8 @@ class JobRunner:
                 stage_output = ""
                 stage_feedback = ""
                 last_provider = ""
+                last_signal = "missing"
+                last_cleaned_output = ""
                 prior_normalized_outputs: list[str] = []
                 stage_tool_calls_made = 0
                 max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
@@ -1162,6 +1175,8 @@ class JobRunner:
                         is_ready, signal, cleaned_output = True, "chat", (result.output or "").strip()
                     else:
                         is_ready, signal, cleaned_output = _extract_stage_signal(result.output, step.label)
+                    last_signal = signal
+                    last_cleaned_output = cleaned_output or (result.output or "")
                     await emit_event(
                         db,
                         job.session_id,
@@ -1315,9 +1330,32 @@ class JobRunner:
                     )
 
                 if not stage_output:
-                    raise RuntimeError(
-                        f"Stage '{step.label}' did not provide required readiness confirmation "
-                        f"after {max_stage_turns} attempts"
+                    stage_output = _forced_stage_wrap_output(
+                        step,
+                        last_signal=last_signal,
+                        last_output=last_cleaned_output,
+                        stage_attempts=max_stage_turns,
+                    )
+                    await emit_event(
+                        db,
+                        job.session_id,
+                        "stage_forced_progress",
+                        {
+                            "query": {
+                                "id": job.id,
+                                "goal": job.goal,
+                                "mode": session.mode,
+                                "attempt": attempts,
+                            },
+                            "step": step.index,
+                            "label": step.label,
+                            "attempt": max_stage_turns,
+                            "max_attempts": max_stage_turns,
+                            "signal": last_signal,
+                            "reason": "max_attempts_exhausted_autowrap",
+                            "repeated_count": 0,
+                        },
+                        job_id=job.id,
                     )
 
                 job.checkpoints = {

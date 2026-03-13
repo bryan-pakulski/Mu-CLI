@@ -580,7 +580,7 @@ function renderTimeline() {
   });
 
   groupedEntries.sort((a, b) => {
-    if (a.queryStartMs !== b.queryStartMs) return a.queryStartMs - b.queryStartMs;
+    if (a.queryStartMs !== b.queryStartMs) return b.queryStartMs - a.queryStartMs;
     return String(a.queryId).localeCompare(String(b.queryId));
   });
 

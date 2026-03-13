@@ -25,6 +25,36 @@ STAGE_READY_PREFIX = "STAGE_READY::"
 STAGE_NEEDS_MORE_PREFIX = "STAGE_NEEDS_MORE::"
 DEFAULT_MAX_STAGE_TURNS = 3
 
+INTERNAL_PROMPT_MARKERS = (
+    "available_tools_by_name_and_usage:",
+    "available_skills_by_name_and_usage:",
+    "stage_protocol:",
+    "stage_success_criteria:",
+)
+
+
+def _looks_like_internal_prompt_echo(content: str) -> bool:
+    text = (content or "").strip()
+    if not text:
+        return False
+    if not text.startswith("goal="):
+        return False
+    return any(marker in text for marker in INTERNAL_PROMPT_MARKERS)
+
+
+def _is_user_facing_context_message(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    role = str(item.get("role") or "").strip().lower()
+    if role not in {"user", "assistant", "system"}:
+        return False
+    content = str(item.get("content") or "")
+    if not content.strip():
+        return False
+    if any(marker in content for marker in INTERNAL_PROMPT_MARKERS):
+        return False
+    return True
+
 
 def _extract_stage_signal(output: str, expected_stage: str) -> tuple[bool, str, str]:
     text = (output or "").strip()
@@ -197,6 +227,8 @@ class JobRunner:
             selected_model = provider_preferences.get("model")
 
             def append_context_message(role: str, content: str) -> None:
+                if role == "assistant" and _looks_like_internal_prompt_echo(content):
+                    return
                 context_state = copy.deepcopy(session.context_state or {"name": session.name, "messages": [], "summary": None, "memory_refs": [], "max_context_messages": 40})
                 context_state.setdefault("messages", []).append({"role": role, "content": content, "created_at": datetime.now().isoformat(timespec="seconds")})
                 max_messages = max(5, int(context_state.get("max_context_messages", 40)))
@@ -220,7 +252,7 @@ class JobRunner:
                 context_lines = [
                     f"{(item.get('role') or 'unknown')}: {item.get('content') or ''}"
                     for item in recent_context
-                    if isinstance(item, dict)
+                    if _is_user_facing_context_message(item)
                 ]
                 context_block = "\n".join(context_lines).strip()
                 max_context_chars = max(1000, int(context_state.get("max_context_chars", 8000)))

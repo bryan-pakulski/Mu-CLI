@@ -18,3 +18,11 @@ def test_chat_mode_is_single_non_agentic_step() -> None:
     steps = _mode_steps("chat")
     assert len(steps) == 1
     assert steps[0]["label"] == "chat"
+
+
+
+def test_research_stages_require_tool_backed_evidence() -> None:
+    explore = [s for s in _mode_steps("research") if s["label"] == "explore"][0]
+    summarize = [s for s in _mode_steps("research") if s["label"] == "summarize"][0]
+    assert any("tools" in item.lower() for item in explore["success_criteria"])
+    assert any("tools" in item.lower() for item in summarize["success_criteria"])

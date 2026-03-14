@@ -45,8 +45,9 @@ from server.app.schemas import (
     WorkspaceIndexRefreshResponse,
 )
 from server.app.skills.registry import skill_registry
-from server.app.tools.registry import tool_registry
-from server.app.workspace.discovery import index_workspace, list_index, refresh_workspace_index
+from server.app.tools import get_all_tools
+from server.app.tools.registry import ToolDefinition
+from server.app.workspace.discovery import WorkspaceStore
 
 router = APIRouter()
 
@@ -119,7 +120,7 @@ async def _ensure_default_session(db: AsyncSession) -> None:
     if sessions:
         return
     session = SessionModel(
-        workspace_path="",
+        workspace=None,
         mode="interactive",
         provider_preferences={"ordered": ["ollama"]},
         policy_profile="default",
@@ -140,7 +141,7 @@ async def create_session(
     db: AsyncSession = Depends(get_db),
 ) -> SessionModel:
     session = SessionModel(
-        workspace_path=payload.workspace_path,
+        workspace=WorkspaceStore(Path(payload.workspace_path)) if payload.workspace_path else None,
         mode=payload.mode,
         provider_preferences=payload.provider_preferences,
         policy_profile=payload.policy_profile,
@@ -152,6 +153,8 @@ async def create_session(
             max_stage_turns=payload.max_stage_turns,
         ),
     )
+    if payload.workspace_path and session.workspace:
+        session.workspace.attach(Path(payload.workspace_path))
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -197,7 +200,7 @@ async def update_session(
     if payload.name is not None:
         session.name = _normalize_session_name(payload.name)
     if payload.workspace_path is not None:
-        session.workspace_path = payload.workspace_path
+        session.workspace = WorkspaceStore(Path(payload.workspace_path))
     if payload.mode is not None:
         session.mode = payload.mode
     if payload.provider_preferences is not None:
@@ -243,7 +246,7 @@ async def update_session(
             "max_context_messages": (session.context_state or {}).get("max_context_messages", 40),
             "max_context_chars": (session.context_state or {}).get("max_context_chars", 8000),
             "max_stage_turns": (session.context_state or {}).get("max_stage_turns", 3),
-            "workspace_path": session.workspace_path,
+            "workspace": session.workspace,
             "agentic_planning": (session.context_state or {}).get("agentic_planning", False),
             "research_mode": (session.context_state or {}).get("research_mode", False),
             "auto_condense": (session.context_state or {}).get("auto_condense", False),
@@ -615,7 +618,7 @@ def _session_enabled_tools(session: SessionModel) -> set[str]:
     enabled_tools = context_state.get("enabled_tools")
     if isinstance(enabled_tools, list):
         return {str(name) for name in enabled_tools}
-    return {tool.name for tool in tool_registry.list_tools()}
+    return {tool.name for tool in get_all_tools()}
 
 
 def _session_enabled_skills(session: SessionModel, discovered: list) -> set[str]:
@@ -632,20 +635,20 @@ async def _get_session_or_404(db: AsyncSession, session_id: str) -> SessionModel
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
-
 @router.get("/sessions/{session_id}/tools-config", response_model=list[ToolConfigRead])
 async def list_session_tools_config(session_id: str, db: AsyncSession = Depends(get_db)) -> list[ToolConfigRead]:
     session = await _get_session_or_404(db, session_id)
     enabled_tools = _session_enabled_tools(session)
+
     return [
         ToolConfigRead(
             name=t.name,
             description=t.description,
             risk_level=t.risk_level,
-            requires_approval=t.requires_approval,
+            requires_approval=t.mutating,
             enabled=t.name in enabled_tools,
         )
-        for t in tool_registry.list_tools()
+        for t in get_all_tools()
     ]
 
 
@@ -656,7 +659,7 @@ async def update_session_tools_config(
     db: AsyncSession = Depends(get_db),
 ) -> list[ToolConfigRead]:
     session = await _get_session_or_404(db, session_id)
-    valid_tool_names = {t.name for t in tool_registry.list_tools()}
+    valid_tool_names = {t.name for t in get_all_tools()}
     enabled = [name for name in payload.enabled if name in valid_tool_names]
     context_state = dict(session.context_state or {})
     context_state["enabled_tools"] = enabled
@@ -669,7 +672,7 @@ async def update_session_tools_config(
 @router.get("/sessions/{session_id}/skills-config", response_model=list[SkillConfigRead])
 async def list_session_skills_config(session_id: str, db: AsyncSession = Depends(get_db)) -> list[SkillConfigRead]:
     session = await _get_session_or_404(db, session_id)
-    discovered = skill_registry.discover(session.workspace_path)
+    discovered = skill_registry.discover(session.workspace)
     enabled_skills = _session_enabled_skills(session, discovered)
     return [
         SkillConfigRead(
@@ -689,7 +692,7 @@ async def update_session_skills_config(
     db: AsyncSession = Depends(get_db),
 ) -> list[SkillConfigRead]:
     session = await _get_session_or_404(db, session_id)
-    discovered = skill_registry.discover(session.workspace_path)
+    discovered = skill_registry.discover(session.workspace)
     valid_skill_names = {skill.name for skill in discovered}
     enabled = [name for name in payload.enabled if name in valid_skill_names]
     context_state = dict(session.context_state or {})
@@ -827,12 +830,12 @@ async def build_workspace_index(
     session = await db.scalar(select(SessionModel).where(SessionModel.id == session_id))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+	
+    if session.workspace is not None:
+        count = session.workspace.snapshot.index_stats["indexed"] if session.workspace.snapshot else 0
+    else:
+        count = 0
 
-    count = await index_workspace(
-        session_id=session.id,
-        workspace_path=session.workspace_path,
-        db=db,
-    )
     await emit_event(
         db,
         session.id,
@@ -856,7 +859,7 @@ async def refresh_index(
 
     stats = await refresh_workspace_index(
         session_id=session.id,
-        workspace_path=session.workspace_path,
+        workspace=session.workspace,
         db=db,
     )
     await emit_event(

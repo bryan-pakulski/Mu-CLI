@@ -3,8 +3,7 @@ import copy
 import json
 import re
 import subprocess
-import urllib.parse
-import urllib.request
+import textwrap
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +24,30 @@ from server.app.providers.router import provider_router, resolve_ordered_provide
 from server.app.runtime.agent_loop import LoopStep, run_agent_loop
 from server.app.runtime.orchestrator import emit_event, update_job_state
 from server.app.skills.registry import skill_registry
-from server.app.tools.registry import tool_registry
+
+from typing import Any
+
+from server.app.tools.registry import (
+    ApplyPatchTool,
+    ClearUploadedContextStoreTool,
+    CustomCommandTool,
+    ExtractLinksContextTool,
+    FetchPdfContextTool,
+    FetchUrlContextTool,
+    GetUploadedContextFileTool,
+    GetWorkspaceFileContextTool,
+    GitTool,
+    ListUploadedContextFilesTool,
+    ListWorkspaceFilesTool,
+    MakefileAgentTool,
+    ReadFileTool,
+    ScoreSourcesTool,
+    SearchArxivPapersTool,
+    SearchWebContextTool,
+    ToolDefinition,
+    WriteFileTool,
+)
+from server.app.workspace.discovery import WorkspaceStore
 
 STAGE_READY_PREFIX = "STAGE_READY::"
 STAGE_NEEDS_MORE_PREFIX = "STAGE_NEEDS_MORE::"
@@ -42,8 +64,220 @@ INTERNET_ENABLED_TOOLS = {
 INTERNAL_PROMPT_MARKERS = (
     "available_tools_by_name_and_usage:",
     "available_skills_by_name_and_usage:",
+    "available_tools:",
+    "available_skills:",
     "stage_protocol:",
+    "response_protocol:",
     "stage_success_criteria:",
+    "working_memory:",
+)
+
+
+RESEARCH_PROMPT_BASE = (
+    "Research mode is enabled. For research requests, proactively use web and paper tools to gather evidence. "
+    "Prefer search_web_context/search_arxiv_papers for discovery, fetch_url_context/fetch_pdf_context for reading, "
+    "and extract_links_context to follow references. "
+    "When writing findings, cite claims inline with numbered references like [1] [2]. "
+    "In every research response, include a clear 'Citations' section with numbered clickable URLs used. "
+    "For each key claim, include a short confidence line (high/medium/low) with a reason."
+)
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a coding agent running in MU-CLI, a terminal-gui coding assistant. "
+    "MU-CLI is an open source project led by Bryan Pakulski. You are expected to be precise, safe, and helpful.\n\n"
+    "Your capabilities:\n\n"
+    "- Receive user prompts and other context provided by the harness, such as files in the workspace.\n"
+    "- Communicate with the user by streaming thinking and responses, and by making and updating plans.\n"
+    "- Emit function calls to run terminal commands and apply patches. Depending on how this run is configured, "
+    "you can request these calls be escalated for approval before running.\n\n"
+    "How you work\n\n"
+    "Personality\n"
+    "- Keep responses concise, direct, and friendly.\n"
+    "- Communicate efficiently and keep the user informed about ongoing actions without unnecessary detail.\n"
+    "- Prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps.\n"
+    "- Unless explicitly asked, avoid excessively verbose explanations."
+)
+
+PLANNING_PROMPT_BASE = (
+    "You are operating in human-in-the-loop developer mode. "
+    "Before significant actions, provide a short plan and rationale. "
+    "Prefer smallest safe changes and explain what tool(s) you need. "
+    "For workspace tasks: first discover with list_workspace_files, then read only specific files with "
+    "get_workspace_file_context. Do not request the whole codebase unless explicitly asked. "
+    "When modifying existing files, prefer apply_patch for targeted edits; use write_file for new files or "
+    "full rewrites only when explicitly requested. "
+    "Before and after mutating edits, use git diff (or equivalent) to verify minimal changes. "
+    "For any request involving repository state, files, diffs, or edits, tool usage is required before final "
+    "claims. For mutating actions, clearly state intended edits before executing. "
+    "Use an execution loop: plan -> act -> verify -> reflect -> finish. "
+    "For code changes, prefer diff-oriented outputs and avoid full-file rewrites unless explicitly requested. "
+    "Do not mark tasks done until you run at least one direct verification command when possible (tests, lint, "
+    "type-check, or targeted checks). "
+    "If progress stalls, explicitly surface blockers, propose a fallback, and request approval before risky "
+    "recovery actions."
+)
+
+INTERACTIVE_PROMPT_BASE = (
+    "Interactive mode is enabled. Follow a strict plan -> act -> verify loop. "
+    "For file/repo tasks, use tools before making final claims. "
+    "Prefer minimal, reversible edits and validate outcomes with direct checks."
+)
+
+CHAT_PROMPT_BASE = (
+    "Chat mode is enabled. Respond directly and conversationally without workflow narration "
+    "or stage/tool protocol unless explicitly requested by the user."
+)
+
+DEBUGGING_PROMPT_BASE = (
+    "Debugging mode is enabled. Prioritize reproducibility and root-cause analysis. "
+    "Capture evidence first, apply focused fixes second, and validate with targeted tests."
+)
+
+YOLO_PROMPT_BASE = (
+    "YOLO mode is enabled. Execute quickly but stay coherent and explicit about risks. "
+    "If blocked, surface blockers immediately and provide the best safe fallback."
+)
+
+MODE_PROMPT_BASES = {
+    "chat": CHAT_PROMPT_BASE,
+    "interactive": INTERACTIVE_PROMPT_BASE,
+    "research": RESEARCH_PROMPT_BASE,
+    "debugging": DEBUGGING_PROMPT_BASE,
+    "yolo": YOLO_PROMPT_BASE,
+}
+
+def _coerce_workspace_store(value: Any) -> WorkspaceStore | None:
+    if value is None:
+        return None
+    if isinstance(value, WorkspaceStore):
+        return value
+    if isinstance(value, dict):
+        try:
+            return WorkspaceStore.from_dict(value)
+        except Exception:  # noqa: BLE001
+            return None
+    if isinstance(value, Path):
+        w = WorkspaceStore(value)
+        w.attach(value)
+        return w
+    if isinstance(value, str):
+        w = WorkspaceStore(Path(value))
+        w.attach(Path(value))
+        return w
+    return None
+
+
+def _workspace_root_for_session(session: SessionModel) -> Path | None:
+    store = _coerce_workspace_store(getattr(session, "workspace", None))
+    if store is None:
+        return None
+    if store.snapshot and getattr(store.snapshot, "root", None):
+        return Path(store.snapshot.root)
+    if getattr(store, "storage_dir", None):
+        return Path(store.storage_dir)
+    return None
+
+
+def _uploaded_context_root_for_session(session: SessionModel) -> Path:
+    root = _workspace_root_for_session(session) or Path.cwd()
+    base = (root / ".mu" / "uploaded_context").resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _uploaded_context_session_dir_name(session: SessionModel) -> str:
+    return str(getattr(session, "id", "") or "default")
+
+
+def _build_custom_tools(session: SessionModel) -> list[ToolDefinition]:
+    context_state = session.context_state or {}
+    raw = context_state.get("custom_tools")
+    if not isinstance(raw, list):
+        return []
+
+    root_getter = lambda: _workspace_root_for_session(session)
+    tools: list[ToolDefinition] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        description = str(item.get("description") or "").strip()
+        command = item.get("command")
+        if not name or not description or not isinstance(command, list) or not command:
+            continue
+        if not all(isinstance(part, str) for part in command):
+            continue
+        tools.append(
+            CustomCommandTool(
+                name=name,
+                description=description,
+                command=command,
+                mutating=bool(item.get("mutating", True)),
+                workspace_root_getter=root_getter,
+            )
+        )
+    return tools
+
+
+def _get_runtime_tool_map(session: SessionModel) -> dict[str, ToolDefinition]:
+    workspace_root_getter = lambda: _workspace_root_for_session(session)
+    # Uploaded files live in <workspace>/.mu/uploaded_context/<session.id>/
+    uploaded_root = _uploaded_context_root_for_session(session)
+    session_name_getter = lambda: _uploaded_context_session_dir_name(session)
+    store = _coerce_workspace_store(getattr(session, "workspace", None))
+
+    tools: list[ToolDefinition] = [
+        ReadFileTool(workspace_root_getter),
+        WriteFileTool(workspace_root_getter),
+        ApplyPatchTool(workspace_root_getter),
+        GitTool(workspace_root_getter),
+        ListUploadedContextFilesTool(uploaded_root, session_name_getter),
+        GetUploadedContextFileTool(uploaded_root, session_name_getter),
+        ClearUploadedContextStoreTool(uploaded_root, session_name_getter),
+        FetchUrlContextTool(),
+        SearchWebContextTool(),
+        ExtractLinksContextTool(),
+        SearchArxivPapersTool(),
+        FetchPdfContextTool(),
+        ScoreSourcesTool(),
+        MakefileAgentTool(workspace_root_getter),
+    ]
+
+    if store is not None:
+        tools.extend(
+            [
+                ListWorkspaceFilesTool(store),
+                GetWorkspaceFileContextTool(store),
+            ]
+        )
+
+    tools.extend(_build_custom_tools(session))
+    return {tool.name: tool for tool in tools}
+
+
+def _mode_prompt_base(mode: str) -> str:
+    return MODE_PROMPT_BASES.get((mode or "interactive").lower(), INTERACTIVE_PROMPT_BASE)
+
+
+def _requires_tool_usage(session_mode: str, step_label: str) -> bool:
+    mode = (session_mode or "").lower()
+    step = (step_label or "").lower()
+    return (mode == "research" and step in {"explore", "summarize"}) or (
+        mode in {"interactive", "debugging"} and step in {"act", "verify", "reproduce", "test"}
+    )
+WORKSPACE_ACTION_KEYWORDS = (
+    "file",
+    "code",
+    "implement",
+    "fix",
+    "edit",
+    "update",
+    "refactor",
+    "write",
+    "test",
+    "run",
+    "workspace",
+    "repository",
 )
 
 
@@ -79,6 +313,140 @@ def _is_user_facing_context_message(item: dict) -> bool:
     return True
 
 
+def _clip_text(text: str, limit: int) -> str:
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)] + "…"
+
+
+def _context_importance_score(message: dict, index: int, total: int) -> int:
+    role = str(message.get("role") or "").strip().lower()
+    content = str(message.get("content") or "")
+    score = min(40, len(content) // 20)
+    if role == "assistant":
+        score += 12
+    if role == "user":
+        score += 8
+    lowered = content.lower()
+    if any(
+        flag in lowered
+        for flag in ("error", "failed", "exception", "blocker", "verify", "evidence", "test", "tool")
+    ):
+        score += 25
+    recency_bonus = max(0, index - max(0, total - 10))
+    return score + recency_bonus
+
+
+def _build_weighted_context_block(messages: list[dict], max_chars: int) -> str:
+    user_facing = [item for item in messages if _is_user_facing_context_message(item)]
+    if not user_facing:
+        return ""
+
+    ranked_rows: list[tuple[int, str]] = []
+    total = len(user_facing)
+    for index, item in enumerate(user_facing):
+        role = str(item.get("role") or "unknown").strip().lower()
+        content = _clip_text(str(item.get("content") or ""), 260)
+        if not content:
+            continue
+        ranked_rows.append((_context_importance_score(item, index, total), f"- {role}: {content}"))
+
+    ranked_rows.sort(key=lambda row: row[0], reverse=True)
+    selected = [row for _, row in ranked_rows[:8]]
+    context_block = "\n".join(selected)
+    return _clip_text(context_block, max(600, max_chars))
+
+
+def _should_enforce_tool_first(goal: str, step: LoopStep, available_tools: list[str], mode: str) -> bool:
+    if mode.lower() in {"chat", "research"}:
+        return False
+    if step.label.lower() in {"plan", "summarize", "chat"}:
+        return False
+    if not available_tools:
+        return False
+    lowered_goal = (goal or "").lower()
+    return any(keyword in lowered_goal for keyword in WORKSPACE_ACTION_KEYWORDS)
+
+
+def _build_stage_prompt(
+    *,
+    goal: str,
+    mode: str,
+    step: LoopStep,
+    chat_mode: bool,
+    stage_attempt: int,
+    max_stage_turns: int,
+    tool_reference_lines: list[str],
+    skill_reference_lines: list[str],
+    stage_feedback: str,
+    citations_required: bool,
+    context_block: str,
+    system_prompt_override: str | None,
+    rules_checklist: str | None,
+) -> str:
+    mode_lower = (mode or "interactive").lower()
+    base_sections = [DEFAULT_SYSTEM_PROMPT, _mode_prompt_base(mode_lower)]
+
+    if not chat_mode and mode_lower != "research":
+        base_sections.append(PLANNING_PROMPT_BASE)
+
+    if chat_mode:
+        stage_protocol = (
+            "chat_protocol:\n"
+            "- Respond directly to the user in normal chat form.\n"
+            "- Do not include stage markers.\n"
+            "- Do not simulate tool calls unless explicitly asked."
+        )
+        stage_body = f"goal={goal}\nmode={mode}\n\n{stage_protocol}"
+    else:
+        criteria = "\n".join(f"- {item}" for item in step.success_criteria)
+        tools_block = "\n".join(tool_reference_lines) if tool_reference_lines else "- none"
+        skills_block = "\n".join(skill_reference_lines) if skill_reference_lines else "- none"
+        stage_body = (
+            f"goal={goal}\n"
+            f"mode={mode}\n"
+            f"step={step.label}\n"
+            f"attempt={stage_attempt}/{max_stage_turns}\n\n"
+            "stage_objective:\n"
+            f"{step.objective}\n\n"
+            "stage_success_criteria:\n"
+            f"{criteria}\n\n"
+            "response_protocol:\n"
+            f"- Complete stage: {STAGE_READY_PREFIX}{step.label}::\n"
+            f"- Need more work: {STAGE_NEEDS_MORE_PREFIX}{step.label}::\n"
+            "- Do not omit the prefix.\n"
+            "- For tools use one of:\n"
+            "  1) <tool_call><tool_name>NAME</tool_name><parameters>{...}</parameters></tool_call>\n"
+            "  2) TOOL_CALL::NAME::{\"key\":\"value\"}\n"
+            "- Parameters must be valid JSON object.\n"
+            "- If the task requires evidence or workspace changes, call at least one relevant tool before STAGE_READY.\n"
+            f"- Final attempt policy: if attempt={stage_attempt}/{max_stage_turns}, wrap up with a decisive STAGE_READY or STAGE_NEEDS_MORE.\n\n"
+            "available_tools:\n"
+            f"{tools_block}\n\n"
+            "available_skills:\n"
+            f"{skills_block}"
+        )
+
+    prompt_parts = [*base_sections, stage_body]
+
+    if stage_feedback:
+        prompt_parts.append(f"stage_feedback:\n{stage_feedback}")
+    if citations_required:
+        prompt_parts.append(
+            "citation_requirements:\n"
+            "- Claims from external sources must include inline markdown citations.\n"
+            "- Add a `## Citations` section listing referenced URLs."
+        )
+    if context_block:
+        prompt_parts.append(f"working_memory:\n{context_block}")
+    if isinstance(system_prompt_override, str) and system_prompt_override.strip():
+        prompt_parts.append(f"system_prompt_override={system_prompt_override.strip()}")
+    if isinstance(rules_checklist, str) and rules_checklist.strip():
+        prompt_parts.append(f"rules_checklist={rules_checklist.strip()}")
+
+    return "\n\n".join(prompt_parts)
+
 
 
 def _extract_requested_tool_name(output: str) -> str | None:
@@ -91,6 +459,14 @@ def _extract_requested_tool_name(output: str) -> str | None:
 def _extract_tool_calls(output: str) -> list[dict]:
     text = output or ""
     calls: list[dict] = []
+
+    def _append_call(tool_name: str, params: dict | None = None) -> None:
+        name = (tool_name or "").strip()
+        if not name:
+            return
+        if any(item.get("tool_name") == name for item in calls):
+            return
+        calls.append({"tool_name": name, "constraints": params if isinstance(params, dict) else {}})
 
     xml_pattern = re.compile(
         r"<tool_call>\s*<tool_name>([^<]+)</tool_name>\s*<parameters>([\s\S]*?)</parameters>\s*</tool_call>",
@@ -107,353 +483,37 @@ def _extract_tool_calls(output: str) -> list[dict]:
                     params = parsed
             except json.JSONDecodeError:
                 params = {"raw_parameters": raw_params}
-        if tool_name:
-            calls.append({"tool_name": tool_name, "constraints": params})
+        _append_call(tool_name, params)
+
+    simple_pattern = re.compile(r"TOOL_CALL::([a-zA-Z0-9_-]+)::(\{[\s\S]*?\})", re.IGNORECASE)
+    for match in simple_pattern.finditer(text):
+        tool_name = match.group(1)
+        raw_params = (match.group(2) or "{}").strip()
+        params: dict = {}
+        try:
+            parsed = json.loads(raw_params)
+            if isinstance(parsed, dict):
+                params = parsed
+        except json.JSONDecodeError:
+            params = {"raw_parameters": raw_params}
+        _append_call(tool_name, params)
+
+    fenced_json = re.search(r"```json\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fenced_json:
+        try:
+            parsed = json.loads(fenced_json.group(1))
+            if isinstance(parsed, dict):
+                tool_name = str(parsed.get("tool_name") or parsed.get("name") or "").strip()
+                params = parsed.get("parameters") or parsed.get("constraints") or {}
+                _append_call(tool_name, params if isinstance(params, dict) else {})
+        except json.JSONDecodeError:
+            pass
 
     inline_match = re.search(r"constraints\.tool_name\s*=\s*([a-zA-Z0-9_-]+)", text)
     if inline_match:
-        tool_name = inline_match.group(1)
-        if tool_name and not any(item.get("tool_name") == tool_name for item in calls):
-            calls.append({"tool_name": tool_name, "constraints": {}})
+        _append_call(inline_match.group(1), {})
 
     return calls
-
-
-def _safe_workspace_path(workspace_path: str | None) -> Path:
-    base = Path(workspace_path or ".").expanduser().resolve()
-    return base if base.exists() else Path(".").resolve()
-
-
-def _safe_workspace_target(workspace: Path, file_path: str) -> Path | None:
-    rel = str(file_path or "").strip()
-    if not rel:
-        return None
-    target = (workspace / rel).resolve()
-    if workspace not in target.parents and target != workspace:
-        return None
-    return target
-
-
-def _safe_upload_store(workspace: Path) -> Path:
-    store = (workspace / ".mu" / "uploaded_context").resolve()
-    store.mkdir(parents=True, exist_ok=True)
-    return store
-
-
-def _text_from_html(html: str) -> str:
-    cleaned = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<style[\s\S]*?</style>", " ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip()
-
-
-def _fetch_url(url: str, timeout_s: int = 20) -> tuple[str, str]:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mu-CLI/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as response:  # noqa: S310
-        payload = response.read()
-        ctype = str(response.headers.get("content-type") or "")
-    return ctype, payload.decode("utf-8", errors="replace")
-
-
-def _run_builtin_tool(tool_name: str, workspace: Path, constraints: dict, session: SessionModel, job: JobModel) -> dict:
-    if tool_name == "list_workspace_files":
-        files = [str(path.relative_to(workspace)) for path in workspace.rglob("*") if path.is_file()][:200]
-        return {"tool_name": tool_name, "workspace": str(workspace), "files": files}
-
-    if tool_name == "read_file":
-        rel = str(constraints.get("file_path") or "")
-        target = _safe_workspace_target(workspace, rel)
-        if not target:
-            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
-        if not target.exists() or not target.is_file():
-            return {"tool_name": tool_name, "error": "file does not exist"}
-        return {
-            "tool_name": tool_name,
-            "file_path": rel,
-            "content": target.read_text(encoding="utf-8", errors="replace")[:12000],
-        }
-
-    if tool_name == "write_file":
-        rel = str(constraints.get("file_path") or "")
-        content = str(constraints.get("content") or "")
-        target = _safe_workspace_target(workspace, rel)
-        if not target:
-            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return {
-            "tool_name": tool_name,
-            "file_path": rel,
-            "bytes_written": len(content.encode("utf-8")),
-        }
-
-    if tool_name == "get_workspace_file_context":
-        rel = str(constraints.get("file_path") or "")
-        target = _safe_workspace_target(workspace, rel)
-        if not target:
-            return {"tool_name": tool_name, "error": "file_path missing or outside workspace"}
-        if not target.exists() or not target.is_file():
-            return {"tool_name": tool_name, "error": "file does not exist"}
-        text = target.read_text(encoding="utf-8", errors="replace")
-        return {"tool_name": tool_name, "file_path": rel, "snippet": text[:2000]}
-
-    if tool_name == "execute_command":
-        command = str(constraints.get("command") or "").strip()
-        if not command:
-            return {"tool_name": tool_name, "error": "command is required"}
-        timeout_s = min(60, max(1, int(constraints.get("timeout_s") or 15)))
-        completed = subprocess.run(
-            command,
-            cwd=str(workspace),
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            check=False,
-        )
-        return {
-            "tool_name": tool_name,
-            "command": command,
-            "exit_code": completed.returncode,
-            "stdout": (completed.stdout or "")[:12000],
-            "stderr": (completed.stderr or "")[:8000],
-        }
-
-    if tool_name == "git":
-        command = str(constraints.get("command") or "status --short")
-        allowed = ["status", "log", "diff", "show", "branch", "rev-parse"]
-        if not any(command.strip().startswith(item) for item in allowed):
-            return {"tool_name": tool_name, "error": "only read-only git commands are allowed"}
-        completed = subprocess.run(
-            ["git", *command.split()],
-            cwd=str(workspace),
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        return {
-            "tool_name": tool_name,
-            "command": f"git {command}",
-            "exit_code": completed.returncode,
-            "stdout": (completed.stdout or "")[:12000],
-            "stderr": (completed.stderr or "")[:8000],
-        }
-
-    if tool_name == "apply_patch":
-        patch_text = str(constraints.get("patch") or "")
-        if not patch_text:
-            return {"tool_name": tool_name, "error": "patch is required"}
-        target_file = workspace / ".mu" / "pending.patch"
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        target_file.write_text(patch_text, encoding="utf-8")
-        completed = subprocess.run(
-            ["git", "apply", "--whitespace=nowarn", str(target_file)],
-            cwd=str(workspace),
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        return {
-            "tool_name": tool_name,
-            "exit_code": completed.returncode,
-            "stdout": (completed.stdout or "")[:12000],
-            "stderr": (completed.stderr or "")[:8000],
-        }
-
-    if tool_name == "fetch_url_context":
-        url = str(constraints.get("url") or "").strip()
-        if not url:
-            return {"tool_name": tool_name, "error": "url is required"}
-        try:
-            ctype, text = _fetch_url(url)
-            return {
-                "tool_name": tool_name,
-                "url": url,
-                "content_type": ctype,
-                "content": _text_from_html(text)[:6000],
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {"tool_name": tool_name, "url": url, "error": str(exc)}
-
-    if tool_name == "extract_links_context":
-        url = str(constraints.get("url") or "").strip()
-        if not url:
-            return {"tool_name": tool_name, "error": "url is required"}
-        try:
-            _, text = _fetch_url(url)
-            links = re.findall(r'href=["\']([^"\']+)["\']', text, flags=re.IGNORECASE)
-            normalized = []
-            for link in links:
-                normalized.append(urllib.parse.urljoin(url, link))
-            unique = []
-            seen = set()
-            for link in normalized:
-                if link in seen:
-                    continue
-                seen.add(link)
-                unique.append(link)
-            return {"tool_name": tool_name, "url": url, "links": unique[:100]}
-        except Exception as exc:  # noqa: BLE001
-            return {"tool_name": tool_name, "url": url, "error": str(exc)}
-
-    if tool_name == "fetch_pdf_context":
-        url = str(constraints.get("url") or "").strip()
-        if not url:
-            return {"tool_name": tool_name, "error": "url is required"}
-        try:
-            _, payload = _fetch_url(url)
-            text = re.sub(r"\s+", " ", payload)
-            return {"tool_name": tool_name, "url": url, "content": text[:6000]}
-        except Exception as exc:  # noqa: BLE001
-            return {"tool_name": tool_name, "url": url, "error": str(exc)}
-
-    if tool_name == "search_web_context":
-        query = str(constraints.get("query") or "").strip()
-        if not query:
-            return {"tool_name": tool_name, "error": "query is required"}
-        search_url = f"https://duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
-        try:
-            _, html = _fetch_url(search_url)
-            titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', html, flags=re.IGNORECASE)
-            snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>|class="result__snippet"[^>]*>(.*?)</div>', html, flags=re.IGNORECASE)
-            parsed = []
-            for idx, title in enumerate(titles[:5]):
-                snip = ""
-                if idx < len(snippets):
-                    snip = (snippets[idx][0] or snippets[idx][1] or "")
-                parsed.append({"title": _text_from_html(title), "snippet": _text_from_html(snip)})
-            return {"tool_name": tool_name, "query": query, "results": parsed}
-        except Exception as exc:  # noqa: BLE001
-            return {"tool_name": tool_name, "query": query, "error": str(exc)}
-
-    if tool_name == "search_arxiv_papers":
-        query = str(constraints.get("query") or "").strip()
-        if not query:
-            return {"tool_name": tool_name, "error": "query is required"}
-        max_results = min(10, max(1, int(constraints.get("max_results") or 5)))
-        endpoint = (
-            "http://export.arxiv.org/api/query?search_query="
-            + urllib.parse.quote_plus(query)
-            + f"&start=0&max_results={max_results}"
-        )
-        try:
-            _, xml_text = _fetch_url(endpoint)
-            root = ET.fromstring(xml_text)
-            ns = {"a": "http://www.w3.org/2005/Atom"}
-            items = []
-            for entry in root.findall("a:entry", ns):
-                items.append(
-                    {
-                        "id": (entry.findtext("a:id", default="", namespaces=ns) or "").strip(),
-                        "title": (entry.findtext("a:title", default="", namespaces=ns) or "").strip(),
-                        "summary": (entry.findtext("a:summary", default="", namespaces=ns) or "").strip()[:1200],
-                    }
-                )
-            return {"tool_name": tool_name, "query": query, "results": items}
-        except Exception as exc:  # noqa: BLE001
-            return {"tool_name": tool_name, "query": query, "error": str(exc)}
-
-    if tool_name == "score_sources":
-        sources = constraints.get("sources") or []
-        if not isinstance(sources, list):
-            return {"tool_name": tool_name, "error": "sources must be a list"}
-        scored = []
-        for source in sources:
-            if isinstance(source, dict):
-                title = str(source.get("title") or "")
-                summary = str(source.get("summary") or source.get("snippet") or "")
-            else:
-                title = str(source)
-                summary = str(source)
-            score = min(100, max(1, len(summary) // 40 + (20 if "arxiv" in title.lower() else 0)))
-            scored.append({"title": title, "score": score, "summary": summary[:300]})
-        scored.sort(key=lambda item: item["score"], reverse=True)
-        return {"tool_name": tool_name, "results": scored[:20]}
-
-    if tool_name == "run_make_agent_job":
-        nested_goal = str(constraints.get("goal") or "").strip()
-        if not nested_goal:
-            return {"tool_name": tool_name, "error": "goal is required"}
-        return {
-            "tool_name": tool_name,
-            "status": "queued",
-            "session_id": session.id,
-            "goal": nested_goal,
-            "note": "nested job creation is currently advisory in runtime tool mode",
-        }
-
-    if tool_name == "list_uploaded_context_files":
-        store = _safe_upload_store(workspace)
-        files = [
-            {
-                "name": path.name,
-                "size": path.stat().st_size,
-            }
-            for path in sorted(store.glob("*"))
-            if path.is_file()
-        ]
-        return {"tool_name": tool_name, "files": files}
-
-    if tool_name == "get_uploaded_context_file":
-        name = str(constraints.get("name") or "").strip()
-        target = _safe_workspace_target(_safe_upload_store(workspace), name)
-        if not target or not target.exists() or not target.is_file():
-            return {"tool_name": tool_name, "error": "uploaded context file not found"}
-        return {
-            "tool_name": tool_name,
-            "name": name,
-            "content": target.read_text(encoding="utf-8", errors="replace")[:12000],
-        }
-
-    if tool_name == "clear_uploaded_context_store":
-        store = _safe_upload_store(workspace)
-        deleted = 0
-        for path in store.glob("*"):
-            if path.is_file():
-                path.unlink(missing_ok=True)
-                deleted += 1
-        return {"tool_name": tool_name, "deleted_files": deleted}
-
-    if tool_name == "retrieve_conversation_summary":
-        context_state = session.context_state or {}
-        summary = context_state.get("summary")
-        messages = context_state.get("messages") if isinstance(context_state.get("messages"), list) else []
-        preview = []
-        for item in messages[-5:]:
-            role = str(item.get("role") or "")
-            content = str(item.get("content") or "")
-            if role and content:
-                preview.append(f"{role}: {content[:240]}")
-        return {
-            "tool_name": tool_name,
-            "summary": summary,
-            "recent_messages": preview,
-        }
-
-    return {
-        "tool_name": tool_name,
-        "status": "not_implemented",
-        "message": "builtin tool handler not implemented",
-    }
-
-
-def _render_shell_command(template: str, constraints: dict, workspace: Path) -> str:
-    values = {"workspace": str(workspace)}
-    for key, value in (constraints or {}).items():
-        if isinstance(value, (dict, list)):
-            values[key] = json.dumps(value)
-        else:
-            values[key] = str(value)
-
-    class _Default(dict):
-        def __missing__(self, key):
-            return ""
-
-    return template.format_map(_Default(values)).strip()
-
 
 async def _run_tool(
     tool_name: str,
@@ -461,67 +521,95 @@ async def _run_tool(
     job: JobModel,
     call_constraints: dict | None = None,
 ) -> dict:
-    workspace = _safe_workspace_path(session.workspace_path)
-    constraints = dict(job.constraints or {})
+    merged_args = dict(job.constraints or {})
     if isinstance(call_constraints, dict):
-        constraints.update(call_constraints)
-    tool = tool_registry.get(tool_name)
-    executor = tool.executor if tool else None
+        merged_args.update(call_constraints)
 
-    if not isinstance(executor, dict):
+    runtime_tools = _get_runtime_tool_map(session)
+    tool = runtime_tools.get(tool_name)
+    if tool is None:
         return {
             "tool_name": tool_name,
-            "status": "not_implemented",
-            "message": "missing executor config in tools registry",
+            "ok": False,
+            "error": "tool not found",
         }
 
-    exec_kind = str(executor.get("kind") or "builtin")
-    if exec_kind == "builtin":
-        builtin_name = str(executor.get("name") or tool_name)
-        return _run_builtin_tool(builtin_name, workspace, constraints, session, job)
+    context_state = session.context_state or {}
+    enabled_tools = context_state.get("enabled_tools")
+    if isinstance(enabled_tools, list) and enabled_tools and tool_name not in enabled_tools:
+        return {
+            "tool_name": tool_name,
+            "ok": False,
+            "error": f"tool disabled for session: {tool_name}",
+        }
 
-    if exec_kind == "shell":
-        template = str(executor.get("command") or "").strip()
-        if not template:
-            return {"tool_name": tool_name, "error": "executor.command is required for shell tools"}
-        command = _render_shell_command(template, constraints, workspace)
-        if not command:
-            return {"tool_name": tool_name, "error": "rendered command was empty"}
-        timeout_s = min(
-            120,
-            max(1, int(executor.get("timeout_s") or constraints.get("timeout_s") or 30)),
-        )
-        process = await asyncio.create_subprocess_shell(
-            command,
-            cwd=str(workspace),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+    try:
+        result = await asyncio.to_thread(tool.run, merged_args)
+    except Exception as exc:  # noqa: BLE001
+        result_payload = {
+            "tool_name": tool.name,
+            "ok": False,
+            "error": str(exc),
+        }
+    else:
+        result_payload = {
+            "tool_name": tool.name,
+            "ok": bool(result.ok),
+            "output": result.output,
+        }
+        if not result.ok:
+            result_payload["error"] = result.output
+
+    store = _coerce_workspace_store(getattr(session, "workspace", None))
+    if store is not None:
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
-        except TimeoutError:
-            process.kill()
-            await process.communicate()
-            return {
-                "tool_name": tool_name,
-                "command": command,
-                "error": f"command timed out after {timeout_s}s",
-            }
+            store.record_tool_run(
+                tool_name=tool.name,
+                args=merged_args,
+                output=str(result_payload.get("output") or result_payload.get("error") or ""),
+                ok=bool(result_payload.get("ok")),
+            )
+            session.workspace = store
+        except Exception:
+            pass
 
-        return {
-            "tool_name": tool_name,
-            "command": command,
-            "exit_code": process.returncode,
-            "stdout": (stdout or b"").decode("utf-8", errors="replace")[:12000],
-            "stderr": (stderr or b"").decode("utf-8", errors="replace")[:8000],
-        }
+    return result_payload
 
-    return {
-        "tool_name": tool_name,
-        "status": "not_implemented",
-        "message": f"unsupported executor kind: {exec_kind}",
-    }
 
+def _fallback_tool_calls(
+    *,
+    session_mode: str,
+    step_label: str,
+    goal: str,
+    stage_attempt: int,
+    max_stage_turns: int,
+) -> list[dict]:
+    mode = (session_mode or "").lower()
+    label = (step_label or "").lower()
+    if mode != "research" or label != "explore":
+        return []
+    if stage_attempt >= max_stage_turns:
+        return []
+
+    query = (goal or "").strip()
+    if not query:
+        return []
+
+    return [
+        {"tool_name": "search_web_context", "constraints": {"query": query}},
+        {"tool_name": "search_arxiv_papers", "constraints": {"query": query, "max_results": 5}},
+    ]
+
+
+
+
+def _forced_stage_wrap_output(step: LoopStep, last_signal: str, last_output: str, stage_attempts: int) -> str:
+    summary = (last_output or "").strip() or "No substantive model output was returned."
+    return (
+        f"Stage '{step.label}' auto-wrapped after {stage_attempts} attempts. "
+        f"Last signal={last_signal or 'missing'}. "
+        f"Best-effort summary: {summary}"
+    )
 
 def _normalize_stage_output(output: str) -> str:
     return re.sub(r"\s+", " ", (output or "").strip()).lower()
@@ -612,7 +700,8 @@ class JobRunner:
             await update_job_state(db, job.id, JobState.blocked)
             return False
 
-        tool = tool_registry.get(requested_tool)
+        runtime_tools = _get_runtime_tool_map(session)
+        tool = runtime_tools.get(str(requested_tool))
         if not tool:
             await emit_event(
                 db,
@@ -740,13 +829,12 @@ class JobRunner:
                 context_state = session.context_state or {}
                 enabled_skills = context_state.get("enabled_skills")
                 enabled_tools = context_state.get("enabled_tools")
-                skills_hint = ",".join(enabled_skills) if isinstance(enabled_skills, list) and enabled_skills else "none"
-                tools_hint = ",".join(enabled_tools) if isinstance(enabled_tools, list) and enabled_tools else "all"
                 system_prompt_override = context_state.get("system_prompt_override")
                 rules_checklist = context_state.get("rules_checklist")
                 chat_mode = (session.mode or "").lower() == "chat"
 
-                all_tools = tool_registry.list_tools()
+                runtime_tool_map = _get_runtime_tool_map(session)
+                all_tools = list(runtime_tool_map.values())
                 citations_required = _citations_required(
                     session.mode,
                     enabled_tools if isinstance(enabled_tools, list) else None,
@@ -757,17 +845,10 @@ class JobRunner:
                 max_context_messages = max(5, int(context_state.get("max_context_messages", 40)))
                 history_window = min(20, max_context_messages)
                 recent_context = context_messages[-history_window:] if history_window else []
-                context_lines = [
-                    f"{(item.get('role') or 'unknown')}: {item.get('content') or ''}"
-                    for item in recent_context
-                    if _is_user_facing_context_message(item)
-                ]
-                context_block = "\n".join(context_lines).strip()
                 max_context_chars = max(1000, int(context_state.get("max_context_chars", 8000)))
-                if len(context_block) > max_context_chars:
-                    context_block = context_block[-max_context_chars:]
+                context_block = _build_weighted_context_block(recent_context, max_context_chars)
 
-                all_skills = skill_registry.discover(session.workspace_path)
+                all_skills = skill_registry.discover(session.workspace)
                 tool_reference_lines = []
                 for tool in all_tools:
                     approval = "requires approval" if tool.requires_approval else "no approval"
@@ -782,53 +863,30 @@ class JobRunner:
                         f"Call by explicitly referencing skill '{skill.name}' in your plan/tooling rationale."
                     )
 
-                tools_reference_block = "\n".join(tool_reference_lines)
-                skills_reference_block = "\n".join(skill_reference_lines) if skill_reference_lines else "- none"
-
                 stage_output = ""
                 stage_feedback = ""
                 last_provider = ""
+                last_signal = "missing"
+                last_cleaned_output = ""
                 prior_normalized_outputs: list[str] = []
+                stage_tool_calls_made = 0
                 max_stage_turns = max(1, int(context_state.get("max_stage_turns", DEFAULT_MAX_STAGE_TURNS)))
                 for stage_attempt in range(1, max_stage_turns + 1):
-                    stage_success = "\n".join([f"- {item}" for item in step.success_criteria])
-                    if chat_mode:
-                        prompt = f"goal={job.goal}\nmode={session.mode}"
-                        prompt += "\n\nchat_protocol:\n"
-                        prompt += "- Respond directly to the user in normal chat form.\n"
-                        prompt += "- Do not include stage markers or agent loop narration.\n"
-                        prompt += "- Do not suggest or simulate tool calls unless explicitly asked for that behavior."
-                    else:
-                        prompt = f"goal={job.goal}\nmode={session.mode}\nstep={step.label}\nenabled_skills={skills_hint}\nenabled_tools={tools_hint}"
-                        prompt += "\n\nstage_objective:\n" + step.objective
-                        prompt += "\n\nstage_success_criteria:\n" + stage_success
-                        prompt += "\n\navailable_tools_by_name_and_usage:\n" + tools_reference_block
-                        prompt += "\n\navailable_skills_by_name_and_usage:\n" + skills_reference_block
-                        prompt += (
-                            "\n\nstage_protocol:\n"
-                            f"- When this stage is complete, prefix your response with {STAGE_READY_PREFIX}{step.label}::\n"
-                            f"- If not complete, prefix with {STAGE_NEEDS_MORE_PREFIX}{step.label}:: and explain what is missing.\n"
-                            "- Do not omit this prefix."
-                            "\n- Use STAGE_NEEDS_MORE when criteria are not yet satisfied; do not use STAGE_READY prematurely."
-                        )
-                        prompt += f"\ncurrent_stage_attempt={stage_attempt}/{max_stage_turns}"
-                        if stage_feedback:
-                            prompt += f"\n\nstage_feedback:\n{stage_feedback}"
-
-                    if citations_required:
-                        prompt += (
-                            "\n\ncitation_requirements:\n"
-                            "- Any claim derived from external web/PDF/arXiv/link sources MUST include an inline citation like [1].\n"
-                            "- Inline citations must use markdown links to the source URL, e.g. [1](https://example.com/source).\n"
-                            "- Include a separate `## Citations` section at the end listing each referenced URL.\n"
-                            "- Do not present externally sourced claims without citations."
-                        )
-                    if context_block:
-                        prompt += f"\n\nconversation_context:\n{context_block}"
-                    if isinstance(system_prompt_override, str) and system_prompt_override.strip():
-                        prompt += f"\n\nsystem_prompt_override={system_prompt_override.strip()}"
-                    if isinstance(rules_checklist, str) and rules_checklist.strip():
-                        prompt += f"\n\nrules_checklist={rules_checklist.strip()}"
+                    prompt = _build_stage_prompt(
+                        goal=job.goal,
+                        mode=session.mode,
+                        step=step,
+                        chat_mode=chat_mode,
+                        stage_attempt=stage_attempt,
+                        max_stage_turns=max_stage_turns,
+                        tool_reference_lines=tool_reference_lines,
+                        skill_reference_lines=skill_reference_lines,
+                        stage_feedback=stage_feedback,
+                        citations_required=citations_required,
+                        context_block=context_block,
+                        system_prompt_override=system_prompt_override if isinstance(system_prompt_override, str) else None,
+                        rules_checklist=rules_checklist if isinstance(rules_checklist, str) else None,
+                    )
 
                     stage_meta = {
                         "index": step.index,
@@ -905,6 +963,8 @@ class JobRunner:
                         is_ready, signal, cleaned_output = True, "chat", (result.output or "").strip()
                     else:
                         is_ready, signal, cleaned_output = _extract_stage_signal(result.output, step.label)
+                    last_signal = signal
+                    last_cleaned_output = cleaned_output or (result.output or "")
                     await emit_event(
                         db,
                         job.session_id,
@@ -930,7 +990,34 @@ class JobRunner:
                         prior_normalized_outputs.append(normalized_output)
 
                     requested_tool_calls = [] if chat_mode else _extract_tool_calls(result.output)
+                    if not requested_tool_calls and not chat_mode:
+                        requested_tool_calls = _fallback_tool_calls(
+                            session_mode=session.mode,
+                            step_label=step.label,
+                            goal=job.goal,
+                            stage_attempt=stage_attempt,
+                            max_stage_turns=max_stage_turns,
+                        )
+
+                    if (
+                        _should_enforce_tool_first(
+                            goal=job.goal,
+                            step=step,
+                            available_tools=[tool.name for tool in all_tools],
+                            mode=session.mode,
+                        )
+                        and stage_attempt < max_stage_turns
+                        and not requested_tool_calls
+                        and signal != "ready"
+                    ):
+                        stage_feedback = (
+                            "Tool-first reminder: call at least one workspace tool before concluding this stage.\n"
+                            "Use exact format: <tool_call><tool_name>read_file</tool_name>"
+                            "<parameters>{\"path\":\"path/to/file\"}</parameters></tool_call>"
+                        )
+                        continue
                     if requested_tool_calls:
+                        stage_tool_calls_made += len(requested_tool_calls)
                         tool_results: list[dict] = []
                         for tool_call in requested_tool_calls:
                             requested_tool_name = str(tool_call.get("tool_name") or "").strip()
@@ -978,9 +1065,16 @@ class JobRunner:
                                 break
                             stage_feedback = (
                                 "Requested tools were executed. Review results and continue this stage.\n"
-                                f"tool_results={json.dumps(tool_results, ensure_ascii=False)}"
+                                f"tool_results={_clip_text(json.dumps(tool_results, ensure_ascii=False), 3000)}"
                             )
                             continue
+
+                    if is_ready and _requires_tool_usage(session.mode, step.label) and stage_tool_calls_made == 0:
+                        stage_feedback = (
+                            "This stage requires tool-backed evidence before completion. "
+                            "Call at least one relevant tool now, then continue."
+                        )
+                        continue
 
                     if is_ready:
                         stage_output = cleaned_output
@@ -1024,9 +1118,32 @@ class JobRunner:
                     )
 
                 if not stage_output:
-                    raise RuntimeError(
-                        f"Stage '{step.label}' did not provide required readiness confirmation "
-                        f"after {max_stage_turns} attempts"
+                    stage_output = _forced_stage_wrap_output(
+                        step,
+                        last_signal=last_signal,
+                        last_output=last_cleaned_output,
+                        stage_attempts=max_stage_turns,
+                    )
+                    await emit_event(
+                        db,
+                        job.session_id,
+                        "stage_forced_progress",
+                        {
+                            "query": {
+                                "id": job.id,
+                                "goal": job.goal,
+                                "mode": session.mode,
+                                "attempt": attempts,
+                            },
+                            "step": step.index,
+                            "label": step.label,
+                            "attempt": max_stage_turns,
+                            "max_attempts": max_stage_turns,
+                            "signal": last_signal,
+                            "reason": "max_attempts_exhausted_autowrap",
+                            "repeated_count": 0,
+                        },
+                        job_id=job.id,
                     )
 
                 job.checkpoints = {

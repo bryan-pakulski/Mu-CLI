@@ -151,6 +151,34 @@ function toggleTheme() {
   applyTheme(next);
 }
 
+function formatNumber(value) {
+  const num = Number(value || 0);
+  return Number.isFinite(num) ? num.toLocaleString("en-US") : "0";
+}
+
+function estimateSessionContextChars(sessionId) {
+  const messages = sessionMessages.get(sessionId) || [];
+  return messages.reduce((sum, msg) => sum + String(msg?.content || "").length, 0);
+}
+
+function estimateSessionContextMessages(sessionId) {
+  return (sessionMessages.get(sessionId) || []).length;
+}
+
+function updateContextSizeIndicator(sessionId = currentSession) {
+  const indicator = el("context-size-indicator");
+  if (!indicator) return;
+  if (!sessionId) {
+    indicator.textContent = "context: 0 / 0 msgs";
+    return;
+  }
+
+  const session = sessionsCache.find((s) => s.id === sessionId);
+  const maxMessages = Number(session?.context_state?.max_context_messages || 0);
+  const usedMessages = estimateSessionContextMessages(sessionId);
+  indicator.textContent = `context: ${formatNumber(usedMessages)} / ${formatNumber(maxMessages)} msgs`;
+}
+
 function getSessionLimits(session) {
   const maxTimeout = Number(session?.context_state?.max_timeout_s || 300);
   const maxContext = Number(session?.context_state?.max_context_messages || 40);
@@ -210,7 +238,7 @@ function appendToolMetadata(details, eventType, payload) {
   details.appendChild(box);
 }
 
-function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = null) {
+function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = null, detailKey = "", openKeys = new Set()) {
   const wrapper = document.createElement("div");
   wrapper.className = "meta-entry";
   wrapper.dataset.eventType = eventType;
@@ -218,6 +246,8 @@ function buildTimelineNode(eventType, payload, createdAt = null, queryStartMs = 
 
   const details = document.createElement("details");
   details.className = "meta-details";
+  if (detailKey) details.dataset.detailKey = detailKey;
+  details.open = openKeys.has(detailKey);
 
   const summary = document.createElement("summary");
   const tag = document.createElement("span");
@@ -427,6 +457,59 @@ function setSessionState(state) {
   });
 }
 
+
+function lastSessionMessage(sessionId) {
+  const messages = sessionMessages.get(sessionId) || [];
+  return messages.length > 0 ? messages[messages.length - 1] : null;
+}
+
+function appendAssistantStreamChunk(chunk, sessionId = currentSession) {
+  if (!sessionId || !String(chunk || "").trim()) return;
+  const messages = sessionMessages.get(sessionId) || [];
+  const last = messages.length > 0 ? messages[messages.length - 1] : null;
+  if (!last || last.role !== "assistant" || !last.is_streaming) {
+    messages.push({
+      role: "assistant",
+      content: String(chunk || ""),
+      created_at: formatLocalTimestamp(),
+      is_streaming: true,
+      stream_chunks: [String(chunk || "")],
+    });
+  } else {
+    last.content = String(chunk || "");
+    last.stream_chunks = [...(last.stream_chunks || []), String(chunk || "")];
+  }
+  sessionMessages.set(sessionId, messages);
+  if (sessionId === currentSession) {
+    renderChatForSession(sessionId);
+    const nodes = el("chat-window")?.querySelectorAll?.(".message.assistant");
+    latestAssistantMessage = nodes && nodes.length ? nodes[nodes.length - 1] : null;
+  }
+}
+
+function finalizeAssistantMessage(finalText, sessionId = currentSession) {
+  if (!sessionId) return;
+  const content = String(finalText || "").trim();
+  if (!content) return;
+  const messages = sessionMessages.get(sessionId) || [];
+  const last = messages.length > 0 ? messages[messages.length - 1] : null;
+
+  if (last && last.role === "assistant" && last.is_streaming) {
+    last.content = content;
+    last.is_streaming = false;
+    last.stream_chunks = Array.isArray(last.stream_chunks) ? last.stream_chunks : [];
+  } else {
+    messages.push({ role: "assistant", content, created_at: formatLocalTimestamp(), is_streaming: false, stream_chunks: [] });
+  }
+
+  sessionMessages.set(sessionId, messages);
+  if (sessionId === currentSession) {
+    renderChatForSession(sessionId);
+    const nodes = el("chat-window")?.querySelectorAll?.(".message.assistant");
+    latestAssistantMessage = nodes && nodes.length ? nodes[nodes.length - 1] : null;
+  }
+}
+
 function addSessionMessage(sessionId, role, content, extras = {}) {
   const existing = sessionMessages.get(sessionId) || [];
   existing.push({ role, content, created_at: formatLocalTimestamp(), ...extras });
@@ -440,6 +523,7 @@ function renderChatForSession(sessionId) {
 
   if (messages.length === 0) {
     chatWindow.innerHTML = '<div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>';
+    updateContextSizeIndicator(sessionId);
     return;
   }
 
@@ -447,6 +531,26 @@ function renderChatForSession(sessionId) {
     const node = document.createElement("div");
     node.className = `message ${msg.role}`;
     node.innerHTML = `<div class="tag-row"><div class="tag">${msg.role}</div><div class="timestamp">${msg.created_at || formatLocalTimestamp()}</div></div><div class="message-content">${renderMarkdown(msg.content)}</div>`;
+
+    if (msg.role === "assistant" && Array.isArray(msg.stream_chunks) && msg.stream_chunks.length > 0 && !msg.is_streaming) {
+      const footer = document.createElement("details");
+      footer.className = "stream-footer";
+      const summary = document.createElement("summary");
+      summary.textContent = `View streamed updates (${msg.stream_chunks.length})`;
+      footer.appendChild(summary);
+
+      const body = document.createElement("div");
+      body.className = "stream-footer-body";
+      msg.stream_chunks.forEach((chunk, idx) => {
+        const item = document.createElement("div");
+        item.className = "stream-footer-item";
+        item.innerHTML = `<div class="stream-footer-index">Update ${idx + 1}</div><div>${renderMarkdown(chunk)}</div>`;
+        body.appendChild(item);
+      });
+      footer.appendChild(body);
+      node.appendChild(footer);
+    }
+
     chatWindow.appendChild(node);
   });
 
@@ -460,6 +564,7 @@ function renderChatForSession(sessionId) {
   }
 
   chatWindow.scrollTop = chatWindow.scrollHeight;
+  updateContextSizeIndicator(sessionId);
 }
 
 function pushChat(tag, message) {
@@ -471,19 +576,7 @@ function pushChat(tag, message) {
 }
 
 function updateAssistantDraft(text, sessionId = currentSession) {
-  if (!sessionId) return;
-  if (sessionId !== currentSession) return;
-  if (!latestAssistantMessage) {
-    latestAssistantMessage = pushChat("assistant", text);
-    return;
-  }
-  const contentNode = latestAssistantMessage.querySelector(".message-content");
-  if (contentNode) {
-    contentNode.innerHTML = renderMarkdown(text);
-    highlightCodeBlocks(contentNode);
-  }
-  const messages = sessionMessages.get(sessionId) || [];
-  if (messages.length > 0) messages[messages.length - 1].content = text;
+  appendAssistantStreamChunk(text, sessionId);
 }
 
 function setThinkingState(sessionId, active) {
@@ -504,9 +597,23 @@ function eventQueryKey(payload = {}) {
   return payload?.query?.id || "ungrouped";
 }
 
+function captureTimelineUiState(timelineNode) {
+  const openKeys = new Set();
+  if (timelineNode) {
+    timelineNode.querySelectorAll("details[data-detail-key]").forEach((detailsNode) => {
+      if (detailsNode.open) openKeys.add(detailsNode.dataset.detailKey);
+    });
+  }
+  return {
+    openKeys,
+    scrollTop: timelineNode ? timelineNode.scrollTop : 0,
+  };
+}
+
 function renderTimeline() {
   const timeline = el("timeline");
   if (!timeline) return;
+  const uiState = captureTimelineUiState(timeline);
   timeline.innerHTML = "";
 
   const grouped = new Map();
@@ -516,18 +623,30 @@ function renderTimeline() {
     grouped.get(key).push(evt);
   });
 
-  [...grouped.entries()].forEach(([queryId, events]) => {
+  const groupedEntries = [...grouped.entries()].map(([queryId, events]) => {
     const queryStartMs = Math.min(
       ...events.map((evt) => {
         const ms = evt.created_at ? Date.parse(evt.created_at) : Date.now();
         return Number.isFinite(ms) ? ms : Date.now();
       }),
     );
+    return { queryId, events, queryStartMs };
+  });
+
+  groupedEntries.sort((a, b) => {
+    if (a.queryStartMs !== b.queryStartMs) return b.queryStartMs - a.queryStartMs;
+    return String(a.queryId).localeCompare(String(b.queryId));
+  });
+
+  groupedEntries.forEach(({ queryId, events, queryStartMs }) => {
 
     const group = document.createElement("section");
     group.className = "block collapsible query-separator";
 
     const details = document.createElement("details");
+    const queryDetailKey = `query:${queryId}`;
+    details.dataset.detailKey = queryDetailKey;
+    details.open = uiState.openKeys.has(queryDetailKey) || events.length <= 3;
 
     const summary = document.createElement("summary");
     summary.className = "meta-group-summary";
@@ -538,8 +657,16 @@ function renderTimeline() {
 
     const eventsWrap = document.createElement("div");
     eventsWrap.className = "meta-group-events";
-    events.forEach((evt) => {
-      const node = buildTimelineNode(evt.event_type, evt.payload || {}, evt.created_at, queryStartMs);
+    events.forEach((evt, index) => {
+      const eventDetailKey = `event:${queryId}:${evt.created_at || "na"}:${evt.event_type}:${index}`;
+      const node = buildTimelineNode(
+        evt.event_type,
+        evt.payload || {},
+        evt.created_at,
+        queryStartMs,
+        eventDetailKey,
+        uiState.openKeys,
+      );
       eventsWrap.appendChild(node);
     });
 
@@ -549,6 +676,7 @@ function renderTimeline() {
   });
 
   applyTimelineFilter();
+  timeline.scrollTop = Math.min(uiState.scrollTop, timeline.scrollHeight);
 }
 
 
@@ -754,6 +882,7 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
     el("active-model").textContent = "provider: n/a";
     setSessionState("idle");
     el("chat-window").innerHTML = '<div class="empty-state">Start by creating/selecting a session, then send a prompt.</div>';
+    updateContextSizeIndicator(null);
     return;
   }
 
@@ -762,7 +891,8 @@ async function updateSessionSummary(session, options = { autoPersistIfMissingMod
   const name = session.name || "default";
 
   const limits = getSessionLimits(session);
-  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${limits.maxContext} msgs/${limits.maxContextChars} chars | stage_turns=${limits.maxStageTurns}`;
+  const contextMsgCount = estimateSessionContextMessages(session.id);
+  el("session-summary").textContent = `session=${name} | mode=${session.mode} | policy=${session.policy_profile} | provider=${provider} | model=${model || "default"} | timeout=${limits.maxTimeout}s | context=${contextMsgCount}/${limits.maxContext} msgs | stage_turns=${limits.maxStageTurns}`;
   el("mode").value = session.mode || "interactive";
   el("policy").value = session.policy_profile || "default";
   el("providers").value = provider;
@@ -834,7 +964,8 @@ function showSessionMenu(anchorButton, session) {
   menu.className = "session-menu";
   menu.style.position = "fixed";
   menu.style.top = `${rect.bottom + 6}px`;
-  menu.style.left = `${Math.max(8, rect.right - 140)}px`;
+  menu.style.left = `${Math.max(8, rect.right - 160)}px`;
+  menu.style.width = "160px";
 
   const settingsBtn = document.createElement("button");
   settingsBtn.textContent = "Settings";
@@ -963,11 +1094,17 @@ function connectStream() {
     }
 
     if (eventType === "assistant_chunk") {
-      const existing = assistantDraftBuffers.get(sessionId) || "";
-      const next = `${existing}${existing ? "\n\n" : ""}${payload?.text || ""}`;
-      assistantDraftBuffers.set(sessionId, next);
-      updateAssistantDraft(next, sessionId);
+      finalizeAssistantMessage(payload?.text || "", sessionId);
+      assistantDraftBuffers.delete(sessionId);
       setThinkingState(sessionId, true);
+    }
+
+    if (eventType === "model_response") {
+      const chunk = String(payload?.text || "").trim();
+      const isReady = Boolean(payload?.stage_ready);
+      if (chunk && !isReady) {
+        appendAssistantStreamChunk(chunk, sessionId);
+      }
     }
 
     if (eventType === "loop_step") {

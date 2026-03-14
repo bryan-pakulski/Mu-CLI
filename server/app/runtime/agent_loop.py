@@ -67,6 +67,7 @@ _MODE_STEP_DEFINITIONS: dict[str, list[dict[str, object]]] = {
             "label": "explore",
             "objective": "Gather and analyze relevant information.",
             "success_criteria": [
+                "Use discovery/read tools to gather evidence before conclusions.",
                 "Findings are relevant to the question.",
                 "Evidence/source quality is considered.",
                 "Open uncertainties are called out.",
@@ -76,6 +77,7 @@ _MODE_STEP_DEFINITIONS: dict[str, list[dict[str, object]]] = {
             "label": "summarize",
             "objective": "Produce a concise synthesis of findings.",
             "success_criteria": [
+                "Summary is grounded in evidence gathered via tools during exploration.",
                 "Summary answers the user goal directly.",
                 "Trade-offs and confidence are stated.",
                 "Recommended next actions are provided when applicable.",

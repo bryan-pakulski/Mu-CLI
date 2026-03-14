@@ -7,7 +7,7 @@ from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from server.app.persistence.db import Base
-
+from server.app.workspace.discovery import WorkspaceStore, WorkspaceStoreType
 
 class SessionStatus(str, enum.Enum):
     active = "active"
@@ -36,7 +36,7 @@ class SessionModel(Base):
     __tablename__ = "sessions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    workspace_path: Mapped[str] = mapped_column(String, nullable=False)
+    workspace: Mapped[WorkspaceStore | None] = mapped_column(WorkspaceStoreType())
     mode: Mapped[str] = mapped_column(String, default="interactive")
     provider_preferences: Mapped[dict] = mapped_column(JSON().with_variant(SQLITE_JSON, "sqlite"))
     policy_profile: Mapped[str] = mapped_column(String, default="default")

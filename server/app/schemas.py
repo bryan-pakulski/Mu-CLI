@@ -3,10 +3,10 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from server.app.persistence.models import ApprovalState, JobState, SessionStatus
-
+from server.app.workspace.discovery import WorkspaceStore
 
 class SessionCreate(BaseModel):
-    workspace_path: str
+    workspace_path: str | None = None
     name: str = "default"
     mode: str = "interactive"
     provider_preferences: dict = Field(default_factory=lambda: {"ordered": ["ollama"]})
@@ -20,7 +20,7 @@ class SessionCreate(BaseModel):
 class SessionRead(BaseModel):
     id: str
     name: str
-    workspace_path: str
+    workspace: WorkspaceStore | None = None
     mode: str
     provider_preferences: dict
     policy_profile: str

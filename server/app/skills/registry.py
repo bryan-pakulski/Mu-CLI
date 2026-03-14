@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from server.app.workspace.discovery import WorkspaceStore
 
 @dataclass
 class SkillDefinition:
@@ -31,7 +32,7 @@ class SkillRegistry:
         self._ensure_store()
         return self._store_root
 
-    def discover(self, workspace_path: str = "") -> list[SkillDefinition]:
+    def discover(self, workspace: WorkspaceStore | None = None) -> list[SkillDefinition]:
         self._ensure_store()
         skills: list[SkillDefinition] = []
         for skill_file in sorted(self._store_root.glob("*/SKILL.md")):

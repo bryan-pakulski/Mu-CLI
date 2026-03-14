@@ -133,11 +133,12 @@ def interactive_loop(
 
 def cmd_session_create(args: argparse.Namespace, client: Client) -> None:
     payload = {
-        "workspace_path": args.workspace,
+        "workspace": WorkspaceStore(args.workspace),
         "mode": args.mode,
         "provider_preferences": {"ordered": args.providers.split(",")},
         "policy_profile": args.policy,
     }
+    payload["workspace"].attach(Path(args.workspace))
     out = client.post("/sessions", payload)
     print(json.dumps(out, indent=2))
 
@@ -181,7 +182,7 @@ def cmd_approvals(args: argparse.Namespace, client: Client) -> None:
 
 def cmd_loop(args: argparse.Namespace, client: Client) -> None:
     session_payload = {
-        "workspace_path": args.workspace,
+        "workspace": WorkspaceStore(args.workspace),
         "mode": args.mode,
         "provider_preferences": {"ordered": args.providers.split(",")},
         "policy_profile": args.policy,

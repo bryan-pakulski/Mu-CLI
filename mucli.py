@@ -123,6 +123,22 @@ def print_splash(session):
     console.print("[dim] Type '/help' for commands.[/dim]\n")
 
 
+def init_provider(provider_name, model_name, ollama_host=None):
+    # Init provider contextually
+    if provider_name == "ollama":
+        if ollama_host:
+            provider = OllamaProvider(model_name=model_name, host=ollama_host)
+        else:
+            provider = OllamaProvider(model_name=model_name)
+    elif provider_name == "gemini":
+        provider = GeminiProvider(model_name=model_name)
+    elif provider_name == "openai":
+        provider = OpenAIProvider(model_name=model_name)
+    else:
+        return None
+    return provider
+
+
 def select_provider_and_model(args_provider, args_model, ollama_host=None):
     providers = ["gemini", "ollama", "openai"]
     provider_name = args_provider
@@ -136,18 +152,9 @@ def select_provider_and_model(args_provider, args_model, ollama_host=None):
         )
         provider_name = providers[int(choice) - 1]
 
-    # Init provider contextually
-    if provider_name == "ollama":
-        if ollama_host:
-            provider = OllamaProvider(model_name="", host=ollama_host)
-        else:
-            provider = OllamaProvider(model_name="")
-    elif provider_name == "gemini":
-        provider = GeminiProvider(model_name="")
-    elif provider_name == "openai":
-        provider = OpenAIProvider(model_name="")
-    else:
-        console.print(f"[red]Unknown provider: {provider_name}")
+    provider = init_provider(provider_name, "", ollama_host)
+    if not provider:
+        console.print(f"[red]Unknown provider: {provider_name}[/red]")
         sys.exit(1)
 
     models = provider.get_available_models()
@@ -168,6 +175,30 @@ def select_provider_and_model(args_provider, args_model, ollama_host=None):
 
     provider.model_name = model_name
     return provider
+
+
+def choose_session(session_manager):
+    sessions = session_manager.get_session_list()
+    if not sessions:
+        return "new", None
+
+    console.print("\n[bold cyan]Available Sessions:[/bold cyan]")
+    for i, s in enumerate(sessions, 1):
+        console.print(f" {i}. {s}")
+    console.print(f" {len(sessions) + 1}. [New Session]")
+
+    choice = IntPrompt.ask(
+        "Select a session", choices=[str(i) for i in range(1, len(sessions) + 2)]
+    )
+
+    if choice == len(sessions) + 1:
+        from rich.prompt import Prompt
+        name = Prompt.ask(
+            "Enter name for new session (optional, press enter for default)"
+        )
+        return "new", name if name else None
+    else:
+        return "load", sessions[choice - 1]
 
 
 def sync_provider_settings(session):
@@ -211,11 +242,24 @@ def main():
     ui.set_variables(session_manager.variables)
     ollama_host = session_manager.variables.get("ollama_host")
 
-    # --- Initialize Provider ---
+    # --- Initialize Session and Provider ---
     try:
-        provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
+        action, session_name = choose_session(session_manager)
+        if action == "load":
+            session_manager.switch_session(session_name)
+            p_cfg = session_manager.provider_config
+            if p_cfg.get("provider") and p_cfg.get("model"):
+                provider = init_provider(p_cfg["provider"], p_cfg["model"], ollama_host=ollama_host)
+            else:
+                # Fallback if config is missing
+                provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
+                session_manager.provider_config = {"provider": provider.name, "model": provider.model_name}
+                session_manager.save_history()
+        else:
+            provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
+            session_manager.new_session(session_name, provider.name, provider.model_name)
     except Exception as e:
-        console.print(f"[red]Failed to initialize Provider: {e}[/red]")
+        console.print(f"[red]Failed to initialize Session/Provider: {e}[/red]")
         sys.exit(1)
 
     # --- Initialize Session ---
@@ -342,18 +386,33 @@ def main():
 
                 elif cmd in ["/new"]:
                     name = arg.strip() if arg else None
-                    session.session_manager.new_session(name)
+                    # Prompt for provider/model on new session
+                    ollama_host = session.variables.get("ollama_host")
+                    new_provider = select_provider_and_model(
+                        None, None, ollama_host=ollama_host
+                    )
+                    session.provider = new_provider
+                    session.session_manager.new_session(
+                        name, new_provider.name, new_provider.model_name
+                    )
                     session.staged_files = []
                     session.folder_context = FolderContext()
                     ui.set_variables(session.variables)
                     print_splash(session)
-
                 elif cmd in ["/load", "/open"]:
                     if arg:
                         session.session_manager.switch_session(arg.strip())
                         session.staged_files = []
                         session.folder_context = FolderContext()
                         ui.set_variables(session.variables)
+                        # Update provider based on session config
+                        p_cfg = session.session_manager.provider_config
+                        if p_cfg.get("provider") and p_cfg.get("model"):
+                            ollama_host = session.variables.get("ollama_host")
+                            session.provider = init_provider(
+                                p_cfg["provider"], p_cfg["model"], ollama_host
+                            )
+
                         sync_provider_settings(session)
                         if session.session_manager.folder_context_data:
                             session.folder_context.from_dict(
@@ -404,6 +463,12 @@ def main():
                             console.print(
                                 f"Model changed to: [green]{session.provider.model_name}"
                             )
+                            # Update provider config in session
+                            session.session_manager.provider_config = {
+                                "provider": session.provider.name,
+                                "model": session.provider.model_name,
+                            }
+                            session.session_manager.save_history()
                             print_splash(session)
 
                 elif cmd == "/provider":
@@ -412,6 +477,11 @@ def main():
                         session.provider = select_provider_and_model(
                             arg.strip() if arg else None, None, ollama_host=ollama_host
                         )
+                        session.session_manager.provider_config = {
+                            "provider": session.provider.name,
+                            "model": session.provider.model_name,
+                        }
+                        session.session_manager.save_history()
                         console.print(f"[green]Provider changed successfully![/green]")
                         print_splash(session)
                     except Exception as e:

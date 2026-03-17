@@ -26,6 +26,7 @@ class OpenAIProvider(LLMProvider):
                 "OPENAI_API_KEY environment variable is required. Set it via: export OPENAI_API_KEY='your-key'"
             )
         super().__init__(model_name)
+        self.name = "openai"
 
     def get_available_models(self) -> List[str]:
         """Fetch available models from OpenAI API."""

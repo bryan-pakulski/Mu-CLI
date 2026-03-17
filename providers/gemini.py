@@ -15,6 +15,7 @@ from .base import (
 class GeminiProvider(LLMProvider):
     def __init__(self, model_name: str = "", api_key: str = None):
         super().__init__(model_name)
+        self.name = "gemini"
         if not api_key:
             api_key = os.environ.get("GOOGLE_API_KEY")
         self.client = genai.Client(api_key=api_key)

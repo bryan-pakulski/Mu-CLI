@@ -15,6 +15,7 @@ from .base import (
 class OllamaProvider(LLMProvider):
     def __init__(self, model_name: str = "", host: str = "http://localhost:11434"):
         super().__init__(model_name)
+        self.name = "ollama"
         self.host = host
 
     def get_available_models(self) -> List[str]:

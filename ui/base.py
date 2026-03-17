@@ -25,3 +25,8 @@ class BaseUI(ABC):
     def show_status(self, message):
         """Context manager or similar for displaying status (e.g. 'Thinking...')"""
         pass
+
+    @abstractmethod
+    def show_tool_result(self, result_str):
+        """Display the result of a tool execution with appropriate color-coding."""
+        pass

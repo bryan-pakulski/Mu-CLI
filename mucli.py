@@ -32,7 +32,7 @@ def print_help():
     table.add_row("/new [name]", "", "Start a new conversation")
     table.add_row("/file <path>", "/f", "Attach a file")
     table.add_row(
-        "/folder <path>", "/dir", "Monitor a folder for changes and use as context"
+        "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
     )
     table.add_row("/help", "", "Show this help menu")
     table.add_row("/list", "/ls", "List saved conversations")
@@ -66,9 +66,7 @@ def print_help():
     )
 
 
-def print_splash(
-    session_model, session_thinking, session_sys, session_agentic, agent_mode
-):
+def print_splash(session):
     welcome_text = Text()
 
     # Neon μCLI Cyberpunk Ascii Art
@@ -89,12 +87,29 @@ def print_splash(
 
     welcome_text.append("\n > _AUTONOMOUS_AGENT_READY\n", style="bold yellow")
 
+    sys_status = "SET" if session.system_instruction else "NONE"
+    agent_mode = session.variables.get("agent_mode", "default")
+    
+    # Folder info
+    folder_count = len(session.folder_context.folders)
+    folder_list = ", ".join([os.path.basename(f) for f in session.folder_context.folders])
+    if folder_count > 3:
+        folder_list = f"{len(session.folder_context.folders)} folders"
+    elif folder_count == 0:
+        folder_list = "None"
+
+    # History info
+    total_history = len(session.session_manager.history)
+    active_history = total_history - session.session_manager.summary_anchor
+
     info_grid = f"""                                                                   
-    [bold magenta]System:[/bold magenta]  {session_sys}                                
-    [bold magenta]Model:[/bold magenta]   [bold cyan]{session_model}[/bold cyan]       
-    [bold magenta]Thinking:[/bold magenta] [bold cyan]{session_thinking}[/bold cyan]   
-    [bold magenta]Agentic:[/bold magenta]  [bold cyan]{session_agentic}[/bold cyan]
+    [bold magenta]Session:[/bold magenta]  [bold yellow]{session.session_manager.current_session_name}[/bold yellow]
+    [bold magenta]System:[/bold magenta]   {sys_status}                                
+    [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
+    [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan]
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan]
+    [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns
     """
 
     console.print(
@@ -213,14 +228,7 @@ def main():
         debug=args.debug,
     )
 
-    sys_status = "SET" if session.system_instruction else "NONE"
-    print_splash(
-        session.provider.model_name,
-        session.thinking,
-        sys_status,
-        session.agentic,
-        session.variables.get("agent_mode", "default"),
-    )
+    print_splash(session)
 
     while True:
         try:
@@ -268,23 +276,34 @@ def main():
                                 console.print(
                                     f"[green]Removed folder from context: {path_to_remove}[/green]"
                                 )
+                                session.session_manager.save_history(session.folder_context)
                             else:
                                 console.print(
                                     f"[red]Folder not found in context: {path_to_remove}[/red]"
                                 )
                         else:
-                            path = arg.strip("'\"")
-                            if session.folder_context.add_folder(path):
-                                console.print(
-                                    f"[green]Added folder context: {path}[/green]"
-                                )
-                                console.print(
-                                    "[dim]Files cached as initial context. Changes will be provided as diffs.[/dim]"
-                                )
-                            else:
-                                console.print(
-                                    f"[red]Folder not found or invalid: {path}[/red]"
-                                )
+                            # Support multiple folders
+                            import shlex
+                            try:
+                                paths = shlex.split(arg)
+                            except ValueError:
+                                paths = [arg.strip("'\"")]
+                                
+                            for path in paths:
+                                path = path.strip("'\"")
+                                if session.folder_context.add_folder(path):
+                                    console.print(
+                                        f"[green]Added folder context: {path}[/green]"
+                                    )
+                                else:
+                                    console.print(
+                                        f"[red]Folder not found or invalid: {path}[/red]"
+                                    )
+                            
+                            session.session_manager.save_history(session.folder_context)
+                            console.print(
+                                "[dim]Files cached as initial context. Changes will be provided as diffs.[/dim]"
+                            )
                     else:
                         if not session.folder_context.folders:
                             console.print(
@@ -327,6 +346,7 @@ def main():
                     session.staged_files = []
                     session.folder_context = FolderContext()
                     ui.set_variables(session.variables)
+                    print_splash(session)
 
                 elif cmd in ["/load", "/open"]:
                     if arg:
@@ -342,6 +362,7 @@ def main():
                             console.print(
                                 f"[dim]Context restored for {len(session.folder_context.folders)} folders.[/dim]"
                             )
+                        print_splash(session)
                     else:
                         console.print("[yellow]Usage: /load <session_name>")
 
@@ -383,14 +404,7 @@ def main():
                             console.print(
                                 f"Model changed to: [green]{session.provider.model_name}"
                             )
-                            sys_status = "SET" if session.system_instruction else "NONE"
-                            print_splash(
-                                session.provider.model_name,
-                                session.thinking,
-                                sys_status,
-                                session.agentic,
-                                session.variables.get("agent_mode", "default"),
-                            )
+                            print_splash(session)
 
                 elif cmd == "/provider":
                     try:
@@ -399,14 +413,7 @@ def main():
                             arg.strip() if arg else None, None, ollama_host=ollama_host
                         )
                         console.print(f"[green]Provider changed successfully![/green]")
-                        sys_status = "SET" if session.system_instruction else "NONE"
-                        print_splash(
-                            session.provider.model_name,
-                            session.thinking,
-                            sys_status,
-                            session.agentic,
-                            session.variables.get("agent_mode", "default"),
-                        )
+                        print_splash(session)
                     except Exception as e:
                         console.print(f"[red]Failed to change provider: {e}[/red]")
 
@@ -531,6 +538,8 @@ def main():
                     session.agentic = not session.agentic
                     state = "ON" if session.agentic else "OFF"
                     console.print(f"Agentic mode: {state}")
+                elif cmd == "/splash":
+                    print_splash(session)
                 else:
                     console.print(f"[red]Unknown command: {cmd}")
 

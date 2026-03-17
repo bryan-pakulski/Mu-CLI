@@ -7,7 +7,7 @@ from datetime import datetime
 
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
-from core.tools import TOOLS, execute_tool
+from core.tools import TOOLS, execute_tool, get_modifications
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.config import (
     HISTORY_DIR,
@@ -19,15 +19,31 @@ from utils.config import (
     validate_and_cast,
 )
 
+def _shorten_tool_args(args: dict) -> dict:
+    """Shortens long string arguments (like 'content' or 'diff') for display."""
+    if not args:
+        return {}
+    shortened = args.copy()
+    for key in ["content", "diff"]:
+        if key in shortened and isinstance(shortened[key], str) and len(shortened[key]) > 100:
+            shortened[key] = f"({len(shortened[key])} chars)"
+    return shortened
+
+
 class SessionManager:
-    def __init__(self, ui=None):
+    def __init__(self, ui=None, session_name=None):
         self.ui = ui
         self.current_session_name = DEFAULT_SESSION_NAME
         self.history = []  # Stores standardized list of dicts representing messages
+        self.provider_config = {} # Stores { "provider": "...", "model": "..." }
         self.summary_anchor = 0
         self.folder_context_data = {}
         self.variables = DEFAULT_VARIABLES.copy()
-        self._load_session(DEFAULT_SESSION_NAME)
+        
+        if session_name:
+            self._load_session(session_name)
+        else:
+            self._load_session(DEFAULT_SESSION_NAME)
 
     def _get_filepath(self, name):
         return os.path.join(HISTORY_DIR, f"{name}.json")
@@ -37,6 +53,7 @@ class SessionManager:
         self.current_session_name = name
         self.history = []
         self.summary_anchor = 0
+        self.provider_config = {}
         self.folder_context_data = {}
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
@@ -50,6 +67,7 @@ class SessionManager:
                 elif isinstance(data, dict):
                     self.history = data.get("history", [])
                     self.summary_anchor = data.get("summary_anchor", 0)
+                    self.provider_config = data.get("provider_config", {})
                     self.folder_context_data = data.get("folder_context", {})
                     
                     saved_vars = data.get("variables", {})
@@ -68,6 +86,7 @@ class SessionManager:
             data = {
                 "history": self.history,
                 "summary_anchor": self.summary_anchor,
+                "provider_config": self.provider_config,
                 "folder_context": (
                     folder_context_obj.to_dict() if folder_context_obj else {}
                 ),
@@ -84,12 +103,13 @@ class SessionManager:
         if self.ui: self.ui.show_info(f"Switched to session: '{name}'")
         self.view_history()
 
-    def new_session(self, name=None):
+    def new_session(self, name=None, provider_name=None, model_name=None):
         self.save_history()
         if not name:
             name = f"chat_{int(time.time())}"
         self.current_session_name = name
         self.history = []
+        self.provider_config = {"provider": provider_name, "model": model_name}
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
         self.save_history()
@@ -110,6 +130,13 @@ class SessionManager:
                     "%Y-%m-%d %H:%M"
                 )
                 self.ui.show_info(f" {indicator} {name:<20} ({mod_time})")
+
+    def get_session_list(self):
+        files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
+        sessions = []
+        for f in files:
+            sessions.append(os.path.basename(f).replace(".json", ""))
+        return sorted(sessions)
 
     def delete_session(self, name):
         if name == self.current_session_name:
@@ -302,6 +329,10 @@ class Session:
         iteration = 0
         active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
 
+        total_in = 0
+        total_out = 0
+        total_cost = 0.0
+
         while iteration < max_iterations:
             iteration += 1
 
@@ -361,21 +392,25 @@ class Session:
                                 "thought_signature": part.thought_signature,
                             }
                         )
-                        if self.ui: self.ui.show_info(f"🔨 Running tool: {part.tool_name}({part.tool_args})")
+                        if self.ui: self.ui.show_info(f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})")
 
                 if ai_parts_archive:
                     self.session_manager.history.append(
                         {"role": "assistant", "parts": ai_parts_archive}
                     )
 
-                cost_str = ""
+                total_in += response.input_tokens
+                total_out += response.output_tokens
+                
                 est_cost = calculate_cost(
                     self.provider.model_name,
                     response.input_tokens,
                     response.output_tokens,
                 )
+                cost_str = ""
                 if est_cost is not None:
-                    cost_str = f"| Est. Cost: ${est_cost:.5f}"
+                    total_cost += est_cost
+                    cost_str = f"| Est. Cost: ${est_cost:.5f} (Total: ${total_cost:.5f})"
                 
                 if self.ui:
                     self.ui.show_info(
@@ -399,6 +434,10 @@ class Session:
                             {"role": "system", "parts": []},
                         )[:-1]
                         continue
+
+                    if self.ui:
+                        self.ui.show_info(f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}")
+
                     self.session_manager.save_history(self.folder_context)
                     break
 
@@ -414,13 +453,33 @@ class Session:
                             tool_def and tool_def.requires_approval
                         )
                         if needs_approval:
-                            # This part is tricky as it needs user interaction.
-                            # We might need a self.ui.ask_approval() method
+                            # Enhanced approval logic with side-by-side diff
+                            orig, modified, filename = get_modifications(
+                                part.tool_name, part.tool_args, self.folder_context
+                            )
+                            
+                            can_approve = True
+                            if filename and (orig is not None) and (modified is not None):
+                                if modified.startswith("ERROR:"):
+                                    if self.ui:
+                                        self.ui.show_error(f"Cannot show diff for {filename}: {modified}")
+                                    can_approve = False
+                                else:
+                                    if self.ui:
+                                        self.ui.show_diff(filename, orig, modified)
+
+                            # Shorten args for display
+                            display_args = _shorten_tool_args(part.tool_args)
+
                             from rich.prompt import Prompt
                             choice = Prompt.ask(
-                                f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]\nArgs: {part.tool_args}\nAllow?",
-                                choices=["y", "n", "e"],
-                                default="y",
+                                (
+                                    f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]\nArgs: {display_args}\nAllow?"
+                                    if can_approve else
+                                    f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]\nArgs: {display_args}\nReject or Explain?"
+                                ),
+                                choices=["y", "n", "e"] if can_approve else ["n", "e"],
+                                default="y" if can_approve else "n",
                             )
                             if choice == "n":
                                 result = "User denied this tool call."
@@ -438,8 +497,7 @@ class Session:
                                 part.tool_name, part.tool_args, self.folder_context
                             )
 
-                        res_preview = str(result).replace("\n", " ")[:60]
-                        if self.ui: self.ui.show_info(f"  ↳ Result: {res_preview}... ({len(str(result))} chars)")
+                        if self.ui: self.ui.show_tool_result(result)
 
                         tool_result_parts.append(
                             {

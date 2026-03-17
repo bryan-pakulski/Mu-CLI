@@ -1,5 +1,7 @@
 import os
 import datetime
+import difflib
+import re
 from providers.base import ToolDefinition
 
 # --- Tool Definitions (Schemas) ---
@@ -94,6 +96,19 @@ TOOLS = [
                 "content": {"type": "string", "description": "Content to write."},
             },
             "required": ["filename", "content"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="apply_diff",
+        description="Applies a unified diff to a file. This is preferred over write_file for incremental changes.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "Path to the file."},
+                "diff": {"type": "string", "description": "The unified diff content to apply."},
+            },
+            "required": ["filename", "diff"],
         },
         requires_approval=True,
     ),
@@ -240,6 +255,114 @@ def write_file(filename: str, content: str, folder_context) -> str:
         return f"Error writing file: {e}"
 
 
+def apply_diff(filename: str, diff: str, folder_context) -> str:
+    """Applies a unified diff to a file."""
+    if not _check_bounds(filename, folder_context):
+        return f"Error: Access denied or path ignored. '{filename}'"
+
+    try:
+        if not os.path.exists(filename):
+            return f"Error: File '{filename}' does not exist. Cannot apply diff."
+
+        with open(filename, "r", encoding="utf-8") as f:
+            original_content = f.read()
+
+        # Ensure diff header is present or fix common LLM mistakes
+        diff_lines = diff.splitlines()
+        if not any(l.startswith("--- ") for l in diff_lines[:3]):
+            # Inject dummy header if missing
+            diff = f"--- a/{filename}\n+++ b/{filename}\n" + diff
+
+        # Use patch logic (difflib doesn't have apply, so we use a simple approach or external tool if preferred)
+        # For simplicity and cross-platform, we can try a basic hunk application or require 'patch' utility
+        # Here's a pure python way to try and apply a unified diff
+        
+        # We'll use a temporary file and the 'patch' command if available, 
+        # or implement a basic hunk applier.
+        
+        import tempfile
+        import subprocess
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_diff:
+            tmp_diff.write(diff)
+            tmp_diff_path = tmp_diff.name
+
+        try:
+            # Try using system 'patch' command first as it is robust
+            result = subprocess.run(
+                ["patch", "-u", filename, "-i", tmp_diff_path],
+                capture_output=True, text=True
+            )
+            os.unlink(tmp_diff_path)
+            
+            if result.returncode == 0:
+                return f"Successfully applied diff to {filename}"
+            else:
+                return f"Error applying diff via 'patch': {result.stderr or result.stdout}"
+        except FileNotFoundError:
+            os.unlink(tmp_diff_path)
+            return "Error: 'patch' utility not found on system. Please install it to apply diffs."
+
+    except Exception as e:
+        return f"Error applying diff: {e}"
+
+
+def get_modifications(tool_name: str, args: dict, folder_context) -> tuple[str, str, str]:
+    """
+    Returns (original_content, new_content, filename) for tools that modify files.
+    Used for showing diffs before approval.
+    """
+    filename = args.get("filename") or args.get("file")
+    if not filename:
+        return None, None, None
+
+    abs_path = os.path.abspath(os.path.expanduser(filename))
+    
+    original_content = ""
+    if os.path.exists(abs_path):
+        try:
+            with open(abs_path, "r", encoding="utf-8") as f:
+                original_content = f.read()
+        except:
+            pass
+
+    if tool_name == "write_file":
+        return original_content, args.get("content", ""), filename
+    
+    elif tool_name == "apply_diff":
+        diff = args.get("diff", "")
+        if not original_content:
+            return "", "", filename # Should not happen if apply_diff validates existence
+
+        # Use patch to get new content without writing to disk
+        import tempfile
+        import subprocess
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_orig:
+            tmp_orig.write(original_content)
+            tmp_orig_path = tmp_orig.name
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_diff:
+            # Ensure header
+            if not any(l.startswith("--- ") for l in diff.splitlines()[:3]):
+                diff = f"--- a/{filename}\n+++ b/{filename}\n" + diff
+            tmp_diff.write(diff)
+            tmp_diff_path = tmp_diff.name
+
+        try:
+            result = subprocess.run(
+                ["patch", "-u", tmp_orig_path, "-i", tmp_diff_path, "-o", "-"],
+                capture_output=True, text=True
+            )
+            new_content = result.stdout if result.returncode == 0 else f"ERROR: {result.stderr}"
+            return original_content, new_content, filename
+        finally:
+            if os.path.exists(tmp_orig_path): os.unlink(tmp_orig_path)
+            if os.path.exists(tmp_diff_path): os.unlink(tmp_diff_path)
+
+    return None, None, None
+
+
 def execute_tool(tool_name: str, args: dict, folder_context) -> str:
     """Dispatcher to execute the local Python functions based on tool name."""
     if tool_name == "get_workspace_details":
@@ -262,6 +385,10 @@ def execute_tool(tool_name: str, args: dict, folder_context) -> str:
     elif tool_name == "write_file":
         return write_file(
             args.get("filename", ""), args.get("content", ""), folder_context
+        )
+    elif tool_name == "apply_diff":
+        return apply_diff(
+            args.get("filename", ""), args.get("diff", ""), folder_context
         )
     else:
         return f"Unknown tool: {tool_name}"

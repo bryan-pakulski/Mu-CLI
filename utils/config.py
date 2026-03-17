@@ -19,13 +19,49 @@ if not os.path.exists(HISTORY_DIR):
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
 
-# --- Default Variables ---
-DEFAULT_VARIABLES = {
-    "agent_mode": "default",
-    "ollama_host": "http://localhost:11434",
-    "auto_approve": "true",
-    "max_iterations": "50",
+# --- Variable Schema & Defaults ---
+VARIABLE_SCHEMA = {
+    "agent_mode": {"type": str, "default": "default"},
+    "ollama_host": {"type": str, "default": "http://localhost:11434"},
+    "auto_approve": {"type": bool, "default": True},
+    "max_iterations": {"type": int, "default": 50},
 }
+
+DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}
+
+
+def validate_and_cast(key, value):
+    """Validates and casts a value based on the schema."""
+    if key not in VARIABLE_SCHEMA:
+        # For unknown variables, we default to string
+        return value
+
+    target_type = VARIABLE_SCHEMA[key]["type"]
+
+    if target_type == bool:
+        if isinstance(value, bool):
+            return value
+        v = str(value).lower()
+        if v in ["true", "1", "t", "y", "yes", "on"]:
+            return True
+        if v in ["false", "0", "f", "n", "no", "off"]:
+            return False
+        raise ValueError(f"Invalid boolean value for {key}: {value}")
+
+    if target_type == int:
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid integer value for {key}: {value}")
+
+    if target_type == float:
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid float value for {key}: {value}")
+
+    return str(value)
+
 
 # --- System Prompts & Nudges ---
 DEFAULT_SYSTEM_PROMPT = (

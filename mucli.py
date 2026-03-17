@@ -411,15 +411,28 @@ def main():
                         console.print(f"[red]Failed to change provider: {e}[/red]")
 
                 elif cmd == "/set":
-                    if arg and " " in arg:
-                        k, v = arg.split(" ", 1)
-                        session.variables[k.strip()] = v.strip()
-                        session.session_manager.save_history(session.folder_context)
-                        console.print(
-                            f"[green]Set variable: {k.strip()} = {v.strip()}[/green]"
-                        )
-                        if k.strip() == "ollama_host":
-                            sync_provider_settings(session)
+                    if arg:
+                        if "=" in arg:
+                            k, v = arg.split("=", 1)
+                        elif " " in arg:
+                            k, v = arg.split(" ", 1)
+                        else:
+                            console.print("[red]Usage: /set <key> <value> OR /set <key>=<value>[/red]")
+                            continue
+                            
+                        k = k.strip()
+                        v = v.strip()
+                        try:
+                            from utils.config import validate_and_cast
+                            session.variables[k] = validate_and_cast(k, v)
+                            session.session_manager.save_history(session.folder_context)
+                            console.print(
+                                f"[green]Set variable: {k} = {session.variables[k]} ({type(session.variables[k]).__name__})[/green]"
+                            )
+                            if k == "ollama_host":
+                                sync_provider_settings(session)
+                        except ValueError as e:
+                            console.print(f"[red]Error: {e}[/red]")
                     else:
                         console.print("[red]Usage: /set <key> <value>[/red]")
 
@@ -443,16 +456,18 @@ def main():
                         from utils.config import DEFAULT_VARIABLES
                         session.variables.update(DEFAULT_VARIABLES)
                         session.session_manager.save_history(session.folder_context)
-                        console.print("[green]All variables cleared (reset to defaults).[/green]")
+                        console.print("[green]All variables reset to defaults.[/green]")
                         sync_provider_settings(session)
                     else:
                         if k in session.variables:
-                            del session.variables[k]
-                            # If it was a default, it should probably be restored?
-                            # But the user asked for it to be unset.
-                            # If it's unset, it might be gone until next session load.
+                            from utils.config import VARIABLE_SCHEMA
+                            if k in VARIABLE_SCHEMA:
+                                session.variables[k] = VARIABLE_SCHEMA[k]["default"]
+                                console.print(f"[green]Reset variable to default: {k} = {session.variables[k]}[/green]")
+                            else:
+                                del session.variables[k]
+                                console.print(f"[green]Unset variable: {k}[/green]")
                             session.session_manager.save_history(session.folder_context)
-                            console.print(f"[green]Unset variable: {k}[/green]")
                             if k == "ollama_host":
                                 sync_provider_settings(session)
                         else:

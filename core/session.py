@@ -16,6 +16,7 @@ from utils.config import (
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
     DEFAULT_VARIABLES,
+    validate_and_cast,
 )
 
 class SessionManager:
@@ -50,7 +51,14 @@ class SessionManager:
                     self.history = data.get("history", [])
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.folder_context_data = data.get("folder_context", {})
-                    self.variables.update(data.get("variables", {}))
+                    
+                    saved_vars = data.get("variables", {})
+                    for k, v in saved_vars.items():
+                        try:
+                            self.variables[k] = validate_and_cast(k, v)
+                        except ValueError:
+                            # If saved data is corrupt or schema changed, keep default
+                            pass
             except (json.JSONDecodeError, IOError):
                 self.history = []
 
@@ -290,7 +298,7 @@ class Session:
         self.session_manager.save_history()
         self.staged_files = []
 
-        max_iterations = int(self.variables.get("max_iterations", 50))
+        max_iterations = self.variables.get("max_iterations", 50)
         iteration = 0
         active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
 
@@ -394,9 +402,7 @@ class Session:
                     self.session_manager.save_history(self.folder_context)
                     break
 
-                auto_approve = (
-                    str(self.variables.get("auto_approve", "true")).lower() == "true"
-                )
+                auto_approve = self.variables.get("auto_approve", True)
                 tool_result_parts = []
 
                 for part in response.parts:

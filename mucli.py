@@ -40,6 +40,7 @@ def print_help():
     table.add_row("/model [name]", "", "Show / change current model")
     table.add_row("/get [key]", "", "Get a variable")
     table.add_row("/set [key] [value]", "", "Set a variable")
+    table.add_row("/unset [key]", "", "Unset a variable (or --all)")
     table.add_row("/variables", "", "Show all variables")
     table.add_row("/agentic", "", "Toggle Agentic (Tool Calling) mode")
     table.add_row(
@@ -107,7 +108,7 @@ def print_splash(
     console.print("[dim] Type '/help' for commands.[/dim]\n")
 
 
-def select_provider_and_model(args_provider, args_model):
+def select_provider_and_model(args_provider, args_model, ollama_host=None):
     providers = ["gemini", "ollama", "openai"]
     provider_name = args_provider
 
@@ -122,7 +123,10 @@ def select_provider_and_model(args_provider, args_model):
 
     # Init provider contextually
     if provider_name == "ollama":
-        provider = OllamaProvider(model_name="")
+        if ollama_host:
+            provider = OllamaProvider(model_name="", host=ollama_host)
+        else:
+            provider = OllamaProvider(model_name="")
     elif provider_name == "gemini":
         provider = GeminiProvider(model_name="")
     elif provider_name == "openai":
@@ -151,6 +155,13 @@ def select_provider_and_model(args_provider, args_model):
     return provider
 
 
+def sync_provider_settings(session):
+    if isinstance(session.provider, OllamaProvider):
+        # Default Ollama host is http://localhost:11434
+        host = session.variables.get("ollama_host", "http://localhost:11434")
+        session.provider.host = host
+
+
 def main():
     parser = argparse.ArgumentParser(description="Interactive AI CLI")
     parser.add_argument("--model", default=None, help="Default model")
@@ -177,19 +188,22 @@ def main():
     )
     args = parser.parse_args()
 
+    # --- Initialize UI ---
+    ui = RichUI()
+
+    # --- Initialize Session Manager ---
+    session_manager = SessionManager(ui=ui)
+    ui.set_variables(session_manager.variables)
+    ollama_host = session_manager.variables.get("ollama_host")
+
     # --- Initialize Provider ---
     try:
-        provider = select_provider_and_model(args.provider, args.model)
-
+        provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
     except Exception as e:
         console.print(f"[red]Failed to initialize Provider: {e}[/red]")
         sys.exit(1)
 
-    # --- Initialize UI ---
-    ui = RichUI()
-
     # --- Initialize Session ---
-    session_manager = SessionManager(ui=ui)
     session = Session(
         provider=provider,
         thinking=False,
@@ -312,12 +326,15 @@ def main():
                     session.session_manager.new_session(name)
                     session.staged_files = []
                     session.folder_context = FolderContext()
+                    ui.set_variables(session.variables)
 
                 elif cmd in ["/load", "/open"]:
                     if arg:
                         session.session_manager.switch_session(arg.strip())
                         session.staged_files = []
                         session.folder_context = FolderContext()
+                        ui.set_variables(session.variables)
+                        sync_provider_settings(session)
                         if session.session_manager.folder_context_data:
                             session.folder_context.from_dict(
                                 session.session_manager.folder_context_data
@@ -377,8 +394,9 @@ def main():
 
                 elif cmd == "/provider":
                     try:
+                        ollama_host = session.variables.get("ollama_host")
                         session.provider = select_provider_and_model(
-                            arg.strip() if arg else None, None
+                            arg.strip() if arg else None, None, ollama_host=ollama_host
                         )
                         console.print(f"[green]Provider changed successfully![/green]")
                         sys_status = "SET" if session.system_instruction else "NONE"
@@ -400,6 +418,8 @@ def main():
                         console.print(
                             f"[green]Set variable: {k.strip()} = {v.strip()}[/green]"
                         )
+                        if k.strip() == "ollama_host":
+                            sync_provider_settings(session)
                     else:
                         console.print("[red]Usage: /set <key> <value>[/red]")
 
@@ -412,6 +432,31 @@ def main():
                         console.print(
                             f"{session.variables.get(k, '[dim]Not set[/dim]')}"
                         )
+
+                elif cmd == "/unset":
+                    k = arg.strip()
+                    if not k:
+                        console.print("[red]Usage: /unset <key> OR /unset --all[/red]")
+                    elif k == "--all":
+                        session.variables.clear()
+                        # Restore defaults after clear
+                        from utils.config import DEFAULT_VARIABLES
+                        session.variables.update(DEFAULT_VARIABLES)
+                        session.session_manager.save_history(session.folder_context)
+                        console.print("[green]All variables cleared (reset to defaults).[/green]")
+                        sync_provider_settings(session)
+                    else:
+                        if k in session.variables:
+                            del session.variables[k]
+                            # If it was a default, it should probably be restored?
+                            # But the user asked for it to be unset.
+                            # If it's unset, it might be gone until next session load.
+                            session.session_manager.save_history(session.folder_context)
+                            console.print(f"[green]Unset variable: {k}[/green]")
+                            if k == "ollama_host":
+                                sync_provider_settings(session)
+                        else:
+                            console.print(f"[yellow]Variable '{k}' not found.[/yellow]")
 
                 elif cmd == "/variables":
                     for vk, vv in session.variables.items():

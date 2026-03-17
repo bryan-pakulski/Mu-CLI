@@ -29,6 +29,9 @@ class RichUI:
     def get_input(self, session_name, staged_files):
         return self.input_handler.get_input(session_name, staged_files)
 
+    def set_variables(self, variables_dict):
+        self.input_handler.set_variables(variables_dict)
+
     def show_error(self, message):
         self.console.print(f"[red]{message}[/red]")
 

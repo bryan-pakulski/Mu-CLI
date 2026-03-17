@@ -35,18 +35,37 @@ class DynamicSessionCompleter(Completer):
         yield from completer.get_completions(document, complete_event)
 
 
+class DynamicVariableCompleter(Completer):
+    def __init__(self, input_handler):
+        self.input_handler = input_handler
+
+    def get_completions(self, document, complete_event):
+        if self.input_handler.variables_dict is None:
+            return
+        # We always get the latest keys from the dictionary reference
+        completer = FuzzyWordCompleter(list(self.input_handler.variables_dict.keys()))
+        yield from completer.get_completions(document, complete_event)
+
+
+class MergedCompleter(Completer):
+    """Custom class to merge multiple completers to avoid import errors across versions."""
+    def __init__(self, completers):
+        self.completers = completers
+
+    def get_completions(self, document, complete_event):
+        for completer in self.completers:
+            yield from completer.get_completions(document, complete_event)
+
+
 class InputHandler:
     def __init__(self):
+        self.variables_dict = None  # Will be set via set_variables
         path_completer = PathCompleter(expanduser=True)
+        directory_completer = PathCompleter(expanduser=True, only_directories=True)
         session_completer = DynamicSessionCompleter()
+        variable_completer = DynamicVariableCompleter(self)
 
         model_dict = {m: None for m in KNOWN_MODELS}
-
-        folder_completer = NestedCompleter.from_nested_dict(
-            {
-                "remove": path_completer,
-            }
-        )
 
         provider_completer = NestedCompleter.from_nested_dict(
             {"gemini": None, "ollama": None}
@@ -76,10 +95,10 @@ class InputHandler:
                 "/help": None,
                 "/model": model_dict,
                 "/agentic": None,
-                "/folder": {
-                    "remove": folder_completer,
-                    **{".": path_completer},
-                },
+                "/folder": MergedCompleter([
+                    NestedCompleter.from_nested_dict({"remove": directory_completer}),
+                    directory_completer
+                ]),
                 "/provider": provider_completer,
                 "/tool": tool_completer,
                 "/mode": mode_completer,
@@ -90,6 +109,10 @@ class InputHandler:
                 "/new": None,
                 "/delete": session_completer,
                 "/tokens": None,
+                "/set": variable_completer,
+                "/get": variable_completer,
+                "/unset": variable_completer,
+                "/variables": None,
             }
         )
 
@@ -126,6 +149,10 @@ class InputHandler:
             key_bindings=self.kb,
             multiline=True,
         )
+
+    def set_variables(self, variables_dict):
+        """Update the reference to the variables dictionary for completion."""
+        self.variables_dict = variables_dict
 
     def get_input(self, session_name, staged_files):
         files_text = ""

@@ -15,6 +15,7 @@ from utils.config import (
     calculate_cost,
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
+    DEFAULT_VARIABLES,
 )
 
 class SessionManager:
@@ -24,7 +25,7 @@ class SessionManager:
         self.history = []  # Stores standardized list of dicts representing messages
         self.summary_anchor = 0
         self.folder_context_data = {}
-        self.variables = {}
+        self.variables = DEFAULT_VARIABLES.copy()
         self._load_session(DEFAULT_SESSION_NAME)
 
     def _get_filepath(self, name):
@@ -36,7 +37,8 @@ class SessionManager:
         self.history = []
         self.summary_anchor = 0
         self.folder_context_data = {}
-        self.variables = {}
+        self.variables.clear()
+        self.variables.update(DEFAULT_VARIABLES)
 
         if os.path.exists(filepath):
             try:
@@ -48,7 +50,7 @@ class SessionManager:
                     self.history = data.get("history", [])
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.folder_context_data = data.get("folder_context", {})
-                    self.variables = data.get("variables", {})
+                    self.variables.update(data.get("variables", {}))
             except (json.JSONDecodeError, IOError):
                 self.history = []
 
@@ -80,6 +82,8 @@ class SessionManager:
             name = f"chat_{int(time.time())}"
         self.current_session_name = name
         self.history = []
+        self.variables.clear()
+        self.variables.update(DEFAULT_VARIABLES)
         self.save_history()
         if self.ui: self.ui.show_info(f"Started new session: '{name}'")
 

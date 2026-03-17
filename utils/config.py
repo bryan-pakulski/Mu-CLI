@@ -19,6 +19,14 @@ if not os.path.exists(HISTORY_DIR):
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
 
+# --- Default Variables ---
+DEFAULT_VARIABLES = {
+    "agent_mode": "default",
+    "ollama_host": "http://localhost:11434",
+    "auto_approve": "true",
+    "max_iterations": "50",
+}
+
 # --- System Prompts & Nudges ---
 DEFAULT_SYSTEM_PROMPT = (
     """You are a helpful assistant, answer all questions succinctly.
@@ -40,7 +48,8 @@ GENERAL RULES:
 1. NEVER guess file paths or content. ALWAYS use your tools to discover and read files.
 2. If a file is large, use `get_chunk` to read specific lines instead of the whole file.
 3. If a tool returns an error, read the error carefully and try a different approach (e.g., search for a string instead of guessing a filename).
-4. Once you have enough context, stop using tools and provide your final response to the user.
+4. Do no overwrite existing files, only update necessary parts using patch tooling.
+5. Once you have enough context, stop using tools and provide your final response to the user.
 """
 
 AGENTIC_MODES = {
@@ -49,21 +58,30 @@ AGENTIC_MODES = {
 2. Use `search_for_string` or `read_file` to drill down into the specific files mentioned or implied by the user.
 3. Analyze the code.
 4. Provide your solution or answer.""",
+
     "debug": """WORKFLOW (Debugging):
 1. Read the error message or issue description provided by the user.
 2. Use `search_for_string` to find exactly where the error originates in the codebase.
+3. You have access to online tooling and research knowledge bases, use them to explore any relevent information.
 3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
 4. Identify the root cause and propose a precise fix.""",
+
     "feature": """WORKFLOW (New Feature):
 1. Understand the new feature request.
-2. Use the workspace map and `search_for_string` to identify integration points (e.g., where routes, models, or UI components are defined).
-3. Use `read_file` to understand the interfaces and patterns of existing code.
-4. Draft the new code following the existing project architecture.""",
+2. Create a thorough implementation plan that includes the design and architecture of the new feature, split into actionable tasks, this should be saved as a markdown file in the workspace - FEATURE_<feature_name>.md.
+3. Use the workspace map and `search_for_string` to identify integration points (e.g., where routes, models, or UI components are defined).
+4. Use `read_file` to understand the interfaces and patterns of existing code.
+5. Write the new code following the existing project architecture, ensure it is maintainable and follows best practices.
+6. Ensure that the new feature is well tested and has sufficient documentatation""",
+
     "research": """WORKFLOW (Research & Exploration):
-1. The user wants to understand how something works without necessarily changing it.
-2. Search for the relevant components.
-3. Traverse the codebase by reading files and following function calls/imports.
-4. Provide a detailed, comprehensive summary of your findings.""",
+1. The user wants to understand how something works without necessarily changing things.
+2. You have access to online tooling and research knowledge bases, use them to explore any relevent information.
+3. If asked to research within a codebase, search for the relevant components.
+4. Traverse the codebase by reading files and following function calls/imports.
+5. Provide a detailed, comprehensive summary of your findings.
+6. Include citations and references to support your findings.
+7. Any online resources should be cited and referenced in your summary.""",
 }
 
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."

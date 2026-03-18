@@ -81,7 +81,7 @@ class InputHandler:
         )
 
         mode_completer = NestedCompleter.from_nested_dict(
-            {"default": None, "debug": None, "feature": None, "research": None}
+                {"default": None, "debug": None, "feature": None, "research": None, "git": None}
         )
 
         self.completer = NestedCompleter.from_nested_dict(

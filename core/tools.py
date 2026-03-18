@@ -138,7 +138,7 @@ TOOLS = [
             },
             "required": ["commands"],
         },
-        requires_approval=True,
+        requires_approval=False, # We will query the individual tools and only require a single approval
     ),
 ]
 
@@ -354,7 +354,8 @@ def get_modifications(
             mod = get_modifications(
                 cmd.get("tool_name"), cmd.get("tool_args", {}), folder_context
             )
-            results.extend(mod)
+            if mod:
+                results.extend(mod)
         return results
 
     filename = args.get("filename") or args.get("file")

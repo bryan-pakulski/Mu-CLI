@@ -92,13 +92,17 @@ def print_splash(session):
     agent_mode = session.variables.get("agent_mode", "default")
     yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
     
-    # Folder info
-    folder_count = len(session.folder_context.folders)
-    folder_list = ", ".join([os.path.basename(f) for f in session.folder_context.folders])
-    if folder_count > 3:
-        folder_list = f"{len(session.folder_context.folders)} folders"
-    elif folder_count == 0:
+    # Workspace Folder info
+    folders = session.folder_context.folders
+    folder_count = len(folders)
+    if folder_count == 0:
         folder_list = "None"
+    elif folder_count == 1:
+        folder_list = folders[0]
+    else:
+        folder_list = f"{folder_count} folders: " + ", ".join([os.path.basename(f) for f in folders[:3]])
+        if folder_count > 3:
+            folder_list += " ..."
 
     # History info
     total_history = len(session.session_manager.history)
@@ -404,14 +408,14 @@ def main():
                         name, new_provider.name, new_provider.model_name
                     )
                     session.staged_files = []
-                    session.folder_context = FolderContext()
+                    session.folder_context = session.session_manager.folder_context
                     ui.set_variables(session.variables)
                     print_splash(session)
                 elif cmd in ["/load", "/open"]:
                     if arg:
                         session.session_manager.switch_session(arg.strip())
                         session.staged_files = []
-                        session.folder_context = FolderContext()
+                        session.folder_context = session.session_manager.folder_context
                         ui.set_variables(session.variables)
                         # Update provider based on session config
                         p_cfg = session.session_manager.provider_config
@@ -422,19 +426,6 @@ def main():
                             )
 
                         sync_provider_settings(session)
-                        if session.session_manager.folder_context_data:
-                            session.folder_context.from_dict(
-                                session.session_manager.folder_context_data
-                            )
-                            console.print(
-                                f"[dim]Context restored for {len(session.folder_context.folders)} folders.[/dim]"
-                            )
-                            if session.folder_context.folders:
-                                try:
-                                    os.chdir(session.folder_context.folders[0])
-                                    console.print(f"[dim]Switched workspace to: {os.getcwd()}[/dim]")
-                                except Exception:
-                                    pass
                         print_splash(session)
                     else:
                         console.print("[yellow]Usage: /load <session_name>")

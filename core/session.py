@@ -42,7 +42,7 @@ class SessionManager:
         self.history = []  # Stores standardized list of dicts representing messages
         self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
         self.summary_anchor = 0
-        self.folder_context_data = {}
+        self.folder_context = FolderContext()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.variables = DEFAULT_VARIABLES.copy()
 
@@ -60,7 +60,7 @@ class SessionManager:
         self.history = []
         self.summary_anchor = 0
         self.provider_config = {}
-        self.folder_context_data = {}
+        self.folder_context = FolderContext()
         self.variables.clear()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.variables.update(DEFAULT_VARIABLES)
@@ -75,8 +75,11 @@ class SessionManager:
                     self.history = data.get("history", [])
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.provider_config = data.get("provider_config", {})
-                    self.folder_context_data = data.get("folder_context", {})
-                    self.token_counts = data.get("token_counts", {"input": 0, "output": 0, "total": 0, "total_cost": 0.0})
+                    self.folder_context.from_dict(data.get("folder_context", {}))
+                    self.token_counts = data.get(
+                        "token_counts",
+                        {"input": 0, "output": 0, "total": 0, "total_cost": 0.0},
+                    )
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -90,14 +93,15 @@ class SessionManager:
 
     def save_history(self, folder_context_obj=None):
         filepath = self._get_filepath(self.current_session_name)
+        if folder_context_obj:
+            self.folder_context = folder_context_obj
+
         try:
             data = {
                 "history": self.history,
                 "summary_anchor": self.summary_anchor,
                 "provider_config": self.provider_config,
-                "folder_context": (
-                    folder_context_obj.to_dict() if folder_context_obj else {}
-                ),
+                "folder_context": self.folder_context.to_dict(),
                 "variables": self.variables,
                 "token_counts": self.token_counts,
             }
@@ -118,6 +122,7 @@ class SessionManager:
         self.save_history()
         if not name:
             name = f"chat_{int(time.time())}"
+        self.folder_context = FolderContext()
         self.current_session_name = name
         self.history = []
         self.provider_config = {"provider": provider_name, "model": model_name}
@@ -265,19 +270,18 @@ class Session:
         self.staged_files = []  # list of dicts
         self.disabled_tools = []  # list of tool names strings
 
-        self.folder_context = FolderContext()
-        if session_manager.folder_context_data:
-            self.folder_context.from_dict(session_manager.folder_context_data)
-            if self.folder_context.folders:
+        self.folder_context = session_manager.folder_context
+        if self.folder_context.folders:
+            if self.ui:
+                self.ui.show_info(
+                    f"Restored folder context: {', '.join(self.folder_context.folders)}"
+                )
+            try:
+                os.chdir(self.folder_context.folders[0])
                 if self.ui:
-                    self.ui.show_info(
-                        f"Restored folder context: {', '.join(self.folder_context.folders)}"
-                    )
-                try:
-                    os.chdir(self.folder_context.folders[0])
-                except Exception:
-                    pass
-
+                    self.ui.show_info(f"Working directory set to: {os.getcwd()}")
+            except Exception:
+                pass
 
     def add_file(self, file_path):
         file_path = file_path.strip("'\"")
@@ -524,9 +528,11 @@ class Session:
                         )
 
                     if self.variables.get("compact_history", False):
-                        if self.ui: 
-                            self.ui.show_info("[dim]Compacting turn history (removing tool metadata)...[/dim]")
-                            self.session_manager.compact_completed_turn()                                                  
+                        if self.ui:
+                            self.ui.show_info(
+                                "[dim]Compacting turn history (removing tool metadata)...[/dim]"
+                            )
+                            self.session_manager.compact_completed_turn()
 
                     self.session_manager.save_history(self.folder_context)
                     break
@@ -571,21 +577,28 @@ class Session:
                 for i, part in enumerate(tool_calls):
                     needs_approval = (i in to_approve_data) or strict_mode
                     if needs_approval:
-                        orig, modified, filename = to_approve_data[i]
+                        mods = to_approve_data.get(i, [])
 
                         can_approve = True
-                        if filename and (orig is not None) and (modified is not None):
-                            if modified.startswith("ERROR:"):
+                        # Validate all modifications in the set (especially for batch_job)
+                        for _, m, f in mods:
+                            if m and str(m).startswith("ERROR:"):
                                 if self.ui:
-                                    self.ui.show_error(
-                                        f"Cannot show diff for {filename}: {modified}"
-                                    )
+                                    self.ui.show_error(f"Cannot show diff for {f}: {m}")
                                 can_approve = False
-                            elif (
-                                len(to_approve_data) <= 1
-                            ):  # Only show single diff if not already shown in bulk
-                                if self.ui:
-                                    self.ui.show_diff(filename, orig, modified)
+                                break
+
+                        # Show diffs if not already shown in bulk pre-calculation
+                        if len(to_approve_data) <= 1:
+                            for o, m, f in mods:
+                                if (
+                                    f
+                                    and o is not None
+                                    and m is not None
+                                    and not str(m).startswith("ERROR:")
+                                ):
+                                    if self.ui:
+                                        self.ui.show_diff(f, o, m)
 
                         # Shorten args for display
                         display_args = _shorten_tool_args(part.tool_args)
@@ -615,7 +628,10 @@ class Session:
                             result = f"User denied this tool call. Reason: {reason}"
                         else:
                             result = execute_tool(
-                                part.tool_name, part.tool_args, self.folder_context, self.ui
+                                part.tool_name,
+                                part.tool_args,
+                                self.folder_context,
+                                self.ui,
                             )
                     else:
                         result = execute_tool(

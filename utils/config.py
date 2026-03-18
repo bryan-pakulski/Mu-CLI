@@ -119,15 +119,20 @@ GENERAL RULES:
 6. If a tool returns an error, read the error carefully and try a different approach (e.g., search for a string instead of guessing a filename).
 7. Do no overwrite existing files, only update necessary parts using patch tooling.
 8. Provide multiple tool calls (e.g. multiple `apply_diff` calls) in a single response when they are related or can be executed together.
-9. Once you have enough context, stop using tools and provide your final response to the user.
+9. **Collation Buffer**: Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, `git_status`, etc.) results are automatically stored in a collation buffer.
+   You will only receive a status update when you call them.
+   When you are ready to receive all the gathered data, you MUST call the `flush` tool.
+   This saves context and makes your processing more efficient.
+   Gather everything you think you'll need first in a "context collection" stage, then flush once to process it all.
+10. Once you have enough context, stop using tools and provide your final response to the user.
 """
 
 AGENTIC_MODES = {
-    "default": """WORKFLOW (Default):
-1. Review the provided workspace map to understand the project structure.
-2. Use `search_for_string` or `read_file` to drill down into the specific files mentioned or implied by the user.
-3. Analyze the code.
-4. Provide your solution or answer.""",
+    "default": """WORKFLOW (Collation-Aware Default):
+1. **Context Collection**: Review the workspace map and use read-only tools to gather all necessary information. 
+   These will be stored in your collation buffer.
+2. **Flush**: Call the `flush` tool once you have gathered enough information to analyze the situation.
+3. **Analyze & Respond**: Process the flushed context and provide your solution or answer.""",
     "debug": """WORKFLOW (Debugging):
 1. Read the error message or issue description provided by the user.
 2. Use `search_for_string` to find exactly where the error originates in the codebase.

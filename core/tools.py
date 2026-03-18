@@ -344,6 +344,27 @@ TOOLS = [
         },
         requires_approval=False,
     ),
+    ToolDefinition(
+        name="flush",
+        description="Flushes the collation buffer and returns all the gathered context to the model. Use this when you have finished gathering all the necessary information and are ready to process it.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+]
+
+COLLATED_TOOLS = [
+    "get_workspace_details",
+    "read_file",
+    "search_for_string",
+    "get_chunk",
+    "list_dir",
+    "list_agent_tasks",
+    "git_status",
+    "git_log",
+    "git_diff",
+    "git_branch",
+    "url_grounding",
+    "read_document",
 ]
 
 
@@ -1033,6 +1054,8 @@ def execute_tool(
 
     if tool_name == "get_workspace_details":
         return get_workspace_details(folder_context)
+    elif tool_name == "flush":
+        return "Buffer flushed." # This is a placeholder, Session will handle the actual flush
     elif tool_name == "read_file":
         return read_file(args.get("filename", ""), folder_context)
     elif tool_name == "search_for_string":

@@ -42,6 +42,7 @@ def print_help():
     table.add_row("/yolo", "", "Toggle YOLO mode (no approvals)")
     table.add_row("/set [key] [value]", "", "Set a variable")
     table.add_row("/unset [key]", "", "Unset a variable (or --all)")
+    table.add_row("/flush", "", "Flush the collation buffer and inject context into the next turn")
     table.add_row("/variables", "", "Show all variables")
     table.add_row("/agentic", "", "Toggle Agentic (Tool Calling) mode")
     table.add_row(
@@ -428,6 +429,7 @@ def main():
                     )
                     session.staged_files = []
                     session.folder_context = session.session_manager.folder_context
+                    session.collation_buffer = session.session_manager.collation_buffer
                     ui.set_variables(session.variables)
                     print_splash(session)
                 elif cmd in ["/load", "/open"]:
@@ -435,6 +437,7 @@ def main():
                         session.session_manager.switch_session(arg.strip())
                         session.staged_files = []
                         session.folder_context = session.session_manager.folder_context
+                        session.collation_buffer = session.session_manager.collation_buffer
                         ui.set_variables(session.variables)
                         # Update provider based on session config
                         p_cfg = session.session_manager.provider_config
@@ -580,6 +583,19 @@ def main():
                                 sync_provider_settings(session)
                         else:
                             console.print(f"[yellow]Variable '{k}' not found.[/yellow]")
+
+                elif cmd == "/flush":
+                    if hasattr(session, "collation_buffer"):
+                        count = len(session.collation_buffer.entries)
+                        if count == 0:
+                            console.print("[yellow]Collation buffer is empty.[/yellow]")
+                        else:
+                            collated = session.collation_buffer.flush()
+                            # Inject into history as a system message or user message?
+                            # User message is usually better for context injection.
+                            text = "### Collated Context Flushed by User:\n\n" + "\n\n".join(collated)
+                            session.send_message(text)
+                            console.print(f"[green]Flushed {count} items from buffer into conversation history.[/green]")
 
                 elif cmd == "/variables":
                     for vk, vv in session.variables.items():

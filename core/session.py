@@ -5,9 +5,10 @@ import time
 import glob
 from datetime import datetime
 
+from core.collation import CollationBuffer
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
-from core.tools import TOOLS, execute_tool, get_modifications
+from core.tools import TOOLS, execute_tool, get_modifications, COLLATED_TOOLS
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.config import (
     HISTORY_DIR,
@@ -41,6 +42,7 @@ class SessionManager:
         self.current_session_name = DEFAULT_SESSION_NAME
         self.history = []  # Stores standardized list of dicts representing messages
         self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
+        self.collation_buffer = CollationBuffer()
         self.summary_anchor = 0
         self.folder_context = FolderContext()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
@@ -60,6 +62,7 @@ class SessionManager:
         self.history = []
         self.summary_anchor = 0
         self.provider_config = {}
+        self.collation_buffer = CollationBuffer()
         self.folder_context = FolderContext()
         self.variables.clear()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
@@ -75,6 +78,7 @@ class SessionManager:
                     self.history = data.get("history", [])
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.provider_config = data.get("provider_config", {})
+                    self.collation_buffer = CollationBuffer.from_dict(data.get("collation_buffer", {}))
                     self.folder_context.from_dict(data.get("folder_context", {}))
                     self.token_counts = data.get(
                         "token_counts",
@@ -103,6 +107,7 @@ class SessionManager:
                 "provider_config": self.provider_config,
                 "folder_context": self.folder_context.to_dict(),
                 "variables": self.variables,
+                "collation_buffer": self.collation_buffer.to_dict(),
                 "token_counts": self.token_counts,
             }
             with open(filepath, "w") as f:
@@ -124,6 +129,7 @@ class SessionManager:
             name = f"chat_{int(time.time())}"
         self.folder_context = FolderContext()
         self.current_session_name = name
+        self.collation_buffer = CollationBuffer()
         self.history = []
         self.provider_config = {"provider": provider_name, "model": model_name}
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
@@ -266,6 +272,7 @@ class Session:
         self.ui = ui
         self.debug = debug
         self.variables = session_manager.variables
+        self.collation_buffer = session_manager.collation_buffer
         self.agentic = True
         self.active_context_window = 150
         self.staged_files = []  # list of dicts
@@ -674,6 +681,43 @@ class Session:
 
                     if self.ui:
                         self.ui.show_tool_result(result)
+
+                    # --- Collation Logic ---
+                    is_flush = part.tool_name == "flush"
+                    should_collate = (
+                        part.tool_name in COLLATED_TOOLS 
+                        and self.variables.get("collation_enabled", True)
+                    )
+
+                    if is_flush:
+                        collated_data = self.collation_buffer.flush()
+                        if not collated_data:
+                            result = "No data in collation buffer to flush."
+                        else:
+                            result = "--- Flushed Context ---\n" + "\n\n".join(collated_data)
+                        if self.ui:
+                            self.ui.show_info(f"  [Flushed {len(collated_data)} items from buffer]")
+                    elif should_collate:
+                        # Don't collate if there was an error
+                        if result and not str(result).startswith("Error:"):
+                            self.collation_buffer.add(part.tool_name, part.tool_args, result)
+                            count = len(self.collation_buffer.entries)
+                            result = (
+                                f"Stored '{part.tool_name}' result in collation buffer. "
+                                f"{count} item(s) currently pending. "
+                                "Continue gathering or call 'flush' when ready to receive all context."
+                            )
+                            if self.ui:
+                                self.ui.show_info(f"  [Collated: {part.tool_name}]")
+                        else:
+                            # If it's an error, don't collate it, let the model see the error immediately
+                            if self.ui:
+                                self.ui.show_tool_result(result)
+                    else:
+                        if self.ui:
+                            self.ui.show_tool_result(result)
+
+                    # --- End Collation Logic ---
 
                     tool_result_parts.append(
                         {

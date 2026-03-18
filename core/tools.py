@@ -314,6 +314,36 @@ TOOLS = [
         parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
+    ToolDefinition(
+        name="url_grounding",
+        description="Accesses a URL to gather additional context. Supports JavaScript-heavy websites.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to access.",
+                }
+            },
+            "required": ["url"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="read_document",
+        description="Reads and parses documents like PDFs to gather additional context.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "The path to the document file (e.g., a PDF).",
+                }
+            },
+            "required": ["filename"],
+        },
+        requires_approval=False,
+    ),
 ]
 
 
@@ -792,6 +822,90 @@ def git_branch(folder_context) -> str:
     return run_git_command(["branch"], folder_context)
 
 
+def url_grounding(url: str, folder_context) -> str:
+    """Accesses a URL to gather additional context. Supports JavaScript-heavy websites."""
+    try:
+        from playwright.sync_api import sync_playwright
+        from bs4 import BeautifulSoup
+
+        with sync_playwright() as p:
+            # Try to launch chromium. We use chromium as it's generally most compatible
+            try:
+                browser = p.chromium.launch(headless=True)
+            except Exception as e:
+                return f"Error: Failed to launch browser. You may need to run 'playwright install chromium'. Details: {e}"
+                
+            page = browser.new_page()
+            
+            # Wait for network idle to ensure JS has rendered content
+            page.goto(url, wait_until="networkidle")
+            
+            content = page.content()
+            browser.close()
+            
+            soup = BeautifulSoup(content, "html.parser")
+            
+            # Remove script and style elements
+            for script_or_style in soup(["script", "style"]):
+                script_or_style.decompose()
+
+            # Get text
+            text = soup.get_text(separator="\n")
+            
+            # Clean up whitespace
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            text = "\n".join(chunk for chunk in chunks if chunk)
+            
+            return text
+    except (ImportError, Exception):
+        # Fallback to a simpler method if playwright is not installed or fails
+        try:
+            import httpx
+            from bs4 import BeautifulSoup
+            
+            response = httpx.get(url, follow_redirects=True, timeout=30.0)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            for script_or_style in soup(["script", "style"]):
+                script_or_style.decompose()
+            
+            text = soup.get_text(separator="\n")
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            text = "\n".join(chunk for chunk in chunks if chunk)
+            
+            return f"(Note: Playwright not installed or failed, JS-heavy content might be missing)\n\n{text}"
+        except Exception as e:
+            return f"Error accessing URL: {e}"
+
+
+def read_document(filename: str, folder_context) -> str:
+    """Reads and parses documents like PDFs to gather additional context."""
+    if not _check_bounds(filename, folder_context):
+        return f"Error: Access denied or file ignored. '{filename}'"
+    
+    ext = os.path.splitext(filename)[1].lower()
+    if ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(filename)
+            text = ""
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text += extracted + "\n"
+            return text
+        except ImportError:
+            return "Error: 'pypdf' is not installed. Please install it to parse PDF files."
+        except Exception as e:
+            return f"Error reading PDF: {e}"
+    
+    # Default to read_file for other text-based documents
+    return read_file(filename, folder_context)
+
+
 def tool_requires_approval(tool_name: str, args: dict) -> bool:
     """Checks if a tool call requires user approval."""
     tool_def = next((t for t in TOOLS if t.name == tool_name), None)
@@ -972,6 +1086,10 @@ def execute_tool(
         return git_pull(
             args.get("remote", "origin"), args.get("branch"), folder_context
         )
+    elif tool_name == "url_grounding":
+        return url_grounding(args.get("url", ""), folder_context)
+    elif tool_name == "read_document":
+        return read_document(args.get("filename", ""), folder_context)
     elif tool_name == "git_branch":
         return git_branch(folder_context)
     elif tool_name == "batch_job":

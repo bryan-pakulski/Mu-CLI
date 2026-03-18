@@ -4,3 +4,7 @@ prompt-toolkit
 Pillow
 pytest
 black
+playwright
+pypdf
+beautifulsoup4
+httpx

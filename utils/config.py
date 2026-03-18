@@ -47,6 +47,14 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 10000,
     },  # Max characters to return from run_agent_task output
+    "collation_enabled": {
+        "type": bool,
+        "default": True,
+    },
+    "collation_flush_command": {
+        "type": str,
+        "default": "/flush",
+    },
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}
@@ -103,7 +111,7 @@ AGENTIC_SYSTEM_BASE = """You are an autonomous AI programming agent. You have ac
 AVAILABLE TOOLS:
 {tool_descriptions}
 GENERAL RULES:
-1. **NO HALLUCINATIONS**: Never guess file paths. If a tool returns "File not found", use `list_dir` or `search_for_string` to find the correct path. 
+1. **NO HALLUCINATIONS**: Never guess file paths. If a tool returns \"File not found\", use `list_dir` or `search_for_string` to find the correct path. 
 2. **ARGUMENT PRECISION**: Always provide the full 'filename' argument for tools like `read_file` or `apply_diff`.                                    
 3. **STUCK LOOP PREVENTION**: If you fail a task 3 times using the same tool, STOP and use `get_workspace_details` to re-orient yourself.
 4. **DIFF FORMAT**: When using `apply_diff`, ensure the diff is in valid unified format with `---` and `+++` headers.
@@ -140,7 +148,8 @@ AGENTIC_MODES = {
 4. Traverse the codebase by reading files and following function calls/imports.
 5. Provide a detailed, comprehensive summary of your findings.
 6. Include citations and references to support your findings.
-7. Any online resources should be cited and referenced in your summary.""",
+7. Any online resources should be cited and referenced in your summary.
+""",
     "git": """WORKFLOW (Autonomous Software Engineer):
 1. **Understand Task**: Review the task provided by the user.
 2. **Planning Phase**: Before making any changes, you MUST create three documents as files in the repository:

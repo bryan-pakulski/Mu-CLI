@@ -90,7 +90,7 @@ def print_splash(session):
 
     sys_status = "SET" if session.system_instruction else "NONE"
     agent_mode = session.variables.get("agent_mode", "default")
-    yolo_status = "ON" if session.variables.get("auto_approve", False) else "OFF"
+    yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
     
     # Folder info
     folder_count = len(session.folder_context.folders)
@@ -466,7 +466,7 @@ def main():
                     else:
                         models = session.provider.get_available_models()
                         if models:
-                            console.print(f"\n[bold cyan]Available Models:[/bold cyan]")
+                            console.print("\n[bold cyan]Available Models:[/bold cyan]")
                             for i, m in enumerate(models, 1):
                                 console.print(f" {i}. {m}")
                             choice = IntPrompt.ask(
@@ -496,7 +496,7 @@ def main():
                             "model": session.provider.model_name,
                         }
                         session.session_manager.save_history()
-                        console.print(f"[green]Provider changed successfully![/green]")
+                        console.print("[green]Provider changed successfully![/green]")
                         print_splash(session)
                     except Exception as e:
                         console.print(f"[red]Failed to change provider: {e}[/red]")
@@ -605,14 +605,17 @@ def main():
                 elif cmd == "/tokens":
                     hist_len = len(session.session_manager.history)
                     anchor = session.session_manager.summary_anchor
+                    tokens = session.session_manager.token_counts
 
                     console.print("[yellow]--- Context Stats ---")
                     console.print(f"Total History Turns: {hist_len}")
                     console.print(f"Summarized Turns:    {anchor}")
                     console.print(f"Active Turns (Window): {hist_len - anchor}")
-                    console.print(
-                        "[dim](Actual token count is displayed after generation)"
-                    )
+                    console.print(f"Session Tokens (In):  {tokens['input']}")
+                    console.print(f"Session Tokens (Out): {tokens['output']}")
+                    console.print(f"Session Tokens (Total): {tokens['total']}")
+                    console.print(f"Session Est. Cost:    ${tokens.get('total_cost', 0.0):.5f}")
+                    console.print("[dim](Actual token count is also displayed after each generation)[/dim]")
 
                 elif cmd == "/thinking":
                     session.thinking = not session.thinking
@@ -623,11 +626,13 @@ def main():
                     state = "ON" if session.agentic else "OFF"
                     console.print(f"Agentic mode: {state}")
                 elif cmd == "/yolo":
-                    current = session.variables.get("auto_approve", False)
-                    session.variables["auto_approve"] = not current
-                    state = "ON" if session.variables["auto_approve"] else "OFF"
-                    color = "bold red" if session.variables["auto_approve"] else "bold green"
-                    console.print(f"YOLO mode: [{color}]{state}[/{color}]")
+                    current = session.variables.get("yolo", False)
+                    session.variables["yolo"] = not current
+                    state = "ON" if session.variables["yolo"] else "OFF"
+                    if state == "ON":
+                        console.print("YOLO mode: [green]ON[/green]")
+                    else:
+                        console.print("YOLO mode: [red]OFF[/red]")
                     session.session_manager.save_history(session.folder_context)
                 elif cmd == "/splash":
                     print_splash(session)

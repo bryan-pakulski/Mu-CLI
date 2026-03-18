@@ -64,7 +64,7 @@ def test_multiple_diffs_handling(tmp_path):
     
     provider = MockProvider([resp1, resp2])
     session = Session(provider, False, "system", sm, ui=ui)
-    session.variables["auto_approve"] = True # To avoid Prompt.ask
+    session.variables["strict_mode"] = False # To avoid Prompt.ask on every tool call
     
     session.send_message("test")
     

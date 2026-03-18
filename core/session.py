@@ -43,6 +43,7 @@ class SessionManager:
         self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
         self.summary_anchor = 0
         self.folder_context_data = {}
+        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.variables = DEFAULT_VARIABLES.copy()
 
         if session_name:
@@ -61,6 +62,7 @@ class SessionManager:
         self.provider_config = {}
         self.folder_context_data = {}
         self.variables.clear()
+        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.variables.update(DEFAULT_VARIABLES)
 
         if os.path.exists(filepath):
@@ -74,6 +76,7 @@ class SessionManager:
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.provider_config = data.get("provider_config", {})
                     self.folder_context_data = data.get("folder_context", {})
+                    self.token_counts = data.get("token_counts", {"input": 0, "output": 0, "total": 0, "total_cost": 0.0})
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -96,6 +99,7 @@ class SessionManager:
                     folder_context_obj.to_dict() if folder_context_obj else {}
                 ),
                 "variables": self.variables,
+                "token_counts": self.token_counts,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -117,6 +121,7 @@ class SessionManager:
         self.current_session_name = name
         self.history = []
         self.provider_config = {"provider": provider_name, "model": model_name}
+        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
         self.save_history()
@@ -470,6 +475,10 @@ class Session:
                         "parts": ai_parts_archive,
                     })
 
+                self.session_manager.token_counts["input"] += response.input_tokens
+                self.session_manager.token_counts["output"] += response.output_tokens
+                self.session_manager.token_counts["total"] += response.total_tokens
+
                 total_in += response.input_tokens
                 total_out += response.output_tokens
 
@@ -481,6 +490,7 @@ class Session:
                 cost_str = ""
                 if est_cost is not None:
                     total_cost += est_cost
+                    self.session_manager.token_counts["total_cost"] += est_cost
                     cost_str = (
                         f"| Est. Cost: ${est_cost:.5f} (Total: ${total_cost:.5f})"
                     )
@@ -521,7 +531,7 @@ class Session:
                     self.session_manager.save_history(self.folder_context)
                     break
 
-                auto_approve = self.variables.get("auto_approve", False)
+                strict_mode = self.variables.get("strict_mode", False)
                 tool_result_parts = []
                 tool_calls = [p for p in response.parts if p.type == "tool_call"]
 
@@ -531,7 +541,11 @@ class Session:
                     tool_def = next(
                         (t for t in TOOLS if t.name == part.tool_name), None
                     )
-                    if not auto_approve or (tool_def and tool_def.requires_approval):
+
+                    if self.variables.get("yolo", False):
+                        continue
+
+                    if strict_mode or (tool_def and tool_def.requires_approval):
                         mods = get_modifications(
                             part.tool_name, part.tool_args, self.folder_context
                         )
@@ -555,7 +569,7 @@ class Session:
                                     self.ui.show_diff(filename, orig, modified)
 
                 for i, part in enumerate(tool_calls):
-                    needs_approval = (i in to_approve_data) and not auto_approve
+                    needs_approval = (i in to_approve_data) or strict_mode
                     if needs_approval:
                         orig, modified, filename = to_approve_data[i]
 

@@ -23,9 +23,10 @@ if not os.path.exists(IMAGE_DIR):
 VARIABLE_SCHEMA = {
     "agent_mode": {"type": str, "default": "default"},                             # Agent mode, determines the initial system prompt
     "ollama_host": {"type": str, "default": "http://localhost:11434"},             # Ollama server host
-    "auto_approve": {"type": bool, "default": False},                              # Auto-approves tools that require approval
+    "strict_mode": {"type": bool, "default": False},                               # Forces approval for all tools
     "max_iterations": {"type": int, "default": 80},                                # Max number of iterations to run for each conversation
     "compact_history": {"type": bool, "default": True},                            # Auto-compacts tooling history after each finished conversation, minimizes token usage
+    "yolo": {"type": bool, "default": False},                                      # YOLO mode (no approvals)
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}

@@ -56,7 +56,7 @@ python mucli.py
 | `/agentic` | | Toggle Agentic (Tool Calling) mode |
 | `/folder <path>` | `/dir` | Monitor a folder for context |
 | `/file <path>` | `/f` | Attach a specific file as context |
-| `/mode <mode>` | | Change strategy: `default`, `debug`, `feature`, `research` |
+| `/mode <mode>` | | Change strategy: `default`, `debug`, `feature`, `research`, `git` |
 | `/yolo` | | Toggle YOLO mode (no tool approvals) |
 | `/tool <cmd>` | `/tools` | Manage tools: `enable`, `disable`, `list` |
 | `/list` | `/ls` | List saved conversations |
@@ -77,6 +77,16 @@ python mucli.py
 | `/splash` | | Show the welcome splash screen |
 | `/quit` | `/q` | Exit the application |
 
+## Agent Modes
+
+μCLI supports different agent modes (strategies) to tailor the AI's behavior to specific tasks. Use `/mode <mode>` to switch.
+
+- **`default`**: Standard programming assistant. Best for general questions and small code changes.
+- **`debug`**: Optimized for bug hunting. The agent focuses on error logs, searching for root causes, and providing precise fixes.
+- **`feature`**: Designed for implementing new features. The agent creates an architecture plan (`FEATURE_<name>.md`) before writing any code.
+- **`research`**: Focuses on codebase exploration and documentation. The agent traverses function calls and imports to explain how systems work.
+- **`git`**: **Autonomous Software Engineer Mode.** The agent works through a structured workflow: Requirements -> Implementation Plan -> Verification Plan -> Implementation (in a new git branch) -> Verification -> Self-Review -> Merge Request. It creates and follows its own documentation and ensures task completion before finalizing.
+
 ## Tools Overview
 
 When in **Agentic Mode**, the AI can invoke the following tools:
@@ -92,7 +102,7 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 - `run_agent_task`: Executes tasks defined in a `Makefile.agents` (e.g., running tests).
 - `batch_job`: Executes multiple of the above tools in a single turn.
 - `get_current_time`: Provides the current system time in ISO format.
-- **Git Suite**: `git_status`, `git_log`, `git_diff`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`.
+- **Git Suite**: `git_init`, `git_status`, `git_log`, `git_diff`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_merge_request`.
 
 ## Additional Notes
 

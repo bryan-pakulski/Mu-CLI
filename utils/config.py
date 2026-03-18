@@ -12,12 +12,15 @@ except ImportError:
 # Configuration
 HISTORY_DIR = os.path.expanduser("~/.mucli_chats/")
 IMAGE_DIR = os.path.join(HISTORY_DIR, "images")
+LOG_DIR = os.path.join(HISTORY_DIR, "logs")
 DEFAULT_SESSION_NAME = "default"
 
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
 if not os.path.exists(IMAGE_DIR):
     os.makedirs(IMAGE_DIR)
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
 
 # --- Variable Schema & Defaults ---
 VARIABLE_SCHEMA = {

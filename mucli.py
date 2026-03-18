@@ -14,6 +14,7 @@ from rich import box
 # Import from our new modular structure
 from providers.gemini import GeminiProvider
 from providers.ollama import OllamaProvider
+from utils.logger import logger
 from providers.openai import OpenAIProvider
 from core.session import SessionManager, Session
 from core.workspace import FolderContext
@@ -219,6 +220,8 @@ def sync_provider_settings(session):
 
 
 def main():
+    logger.info("μCLI starting...")
+
     parser = argparse.ArgumentParser(description="Interactive AI CLI")
     parser.add_argument("--model", default=None, help="Default model")
     parser.add_argument(

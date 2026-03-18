@@ -3,6 +3,7 @@ import datetime
 import difflib
 import re
 from providers.base import ToolDefinition
+from utils.logger import logger
 
 # --- Tool Definitions (Schemas) ---
 
@@ -411,6 +412,7 @@ def get_workspace_details(folder_context) -> str:
 def read_file(filename: str, folder_context) -> str:
     """Returns the whole file contents."""
     if not _check_bounds(filename, folder_context):
+        logger.warning(f"read_file: Access denied or file ignored: {filename}")
         return f"Error: Access denied or file ignored. '{filename}' is outside boundaries or in ignore list."
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -420,6 +422,7 @@ def read_file(filename: str, folder_context) -> str:
     except UnicodeDecodeError:
         return f"Error: '{filename}' appears to be a binary file or has an unsupported encoding."
     except Exception as e:
+        logger.error(f"read_file: Error reading {filename}: {e}")
         return f"Error reading file: {e}"
 
 
@@ -446,6 +449,7 @@ def search_for_string(search_string: str, folder_context) -> str:
 def get_chunk(filename: str, start_line: int, end_line: int, folder_context) -> str:
     """Returns a string of the file contents between the start and end line numbers."""
     if not _check_bounds(filename, folder_context):
+        logger.warning(f"get_chunk: Access denied or file ignored: {filename}")
         return f"Error: Access denied or file ignored. '{filename}' is outside boundaries or in ignore list."
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -462,6 +466,7 @@ def get_chunk(filename: str, start_line: int, end_line: int, folder_context) -> 
     except UnicodeDecodeError:
         return f"Error: '{filename}' appears to be a binary file or has an unsupported encoding."
     except Exception as e:
+        logger.error(f"get_chunk: Error reading {filename}: {e}")
         return f"Error reading file chunk: {e}"
 
 
@@ -478,6 +483,7 @@ def list_dir(path: str, folder_context) -> str:
     target_path = path or "."
     # We check bounds for the directory itself
     if not _check_bounds(target_path, folder_context):
+        logger.warning(f"list_dir: Access denied or path ignored: {target_path}")
         return f"Error: Access denied or path ignored. '{target_path}'"
 
     try:
@@ -491,12 +497,14 @@ def list_dir(path: str, folder_context) -> str:
             filtered_items.append(item)
         return "\n".join(sorted(filtered_items))
     except Exception as e:
+        logger.error(f"list_dir: Error listing {target_path}: {e}")
         return f"Error listing directory: {e}"
 
 
 def write_file(filename: str, content: str, folder_context) -> str:
     """Creates or overwrites a file with the provided content."""
     if not _check_bounds(filename, folder_context):
+        logger.warning(f"write_file: Access denied or path ignored: {filename}")
         return f"Error: Access denied or path ignored. '{filename}'"
 
     try:
@@ -507,6 +515,7 @@ def write_file(filename: str, content: str, folder_context) -> str:
             f.write(content)
         return f"Successfully wrote to {filename}"
     except Exception as e:
+        logger.error(f"write_file: Error writing to {filename}: {e}")
         return f"Error writing file: {e}"
 
 
@@ -589,6 +598,7 @@ def _sanitize_diff(diff: str, filename: str) -> str:
 def apply_diff(filename: str, diff: str, folder_context) -> str:
     """Applies a unified diff to a file."""
     if not _check_bounds(filename, folder_context):
+        logger.warning(f"apply_diff: Access denied or path ignored: {filename}")
         return f"Error: Access denied or path ignored. '{filename}'"
 
     try:
@@ -620,14 +630,17 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
             if result.returncode == 0:
                 return f"Successfully applied diff to {filename}"
             else:
+                logger.error(f"apply_diff: Patch error for {filename}: {result.stderr or result.stdout}")
                 return (
                     f"Error applying diff via 'patch': {result.stderr or result.stdout}"
                 )
         except FileNotFoundError:
             os.unlink(tmp_diff_path)
+            logger.error("apply_diff: 'patch' utility not found.")
             return "Error: 'patch' utility not found on system. Please install it to apply diffs."
 
     except Exception as e:
+        logger.error(f"apply_diff: Exception for {filename}: {e}")
         return f"Error applying diff: {e}"
 
 
@@ -743,6 +756,7 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None) -> st
     except subprocess.TimeoutExpired as e:
         return f"Error: Task timed out after {timeout} seconds. Partial output:\n{e.stdout or ''}\n{e.stderr or ''}"
     except Exception as e:
+        logger.error(f"run_agent_task: Error executing {task_name}: {e}")
         return f"Error executing task: {e}"
 
 def run_git_command(args_list: list[str], folder_context) -> str:
@@ -778,6 +792,7 @@ def run_git_command(args_list: list[str], folder_context) -> str:
 
         return combined_output
     except Exception as e:
+        logger.error(f"run_git_command: Error executing git {' '.join(args_list)}: {e}")
         return f"Error executing git command: {e}"
 
 def git_status(folder_context) -> str:
@@ -799,6 +814,7 @@ def git_diff(cached: bool = False, filename: str = None, folder_context=None) ->
         cmd_args.append("--cached")
     if filename:
         if not _check_bounds(filename, folder_context):
+             logger.warning(f"git_diff: Access denied or path ignored: {filename}")
              return f"Error: Access denied or path ignored. '{filename}'"
         cmd_args.append(filename)
     return run_git_command(cmd_args, folder_context)
@@ -815,6 +831,7 @@ def git_add(files: list[str], folder_context=None) -> str:
     """Adds file contents to the index."""
     for f in files:
         if f != "." and not _check_bounds(f, folder_context):
+             logger.warning(f"git_add: Access denied or path ignored: {f}")
              return f"Error: Access denied or path ignored. '{f}'"
     
     cmd_args = ["add"] + files
@@ -905,6 +922,7 @@ def url_grounding(url: str, folder_context) -> str:
 def read_document(filename: str, folder_context) -> str:
     """Reads and parses documents like PDFs to gather additional context."""
     if not _check_bounds(filename, folder_context):
+        logger.warning(f"read_document: Access denied or file ignored: {filename}")
         return f"Error: Access denied or file ignored. '{filename}'"
     
     ext = os.path.splitext(filename)[1].lower()
@@ -919,8 +937,10 @@ def read_document(filename: str, folder_context) -> str:
                     text += extracted + "\n"
             return text
         except ImportError:
+            logger.error("read_document: 'pypdf' not installed.")
             return "Error: 'pypdf' is not installed. Please install it to parse PDF files."
         except Exception as e:
+            logger.error(f"read_document: Error reading PDF {filename}: {e}")
             return f"Error reading PDF: {e}"
     
     # Default to read_file for other text-based documents

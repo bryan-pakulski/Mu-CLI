@@ -9,6 +9,7 @@ from core.collation import CollationBuffer
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
 from core.tools import TOOLS, execute_tool, get_modifications, COLLATED_TOOLS
+from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.config import (
     HISTORY_DIR,
@@ -19,6 +20,12 @@ from utils.config import (
     DEFAULT_VARIABLES,
     validate_and_cast,
 )
+
+def _sanitize_for_log(data):
+    """Truncates large data for logging."""
+    if isinstance(data, str) and len(data) > 1000:
+        return f"{data[:500]}... [TRUNCATED {len(data)-1000} chars] ...{data[-500:]}"
+    return data
 
 
 def _shorten_tool_args(args: dict) -> dict:
@@ -39,6 +46,7 @@ def _shorten_tool_args(args: dict) -> dict:
 class SessionManager:
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
+        logger.info(f"Initializing SessionManager (session_name={session_name})")
         self.current_session_name = DEFAULT_SESSION_NAME
         self.history = []  # Stores standardized list of dicts representing messages
         self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
@@ -96,6 +104,7 @@ class SessionManager:
                 self.history = []
 
     def save_history(self, folder_context_obj=None):
+        logger.debug(f"Saving history for session: {self.current_session_name}")
         filepath = self._get_filepath(self.current_session_name)
         if folder_context_obj:
             self.folder_context = folder_context_obj
@@ -115,8 +124,10 @@ class SessionManager:
         except IOError as e:
             if self.ui:
                 self.ui.show_error(f"Warning: Could not save chat history: {e}")
+            logger.error(f"Failed to save history: {e}")
 
     def switch_session(self, name):
+        logger.info(f"Switching to session: {name}")
         self.save_history()
         self._load_session(name)
         if self.ui:
@@ -124,6 +135,7 @@ class SessionManager:
         self.view_history()
 
     def new_session(self, name=None, provider_name=None, model_name=None):
+        logger.info(f"Creating new session: {name} (provider={provider_name}, model={model_name})")
         self.save_history()
         if not name:
             name = f"chat_{int(time.time())}"
@@ -140,6 +152,7 @@ class SessionManager:
             self.ui.show_info(f"Started new session: '{name}'")
 
     def list_sessions(self):
+        logger.debug("Listing sessions")
         if not os.path.exists(self._get_filepath(self.current_session_name)):
             self.save_history()
 
@@ -163,6 +176,7 @@ class SessionManager:
         return sorted(sessions)
 
     def delete_session(self, name):
+        logger.info(f"Deleting session: {name}")
         if name == self.current_session_name:
             if self.ui:
                 self.ui.show_error("Cannot delete active session.")
@@ -178,6 +192,7 @@ class SessionManager:
                 self.ui.show_error(f"Session '{name}' not found.")
 
     def clear_current_history(self):
+        logger.info(f"Clearing history for session: {self.current_session_name}")
         self.history = []
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.save_history()
@@ -265,6 +280,7 @@ class Session:
         ui=None,
         debug: bool = False,
     ):
+        logger.info("Initializing Session object")
         self.provider = provider
         self.thinking = thinking
         self.system_instruction = system_instruction
@@ -284,6 +300,7 @@ class Session:
                 self.ui.show_info(
                     f"Restored folder context: {', '.join(self.folder_context.folders)}"
                 )
+            logger.info(f"Restored folder context: {self.folder_context.folders}")
             try:
                 os.chdir(self.folder_context.folders[0])
                 if self.ui:
@@ -367,6 +384,8 @@ class Session:
         return messages
 
     def send_message(self, text):
+        logger.info(f"Sending message: {text[:100]}...")
+        
         parts = list(self.staged_files)
         if text:
             parts.append({"type": "text", "text": text})
@@ -392,6 +411,8 @@ class Session:
                 map_str = self.folder_context.get_tree_map()
                 workspace_context = f"<workspace_map>\n{map_str}\n</workspace_map>\n\n{AGENTIC_SYSTEM_BASE.format(tool_descriptions=tool_desc_str)}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
             else:
+                logger.debug(f"Using agent_mode={self.variables.get('agent_mode', 'default')}")
+
                 if self.ui:
                     with self.ui.show_status(
                         "Scanning monitored folders for changes..."
@@ -421,8 +442,11 @@ class Session:
         total_out = 0
         total_cost = 0.0
 
+        logger.info(f"Starting agentic loop (max_iterations={max_iterations})")
+
         while iteration < max_iterations:
             iteration += 1
+            logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
 
             try:
                 status_msg = f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}..."
@@ -450,6 +474,8 @@ class Session:
                         ),
                     )
 
+                logger.debug(f"Provider response received. Tokens: In {response.input_tokens}, Out {response.output_tokens}")
+
                 ai_parts_archive = []
                 has_tool_call = False
                 has_text = False
@@ -461,6 +487,7 @@ class Session:
                             self.ui.render_message(
                                 "assistant", part.text, self.provider.model_name
                             )
+                        logger.debug(f"Assistant text: {part.text[:200]}...")
                         ai_parts_archive.append({"type": "text", "text": part.text})
 
                     elif part.type == "image_inline" and part.inline_data:
@@ -486,6 +513,7 @@ class Session:
                             self.ui.show_info(
                                 f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                             )
+                        logger.info(f"Tool call: {part.tool_name} with args {part.tool_args}")
 
                 if ai_parts_archive:
                     self.session_manager.history.append(
@@ -522,6 +550,8 @@ class Session:
 
                 if not has_tool_call:
                     if not has_text:
+                        logger.warning("Assistant provided empty response. Nudging.")
+
                         nudge_msg = {
                             "role": "user",
                             "parts": [
@@ -543,12 +573,15 @@ class Session:
                             f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}"
                         )
 
+                    logger.info("Agentic loop finished (no tool calls).")
+
                     if self.variables.get("compact_history", False):
                         if self.ui:
                             self.ui.show_info(
                                 "[dim]Compacting turn history (removing tool metadata)...[/dim]"
                             )
                             self.session_manager.compact_completed_turn()
+                        logger.debug("History compacted.")
 
                     self.session_manager.save_history(self.folder_context)
                     break
@@ -611,6 +644,7 @@ class Session:
                                 if self.ui:
                                     self.ui.show_error(f"Cannot show diff for {f}: {m}")
                                 can_approve = False
+                                logger.error(f"Diff error for {f}: {m}")
                                 break
 
                         if not can_approve and error_msg:
@@ -619,6 +653,7 @@ class Session:
                                     f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
                                 )
                             result = f"Error: Malformed patch detected. Please ensure your diff is correctly formatted. Check hunk headers and context.\n{error_msg}"
+                            logger.warning(f"Malformed patch detected for {part.tool_name}: {error_msg}")
                             # Fall through to skip Prompt.ask since result is now set
 
                         # Show diffs if not already shown in bulk pre-calculation
@@ -657,11 +692,13 @@ class Session:
                             )
                             if choice == "n":
                                 result = "User denied this tool call."
+                                logger.info(f"Tool call {part.tool_name} denied by user.")
                             elif choice == "e":
                                 reason = Prompt.ask(
                                     "Provide an explanation to the model"
                                 )
                                 result = f"User denied this tool call. Reason: {reason}"
+                                logger.info(f"Tool call {part.tool_name} denied by user with explanation: {reason}")
                             else:
                                 result = execute_tool(
                                     part.tool_name,
@@ -678,6 +715,8 @@ class Session:
                             self.ui,
                             self.variables,
                         )
+
+                    logger.debug(f"Tool result ({part.tool_name}): {_sanitize_for_log(result)}")
 
                     if self.ui:
                         self.ui.show_tool_result(result)
@@ -740,6 +779,7 @@ class Session:
             except KeyboardInterrupt:
                 if self.ui:
                     self.ui.show_info("\nAgentic loop interrupted by user.")
+                logger.warning("Agentic loop interrupted by user.")
                 self.session_manager.history.append(
                     {
                         "role": "tool",
@@ -757,5 +797,6 @@ class Session:
             except Exception as e:
                 if self.ui:
                     self.ui.show_error(f"API Error during agentic loop: {e}")
+                logger.error(f"Error in agentic loop: {e}", exc_info=True)
                 self.session_manager.save_history(self.folder_context)
                 break

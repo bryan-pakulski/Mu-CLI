@@ -21,11 +21,11 @@ if not os.path.exists(IMAGE_DIR):
 
 # --- Variable Schema & Defaults ---
 VARIABLE_SCHEMA = {
-    "agent_mode": {"type": str, "default": "default"},
-    "ollama_host": {"type": str, "default": "http://localhost:11434"},
-    "auto_approve": {"type": bool, "default": True},
-    "max_iterations": {"type": int, "default": 50},
-    "compact_history": {"type": bool, "default": True},
+    "agent_mode": {"type": str, "default": "default"},                             # Agent mode, determines the initial system prompt
+    "ollama_host": {"type": str, "default": "http://localhost:11434"},             # Ollama server host
+    "auto_approve": {"type": bool, "default": False},                              # Auto-approves tools that require approval
+    "max_iterations": {"type": int, "default": 80},                                # Max number of iterations to run for each conversation
+    "compact_history": {"type": bool, "default": True},                            # Auto-compacts tooling history after each finished conversation, minimizes token usage
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}
@@ -82,12 +82,15 @@ AGENTIC_SYSTEM_BASE = """You are an autonomous AI programming agent. You have ac
 AVAILABLE TOOLS:
 {tool_descriptions}
 GENERAL RULES:
-1. NEVER guess file paths or content. ALWAYS use your tools to discover and read files.
-2. If a file is large, use `get_chunk` to read specific lines instead of the whole file.
-3. If a tool returns an error, read the error carefully and try a different approach (e.g., search for a string instead of guessing a filename).
-4. Do no overwrite existing files, only update necessary parts using patch tooling.
-5. Provide multiple tool calls (e.g. multiple `apply_diff` calls) in a single response when they are related or can be executed together.
-6. Once you have enough context, stop using tools and provide your final response to the user.
+1. **NO HALLUCINATIONS**: Never guess file paths. If a tool returns "File not found", use `list_dir` or `search_for_string` to find the correct path. 
+2. **ARGUMENT PRECISION**: Always provide the full 'filename' argument for tools like `read_file` or `apply_diff`.                                    
+3. **STUCK LOOP PREVENTION**: If you fail a task 3 times using the same tool, STOP and use `get_workspace_details` to re-orient yourself.
+4. **DIFF FORMAT**: When using `apply_diff`, ensure the diff is in valid unified format with `---` and `+++` headers.
+5. **BATCH TOOLING**: Where possible, use batching for multiple tool calls to reduce token usage.
+6. If a tool returns an error, read the error carefully and try a different approach (e.g., search for a string instead of guessing a filename).
+7. Do no overwrite existing files, only update necessary parts using patch tooling.
+8. Provide multiple tool calls (e.g. multiple `apply_diff` calls) in a single response when they are related or can be executed together.
+9. Once you have enough context, stop using tools and provide your final response to the user.
 """
 
 AGENTIC_MODES = {
@@ -96,14 +99,12 @@ AGENTIC_MODES = {
 2. Use `search_for_string` or `read_file` to drill down into the specific files mentioned or implied by the user.
 3. Analyze the code.
 4. Provide your solution or answer.""",
-
     "debug": """WORKFLOW (Debugging):
 1. Read the error message or issue description provided by the user.
 2. Use `search_for_string` to find exactly where the error originates in the codebase.
 3. You have access to online tooling and research knowledge bases, use them to explore any relevent information.
 3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
 4. Identify the root cause and propose a precise fix.""",
-
     "feature": """WORKFLOW (New Feature):
 1. Understand the new feature request.
 2. Create a thorough implementation plan that includes the design and architecture of the new feature, split into actionable tasks, this should be saved as a markdown file in the workspace - FEATURE_<feature_name>.md.
@@ -111,7 +112,6 @@ AGENTIC_MODES = {
 4. Use `read_file` to understand the interfaces and patterns of existing code.
 5. Write the new code following the existing project architecture, ensure it is maintainable and follows best practices.
 6. Ensure that the new feature is well tested and has sufficient documentatation""",
-
     "research": """WORKFLOW (Research & Exploration):
 1. The user wants to understand how something works without necessarily changing things.
 2. You have access to online tooling and research knowledge bases, use them to explore any relevent information.

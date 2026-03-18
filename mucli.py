@@ -39,6 +39,7 @@ def print_help():
     table.add_row("/load [name]", "/open", "Load a conversation")
     table.add_row("/model [name]", "", "Show / change current model")
     table.add_row("/get [key]", "", "Get a variable")
+    table.add_row("/yolo", "", "Toggle YOLO mode (no approvals)")
     table.add_row("/set [key] [value]", "", "Set a variable")
     table.add_row("/unset [key]", "", "Unset a variable (or --all)")
     table.add_row("/variables", "", "Show all variables")
@@ -89,6 +90,7 @@ def print_splash(session):
 
     sys_status = "SET" if session.system_instruction else "NONE"
     agent_mode = session.variables.get("agent_mode", "default")
+    yolo_status = "ON" if session.variables.get("auto_approve", False) else "OFF"
     
     # Folder info
     folder_count = len(session.folder_context.folders)
@@ -106,7 +108,7 @@ def print_splash(session):
     [bold magenta]Session:[/bold magenta]  [bold yellow]{session.session_manager.current_session_name}[/bold yellow]
     [bold magenta]System:[/bold magenta]   {sys_status}                                
     [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
-    [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan]
+    [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan]
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
     [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns
@@ -339,6 +341,12 @@ def main():
                                     console.print(
                                         f"[green]Added folder context: {path}[/green]"
                                     )
+                                    if len(session.folder_context.folders) == 1:
+                                        try:
+                                            os.chdir(session.folder_context.folders[0])
+                                            console.print(f"[dim]Switched workspace to: {os.getcwd()}[/dim]")
+                                        except Exception:
+                                            pass
                                 else:
                                     console.print(
                                         f"[red]Folder not found or invalid: {path}[/red]"
@@ -421,6 +429,12 @@ def main():
                             console.print(
                                 f"[dim]Context restored for {len(session.folder_context.folders)} folders.[/dim]"
                             )
+                            if session.folder_context.folders:
+                                try:
+                                    os.chdir(session.folder_context.folders[0])
+                                    console.print(f"[dim]Switched workspace to: {os.getcwd()}[/dim]")
+                                except Exception:
+                                    pass
                         print_splash(session)
                     else:
                         console.print("[yellow]Usage: /load <session_name>")
@@ -608,6 +622,13 @@ def main():
                     session.agentic = not session.agentic
                     state = "ON" if session.agentic else "OFF"
                     console.print(f"Agentic mode: {state}")
+                elif cmd == "/yolo":
+                    current = session.variables.get("auto_approve", False)
+                    session.variables["auto_approve"] = not current
+                    state = "ON" if session.variables["auto_approve"] else "OFF"
+                    color = "bold red" if session.variables["auto_approve"] else "bold green"
+                    console.print(f"YOLO mode: [{color}]{state}[/{color}]")
+                    session.session_manager.save_history(session.folder_context)
                 elif cmd == "/splash":
                     print_splash(session)
                 else:

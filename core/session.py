@@ -19,13 +19,18 @@ from utils.config import (
     validate_and_cast,
 )
 
+
 def _shorten_tool_args(args: dict) -> dict:
     """Shortens long string arguments (like 'content' or 'diff') for display."""
     if not args:
         return {}
     shortened = args.copy()
     for key in ["content", "diff"]:
-        if key in shortened and isinstance(shortened[key], str) and len(shortened[key]) > 100:
+        if (
+            key in shortened
+            and isinstance(shortened[key], str)
+            and len(shortened[key]) > 100
+        ):
             shortened[key] = f"({len(shortened[key])} chars)"
     return shortened
 
@@ -35,11 +40,11 @@ class SessionManager:
         self.ui = ui
         self.current_session_name = DEFAULT_SESSION_NAME
         self.history = []  # Stores standardized list of dicts representing messages
-        self.provider_config = {} # Stores { "provider": "...", "model": "..." }
+        self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
         self.summary_anchor = 0
         self.folder_context_data = {}
         self.variables = DEFAULT_VARIABLES.copy()
-        
+
         if session_name:
             self._load_session(session_name)
         else:
@@ -69,7 +74,7 @@ class SessionManager:
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.provider_config = data.get("provider_config", {})
                     self.folder_context_data = data.get("folder_context", {})
-                    
+
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
                         try:
@@ -95,12 +100,14 @@ class SessionManager:
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
         except IOError as e:
-            if self.ui: self.ui.show_error(f"Warning: Could not save chat history: {e}")
+            if self.ui:
+                self.ui.show_error(f"Warning: Could not save chat history: {e}")
 
     def switch_session(self, name):
         self.save_history()
         self._load_session(name)
-        if self.ui: self.ui.show_info(f"Switched to session: '{name}'")
+        if self.ui:
+            self.ui.show_info(f"Switched to session: '{name}'")
         self.view_history()
 
     def new_session(self, name=None, provider_name=None, model_name=None):
@@ -113,7 +120,8 @@ class SessionManager:
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
         self.save_history()
-        if self.ui: self.ui.show_info(f"Started new session: '{name}'")
+        if self.ui:
+            self.ui.show_info(f"Started new session: '{name}'")
 
     def list_sessions(self):
         if not os.path.exists(self._get_filepath(self.current_session_name)):
@@ -140,24 +148,29 @@ class SessionManager:
 
     def delete_session(self, name):
         if name == self.current_session_name:
-            if self.ui: self.ui.show_error("Cannot delete active session.")
+            if self.ui:
+                self.ui.show_error("Cannot delete active session.")
             return
 
         filepath = self._get_filepath(name)
         if os.path.exists(filepath):
             os.remove(filepath)
-            if self.ui: self.ui.show_info(f"Deleted session: '{name}'")
+            if self.ui:
+                self.ui.show_info(f"Deleted session: '{name}'")
         else:
-            if self.ui: self.ui.show_error(f"Session '{name}' not found.")
+            if self.ui:
+                self.ui.show_error(f"Session '{name}' not found.")
 
     def clear_current_history(self):
         self.history = []
         self.save_history()
-        if self.ui: self.ui.show_info("Current chat history cleared.")
+        if self.ui:
+            self.ui.show_info("Current chat history cleared.")
 
     def view_history(self):
         if not self.history:
-            if self.ui: self.ui.show_info("No history in this session.")
+            if self.ui:
+                self.ui.show_info("No history in this session.")
             return
 
         if self.ui:
@@ -180,38 +193,49 @@ class SessionManager:
                         )
                         self.ui.show_info(f"  [Tool Result: {res_preview}...]")
 
-    def prune_history(self):
+    def compact_completed_turn(self):
         """
-        Removes tool calls and tool results from the history, keeping only user and assistant text.
-        Merges consecutive assistant messages if they result from this pruning.
+        Collapses the most recent agentic turn.
+        Identifies the last 'user' prompt and the last 'assistant' text response,
+        then removes all intermediate tool calls and results between them.
         """
-        if not self.history:
+        if len(self.history) < 2:
             return
 
-        new_history = []
-        for msg in self.history:
-            role = msg.get("role")
-            if role == "tool":
-                continue
-            
-            parts = msg.get("parts", [])
-            new_parts = []
-            for p in parts:
-                if p.get("type") not in ("tool_call", "tool_result"):
-                    new_parts.append(p)
-            
-            # Skip messages that became empty and are not 'user' messages
-            if not new_parts and role != "user":
-                continue
-            
-            # Merge consecutive assistant messages
-            if role == "assistant" and new_history and new_history[-1]["role"] == "assistant":
-                new_history[-1]["parts"].extend(new_parts)
-            else:
-                new_history.append({"role": role, "parts": new_parts.copy()})
-        
+        # 1. Find the index of the last 'user' message that started this turn
+        last_user_idx = -1
+        for i in range(len(self.history) - 1, -1, -1):
+            if self.history[i]["role"] == "user":
+                last_user_idx = i
+                break
+
+        if last_user_idx == -1:
+            return
+
+        # 2. Extract the final assistant text parts from the end of history
+        final_assistant_parts = []
+        for i in range(len(self.history) - 1, last_user_idx, -1):
+            if self.history[i]["role"] == "assistant":
+                # Collect text parts only
+                text_parts = [
+                    p for p in self.history[i]["parts"] if p["type"] == "text"
+                ]
+                if text_parts:
+                    # We reverse them back because we are iterating backwards
+                    final_assistant_parts = text_parts + final_assistant_parts
+                    # If we found the "final" response message, we stop looking for more text
+                    break
+
+        # 3. Reconstruct history
+        # Keep everything before the current turn
+        new_history = self.history[: last_user_idx + 1]
+
+        # Append the collapsed assistant response if we found text
+        if final_assistant_parts:
+            new_history.append({"role": "assistant", "parts": final_assistant_parts})
+
         self.history = new_history
-        self.summary_anchor = 0 # Reset anchor as history structure changed
+        self.summary_anchor = 0
 
 
 class Session:
@@ -244,38 +268,46 @@ class Session:
                     self.ui.show_info(
                         f"Restored folder context: {', '.join(self.folder_context.folders)}"
                     )
+                try:
+                    os.chdir(self.folder_context.folders[0])
+                except Exception:
+                    pass
+
 
     def add_file(self, file_path):
         file_path = file_path.strip("'\"")
         file_path = os.path.expanduser(file_path)
 
         if not os.path.exists(file_path):
-            if self.ui: self.ui.show_error(f"Error: File '{file_path}' not found.")
+            if self.ui:
+                self.ui.show_error(f"Error: File '{file_path}' not found.")
             return
 
         safe_mime = get_safe_mime_type(file_path)
-        if self.ui: self.ui.show_info(f"Uploading {file_path} as {safe_mime}...")
+        if self.ui:
+            self.ui.show_info(f"Uploading {file_path} as {safe_mime}...")
 
         try:
             file_ref = self.provider.upload_file(file_path, safe_mime)
             if file_ref:
-                self.staged_files.append(
-                    {
-                        "type": "file",
-                        "file_ref": {
-                            "uri": file_ref.uri,
-                            "mime_type": file_ref.mime_type,
-                            "display_name": file_ref.display_name,
-                        },
-                    }
-                )
-                if self.ui: self.ui.show_info("Upload complete.")
+                self.staged_files.append({
+                    "type": "file",
+                    "file_ref": {
+                        "uri": file_ref.uri,
+                        "mime_type": file_ref.mime_type,
+                        "display_name": file_ref.display_name,
+                    },
+                })
+                if self.ui:
+                    self.ui.show_info("Upload complete.")
         except Exception as e:
-            if self.ui: self.ui.show_error(f"Upload failed: {e}")
+            if self.ui:
+                self.ui.show_error(f"Upload failed: {e}")
 
     def clear_files(self):
         self.staged_files = []
-        if self.ui: self.ui.show_info("Staged files cleared.")
+        if self.ui:
+            self.ui.show_info("Staged files cleared.")
 
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
@@ -329,9 +361,9 @@ class Session:
         if self.folder_context.folders:
             if self.agentic:
                 active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
-                tool_desc_str = "\n".join(
-                    [f"{t.name} - {t.description}" for t in active_tools]
-                )
+                tool_desc_str = "\n".join([
+                    f"{t.name} - {t.description}" for t in active_tools
+                ])
 
                 agent_mode = str(self.variables.get("agent_mode", "default")).lower()
                 mode_instruction = AGENTIC_MODES.get(
@@ -342,8 +374,12 @@ class Session:
                 workspace_context = f"<workspace_map>\n{map_str}\n</workspace_map>\n\n{AGENTIC_SYSTEM_BASE.format(tool_descriptions=tool_desc_str)}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
             else:
                 if self.ui:
-                    with self.ui.show_status("Scanning monitored folders for changes..."):
-                        folder_initial_xml = self.folder_context.get_initial_context_xml()
+                    with self.ui.show_status(
+                        "Scanning monitored folders for changes..."
+                    ):
+                        folder_initial_xml = (
+                            self.folder_context.get_initial_context_xml()
+                        )
                         folder_diff_xml = self.folder_context.get_context_diff_xml()
                         workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
@@ -403,38 +439,40 @@ class Session:
                     if part.type == "text" and part.text:
                         has_text = True
                         if self.ui:
-                            self.ui.render_message("assistant", part.text, self.provider.model_name)
+                            self.ui.render_message(
+                                "assistant", part.text, self.provider.model_name
+                            )
                         ai_parts_archive.append({"type": "text", "text": part.text})
 
                     elif part.type == "image_inline" and part.inline_data:
                         display_image_in_terminal(part.inline_data)
-                        ai_parts_archive.append(
-                            {
-                                "type": "text",
-                                "text": "[Image Generated and Saved locally]",
-                            }
-                        )
+                        ai_parts_archive.append({
+                            "type": "text",
+                            "text": "[Image Generated and Saved locally]",
+                        })
 
                     elif part.type == "tool_call":
                         has_tool_call = True
-                        ai_parts_archive.append(
-                            {
-                                "type": "tool_call",
-                                "tool_name": part.tool_name,
-                                "tool_args": part.tool_args,
-                                "thought_signature": part.thought_signature,
-                            }
-                        )
-                        if self.ui: self.ui.show_info(f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})")
+                        ai_parts_archive.append({
+                            "type": "tool_call",
+                            "tool_name": part.tool_name,
+                            "tool_args": part.tool_args,
+                            "thought_signature": part.thought_signature,
+                        })
+                        if self.ui:
+                            self.ui.show_info(
+                                f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
+                            )
 
                 if ai_parts_archive:
-                    self.session_manager.history.append(
-                        {"role": "assistant", "parts": ai_parts_archive}
-                    )
+                    self.session_manager.history.append({
+                        "role": "assistant",
+                        "parts": ai_parts_archive,
+                    })
 
                 total_in += response.input_tokens
                 total_out += response.output_tokens
-                
+
                 est_cost = calculate_cost(
                     self.provider.model_name,
                     response.input_tokens,
@@ -443,8 +481,10 @@ class Session:
                 cost_str = ""
                 if est_cost is not None:
                     total_cost += est_cost
-                    cost_str = f"| Est. Cost: ${est_cost:.5f} (Total: ${total_cost:.5f})"
-                
+                    cost_str = (
+                        f"| Est. Cost: ${est_cost:.5f} (Total: ${total_cost:.5f})"
+                    )
+
                 if self.ui:
                     self.ui.show_info(
                         f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | Total {response.total_tokens} {cost_str}"
@@ -469,46 +509,67 @@ class Session:
                         continue
 
                     if self.ui:
-                        self.ui.show_info(f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}")
+                        self.ui.show_info(
+                            f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}"
+                        )
 
                     if self.variables.get("compact_history", False):
-                        self.session_manager.prune_history()
+                        if self.ui: 
+                            self.ui.show_info("[dim]Compacting turn history (removing tool metadata)...[/dim]")
+                            self.session_manager.compact_completed_turn()                                                  
 
                     self.session_manager.save_history(self.folder_context)
                     break
 
-                auto_approve = self.variables.get("auto_approve", True)
+                auto_approve = self.variables.get("auto_approve", False)
                 tool_result_parts = []
                 tool_calls = [p for p in response.parts if p.type == "tool_call"]
-                
+
                 # Pre-calculate modifications for tools needing approval
                 to_approve_data = {}
                 for idx, part in enumerate(tool_calls):
-                    tool_def = next((t for t in TOOLS if t.name == part.tool_name), None)
+                    tool_def = next(
+                        (t for t in TOOLS if t.name == part.tool_name), None
+                    )
                     if not auto_approve or (tool_def and tool_def.requires_approval):
-                        orig, modified, filename = get_modifications(part.tool_name, part.tool_args, self.folder_context)
-                        to_approve_data[idx] = (orig, modified, filename)
+                        mods = get_modifications(
+                            part.tool_name, part.tool_args, self.folder_context
+                        )
+                        to_approve_data[idx] = mods
 
                 # Show bulk diffs if multiple
                 if len(to_approve_data) > 1:
                     if self.ui:
-                        self.ui.show_info(f"\n[bold yellow]Turn contains {len(to_approve_data)} modifications requiring approval.[/bold yellow]")
-                    for idx, (orig, modified, filename) in to_approve_data.items():
-                        if filename and orig is not None and modified is not None and not modified.startswith("ERROR:"):
-                            if self.ui: self.ui.show_diff(filename, orig, modified)
+                        self.ui.show_info(
+                            f"\n[bold yellow]Turn contains {len(to_approve_data)} modifications requiring approval.[/bold yellow]"
+                        )
+                    for idx, mods in to_approve_data.items():
+                        for orig, modified, filename in mods:
+                            if (
+                                filename
+                                and orig is not None
+                                and modified is not None
+                                and not modified.startswith("ERROR:")
+                            ):
+                                if self.ui:
+                                    self.ui.show_diff(filename, orig, modified)
 
                 for i, part in enumerate(tool_calls):
                     needs_approval = (i in to_approve_data) and not auto_approve
                     if needs_approval:
                         orig, modified, filename = to_approve_data[i]
-                        
+
                         can_approve = True
                         if filename and (orig is not None) and (modified is not None):
                             if modified.startswith("ERROR:"):
                                 if self.ui:
-                                    self.ui.show_error(f"Cannot show diff for {filename}: {modified}")
+                                    self.ui.show_error(
+                                        f"Cannot show diff for {filename}: {modified}"
+                                    )
                                 can_approve = False
-                            elif len(to_approve_data) <= 1: # Only show single diff if not already shown in bulk
+                            elif (
+                                len(to_approve_data) <= 1
+                            ):  # Only show single diff if not already shown in bulk
                                 if self.ui:
                                     self.ui.show_diff(filename, orig, modified)
 
@@ -516,15 +577,19 @@ class Session:
                         display_args = _shorten_tool_args(part.tool_args)
 
                         from rich.prompt import Prompt
-                        
+
                         # Add count info to prompt if multiple
-                        count_info = f" ({i+1}/{len(tool_calls)})" if len(tool_calls) > 1 else ""
-                        
+                        count_info = (
+                            f" ({i + 1}/{len(tool_calls)})"
+                            if len(tool_calls) > 1
+                            else ""
+                        )
+
                         choice = Prompt.ask(
                             (
                                 f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
-                                if can_approve else
-                                f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+                                if can_approve
+                                else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
                             ),
                             choices=["y", "n", "e"] if can_approve else ["n", "e"],
                             default="y" if can_approve else "n",
@@ -532,29 +597,26 @@ class Session:
                         if choice == "n":
                             result = "User denied this tool call."
                         elif choice == "e":
-                            reason = Prompt.ask(
-                                "Provide an explanation to the model"
-                            )
+                            reason = Prompt.ask("Provide an explanation to the model")
                             result = f"User denied this tool call. Reason: {reason}"
                         else:
                             result = execute_tool(
-                                part.tool_name, part.tool_args, self.folder_context
+                                part.tool_name, part.tool_args, self.folder_context, self.ui
                             )
                     else:
                         result = execute_tool(
-                            part.tool_name, part.tool_args, self.folder_context
+                            part.tool_name, part.tool_args, self.folder_context, self.ui
                         )
 
-                    if self.ui: self.ui.show_tool_result(result)
+                    if self.ui:
+                        self.ui.show_tool_result(result)
 
-                    tool_result_parts.append(
-                        {
-                            "type": "tool_result",
-                            "tool_name": part.tool_name,
-                            "tool_result": result,
-                            "thought_signature": part.thought_signature,
-                        }
-                    )
+                    tool_result_parts.append({
+                        "type": "tool_result",
+                        "tool_name": part.tool_name,
+                        "tool_result": result,
+                        "thought_signature": part.thought_signature,
+                    })
 
                 tool_result_msg = {"role": "tool", "parts": tool_result_parts}
                 self.session_manager.history.append(tool_result_msg)
@@ -566,22 +628,22 @@ class Session:
                 )[:-1]
 
             except KeyboardInterrupt:
-                if self.ui: self.ui.show_info("\nAgentic loop interrupted by user.")
-                self.session_manager.history.append(
-                    {
-                        "role": "tool",
-                        "parts": [
-                            {
-                                "type": "tool_result",
-                                "tool_name": "system",
-                                "tool_result": "User interrupted execution.",
-                            }
-                        ],
-                    }
-                )
+                if self.ui:
+                    self.ui.show_info("\nAgentic loop interrupted by user.")
+                self.session_manager.history.append({
+                    "role": "tool",
+                    "parts": [
+                        {
+                            "type": "tool_result",
+                            "tool_name": "system",
+                            "tool_result": "User interrupted execution.",
+                        }
+                    ],
+                })
                 self.session_manager.save_history(self.folder_context)
                 break
             except Exception as e:
-                if self.ui: self.ui.show_error(f"API Error during agentic loop: {e}")
+                if self.ui:
+                    self.ui.show_error(f"API Error during agentic loop: {e}")
                 self.session_manager.save_history(self.folder_context)
                 break

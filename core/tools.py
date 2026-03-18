@@ -106,9 +106,37 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "filename": {"type": "string", "description": "Path to the file."},
-                "diff": {"type": "string", "description": "The unified diff content to apply."},
+                "diff": {
+                    "type": "string",
+                    "description": "The unified diff content to apply.",
+                },
             },
             "required": ["filename", "diff"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="batch_job",
+        description="Executes multiple tool calls in sequence. Returns the results of all calls in the order they were provided.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "commands": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool_name": {
+                                "type": "string",
+                                "description": "The name of the tool to execute.",
+                            },
+                            "tool_args": {"type": "object"},
+                        },
+                        "required": ["tool_name", "tool_args"],
+                    },
+                }
+            },
+            "required": ["commands"],
         },
         requires_approval=True,
     ),
@@ -119,23 +147,23 @@ def _check_bounds(filename: str, folder_context) -> bool:
     """Validates if a file path is within the attached workspace folders and not ignored."""
     if not folder_context or not folder_context.folders:
         return True  # If no workspace attached, bypass boundary strictness
-    
+
     abs_path = os.path.abspath(os.path.expanduser(filename))
-    
+
     # Check if it's within any of the workspace folders
     within_bounds = False
     for f in folder_context.folders:
         if abs_path.startswith(os.path.abspath(f)):
             within_bounds = True
             break
-            
+
     if not within_bounds:
         return False
-        
+
     # Check if it's ignored
     if folder_context.is_ignored(abs_path):
         return False
-        
+
     return True
 
 
@@ -247,7 +275,9 @@ def write_file(filename: str, content: str, folder_context) -> str:
         return f"Error: Access denied or path ignored. '{filename}'"
 
     try:
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        dirname = os.path.dirname(filename)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         with open(filename, "w", encoding="utf-8") as f:
             f.write(content)
         return f"Successfully wrote to {filename}"
@@ -276,14 +306,14 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
         # Use patch logic (difflib doesn't have apply, so we use a simple approach or external tool if preferred)
         # For simplicity and cross-platform, we can try a basic hunk application or require 'patch' utility
         # Here's a pure python way to try and apply a unified diff
-        
-        # We'll use a temporary file and the 'patch' command if available, 
+
+        # We'll use a temporary file and the 'patch' command if available,
         # or implement a basic hunk applier.
-        
+
         import tempfile
         import subprocess
 
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_diff:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp_diff:
             tmp_diff.write(diff)
             tmp_diff_path = tmp_diff.name
 
@@ -291,14 +321,17 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
             # Try using system 'patch' command first as it is robust
             result = subprocess.run(
                 ["patch", "-u", filename, "-i", tmp_diff_path],
-                capture_output=True, text=True
+                capture_output=True,
+                text=True,
             )
             os.unlink(tmp_diff_path)
-            
+
             if result.returncode == 0:
                 return f"Successfully applied diff to {filename}"
             else:
-                return f"Error applying diff via 'patch': {result.stderr or result.stdout}"
+                return (
+                    f"Error applying diff via 'patch': {result.stderr or result.stdout}"
+                )
         except FileNotFoundError:
             os.unlink(tmp_diff_path)
             return "Error: 'patch' utility not found on system. Please install it to apply diffs."
@@ -307,17 +340,29 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
         return f"Error applying diff: {e}"
 
 
-def get_modifications(tool_name: str, args: dict, folder_context) -> tuple[str, str, str]:
+def get_modifications(
+    tool_name: str, args: dict, folder_context
+) -> list[tuple[str, str, str]]:
     """
-    Returns (original_content, new_content, filename) for tools that modify files.
+    Returns a list of (original_content, new_content, filename) for tools that modify files.
     Used for showing diffs before approval.
     """
+    if tool_name == "batch_job":
+        results = []
+        commands = args.get("commands", [])
+        for cmd in commands:
+            mod = get_modifications(
+                cmd.get("tool_name"), cmd.get("tool_args", {}), folder_context
+            )
+            results.extend(mod)
+        return results
+
     filename = args.get("filename") or args.get("file")
     if not filename:
-        return None, None, None
+        return []
 
     abs_path = os.path.abspath(os.path.expanduser(filename))
-    
+
     original_content = ""
     if os.path.exists(abs_path):
         try:
@@ -327,22 +372,22 @@ def get_modifications(tool_name: str, args: dict, folder_context) -> tuple[str, 
             pass
 
     if tool_name == "write_file":
-        return original_content, args.get("content", ""), filename
-    
+        return [(original_content, args.get("content", ""), filename)]
+
     elif tool_name == "apply_diff":
         diff = args.get("diff", "")
         if not original_content:
-            return "", "", filename # Should not happen if apply_diff validates existence
+            return [("", "", filename)]
 
         # Use patch to get new content without writing to disk
         import tempfile
         import subprocess
 
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_orig:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp_orig:
             tmp_orig.write(original_content)
             tmp_orig_path = tmp_orig.name
-        
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_diff:
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp_diff:
             # Ensure header
             if not any(l.startswith("--- ") for l in diff.splitlines()[:3]):
                 diff = f"--- a/{filename}\n+++ b/{filename}\n" + diff
@@ -352,23 +397,41 @@ def get_modifications(tool_name: str, args: dict, folder_context) -> tuple[str, 
         try:
             result = subprocess.run(
                 ["patch", "-u", tmp_orig_path, "-i", tmp_diff_path, "-o", "-"],
-                capture_output=True, text=True
+                capture_output=True,
+                text=True,
             )
-            new_content = result.stdout if result.returncode == 0 else f"ERROR: {result.stderr}"
-            return original_content, new_content, filename
+            new_content = (
+                result.stdout if result.returncode == 0 else f"ERROR: {result.stderr}"
+            )
+            return [(original_content, new_content, filename)]
         except FileNotFoundError:
-            return original_content, "ERROR: 'patch' utility not found on system.", filename
+            return [
+                (
+                    original_content,
+                    "ERROR: 'patch' utility not found on system.",
+                    filename,
+                )
+            ]
         except Exception as e:
-            return original_content, f"ERROR: {e}", filename
+            return [(original_content, f"ERROR: {e}", filename)]
         finally:
-            if os.path.exists(tmp_orig_path): os.unlink(tmp_orig_path)
-            if os.path.exists(tmp_diff_path): os.unlink(tmp_diff_path)
+            if os.path.exists(tmp_orig_path):
+                os.unlink(tmp_orig_path)
+            if os.path.exists(tmp_diff_path):
+                os.unlink(tmp_diff_path)
 
-    return None, None, None
+    return []
 
 
-def execute_tool(tool_name: str, args: dict, folder_context) -> str:
-    """Dispatcher to execute the local Python functions based on tool name."""
+def execute_tool(tool_name: str, args: dict, folder_context, ui=None) -> str:
+    """Dispatcher with argument validation"""
+
+    # 1. Validate Path-based arguments for basic tools
+    path_keys = ["filename", "file", "path"]
+    for k in path_keys:
+        if k in args and (not args[k] or str(args[k]).strip() == ""):
+            return f"Error: The '{k}' argument is empty. You must provide a valid file path from the workspace map."
+
     if tool_name == "get_workspace_details":
         return get_workspace_details(folder_context)
     elif tool_name == "read_file":
@@ -393,6 +456,36 @@ def execute_tool(tool_name: str, args: dict, folder_context) -> str:
     elif tool_name == "apply_diff":
         return apply_diff(
             args.get("filename", ""), args.get("diff", ""), folder_context
+        )
+    elif tool_name == "batch_job":
+        commands = args.get("commands", [])
+        if not isinstance(commands, list):
+            return "Error: 'commands' must be a list."
+
+        results = []
+        for i, cmd in enumerate(commands):
+            name = cmd.get("tool_name")
+            t_args = cmd.get("tool_args", {})
+
+            if not name:
+                results.append(f"Command {i}: Error - tool_name missing.")
+                continue
+
+            if name == "batch_job":
+                results.append(f"Command {i}: Error - nested batch_job not allowed.")
+                continue
+
+            if ui:
+                ui.show_info(f"  [{i+1}/{len(commands)}] Executing in batch: {name}")
+
+            # Recursively execute the tool in the batch
+            res = execute_tool(name, t_args, folder_context, ui)
+            results.append(f"Tool: {name}\nResult: {res}")
+
+        return (
+            "--- Batch Job Results ---\n"
+            + "\n\n---\n\n".join(results)
+            + "\n------------------------"
         )
     else:
         return f"Unknown tool: {tool_name}"

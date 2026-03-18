@@ -9,6 +9,8 @@
 - **Workspace Context**: Monitor entire directories or specific files. The agent maintains a "workspace map" to understand your project structure.
 - **Session Management**: Save, load, and manage multiple conversation histories.
 - **Smart Context Management**: Automatic history truncation and summarization to stay within model context limits while keeping costs down.
+- **In-Task Memory Engine**: Agent mode can store and recall concise facts so it does not need to replay large tool outputs.
+- **Turn Scratchpads**: Agent mode can keep temporary notes for the active task loop without polluting durable memory.
 - **Customizable Strategies**: Specialized agent modes for Debugging, Feature Implementation, and Research.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 
@@ -64,6 +66,7 @@ python mucli.py
 | `/new [name]` | | Start a fresh session |
 | `/model [name]` | | Show or change the current model |
 | `/provider [name]`| | Change the LLM provider |
+| `/flush` | | Flush the collation buffer into the next model turn |
 | `/tokens` | | Show current context token usage and estimated cost |
 | `/view` | `/v` | View full conversation history |
 | `/clear` | `/c` | Clear conversation history |
@@ -102,6 +105,9 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 - `run_agent_task`: Executes tasks defined in a `Makefile.agents` (e.g., running tests).
 - `batch_job`: Executes multiple of the above tools in a single turn.
 - `get_current_time`: Provides the current system time in ISO format.
+- `save_memory`, `search_memory`, `list_memory`: Persist and retrieve concise high-value notes during an agentic task.
+- `save_scratchpad`, `search_scratchpad`, `list_scratchpad`, `clear_scratchpad`: Manage turn-local notes separately from durable memory.
+- Structured tool result summaries are attached during agentic execution so the model can reason over smaller schemas instead of large raw blobs.
 - **Git Suite**: `git_init`, `git_status`, `git_log`, `git_diff`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_merge_request`.
 
 ## Additional Notes

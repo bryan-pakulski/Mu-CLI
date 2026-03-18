@@ -49,7 +49,10 @@ class OllamaProvider(LLMProvider):
                     role = "assistant"
                 elif part.type == "tool_result":
                     role = "tool"
-                    content = str(part.tool_result)
+                    if isinstance(part.tool_result, (dict, list)):
+                        content = json.dumps(part.tool_result, indent=2, sort_keys=True)
+                    else:
+                        content = str(part.tool_result)
 
             message_dict = {"role": role, "content": content.strip()}
             if tool_calls:

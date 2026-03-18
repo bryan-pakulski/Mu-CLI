@@ -351,6 +351,128 @@ TOOLS = [
         parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
+    ToolDefinition(
+        name="save_memory",
+        description="Saves a short, important fact into the in-task memory store so it can be reused later without replaying large context.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The concise fact, decision, or reminder to store.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tags to help later retrieval.",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Optional note about where this memory came from.",
+                },
+            },
+            "required": ["content"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="save_scratchpad",
+        description="Saves a temporary note in the current turn scratchpad. Use this for short-lived plans or observations that do not need durable memory.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The temporary note to store for the current turn.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tags to help later retrieval during this turn.",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Optional source note for the scratchpad entry.",
+                },
+            },
+            "required": ["content"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="search_memory",
+        description="Searches the in-task memory store for previously saved facts.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search terms to match against memory content, tags, and sources.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of memory entries to return.",
+                    "default": 5,
+                },
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="search_scratchpad",
+        description="Searches turn-local scratchpad notes saved during the current task loop.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search terms to match against scratchpad content, tags, and sources.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of scratchpad entries to return.",
+                    "default": 5,
+                },
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="list_memory",
+        description="Lists the most recent in-task memory entries.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of memory entries to return.",
+                    "default": 10,
+                }
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="list_scratchpad",
+        description="Lists the most recent turn-local scratchpad entries.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of scratchpad entries to return.",
+                    "default": 10,
+                }
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="clear_scratchpad",
+        description="Clears the current turn scratchpad.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
 ]
 
 COLLATED_TOOLS = [
@@ -1124,6 +1246,20 @@ def execute_tool(
         return get_workspace_details(folder_context)
     elif tool_name == "flush":
         return "Buffer flushed." # This is a placeholder, Session will handle the actual flush
+    elif tool_name == "save_memory":
+        return "Memory save requested."
+    elif tool_name == "save_scratchpad":
+        return "Scratchpad save requested."
+    elif tool_name == "search_memory":
+        return "Memory search requested."
+    elif tool_name == "search_scratchpad":
+        return "Scratchpad search requested."
+    elif tool_name == "list_memory":
+        return "Memory listing requested."
+    elif tool_name == "list_scratchpad":
+        return "Scratchpad listing requested."
+    elif tool_name == "clear_scratchpad":
+        return "Scratchpad cleared."
     elif tool_name == "read_file":
         return read_file(args.get("filename", ""), folder_context)
     elif tool_name == "search_for_string":

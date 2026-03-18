@@ -63,6 +63,11 @@ class OpenAIProvider(LLMProvider):
                 elif part.type == "file" and part.file_ref:
                     # For now, only text files are supported
                     content_parts.append(f"[File: {part.file_ref.display_name}]")
+                elif part.type == "tool_result":
+                    tool_result = part.tool_result
+                    if isinstance(tool_result, (dict, list)):
+                        tool_result = json.dumps(tool_result, indent=2, sort_keys=True)
+                    content_parts.append(str(tool_result))
                 elif part.type == "tool_call":
                     # OpenAI handles tool_calls differently in the response
                     continue

@@ -1194,11 +1194,11 @@ def execute_tool(
             t_args = cmd.get("tool_args", {})
 
             if not name:
-                results.append(f"Command {i}: Error - tool_name missing.")
+                results.append(f"Error: Command {i} - tool_name missing.")
                 continue
 
             if name == "batch_job":
-                results.append(f"Command {i}: Error - nested batch_job not allowed.")
+                results.append(f"Error: Command {i} - nested batch_job not allowed.")
                 continue
 
             if ui:

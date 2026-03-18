@@ -90,11 +90,21 @@ class GeminiProvider(LLMProvider):
                     }
 
                     function_response_obj = types.FunctionResponse(**fresp_dict)
+                    resp_part = types.Part(function_response=function_response_obj)
+
+                    # For gemini 3.0+ thinking models, thought signature MUST be
+                    # returned in order to maintain thinking chain
+                    if part.thought_signature:
+                        try:
+                            resp_part.thought_signature = bytes.fromhex(
+                                part.thought_signature
+                            )
+                        except (ValueError, TypeError):
+                            # Fallback if it was stored as a raw string
+                            resp_part.thought_signature = part.thought_signature.encode()
 
                     # tool_result doesn't take thought_signature - only model functionCall does!
-                    gemini_parts.append(
-                        types.Part(function_response=function_response_obj)
-                    )
+                    gemini_parts.append(resp_part)
 
             if not gemini_parts:
                 continue

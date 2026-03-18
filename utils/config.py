@@ -103,13 +103,9 @@ DEFAULT_SYSTEM_PROMPT = (
     Reasoning: high
 
   When providing code changes or file content:
-  1. Always use standard Markdown 6-double-quote code blocks ("""
-    """language ... """
-    """).
-  2. For code modifications/diffs, use the same code block style as point .1
-  3. For new files or partial snippets, use the specific language tag (e.g., 'python', 'cpp')
-  4. Always precede the code block with a clear header including the file path, for example: "### File: src/main.cpp".
-  5. Only provide the new code or specific changes; do not regenerate whole files unless specifically asked.
+  1. Always use standard Markdown code blocks
+  2. Always precede code block with a clear header including the file path, for example: "### File: src/main.cpp".
+  3. Do not regenerate whole files unless specifically asked.
 """
 )
 
@@ -121,10 +117,10 @@ AVAILABLE TOOLS:
 {tool_descriptions}
 
 GENERAL RULES:
-1. **NO HALLUCINATIONS**: Never guess file paths. If a tool returns \"File not found\", use `list_dir` or `search_for_string` to find the correct path. 
-2. **ARGUMENT PRECISION**: Always provide the full 'filename' argument for tools like `read_file` or `apply_diff`.                                    
-3. **STUCK LOOP PREVENTION**: If you fail a task 3 times using the same tool, STOP and use `get_workspace_details` to re-orient yourself.
-4. **DIFF FORMAT**: When using `apply_diff`, you MUST provide a standard unified diff.
+1. Never guess file paths. If a tool returns \"File not found\", use `list_dir` or `search_for_string` to find the correct path. 
+2. Always provide the full 'filename' argument for tools.                                    
+3. If you fail a task 3 times using the same tool, STOP and use `get_workspace_details` to re-orient yourself.
+4. When using `apply_diff`, you MUST provide a standard unified diff.
    - It MUST include file headers: `--- filename` and `+++ filename`.
    - It MUST include hunk headers with line numbers: `@@ -start,len +start,len @@`.
    - Context lines must start with a space.
@@ -132,36 +128,26 @@ GENERAL RULES:
    - Additions must start with `+`.
    - DO NOT use markers like `*** Begin Patch` or `@@` without line numbers.
    - If you are unsure of the line numbers, use `read_file` first to get the content and count lines, or use `write_file` to overwrite the whole file if the change is extensive.
-   - Example of valid diff:
-     --- filename.py
-     +++ filename.py
-     @@ -1,5 +1,5 @@
-      existing context
-     -old line
-     +new line
-      more context
-5. **BATCH TOOLING**: Where possible, use batching for multiple tool calls to reduce token usage.
-6. If a tool returns an error, read the error carefully and try a different approach (e.g., search for a string instead of guessing a filename).
-7. Do no overwrite existing files, only update necessary parts using patch tooling.
-8. Provide multiple tool calls (e.g. multiple `apply_diff` calls) in a single response when they are related or can be executed together.
-9. **Collation Buffer**: Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, `git_status`, etc.) results are automatically stored in a collation buffer.
+5. Use batching for multiple related tool calls to reduce token usage.
+6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, `git_status`, etc.) results are automatically stored in a collation buffer.
    You will only receive a status update when you call them.
    When you are ready to receive all the gathered data, you MUST call the `flush` tool.
    This saves context and makes your processing more efficient.
    Gather everything you think you'll need first in a "context collection" stage, then flush once to process it all.
-10. Once you have enough context, stop using tools and provide your final response to the user.
+   Collect at MOST 10 turns of context before flushing and performing actions against the knowledge collected.
 """
 
 AGENTIC_MODES = {
     "default": """WORKFLOW (Collation-Aware Default):
-1. **Context Collection**: Review the workspace map and use read-only tools to gather all necessary information. 
+1. **Context Collection**: Review the workspace map and use read only tools to build up context. 
    These will be stored in your collation buffer.
 2. **Flush**: Call the `flush` tool once you have gathered enough information to analyze the situation.
-3. **Analyze & Respond**: Process the flushed context and provide your solution or answer.""",
+3. **Act**: Process the flushed context and provide a solution, use tools available to make needed changes.
+3. **Analyze**: Compare against the original context, determine if the changes are correct, respond with a final summary.""",
     "debug": """WORKFLOW (Debugging):
 1. Read the error message or issue description provided by the user.
-2. Use `search_for_string` to find exactly where the error originates in the codebase.
-3. You have access to online tooling and research knowledge bases, use them to explore any relevent information.
+2. Use tooling to find exactly where the error originates in the codebase.
+3. You have access to online url grounding, use this to explore any relevent information.
 3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
 4. Identify the root cause and propose a precise fix.""",
     "feature": """WORKFLOW (New Feature):

@@ -734,7 +734,7 @@ class Session:
                             self.ui.show_info(f"  [Flushed {len(collated_data)} items from buffer]")
                     elif should_collate:
                         # Don't collate if there was an error
-                        if result and not str(result).startswith("Error:"):
+                        if result and not str(result).startswith("Error"):
                             self.collation_buffer.add(part.tool_name, part.tool_args, result)
                             count = len(self.collation_buffer.entries)
                             result = (

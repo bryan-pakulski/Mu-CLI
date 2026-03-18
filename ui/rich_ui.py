@@ -5,6 +5,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from rich import box
+from rich.prompt import Confirm, Prompt
 from .render import render_response
 from .input import InputHandler
 from contextlib import contextmanager
@@ -36,6 +37,15 @@ class RichUI:
 
     def set_variables(self, variables_dict):
         self.input_handler.set_variables(variables_dict)
+
+    def confirm(self, message, default=True):
+        return Confirm.ask(message, default=default)
+
+    def prompt_choices(self, message, choices, default=None):
+        return Prompt.ask(message, choices=choices, default=default)
+
+    def prompt(self, message, default=None):
+        return Prompt.ask(message, default=default)
 
     def show_error(self, message):
         self.console.print(f"[red]{message}[/red]")

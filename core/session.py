@@ -671,8 +671,6 @@ class Session:
                         # Shorten args for display
                         display_args = _shorten_tool_args(part.tool_args)
 
-                        from rich.prompt import Prompt
-
                         # Add count info to prompt if multiple
                         count_info = (
                             f" ({i + 1}/{len(tool_calls)})"
@@ -681,7 +679,7 @@ class Session:
                         )
 
                         if result is None:
-                            choice = Prompt.ask(
+                            choice = self.ui.prompt_choices(
                                 (
                                     f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
                                     if can_approve
@@ -694,9 +692,7 @@ class Session:
                                 result = "User denied this tool call."
                                 logger.info(f"Tool call {part.tool_name} denied by user.")
                             elif choice == "e":
-                                reason = Prompt.ask(
-                                    "Provide an explanation to the model"
-                                )
+                                reason = self.ui.prompt("Provide an explanation to the model")
                                 result = f"User denied this tool call. Reason: {reason}"
                                 logger.info(f"Tool call {part.tool_name} denied by user with explanation: {reason}")
                             else:
@@ -798,5 +794,11 @@ class Session:
                 if self.ui:
                     self.ui.show_error(f"API Error during agentic loop: {e}")
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
+
+                # Failsafe for retry
+                if self.ui and self.ui.confirm("An error occurred during the LLM call. Would you like to retry?", default=True):
+                    iteration -= 1  # Decrement so the next loop run tries the same step
+                    continue
+
                 self.session_manager.save_history(self.folder_context)
                 break

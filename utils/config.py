@@ -95,7 +95,10 @@ def validate_and_cast(key, value):
 
 # --- System Prompts & Nudges ---
 DEFAULT_SYSTEM_PROMPT = (
-    """You are a helpful assistant, answer all questions succinctly.
+    """You are a helpful LLM Agent, answer all questions succinctly.
+
+    Reasoning: high
+
   When providing code changes or file content:
   1. Always use standard Markdown 6-double-quote code blocks ("""
     """language ... """
@@ -108,8 +111,12 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 AGENTIC_SYSTEM_BASE = """You are an autonomous AI programming agent. You have access to tools to explore the user's workspace.
+
+Reasoning: high
+
 AVAILABLE TOOLS:
 {tool_descriptions}
+
 GENERAL RULES:
 1. **NO HALLUCINATIONS**: Never guess file paths. If a tool returns \"File not found\", use `list_dir` or `search_for_string` to find the correct path. 
 2. **ARGUMENT PRECISION**: Always provide the full 'filename' argument for tools like `read_file` or `apply_diff`.                                    

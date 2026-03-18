@@ -3,6 +3,7 @@ from google import genai
 from google.genai.types import Tool, FunctionDeclaration, Content
 from pytest import skip
 
+
 def test_gemini_agentic_tool_call_with_thought_signature():
     """Test tool calls to verify thought signature handling in 3.0+ API"""
 

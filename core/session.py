@@ -173,6 +173,7 @@ class SessionManager:
 
     def clear_current_history(self):
         self.history = []
+        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.save_history()
         if self.ui:
             self.ui.show_info("Current chat history cleared.")
@@ -299,14 +300,16 @@ class Session:
         try:
             file_ref = self.provider.upload_file(file_path, safe_mime)
             if file_ref:
-                self.staged_files.append({
-                    "type": "file",
-                    "file_ref": {
-                        "uri": file_ref.uri,
-                        "mime_type": file_ref.mime_type,
-                        "display_name": file_ref.display_name,
-                    },
-                })
+                self.staged_files.append(
+                    {
+                        "type": "file",
+                        "file_ref": {
+                            "uri": file_ref.uri,
+                            "mime_type": file_ref.mime_type,
+                            "display_name": file_ref.display_name,
+                        },
+                    }
+                )
                 if self.ui:
                     self.ui.show_info("Upload complete.")
         except Exception as e:
@@ -370,9 +373,9 @@ class Session:
         if self.folder_context.folders:
             if self.agentic:
                 active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
-                tool_desc_str = "\n".join([
-                    f"{t.name} - {t.description}" for t in active_tools
-                ])
+                tool_desc_str = "\n".join(
+                    [f"{t.name} - {t.description}" for t in active_tools]
+                )
 
                 agent_mode = str(self.variables.get("agent_mode", "default")).lower()
                 mode_instruction = AGENTIC_MODES.get(
@@ -455,29 +458,35 @@ class Session:
 
                     elif part.type == "image_inline" and part.inline_data:
                         display_image_in_terminal(part.inline_data)
-                        ai_parts_archive.append({
-                            "type": "text",
-                            "text": "[Image Generated and Saved locally]",
-                        })
+                        ai_parts_archive.append(
+                            {
+                                "type": "text",
+                                "text": "[Image Generated and Saved locally]",
+                            }
+                        )
 
                     elif part.type == "tool_call":
                         has_tool_call = True
-                        ai_parts_archive.append({
-                            "type": "tool_call",
-                            "tool_name": part.tool_name,
-                            "tool_args": part.tool_args,
-                            "thought_signature": part.thought_signature,
-                        })
+                        ai_parts_archive.append(
+                            {
+                                "type": "tool_call",
+                                "tool_name": part.tool_name,
+                                "tool_args": part.tool_args,
+                                "thought_signature": part.thought_signature,
+                            }
+                        )
                         if self.ui:
                             self.ui.show_info(
                                 f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                             )
 
                 if ai_parts_archive:
-                    self.session_manager.history.append({
-                        "role": "assistant",
-                        "parts": ai_parts_archive,
-                    })
+                    self.session_manager.history.append(
+                        {
+                            "role": "assistant",
+                            "parts": ai_parts_archive,
+                        }
+                    )
 
                 self.session_manager.token_counts["input"] += response.input_tokens
                 self.session_manager.token_counts["output"] += response.output_tokens
@@ -579,17 +588,34 @@ class Session:
                     if needs_approval:
                         mods = to_approve_data.get(i, [])
 
+                        result = None
                         can_approve = True
+                        error_msg = None
+
                         # Validate all modifications in the set (especially for batch_job)
                         for _, m, f in mods:
                             if m and str(m).startswith("ERROR:"):
+                                if "malformed patch" in str(
+                                    m
+                                ).lower() or "patch: ****" in str(m):
+                                    error_msg = m
+                                    can_approve = False
+                                    break
                                 if self.ui:
                                     self.ui.show_error(f"Cannot show diff for {f}: {m}")
                                 can_approve = False
                                 break
 
+                        if not can_approve and error_msg:
+                            if self.ui:
+                                self.ui.show_info(
+                                    f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
+                                )
+                            result = f"Error: Malformed patch detected. Please ensure your diff is correctly formatted. Check hunk headers and context.\n{error_msg}"
+                            # Fall through to skip Prompt.ask since result is now set
+
                         # Show diffs if not already shown in bulk pre-calculation
-                        if len(to_approve_data) <= 1:
+                        if result is None and len(to_approve_data) <= 1:
                             for o, m, f in mods:
                                 if (
                                     f
@@ -612,41 +638,51 @@ class Session:
                             else ""
                         )
 
-                        choice = Prompt.ask(
-                            (
-                                f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
-                                if can_approve
-                                else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
-                            ),
-                            choices=["y", "n", "e"] if can_approve else ["n", "e"],
-                            default="y" if can_approve else "n",
-                        )
-                        if choice == "n":
-                            result = "User denied this tool call."
-                        elif choice == "e":
-                            reason = Prompt.ask("Provide an explanation to the model")
-                            result = f"User denied this tool call. Reason: {reason}"
-                        else:
-                            result = execute_tool(
-                                part.tool_name,
-                                part.tool_args,
-                                self.folder_context,
-                                self.ui,
+                        if result is None:
+                            choice = Prompt.ask(
+                                (
+                                    f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
+                                    if can_approve
+                                    else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+                                ),
+                                choices=["y", "n", "e"] if can_approve else ["n", "e"],
+                                default="y" if can_approve else "n",
                             )
+                            if choice == "n":
+                                result = "User denied this tool call."
+                            elif choice == "e":
+                                reason = Prompt.ask(
+                                    "Provide an explanation to the model"
+                                )
+                                result = f"User denied this tool call. Reason: {reason}"
+                            else:
+                                result = execute_tool(
+                                    part.tool_name,
+                                    part.tool_args,
+                                    self.folder_context,
+                                    self.ui,
+                                    self.variables,
+                                )
                     else:
                         result = execute_tool(
-                            part.tool_name, part.tool_args, self.folder_context, self.ui
+                            part.tool_name,
+                            part.tool_args,
+                            self.folder_context,
+                            self.ui,
+                            self.variables,
                         )
 
                     if self.ui:
                         self.ui.show_tool_result(result)
 
-                    tool_result_parts.append({
-                        "type": "tool_result",
-                        "tool_name": part.tool_name,
-                        "tool_result": result,
-                        "thought_signature": part.thought_signature,
-                    })
+                    tool_result_parts.append(
+                        {
+                            "type": "tool_result",
+                            "tool_name": part.tool_name,
+                            "tool_result": result,
+                            "thought_signature": part.thought_signature,
+                        }
+                    )
 
                 tool_result_msg = {"role": "tool", "parts": tool_result_parts}
                 self.session_manager.history.append(tool_result_msg)
@@ -660,16 +696,18 @@ class Session:
             except KeyboardInterrupt:
                 if self.ui:
                     self.ui.show_info("\nAgentic loop interrupted by user.")
-                self.session_manager.history.append({
-                    "role": "tool",
-                    "parts": [
-                        {
-                            "type": "tool_result",
-                            "tool_name": "system",
-                            "tool_result": "User interrupted execution.",
-                        }
-                    ],
-                })
+                self.session_manager.history.append(
+                    {
+                        "role": "tool",
+                        "parts": [
+                            {
+                                "type": "tool_result",
+                                "tool_name": "system",
+                                "tool_result": "User interrupted execution.",
+                            }
+                        ],
+                    }
+                )
                 self.session_manager.save_history(self.folder_context)
                 break
             except Exception as e:

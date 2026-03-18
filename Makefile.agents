@@ -1,0 +1,19 @@
+.PHONY: test test-tools test-models test-session test-workspace test-batch
+
+test:
+	PYTHONPATH=. pytest tests
+
+test-tools:
+	PYTHONPATH=. pytest tests/test_tools.py tests/test_multi_diff.py
+
+test-models:
+	PYTHONPATH=. pytest tests/test_gemini.py tests/test_ollama.py
+
+test-session:
+	PYTHONPATH=. pytest tests/test_session.py
+
+test-workspace:
+	PYTHONPATH=. pytest tests/test_workspace.py
+
+test-batch:
+	PYTHONPATH=. pytest tests/test_batch_tool.py

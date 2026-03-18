@@ -21,12 +21,32 @@ if not os.path.exists(IMAGE_DIR):
 
 # --- Variable Schema & Defaults ---
 VARIABLE_SCHEMA = {
-    "agent_mode": {"type": str, "default": "default"},                             # Agent mode, determines the initial system prompt
-    "ollama_host": {"type": str, "default": "http://localhost:11434"},             # Ollama server host
-    "strict_mode": {"type": bool, "default": False},                               # Forces approval for all tools
-    "max_iterations": {"type": int, "default": 80},                                # Max number of iterations to run for each conversation
-    "compact_history": {"type": bool, "default": True},                            # Auto-compacts tooling history after each finished conversation, minimizes token usage
-    "yolo": {"type": bool, "default": False},                                      # YOLO mode (no approvals)
+    "agent_mode": {
+        "type": str,
+        "default": "default",
+    },  # Agent mode, determines the initial system prompt
+    "ollama_host": {
+        "type": str,
+        "default": "http://localhost:11434",
+    },  # Ollama server host
+    "strict_mode": {"type": bool, "default": False},  # Forces approval for all tools
+    "max_iterations": {
+        "type": int,
+        "default": 80,
+    },  # Max number of iterations to run for each conversation
+    "compact_history": {
+        "type": bool,
+        "default": True,
+    },  # Auto-compacts tooling history after each finished conversation, minimizes token usage
+    "yolo": {"type": bool, "default": False},  # YOLO mode (no approvals)
+    "make_timeout": {
+        "type": int,
+        "default": 600,
+    },  # Timeout in seconds for run_agent_task
+    "make_max_output": {
+        "type": int,
+        "default": 10000,
+    },  # Max characters to return from run_agent_task output
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}

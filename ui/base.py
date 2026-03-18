@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class BaseUI(ABC):
     @abstractmethod
     def render_message(self, role, content, model_name=None):

@@ -51,29 +51,34 @@ class FolderContext:
     def is_ignored(self, full_path):
         """Returns True if the path should be ignored based on global and gitignore patterns."""
         full_path = os.path.abspath(full_path)
-        
+
         # 1. Check hardcoded ignore patterns in any part of the path
         parts = full_path.split(os.sep)
         for part in parts:
             if part in self.ignore_patterns:
                 return True
-        
+
         # 2. Check gitignore patterns for the relevant folder
         for folder in self.folders:
             if full_path.startswith(folder):
                 rel_path = os.path.relpath(full_path, folder)
                 if rel_path == ".":
                     continue
-                
+
                 patterns = self.gitignore_patterns.get(folder, [])
                 for pattern in patterns:
                     # Basic matching: relative path match or filename match
-                    if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(os.path.basename(full_path), pattern):
+                    if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(
+                        os.path.basename(full_path), pattern
+                    ):
                         return True
                     # Directory match (e.g., "dist/" should match "dist" directory)
-                    if pattern.endswith('/') and (fnmatch.fnmatch(rel_path + '/', pattern) or fnmatch.fnmatch(rel_path, pattern.rstrip('/'))):
+                    if pattern.endswith("/") and (
+                        fnmatch.fnmatch(rel_path + "/", pattern)
+                        or fnmatch.fnmatch(rel_path, pattern.rstrip("/"))
+                    ):
                         return True
-                break # Found the containing folder
+                break  # Found the containing folder
         return False
 
     def remove_folder(self, folder_path):
@@ -141,7 +146,9 @@ class FolderContext:
             tree.append(f"📁 {os.path.basename(folder)}/ ({folder})")
             for root, dirs, files in os.walk(folder):
                 # Prune directories
-                dirs[:] = [d for d in dirs if not self.is_ignored(os.path.join(root, d))]
+                dirs[:] = [
+                    d for d in dirs if not self.is_ignored(os.path.join(root, d))
+                ]
 
                 # Calculate relative path to determine indentation level
                 rel_root = os.path.relpath(root, folder)
@@ -185,12 +192,14 @@ class FolderContext:
         # 1. Scan current state
         for folder in self.folders:
             for root, dirs, files in os.walk(folder):
-                dirs[:] = [d for d in dirs if not self.is_ignored(os.path.join(root, d))]
+                dirs[:] = [
+                    d for d in dirs if not self.is_ignored(os.path.join(root, d))
+                ]
                 for file in files:
                     full_path = os.path.join(root, file)
                     if self.is_ignored(full_path):
                         continue
-                        
+
                     current_files.add(full_path)
 
                     if not self._is_text_file(full_path):
@@ -216,12 +225,14 @@ class FolderContext:
                         )
                         diff_text = "\n".join(diff)
                         if diff_text:
-                            updates.append(f"""
+                            updates.append(
+                                f"""
 ### FILE CHANGE: {full_path}
  ┌── diff ─────────────────────────────────
 \n{diff_text}\n
  └────────────────────────────────────────────
-""")
+"""
+                            )
                         else:
                             # Content changed but diff is empty (whitespace?), show full
                             updates.append(
@@ -235,9 +246,11 @@ class FolderContext:
                             )
                     elif full_path not in self.initial_snapshots:
                         # New file found after initial snapshot
-                        updates.append(f"""
+                        updates.append(
+                            f"""
 <new_file path='{full_path}'>\n{current_content}\n</new_file>
-""")
+"""
+                        )
                     else:  # No change
                         pass
         # 2. Detect deletions
@@ -260,7 +273,11 @@ class FolderContext:
         return list(self.initial_snapshots.keys())
 
     def to_dict(self):
-        return {"folders": self.folders, "initial_snapshots": self.initial_snapshots, "gitignore_patterns": self.gitignore_patterns}
+        return {
+            "folders": self.folders,
+            "initial_snapshots": self.initial_snapshots,
+            "gitignore_patterns": self.gitignore_patterns,
+        }
 
     def from_dict(self, data):
         self.folders = data.get("folders", [])

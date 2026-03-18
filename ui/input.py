@@ -49,6 +49,7 @@ class DynamicVariableCompleter(Completer):
 
 class MergedCompleter(Completer):
     """Custom class to merge multiple completers to avoid import errors across versions."""
+
     def __init__(self, completers):
         self.completers = completers
 
@@ -95,10 +96,14 @@ class InputHandler:
                 "/help": None,
                 "/model": model_dict,
                 "/agentic": None,
-                "/folder": MergedCompleter([
-                    NestedCompleter.from_nested_dict({"remove": directory_completer}),
-                    directory_completer
-                ]),
+                "/folder": MergedCompleter(
+                    [
+                        NestedCompleter.from_nested_dict(
+                            {"remove": directory_completer}
+                        ),
+                        directory_completer,
+                    ]
+                ),
                 "/provider": provider_completer,
                 "/tool": tool_completer,
                 "/mode": mode_completer,

@@ -138,7 +138,28 @@ TOOLS = [
             },
             "required": ["commands"],
         },
-        requires_approval=False, # We will query the individual tools and only require a single approval
+        requires_approval=False,  # We will query the individual tools and only require a single approval
+    ),
+    ToolDefinition(
+        name="list_agent_tasks",
+        description="Lists available tasks in Makefile.agents and their descriptions. Use this to discover automation scripts and when to run them.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="run_agent_task",
+        description="Executes a task defined in Makefile.agents. This can be used for running tests, builds, or other automated processes.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_name": {
+                    "type": "string",
+                    "description": "The name of the task to execute.",
+                }
+            },
+            "required": ["task_name"],
+        },
+        requires_approval=True,
     ),
 ]
 
@@ -285,6 +306,82 @@ def write_file(filename: str, content: str, folder_context) -> str:
         return f"Error writing file: {e}"
 
 
+def _sanitize_diff(diff: str, filename: str) -> str:
+    """Cleans up common LLM diff issues."""
+    lines = diff.splitlines()
+    if not lines:
+        return diff
+
+    # Strip preamble text before the first header or hunk
+    first_meaningful_line = -1
+    for i, line in enumerate(lines):
+        if line.startswith("---") or line.startswith("+++") or line.startswith("@@"):
+            first_meaningful_line = i
+            break
+    if first_meaningful_line != -1:
+        lines = lines[first_meaningful_line:]
+
+    sanitized = []
+    hunk_lines = []
+
+    def flush_hunk(hlines):
+        if not hlines:
+            return
+        if hlines[0].startswith("@@"):
+            # Recount hunk
+            header = hlines[0]
+            # Try to match standard @@ -start,len +start,len @@
+            match = re.match(r"^@@ -(\d+),?\d* \+(\d+),?\d* @@(.*)$", header)
+            if match:
+                start_old, start_new, tail = match.groups()
+                count_old = 0
+                count_new = 0
+                for hl in hlines[1:]:
+                    if hl.startswith("-"):
+                        count_old += 1
+                    elif hl.startswith("+"):
+                        count_new += 1
+                    elif hl.startswith(" "):
+                        count_old += 1
+                        count_new += 1
+                new_header = (
+                    f"@@ -{start_old},{count_old} +{start_new},{count_new} @@{tail}"
+                )
+                sanitized.append(new_header)
+                sanitized.extend(hlines[1:])
+                return
+        sanitized.extend(hlines)
+
+    # Ensure file headers
+    if not any(l.startswith("--- ") for l in lines[:3]):
+        sanitized.append(f"--- {filename}")
+        sanitized.append(f"+++ {filename}")
+
+    for line in lines:
+        if line.startswith("---") or line.startswith("+++"):
+            flush_hunk(hunk_lines)
+            hunk_lines = []
+            sanitized.append(line)
+        elif line.startswith("@@"):
+            flush_hunk(hunk_lines)
+            hunk_lines = [line]
+        elif line.startswith("+") or line.startswith("-") or line.startswith(" "):
+            if hunk_lines:
+                hunk_lines.append(line)
+            else:
+                sanitized.append(line)
+        else:
+            # Likely context missing its space
+            if hunk_lines:
+                hunk_lines.append(" " + line)
+            else:
+                sanitized.append(" " + line)
+
+    flush_hunk(hunk_lines)
+
+    return "\n".join(sanitized) + "\n"
+
+
 def apply_diff(filename: str, diff: str, folder_context) -> str:
     """Applies a unified diff to a file."""
     if not _check_bounds(filename, folder_context):
@@ -294,21 +391,8 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
         if not os.path.exists(filename):
             return f"Error: File '{filename}' does not exist. Cannot apply diff."
 
-        with open(filename, "r", encoding="utf-8") as f:
-            original_content = f.read()
-
-        # Ensure diff header is present or fix common LLM mistakes
-        diff_lines = diff.splitlines()
-        if not any(l.startswith("--- ") for l in diff_lines[:3]):
-            # Inject dummy header if missing
-            diff = f"--- a/{filename}\n+++ b/{filename}\n" + diff
-
-        # Use patch logic (difflib doesn't have apply, so we use a simple approach or external tool if preferred)
-        # For simplicity and cross-platform, we can try a basic hunk application or require 'patch' utility
-        # Here's a pure python way to try and apply a unified diff
-
-        # We'll use a temporary file and the 'patch' command if available,
-        # or implement a basic hunk applier.
+        # Pre-sanitize the diff
+        diff = _sanitize_diff(diff, filename)
 
         import tempfile
         import subprocess
@@ -318,9 +402,12 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
             tmp_diff_path = tmp_diff.name
 
         try:
-            # Try using system 'patch' command first as it is robust
+            # Try using system 'patch' command first as it is robust.
+            # -u: unified diff
+            # -l: ignore whitespace in context
+            # -F3: set fuzz factor to 3 lines
             result = subprocess.run(
-                ["patch", "-u", filename, "-i", tmp_diff_path],
+                ["patch", "-u", "-l", "-F3", filename, "-i", tmp_diff_path],
                 capture_output=True,
                 text=True,
             )
@@ -338,6 +425,137 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
 
     except Exception as e:
         return f"Error applying diff: {e}"
+
+
+def list_agent_tasks(folder_context) -> str:
+    """Lists tasks from Makefile.agents with their descriptions."""
+    if not folder_context or not folder_context.folders:
+        return "No workspace attached."
+
+    found_any = False
+    all_tasks = []
+
+    for folder in folder_context.folders:
+        makefile_path = os.path.join(folder, "Makefile.agents")
+        if os.path.exists(makefile_path):
+            found_any = True
+            tasks = []
+            try:
+                with open(makefile_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    for i, line in enumerate(lines):
+                        # 1. Target with ## description on same line
+                        match = re.match(r"^([a-zA-Z0-9_-]+):.*?##\s*(.*)$", line)
+                        if match:
+                            tasks.append(f"  - {match.group(1)}: {match.group(2)}")
+                            continue
+
+                        # 2. Target without ## description on same line
+                        match = re.match(r"^([a-zA-Z0-9_-]+):", line)
+                        if match:
+                            target = match.group(1)
+                            if target in ["FORCE", ".PHONY"]:
+                                continue
+                            # Check line above for ## description
+                            description = ""
+                            if i > 0:
+                                prev_line = lines[i - 1].strip()
+                                if prev_line.startswith("##"):
+                                    description = prev_line.lstrip("#").strip()
+                            if description:
+                                tasks.append(f"  - {target}: {description}")
+                            else:
+                                tasks.append(f"  - {target}")
+                if tasks:
+                    all_tasks.append(f"In {folder}:\n" + "\n".join(tasks))
+            except Exception as e:
+                all_tasks.append(f"Error reading {makefile_path}: {e}")
+
+    if not found_any:
+        return "No Makefile.agents found in any workspace folder."
+
+    if not all_tasks:
+        return "No tasks found in any Makefile.agents."
+
+    return "Available tasks in Makefile.agents:\n\n" + "\n\n".join(all_tasks)
+
+
+def run_agent_task(task_name: str, folder_context, variables: dict = None) -> str:
+    """Executes a task from Makefile.agents."""
+    if not variables:
+        variables = {}
+
+    if not folder_context or not folder_context.folders:
+        return "No workspace attached."
+
+    # Load variables with defaults
+    timeout = variables.get("make_timeout", 600)
+    max_len = variables.get("make_max_output", 10000)
+
+    makefile_path = None
+    for folder in folder_context.folders:
+        path = os.path.join(folder, "Makefile.agents")
+        if os.path.exists(path):
+            makefile_path = path
+            break
+
+    if not makefile_path:
+        return "Error: Makefile.agents not found in any workspace folder."
+
+    import subprocess
+
+    cmd = ["make", "-f", "Makefile.agents", task_name]
+    try:
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=os.path.dirname(makefile_path),
+        )
+
+        output = process.stdout
+        errors = process.stderr
+
+        combined_output = ""
+        if output:
+            combined_output += f"STDOUT:\n{output}\n"
+        if errors:
+            combined_output += f"STDERR:\n{errors}\n"
+
+        if not combined_output:
+            combined_output = "Task executed successfully with no output."
+
+        # Truncate if too long (max 10k chars)
+        if len(combined_output) > max_len:
+            combined_output = (
+                combined_output[: max_len // 2]
+                + f"\n\n... [TRUNCATED {len(combined_output) - max_len} characters] ...\n\n"
+                + combined_output[-max_len // 2 :]
+            )
+
+        return combined_output
+
+    except subprocess.TimeoutExpired as e:
+        return f"Error: Task timed out after {timeout} seconds. Partial output:\n{e.stdout or ''}\n{e.stderr or ''}"
+    except Exception as e:
+        return f"Error executing task: {e}"
+
+
+def tool_requires_approval(tool_name: str, args: dict) -> bool:
+    """Checks if a tool call requires user approval."""
+    tool_def = next((t for t in TOOLS if t.name == tool_name), None)
+    if not tool_def:
+        return False
+
+    if tool_name == "batch_job":
+        commands = args.get("commands", [])
+        for cmd in commands:
+            if tool_requires_approval(cmd.get("tool_name"), cmd.get("tool_args", {})):
+                return True
+        return False
+
+    return tool_def.requires_approval
 
 
 def get_modifications(
@@ -380,6 +598,9 @@ def get_modifications(
         if not original_content:
             return [("", "", filename)]
 
+        # Pre-sanitize the diff
+        diff = _sanitize_diff(diff, filename)
+
         # Use patch to get new content without writing to disk
         import tempfile
         import subprocess
@@ -389,15 +610,26 @@ def get_modifications(
             tmp_orig_path = tmp_orig.name
 
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp_diff:
-            # Ensure header
-            if not any(l.startswith("--- ") for l in diff.splitlines()[:3]):
-                diff = f"--- a/{filename}\n+++ b/{filename}\n" + diff
             tmp_diff.write(diff)
             tmp_diff_path = tmp_diff.name
 
         try:
+            # -u: unified diff
+            # -l: ignore whitespace in context
+            # -F3: set fuzz factor to 3 lines
+            # -o -: output result to stdout
             result = subprocess.run(
-                ["patch", "-u", tmp_orig_path, "-i", tmp_diff_path, "-o", "-"],
+                [
+                    "patch",
+                    "-u",
+                    "-l",
+                    "-F3",
+                    tmp_orig_path,
+                    "-i",
+                    tmp_diff_path,
+                    "-o",
+                    "-",
+                ],
                 capture_output=True,
                 text=True,
             )
@@ -424,7 +656,9 @@ def get_modifications(
     return []
 
 
-def execute_tool(tool_name: str, args: dict, folder_context, ui=None) -> str:
+def execute_tool(
+    tool_name: str, args: dict, folder_context, ui=None, variables: dict = None
+) -> str:
     """Dispatcher with argument validation"""
 
     # 1. Validate Path-based arguments for basic tools
@@ -454,6 +688,10 @@ def execute_tool(tool_name: str, args: dict, folder_context, ui=None) -> str:
         return write_file(
             args.get("filename", ""), args.get("content", ""), folder_context
         )
+    elif tool_name == "list_agent_tasks":
+        return list_agent_tasks(folder_context)
+    elif tool_name == "run_agent_task":
+        return run_agent_task(args.get("task_name", ""), folder_context, variables)
     elif tool_name == "apply_diff":
         return apply_diff(
             args.get("filename", ""), args.get("diff", ""), folder_context
@@ -480,7 +718,7 @@ def execute_tool(tool_name: str, args: dict, folder_context, ui=None) -> str:
                 ui.show_info(f"  [{i+1}/{len(commands)}] Executing in batch: {name}")
 
             # Recursively execute the tool in the batch
-            res = execute_tool(name, t_args, folder_context, ui)
+            res = execute_tool(name, t_args, folder_context, ui, variables)
             results.append(f"Tool: {name}\nResult: {res}")
 
         return (

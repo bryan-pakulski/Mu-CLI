@@ -91,7 +91,7 @@ def print_splash(session):
     sys_status = "SET" if session.system_instruction else "NONE"
     agent_mode = session.variables.get("agent_mode", "default")
     yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
-    
+
     # Workspace Folder info
     folders = session.folder_context.folders
     folder_count = len(folders)
@@ -100,7 +100,9 @@ def print_splash(session):
     elif folder_count == 1:
         folder_list = folders[0]
     else:
-        folder_list = f"{folder_count} folders: " + ", ".join([os.path.basename(f) for f in folders[:3]])
+        folder_list = f"{folder_count} folders: " + ", ".join(
+            [os.path.basename(f) for f in folders[:3]]
+        )
         if folder_count > 3:
             folder_list += " ..."
 
@@ -199,6 +201,7 @@ def choose_session(session_manager):
 
     if choice == len(sessions) + 1:
         from rich.prompt import Prompt
+
         name = Prompt.ask(
             "Enter name for new session (optional, press enter for default)"
         )
@@ -255,15 +258,26 @@ def main():
             session_manager.switch_session(session_name)
             p_cfg = session_manager.provider_config
             if p_cfg.get("provider") and p_cfg.get("model"):
-                provider = init_provider(p_cfg["provider"], p_cfg["model"], ollama_host=ollama_host)
+                provider = init_provider(
+                    p_cfg["provider"], p_cfg["model"], ollama_host=ollama_host
+                )
             else:
                 # Fallback if config is missing
-                provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
-                session_manager.provider_config = {"provider": provider.name, "model": provider.model_name}
+                provider = select_provider_and_model(
+                    args.provider, args.model, ollama_host=ollama_host
+                )
+                session_manager.provider_config = {
+                    "provider": provider.name,
+                    "model": provider.model_name,
+                }
                 session_manager.save_history()
         else:
-            provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
-            session_manager.new_session(session_name, provider.name, provider.model_name)
+            provider = select_provider_and_model(
+                args.provider, args.model, ollama_host=ollama_host
+            )
+            session_manager.new_session(
+                session_name, provider.name, provider.model_name
+            )
     except Exception as e:
         console.print(f"[red]Failed to initialize Session/Provider: {e}[/red]")
         sys.exit(1)
@@ -300,7 +314,7 @@ def main():
 
                 elif cmd in ["/help", "/h"]:
                     print_help()
-                
+
                 elif cmd in ["/clear", "/c"]:
                     session.session_manager.clear_current_history()
                     session.staged_files = []
@@ -326,7 +340,9 @@ def main():
                                 console.print(
                                     f"[green]Removed folder from context: {path_to_remove}[/green]"
                                 )
-                                session.session_manager.save_history(session.folder_context)
+                                session.session_manager.save_history(
+                                    session.folder_context
+                                )
                             else:
                                 console.print(
                                     f"[red]Folder not found in context: {path_to_remove}[/red]"
@@ -334,11 +350,12 @@ def main():
                         else:
                             # Support multiple folders
                             import shlex
+
                             try:
                                 paths = shlex.split(arg)
                             except ValueError:
                                 paths = [arg.strip("'\"")]
-                                
+
                             for path in paths:
                                 path = path.strip("'\"")
                                 if session.folder_context.add_folder(path):
@@ -348,14 +365,16 @@ def main():
                                     if len(session.folder_context.folders) == 1:
                                         try:
                                             os.chdir(session.folder_context.folders[0])
-                                            console.print(f"[dim]Switched workspace to: {os.getcwd()}[/dim]")
+                                            console.print(
+                                                f"[dim]Switched workspace to: {os.getcwd()}[/dim]"
+                                            )
                                         except Exception:
                                             pass
                                 else:
                                     console.print(
                                         f"[red]Folder not found or invalid: {path}[/red]"
                                     )
-                            
+
                             session.session_manager.save_history(session.folder_context)
                             console.print(
                                 "[dim]Files cached as initial context. Changes will be provided as diffs.[/dim]"
@@ -499,13 +518,16 @@ def main():
                         elif " " in arg:
                             k, v = arg.split(" ", 1)
                         else:
-                            console.print("[red]Usage: /set <key> <value> OR /set <key>=<value>[/red]")
+                            console.print(
+                                "[red]Usage: /set <key> <value> OR /set <key>=<value>[/red]"
+                            )
                             continue
-                            
+
                         k = k.strip()
                         v = v.strip()
                         try:
                             from utils.config import validate_and_cast
+
                             session.variables[k] = validate_and_cast(k, v)
                             session.session_manager.save_history(session.folder_context)
                             console.print(
@@ -536,6 +558,7 @@ def main():
                         session.variables.clear()
                         # Restore defaults after clear
                         from utils.config import DEFAULT_VARIABLES
+
                         session.variables.update(DEFAULT_VARIABLES)
                         session.session_manager.save_history(session.folder_context)
                         console.print("[green]All variables reset to defaults.[/green]")
@@ -543,9 +566,12 @@ def main():
                     else:
                         if k in session.variables:
                             from utils.config import VARIABLE_SCHEMA
+
                             if k in VARIABLE_SCHEMA:
                                 session.variables[k] = VARIABLE_SCHEMA[k]["default"]
-                                console.print(f"[green]Reset variable to default: {k} = {session.variables[k]}[/green]")
+                                console.print(
+                                    f"[green]Reset variable to default: {k} = {session.variables[k]}[/green]"
+                                )
                             else:
                                 del session.variables[k]
                                 console.print(f"[green]Unset variable: {k}[/green]")
@@ -605,8 +631,12 @@ def main():
                     console.print(f"Session Tokens (In):  {tokens['input']}")
                     console.print(f"Session Tokens (Out): {tokens['output']}")
                     console.print(f"Session Tokens (Total): {tokens['total']}")
-                    console.print(f"Session Est. Cost:    ${tokens.get('total_cost', 0.0):.5f}")
-                    console.print("[dim](Actual token count is also displayed after each generation)[/dim]")
+                    console.print(
+                        f"Session Est. Cost:    ${tokens.get('total_cost', 0.0):.5f}"
+                    )
+                    console.print(
+                        "[dim](Actual token count is also displayed after each generation)[/dim]"
+                    )
 
                 elif cmd == "/thinking":
                     session.thinking = not session.thinking

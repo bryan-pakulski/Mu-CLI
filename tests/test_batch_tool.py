@@ -32,7 +32,9 @@ def test_batch_job_nested_prevention(tmp_path):
     commands = [
         {
             "tool_name": "batch_job",
-            "tool_args": {"commands": [{"tool_name": "get_current_time", "tool_args": {}}]},
+            "tool_args": {
+                "commands": [{"tool_name": "get_current_time", "tool_args": {}}]
+            },
         }
     ]
 
@@ -48,8 +50,14 @@ def test_batch_job_modifications(tmp_path):
     file2 = tmp_path / "file2.txt"
 
     commands = [
-        {"tool_name": "write_file", "tool_args": {"filename": str(file1), "content": "content1"}},
-        {"tool_name": "write_file", "tool_args": {"filename": str(file2), "content": "content2"}},
+        {
+            "tool_name": "write_file",
+            "tool_args": {"filename": str(file1), "content": "content1"},
+        },
+        {
+            "tool_name": "write_file",
+            "tool_args": {"filename": str(file2), "content": "content2"},
+        },
     ]
 
     # Test get_modifications for a batch_job
@@ -68,16 +76,19 @@ def test_batch_job_execution_with_writes(tmp_path):
     ctx.add_folder(str(tmp_path))
 
     file1 = tmp_path / "batch_write.txt"
-    
+
     commands = [
-        {"tool_name": "write_file", "tool_args": {"filename": str(file1), "content": "initial"}},
+        {
+            "tool_name": "write_file",
+            "tool_args": {"filename": str(file1), "content": "initial"},
+        },
         {"tool_name": "read_file", "tool_args": {"filename": str(file1)}},
     ]
 
     result = execute_tool("batch_job", {"commands": commands}, ctx)
-    
+
     assert "Successfully wrote to" in result
     assert "initial" in result
-    
+
     with open(file1, "r") as f:
         assert f.read() == "initial"

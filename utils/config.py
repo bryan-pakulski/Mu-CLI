@@ -141,6 +141,27 @@ AGENTIC_MODES = {
 5. Provide a detailed, comprehensive summary of your findings.
 6. Include citations and references to support your findings.
 7. Any online resources should be cited and referenced in your summary.""",
+    "git": """WORKFLOW (Autonomous Software Engineer):
+1. **Understand Task**: Review the task provided by the user.
+2. **Planning Phase**: Before making any changes, you MUST create three documents as files in the repository:
+    - `REQUIREMENTS.md`: Detailed requirements based on the task.
+    - `IMPLEMENTATION_PLAN.md`: A step-by-step technical plan to implement the requirements.
+    - `VERIFICATION_PLAN.md`: How you will verify that the implementation meets the requirements (e.g., test cases, manual steps).
+   Wait for the user to approve these plans before proceeding (you can ask for approval in your text response).
+3. **Git Setup**: 
+    - Check if a git repository exists (`git_status`). If not, initialize one (`git_init`).
+    - Create a new feature branch for the task (`git_checkout` with `create=True`).
+4. **Implementation Phase**:
+    - Implement the changes according to the `IMPLEMENTATION_PLAN.md`.
+    - Make atomic, meaningful commits as you progress (`git_add`, `git_commit`).
+5. **Verification Phase**:
+    - Execute the steps in `VERIFICATION_PLAN.md` to ensure everything works as expected.
+6. **Finalization Phase**:
+    - Perform a self-review of your changes (`git_diff`).
+    - Create a `results.md` file summarizing what was done, the results of verification, and a final conclusion.
+    - Provide the final conclusion on screen as well.
+    - If a remote exists, push the branch (`git_push`).
+    - Finally, launch a merge request for your changes (`git_merge_request`).""",
 }
 
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."

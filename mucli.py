@@ -45,9 +45,9 @@ def print_help():
     table.add_row("/variables", "", "Show all variables")
     table.add_row("/agentic", "", "Toggle Agentic (Tool Calling) mode")
     table.add_row(
-        "/tool <enable/disable/list> <toolname>",
-        "",
-        "Enable/Disable a tool or list all",
+        "/tool <enable/disable/list>",
+        "/tools",
+        "Enable/Disable a tool or list all available tools",
     )
     table.add_row(
         "/mode <mode>",
@@ -586,38 +586,63 @@ def main():
                         console.print(f"[blue]{vk}[/blue] = [green]{vv}[/green]")
 
                 elif cmd == "/mode":
-                    valid_modes = ["default", "debug", "feature", "research"]
+                    valid_modes = ["default", "debug", "feature", "research", "git"]
                     if arg and arg.lower() in valid_modes:
                         session.variables["agent_mode"] = arg.lower()
                         session.session_manager.save_history(session.folder_context)
                         console.print(f"Agent strategy set to: {arg.upper()}")
                     else:
-                        console.print("Usage: /mode <default|debug|feature|research>")
+                        console.print("Usage: /mode <default|debug|feature|research|git>")
                         curr = session.variables.get("agent_mode", "default")
                         console.print(f"Current mode: {curr}")
 
-                elif cmd == "/tool":
-                    if not arg:
-                        console.print("Usage: /tool <enable|disable|list> ")
-                    else:
-                        t_parts = arg.split(" ", 1)
-                        t_cmd = t_parts[0].lower()
-                        t_name = t_parts[1].strip() if len(t_parts) > 1 else ""
+                elif cmd in ["/tool", "/tools"]:
+                    t_parts = arg.split(" ", 1) if arg else ["list"]
+                    t_cmd = t_parts[0].lower()
+                    t_name = t_parts[1].strip() if len(t_parts) > 1 else ""
 
-                        if t_cmd == "disable" and t_name:
-                            if t_name not in session.disabled_tools:
-                                session.disabled_tools.append(t_name)
-                            console.print(f"Tool '{t_name}' disabled.")
-                        elif t_cmd == "enable" and t_name:
-                            if t_name in session.disabled_tools:
-                                session.disabled_tools.remove(t_name)
-                            console.print(f"Tool '{t_name}' enabled.")
-                        elif t_cmd == "list":
-                            console.print(f"Disabled Tools: {session.disabled_tools}")
-                        else:
-                            console.print(
-                                "Invalid /tool command. Use enable, disable, or list."
+                    if t_cmd == "disable" and t_name:
+                        if t_name not in session.disabled_tools:
+                            session.disabled_tools.append(t_name)
+                        console.print(f"Tool '{t_name}' disabled.")
+                    elif t_cmd == "enable" and t_name:
+                        if t_name in session.disabled_tools:
+                            session.disabled_tools.remove(t_name)
+                        console.print(f"Tool '{t_name}' enabled.")
+                    elif t_cmd == "list":
+                        from core.tools import TOOLS
+                        table = Table(title="Available Tools", box=box.ROUNDED, show_lines=True)
+                        table.add_column("Tool", style="cyan", no_wrap=True)
+                        table.add_column("Description", style="white", width=40)
+                        table.add_column("Parameters", style="magenta")
+                        table.add_column("Approval", style="yellow", justify="center")
+                        table.add_column("Status", style="green", justify="center")
+
+                        for t in TOOLS:
+                            status = "[red]OFF[/red]" if t.name in session.disabled_tools else "[green]ON[/green]"
+                            approval = "Yes" if t.requires_approval else "No"
+                                
+                            params = []
+                            props = t.parameters.get("properties", {})
+                            required = t.parameters.get("required", [])
+                            for p_name, p_info in props.items():
+                                req_star = "[red]*[/red]" if p_name in required else ""
+                                p_type = p_info.get("type", "any")
+                                params.append(f"{p_name}{req_star} [dim]({p_type})[/dim]")
+                            
+                            params_str = "\n".join(params) if params else "None"
+                            
+                            table.add_row(
+                                t.name,
+                                t.description,
+                                params_str,
+                                approval,
+                                status
                             )
+                        console.print(table)
+                        console.print("[dim] [red]*[/red] indicates required parameter[/dim]")
+                    else:
+                        console.print(f"Usage: {cmd} <enable|disable|list> [toolname]")
 
                 elif cmd == "/tokens":
                     hist_len = len(session.session_manager.history)

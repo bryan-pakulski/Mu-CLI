@@ -161,6 +161,159 @@ TOOLS = [
         },
         requires_approval=True,
     ),
+    ToolDefinition(
+        name="git_status",
+        description="Shows the working tree status.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="git_log",
+        description="Shows the commit logs.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Limit the number of commits to show.",
+                    "default": 10,
+                }
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="git_diff",
+        description="Shows changes between commits, commit and working tree, etc.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "cached": {
+                    "type": "boolean",
+                    "description": "Show changes that are staged for the next commit.",
+                    "default": False,
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Optional file path to limit the diff to.",
+                },
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="git_checkout",
+        description="Switch branches or restore working tree files.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "type": "string",
+                    "description": "The name of the branch to checkout.",
+                },
+                "create": {
+                    "type": "boolean",
+                    "description": "Whether to create the branch if it doesn't exist.",
+                    "default": False,
+                },
+            },
+            "required": ["branch"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="git_add",
+        description="Adds file contents to the index (staging area).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of files to add. Use ['.'] for all changes.",
+                }
+            },
+            "required": ["files"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="git_commit",
+        description="Record changes to the repository.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The commit message.",
+                }
+            },
+            "required": ["message"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="git_push",
+        description="Update remote refs along with associated objects.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "remote": {
+                    "type": "string",
+                    "description": "The name of the remote. Defaults to 'origin'.",
+                    "default": "origin",
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "The name of the branch to push. Defaults to current branch.",
+                },
+            },
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="git_pull",
+        description="Fetch from and integrate with another repository or a local branch.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "remote": {
+                    "type": "string",
+                    "description": "The name of the remote. Defaults to 'origin'.",
+                    "default": "origin",
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "The name of the branch to pull. Defaults to current branch.",
+                },
+            },
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="git_init",
+        description="Initialize a new git repository in the workspace.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="git_merge_request",
+        description="Launch a merge request for the current branch. In this CLI it simulates the action and provides a summary.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The title of the merge request."},
+                "description": {"type": "string", "description": "The description of the changes."},
+            },
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="git_branch",
+        description="List, create, or delete branches.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
 ]
 
 
@@ -541,6 +694,103 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None) -> st
     except Exception as e:
         return f"Error executing task: {e}"
 
+def run_git_command(args_list: list[str], folder_context) -> str:
+    """Executes a git command in the primary workspace folder."""
+    if not folder_context or not folder_context.folders:
+        return "Error: No workspace attached."
+
+    import subprocess
+
+    # Assume git should run from the first folder (primary project root)
+    cwd = folder_context.folders[0]
+
+    cmd = ["git"] + args_list
+    try:
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+        )
+
+        output = process.stdout
+        errors = process.stderr
+
+        combined_output = ""
+        if output:
+            combined_output += output
+        if errors:
+            combined_output += f"\nSTDERR:\n{errors}"
+
+        if not combined_output:
+            combined_output = "Command executed successfully with no output."
+
+        return combined_output
+    except Exception as e:
+        return f"Error executing git command: {e}"
+
+def git_status(folder_context) -> str:
+    """Shows the working tree status."""
+    return run_git_command(["status"], folder_context)
+
+def git_init(folder_context) -> str:
+    """Initialize a new git repository."""
+    return run_git_command(["init"], folder_context)
+
+def git_log(limit: int = 10, folder_context=None) -> str:
+    """Shows the commit logs."""
+    return run_git_command(["log", "--oneline", "-n", str(limit)], folder_context)
+
+def git_diff(cached: bool = False, filename: str = None, folder_context=None) -> str:
+    """Shows changes between commits, commit and working tree, etc."""
+    cmd_args = ["diff"]
+    if cached:
+        cmd_args.append("--cached")
+    if filename:
+        if not _check_bounds(filename, folder_context):
+             return f"Error: Access denied or path ignored. '{filename}'"
+        cmd_args.append(filename)
+    return run_git_command(cmd_args, folder_context)
+
+def git_checkout(branch: str, create: bool = False, folder_context=None) -> str:
+    """Switch branches or restore working tree files."""
+    cmd_args = ["checkout"]
+    if create:
+        cmd_args.append("-b")
+    cmd_args.append(branch)
+    return run_git_command(cmd_args, folder_context)
+
+def git_add(files: list[str], folder_context=None) -> str:
+    """Adds file contents to the index."""
+    for f in files:
+        if f != "." and not _check_bounds(f, folder_context):
+             return f"Error: Access denied or path ignored. '{f}'"
+    
+    cmd_args = ["add"] + files
+    return run_git_command(cmd_args, folder_context)
+
+def git_commit(message: str, folder_context=None) -> str:
+    """Record changes to the repository."""
+    return run_git_command(["commit", "-m", message], folder_context)
+
+def git_push(remote: str = "origin", branch: str = None, folder_context=None) -> str:
+    """Update remote refs."""
+    cmd_args = ["push", remote]
+    if branch:
+        cmd_args.append(branch)
+    return run_git_command(cmd_args, folder_context)
+
+def git_pull(remote: str = "origin", branch: str = None, folder_context=None) -> str:
+    """Fetch from and integrate with another repository."""
+    cmd_args = ["pull", remote]
+    if branch:
+        cmd_args.append(branch)
+    return run_git_command(cmd_args, folder_context)
+
+def git_branch(folder_context) -> str:
+    """List branches."""
+    return run_git_command(["branch"], folder_context)
+
 
 def tool_requires_approval(tool_name: str, args: dict) -> bool:
     """Checks if a tool call requires user approval."""
@@ -696,6 +946,34 @@ def execute_tool(
         return apply_diff(
             args.get("filename", ""), args.get("diff", ""), folder_context
         )
+    elif tool_name == "git_status":
+        return git_status(folder_context)
+    elif tool_name == "git_init":
+        return git_init(folder_context)
+    elif tool_name == "git_log":
+        return git_log(args.get("limit", 10), folder_context)
+    elif tool_name == "git_diff":
+        return git_diff(args.get("cached", False), args.get("filename"), folder_context)
+    elif tool_name == "git_checkout":
+        return git_checkout(
+            args.get("branch", ""), args.get("create", False), folder_context
+        )
+    elif tool_name == "git_add":
+        return git_add(args.get("files", []), folder_context)
+    elif tool_name == "git_commit":
+        return git_commit(args.get("message", ""), folder_context)
+    elif tool_name == "git_push":
+        return git_push(
+            args.get("remote", "origin"), args.get("branch"), folder_context
+        )
+    elif tool_name == "git_merge_request":
+        return f"Merge Request '{args.get('title')}' launched successfully!\nDescription: {args.get('description')}"
+    elif tool_name == "git_pull":
+        return git_pull(
+            args.get("remote", "origin"), args.get("branch"), folder_context
+        )
+    elif tool_name == "git_branch":
+        return git_branch(folder_context)
     elif tool_name == "batch_job":
         commands = args.get("commands", [])
         if not isinstance(commands, list):

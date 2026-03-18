@@ -109,7 +109,7 @@ TOOLS = [
                 "filename": {"type": "string", "description": "Path to the file."},
                 "diff": {
                     "type": "string",
-                    "description": "The unified diff content to apply.",
+                    "description": "The unified diff content to apply. MUST follow standard unified diff format: --- filename, +++ filename, @@ -L,C +L,C @@ headers, and +/-/space line markers.",
                 },
             },
             "required": ["filename", "diff"],
@@ -525,7 +525,21 @@ def _sanitize_diff(diff: str, filename: str) -> str:
     if not lines:
         return diff
 
-    # Strip preamble text before the first header or hunk
+    # 1. Strip LLM chatter/markers (e.g. *** Begin Patch, *** Update File)
+    # Also strip code block backticks if the model included them inside the string
+    cleaned_lines = []
+    meaningful_found = False
+    for line in lines:
+        trimmed = line.strip()
+        if trimmed.startswith("***") or trimmed.endswith("***"):
+            continue
+        # Strip markdown code block markers
+        if trimmed.startswith("```"):
+            continue
+        cleaned_lines.append(line)
+    lines = cleaned_lines
+
+    # 2. Strip preamble text before the first header or hunk
     first_meaningful_line = -1
     for i, line in enumerate(lines):
         if line.startswith("---") or line.startswith("+++") or line.startswith("@@"):
@@ -541,31 +555,59 @@ def _sanitize_diff(diff: str, filename: str) -> str:
         if not hlines:
             return
         if hlines[0].startswith("@@"):
-            # Recount hunk
-            header = hlines[0]
+            header = hlines[0].strip()
             # Try to match standard @@ -start,len +start,len @@
             match = re.match(r"^@@ -(\d+),?\d* \+(\d+),?\d* @@(.*)$", header)
+            
+            start_old, start_new = "1", "1"
+            tail = ""
             if match:
                 start_old, start_new, tail = match.groups()
-                count_old = 0
-                count_new = 0
-                for hl in hlines[1:]:
-                    if hl.startswith("-"):
+            
+            count_old = 0
+            count_new = 0
+            content_lines = []
+            for hl in hlines[1:]:
+                if not hl: continue
+                
+                # If model is lazy and doesn't provide prefixes, try to guess
+                if hl.startswith("-"):
+                    count_old += 1
+                    content_lines.append(hl)
+                elif hl.startswith("+"):
+                    count_new += 1
+                    content_lines.append(hl)
+                elif hl.startswith(" ") or hl.startswith("\t"):
+                    count_old += 1
+                    count_new += 1
+                    content_lines.append(hl)
+                else:
+                    # If it's not a +/- line and we are in a hunk, assume context
+                    trimmed_hl = hl.strip()
+                    if trimmed_hl:
                         count_old += 1
-                    elif hl.startswith("+"):
                         count_new += 1
-                    elif hl.startswith(" "):
+                        content_lines.append(" " + hl)
+                    else:
+                        # Empty line, usually context
                         count_old += 1
                         count_new += 1
-                new_header = (
-                    f"@@ -{start_old},{count_old} +{start_new},{count_new} @@{tail}"
-                )
-                sanitized.append(new_header)
-                sanitized.extend(hlines[1:])
+                        content_lines.append(" ")
+            
+            if not content_lines and header == "@@":
                 return
+
+            new_header = f"@@ -{start_old},{count_old} +{start_new},{count_new} @@{tail}"
+            sanitized.append(new_header)
+            sanitized.extend(content_lines)
+            return
         sanitized.extend(hlines)
 
-    # Ensure file headers
+    # Ensure file headers are at the TOP (after stripping chatter)
+    # If the model included headers, we use them, but if it didn't we add them.
+    # But wait, if they are already in 'lines', we shouldn't duplicate them.
+    # The current logic will add them if they are not in the first 3 lines.
+
     if not any(l.startswith("--- ") for l in lines[:3]):
         sanitized.append(f"--- {filename}")
         sanitized.append(f"+++ {filename}")
@@ -582,13 +624,19 @@ def _sanitize_diff(diff: str, filename: str) -> str:
             if hunk_lines:
                 hunk_lines.append(line)
             else:
-                sanitized.append(line)
+                # Line without prefix but we haven't found a hunk yet.
+                # Skip it or treat it as context? Treat as context for now.
+                trimmed = line.strip()
+                if trimmed:
+                    sanitized.append(" " + line)
         else:
-            # Likely context missing its space
+            # Likely context missing its space OR trailing garbage
             if hunk_lines:
+                # If we are in a hunk, assume it's context
                 hunk_lines.append(" " + line)
             else:
-                sanitized.append(" " + line)
+                # Outside hunk, probably preamble/postamble chatter
+                pass
 
     flush_hunk(hunk_lines)
 

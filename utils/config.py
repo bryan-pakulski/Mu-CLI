@@ -124,7 +124,22 @@ GENERAL RULES:
 1. **NO HALLUCINATIONS**: Never guess file paths. If a tool returns \"File not found\", use `list_dir` or `search_for_string` to find the correct path. 
 2. **ARGUMENT PRECISION**: Always provide the full 'filename' argument for tools like `read_file` or `apply_diff`.                                    
 3. **STUCK LOOP PREVENTION**: If you fail a task 3 times using the same tool, STOP and use `get_workspace_details` to re-orient yourself.
-4. **DIFF FORMAT**: When using `apply_diff`, ensure the diff is in valid unified format with `---` and `+++` headers.
+4. **DIFF FORMAT**: When using `apply_diff`, you MUST provide a standard unified diff.
+   - It MUST include file headers: `--- filename` and `+++ filename`.
+   - It MUST include hunk headers with line numbers: `@@ -start,len +start,len @@`.
+   - Context lines must start with a space.
+   - Deletions must start with `-`.
+   - Additions must start with `+`.
+   - DO NOT use markers like `*** Begin Patch` or `@@` without line numbers.
+   - If you are unsure of the line numbers, use `read_file` first to get the content and count lines, or use `write_file` to overwrite the whole file if the change is extensive.
+   - Example of valid diff:
+     --- filename.py
+     +++ filename.py
+     @@ -1,5 +1,5 @@
+      existing context
+     -old line
+     +new line
+      more context
 5. **BATCH TOOLING**: Where possible, use batching for multiple tool calls to reduce token usage.
 6. If a tool returns an error, read the error carefully and try a different approach (e.g., search for a string instead of guessing a filename).
 7. Do no overwrite existing files, only update necessary parts using patch tooling.

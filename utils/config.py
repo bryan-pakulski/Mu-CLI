@@ -25,6 +25,7 @@ VARIABLE_SCHEMA = {
     "ollama_host": {"type": str, "default": "http://localhost:11434"},
     "auto_approve": {"type": bool, "default": True},
     "max_iterations": {"type": int, "default": 50},
+    "compact_history": {"type": bool, "default": True},
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}
@@ -85,7 +86,8 @@ GENERAL RULES:
 2. If a file is large, use `get_chunk` to read specific lines instead of the whole file.
 3. If a tool returns an error, read the error carefully and try a different approach (e.g., search for a string instead of guessing a filename).
 4. Do no overwrite existing files, only update necessary parts using patch tooling.
-5. Once you have enough context, stop using tools and provide your final response to the user.
+5. Provide multiple tool calls (e.g. multiple `apply_diff` calls) in a single response when they are related or can be executed together.
+6. Once you have enough context, stop using tools and provide your final response to the user.
 """
 
 AGENTIC_MODES = {

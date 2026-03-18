@@ -1,1 +1,6 @@
-textual[syntax]
+google-genai
+rich
+prompt-toolkit
+Pillow
+pytest
+black

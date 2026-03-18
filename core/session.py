@@ -180,6 +180,39 @@ class SessionManager:
                         )
                         self.ui.show_info(f"  [Tool Result: {res_preview}...]")
 
+    def prune_history(self):
+        """
+        Removes tool calls and tool results from the history, keeping only user and assistant text.
+        Merges consecutive assistant messages if they result from this pruning.
+        """
+        if not self.history:
+            return
+
+        new_history = []
+        for msg in self.history:
+            role = msg.get("role")
+            if role == "tool":
+                continue
+            
+            parts = msg.get("parts", [])
+            new_parts = []
+            for p in parts:
+                if p.get("type") not in ("tool_call", "tool_result"):
+                    new_parts.append(p)
+            
+            # Skip messages that became empty and are not 'user' messages
+            if not new_parts and role != "user":
+                continue
+            
+            # Merge consecutive assistant messages
+            if role == "assistant" and new_history and new_history[-1]["role"] == "assistant":
+                new_history[-1]["parts"].extend(new_parts)
+            else:
+                new_history.append({"role": role, "parts": new_parts.copy()})
+        
+        self.history = new_history
+        self.summary_anchor = 0 # Reset anchor as history structure changed
+
 
 class Session:
     def __init__(
@@ -438,75 +471,90 @@ class Session:
                     if self.ui:
                         self.ui.show_info(f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}")
 
+                    if self.variables.get("compact_history", False):
+                        self.session_manager.prune_history()
+
                     self.session_manager.save_history(self.folder_context)
                     break
 
                 auto_approve = self.variables.get("auto_approve", True)
                 tool_result_parts = []
+                tool_calls = [p for p in response.parts if p.type == "tool_call"]
+                
+                # Pre-calculate modifications for tools needing approval
+                to_approve_data = {}
+                for idx, part in enumerate(tool_calls):
+                    tool_def = next((t for t in TOOLS if t.name == part.tool_name), None)
+                    if not auto_approve or (tool_def and tool_def.requires_approval):
+                        orig, modified, filename = get_modifications(part.tool_name, part.tool_args, self.folder_context)
+                        to_approve_data[idx] = (orig, modified, filename)
 
-                for part in response.parts:
-                    if part.type == "tool_call":
-                        tool_def = next(
-                            (t for t in TOOLS if t.name == part.tool_name), None
+                # Show bulk diffs if multiple
+                if len(to_approve_data) > 1:
+                    if self.ui:
+                        self.ui.show_info(f"\n[bold yellow]Turn contains {len(to_approve_data)} modifications requiring approval.[/bold yellow]")
+                    for idx, (orig, modified, filename) in to_approve_data.items():
+                        if filename and orig is not None and modified is not None and not modified.startswith("ERROR:"):
+                            if self.ui: self.ui.show_diff(filename, orig, modified)
+
+                for i, part in enumerate(tool_calls):
+                    needs_approval = (i in to_approve_data) and not auto_approve
+                    if needs_approval:
+                        orig, modified, filename = to_approve_data[i]
+                        
+                        can_approve = True
+                        if filename and (orig is not None) and (modified is not None):
+                            if modified.startswith("ERROR:"):
+                                if self.ui:
+                                    self.ui.show_error(f"Cannot show diff for {filename}: {modified}")
+                                can_approve = False
+                            elif len(to_approve_data) <= 1: # Only show single diff if not already shown in bulk
+                                if self.ui:
+                                    self.ui.show_diff(filename, orig, modified)
+
+                        # Shorten args for display
+                        display_args = _shorten_tool_args(part.tool_args)
+
+                        from rich.prompt import Prompt
+                        
+                        # Add count info to prompt if multiple
+                        count_info = f" ({i+1}/{len(tool_calls)})" if len(tool_calls) > 1 else ""
+                        
+                        choice = Prompt.ask(
+                            (
+                                f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
+                                if can_approve else
+                                f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+                            ),
+                            choices=["y", "n", "e"] if can_approve else ["n", "e"],
+                            default="y" if can_approve else "n",
                         )
-                        needs_approval = not auto_approve or (
-                            tool_def and tool_def.requires_approval
-                        )
-                        if needs_approval:
-                            # Enhanced approval logic with side-by-side diff
-                            orig, modified, filename = get_modifications(
-                                part.tool_name, part.tool_args, self.folder_context
+                        if choice == "n":
+                            result = "User denied this tool call."
+                        elif choice == "e":
+                            reason = Prompt.ask(
+                                "Provide an explanation to the model"
                             )
-                            
-                            can_approve = True
-                            if filename and (orig is not None) and (modified is not None):
-                                if modified.startswith("ERROR:"):
-                                    if self.ui:
-                                        self.ui.show_error(f"Cannot show diff for {filename}: {modified}")
-                                    can_approve = False
-                                else:
-                                    if self.ui:
-                                        self.ui.show_diff(filename, orig, modified)
-
-                            # Shorten args for display
-                            display_args = _shorten_tool_args(part.tool_args)
-
-                            from rich.prompt import Prompt
-                            choice = Prompt.ask(
-                                (
-                                    f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]\nArgs: {display_args}\nAllow?"
-                                    if can_approve else
-                                    f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]\nArgs: {display_args}\nReject or Explain?"
-                                ),
-                                choices=["y", "n", "e"] if can_approve else ["n", "e"],
-                                default="y" if can_approve else "n",
-                            )
-                            if choice == "n":
-                                result = "User denied this tool call."
-                            elif choice == "e":
-                                reason = Prompt.ask(
-                                    "Provide an explanation to the model"
-                                )
-                                result = f"User denied this tool call. Reason: {reason}"
-                            else:
-                                result = execute_tool(
-                                    part.tool_name, part.tool_args, self.folder_context
-                                )
+                            result = f"User denied this tool call. Reason: {reason}"
                         else:
                             result = execute_tool(
                                 part.tool_name, part.tool_args, self.folder_context
                             )
-
-                        if self.ui: self.ui.show_tool_result(result)
-
-                        tool_result_parts.append(
-                            {
-                                "type": "tool_result",
-                                "tool_name": part.tool_name,
-                                "tool_result": result,
-                                "thought_signature": part.thought_signature,
-                            }
+                    else:
+                        result = execute_tool(
+                            part.tool_name, part.tool_args, self.folder_context
                         )
+
+                    if self.ui: self.ui.show_tool_result(result)
+
+                    tool_result_parts.append(
+                        {
+                            "type": "tool_result",
+                            "tool_name": part.tool_name,
+                            "tool_result": result,
+                            "thought_signature": part.thought_signature,
+                        }
+                    )
 
                 tool_result_msg = {"role": "tool", "parts": tool_result_parts}
                 self.session_manager.history.append(tool_result_msg)

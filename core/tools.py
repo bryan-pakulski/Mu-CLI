@@ -356,6 +356,10 @@ def get_modifications(tool_name: str, args: dict, folder_context) -> tuple[str, 
             )
             new_content = result.stdout if result.returncode == 0 else f"ERROR: {result.stderr}"
             return original_content, new_content, filename
+        except FileNotFoundError:
+            return original_content, "ERROR: 'patch' utility not found on system.", filename
+        except Exception as e:
+            return original_content, f"ERROR: {e}", filename
         finally:
             if os.path.exists(tmp_orig_path): os.unlink(tmp_orig_path)
             if os.path.exists(tmp_diff_path): os.unlink(tmp_diff_path)

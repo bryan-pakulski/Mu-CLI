@@ -9,7 +9,8 @@ from threading import Lock
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
-from core.tools import TOOLS
+from core.tools import TOOLS, get_modifications
+from providers.ollama import OllamaProvider
 from utils.logger import logger
 from utils.config import validate_and_cast
 
@@ -325,6 +326,66 @@ class TaskManager:
         thread.start()
         return self.get_task(task_id)
 
+    def start_tool_task(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        approval_manager,
+        structured: bool = True,
+    ) -> dict:
+        task_id = self.create_task(
+            "tool",
+            {
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "structured": structured,
+            },
+        )
+
+        def runner():
+            self.bind_task(task_id)
+            approval_manager.bind_task(task_id)
+            self.set_running(task_id)
+            try:
+                with self.session_lock:
+                    result = execute_server_tool(self.session, tool_name, tool_args)
+                    if structured:
+                        response_payload = self.session._build_structured_tool_result(
+                            tool_name,
+                            tool_args,
+                            result,
+                        )
+                    else:
+                        response_payload = {
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                            "raw": result,
+                        }
+                if self.event_hub:
+                    self.event_hub.publish(
+                        "tool.executed",
+                        {
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                            "result": response_payload,
+                            "session_name": self.session.session_manager.current_session_name,
+                        },
+                        task_id=task_id,
+                    )
+                self.complete_task(task_id, {"ok": True, "result": response_payload})
+            except Exception as exc:
+                logger.error("Tool task %s failed: %s", task_id, exc, exc_info=True)
+                self.fail_task(task_id, str(exc))
+            finally:
+                approval_manager.unbind_task()
+                self.unbind_task()
+
+        thread = threading.Thread(target=runner, daemon=True)
+        with self.lock:
+            self.threads[task_id] = thread
+        thread.start()
+        return self.get_task(task_id)
+
     def wait_for_task(self, task_id: str, timeout: float | None = None) -> dict | None:
         with self.lock:
             thread = self.threads.get(task_id)
@@ -474,6 +535,8 @@ def build_sessions_payload(session) -> dict:
 
 
 def build_runtime_payload(session) -> dict:
+    session.sync_runtime_state()
+    sync_live_provider_settings(session)
     return {
         "session_name": session.session_manager.current_session_name,
         "provider": session.provider.name,
@@ -504,6 +567,46 @@ def build_staged_files_payload(session) -> dict:
 
 def publish_server_event(state: dict, event_name: str, payload: dict):
     state["event_hub"].publish(event_name, payload, task_id=payload.get("task_id"))
+
+
+def sync_live_provider_settings(session):
+    if isinstance(session.provider, OllamaProvider):
+        session.provider.host = session.variables.get(
+            "ollama_host", "http://localhost:11434"
+        )
+
+
+def execute_server_tool(session, tool_name: str, tool_args: dict):
+    if tool_name in session.disabled_tools:
+        raise PermissionError(f"Tool '{tool_name}' is disabled for this session.")
+
+    tool_def = next((tool for tool in TOOLS if tool.name == tool_name), None)
+    if (
+        tool_def
+        and tool_def.requires_approval
+        and not session.variables.get("yolo", False)
+    ):
+        modifications = get_modifications(tool_name, tool_args, session.folder_context)
+        can_approve = True
+        for _, modified, _ in modifications:
+            if modified and str(modified).startswith("ERROR:"):
+                can_approve = False
+                break
+
+        choice, reason = session._request_tool_approval(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            display_args=tool_args,
+            count_info="",
+            can_approve=can_approve,
+            modifications=modifications,
+        )
+        if choice == "n":
+            return f"User denied direct tool call: {tool_name}"
+        if choice == "e":
+            return f"User denied direct tool call: {tool_name}. Reason: {reason}"
+
+    return session._execute_tool_with_memory(tool_name, tool_args)
 
 
 def serve(session, host: str, port: int, command_handler):
@@ -766,6 +869,52 @@ def serve(session, host: str, port: int, command_handler):
                     self._send_json(202, {"ok": True, "task": task})
                 return
 
+            if parsed.path == "/api/tool":
+                tool_name = str(payload.get("tool_name", "") or "")
+                tool_args = payload.get("tool_args", {}) or {}
+                if not tool_name:
+                    self._send_json(
+                        400,
+                        {
+                            "ok": False,
+                            "error": "Field 'tool_name' is required.",
+                        },
+                    )
+                    return
+                async_mode = bool(payload.get("async", False))
+                task = state["task_manager"].start_tool_task(
+                    tool_name,
+                    tool_args,
+                    state["approval_manager"],
+                    structured=bool(payload.get("structured", True)),
+                )
+                task_id = task["task_id"]
+                if async_mode:
+                    self._send_json(202, {"ok": True, "task": task})
+                    return
+
+                task = state["task_manager"].wait_for_task_state(
+                    task_id,
+                    {"completed", "error", "awaiting_approval"},
+                )
+                if not task:
+                    self._send_json(500, {"ok": False, "error": "Task disappeared."})
+                    return
+                if task["status"] == "completed":
+                    self._send_json(200, task["result"])
+                elif task["status"] == "error":
+                    self._send_json(
+                        500,
+                        {
+                            "ok": False,
+                            "error": task["error"] or "Tool task failed.",
+                            "task": task,
+                        },
+                    )
+                else:
+                    self._send_json(202, {"ok": True, "task": task})
+                return
+
             with state["session_lock"]:
                 session = state["session"]
                 try:
@@ -797,44 +946,6 @@ def serve(session, host: str, port: int, command_handler):
                         self._send_json(200, result)
                         return
 
-                    if parsed.path == "/api/tool":
-                        tool_name = str(payload.get("tool_name", "") or "")
-                        tool_args = payload.get("tool_args", {}) or {}
-                        if not tool_name:
-                            self._send_json(
-                                400,
-                                {
-                                    "ok": False,
-                                    "error": "Field 'tool_name' is required.",
-                                },
-                            )
-                            return
-                        result = session._execute_tool_with_memory(tool_name, tool_args)
-                        if payload.get("structured", True):
-                            response_payload = session._build_structured_tool_result(
-                                tool_name,
-                                tool_args,
-                                result,
-                            )
-                        else:
-                            response_payload = {
-                                "tool_name": tool_name,
-                                "tool_args": tool_args,
-                                "raw": result,
-                            }
-                        publish_server_event(
-                            state,
-                            "tool.executed",
-                            {
-                                "tool_name": tool_name,
-                                "tool_args": tool_args,
-                                "result": response_payload,
-                                "session_name": session.session_manager.current_session_name,
-                            },
-                        )
-                        self._send_json(200, {"ok": True, "result": response_payload})
-                        return
-
                     if parsed.path == "/api/sessions/new":
                         name = str(payload.get("name", "") or "").strip() or None
                         session.session_manager.new_session(
@@ -844,6 +955,7 @@ def serve(session, host: str, port: int, command_handler):
                         )
                         session.staged_files = []
                         session.sync_runtime_state()
+                        sync_live_provider_settings(session)
                         publish_server_event(
                             state,
                             "session.created",
@@ -958,6 +1070,7 @@ def serve(session, host: str, port: int, command_handler):
                                 payload.get("variables") or {}
                             ).items():
                                 session.variables[key] = validate_and_cast(key, value)
+                        sync_live_provider_settings(session)
                         session.session_manager.save_history(session.folder_context)
                         publish_server_event(
                             state,

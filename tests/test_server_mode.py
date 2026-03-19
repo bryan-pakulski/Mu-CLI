@@ -15,6 +15,7 @@ from core.server import (
 from core.session import Session, SessionManager
 from mucli import handle_command
 from providers.base import MessagePart, ProviderResponse
+from providers.ollama import OllamaProvider
 
 
 @dataclass
@@ -219,3 +220,67 @@ def test_headless_approval_workflow_for_modifying_tool(tmp_path):
     assert "task.completed" in observed_events
     assert "trace.tool" in observed_events
     assert "trace.tool_result" in observed_events
+
+
+def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target_file = workspace / "note.txt"
+    target_file.write_text("before\n", encoding="utf-8")
+
+    ui = HeadlessUI()
+    session = build_test_session(ui=ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    event_hub = EventHub()
+    task_manager = TaskManager(session, Lock(), event_hub=event_hub)
+    approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
+    ui.bind_runtime(task_manager, approval_manager)
+
+    task = task_manager.start_tool_task(
+        "write_file",
+        {"filename": str(target_file), "content": "updated\n"},
+        approval_manager,
+    )
+    task = task_manager.wait_for_task_state(
+        task["task_id"], {"awaiting_approval"}, timeout=5.0
+    )
+
+    assert task is not None
+    assert task["status"] == "awaiting_approval"
+
+    pending = approval_manager.list_pending()
+    assert len(pending) == 1
+    assert pending[0]["tool_name"] == "write_file"
+    assert pending[0]["modifications"][0]["filename"] == str(target_file)
+
+    approval_manager.resolve(task["approval_id"], "y")
+    completed = task_manager.wait_for_task_state(
+        task["task_id"], {"completed"}, timeout=5.0
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["result"]["ok"] is True
+    assert completed["result"]["result"]["raw"] == f"Successfully wrote to {target_file}"
+    assert target_file.read_text(encoding="utf-8") == "updated\n"
+
+
+def test_build_runtime_payload_syncs_saved_variables_into_ollama_provider():
+    ui = HeadlessUI()
+    session_manager = SessionManager(ui=ui, session_name=f"test_{uuid4().hex}")
+    session_manager.provider_config = {"provider": "ollama", "model": "qwen3"}
+    session_manager.variables["ollama_host"] = "http://example.local:11434"
+    session = Session(
+        provider=OllamaProvider(model_name="qwen3", host="http://localhost:11434"),
+        thinking=False,
+        system_instruction="test system prompt",
+        session_manager=session_manager,
+        ui=ui,
+        debug=False,
+    )
+
+    runtime = build_runtime_payload(session)
+
+    assert runtime["variables"]["ollama_host"] == "http://example.local:11434"
+    assert session.provider.host == "http://example.local:11434"

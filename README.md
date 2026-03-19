@@ -14,6 +14,7 @@
 - **Live Memory HUD**: A compact right-aligned terminal widget visualizes context, durable memory, scratchpad usage, and the collation queue as they fill up over time.
 - **Customizable Strategies**: Specialized agent modes for Debugging, Feature Implementation, and Research.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
+- **Server Mode for GUIs**: Launch μCLI with an HTTP API so desktop/web clients can drive sessions, commands, and tool execution.
 
 ## Installation
 
@@ -42,6 +43,11 @@
 Run the tool using:
 ```bash
 python mucli.py
+```
+
+Run the server/API mode using:
+```bash
+python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 ```
 
 ### Getting Started
@@ -81,6 +87,114 @@ python mucli.py
 | `/unset [key]` | | Reset a variable to default (or `--all`) |
 | `/splash` | | Show the welcome splash screen |
 | `/quit` | `/q` | Exit the application |
+
+## Server Mode
+
+μCLI can run as a lightweight HTTP server so a GUI can interact with the same session, command, and tooling primitives used by the terminal UI.
+
+### Starting the server
+
+```bash
+python mucli.py \
+  --server \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --provider openai \
+  --model gpt-4o-mini \
+  --workspace .
+```
+
+Notes:
+
+- Use `--session <name>` to reuse an existing saved session instead of the default session.
+- Use `--workspace <path>` multiple times to preload one or more folders into context.
+- Use `--yolo` if you want server-driven tool calls to auto-approve modifying tools for a trusted local GUI.
+
+### API endpoints
+
+For a higher-level assessment of whether the current server stack is ready for GUI work, see `documentation/server_architecture_review.md`.
+
+- `GET /health` — basic health check.
+- `GET /api/state` — current session state, active model, variables, workspaces, and tool metadata.
+- `GET /api/tools` — available tool definitions and whether each tool is enabled.
+- `GET /api/history?limit=50` — serialized conversation history.
+- `GET /api/sessions` — list saved sessions and the currently loaded session.
+- `POST /api/sessions/new` — create a new session using the current provider/model.
+- `POST /api/sessions/load` — switch to another saved session.
+- `POST /api/sessions/delete` — delete a saved session.
+- `GET /api/events` — subscribe to live server-sent events for task, approval, command, tool, runtime, workspace, staged-file, stream lifecycle, and live trace updates (`trace.info`, `trace.tool`, `trace.tool_result`, etc.).
+- `GET /api/tasks` / `GET /api/tasks/<task_id>` — inspect async message task state.
+- `GET /api/approvals` / `GET /api/approvals/<approval_id>` — inspect pending approval requests for modifying tools.
+- `POST /api/approvals/resolve` — approve, reject, or explain a pending modifying tool request.
+- `GET /api/runtime` — inspect the current runtime state (`thinking`, `agentic`, model, variables, disabled tools, system prompt).
+- `POST /api/runtime` — update runtime state such as system prompt, model, booleans, disabled tools, and variables.
+- `GET /api/workspaces` — inspect attached workspace folders and tracked files.
+- `POST /api/workspaces/add` — attach a workspace folder.
+- `POST /api/workspaces/remove` — detach a workspace folder.
+- `GET /api/staged-files` — inspect currently staged files for the next turn.
+- `POST /api/staged-files/add` — stage a file by path for the next turn.
+- `POST /api/staged-files/clear` — clear staged files.
+- `POST /api/message` — send a normal chat turn to the active session.
+- `POST /api/command` — execute a slash command such as `/folder .`, `/set yolo true`, or `/tool list`.
+- `POST /api/tool` — invoke a tool directly with JSON arguments for GUI workflows that want structured tool access.
+
+For provider switching, you can still use `POST /api/command` with a slash command such as `{"command":"/provider ollama"}`.
+
+### Example requests
+
+Send a chat message:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/message \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Summarize the current workspace."}'
+```
+
+Send an async chat message for GUI workflows:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/message \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Make the requested file change.","async":true}'
+```
+
+Subscribe to live task/approval events:
+
+```bash
+curl -N http://127.0.0.1:8765/api/events
+```
+
+Run a slash command:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/command \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"/folder ."}'
+```
+
+Update runtime state:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/runtime \
+  -H 'Content-Type: application/json' \
+  -d '{"thinking":true,"agentic":true,"variables":{"yolo":true}}'
+```
+
+Resolve a pending approval:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/approvals/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"approval_id":"<approval_id>","decision":"approve"}'
+```
+
+Execute a tool directly:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/tool \
+  -H 'Content-Type: application/json' \
+  -d '{"tool_name":"list_dir","tool_args":{"path":"."}}'
+```
 
 ## Agent Modes
 

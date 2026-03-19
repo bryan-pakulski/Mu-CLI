@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import shlex
 import sys
 
 from rich.console import Console
@@ -16,8 +17,8 @@ from providers.gemini import GeminiProvider
 from providers.ollama import OllamaProvider
 from utils.logger import logger
 from providers.openai import OpenAIProvider
+from core.server import HeadlessUI, serve
 from core.session import SessionManager, Session
-from core.workspace import FolderContext
 from ui.rich_ui import RichUI
 
 console = Console()
@@ -48,7 +49,9 @@ def print_help():
     table.add_row("/yolo", "", "Toggle YOLO mode (no approvals)")
     table.add_row("/set [key] [value]", "", "Set a variable")
     table.add_row("/unset [key]", "", "Unset a variable (or --all)")
-    table.add_row("/flush", "", "Flush the collation buffer and inject context into the next turn")
+    table.add_row(
+        "/flush", "", "Flush the collation buffer and inject context into the next turn"
+    )
     table.add_row("/variables", "", "Show all variables")
     table.add_row("/agentic", "", "Toggle Agentic (Tool Calling) mode")
     table.add_row(
@@ -154,11 +157,15 @@ def init_provider(provider_name, model_name, ollama_host=None):
     return provider
 
 
-def select_provider_and_model(args_provider, args_model, ollama_host=None):
+def select_provider_and_model(
+    args_provider, args_model, ollama_host=None, allow_prompt=True
+):
     providers = ["gemini", "ollama", "openai"]
     provider_name = args_provider
 
     if provider_name not in providers:
+        if not allow_prompt:
+            raise ValueError("A valid --provider is required in non-interactive mode.")
         console.print("\n[bold cyan]Available Providers:[/bold cyan]")
         for i, p in enumerate(providers, 1):
             console.print(f" {i}. {p}")
@@ -169,16 +176,29 @@ def select_provider_and_model(args_provider, args_model, ollama_host=None):
 
     provider = init_provider(provider_name, "", ollama_host)
     if not provider:
-        console.print(f"[red]Unknown provider: {provider_name}[/red]")
-        sys.exit(1)
+        raise ValueError(f"Unknown provider: {provider_name}")
 
     models = provider.get_available_models()
     model_name = args_model
 
     if not models:
         if not model_name:
+            if not allow_prompt:
+                raise ValueError(
+                    f"A model name is required for provider '{provider_name}' in "
+                    "non-interactive mode."
+                )
             model_name = Prompt.ask(f"Enter model name manually for {provider_name}")
     elif model_name not in models:
+        if not allow_prompt and model_name:
+            raise ValueError(
+                f"Model '{model_name}' is not available for provider '{provider_name}'."
+            )
+        if not allow_prompt:
+            raise ValueError(
+                f"A valid --model is required for provider '{provider_name}' in "
+                "non-interactive mode."
+            )
         console.print(f"\n[bold cyan]Available Models for {provider_name}:[/bold cyan]")
         for i, m in enumerate(models, 1):
             console.print(f" {i}. {m}")
@@ -224,6 +244,701 @@ def sync_provider_settings(session):
         session.provider.host = host
 
 
+def build_session(args, ui, allow_prompt=True):
+    session_manager = SessionManager(ui=ui, session_name=args.session)
+    if ui and hasattr(ui, "set_variables"):
+        ui.set_variables(session_manager.variables)
+
+    ollama_host = session_manager.variables.get("ollama_host")
+
+    if allow_prompt and not args.session:
+        action, session_name = choose_session(session_manager)
+        if action == "load":
+            session_manager.switch_session(session_name)
+            provider_config = session_manager.provider_config
+            if provider_config.get("provider") and provider_config.get("model"):
+                provider = init_provider(
+                    provider_config["provider"],
+                    provider_config["model"],
+                    ollama_host=ollama_host,
+                )
+            else:
+                provider = select_provider_and_model(
+                    args.provider,
+                    args.model,
+                    ollama_host=ollama_host,
+                    allow_prompt=allow_prompt,
+                )
+                session_manager.provider_config = {
+                    "provider": provider.name,
+                    "model": provider.model_name,
+                }
+                session_manager.save_history()
+        else:
+            provider = select_provider_and_model(
+                args.provider,
+                args.model,
+                ollama_host=ollama_host,
+                allow_prompt=allow_prompt,
+            )
+            session_manager.new_session(
+                session_name, provider.name, provider.model_name
+            )
+    else:
+        provider = None
+        provider_name = args.provider
+        model_name = args.model
+        provider_config = session_manager.provider_config
+
+        if provider_name and model_name:
+            provider = select_provider_and_model(
+                provider_name,
+                model_name,
+                ollama_host=ollama_host,
+                allow_prompt=allow_prompt,
+            )
+            session_manager.provider_config = {
+                "provider": provider.name,
+                "model": provider.model_name,
+            }
+            session_manager.save_history()
+        elif provider_config.get("provider") and provider_config.get("model"):
+            provider = init_provider(
+                provider_config["provider"],
+                provider_config["model"],
+                ollama_host=ollama_host,
+            )
+        elif provider_name and model_name:
+            provider = init_provider(provider_name, model_name, ollama_host=ollama_host)
+
+        if not provider:
+            raise ValueError(
+                "Unable to determine provider/model. Supply --provider and --model, "
+                "or reuse a saved session with provider configuration."
+            )
+
+    session = Session(
+        provider=provider,
+        thinking=False,
+        system_instruction=args.system,
+        session_manager=session_manager,
+        ui=ui,
+        debug=args.debug,
+    )
+
+    if args.workspace:
+        for workspace in args.workspace:
+            session.folder_context.add_folder(workspace)
+        session.session_manager.save_history(session.folder_context)
+
+    if args.yolo:
+        session.variables["yolo"] = True
+        session.session_manager.save_history(session.folder_context)
+
+    sync_provider_settings(session)
+    return session
+
+
+def serialize_command_result(session, command, ok=True, message=None, data=None):
+    return {
+        "ok": ok,
+        "command": command,
+        "message": message,
+        "data": data or {},
+        "session_name": session.session_manager.current_session_name,
+        "provider": session.provider.name,
+        "model": session.provider.model_name,
+        "variables": dict(session.variables),
+        "folders": list(session.folder_context.folders),
+        "history_length": len(session.session_manager.history),
+    }
+
+
+def handle_command(session, user_input, allow_prompt=True):
+    ui = session.ui
+    parts = user_input.split(" ", 1)
+    cmd = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if cmd in ["/quit", "/exit", "/q"]:
+        if allow_prompt:
+            print("Goodbye!")
+        return serialize_command_result(
+            session, cmd, message="Goodbye!", data={"exit": True}
+        )
+
+    if cmd in ["/help", "/h"]:
+        if allow_prompt:
+            print_help()
+        return serialize_command_result(session, cmd, data={"commands_help": True})
+
+    if cmd in ["/clear", "/c"]:
+        session.session_manager.clear_current_history()
+        session.staged_files = []
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(
+            session, cmd, message="Conversation history cleared."
+        )
+
+    if cmd in ["/view", "/v"]:
+        if allow_prompt:
+            session.session_manager.view_history()
+        return serialize_command_result(
+            session,
+            cmd,
+            data={"history": session.session_manager.history},
+        )
+
+    if cmd in ["/file", "/f", "/add"]:
+        if not arg:
+            if ui:
+                ui.show_error("Usage: /file <path_to_file>")
+            return serialize_command_result(
+                session, cmd, ok=False, message="Usage: /file <path_to_file>"
+            )
+        session.add_file(arg)
+        return serialize_command_result(
+            session,
+            cmd,
+            message=f"Staged file: {arg}",
+            data={"staged_files": list(session.staged_files)},
+        )
+
+    if cmd in ["/clearfiles", "/cf"]:
+        session.clear_files()
+        return serialize_command_result(session, cmd, message="Staged files cleared.")
+
+    if cmd in ["/folder", "/dir"]:
+        if arg:
+            sub_parts = arg.split(" ", 1)
+            if sub_parts[0] == "remove" and len(sub_parts) > 1:
+                path_to_remove = sub_parts[1].strip("'\"")
+                removed = session.folder_context.remove_folder(path_to_remove)
+                if removed:
+                    if ui:
+                        ui.show_info(f"Removed folder from context: {path_to_remove}")
+                    session.session_manager.save_history(session.folder_context)
+                    refresh_memory_hud(session, ui)
+                    return serialize_command_result(
+                        session,
+                        cmd,
+                        message=f"Removed folder from context: {path_to_remove}",
+                    )
+                if ui:
+                    ui.show_error(f"Folder not found in context: {path_to_remove}")
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message=f"Folder not found in context: {path_to_remove}",
+                )
+
+            added = []
+            invalid = []
+            try:
+                paths = shlex.split(arg)
+            except ValueError:
+                paths = [arg.strip("'\"")]
+
+            for path in paths:
+                path = path.strip("'\"")
+                if session.folder_context.add_folder(path):
+                    added.append(path)
+                    if ui:
+                        ui.show_info(f"Added folder context: {path}")
+                    if len(session.folder_context.folders) == 1:
+                        try:
+                            os.chdir(session.folder_context.folders[0])
+                            if ui:
+                                ui.show_info(f"Switched workspace to: {os.getcwd()}")
+                        except Exception:
+                            pass
+                else:
+                    invalid.append(path)
+                    if ui:
+                        ui.show_error(f"Folder not found or invalid: {path}")
+
+            session.session_manager.save_history(session.folder_context)
+            if added and ui:
+                ui.show_info(
+                    "Files cached as initial context. Changes will be provided as diffs."
+                )
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=not invalid,
+                message="Workspace folders updated.",
+                data={"added": added, "invalid": invalid},
+            )
+
+        if allow_prompt and not session.folder_context.folders:
+            console.print("[yellow]No folders currently monitored.[/yellow]")
+            console.print("Usage: /folder <path> OR /folder remove <path>")
+        return serialize_command_result(
+            session,
+            cmd,
+            data={"folders": list(session.folder_context.folders)},
+        )
+
+    if cmd in ["/list", "/ls"]:
+        if allow_prompt:
+            session.session_manager.list_sessions()
+        return serialize_command_result(
+            session,
+            cmd,
+            data={"sessions": session.session_manager.get_session_list()},
+        )
+
+    if cmd in ["/new"]:
+        name = arg.strip() if arg else None
+        ollama_host = session.variables.get("ollama_host")
+        if not allow_prompt and not (
+            session.provider.name and session.provider.model_name
+        ):
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=False,
+                message="Non-interactive mode requires an active provider/model to create a new session.",
+            )
+        if allow_prompt:
+            new_provider = select_provider_and_model(
+                None,
+                None,
+                ollama_host=ollama_host,
+                allow_prompt=allow_prompt,
+            )
+            session.provider = new_provider
+        session.session_manager.new_session(
+            name,
+            session.provider.name,
+            session.provider.model_name,
+        )
+        session.staged_files = []
+        session.sync_runtime_state()
+        if ui and hasattr(ui, "set_variables"):
+            ui.set_variables(session.variables)
+        if allow_prompt:
+            print_splash(session)
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(
+            session,
+            cmd,
+            message=f"Started new session: {session.session_manager.current_session_name}",
+        )
+
+    if cmd in ["/load", "/open"]:
+        if not arg:
+            if ui:
+                ui.show_error("Usage: /load <session_name>")
+            return serialize_command_result(
+                session, cmd, ok=False, message="Usage: /load <session_name>"
+            )
+        session.session_manager.switch_session(arg.strip())
+        session.staged_files = []
+        session.sync_runtime_state()
+        if ui and hasattr(ui, "set_variables"):
+            ui.set_variables(session.variables)
+        provider_config = session.session_manager.provider_config
+        if provider_config.get("provider") and provider_config.get("model"):
+            ollama_host = session.variables.get("ollama_host")
+            session.provider = init_provider(
+                provider_config["provider"],
+                provider_config["model"],
+                ollama_host,
+            )
+        sync_provider_settings(session)
+        if allow_prompt:
+            print_splash(session)
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(
+            session,
+            cmd,
+            message=f"Loaded session: {session.session_manager.current_session_name}",
+        )
+
+    if cmd in ["/delete", "/rm"]:
+        if not arg:
+            if ui:
+                ui.show_error("Usage: /delete <session_name>")
+            return serialize_command_result(
+                session, cmd, ok=False, message="Usage: /delete <session_name>"
+            )
+        session.session_manager.delete_session(arg.strip())
+        return serialize_command_result(
+            session, cmd, message=f"Deleted session request: {arg.strip()}"
+        )
+
+    if cmd in ["/system", "/sys"]:
+        if arg:
+            session.system_instruction = arg
+            if ui:
+                ui.show_info("System prompt updated.")
+            return serialize_command_result(
+                session, cmd, message="System prompt updated."
+            )
+        current = session.system_instruction if session.system_instruction else "None"
+        if allow_prompt:
+            console.print(f"[blue]Current System Prompt:\n{current}")
+        return serialize_command_result(
+            session, cmd, data={"system_instruction": current}
+        )
+
+    if cmd == "/model":
+        if not arg:
+            if not allow_prompt:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Non-interactive mode requires /model <name>.",
+                )
+            models = session.provider.get_available_models()
+            if models:
+                console.print("\n[bold cyan]Available Models:[/bold cyan]")
+                for i, model in enumerate(models, 1):
+                    console.print(f" {i}. {model}")
+                choice = IntPrompt.ask(
+                    "Select a model",
+                    choices=[str(i) for i in range(1, len(models) + 1)],
+                )
+                arg = models[int(choice) - 1]
+            else:
+                return serialize_command_result(
+                    session, cmd, ok=False, message="No models available."
+                )
+
+        session.provider.model_name = arg.strip()
+        session.session_manager.provider_config = {
+            "provider": session.provider.name,
+            "model": session.provider.model_name,
+        }
+        session.session_manager.save_history()
+        if ui:
+            ui.show_info(f"Model changed to: {session.provider.model_name}")
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(
+            session, cmd, message=f"Model changed to {session.provider.model_name}."
+        )
+
+    if cmd == "/provider":
+        if not arg and not allow_prompt:
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=False,
+                message="Non-interactive mode requires /provider <name>.",
+            )
+        try:
+            ollama_host = session.variables.get("ollama_host")
+            session.provider = select_provider_and_model(
+                arg.strip() if arg else None,
+                session.provider.model_name if not allow_prompt else None,
+                ollama_host=ollama_host,
+                allow_prompt=allow_prompt,
+            )
+            session.session_manager.provider_config = {
+                "provider": session.provider.name,
+                "model": session.provider.model_name,
+            }
+            session.session_manager.save_history()
+            if ui:
+                ui.show_info("Provider changed successfully!")
+            if allow_prompt:
+                print_splash(session)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session, cmd, message="Provider changed successfully."
+            )
+        except Exception as exc:
+            if ui:
+                ui.show_error(f"Failed to change provider: {exc}")
+            return serialize_command_result(session, cmd, ok=False, message=str(exc))
+
+    if cmd == "/set":
+        if not arg:
+            if ui:
+                ui.show_error("Usage: /set <key> <value>")
+            return serialize_command_result(
+                session, cmd, ok=False, message="Usage: /set <key> <value>"
+            )
+        if "=" in arg:
+            key, value = arg.split("=", 1)
+        elif " " in arg:
+            key, value = arg.split(" ", 1)
+        else:
+            if ui:
+                ui.show_error("Usage: /set <key> <value> OR /set <key>=<value>")
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=False,
+                message="Usage: /set <key> <value> OR /set <key>=<value>",
+            )
+        key = key.strip()
+        value = value.strip()
+        try:
+            from utils.config import validate_and_cast
+
+            session.variables[key] = validate_and_cast(key, value)
+            session.session_manager.save_history(session.folder_context)
+            if ui:
+                ui.show_info(
+                    f"Set variable: {key} = {session.variables[key]} ({type(session.variables[key]).__name__})"
+                )
+            if key == "ollama_host":
+                sync_provider_settings(session)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Set variable: {key}",
+                data={"key": key, "value": session.variables[key]},
+            )
+        except ValueError as exc:
+            if ui:
+                ui.show_error(f"Error: {exc}")
+            return serialize_command_result(session, cmd, ok=False, message=str(exc))
+
+    if cmd == "/get":
+        key = arg.strip()
+        if not key:
+            if allow_prompt:
+                for variable_key, variable_value in session.variables.items():
+                    console.print(f"[blue]{variable_key}[/blue] = {variable_value}")
+            return serialize_command_result(
+                session, cmd, data={"variables": dict(session.variables)}
+            )
+        return serialize_command_result(
+            session,
+            cmd,
+            data={"key": key, "value": session.variables.get(key)},
+        )
+
+    if cmd == "/unset":
+        key = arg.strip()
+        if not key:
+            if ui:
+                ui.show_error("Usage: /unset <key> OR /unset --all")
+            return serialize_command_result(
+                session, cmd, ok=False, message="Usage: /unset <key> OR /unset --all"
+            )
+        if key == "--all":
+            session.variables.clear()
+            from utils.config import DEFAULT_VARIABLES
+
+            session.variables.update(DEFAULT_VARIABLES)
+            session.session_manager.save_history(session.folder_context)
+            sync_provider_settings(session)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session, cmd, message="All variables reset to defaults."
+            )
+        if key in session.variables:
+            from utils.config import VARIABLE_SCHEMA
+
+            if key in VARIABLE_SCHEMA:
+                session.variables[key] = VARIABLE_SCHEMA[key]["default"]
+            else:
+                del session.variables[key]
+            session.session_manager.save_history(session.folder_context)
+            if key == "ollama_host":
+                sync_provider_settings(session)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Unset variable: {key}",
+                data={"key": key, "value": session.variables.get(key)},
+            )
+        return serialize_command_result(
+            session, cmd, ok=False, message=f"Variable '{key}' not found."
+        )
+
+    if cmd == "/flush":
+        if hasattr(session, "collation_buffer"):
+            count = len(session.collation_buffer.entries)
+            if count == 0:
+                if ui:
+                    ui.show_info("Collation buffer is empty.")
+                return serialize_command_result(
+                    session, cmd, message="Collation buffer is empty."
+                )
+            collated = session.collation_buffer.flush()
+            text = "### Collated Context Flushed by User:\n\n" + "\n\n".join(collated)
+            send_result = session.send_message(text)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Flushed {count} items from buffer into conversation history.",
+                data={"flushed_items": count, "send_result": send_result},
+            )
+
+    if cmd == "/variables":
+        if allow_prompt:
+            for variable_key, variable_value in session.variables.items():
+                console.print(
+                    f"[blue]{variable_key}[/blue] = [green]{variable_value}[/green]"
+                )
+        return serialize_command_result(
+            session, cmd, data={"variables": dict(session.variables)}
+        )
+
+    if cmd == "/mode":
+        valid_modes = ["default", "debug", "feature", "research", "git"]
+        if arg and arg.lower() in valid_modes:
+            session.variables["agent_mode"] = arg.lower()
+            session.session_manager.save_history(session.folder_context)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session, cmd, message=f"Agent strategy set to: {arg.lower()}"
+            )
+        if allow_prompt:
+            console.print("Usage: /mode <default|debug|feature|research|git>")
+            console.print(
+                f"Current mode: {session.variables.get('agent_mode', 'default')}"
+            )
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=False,
+            message="Usage: /mode <default|debug|feature|research|git>",
+            data={"current_mode": session.variables.get("agent_mode", "default")},
+        )
+
+    if cmd in ["/tool", "/tools"]:
+        tool_parts = arg.split(" ", 1) if arg else ["list"]
+        tool_cmd = tool_parts[0].lower()
+        tool_name = tool_parts[1].strip() if len(tool_parts) > 1 else ""
+
+        if tool_cmd == "disable" and tool_name:
+            if tool_name not in session.disabled_tools:
+                session.disabled_tools.append(tool_name)
+            return serialize_command_result(
+                session, cmd, message=f"Tool '{tool_name}' disabled."
+            )
+        if tool_cmd == "enable" and tool_name:
+            if tool_name in session.disabled_tools:
+                session.disabled_tools.remove(tool_name)
+            return serialize_command_result(
+                session, cmd, message=f"Tool '{tool_name}' enabled."
+            )
+        if tool_cmd == "list":
+            from core.tools import TOOLS
+
+            if allow_prompt:
+                table = Table(title="Available Tools", box=box.ROUNDED, show_lines=True)
+                table.add_column("Tool", style="cyan", no_wrap=True)
+                table.add_column("Description", style="white", width=40)
+                table.add_column("Parameters", style="magenta")
+                table.add_column("Approval", style="yellow", justify="center")
+                table.add_column("Status", style="green", justify="center")
+
+                for tool in TOOLS:
+                    status = (
+                        "[red]OFF[/red]"
+                        if tool.name in session.disabled_tools
+                        else "[green]ON[/green]"
+                    )
+                    approval = "Yes" if tool.requires_approval else "No"
+                    params = []
+                    props = tool.parameters.get("properties", {})
+                    required = tool.parameters.get("required", [])
+                    for param_name, param_info in props.items():
+                        required_star = "[red]*[/red]" if param_name in required else ""
+                        param_type = param_info.get("type", "any")
+                        params.append(
+                            f"{param_name}{required_star} [dim]({param_type})[/dim]"
+                        )
+                    params_str = "\n".join(params) if params else "None"
+                    table.add_row(
+                        tool.name, tool.description, params_str, approval, status
+                    )
+                console.print(table)
+                console.print("[dim] [red]*[/red] indicates required parameter[/dim]")
+
+            tools_data = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                    "requires_approval": tool.requires_approval,
+                    "enabled": tool.name not in session.disabled_tools,
+                }
+                for tool in TOOLS
+            ]
+            return serialize_command_result(session, cmd, data={"tools": tools_data})
+
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=False,
+            message=f"Usage: {cmd} <enable|disable|list> [toolname]",
+        )
+
+    if cmd == "/tokens":
+        stats = {
+            "history_turns": len(session.session_manager.history),
+            "summary_anchor": session.session_manager.summary_anchor,
+            "active_turns": len(session.session_manager.history)
+            - session.session_manager.summary_anchor,
+            "token_counts": dict(session.session_manager.token_counts),
+        }
+        if allow_prompt:
+            console.print("[yellow]--- Context Stats ---")
+            console.print(f"Total History Turns: {stats['history_turns']}")
+            console.print(f"Summarized Turns:    {stats['summary_anchor']}")
+            console.print(f"Active Turns (Window): {stats['active_turns']}")
+            console.print(f"Session Tokens (In):  {stats['token_counts']['input']}")
+            console.print(f"Session Tokens (Out): {stats['token_counts']['output']}")
+            console.print(f"Session Tokens (Total): {stats['token_counts']['total']}")
+            console.print(
+                f"Session Est. Cost:    ${stats['token_counts'].get('total_cost', 0.0):.5f}"
+            )
+            console.print(
+                "[dim](Actual token count is also displayed after each generation)[/dim]"
+            )
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(session, cmd, data=stats)
+
+    if cmd == "/thinking":
+        session.thinking = not session.thinking
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(
+            session, cmd, message=f"Thinking mode: {session.thinking}"
+        )
+
+    if cmd == "/agentic":
+        session.agentic = not session.agentic
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(
+            session, cmd, message=f"Agentic mode: {session.agentic}"
+        )
+
+    if cmd == "/yolo":
+        current = session.variables.get("yolo", False)
+        session.variables["yolo"] = not current
+        session.session_manager.save_history(session.folder_context)
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(
+            session, cmd, message=f"YOLO mode: {session.variables['yolo']}"
+        )
+
+    if cmd == "/splash":
+        if allow_prompt:
+            print_splash(session)
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(session, cmd, data={"splash": True})
+
+    if ui:
+        ui.show_error(f"Unknown command: {cmd}")
+    return serialize_command_result(
+        session, cmd, ok=False, message=f"Unknown command: {cmd}"
+    )
+
+
 def main():
     logger.info("μCLI starting...")
 
@@ -234,6 +949,38 @@ def main():
         default=None,
         choices=["gemini", "ollama", "openai"],
         help="LLM provider to use",
+    )
+    parser.add_argument(
+        "--session",
+        default=None,
+        help="Load the specified saved session instead of prompting.",
+    )
+    parser.add_argument(
+        "--workspace",
+        action="append",
+        default=[],
+        help="Attach a workspace folder at startup. May be provided multiple times.",
+    )
+    parser.add_argument(
+        "--server",
+        action="store_true",
+        help="Run μCLI in HTTP server mode for GUI/API clients.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host interface for --server mode.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for --server mode.",
+    )
+    parser.add_argument(
+        "--yolo",
+        action="store_true",
+        help="Enable YOLO mode at startup.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
@@ -251,55 +998,17 @@ def main():
         help="Initial system instruction",
     )
     args = parser.parse_args()
+    ui = HeadlessUI(auto_approve=args.yolo) if args.server else RichUI()
 
-    # --- Initialize UI ---
-    ui = RichUI()
-
-    # --- Initialize Session Manager ---
-    session_manager = SessionManager(ui=ui)
-    ui.set_variables(session_manager.variables)
-    ollama_host = session_manager.variables.get("ollama_host")
-
-    # --- Initialize Session and Provider ---
     try:
-        action, session_name = choose_session(session_manager)
-        if action == "load":
-            session_manager.switch_session(session_name)
-            p_cfg = session_manager.provider_config
-            if p_cfg.get("provider") and p_cfg.get("model"):
-                provider = init_provider(
-                    p_cfg["provider"], p_cfg["model"], ollama_host=ollama_host
-                )
-            else:
-                # Fallback if config is missing
-                provider = select_provider_and_model(
-                    args.provider, args.model, ollama_host=ollama_host
-                )
-                session_manager.provider_config = {
-                    "provider": provider.name,
-                    "model": provider.model_name,
-                }
-                session_manager.save_history()
-        else:
-            provider = select_provider_and_model(
-                args.provider, args.model, ollama_host=ollama_host
-            )
-            session_manager.new_session(
-                session_name, provider.name, provider.model_name
-            )
-    except Exception as e:
-        console.print(f"[red]Failed to initialize Session/Provider: {e}[/red]")
+        session = build_session(args, ui, allow_prompt=not args.server)
+    except Exception as exc:
+        console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
         sys.exit(1)
 
-    # --- Initialize Session ---
-    session = Session(
-        provider=provider,
-        thinking=False,
-        system_instruction=args.system,
-        session_manager=session_manager,
-        ui=ui,
-        debug=args.debug,
-    )
+    if args.server:
+        serve(session, args.host, args.port, handle_command)
+        return
 
     print_splash(session)
     refresh_memory_hud(session, ui)
@@ -314,417 +1023,9 @@ def main():
                 continue
 
             if user_input.startswith("/"):
-                parts = user_input.split(" ", 1)
-                cmd = parts[0].lower()
-                arg = parts[1] if len(parts) > 1 else ""
-
-                if cmd in ["/quit", "/exit", "/q"]:
-                    print("Goodbye!")
+                result = handle_command(session, user_input, allow_prompt=True)
+                if result.get("data", {}).get("exit"):
                     break
-
-                elif cmd in ["/help", "/h"]:
-                    print_help()
-
-                elif cmd in ["/clear", "/c"]:
-                    session.session_manager.clear_current_history()
-                    session.staged_files = []
-                    refresh_memory_hud(session, ui)
-
-                elif cmd in ["/view", "/v"]:
-                    session.session_manager.view_history()
-
-                elif cmd in ["/file", "/f", "/add"]:
-                    if arg:
-                        session.add_file(arg)
-                    else:
-                        console.print("[red]Usage: /file <path_to_file>")
-
-                elif cmd in ["/clearfiles", "/cf"]:
-                    session.clear_files()
-
-                elif cmd in ["/folder", "/dir"]:
-                    if arg:
-                        sub_parts = arg.split(" ", 1)
-                        if sub_parts[0] == "remove" and len(sub_parts) > 1:
-                            path_to_remove = sub_parts[1].strip("'\"")
-                            if session.folder_context.remove_folder(path_to_remove):
-                                console.print(
-                                    f"[green]Removed folder from context: {path_to_remove}[/green]"
-                                )
-                                session.session_manager.save_history(
-                                    session.folder_context
-                                )
-                                refresh_memory_hud(session, ui)
-                            else:
-                                console.print(
-                                    f"[red]Folder not found in context: {path_to_remove}[/red]"
-                                )
-                        else:
-                            # Support multiple folders
-                            import shlex
-
-                            try:
-                                paths = shlex.split(arg)
-                            except ValueError:
-                                paths = [arg.strip("'\"")]
-
-                            for path in paths:
-                                path = path.strip("'\"")
-                                if session.folder_context.add_folder(path):
-                                    console.print(
-                                        f"[green]Added folder context: {path}[/green]"
-                                    )
-                                    if len(session.folder_context.folders) == 1:
-                                        try:
-                                            os.chdir(session.folder_context.folders[0])
-                                            console.print(
-                                                f"[dim]Switched workspace to: {os.getcwd()}[/dim]"
-                                            )
-                                        except Exception:
-                                            pass
-                                else:
-                                    console.print(
-                                        f"[red]Folder not found or invalid: {path}[/red]"
-                                    )
-
-                            session.session_manager.save_history(session.folder_context)
-                            console.print(
-                                "[dim]Files cached as initial context. Changes will be provided as diffs.[/dim]"
-                            )
-                            refresh_memory_hud(session, ui)
-                    else:
-                        if not session.folder_context.folders:
-                            console.print(
-                                "[yellow]No folders currently monitored.[/yellow]"
-                            )
-                            console.print(
-                                "Usage: /folder <path> OR /folder remove <path>"
-                            )
-                        else:
-                            console.print(
-                                "\n[bold cyan]Current Folder Context:[/bold cyan]"
-                            )
-                            grid = Table.grid(padding=1)
-                            grid.add_column(style="green", justify="left")
-                            for f in session.folder_context.folders:
-                                grid.add_row(f"📁 {f}")
-                            console.print(grid)
-
-                            files = session.folder_context.get_file_list()
-                            console.print(
-                                f"\n[dim]Total Tracked Files: {len(files)}[/dim]"
-                            )
-                            if files:
-                                console.print("[dim]Tracked Files:[/dim]")
-                                for f in files[:10]:
-                                    console.print(
-                                        f" - {os.path.basename(f)} [dim]({f})[/dim]"
-                                    )
-                                if len(files) > 10:
-                                    console.print(
-                                        f"   [dim]... and {len(files)-10} more[/dim]"
-                                    )
-
-                elif cmd in ["/list", "/ls"]:
-                    session.session_manager.list_sessions()
-
-                elif cmd in ["/new"]:
-                    name = arg.strip() if arg else None
-                    # Prompt for provider/model on new session
-                    ollama_host = session.variables.get("ollama_host")
-                    new_provider = select_provider_and_model(
-                        None, None, ollama_host=ollama_host
-                    )
-                    session.provider = new_provider
-                    session.session_manager.new_session(
-                        name, new_provider.name, new_provider.model_name
-                    )
-                    session.staged_files = []
-                    session.sync_runtime_state()
-                    ui.set_variables(session.variables)
-                    print_splash(session)
-                    refresh_memory_hud(session, ui)
-                elif cmd in ["/load", "/open"]:
-                    if arg:
-                        session.session_manager.switch_session(arg.strip())
-                        session.staged_files = []
-                        session.sync_runtime_state()
-                        ui.set_variables(session.variables)
-                        # Update provider based on session config
-                        p_cfg = session.session_manager.provider_config
-                        if p_cfg.get("provider") and p_cfg.get("model"):
-                            ollama_host = session.variables.get("ollama_host")
-                            session.provider = init_provider(
-                                p_cfg["provider"], p_cfg["model"], ollama_host
-                            )
-
-                        sync_provider_settings(session)
-                        print_splash(session)
-                        refresh_memory_hud(session, ui)
-                    else:
-                        console.print("[yellow]Usage: /load <session_name>")
-
-                elif cmd in ["/delete", "/rm"]:
-                    if arg:
-                        session.session_manager.delete_session(arg.strip())
-                    else:
-                        console.print("[yellow]Usage: /delete <session_name>")
-
-                elif cmd in ["/system", "/sys"]:
-                    if arg:
-                        session.system_instruction = arg
-                        console.print("[green]System prompt updated.")
-                    else:
-                        curr = (
-                            session.system_instruction
-                            if session.system_instruction
-                            else "None"
-                        )
-                        console.print(f"[blue]Current System Prompt:\n{curr}")
-
-                elif cmd == "/model":
-                    if arg:
-                        session.provider.model_name = arg.strip()
-                        console.print(
-                            f"Model changed to: [green]{session.provider.model_name}"
-                        )
-                    else:
-                        models = session.provider.get_available_models()
-                        if models:
-                            console.print("\n[bold cyan]Available Models:[/bold cyan]")
-                            for i, m in enumerate(models, 1):
-                                console.print(f" {i}. {m}")
-                            choice = IntPrompt.ask(
-                                "Select a model",
-                                choices=[str(i) for i in range(1, len(models) + 1)],
-                            )
-                            session.provider.model_name = models[int(choice) - 1]
-                            console.print(
-                                f"Model changed to: [green]{session.provider.model_name}"
-                            )
-                            # Update provider config in session
-                            session.session_manager.provider_config = {
-                                "provider": session.provider.name,
-                                "model": session.provider.model_name,
-                            }
-                            session.session_manager.save_history()
-                            print_splash(session)
-                    refresh_memory_hud(session, ui)
-
-                elif cmd == "/provider":
-                    try:
-                        ollama_host = session.variables.get("ollama_host")
-                        session.provider = select_provider_and_model(
-                            arg.strip() if arg else None, None, ollama_host=ollama_host
-                        )
-                        session.session_manager.provider_config = {
-                            "provider": session.provider.name,
-                            "model": session.provider.model_name,
-                        }
-                        session.session_manager.save_history()
-                        console.print("[green]Provider changed successfully![/green]")
-                        print_splash(session)
-                        refresh_memory_hud(session, ui)
-                    except Exception as e:
-                        console.print(f"[red]Failed to change provider: {e}[/red]")
-
-                elif cmd == "/set":
-                    if arg:
-                        if "=" in arg:
-                            k, v = arg.split("=", 1)
-                        elif " " in arg:
-                            k, v = arg.split(" ", 1)
-                        else:
-                            console.print(
-                                "[red]Usage: /set <key> <value> OR /set <key>=<value>[/red]"
-                            )
-                            continue
-
-                        k = k.strip()
-                        v = v.strip()
-                        try:
-                            from utils.config import validate_and_cast
-
-                            session.variables[k] = validate_and_cast(k, v)
-                            session.session_manager.save_history(session.folder_context)
-                            console.print(
-                                f"[green]Set variable: {k} = {session.variables[k]} ({type(session.variables[k]).__name__})[/green]"
-                            )
-                            if k == "ollama_host":
-                                sync_provider_settings(session)
-                            refresh_memory_hud(session, ui)
-                        except ValueError as e:
-                            console.print(f"[red]Error: {e}[/red]")
-                    else:
-                        console.print("[red]Usage: /set <key> <value>[/red]")
-
-                elif cmd == "/get":
-                    k = arg.strip()
-                    if not k:
-                        for vk, vv in session.variables.items():
-                            console.print(f"[blue]{vk}[/blue] = {vv}")
-                    else:
-                        console.print(
-                            f"{session.variables.get(k, '[dim]Not set[/dim]')}"
-                        )
-
-                elif cmd == "/unset":
-                    k = arg.strip()
-                    if not k:
-                        console.print("[red]Usage: /unset <key> OR /unset --all[/red]")
-                    elif k == "--all":
-                        session.variables.clear()
-                        # Restore defaults after clear
-                        from utils.config import DEFAULT_VARIABLES
-
-                        session.variables.update(DEFAULT_VARIABLES)
-                        session.session_manager.save_history(session.folder_context)
-                        console.print("[green]All variables reset to defaults.[/green]")
-                        sync_provider_settings(session)
-                        refresh_memory_hud(session, ui)
-                    else:
-                        if k in session.variables:
-                            from utils.config import VARIABLE_SCHEMA
-
-                            if k in VARIABLE_SCHEMA:
-                                session.variables[k] = VARIABLE_SCHEMA[k]["default"]
-                                console.print(
-                                    f"[green]Reset variable to default: {k} = {session.variables[k]}[/green]"
-                                )
-                            else:
-                                del session.variables[k]
-                                console.print(f"[green]Unset variable: {k}[/green]")
-                            session.session_manager.save_history(session.folder_context)
-                            if k == "ollama_host":
-                                sync_provider_settings(session)
-                            refresh_memory_hud(session, ui)
-                        else:
-                            console.print(f"[yellow]Variable '{k}' not found.[/yellow]")
-
-                elif cmd == "/flush":
-                    if hasattr(session, "collation_buffer"):
-                        count = len(session.collation_buffer.entries)
-                        if count == 0:
-                            console.print("[yellow]Collation buffer is empty.[/yellow]")
-                        else:
-                            collated = session.collation_buffer.flush()
-                            # Inject into history as a system message or user message?
-                            # User message is usually better for context injection.
-                            text = "### Collated Context Flushed by User:\n\n" + "\n\n".join(collated)
-                            session.send_message(text)
-                            console.print(f"[green]Flushed {count} items from buffer into conversation history.[/green]")
-                            refresh_memory_hud(session, ui)
-
-                elif cmd == "/variables":
-                    for vk, vv in session.variables.items():
-                        console.print(f"[blue]{vk}[/blue] = [green]{vv}[/green]")
-
-                elif cmd == "/mode":
-                    valid_modes = ["default", "debug", "feature", "research", "git"]
-                    if arg and arg.lower() in valid_modes:
-                        session.variables["agent_mode"] = arg.lower()
-                        session.session_manager.save_history(session.folder_context)
-                        console.print(f"Agent strategy set to: {arg.upper()}")
-                    else:
-                        console.print("Usage: /mode <default|debug|feature|research|git>")
-                        curr = session.variables.get("agent_mode", "default")
-                        console.print(f"Current mode: {curr}")
-                    refresh_memory_hud(session, ui)
-
-                elif cmd in ["/tool", "/tools"]:
-                    t_parts = arg.split(" ", 1) if arg else ["list"]
-                    t_cmd = t_parts[0].lower()
-                    t_name = t_parts[1].strip() if len(t_parts) > 1 else ""
-
-                    if t_cmd == "disable" and t_name:
-                        if t_name not in session.disabled_tools:
-                            session.disabled_tools.append(t_name)
-                        console.print(f"Tool '{t_name}' disabled.")
-                    elif t_cmd == "enable" and t_name:
-                        if t_name in session.disabled_tools:
-                            session.disabled_tools.remove(t_name)
-                        console.print(f"Tool '{t_name}' enabled.")
-                    elif t_cmd == "list":
-                        from core.tools import TOOLS
-                        table = Table(title="Available Tools", box=box.ROUNDED, show_lines=True)
-                        table.add_column("Tool", style="cyan", no_wrap=True)
-                        table.add_column("Description", style="white", width=40)
-                        table.add_column("Parameters", style="magenta")
-                        table.add_column("Approval", style="yellow", justify="center")
-                        table.add_column("Status", style="green", justify="center")
-
-                        for t in TOOLS:
-                            status = "[red]OFF[/red]" if t.name in session.disabled_tools else "[green]ON[/green]"
-                            approval = "Yes" if t.requires_approval else "No"
-                                
-                            params = []
-                            props = t.parameters.get("properties", {})
-                            required = t.parameters.get("required", [])
-                            for p_name, p_info in props.items():
-                                req_star = "[red]*[/red]" if p_name in required else ""
-                                p_type = p_info.get("type", "any")
-                                params.append(f"{p_name}{req_star} [dim]({p_type})[/dim]")
-                            
-                            params_str = "\n".join(params) if params else "None"
-                            
-                            table.add_row(
-                                t.name,
-                                t.description,
-                                params_str,
-                                approval,
-                                status
-                            )
-                        console.print(table)
-                        console.print("[dim] [red]*[/red] indicates required parameter[/dim]")
-                    else:
-                        console.print(f"Usage: {cmd} <enable|disable|list> [toolname]")
-
-                elif cmd == "/tokens":
-                    hist_len = len(session.session_manager.history)
-                    anchor = session.session_manager.summary_anchor
-                    tokens = session.session_manager.token_counts
-
-                    console.print("[yellow]--- Context Stats ---")
-                    console.print(f"Total History Turns: {hist_len}")
-                    console.print(f"Summarized Turns:    {anchor}")
-                    console.print(f"Active Turns (Window): {hist_len - anchor}")
-                    console.print(f"Session Tokens (In):  {tokens['input']}")
-                    console.print(f"Session Tokens (Out): {tokens['output']}")
-                    console.print(f"Session Tokens (Total): {tokens['total']}")
-                    console.print(
-                        f"Session Est. Cost:    ${tokens.get('total_cost', 0.0):.5f}"
-                    )
-                    console.print(
-                        "[dim](Actual token count is also displayed after each generation)[/dim]"
-                    )
-                    refresh_memory_hud(session, ui)
-
-                elif cmd == "/thinking":
-                    session.thinking = not session.thinking
-                    state = "ON" if session.thinking else "OFF"
-                    console.print(f"Thinking mode: [green]{state}")
-                    refresh_memory_hud(session, ui)
-                elif cmd == "/agentic":
-                    session.agentic = not session.agentic
-                    state = "ON" if session.agentic else "OFF"
-                    console.print(f"Agentic mode: {state}")
-                    refresh_memory_hud(session, ui)
-                elif cmd == "/yolo":
-                    current = session.variables.get("yolo", False)
-                    session.variables["yolo"] = not current
-                    state = "ON" if session.variables["yolo"] else "OFF"
-                    if state == "ON":
-                        console.print("YOLO mode: [green]ON[/green]")
-                    else:
-                        console.print("YOLO mode: [red]OFF[/red]")
-                    session.session_manager.save_history(session.folder_context)
-                    refresh_memory_hud(session, ui)
-                elif cmd == "/splash":
-                    print_splash(session)
-                    refresh_memory_hud(session, ui)
-                else:
-                    console.print(f"[red]Unknown command: {cmd}")
-
                 continue
 
             session.send_message(user_input)

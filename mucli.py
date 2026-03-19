@@ -71,8 +71,10 @@ def build_help_table():
 
 
 def show_help(ui):
-    ui.print(build_help_table())
-    ui.show_info("[dim]Type a message or command in the input bar below.[/dim]")
+    printer = getattr(ui, "print_command", ui.print)
+    info = getattr(ui, "show_command_info", ui.show_info)
+    printer(build_help_table())
+    info("[dim]Use Ctrl+K for the command palette or type a slash command directly.[/dim]")
 
 
 def build_splash_panel(session):
@@ -132,8 +134,10 @@ def build_splash_panel(session):
 
 
 def show_splash(session, ui):
-    ui.print(build_splash_panel(session))
-    ui.show_info("[dim]Type '/help' for commands.[/dim]")
+    printer = getattr(ui, "print_command", ui.print)
+    info = getattr(ui, "show_command_info", ui.show_info)
+    printer(build_splash_panel(session))
+    info("[dim]Type '/help' for commands or press Ctrl+K for the command palette.[/dim]")
 
 
 def init_provider(provider_name, model_name, ollama_host=None):
@@ -239,6 +243,10 @@ def sync_provider_settings(session):
 
 
 def handle_user_input(session, ui, user_input, args):
+    command_info = getattr(ui, "show_command_info", ui.show_info)
+    command_error = getattr(ui, "show_command_error", ui.show_error)
+    command_print = getattr(ui, "print_command", ui.print)
+
     if not user_input:
         return True
 
@@ -248,7 +256,7 @@ def handle_user_input(session, ui, user_input, args):
         arg = parts[1] if len(parts) > 1 else ""
 
         if cmd in ["/quit", "/exit", "/q"]:
-            ui.show_info("Goodbye!")
+            command_info("Goodbye!")
             return False
 
         if cmd in ["/help", "/h"]:
@@ -258,7 +266,7 @@ def handle_user_input(session, ui, user_input, args):
         if cmd in ["/clear", "/c"]:
             session.session_manager.clear_current_history()
             session.staged_files = []
-            ui.show_info("Conversation history cleared.")
+            command_info("Conversation history cleared.")
             refresh_memory_hud(session, ui)
             return True
 
@@ -276,19 +284,19 @@ def handle_user_input(session, ui, user_input, args):
                     elif part.get("type") == "tool_result":
                         fragments.append(f"tool_result: {part.get('tool_name')}")
                 history_table.add_row(message.get("role", "?"), "\n".join(fragments) or "-")
-            ui.print(history_table)
+            command_print(history_table)
             return True
 
         if cmd in ["/file", "/f", "/add"]:
             if arg:
                 session.add_file(arg)
             else:
-                ui.show_error("Usage: /file <path_to_file>")
+                command_error("Usage: /file <path_to_file>")
             return True
 
         if cmd in ["/clearfiles", "/cf"]:
             session.clear_files()
-            ui.show_info("Cleared staged files.")
+            command_info("Cleared staged files.")
             return True
 
         if cmd in ["/folder", "/dir"]:
@@ -299,11 +307,11 @@ def handle_user_input(session, ui, user_input, args):
                 if sub_parts[0] == "remove" and len(sub_parts) > 1:
                     path_to_remove = sub_parts[1].strip("'\"")
                     if session.folder_context.remove_folder(path_to_remove):
-                        ui.show_info(f"[green]Removed folder from context: {path_to_remove}[/green]")
+                        command_info(f"[green]Removed folder from context: {path_to_remove}[/green]")
                         session.session_manager.save_history(session.folder_context)
                         refresh_memory_hud(session, ui)
                     else:
-                        ui.show_error(f"Folder not found in context: {path_to_remove}")
+                        command_error(f"Folder not found in context: {path_to_remove}")
                     return True
 
                 try:
@@ -314,38 +322,38 @@ def handle_user_input(session, ui, user_input, args):
                 for path in paths:
                     path = path.strip("'\"")
                     if session.folder_context.add_folder(path):
-                        ui.show_info(f"[green]Added folder context: {path}[/green]")
+                        command_info(f"[green]Added folder context: {path}[/green]")
                         if len(session.folder_context.folders) == 1:
                             try:
                                 os.chdir(session.folder_context.folders[0])
-                                ui.show_info(f"[dim]Switched workspace to: {os.getcwd()}[/dim]")
+                                command_info(f"[dim]Switched workspace to: {os.getcwd()}[/dim]")
                             except Exception:
                                 pass
                     else:
-                        ui.show_error(f"Folder not found or invalid: {path}")
+                        command_error(f"Folder not found or invalid: {path}")
 
                 session.session_manager.save_history(session.folder_context)
-                ui.show_info("[dim]Files cached as initial context. Changes will be provided as diffs.[/dim]")
+                command_info("[dim]Files cached as initial context. Changes will be provided as diffs.[/dim]")
                 refresh_memory_hud(session, ui)
                 return True
 
             if not session.folder_context.folders:
-                ui.show_info("[yellow]No folders currently monitored.[/yellow]")
-                ui.show_info("Usage: /folder <path> OR /folder remove <path>")
+                command_info("[yellow]No folders currently monitored.[/yellow]")
+                command_info("Usage: /folder <path> OR /folder remove <path>")
                 return True
 
             grid = Table(title="Current Folder Context", box=box.ROUNDED)
             grid.add_column("Folder", style="green")
             for folder in session.folder_context.folders:
                 grid.add_row(f"📁 {folder}")
-            ui.print(grid)
+            command_print(grid)
 
             files = session.folder_context.get_file_list()
-            ui.show_info(f"[dim]Total Tracked Files: {len(files)}[/dim]")
+            command_info(f"[dim]Total Tracked Files: {len(files)}[/dim]")
             for file_name in files[:10]:
-                ui.show_info(f" - {os.path.basename(file_name)} [dim]({file_name})[/dim]")
+                command_info(f" - {os.path.basename(file_name)} [dim]({file_name})[/dim]")
             if len(files) > 10:
-                ui.show_info(f"[dim]... and {len(files) - 10} more[/dim]")
+                command_info(f"[dim]... and {len(files) - 10} more[/dim]")
             return True
 
         if cmd in ["/list", "/ls"]:
@@ -354,7 +362,7 @@ def handle_user_input(session, ui, user_input, args):
             table.add_column("Session", style="cyan")
             for session_name in sessions:
                 table.add_row(session_name)
-            ui.print(table)
+            command_print(table)
             return True
 
         if cmd in ["/new"]:
@@ -372,7 +380,7 @@ def handle_user_input(session, ui, user_input, args):
 
         if cmd in ["/load", "/open"]:
             if not arg:
-                ui.show_error("Usage: /load <session_name>")
+                command_error("Usage: /load <session_name>")
                 return True
             session.session_manager.switch_session(arg.strip())
             session.staged_files = []
@@ -390,31 +398,31 @@ def handle_user_input(session, ui, user_input, args):
         if cmd in ["/delete", "/rm"]:
             if arg:
                 session.session_manager.delete_session(arg.strip())
-                ui.show_info(f"Deleted session: {arg.strip()}")
+                command_info(f"Deleted session: {arg.strip()}")
             else:
-                ui.show_error("Usage: /delete <session_name>")
+                command_error("Usage: /delete <session_name>")
             return True
 
         if cmd in ["/system", "/sys"]:
             if arg:
                 session.system_instruction = arg
-                ui.show_info("[green]System prompt updated.[/green]")
+                command_info("[green]System prompt updated.[/green]")
             else:
                 curr = session.system_instruction if session.system_instruction else "None"
-                ui.print(Panel(curr, title="Current System Prompt", border_style="blue"))
+                command_print(Panel(curr, title="Current System Prompt", border_style="blue"))
             return True
 
         if cmd == "/model":
             if arg:
                 session.provider.model_name = arg.strip()
-                ui.show_info(f"Model changed to: [green]{session.provider.model_name}[/green]")
+                command_info(f"Model changed to: [green]{session.provider.model_name}[/green]")
             else:
                 models = session.provider.get_available_models()
                 if models:
-                    ui.show_info("Available models: " + ", ".join(models))
+                    command_info("Available models: " + ", ".join(models))
                     choice = ui.prompt_choices("Select a model", models, default=models[0])
                     session.provider.model_name = choice
-                    ui.show_info(f"Model changed to: [green]{session.provider.model_name}[/green]")
+                    command_info(f"Model changed to: [green]{session.provider.model_name}[/green]")
                     session.session_manager.provider_config = {
                         "provider": session.provider.name,
                         "model": session.provider.model_name,
@@ -433,23 +441,23 @@ def handle_user_input(session, ui, user_input, args):
                     "model": session.provider.model_name,
                 }
                 session.session_manager.save_history()
-                ui.show_info("[green]Provider changed successfully![/green]")
+                command_info("[green]Provider changed successfully![/green]")
                 show_splash(session, ui)
                 refresh_memory_hud(session, ui)
             except Exception as exc:
-                ui.show_error(f"Failed to change provider: {exc}")
+                command_error(f"Failed to change provider: {exc}")
             return True
 
         if cmd == "/set":
             if not arg:
-                ui.show_error("Usage: /set <key> <value>")
+                command_error("Usage: /set <key> <value>")
                 return True
             if "=" in arg:
                 key, value = arg.split("=", 1)
             elif " " in arg:
                 key, value = arg.split(" ", 1)
             else:
-                ui.show_error("Usage: /set <key> <value> OR /set <key>=<value>")
+                command_error("Usage: /set <key> <value> OR /set <key>=<value>")
                 return True
 
             key = key.strip()
@@ -459,14 +467,14 @@ def handle_user_input(session, ui, user_input, args):
 
                 session.variables[key] = validate_and_cast(key, value)
                 session.session_manager.save_history(session.folder_context)
-                ui.show_info(
+                command_info(
                     f"[green]Set variable: {key} = {session.variables[key]} ({type(session.variables[key]).__name__})[/green]"
                 )
                 if key == "ollama_host":
                     sync_provider_settings(session)
                 refresh_memory_hud(session, ui)
             except ValueError as exc:
-                ui.show_error(f"Error: {exc}")
+                command_error(f"Error: {exc}")
             return True
 
         if cmd == "/get":
@@ -477,15 +485,15 @@ def handle_user_input(session, ui, user_input, args):
                 table.add_column("Value", style="green")
                 for var_key, var_value in session.variables.items():
                     table.add_row(var_key, str(var_value))
-                ui.print(table)
+                command_print(table)
             else:
-                ui.show_info(str(session.variables.get(key, "Not set")))
+                command_info(str(session.variables.get(key, "Not set")))
             return True
 
         if cmd == "/unset":
             key = arg.strip()
             if not key:
-                ui.show_error("Usage: /unset <key> OR /unset --all")
+                command_error("Usage: /unset <key> OR /unset --all")
                 return True
             if key == "--all":
                 from utils.config import DEFAULT_VARIABLES
@@ -493,7 +501,7 @@ def handle_user_input(session, ui, user_input, args):
                 session.variables.clear()
                 session.variables.update(DEFAULT_VARIABLES)
                 session.session_manager.save_history(session.folder_context)
-                ui.show_info("[green]All variables reset to defaults.[/green]")
+                command_info("[green]All variables reset to defaults.[/green]")
                 sync_provider_settings(session)
                 refresh_memory_hud(session, ui)
                 return True
@@ -503,27 +511,27 @@ def handle_user_input(session, ui, user_input, args):
 
                 if key in VARIABLE_SCHEMA:
                     session.variables[key] = VARIABLE_SCHEMA[key]["default"]
-                    ui.show_info(f"[green]Reset variable to default: {key} = {session.variables[key]}[/green]")
+                    command_info(f"[green]Reset variable to default: {key} = {session.variables[key]}[/green]")
                 else:
                     del session.variables[key]
-                    ui.show_info(f"[green]Unset variable: {key}[/green]")
+                    command_info(f"[green]Unset variable: {key}[/green]")
                 session.session_manager.save_history(session.folder_context)
                 if key == "ollama_host":
                     sync_provider_settings(session)
                 refresh_memory_hud(session, ui)
             else:
-                ui.show_info(f"[yellow]Variable '{key}' not found.[/yellow]")
+                command_info(f"[yellow]Variable '{key}' not found.[/yellow]")
             return True
 
         if cmd == "/flush":
             count = len(session.collation_buffer.entries)
             if count == 0:
-                ui.show_info("[yellow]Collation buffer is empty.[/yellow]")
+                command_info("[yellow]Collation buffer is empty.[/yellow]")
             else:
                 collated = session.collation_buffer.flush()
                 text = "### Collated Context Flushed by User:\n\n" + "\n\n".join(collated)
                 session.send_message(text)
-                ui.show_info(f"[green]Flushed {count} items from buffer into conversation history.[/green]")
+                command_info(f"[green]Flushed {count} items from buffer into conversation history.[/green]")
                 refresh_memory_hud(session, ui)
             return True
 
@@ -533,7 +541,7 @@ def handle_user_input(session, ui, user_input, args):
             table.add_column("Value", style="green")
             for var_key, var_value in session.variables.items():
                 table.add_row(var_key, str(var_value))
-            ui.print(table)
+            command_print(table)
             return True
 
         if cmd == "/mode":
@@ -541,11 +549,11 @@ def handle_user_input(session, ui, user_input, args):
             if arg and arg.lower() in valid_modes:
                 session.variables["agent_mode"] = arg.lower()
                 session.session_manager.save_history(session.folder_context)
-                ui.show_info(f"Agent strategy set to: {arg.upper()}")
+                command_info(f"Agent strategy set to: {arg.upper()}")
             else:
                 curr = session.variables.get("agent_mode", "default")
-                ui.show_info("Usage: /mode <default|debug|feature|research|git>")
-                ui.show_info(f"Current mode: {curr}")
+                command_info("Usage: /mode <default|debug|feature|research|git>")
+                command_info(f"Current mode: {curr}")
             refresh_memory_hud(session, ui)
             return True
 
@@ -557,11 +565,11 @@ def handle_user_input(session, ui, user_input, args):
             if t_cmd == "disable" and t_name:
                 if t_name not in session.disabled_tools:
                     session.disabled_tools.append(t_name)
-                ui.show_info(f"Tool '{t_name}' disabled.")
+                command_info(f"Tool '{t_name}' disabled.")
             elif t_cmd == "enable" and t_name:
                 if t_name in session.disabled_tools:
                     session.disabled_tools.remove(t_name)
-                ui.show_info(f"Tool '{t_name}' enabled.")
+                command_info(f"Tool '{t_name}' enabled.")
             elif t_cmd == "list":
                 from core.tools import TOOLS
 
@@ -583,9 +591,9 @@ def handle_user_input(session, ui, user_input, args):
                         prop_type = prop_info.get("type", "any")
                         params.append(f"{prop_name}{req_star} ({prop_type})")
                     table.add_row(tool.name, tool.description, "\n".join(params) if params else "None", approval, status)
-                ui.print(table)
+                command_print(table)
             else:
-                ui.show_error(f"Usage: {cmd} <enable|disable|list> [toolname]")
+                command_error(f"Usage: {cmd} <enable|disable|list> [toolname]")
             return True
 
         if cmd == "/tokens":
@@ -602,19 +610,19 @@ def handle_user_input(session, ui, user_input, args):
             table.add_row("Session Tokens (Out)", str(tokens['output']))
             table.add_row("Session Tokens (Total)", str(tokens['total']))
             table.add_row("Session Est. Cost", f"${tokens.get('total_cost', 0.0):.5f}")
-            ui.print(table)
+            command_print(table)
             refresh_memory_hud(session, ui)
             return True
 
         if cmd == "/thinking":
             session.thinking = not session.thinking
-            ui.show_info(f"Thinking mode: [green]{'ON' if session.thinking else 'OFF'}[/green]")
+            command_info(f"Thinking mode: [green]{'ON' if session.thinking else 'OFF'}[/green]")
             refresh_memory_hud(session, ui)
             return True
 
         if cmd == "/agentic":
             session.agentic = not session.agentic
-            ui.show_info(f"Agentic mode: {'ON' if session.agentic else 'OFF'}")
+            command_info(f"Agentic mode: {'ON' if session.agentic else 'OFF'}")
             refresh_memory_hud(session, ui)
             return True
 
@@ -622,7 +630,7 @@ def handle_user_input(session, ui, user_input, args):
             current = session.variables.get("yolo", False)
             session.variables["yolo"] = not current
             state = "ON" if session.variables["yolo"] else "OFF"
-            ui.show_info(f"YOLO mode: {'[green]ON[/green]' if state == 'ON' else '[red]OFF[/red]'}")
+            command_info(f"YOLO mode: {'[green]ON[/green]' if state == 'ON' else '[red]OFF[/red]'}")
             session.session_manager.save_history(session.folder_context)
             refresh_memory_hud(session, ui)
             return True
@@ -632,7 +640,7 @@ def handle_user_input(session, ui, user_input, args):
             refresh_memory_hud(session, ui)
             return True
 
-        ui.show_error(f"Unknown command: {cmd}")
+        command_error(f"Unknown command: {cmd}")
         return True
 
     session.send_message(user_input)

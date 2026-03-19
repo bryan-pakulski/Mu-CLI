@@ -81,6 +81,124 @@ class ChoiceModal(ModalScreen[str]):
         self.dismiss(self.default or "")
 
 
+
+
+COMMAND_PALETTE_OPTIONS = [
+    "/help",
+    "/clear",
+    "/file",
+    "/folder",
+    "/list",
+    "/load",
+    "/new",
+    "/model",
+    "/provider",
+    "/mode",
+    "/variables",
+    "/tokens",
+    "/thinking",
+    "/agentic",
+    "/yolo",
+    "/splash",
+    "/quit",
+]
+
+
+class CommandPaletteModal(ModalScreen[str]):
+    CSS = ChoiceModal.CSS
+
+    def __init__(self):
+        super().__init__()
+        self.options = COMMAND_PALETTE_OPTIONS
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="choice-dialog"):
+            yield Static("Run command", id="choice-title")
+            yield Input(placeholder="Filter commands", id="command-filter")
+            yield OptionList(*self.options, id="choice-options")
+
+    def on_mount(self) -> None:
+        self.query_one("#command-filter", Input).focus()
+
+    @on(Input.Changed, "#command-filter")
+    def filter_commands(self, event: Input.Changed) -> None:
+        query = event.value.strip().lower()
+        options = [option for option in self.options if query in option.lower()] or self.options
+        option_list = self.query_one(OptionList)
+        option_list.set_options(options)
+        option_list.highlighted = 0 if options else None
+
+    @on(Input.Submitted, "#command-filter")
+    def submit_filter(self) -> None:
+        option_list = self.query_one(OptionList)
+        if option_list.option_count:
+            self.dismiss(str(option_list.highlighted_option.prompt))
+
+    @on(OptionList.OptionSelected)
+    def option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.prompt))
+
+
+class PathAutocompleteModal(ModalScreen[str]):
+    CSS = ChoiceModal.CSS
+
+    def __init__(self, title: str, *, directories_only: bool = False):
+        super().__init__()
+        self.title = title
+        self.directories_only = directories_only
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="choice-dialog"):
+            yield Static(self.title, id="choice-title")
+            yield Input(value=".", placeholder="Type a path", id="path-filter")
+            yield OptionList(id="choice-options")
+
+    def on_mount(self) -> None:
+        self._refresh_options('.')
+        self.query_one("#path-filter", Input).focus()
+
+    def _refresh_options(self, raw_value: str) -> None:
+        from pathlib import Path
+
+        value = raw_value or "."
+        expanded = Path(value).expanduser()
+        if value.endswith(("/", "\\")) or expanded.is_dir():
+            parent = expanded
+            prefix = ""
+        else:
+            parent = expanded.parent if str(expanded.parent) else Path('.')
+            prefix = expanded.name.lower()
+
+        try:
+            entries = sorted(parent.iterdir(), key=lambda entry: (not entry.is_dir(), entry.name.lower()))
+        except OSError:
+            entries = []
+
+        options = []
+        for entry in entries:
+            if self.directories_only and not entry.is_dir():
+                continue
+            if prefix and prefix not in entry.name.lower():
+                continue
+            options.append(str(entry.resolve()))
+
+        self.query_one(OptionList).set_options(options[:100])
+
+    @on(Input.Changed, "#path-filter")
+    def path_changed(self, event: Input.Changed) -> None:
+        self._refresh_options(event.value)
+
+    @on(Input.Submitted, "#path-filter")
+    def path_submitted(self, event: Input.Submitted) -> None:
+        from pathlib import Path
+
+        self.dismiss(str(Path(event.value or '.').expanduser().resolve()))
+
+    @on(OptionList.OptionSelected)
+    def option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.prompt))
+
+
 class RenderableBlock(Static):
     def __init__(self, renderable, *, classes: str = ""):
         super().__init__(renderable, classes=classes)
@@ -209,6 +327,7 @@ class MuTextualApp(App):
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+l", "clear_input", "Clear input"),
         ("ctrl+b", "toggle_sidebar", "Toggle sidebar"),
+        ("ctrl+k", "command_palette", "Command palette"),
     ]
 
     def __init__(self, ui: "TextualUI"):
@@ -243,6 +362,22 @@ class MuTextualApp(App):
         else:
             self.add_class("sidebar-hidden")
             self.update_status("Sidebar hidden. Press Ctrl+B to restore it.")
+
+    async def action_command_palette(self) -> None:
+        command = await self.push_screen_wait(CommandPaletteModal())
+        if not command:
+            return
+        if command == "/folder":
+            path = await self.push_screen_wait(PathAutocompleteModal("Select workspace folder", directories_only=True))
+            if path:
+                self.ui._handle_submission(f"/folder {path}")
+            return
+        if command == "/file":
+            path = await self.push_screen_wait(PathAutocompleteModal("Select file"))
+            if path:
+                self.ui._handle_submission(f"/file {path}")
+            return
+        self.ui._handle_submission(command)
 
     @on(Input.Submitted, "#command-input")
     def input_submitted(self) -> None:
@@ -411,8 +546,19 @@ class TextualUI:
     def show_info(self, message):
         self.display_renderable(build_plain_text(message))
 
+    def show_command_info(self, message):
+        self._enqueue_transcript_renderable(build_plain_text(message))
+
+    def show_command_error(self, message):
+        self._enqueue_transcript_renderable(
+            Panel(build_plain_text(f"[red]{message}[/red]"), title="Command Error", border_style="red")
+        )
+
     def print(self, obj):
         self.display_renderable(obj)
+
+    def print_command(self, obj):
+        self._enqueue_transcript_renderable(obj)
 
     def build_meter(
         self,

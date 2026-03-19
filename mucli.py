@@ -431,16 +431,14 @@ def main():
                         name, new_provider.name, new_provider.model_name
                     )
                     session.staged_files = []
-                    session.folder_context = session.session_manager.folder_context
-                    session.collation_buffer = session.session_manager.collation_buffer
+                    session.sync_runtime_state()
                     ui.set_variables(session.variables)
                     print_splash(session)
                 elif cmd in ["/load", "/open"]:
                     if arg:
                         session.session_manager.switch_session(arg.strip())
                         session.staged_files = []
-                        session.folder_context = session.session_manager.folder_context
-                        session.collation_buffer = session.session_manager.collation_buffer
+                        session.sync_runtime_state()
                         ui.set_variables(session.variables)
                         # Update provider based on session config
                         p_cfg = session.session_manager.provider_config

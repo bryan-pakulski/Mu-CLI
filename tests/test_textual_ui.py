@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from ui.render import build_response_renderables
+from ui.render import build_response_renderables, build_response_segments
 from ui.textual_ui import TextualUI
 
 
@@ -68,3 +68,12 @@ def test_build_response_renderables_supports_markdown_and_code_blocks():
 
     assert any(isinstance(item, Markdown) for item in renderables)
     assert any(isinstance(item, Panel) for item in renderables)
+
+
+def test_build_response_segments_expose_copyable_code_metadata():
+    segments = build_response_segments("Hello\n\n```python\nprint(1)\n```")
+
+    code_segment = next(segment for segment in segments if segment.kind == "code")
+    assert code_segment.lang == "python"
+    assert code_segment.content == "print(1)"
+    assert code_segment.title == "python"

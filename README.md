@@ -11,7 +11,7 @@
 - **Smart Context Management**: Automatic history truncation and summarization to stay within model context limits while keeping costs down.
 - **In-Task Memory Engine**: Agent mode can store and recall concise facts so it does not need to replay large tool outputs.
 - **Turn Scratchpads**: Agent mode can keep temporary notes for the active task loop without polluting durable memory.
-- **Textual Terminal UI**: Scrollable transcript and activity panels, responsive resizing, and in-app command output built with Textual.
+- **Textual Terminal UI**: Scrollable transcript and activity panels, responsive resizing, in-app command output, copy buttons on code blocks, and a toggleable sidebar built with Textual.
 - **Live Memory HUD**: A compact sidebar widget visualizes context, durable memory, scratchpad usage, and the collation queue as they fill up over time.
 - **Customizable Strategies**: Specialized agent modes for Debugging, Feature Implementation, and Research.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
@@ -45,7 +45,7 @@ Run the tool using:
 python mucli.py
 ```
 
-The interactive shell now opens in a Textual interface with a scrollable transcript, an activity sidebar for command output/tool events, and a persistent input bar.
+The interactive shell now opens in a Textual interface with a scrollable transcript, an activity sidebar for command output/tool events, copy controls on code blocks, and a persistent input bar. Press `Ctrl+B` to toggle the sidebar.
 
 ### Getting Started
 1. **Select a Provider**: Choose between Gemini, OpenAI, or Ollama.

@@ -14,10 +14,36 @@ from rich.table import Table
 from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 
-from .render import build_plain_text, build_response_renderables
+from .render import build_plain_text, build_response_segments
+
+
+class RenderableBlock(Static):
+    def __init__(self, renderable, *, classes: str = ""):
+        super().__init__(renderable, classes=classes)
+
+
+class CopyableCodeBlock(Vertical):
+    def __init__(self, content: str, renderable, *, title: str | None = None):
+        super().__init__(classes="code-block")
+        self.content = content
+        self.renderable = renderable
+        self.title = title or "Code"
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(classes="code-toolbar"):
+            yield Static(self.title, classes="code-title")
+            yield Button("Copy", variant="primary", classes="copy-button")
+        yield Static(self.renderable, classes="code-render")
+
+    @on(Button.Pressed)
+    def copy_pressed(self) -> None:
+        self.app.copy_to_clipboard(self.content)
+        button = self.query_one(Button)
+        button.label = "Copied!"
+        self.app.update_status(f"Copied {self.title} to the clipboard.")
 
 
 class MuTextualApp(App):
@@ -43,6 +69,14 @@ class MuTextualApp(App):
         width: 2fr;
     }
 
+    .sidebar-hidden #transcript-pane {
+        width: 1fr;
+    }
+
+    .sidebar-hidden #sidebar {
+        display: none;
+    }
+
     #status {
         height: auto;
         min-height: 3;
@@ -64,28 +98,56 @@ class MuTextualApp(App):
         width: 1fr;
     }
 
-    #send {
+    .transcript-block {
+        margin: 0 1 1 1;
+    }
+
+    .code-block {
+        margin: 0 1 1 1;
+        border: round $primary-background-darken-2;
+    }
+
+    .code-toolbar {
+        height: auto;
+        padding: 0 1;
+        background: $surface;
+    }
+
+    .code-title {
+        width: 1fr;
+        padding-top: 1;
+    }
+
+    .copy-button {
         width: 12;
+    }
+
+    .code-render {
+        height: auto;
     }
     """
 
-    BINDINGS = [("ctrl+c", "quit", "Quit"), ("ctrl+l", "clear_input", "Clear input")]
+    BINDINGS = [
+        ("ctrl+c", "quit", "Quit"),
+        ("ctrl+l", "clear_input", "Clear input"),
+        ("ctrl+b", "toggle_sidebar", "Toggle sidebar"),
+    ]
 
     def __init__(self, ui: "TextualUI"):
         super().__init__()
         self.ui = ui
+        self.sidebar_visible = True
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal(id="body"):
-            yield RichLog(id="transcript-pane", wrap=True, markup=True, highlight=True)
+            yield VerticalScroll(id="transcript-pane")
             with Vertical(id="sidebar"):
                 yield Static("Ready.", id="status")
                 yield RichLog(id="activity", wrap=True, markup=True, highlight=True)
                 yield Static("", id="memory")
         with Horizontal(id="input-row"):
             yield Input(placeholder="Type a message or /command and press Enter", id="command-input")
-            yield Button("Send", variant="primary", id="send")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -95,9 +157,14 @@ class MuTextualApp(App):
     def action_clear_input(self) -> None:
         self.query_one("#command-input", Input).value = ""
 
-    @on(Button.Pressed, "#send")
-    def send_clicked(self) -> None:
-        self._submit_input()
+    def action_toggle_sidebar(self) -> None:
+        self.sidebar_visible = not self.sidebar_visible
+        if self.sidebar_visible:
+            self.remove_class("sidebar-hidden")
+            self.update_status("Sidebar shown.")
+        else:
+            self.add_class("sidebar-hidden")
+            self.update_status("Sidebar hidden. Press Ctrl+B to restore it.")
 
     @on(Input.Submitted, "#command-input")
     def input_submitted(self) -> None:
@@ -111,8 +178,15 @@ class MuTextualApp(App):
         widget.value = ""
         self.ui._handle_submission(value)
 
-    def write_transcript(self, renderable) -> None:
-        self.query_one("#transcript-pane", RichLog).write(renderable)
+    def write_transcript_renderable(self, renderable) -> None:
+        container = self.query_one("#transcript-pane", VerticalScroll)
+        container.mount(RenderableBlock(renderable, classes="transcript-block"))
+        container.scroll_end(animate=False)
+
+    def write_transcript_code(self, content: str, renderable, title: str | None = None) -> None:
+        container = self.query_one("#transcript-pane", VerticalScroll)
+        container.mount(CopyableCodeBlock(content, renderable, title=title))
+        container.scroll_end(animate=False)
 
     def write_activity(self, renderable) -> None:
         self.query_one("#activity", RichLog).write(renderable)
@@ -130,7 +204,7 @@ class TextualUI:
         self.variables_dict = None
         self._submission_callback: Callable[[str], bool | None] | None = None
         self._busy = False
-        self._pending_transcript = []
+        self._pending_transcript: list[tuple[str, tuple]] = []
         self._pending_activity = []
         self._pending_memory = None
         self._prompt_queue: Queue[str] | None = None
@@ -187,15 +261,24 @@ class TextualUI:
         else:
             self._pending_activity.append(renderable)
 
-    def _enqueue_transcript(self, renderable):
+    def _enqueue_transcript_renderable(self, renderable):
         if self.app.is_running:
-            self.app.call_from_thread(self.app.write_transcript, renderable)
+            self.app.call_from_thread(self.app.write_transcript_renderable, renderable)
         else:
-            self._pending_transcript.append(renderable)
+            self._pending_transcript.append(("renderable", (renderable,)))
+
+    def _enqueue_transcript_code(self, content: str, renderable, title: str | None = None):
+        if self.app.is_running:
+            self.app.call_from_thread(self.app.write_transcript_code, content, renderable, title)
+        else:
+            self._pending_transcript.append(("code", (content, renderable, title)))
 
     def flush_pending(self):
-        for renderable in self._pending_transcript:
-            self.app.write_transcript(renderable)
+        for kind, args in self._pending_transcript:
+            if kind == "code":
+                self.app.write_transcript_code(*args)
+            else:
+                self.app.write_transcript_renderable(*args)
         for renderable in self._pending_activity:
             self.app.write_activity(renderable)
         if self._pending_memory is not None:
@@ -209,24 +292,35 @@ class TextualUI:
 
     def display_renderable(self, renderable, *, area="activity"):
         if area == "transcript":
-            self._enqueue_transcript(renderable)
+            self._enqueue_transcript_renderable(renderable)
         else:
             self._enqueue_activity(renderable)
 
     def render_message(self, role, content, model_name=None):
         if role == "user":
-            self.display_renderable(
-                Panel(content, title="User", border_style="blue"), area="transcript"
+            self._enqueue_transcript_renderable(
+                Panel(content, title="User", border_style="blue")
             )
             return
 
         title = f"Assistant ({model_name})" if model_name else "Assistant"
-        self.display_renderable(Panel(Markdown(content), title=title, border_style="green"), area="transcript")
-        for renderable in build_response_renderables(content):
-            self.display_renderable(renderable, area="transcript")
+        self._enqueue_transcript_renderable(
+            Panel(Text(title), title="Assistant", border_style="green")
+        )
+        for segment in build_response_segments(content):
+            if segment.kind == "code":
+                self._enqueue_transcript_code(
+                    segment.content or "",
+                    segment.renderable,
+                    segment.title,
+                )
+            else:
+                self._enqueue_transcript_renderable(segment.renderable)
 
     def show_error(self, message):
-        self.display_renderable(Panel(build_plain_text(f"[red]{message}[/red]"), title="Error", border_style="red"))
+        self.display_renderable(
+            Panel(build_plain_text(f"[red]{message}[/red]"), title="Error", border_style="red")
+        )
 
     def show_info(self, message):
         self.display_renderable(build_plain_text(message))
@@ -344,9 +438,7 @@ class TextualUI:
 
     def show_diff(self, filename, original_content, new_content):
         import difflib
-        import os
 
-        ext = os.path.splitext(filename)[1][1:] or "txt"
         orig_lines = original_content.splitlines()
         new_lines = new_content.splitlines()
 
@@ -421,7 +513,11 @@ class TextualUI:
 
     def confirm(self, message, default=True):
         default_choice = "y" if default else "n"
-        value = self._request_prompt(f"{message} [y/n]", validator=lambda v: v.lower() in {"y", "n", "yes", "no", ""}, default=default_choice)
+        value = self._request_prompt(
+            f"{message} [y/n]",
+            validator=lambda v: v.lower() in {"y", "n", "yes", "no", ""},
+            default=default_choice,
+        )
         return value.lower() in {"y", "yes"}
 
     def prompt_choices(self, message, choices, default=None):

@@ -1,5 +1,6 @@
 import mimetypes
 import re
+from dataclasses import dataclass
 
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -11,6 +12,15 @@ CODE_BLOCK_PATTERN = re.compile(
     r"(```(?:[\w\+\-\.]+)?\s*\n.*?```|<file_change\s+path='[^']+'>.*?</file_change>|<file_content\s+path='[^']+'>.*?</file_content>|<new_file\s+path='[^']+'>.*?</new_file>)",
     flags=re.DOTALL,
 )
+
+
+@dataclass(frozen=True)
+class ResponseSegment:
+    kind: str
+    renderable: object
+    content: str | None = None
+    lang: str | None = None
+    title: str | None = None
 
 
 def _build_code_renderable(content, lang, title=None):
@@ -34,12 +44,12 @@ def _build_code_renderable(content, lang, title=None):
     return Panel(syntax, title=panel_title, border_style="cyan")
 
 
-def build_response_renderables(text):
-    """Convert an assistant response into Rich renderables suitable for Rich/Textual UIs."""
+def build_response_segments(text):
+    """Convert a response into structured Rich/Textual-ready segments."""
     if not text or not text.strip():
         return []
 
-    renderables = []
+    segments = []
     parts = re.split(CODE_BLOCK_PATTERN, text)
 
     for part in parts:
@@ -50,7 +60,16 @@ def build_response_renderables(text):
             lines = part.split("\n")
             lang = lines[0].strip("`").strip() or "text"
             content = "\n".join(lines[1:-1])
-            renderables.append(_build_code_renderable(content, lang))
+            title = lang
+            segments.append(
+                ResponseSegment(
+                    kind="code",
+                    renderable=_build_code_renderable(content, lang, title),
+                    content=content,
+                    lang=lang,
+                    title=title,
+                )
+            )
             continue
 
         if part.startswith("<file_") or part.startswith("<new_file"):
@@ -66,12 +85,26 @@ def build_response_renderables(text):
                     else (mimetypes.guess_type(path)[0] or "text").split("/")[-1]
                 )
                 title = f"{tag.replace('_', ' ').upper()}: {path}"
-                renderables.append(_build_code_renderable(content.strip(), lang, title))
+                content = content.strip()
+                segments.append(
+                    ResponseSegment(
+                        kind="code",
+                        renderable=_build_code_renderable(content, lang, title),
+                        content=content,
+                        lang=lang,
+                        title=title,
+                    )
+                )
                 continue
 
-        renderables.append(Markdown(part.strip()))
+        renderable = Markdown(part.strip())
+        segments.append(ResponseSegment(kind="markdown", renderable=renderable, content=part.strip()))
 
-    return renderables
+    return segments
+
+
+def build_response_renderables(text):
+    return [segment.renderable for segment in build_response_segments(text)]
 
 
 def build_plain_text(text):

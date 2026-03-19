@@ -58,3 +58,17 @@ def test_memory_monitor_renders_context_memory_and_queue_labels():
     assert "queue 2 items" in output
     assert "mode" in output
     assert "feature" in output
+
+
+def test_dashboard_renders_chat_panel_and_static_hud_column():
+    ui = RichUI()
+    session = _build_session()
+    console = Console(record=True, width=120, height=30)
+
+    ui.append_transcript("hello world")
+    console.print(ui.build_dashboard(session))
+    output = console.export_text()
+
+    assert "hello world" in output
+    assert "μCLI" in output
+    assert "Memory HUD" in output

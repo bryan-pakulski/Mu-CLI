@@ -1,26 +1,40 @@
 from contextlib import contextmanager
 
 from rich import box
-from rich.align import Align
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
+from rich.markup import render as render_markup
 
 from .input import InputHandler
-from .render import render_response
+from .render import build_response_renderables
+
+
+class TranscriptConsole:
+    def __init__(self, ui):
+        self.ui = ui
+
+    def print(self, *objects, **kwargs):
+        self.ui.print_to_transcript(*objects, **kwargs)
 
 
 class RichUI:
     def __init__(self):
         self.console = Console()
         self.input_handler = InputHandler()
+        self.transcript = []
+        self.active_session = None
+        self.output_console = TranscriptConsole(self)
+
+    def set_active_session(self, session):
+        self.active_session = session
 
     def render_message(self, role, content, model_name=None):
         if role == "user":
-            self.console.print(
+            self.append_transcript(
                 Panel(
                     content,
                     title="User",
@@ -31,10 +45,13 @@ class RichUI:
             )
         else:
             if model_name:
-                self.console.print(f"\nAssistant ({model_name}):")
-            render_response(content)
+                self.append_transcript(Text.from_markup(f"\nAssistant ({model_name}):"))
+            for renderable in build_response_renderables(content):
+                self.append_transcript(renderable)
+        self.refresh_layout()
 
     def get_input(self, session_name, staged_files):
+        self.refresh_layout()
         return self.input_handler.get_input(session_name, staged_files)
 
     def set_variables(self, variables_dict):
@@ -50,10 +67,25 @@ class RichUI:
         return Prompt.ask(message, default=default)
 
     def show_error(self, message):
-        self.console.print(f"[red]{message}[/red]")
+        self.print_to_transcript(f"[red]{message}[/red]")
 
     def show_info(self, message):
-        self.console.print(f"[blue]{message}[/blue]")
+        self.print_to_transcript(f"[blue]{message}[/blue]")
+
+    def normalize_renderable(self, renderable):
+        if isinstance(renderable, str):
+            return render_markup(renderable)
+        return renderable
+
+    def append_transcript(self, renderable):
+        self.transcript.append(self.normalize_renderable(renderable))
+
+    def print_to_transcript(self, *objects, **kwargs):
+        if not objects:
+            return
+        renderables = [self.normalize_renderable(obj) for obj in objects]
+        self.transcript.append(Group(*renderables) if len(renderables) > 1 else renderables[0])
+        self.refresh_layout()
 
     def build_meter(
         self,
@@ -147,18 +179,67 @@ class RichUI:
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
         )
 
-        return Align.right(
-            Panel(
-                Group(*meters, Text(""), meta, legend),
-                title="[bold white]Memory HUD[/bold white]",
-                border_style="bright_black",
-                box=box.ROUNDED,
-                width=44,
-            )
+        return Panel(
+            Group(*meters, Text(""), meta, legend),
+            title="[bold white]Memory HUD[/bold white]",
+            border_style="bright_black",
+            box=box.ROUNDED,
+            width=44,
         )
 
+    def build_chat_panel(self, session):
+        width = max(40, self.console.size.width - 48)
+        height = max(12, self.console.size.height - 4)
+        capture = Console(
+            width=max(20, width - 2),
+            record=True,
+            force_terminal=False,
+            color_system=None,
+        )
+
+        if not self.transcript:
+            capture.print(
+                Text.from_markup(
+                    "[dim]Chat output will appear here. Type /help for commands.[/dim]"
+                )
+            )
+        else:
+            for renderable in self.transcript:
+                capture.print(renderable)
+
+        lines = capture.export_text().splitlines()
+        visible_lines = lines[-max(1, height - 2) :]
+        body = Text("\n".join(visible_lines))
+
+        session_name = getattr(
+            getattr(session, "session_manager", None), "current_session_name", "μCLI"
+        )
+        title = f"[bold cyan]{session_name}[/bold cyan]"
+        return Panel(
+            body,
+            title=title,
+            border_style="cyan",
+            box=box.HEAVY,
+            height=height,
+        )
+
+    def build_dashboard(self, session):
+        grid = Table.grid(expand=True)
+        grid.add_column(ratio=1)
+        grid.add_column(width=46)
+        grid.add_row(self.build_chat_panel(session), self.build_memory_monitor(session))
+        return grid
+
+    def refresh_layout(self, session=None):
+        if session is not None:
+            self.active_session = session
+        if self.active_session is None:
+            return
+        self.console.clear(home=True)
+        self.console.print(self.build_dashboard(self.active_session))
+
     def show_memory_monitor(self, session):
-        self.console.print(self.build_memory_monitor(session))
+        self.refresh_layout(session)
 
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""

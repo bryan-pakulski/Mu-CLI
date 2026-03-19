@@ -4,7 +4,6 @@ import argparse
 import os
 import sys
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, IntPrompt
 from rich.text import Text
@@ -20,7 +19,7 @@ from core.session import SessionManager, Session
 from core.workspace import FolderContext
 from ui.rich_ui import RichUI
 
-console = Console()
+console = None
 
 
 def refresh_memory_hud(session, ui):
@@ -225,6 +224,7 @@ def sync_provider_settings(session):
 
 
 def main():
+    global console
     logger.info("μCLI starting...")
 
     parser = argparse.ArgumentParser(description="Interactive AI CLI")
@@ -254,6 +254,7 @@ def main():
 
     # --- Initialize UI ---
     ui = RichUI()
+    console = ui.output_console
 
     # --- Initialize Session Manager ---
     session_manager = SessionManager(ui=ui)
@@ -300,6 +301,7 @@ def main():
         ui=ui,
         debug=args.debug,
     )
+    ui.set_active_session(session)
 
     print_splash(session)
     refresh_memory_hud(session, ui)

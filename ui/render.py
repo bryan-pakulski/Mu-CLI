@@ -1,24 +1,25 @@
 # Rich console output and markdown rendering
-import re
 import mimetypes
+import re
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.syntax import Syntax
-from rich.panel import Panel
+from rich.text import Text
 
 console = Console()
 
 
-def render_response(text):
-    """
-    Renders text using Rich.
-    """
+def build_response_renderables(text):
+    """Convert assistant output into Rich renderables."""
     if not text.strip():
-        return
+        return []
+
     pattern = r"(```(?:[\w\+\-\.]+)?\s*\n.*?```|<file_change\s+path='[^']+'>.*?</file_change>|<file_content\s+path='[^']+'>.*?</file_content>|<new_file\s+path='[^']+'>.*?</new_file>)"
     parts = re.split(pattern, text, flags=re.DOTALL)
+    renderables = []
 
-    def print_code_panel(content, lang, title=None):
+    def add_code_renderables(content, lang, title=None):
         if lang == "diff":
             content = re.sub(
                 r"^(@@ \-(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@)(.*)$",
@@ -28,33 +29,37 @@ def render_response(text):
             )
 
         if title:
-            console.print(f"[bold cyan]### {title}[/bold cyan]")
-        console.print(
-            f" [bold cyan]┌── {lang} ─────────────────────────────────[/bold cyan]"
+            renderables.append(Text.from_markup(f"[bold cyan]### {title}[/bold cyan]"))
+        renderables.append(
+            Text.from_markup(
+                f" [bold cyan]┌── {lang} ─────────────────────────────────[/bold cyan]"
+            )
         )
-        syntax = Syntax(
-            content,
-            lang,
-            theme="monokai",
-            background_color=None,
-            word_wrap=False,
-            padding=0,
+        renderables.append(
+            Syntax(
+                content,
+                lang,
+                theme="monokai",
+                background_color=None,
+                word_wrap=False,
+                padding=0,
+            )
         )
-        console.print(syntax)
-        console.print(
-            " [bold cyan]└────────────────────────────────────────────[/bold cyan]"
+        renderables.append(
+            Text.from_markup(
+                " [bold cyan]└────────────────────────────────────────────[/bold cyan]"
+            )
         )
 
     for part in parts:
         if not part.strip():
             continue
 
-        if part.startswith("``````"):
+        if part.startswith("```"):
             lines = part.split("\n")
             lang = lines[0].strip("`").strip() or "text"
             content = "\n".join(lines[1:-1])
-            print_code_panel(content, lang)
-
+            add_code_renderables(content, lang)
         elif part.startswith("<file_"):
             tag_match = re.match(
                 r"<(file_change|file_content|new_file)\s+path='([^']+)'>([\s\S]*?)</\1>",
@@ -68,7 +73,16 @@ def render_response(text):
                     else (mimetypes.guess_type(path)[0] or "text").split("/")[-1]
                 )
                 title = f"{tag.replace('_', ' ').upper()}: {path}"
-                print_code_panel(content.strip(), lang, title)
+                add_code_renderables(content.strip(), lang, title)
         else:
-            console.print(Markdown(part.strip()))
-            console.print("")
+            renderables.append(Markdown(part.strip()))
+            renderables.append(Text(""))
+
+    return renderables
+
+
+def render_response(text, render_console=None):
+    """Render text using Rich."""
+    target_console = render_console or console
+    for renderable in build_response_renderables(text):
+        target_console.print(renderable)

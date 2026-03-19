@@ -137,8 +137,10 @@ def test_live_memory_monitor_updates_in_place(monkeypatch):
     ui._timestamp = lambda: "12:34:56"
     session = _build_session()
 
+    ui.start_app_chrome(session)
+
     with ui.live_memory_monitor(session):
-        assert ui._memory_hud_live is not None
+        assert ui._app_live is not None
         ui.refresh_memory_monitor(session)
         ui.show_info("tooling started")
         ui.show_tool_result("ok")
@@ -152,7 +154,9 @@ def test_live_memory_monitor_updates_in_place(monkeypatch):
 
     assert events[0:2] == ["start", "refresh"]
     assert ("update", True) in events
-    assert events.count("stop") == 1
     assert events.count("start") == 1
+    assert ui._app_live is not None
+    ui.stop_app_chrome()
+    assert events.count("stop") == 1
     assert events[-1] == "stop"
-    assert ui._memory_hud_live is None
+    assert ui._app_live is None

@@ -74,7 +74,7 @@ def print_help():
     )
 
 
-def print_splash(session):
+def print_splash(session, ui=None):
     welcome_text = Text()
 
     # Neon μCLI Cyberpunk Ascii Art
@@ -127,14 +127,18 @@ def print_splash(session):
     [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns
     """
 
-    console.print(
-        Panel(
-            Text.assemble(welcome_text, Text.from_markup(info_grid)),
-            title="[bold yellow] // μCLI TERMINAL // [/bold yellow]",
-            border_style="cyan",
-            box=box.HEAVY,
-        )
+    splash_panel = Panel(
+        Text.assemble(welcome_text, Text.from_markup(info_grid)),
+        title="[bold yellow] // μCLI TERMINAL // [/bold yellow]",
+        border_style="cyan",
+        box=box.HEAVY,
     )
+    if ui and hasattr(ui, "_append_transcript_renderable"):
+        ui._append_transcript_renderable(splash_panel)
+        ui.show_info("[dim]Type '/help' for commands.[/dim]")
+        return
+
+    console.print(splash_panel)
     console.print("[dim] Type '/help' for commands.[/dim]\n")
 
 
@@ -301,7 +305,8 @@ def main():
         debug=args.debug,
     )
 
-    print_splash(session)
+    ui.start_app_chrome(session)
+    print_splash(session, ui=ui)
     refresh_memory_hud(session, ui)
 
     while True:
@@ -319,6 +324,7 @@ def main():
                 arg = parts[1] if len(parts) > 1 else ""
 
                 if cmd in ["/quit", "/exit", "/q"]:
+                    ui.stop_app_chrome()
                     print("Goodbye!")
                     break
 
@@ -442,7 +448,7 @@ def main():
                     session.staged_files = []
                     session.sync_runtime_state()
                     ui.set_variables(session.variables)
-                    print_splash(session)
+                    print_splash(session, ui=ui)
                     refresh_memory_hud(session, ui)
                 elif cmd in ["/load", "/open"]:
                     if arg:
@@ -459,7 +465,7 @@ def main():
                             )
 
                         sync_provider_settings(session)
-                        print_splash(session)
+                        print_splash(session, ui=ui)
                         refresh_memory_hud(session, ui)
                     else:
                         console.print("[yellow]Usage: /load <session_name>")
@@ -508,7 +514,7 @@ def main():
                                 "model": session.provider.model_name,
                             }
                             session.session_manager.save_history()
-                            print_splash(session)
+                            print_splash(session, ui=ui)
                     refresh_memory_hud(session, ui)
 
                 elif cmd == "/provider":
@@ -523,7 +529,7 @@ def main():
                         }
                         session.session_manager.save_history()
                         console.print("[green]Provider changed successfully![/green]")
-                        print_splash(session)
+                        print_splash(session, ui=ui)
                         refresh_memory_hud(session, ui)
                     except Exception as e:
                         console.print(f"[red]Failed to change provider: {e}[/red]")
@@ -720,7 +726,7 @@ def main():
                     session.session_manager.save_history(session.folder_context)
                     refresh_memory_hud(session, ui)
                 elif cmd == "/splash":
-                    print_splash(session)
+                    print_splash(session, ui=ui)
                     refresh_memory_hud(session, ui)
                 else:
                     console.print(f"[red]Unknown command: {cmd}")
@@ -733,6 +739,7 @@ def main():
         except KeyboardInterrupt:
             console.print("\n(Interrupted. Type /quit to exit)")
         except EOFError:
+            ui.stop_app_chrome()
             console.print("\nGoodbye!")
             break
 

@@ -13,6 +13,7 @@ from prompt_toolkit.completion import (
 from prompt_toolkit.styles import Style
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from utils.config import KNOWN_MODELS, HISTORY_DIR
 
@@ -159,17 +160,21 @@ class InputHandler:
         """Update the reference to the variables dictionary for completion."""
         self.variables_dict = variables_dict
 
-    def get_input(self, session_name, staged_files):
+    def get_input(self, session_name, staged_files, show_prompt=True):
         files_text = ""
         if staged_files:
             # Note the updated accessor here for our new FileReference schema
             f_names = ", ".join([f["file_ref"]["display_name"] for f in staged_files])
             files_text = f" [Files: {f_names}]"
 
-        message = HTML(
-            f"<prompt>[{session_name}]</prompt>"
-            f"<files>{files_text}</files> "
-            f"<prompt>>>></prompt> "
+        message = (
+            HTML(
+                f"<prompt>[{session_name}]</prompt>"
+                f"<files>{files_text}</files> "
+                f"<prompt>>>></prompt> "
+            )
+            if show_prompt
+            else HTML("")
         )
 
         def bottom_toolbar():
@@ -178,11 +183,12 @@ class InputHandler:
             )
 
         try:
-            return self.session.prompt(
-                message,
-                bottom_toolbar=bottom_toolbar,
-                prompt_continuation=self._prompt_continuation,
-            ).strip()
+            with patch_stdout(raw=True):
+                return self.session.prompt(
+                    message,
+                    bottom_toolbar=(bottom_toolbar if show_prompt else None),
+                    prompt_continuation=self._prompt_continuation,
+                ).strip()
         except KeyboardInterrupt:
             return ""
         except EOFError:

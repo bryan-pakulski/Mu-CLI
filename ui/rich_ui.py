@@ -5,7 +5,9 @@ from datetime import datetime
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
+from rich.layout import Layout
 from rich.live import Live
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
@@ -20,33 +22,149 @@ class RichUI:
     def __init__(self):
         self.console = Console()
         self.input_handler = InputHandler()
-        self._memory_hud_live = None
+        self._app_live = None
+        self._app_session = None
         self._memory_hud_session = None
+        self._transcript_buffer = deque(maxlen=60)
         self._live_event_buffer = deque(maxlen=18)
         self._live_status_message = None
         self._last_event_timestamp = None
+        self._prompt_panel_text = "[dim]Prompt inactive.[/dim]"
+
+    def _timestamp(self):
+        return datetime.now().strftime("%H:%M:%S")
+
+    def _format_timestamped_markup(self, markup_message):
+        timestamp = self._timestamp()
+        self._last_event_timestamp = timestamp
+        return f"[dim][{timestamp}][/dim] {markup_message}"
+
+    def _append_transcript_renderable(self, renderable):
+        if self._app_live is None:
+            self.console.print(renderable)
+            return
+
+        self._transcript_buffer.append(renderable)
+        self.refresh_memory_monitor()
+
+    def _append_live_event(self, markup_message):
+        if self._app_live is None:
+            return False
+
+        self._live_event_buffer.append(self._format_timestamped_markup(markup_message))
+        self.refresh_memory_monitor()
+        return True
+
+    def _build_runtime_panel(self):
+        lines = []
+        if self._live_status_message:
+            lines.append(Text.from_markup(f"[bold cyan]status:[/bold cyan] {self._live_status_message}"))
+            lines.append(Text(""))
+
+        if self._live_event_buffer:
+            lines.extend(Text.from_markup(entry) for entry in self._live_event_buffer)
+        else:
+            lines.append(Text("Waiting for agent events...", style="dim"))
+
+        return Panel(
+            Group(*lines),
+            title="[bold white]Runtime Feed[/bold white]",
+            border_style="cyan",
+            box=box.ROUNDED,
+            expand=True,
+        )
+
+    def _build_transcript_panel(self):
+        if self._transcript_buffer:
+            body = Group(*self._transcript_buffer)
+        else:
+            body = Text("Transcript will appear here.", style="dim")
+
+        return Panel(
+            body,
+            title="[bold white]Transcript[/bold white]",
+            border_style="blue",
+            box=box.ROUNDED,
+            expand=True,
+        )
+
+    def _build_prompt_panel(self):
+        return Panel(
+            Text.from_markup(self._prompt_panel_text),
+            title="[bold white]Prompt[/bold white]",
+            border_style="green",
+            box=box.ROUNDED,
+            height=5,
+        )
+
+    def start_app_chrome(self, session):
+        self._app_session = session
+        self._memory_hud_session = session
+        if self._app_live is not None:
+            self.refresh_memory_monitor(session)
+            return
+
+        self._app_live = Live(
+            self.build_app_layout(session),
+            console=self.console,
+            refresh_per_second=8,
+            auto_refresh=False,
+            transient=False,
+            vertical_overflow="visible",
+        )
+        self._app_live.start()
+        self._app_live.refresh()
+
+    def stop_app_chrome(self):
+        if self._app_live is None:
+            return
+        self._app_live.stop()
+        self._app_live = None
 
     def render_message(self, role, content, model_name=None):
         timestamp = self._timestamp()
         if role == "user":
-            self.console.print(
-                Panel(
-                    content,
-                    title=f"User • {timestamp}",
-                    style="blue",
-                    box=box.ROUNDED,
-                    title_align="right",
-                )
+            renderable = Panel(
+                content,
+                title=f"User • {timestamp}",
+                style="blue",
+                box=box.ROUNDED,
+                title_align="right",
             )
-        else:
-            if model_name:
-                self.console.print(f"\nAssistant ({model_name}) • {timestamp}:")
-            else:
-                self.console.print(f"\nAssistant • {timestamp}:")
+            self._append_transcript_renderable(renderable)
+            return
+
+        header = (
+            f"Assistant ({model_name}) • {timestamp}:"
+            if model_name
+            else f"Assistant • {timestamp}:"
+        )
+        if self._app_live is None:
+            self.console.print(f"\n{header}")
             render_response(content, console_override=self.console)
+            return
+
+        renderable = Group(
+            Text(header, style="bold cyan"),
+            Markdown(content.strip() or ""),
+        )
+        self._append_transcript_renderable(renderable)
 
     def get_input(self, session_name, staged_files):
-        return self.input_handler.get_input(session_name, staged_files)
+        files_text = ""
+        if staged_files:
+            f_names = ", ".join([f["file_ref"]["display_name"] for f in staged_files])
+            files_text = f"[bold yellow]Files:[/bold yellow] {f_names}"
+        else:
+            files_text = "[dim]No staged files[/dim]"
+
+        self._prompt_panel_text = (
+            f"[bold cyan][{session_name}][/bold cyan] [bold white]>>>[/bold white]\n"
+            f"{files_text}\n"
+            "[dim]Meta+Enter or Esc Enter to submit | /help for commands[/dim]"
+        )
+        self.refresh_memory_monitor()
+        return self.input_handler.get_input(session_name, staged_files, show_prompt=False)
 
     def set_variables(self, variables_dict):
         self.input_handler.set_variables(variables_dict)
@@ -59,22 +177,6 @@ class RichUI:
 
     def prompt(self, message, default=None):
         return Prompt.ask(message, default=default)
-
-    def _timestamp(self):
-        return datetime.now().strftime("%H:%M:%S")
-
-    def _format_timestamped_markup(self, markup_message):
-        timestamp = self._timestamp()
-        self._last_event_timestamp = timestamp
-        return f"[dim][{timestamp}][/dim] {markup_message}"
-
-    def _append_live_event(self, markup_message):
-        if self._memory_hud_live is None:
-            return False
-
-        self._live_event_buffer.append(self._format_timestamped_markup(markup_message))
-        self.refresh_memory_monitor()
-        return True
 
     def show_error(self, message):
         if self._append_live_event(f"[red]{message}[/red]"):
@@ -212,71 +314,48 @@ class RichUI:
             return panel
         return Align.right(panel)
 
-    def build_live_dashboard(self, session):
-        lines = []
-        if self._live_status_message:
-            lines.append(Text.from_markup(f"[bold cyan]status:[/bold cyan] {self._live_status_message}"))
-            lines.append(Text(""))
-
-        if self._live_event_buffer:
-            lines.extend(Text.from_markup(entry) for entry in self._live_event_buffer)
-        else:
-            lines.append(Text("Waiting for agent events...", style="dim"))
-
-        runtime_panel = Panel(
-            Group(*lines),
-            title="[bold white]Runtime Feed[/bold white]",
-            border_style="cyan",
-            box=box.ROUNDED,
-            expand=True,
+    def build_app_layout(self, session):
+        layout = Layout(name="root")
+        layout.split_column(
+            Layout(name="body", ratio=1),
+            Layout(self._build_prompt_panel(), name="footer", size=5),
         )
+        layout["body"].split_row(
+            Layout(name="main", ratio=1),
+            Layout(self.build_memory_monitor(session, align_right=False), name="hud", size=46),
+        )
+        layout["main"].split_column(
+            Layout(self._build_transcript_panel(), name="transcript", ratio=3),
+            Layout(self._build_runtime_panel(), name="runtime", size=12),
+        )
+        return layout
 
-        grid = Table.grid(expand=True)
-        grid.add_column(ratio=1, min_width=60)
-        grid.add_column(width=46)
-        grid.add_row(runtime_panel, self.build_memory_monitor(session, align_right=False))
-        return grid
+    def build_live_dashboard(self, session):
+        return self.build_app_layout(session)
 
     def is_memory_monitor_live(self):
-        return self._memory_hud_live is not None
+        return self._app_live is not None
 
     @contextmanager
     def live_memory_monitor(self, session):
-        if self._memory_hud_live is not None:
-            yield self._memory_hud_live
-            return
-
         self._memory_hud_session = session
+        self._app_session = session
         self._live_event_buffer.clear()
         self._live_status_message = None
         self._last_event_timestamp = None
-        live = Live(
-            self.build_live_dashboard(session),
-            console=self.console,
-            refresh_per_second=8,
-            auto_refresh=False,
-            vertical_overflow="visible",
-            transient=False,
-        )
-        self._memory_hud_live = live
-        live.start()
-        live.refresh()
+        self.refresh_memory_monitor(session)
         try:
-            yield live
+            yield self._app_live
         finally:
-            live.stop()
-            self._memory_hud_live = None
-            self._memory_hud_session = None
             self._live_status_message = None
-            self._last_event_timestamp = None
-            self._live_event_buffer.clear()
+            self.refresh_memory_monitor(session)
 
     def refresh_memory_monitor(self, session=None):
-        target_session = session or self._memory_hud_session
-        if target_session is None or self._memory_hud_live is None:
+        target_session = session or self._memory_hud_session or self._app_session
+        if target_session is None or self._app_live is None:
             return False
 
-        self._memory_hud_live.update(self.build_live_dashboard(target_session), refresh=True)
+        self._app_live.update(self.build_app_layout(target_session), refresh=True)
         return True
 
     def show_memory_monitor(self, session):
@@ -305,14 +384,12 @@ class RichUI:
             collapse_padding=True,
         )
 
-        # We'll use 4 columns: Line L, Content L, Line R, Content R
         table.add_column("L#", justify="right", style="dim", width=5)
         table.add_column("CURRENT STATE", ratio=1)
         table.add_column("R#", justify="right", style="dim", width=5)
         table.add_column("PROPOSED STATE", ratio=1)
 
         for group in grouped_opcodes:
-            # Hunk separator
             table.add_row(
                 Text("...", style="cyan"),
                 Text(
@@ -361,9 +438,6 @@ class RichUI:
                             style="on #001b00",
                         )
                 elif tag == "replace":
-                    # For replace, we show deletions then insertions to keep L/R aligned if possible,
-                    # but side-by-side replace is tricky in 4 columns if we want to align corresponding lines.
-                    # Simplest is to show L on left and R on right in the same row.
                     max_range = max(i2 - i1, j2 - j1)
                     for k in range(max_range):
                         l_idx = i1 + k
@@ -385,10 +459,9 @@ class RichUI:
                                 "+ " + r_text,
                                 style="green on #002b00" if r_text else "",
                             ),
-                            style="on #1a1a1a",  # Neutral dark background for mixed rows
+                            style="on #1a1a1a",
                         )
 
-        # Summary calculation
         diff_list = list(difflib.unified_diff(orig_lines, new_lines))
         additions = len(
             [l for l in diff_list if l.startswith("+") and not l.startswith("+++")]
@@ -407,7 +480,7 @@ class RichUI:
 
     @contextmanager
     def show_status(self, message):
-        if self._memory_hud_live is None:
+        if self._app_live is None:
             with self.console.status(message, spinner="aesthetic") as status:
                 yield status
             return

@@ -1,5 +1,6 @@
 from collections import deque
 from contextlib import contextmanager
+from datetime import datetime
 
 from rich import box
 from rich.align import Align
@@ -23,13 +24,15 @@ class RichUI:
         self._memory_hud_session = None
         self._live_event_buffer = deque(maxlen=18)
         self._live_status_message = None
+        self._last_event_timestamp = None
 
     def render_message(self, role, content, model_name=None):
+        timestamp = self._timestamp()
         if role == "user":
             self.console.print(
                 Panel(
                     content,
-                    title="User",
+                    title=f"User • {timestamp}",
                     style="blue",
                     box=box.ROUNDED,
                     title_align="right",
@@ -37,7 +40,9 @@ class RichUI:
             )
         else:
             if model_name:
-                self.console.print(f"\nAssistant ({model_name}):")
+                self.console.print(f"\nAssistant ({model_name}) • {timestamp}:")
+            else:
+                self.console.print(f"\nAssistant • {timestamp}:")
             render_response(content, console_override=self.console)
 
     def get_input(self, session_name, staged_files):
@@ -55,23 +60,31 @@ class RichUI:
     def prompt(self, message, default=None):
         return Prompt.ask(message, default=default)
 
+    def _timestamp(self):
+        return datetime.now().strftime("%H:%M:%S")
+
+    def _format_timestamped_markup(self, markup_message):
+        timestamp = self._timestamp()
+        self._last_event_timestamp = timestamp
+        return f"[dim][{timestamp}][/dim] {markup_message}"
+
     def _append_live_event(self, markup_message):
         if self._memory_hud_live is None:
             return False
 
-        self._live_event_buffer.append(str(markup_message))
+        self._live_event_buffer.append(self._format_timestamped_markup(markup_message))
         self.refresh_memory_monitor()
         return True
 
     def show_error(self, message):
         if self._append_live_event(f"[red]{message}[/red]"):
             return
-        self.console.print(f"[red]{message}[/red]")
+        self.console.print(self._format_timestamped_markup(f"[red]{message}[/red]"))
 
     def show_info(self, message):
         if self._append_live_event(str(message)):
             return
-        self.console.print(f"[blue]{message}[/blue]")
+        self.console.print(self._format_timestamped_markup(f"[blue]{message}[/blue]"))
 
     def build_meter(
         self,
@@ -165,12 +178,28 @@ class RichUI:
             str(session.variables.get("agent_mode", "default")), style="bold magenta"
         )
 
+        iteration = int(getattr(session, "_runtime_iteration", 0) or 0)
+        max_iterations = int(
+            getattr(session, "_runtime_max_iterations", session.variables.get("max_iterations", 0))
+            or 0
+        )
+        total_cost = float(session.session_manager.token_counts.get("total_cost", 0.0) or 0.0)
+
+        extra = Text()
+        extra.append("iter ", style="dim white")
+        extra.append(f"{iteration}/{max_iterations}", style="bold green")
+        extra.append("  |  cost ", style="dim white")
+        extra.append(f"${total_cost:.5f}", style="bold yellow")
+        if self._last_event_timestamp:
+            extra.append("  |  last ", style="dim white")
+            extra.append(self._last_event_timestamp, style="bold cyan")
+
         legend = Text.from_markup(
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
         )
 
         return Panel(
-            Group(*meters, Text(""), meta, legend),
+            Group(*meters, Text(""), meta, extra, legend),
             title="[bold white]Memory HUD[/bold white]",
             border_style="bright_black",
             box=box.ROUNDED,
@@ -217,6 +246,7 @@ class RichUI:
         self._memory_hud_session = session
         self._live_event_buffer.clear()
         self._live_status_message = None
+        self._last_event_timestamp = None
         live = Live(
             self.build_live_dashboard(session),
             console=self.console,
@@ -235,6 +265,7 @@ class RichUI:
             self._memory_hud_live = None
             self._memory_hud_session = None
             self._live_status_message = None
+            self._last_event_timestamp = None
             self._live_event_buffer.clear()
 
     def refresh_memory_monitor(self, session=None):
@@ -382,7 +413,7 @@ class RichUI:
             return
 
         previous_status = self._live_status_message
-        self._live_status_message = str(message)
+        self._live_status_message = self._format_timestamped_markup(str(message))
         self.refresh_memory_monitor()
         try:
             yield str(message)
@@ -402,4 +433,4 @@ class RichUI:
         message = f"[{color}]  ↳ Result: {res_preview}... ({char_count} chars)[/{color}]"
         if self._append_live_event(message):
             return
-        self.console.print(message)
+        self.console.print(self._format_timestamped_markup(message))

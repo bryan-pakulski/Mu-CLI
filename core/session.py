@@ -874,6 +874,8 @@ class Session:
         turn_start_index = len(self.session_manager.history) - 1
 
         max_iterations = self.variables.get("max_iterations", 50)
+        self._runtime_max_iterations = int(max_iterations or 0)
+        self._runtime_iteration = 0
         iteration = 0
         active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
 
@@ -895,6 +897,7 @@ class Session:
 
             while iteration < max_iterations:
                 iteration += 1
+                self._runtime_iteration = iteration
                 logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
     
                 try:

@@ -60,6 +60,20 @@ def test_memory_monitor_renders_context_memory_and_queue_labels():
     assert "feature" in output
 
 
+
+
+def test_render_message_titles_include_timestamps():
+    ui = RichUI()
+    ui.console = Console(record=True, width=100)
+    ui._timestamp = lambda: "12:34:56"
+
+    ui.render_message("user", "hello")
+    ui.render_message("assistant", "response", model_name="gpt-test")
+    output = ui.console.export_text()
+
+    assert "User • 12:34:56" in output
+    assert "Assistant (gpt-test) • 12:34:56" in output
+
 def test_refresh_memory_monitor_prints_when_live_is_inactive():
     ui = RichUI()
     session = _build_session()
@@ -104,6 +118,7 @@ def test_live_memory_monitor_updates_in_place(monkeypatch):
     monkeypatch.setattr("ui.rich_ui.Live", FakeLive)
 
     ui = RichUI()
+    ui._timestamp = lambda: "12:34:56"
     session = _build_session()
 
     with ui.live_memory_monitor(session):
@@ -112,9 +127,12 @@ def test_live_memory_monitor_updates_in_place(monkeypatch):
         ui.show_info("tooling started")
         ui.show_tool_result("ok")
         assert len(ui._live_event_buffer) == 2
+        assert "[12:34:56]" in ui._live_event_buffer[0]
+        assert "[12:34:56]" in ui._live_event_buffer[1]
         with ui.show_status("Working..."):
             events.append("status")
-            assert ui._live_status_message == "Working..."
+            assert "[12:34:56]" in ui._live_status_message
+            assert "Working..." in ui._live_status_message
 
     assert events[0:2] == ["start", "refresh"]
     assert ("update", True) in events

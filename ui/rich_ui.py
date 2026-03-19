@@ -203,6 +203,20 @@ class RichUI:
     def show_memory_monitor(self, session):
         self.refresh_memory_monitor(session)
 
+    @contextmanager
+    def suspend_memory_monitor(self):
+        if self._memory_hud_live is None:
+            yield
+            return
+
+        live = self._memory_hud_live
+        live.stop()
+        try:
+            yield
+        finally:
+            live.start()
+            self.refresh_memory_monitor()
+
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""
         import difflib
@@ -328,12 +342,7 @@ class RichUI:
 
     @contextmanager
     def show_status(self, message):
-        if self._memory_hud_live is None:
-            with self.console.status(message, spinner="aesthetic") as status:
-                yield status
-            return
-
-        with self._memory_hud_live.pause():
+        with self.suspend_memory_monitor():
             with self.console.status(message, spinner="aesthetic") as status:
                 yield status
 

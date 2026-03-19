@@ -79,13 +79,6 @@ def test_refresh_memory_monitor_prints_when_live_is_inactive():
 def test_live_memory_monitor_updates_in_place(monkeypatch):
     events = []
 
-    class FakePause:
-        def __enter__(self):
-            events.append("pause_enter")
-
-        def __exit__(self, exc_type, exc, tb):
-            events.append("pause_exit")
-
     class FakeLive:
         def __init__(self, renderable, console, refresh_per_second, auto_refresh, vertical_overflow, transient):
             self.renderable = renderable
@@ -108,9 +101,6 @@ def test_live_memory_monitor_updates_in_place(monkeypatch):
         def stop(self):
             events.append("stop")
 
-        def pause(self):
-            return FakePause()
-
     monkeypatch.setattr("ui.rich_ui.Live", FakeLive)
 
     ui = RichUI()
@@ -124,7 +114,7 @@ def test_live_memory_monitor_updates_in_place(monkeypatch):
 
     assert events[0:2] == ["start", "refresh"]
     assert ("update", True) in events
-    assert "pause_enter" in events
-    assert "pause_exit" in events
+    assert events.count("stop") == 2
+    assert events.count("start") == 2
     assert events[-1] == "stop"
     assert ui._memory_hud_live is None

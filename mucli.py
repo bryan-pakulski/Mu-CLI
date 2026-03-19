@@ -23,6 +23,11 @@ from ui.rich_ui import RichUI
 console = Console()
 
 
+def refresh_memory_hud(session, ui):
+    if ui and hasattr(ui, "show_memory_monitor"):
+        ui.show_memory_monitor(session)
+
+
 def print_help():
     table = Table(title="Available Commands", box=box.SIMPLE)
     table.add_column("Command", style="cyan", no_wrap=True)
@@ -297,6 +302,7 @@ def main():
     )
 
     print_splash(session)
+    refresh_memory_hud(session, ui)
 
     while True:
         try:
@@ -322,6 +328,7 @@ def main():
                 elif cmd in ["/clear", "/c"]:
                     session.session_manager.clear_current_history()
                     session.staged_files = []
+                    refresh_memory_hud(session, ui)
 
                 elif cmd in ["/view", "/v"]:
                     session.session_manager.view_history()
@@ -347,6 +354,7 @@ def main():
                                 session.session_manager.save_history(
                                     session.folder_context
                                 )
+                                refresh_memory_hud(session, ui)
                             else:
                                 console.print(
                                     f"[red]Folder not found in context: {path_to_remove}[/red]"
@@ -383,6 +391,7 @@ def main():
                             console.print(
                                 "[dim]Files cached as initial context. Changes will be provided as diffs.[/dim]"
                             )
+                            refresh_memory_hud(session, ui)
                     else:
                         if not session.folder_context.folders:
                             console.print(
@@ -434,6 +443,7 @@ def main():
                     session.sync_runtime_state()
                     ui.set_variables(session.variables)
                     print_splash(session)
+                    refresh_memory_hud(session, ui)
                 elif cmd in ["/load", "/open"]:
                     if arg:
                         session.session_manager.switch_session(arg.strip())
@@ -450,6 +460,7 @@ def main():
 
                         sync_provider_settings(session)
                         print_splash(session)
+                        refresh_memory_hud(session, ui)
                     else:
                         console.print("[yellow]Usage: /load <session_name>")
 
@@ -498,6 +509,7 @@ def main():
                             }
                             session.session_manager.save_history()
                             print_splash(session)
+                    refresh_memory_hud(session, ui)
 
                 elif cmd == "/provider":
                     try:
@@ -512,6 +524,7 @@ def main():
                         session.session_manager.save_history()
                         console.print("[green]Provider changed successfully![/green]")
                         print_splash(session)
+                        refresh_memory_hud(session, ui)
                     except Exception as e:
                         console.print(f"[red]Failed to change provider: {e}[/red]")
 
@@ -539,6 +552,7 @@ def main():
                             )
                             if k == "ollama_host":
                                 sync_provider_settings(session)
+                            refresh_memory_hud(session, ui)
                         except ValueError as e:
                             console.print(f"[red]Error: {e}[/red]")
                     else:
@@ -567,6 +581,7 @@ def main():
                         session.session_manager.save_history(session.folder_context)
                         console.print("[green]All variables reset to defaults.[/green]")
                         sync_provider_settings(session)
+                        refresh_memory_hud(session, ui)
                     else:
                         if k in session.variables:
                             from utils.config import VARIABLE_SCHEMA
@@ -582,6 +597,7 @@ def main():
                             session.session_manager.save_history(session.folder_context)
                             if k == "ollama_host":
                                 sync_provider_settings(session)
+                            refresh_memory_hud(session, ui)
                         else:
                             console.print(f"[yellow]Variable '{k}' not found.[/yellow]")
 
@@ -597,6 +613,7 @@ def main():
                             text = "### Collated Context Flushed by User:\n\n" + "\n\n".join(collated)
                             session.send_message(text)
                             console.print(f"[green]Flushed {count} items from buffer into conversation history.[/green]")
+                            refresh_memory_hud(session, ui)
 
                 elif cmd == "/variables":
                     for vk, vv in session.variables.items():
@@ -612,6 +629,7 @@ def main():
                         console.print("Usage: /mode <default|debug|feature|research|git>")
                         curr = session.variables.get("agent_mode", "default")
                         console.print(f"Current mode: {curr}")
+                    refresh_memory_hud(session, ui)
 
                 elif cmd in ["/tool", "/tools"]:
                     t_parts = arg.split(" ", 1) if arg else ["list"]
@@ -679,15 +697,18 @@ def main():
                     console.print(
                         "[dim](Actual token count is also displayed after each generation)[/dim]"
                     )
+                    refresh_memory_hud(session, ui)
 
                 elif cmd == "/thinking":
                     session.thinking = not session.thinking
                     state = "ON" if session.thinking else "OFF"
                     console.print(f"Thinking mode: [green]{state}")
+                    refresh_memory_hud(session, ui)
                 elif cmd == "/agentic":
                     session.agentic = not session.agentic
                     state = "ON" if session.agentic else "OFF"
                     console.print(f"Agentic mode: {state}")
+                    refresh_memory_hud(session, ui)
                 elif cmd == "/yolo":
                     current = session.variables.get("yolo", False)
                     session.variables["yolo"] = not current
@@ -697,14 +718,17 @@ def main():
                     else:
                         console.print("YOLO mode: [red]OFF[/red]")
                     session.session_manager.save_history(session.folder_context)
+                    refresh_memory_hud(session, ui)
                 elif cmd == "/splash":
                     print_splash(session)
+                    refresh_memory_hud(session, ui)
                 else:
                     console.print(f"[red]Unknown command: {cmd}")
 
                 continue
 
             session.send_message(user_input)
+            refresh_memory_hud(session, ui)
 
         except KeyboardInterrupt:
             console.print("\n(Interrupted. Type /quit to exit)")

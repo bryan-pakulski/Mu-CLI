@@ -1,14 +1,16 @@
-from rich.console import Console
+from contextlib import contextmanager
+
+from rich import box
+from rich.align import Align
+from rich.console import Console, Group
 from rich.panel import Panel
-from rich.columns import Columns
+from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
-from rich import box
-from rich.prompt import Confirm, Prompt
-from .render import render_response
+
 from .input import InputHandler
-from contextlib import contextmanager
+from .render import render_response
 
 
 class RichUI:
@@ -53,10 +55,115 @@ class RichUI:
     def show_info(self, message):
         self.console.print(f"[blue]{message}[/blue]")
 
+    def build_meter(
+        self,
+        label,
+        current,
+        maximum,
+        *,
+        color="cyan",
+        width=16,
+        warning_threshold=0.75,
+        danger_threshold=0.9,
+    ):
+        maximum = max(1, int(maximum or 1))
+        current = max(0, int(current or 0))
+        ratio = min(current / maximum, 1.0)
+        filled = min(width, int(round(width * ratio)))
+
+        bar = Text()
+        active_color = color
+        if ratio >= danger_threshold:
+            active_color = "red"
+        elif ratio >= warning_threshold:
+            active_color = "yellow"
+
+        bar.append("█" * filled, style=f"bold {active_color}")
+        bar.append("░" * (width - filled), style="grey30")
+
+        line = Text()
+        line.append(f"{label:<8}", style="bold white")
+        line.append(" ")
+        line.append(bar)
+        line.append(f" {current}/{maximum}", style="dim white")
+        return line
+
+    def build_memory_monitor(self, session):
+        hist_len = len(session.session_manager.history)
+        anchor = session.session_manager.summary_anchor
+        active_turns = max(0, hist_len - anchor)
+        context_limit = max(1, int(getattr(session, "active_context_window", 1) or 1))
+
+        memory_limit = max(
+            1,
+            int(
+                session.variables.get(
+                    "memory_max_entries", getattr(session.task_memory, "max_entries", 1)
+                )
+            ),
+        )
+        scratch_limit = max(
+            1,
+            int(
+                session.variables.get(
+                    "scratchpad_max_entries",
+                    getattr(session.turn_scratchpad, "max_entries", 1),
+                )
+            ),
+        )
+        collation_limit = max(1, int(getattr(session.collation_buffer, "max_bytes", 1) or 1))
+        collation_bytes = sum(
+            len(result or "") for _, _, result in session.collation_buffer.entries
+        )
+        collation_items = len(session.collation_buffer.entries)
+        token_total = int(session.session_manager.token_counts.get("total", 0) or 0)
+
+        meters = [
+            self.build_meter("CTX", active_turns, context_limit, color="cyan"),
+            self.build_meter(
+                "MEM", len(session.task_memory.entries), memory_limit, color="magenta"
+            ),
+            self.build_meter(
+                "SCRATCH",
+                len(session.turn_scratchpad.entries),
+                scratch_limit,
+                color="green",
+            ),
+            self.build_meter("QUEUE", collation_bytes, collation_limit, color="yellow"),
+        ]
+
+        meta = Text()
+        meta.append("tokens ", style="dim white")
+        meta.append(str(token_total), style="bold cyan")
+        meta.append("  |  queue ", style="dim white")
+        meta.append(str(collation_items), style="bold yellow")
+        meta.append(" item", style="dim white")
+        if collation_items != 1:
+            meta.append("s", style="dim white")
+        meta.append("  |  mode ", style="dim white")
+        meta.append(str(session.variables.get("agent_mode", "default")), style="bold magenta")
+
+        legend = Text.from_markup(
+            "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
+        )
+
+        return Align.right(
+            Panel(
+                Group(*meters, Text(""), meta, legend),
+                title="[bold white]Memory HUD[/bold white]",
+                border_style="bright_black",
+                box=box.ROUNDED,
+                width=44,
+            )
+        )
+
+    def show_memory_monitor(self, session):
+        self.console.print(self.build_memory_monitor(session))
+
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""
-        import os
         import difflib
+        import os
 
         ext = os.path.splitext(filename)[1][1:] or "txt"
 

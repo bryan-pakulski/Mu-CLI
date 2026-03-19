@@ -237,6 +237,9 @@ class RichUI:
         grid.add_row(runtime_panel, self.build_memory_monitor(session, align_right=False))
         return grid
 
+    def is_memory_monitor_live(self):
+        return self._memory_hud_live is not None
+
     @contextmanager
     def live_memory_monitor(self, session):
         if self._memory_hud_live is not None:
@@ -270,17 +273,14 @@ class RichUI:
 
     def refresh_memory_monitor(self, session=None):
         target_session = session or self._memory_hud_session
-        if target_session is None:
-            return
+        if target_session is None or self._memory_hud_live is None:
+            return False
 
-        if self._memory_hud_live is not None:
-            self._memory_hud_live.update(self.build_live_dashboard(target_session), refresh=True)
-            return
-
-        self.console.print(self.build_memory_monitor(target_session))
+        self._memory_hud_live.update(self.build_live_dashboard(target_session), refresh=True)
+        return True
 
     def show_memory_monitor(self, session):
-        self.refresh_memory_monitor(session)
+        self.console.print(self.build_memory_monitor(session))
 
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""

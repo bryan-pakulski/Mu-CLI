@@ -74,7 +74,7 @@ def test_render_message_titles_include_timestamps():
     assert "User • 12:34:56" in output
     assert "Assistant (gpt-test) • 12:34:56" in output
 
-def test_refresh_memory_monitor_prints_when_live_is_inactive():
+def test_refresh_memory_monitor_is_noop_when_live_is_inactive():
     ui = RichUI()
     session = _build_session()
     printed = []
@@ -84,7 +84,23 @@ def test_refresh_memory_monitor_prints_when_live_is_inactive():
 
     ui.console.print = fake_print
 
-    ui.refresh_memory_monitor(session)
+    refreshed = ui.refresh_memory_monitor(session)
+
+    assert refreshed is False
+    assert printed == []
+
+
+def test_show_memory_monitor_prints_static_panel():
+    ui = RichUI()
+    session = _build_session()
+    printed = []
+
+    def fake_print(renderable):
+        printed.append(renderable)
+
+    ui.console.print = fake_print
+
+    ui.show_memory_monitor(session)
 
     assert len(printed) == 1
     assert printed[0] is not None

@@ -24,8 +24,8 @@ console = Console()
 
 
 def refresh_memory_hud(session, ui):
-    if ui and hasattr(ui, "show_memory_monitor"):
-        ui.show_memory_monitor(session)
+    if ui and hasattr(ui, "refresh_memory_monitor"):
+        ui.refresh_memory_monitor(session)
 
 
 def print_help():

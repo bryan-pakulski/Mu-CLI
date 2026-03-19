@@ -23,6 +23,7 @@ from utils.config import (
     validate_and_cast,
 )
 
+
 def _sanitize_for_log(data):
     """Truncates large data for logging."""
     if isinstance(data, str) and len(data) > 1000:
@@ -92,9 +93,13 @@ class SessionManager:
                     self.history = data.get("history", [])
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.provider_config = data.get("provider_config", {})
-                    self.collation_buffer = CollationBuffer.from_dict(data.get("collation_buffer", {}))
+                    self.collation_buffer = CollationBuffer.from_dict(
+                        data.get("collation_buffer", {})
+                    )
                     self.folder_context.from_dict(data.get("folder_context", {}))
-                    self.task_memory = TaskMemoryStore.from_dict(data.get("task_memory", {}))
+                    self.task_memory = TaskMemoryStore.from_dict(
+                        data.get("task_memory", {})
+                    )
                     self.token_counts = data.get(
                         "token_counts",
                         {"input": 0, "output": 0, "total": 0, "total_cost": 0.0},
@@ -143,7 +148,9 @@ class SessionManager:
         self.view_history()
 
     def new_session(self, name=None, provider_name=None, model_name=None):
-        logger.info(f"Creating new session: {name} (provider={provider_name}, model={model_name})")
+        logger.info(
+            f"Creating new session: {name} (provider={provider_name}, model={model_name})"
+        )
         self.save_history()
         if not name:
             name = f"chat_{int(time.time())}"
@@ -362,7 +369,6 @@ class Session:
         self.turn_scratchpad = self.session_manager.turn_scratchpad
         self.variables = self.session_manager.variables
 
-
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
     ) -> list[Message]:
@@ -432,20 +438,28 @@ class Session:
                 summaries.append(f"tool_result:{part.get('tool_name')} => {result}")
             elif p_type == "file":
                 fr = part.get("file_ref", {})
-                summaries.append(f"file:{fr.get('display_name', fr.get('uri', 'unknown'))}")
+                summaries.append(
+                    f"file:{fr.get('display_name', fr.get('uri', 'unknown'))}"
+                )
 
         if not summaries:
             return f"- {role}: [no serializable content]"
         return f"- {role}: " + " | ".join(summaries)
 
-    def _prepare_runtime_history(self, turn_start_index: int | None = None) -> list[dict]:
+    def _prepare_runtime_history(
+        self, turn_start_index: int | None = None
+    ) -> list[dict]:
         recent_history = self.session_manager.history[-self.active_context_window :]
         tool_window = max(0, int(self.variables.get("tool_context_window", 6)))
 
         if turn_start_index is None:
             return recent_history
 
-        start_in_recent = max(0, turn_start_index - max(0, len(self.session_manager.history) - self.active_context_window))
+        start_in_recent = max(
+            0,
+            turn_start_index
+            - max(0, len(self.session_manager.history) - self.active_context_window),
+        )
         prefix = recent_history[:start_in_recent]
         current_turn = recent_history[start_in_recent:]
 
@@ -484,7 +498,11 @@ class Session:
                 + "\n".join(summarized_lines)
             )
             compressed_turn.insert(
-                1 if compressed_turn and compressed_turn[0].get("role") == "user" else 0,
+                (
+                    1
+                    if compressed_turn and compressed_turn[0].get("role") == "user"
+                    else 0
+                ),
                 {"role": "system", "parts": [{"type": "text", "text": summary_text}]},
             )
 
@@ -560,7 +578,9 @@ class Session:
         }
 
     def _parse_list_dir(self, raw_result: str, path: str) -> dict:
-        entries = [line.strip() for line in str(raw_result).splitlines() if line.strip()]
+        entries = [
+            line.strip() for line in str(raw_result).splitlines() if line.strip()
+        ]
         return {
             "path": path or ".",
             "entry_count": len(entries),
@@ -580,7 +600,9 @@ class Session:
             "tasks": tasks[:20],
         }
 
-    def _build_structured_tool_result(self, tool_name: str, tool_args: dict, raw_result):
+    def _build_structured_tool_result(
+        self, tool_name: str, tool_args: dict, raw_result
+    ):
         raw_text = str(raw_result)
         structured = {
             "tool_name": tool_name,
@@ -612,7 +634,9 @@ class Session:
                 **self._parse_search_results(raw_text),
             }
         elif tool_name == "list_dir":
-            structured["data"] = self._parse_list_dir(raw_text, tool_args.get("path", ""))
+            structured["data"] = self._parse_list_dir(
+                raw_text, tool_args.get("path", "")
+            )
         elif tool_name == "get_workspace_details":
             structured["data"] = self._parse_workspace_details(raw_text)
         elif tool_name in {"write_file", "apply_diff"}:
@@ -799,7 +823,9 @@ class Session:
             self.variables,
         )
 
-    def _prompt_tool_choice(self, prompt_text: str, choices: list[str], default: str) -> str:
+    def _prompt_tool_choice(
+        self, prompt_text: str, choices: list[str], default: str
+    ) -> str:
         if self.ui and hasattr(self.ui, "prompt_choices"):
             return self.ui.prompt_choices(prompt_text, choices=choices, default=default)
         return default
@@ -812,16 +838,129 @@ class Session:
             )
         return False
 
+    def _request_tool_approval(
+        self,
+        *,
+        tool_name: str,
+        tool_args: dict,
+        display_args: dict,
+        count_info: str,
+        can_approve: bool,
+        modifications: list[tuple],
+    ) -> tuple[str, str | None]:
+        prompt_text = (
+            f"\n[bold yellow]Permission Required[/bold yellow] for tool: "
+            f"[cyan]{tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
+            if can_approve
+            else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{tool_name}"
+            f"[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+        )
+        choices = ["y", "n", "e"] if can_approve else ["n", "e"]
+        default = "y" if can_approve else "n"
+
+        if self.ui and hasattr(self.ui, "request_tool_approval"):
+            serialized_modifications = []
+            for original, modified, filename in modifications:
+                serialized_modifications.append(
+                    {
+                        "filename": filename,
+                        "original_content": original,
+                        "modified_content": modified,
+                    }
+                )
+            return self.ui.request_tool_approval(
+                tool_name=tool_name,
+                tool_args=tool_args,
+                display_args=display_args,
+                count_info=count_info,
+                can_approve=can_approve,
+                modifications=serialized_modifications,
+                prompt_text=prompt_text,
+                choices=choices,
+                default=default,
+            )
+
+        choice = self._prompt_tool_choice(prompt_text, choices, default)
+        reason = None
+        if choice == "e" and self.ui and hasattr(self.ui, "prompt"):
+            reason = self.ui.prompt("Provide an explanation to the model")
+        return choice, reason
+
+    def _collect_turn_response(
+        self,
+        start_index: int,
+        *,
+        status: str,
+        total_in: int,
+        total_out: int,
+        total_cost: float,
+        error: str | None = None,
+    ) -> dict:
+        history_delta = self.session_manager.history[start_index:]
+        assistant_messages = []
+        assistant_text_parts = []
+        tool_calls = []
+        tool_results = []
+
+        for message in history_delta:
+            role = message.get("role")
+            if role == "assistant":
+                assistant_messages.append(message)
+            for part in message.get("parts", []):
+                part_type = part.get("type")
+                if role == "assistant" and part_type == "text":
+                    assistant_text_parts.append(part.get("text", ""))
+                elif part_type == "tool_call":
+                    tool_calls.append(
+                        {
+                            "tool_name": part.get("tool_name"),
+                            "tool_args": part.get("tool_args", {}),
+                        }
+                    )
+                elif part_type == "tool_result":
+                    tool_results.append(
+                        {
+                            "tool_name": part.get("tool_name"),
+                            "tool_result": part.get("tool_result"),
+                        }
+                    )
+
+        return {
+            "ok": error is None and status not in {"error"},
+            "status": status,
+            "error": error,
+            "session_name": self.session_manager.current_session_name,
+            "assistant_text": "\n\n".join(
+                [text for text in assistant_text_parts if str(text).strip()]
+            ),
+            "assistant_messages": assistant_messages,
+            "tool_calls": tool_calls,
+            "tool_results": tool_results,
+            "history_delta": history_delta,
+            "tokens": {
+                "input": total_in,
+                "output": total_out,
+                "total": total_in + total_out,
+                "estimated_cost": total_cost,
+            },
+            "session_totals": dict(self.session_manager.token_counts),
+        }
+
     def send_message(self, text):
         logger.info(f"Sending message: {text[:100]}...")
         self.sync_runtime_state()
         if self.variables.get("scratchpad_enabled", True):
             self.turn_scratchpad.max_entries = max(
-                1, int(self.variables.get("scratchpad_max_entries", self.turn_scratchpad.max_entries))
+                1,
+                int(
+                    self.variables.get(
+                        "scratchpad_max_entries", self.turn_scratchpad.max_entries
+                    )
+                ),
             )
             self.turn_scratchpad.clear()
         self._auto_promoted_this_turn = 0
-        
+
         parts = list(self.staged_files)
         if text:
             parts.append({"type": "text", "text": text})
@@ -847,7 +986,9 @@ class Session:
                 map_str = self.folder_context.get_tree_map()
                 workspace_context = f"<workspace_map>\n{map_str}\n</workspace_map>\n\n{AGENTIC_SYSTEM_BASE.format(tool_descriptions=tool_desc_str)}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
             else:
-                logger.debug(f"Using agent_mode={self.variables.get('agent_mode', 'default')}")
+                logger.debug(
+                    f"Using agent_mode={self.variables.get('agent_mode', 'default')}"
+                )
 
                 if self.ui:
                     with self.ui.show_status(
@@ -866,6 +1007,7 @@ class Session:
         recent_history = self.session_manager.history[-self.active_context_window :]
         messages = self._build_messages_from_history(recent_history, new_user_message)
 
+        initial_history_len = len(self.session_manager.history)
         self.session_manager.history.append(new_user_message)
         self.session_manager.save_history()
         self.staged_files = []
@@ -889,7 +1031,12 @@ class Session:
                 dynamic_system_prompt = base_system_prompt
                 if self.variables.get("memory_enabled", True):
                     self.task_memory.max_entries = max(
-                        1, int(self.variables.get("memory_max_entries", self.task_memory.max_entries))
+                        1,
+                        int(
+                            self.variables.get(
+                                "memory_max_entries", self.task_memory.max_entries
+                            )
+                        ),
                     )
                     memory_summary = self.task_memory.render_summary(
                         limit=int(self.variables.get("memory_summary_limit", 8))
@@ -930,7 +1077,9 @@ class Session:
                         ),
                     )
 
-                logger.debug(f"Provider response received. Tokens: In {response.input_tokens}, Out {response.output_tokens}")
+                logger.debug(
+                    f"Provider response received. Tokens: In {response.input_tokens}, Out {response.output_tokens}"
+                )
 
                 ai_parts_archive = []
                 has_tool_call = False
@@ -969,7 +1118,9 @@ class Session:
                             self.ui.show_info(
                                 f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                             )
-                        logger.info(f"Tool call: {part.tool_name} with args {part.tool_args}")
+                        logger.info(
+                            f"Tool call: {part.tool_name} with args {part.tool_args}"
+                        )
 
                 if ai_parts_archive:
                     self.session_manager.history.append(
@@ -1040,7 +1191,13 @@ class Session:
                         logger.debug("History compacted.")
 
                     self.session_manager.save_history(self.folder_context)
-                    break
+                    return self._collect_turn_response(
+                        initial_history_len,
+                        status="completed",
+                        total_in=total_in,
+                        total_out=total_out,
+                        total_cost=total_cost,
+                    )
 
                 strict_mode = self.variables.get("strict_mode", False)
                 tool_result_parts = []
@@ -1109,7 +1266,9 @@ class Session:
                                     f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
                                 )
                             result = f"Error: Malformed patch detected. Please ensure your diff is correctly formatted. Check hunk headers and context.\n{error_msg}"
-                            logger.warning(f"Malformed patch detected for {part.tool_name}: {error_msg}")
+                            logger.warning(
+                                f"Malformed patch detected for {part.tool_name}: {error_msg}"
+                            )
                             # Fall through to skip Prompt.ask since result is now set
 
                         # Show diffs if not already shown in bulk pre-calculation
@@ -1135,22 +1294,24 @@ class Session:
                         )
 
                         if result is None:
-                            choice = self._prompt_tool_choice(
-                                (
-                                    f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
-                                    if can_approve
-                                    else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
-                                ),
-                                ["y", "n", "e"] if can_approve else ["n", "e"],
-                                "y" if can_approve else "n",
+                            choice, reason = self._request_tool_approval(
+                                tool_name=part.tool_name,
+                                tool_args=part.tool_args,
+                                display_args=display_args,
+                                count_info=count_info,
+                                can_approve=can_approve,
+                                modifications=mods,
                             )
                             if choice == "n":
                                 result = "User denied this tool call."
-                                logger.info(f"Tool call {part.tool_name} denied by user.")
+                                logger.info(
+                                    f"Tool call {part.tool_name} denied by user."
+                                )
                             elif choice == "e":
-                                reason = self.ui.prompt("Provide an explanation to the model")
                                 result = f"User denied this tool call. Reason: {reason}"
-                                logger.info(f"Tool call {part.tool_name} denied by user with explanation: {reason}")
+                                logger.info(
+                                    f"Tool call {part.tool_name} denied by user with explanation: {reason}"
+                                )
                             else:
                                 result = self._execute_tool_with_memory(
                                     part.tool_name,
@@ -1164,12 +1325,13 @@ class Session:
 
                     source_result = result
                     raw_result = source_result
-                    logger.debug(f"Tool result ({part.tool_name}): {_sanitize_for_log(raw_result)}")
-
+                    logger.debug(
+                        f"Tool result ({part.tool_name}): {_sanitize_for_log(raw_result)}"
+                    )
                     # --- Collation Logic ---
                     is_flush = part.tool_name == "flush"
                     should_collate = (
-                        part.tool_name in COLLATED_TOOLS 
+                        part.tool_name in COLLATED_TOOLS
                         and self.variables.get("collation_enabled", True)
                     )
 
@@ -1178,13 +1340,19 @@ class Session:
                         if not collated_data:
                             raw_result = "No data in collation buffer to flush."
                         else:
-                            raw_result = "--- Flushed Context ---\n" + "\n\n".join(collated_data)
+                            raw_result = "--- Flushed Context ---\n" + "\n\n".join(
+                                collated_data
+                            )
                         if self.ui:
-                            self.ui.show_info(f"  [Flushed {len(collated_data)} items from buffer]")
+                            self.ui.show_info(
+                                f"  [Flushed {len(collated_data)} items from buffer]"
+                            )
                     elif should_collate:
                         # Don't collate if there was an error
                         if raw_result and not str(raw_result).startswith("Error"):
-                            self.collation_buffer.add(part.tool_name, part.tool_args, raw_result)
+                            self.collation_buffer.add(
+                                part.tool_name, part.tool_args, raw_result
+                            )
                             count = len(self.collation_buffer.entries)
                             raw_result = (
                                 f"Stored '{part.tool_name}' result in collation buffer. "
@@ -1196,10 +1364,22 @@ class Session:
                         else:
                             # If it's an error, don't collate it, let the model see the error immediately
                             if self.ui:
-                                self.ui.show_tool_result(self._render_tool_result(raw_result))
+                                self.ui.show_tool_result(
+                                    self._render_tool_result(raw_result)
+                                )
                     else:
                         if self.ui:
-                            self.ui.show_tool_result(self._render_tool_result(raw_result))
+                            self.ui.show_tool_result(
+                                self._render_tool_result(raw_result)
+                            )
+
+                    if self.ui and hasattr(self.ui, "emit_tool_trace"):
+                        self.ui.emit_tool_trace(
+                            part.tool_name,
+                            part.tool_args,
+                            source_result,
+                            raw_result,
+                        )
 
                     # --- End Collation Logic ---
                     if self.variables.get("structured_tool_results", True):
@@ -1234,7 +1414,9 @@ class Session:
                         promotions = self._maybe_auto_promote_memory(promotion_result)
                         if promotions:
                             promo_text = "; ".join(promotions)
-                            result["summary"] = f"{result.get('summary', '')} [{promo_text}]".strip()
+                            result["summary"] = (
+                                f"{result.get('summary', '')} [{promo_text}]".strip()
+                            )
                     else:
                         result = raw_result
 
@@ -1273,7 +1455,14 @@ class Session:
                     }
                 )
                 self.session_manager.save_history(self.folder_context)
-                break
+                return self._collect_turn_response(
+                    initial_history_len,
+                    status="interrupted",
+                    total_in=total_in,
+                    total_out=total_out,
+                    total_cost=total_cost,
+                    error="User interrupted execution.",
+                )
             except Exception as e:
                 if self.ui:
                     self.ui.show_error(f"API Error during agentic loop: {e}")
@@ -1285,4 +1474,24 @@ class Session:
                     continue
 
                 self.session_manager.save_history(self.folder_context)
-                break
+                return self._collect_turn_response(
+                    initial_history_len,
+                    status="error",
+                    total_in=total_in,
+                    total_out=total_out,
+                    total_cost=total_cost,
+                    error=str(e),
+                )
+
+        self.session_manager.save_history(self.folder_context)
+        return self._collect_turn_response(
+            initial_history_len,
+            status="max_iterations_reached",
+            total_in=total_in,
+            total_out=total_out,
+            total_cost=total_cost,
+            error=(
+                f"Reached maximum iterations ({max_iterations}) without a final "
+                "assistant response."
+            ),
+        )

@@ -1,5 +1,6 @@
 # Google Gemini implementation
 import os
+import json
 from google import genai
 from google.genai import types
 from .base import (
@@ -83,10 +84,13 @@ class GeminiProvider(LLMProvider):
                     gemini_parts.append(fc_part)
 
                 elif part.type == "tool_result":
+                    tool_result = part.tool_result
+                    if isinstance(tool_result, (dict, list)):
+                        tool_result = json.dumps(tool_result, indent=2, sort_keys=True)
                     # Build FunctionResponse dynamically - NO thought_signature field here!
                     fresp_dict = {
                         "name": part.tool_name,
-                        "response": {"result": str(part.tool_result)},
+                        "response": {"result": str(tool_result)},
                     }
 
                     function_response_obj = types.FunctionResponse(**fresp_dict)

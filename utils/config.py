@@ -58,6 +58,42 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "/flush",
     },
+    "memory_enabled": {
+        "type": bool,
+        "default": True,
+    },
+    "memory_max_entries": {
+        "type": int,
+        "default": 64,
+    },
+    "memory_summary_limit": {
+        "type": int,
+        "default": 8,
+    },
+    "scratchpad_enabled": {
+        "type": bool,
+        "default": True,
+    },
+    "scratchpad_max_entries": {
+        "type": int,
+        "default": 24,
+    },
+    "tool_context_window": {
+        "type": int,
+        "default": 6,
+    },
+    "auto_promote_memory": {
+        "type": bool,
+        "default": True,
+    },
+    "auto_promote_max_per_turn": {
+        "type": int,
+        "default": 8,
+    },
+    "structured_tool_results": {
+        "type": bool,
+        "default": True,
+    },
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}
@@ -135,6 +171,10 @@ GENERAL RULES:
    This saves context and makes your processing more efficient.
    Gather everything you think you'll need first in a "context collection" stage, then flush once to process it all.
    Collect at MOST 10 turns of context before flushing and performing actions against the knowledge collected.
+7. Use the scratchpad tools for turn-local notes, temporary observations, and short plans that only matter during the current task loop.
+8. Use the task memory tools for durable facts, decisions, file locations, and verified findings worth keeping across later turns.
+   Keep memories concise and high-value. Retrieve memory before repeating tool work.
+9. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
 """
 
 AGENTIC_MODES = {

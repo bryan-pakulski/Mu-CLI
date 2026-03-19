@@ -45,7 +45,7 @@ Run the tool using:
 python mucli.py
 ```
 
-The interactive shell now opens in a Textual interface with a scrollable transcript, an activity sidebar for command output/tool events, copy controls on code blocks, and a persistent input bar. Press `Ctrl+B` to toggle the sidebar.
+The interactive shell now opens in a Textual interface with a scrollable transcript, an activity sidebar for command output/tool events, keyboard-navigable provider/model selection popups, copy controls on code blocks, and a persistent input bar. Press `Ctrl+B` to toggle the sidebar.
 
 ### Getting Started
 1. **Select a Provider**: Choose between Gemini, OpenAI, or Ollama.

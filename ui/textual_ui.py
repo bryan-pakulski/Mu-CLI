@@ -13,10 +13,65 @@ from rich.table import Table
 from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
+from textual.screen import ModalScreen
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, RichLog, Static, TextArea
+from textual.widgets import Button, Footer, Header, Input, OptionList, RichLog, Static, TextArea
 
 from .render import build_plain_text, build_response_segments
+
+
+
+
+class ChoiceModal(ModalScreen[str]):
+    CSS = """
+    ChoiceModal {
+        align: center middle;
+    }
+
+    #choice-dialog {
+        width: 60;
+        height: auto;
+        max-height: 22;
+        border: round $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #choice-title {
+        padding-bottom: 1;
+    }
+
+    #choice-options {
+        height: 12;
+        scrollbar-size-vertical: 1;
+    }
+    """
+
+    BINDINGS = [("escape", "dismiss_default", "Cancel")]
+
+    def __init__(self, title: str, options: list[str], default: str | None = None):
+        super().__init__()
+        self.title = title
+        self.options = options
+        self.default = default if default in options else (options[0] if options else None)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="choice-dialog"):
+            yield Static(self.title, id="choice-title")
+            yield OptionList(*self.options, id="choice-options")
+
+    def on_mount(self) -> None:
+        option_list = self.query_one(OptionList)
+        if self.default in self.options:
+            option_list.highlighted = self.options.index(self.default)
+        option_list.focus()
+
+    @on(OptionList.OptionSelected)
+    def option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.prompt))
+
+    def action_dismiss_default(self) -> None:
+        self.dismiss(self.default or "")
 
 
 class RenderableBlock(Static):
@@ -229,6 +284,14 @@ class TextualUI:
 
     def set_submission_callback(self, callback: Callable[[str], bool | None]):
         self._submission_callback = callback
+
+    def set_busy(self, busy: bool, status: str | None = None):
+        self._busy = busy
+        if status:
+            if self.app.is_running:
+                self.app.call_from_thread(self.app.update_status, status)
+            else:
+                self._pending_activity.append(build_plain_text(status))
 
     def run(self):
         self.app.run()
@@ -537,12 +600,15 @@ class TextualUI:
         return value.lower() in {"y", "yes"}
 
     def prompt_choices(self, message, choices, default=None):
-        valid = set(choices)
-        return self._request_prompt(
-            f"{message} Choices: {', '.join(choices)}",
-            validator=lambda v: (not v.strip() and default is not None) or v in valid,
-            default=default,
-        )
+        options = [str(choice) for choice in choices]
+        if not options:
+            return default
+        if self.app.is_running:
+            return self.app.call_from_thread(
+                self.app.push_screen_wait,
+                ChoiceModal(message, options, default=default),
+            )
+        return default if default in options else options[0]
 
     def prompt(self, message, default=None):
         return self._request_prompt(message, default=default)

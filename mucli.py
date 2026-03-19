@@ -3,6 +3,8 @@
 import argparse
 import os
 import sys
+import time
+from threading import Thread
 
 from rich import box
 from rich.console import Console
@@ -674,37 +676,53 @@ def main():
 
     try:
         action, session_name = choose_session(session_manager)
-        if action == "load":
-            session_manager.switch_session(session_name)
-            p_cfg = session_manager.provider_config
-            if p_cfg.get("provider") and p_cfg.get("model"):
-                provider = init_provider(p_cfg["provider"], p_cfg["model"], ollama_host=ollama_host)
-            else:
-                provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
-                session_manager.provider_config = {
-                    "provider": provider.name,
-                    "model": provider.model_name,
-                }
-                session_manager.save_history()
-        else:
-            provider = select_provider_and_model(args.provider, args.model, ollama_host=ollama_host)
-            session_manager.new_session(session_name, provider.name, provider.model_name)
     except Exception as exc:
-        console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
+        console.print(f"[red]Failed to initialize session selection: {exc}[/red]")
         sys.exit(1)
 
-    session = Session(
-        provider=provider,
-        thinking=False,
-        system_instruction=args.system,
-        session_manager=session_manager,
-        ui=ui,
-        debug=args.debug,
-    )
+    ui.set_busy(True, "Initializing session...")
 
-    ui.set_submission_callback(lambda user_input: handle_user_input(session, ui, user_input, args))
-    show_splash(session, ui)
-    refresh_memory_hud(session, ui)
+    def bootstrap_session():
+        while not ui.app.is_running:
+            time.sleep(0.05)
+
+        try:
+            ollama_host = session_manager.variables.get("ollama_host")
+            if action == "load":
+                session_manager.switch_session(session_name)
+                p_cfg = session_manager.provider_config
+                if p_cfg.get("provider") and p_cfg.get("model"):
+                    provider = init_provider(p_cfg["provider"], p_cfg["model"], ollama_host=ollama_host)
+                else:
+                    provider = select_provider_and_model_ui(ui, args.provider, args.model, ollama_host=ollama_host)
+                    session_manager.provider_config = {
+                        "provider": provider.name,
+                        "model": provider.model_name,
+                    }
+                    session_manager.save_history()
+            else:
+                provider = select_provider_and_model_ui(ui, args.provider, args.model, ollama_host=ollama_host)
+                session_manager.new_session(session_name, provider.name, provider.model_name)
+
+            session = Session(
+                provider=provider,
+                thinking=False,
+                system_instruction=args.system,
+                session_manager=session_manager,
+                ui=ui,
+                debug=args.debug,
+            )
+
+            ui.set_variables(session.variables)
+            ui.set_submission_callback(lambda user_input: handle_user_input(session, ui, user_input, args))
+            show_splash(session, ui)
+            refresh_memory_hud(session, ui)
+            ui.set_busy(False, "Ready.")
+        except Exception as exc:
+            ui.show_error(f"Failed to initialize Session/Provider: {exc}")
+            ui.exit()
+
+    Thread(target=bootstrap_session, daemon=True).start()
     ui.run()
 
 

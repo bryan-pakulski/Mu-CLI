@@ -32,7 +32,7 @@ def build_help_table():
     table.add_column("Alias", style="magenta")
     table.add_column("Description", style="white")
 
-    table.add_row("/clear", "", "Clear conversation history")
+    table.add_row("/clear", "", "Clear conversation history, memory, and queued context")
     table.add_row("/new [name]", "", "Start a new conversation")
     table.add_row("/file <path>", "/f", "Attach a file")
     table.add_row(

@@ -8,14 +8,13 @@ from typing import Callable
 from rich import box
 from rich.align import Align
 from rich.console import Group
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, RichLog, Static
+from textual.widgets import Button, Footer, Header, Input, RichLog, Static, TextArea
 
 from .render import build_plain_text, build_response_segments
 
@@ -26,17 +25,27 @@ class RenderableBlock(Static):
 
 
 class CopyableCodeBlock(Vertical):
-    def __init__(self, content: str, renderable, *, title: str | None = None):
+    def __init__(self, content: str, *, language: str | None = None, title: str | None = None):
         super().__init__(classes="code-block")
         self.content = content
-        self.renderable = renderable
+        self.language = language or "text"
         self.title = title or "Code"
 
     def compose(self) -> ComposeResult:
+        line_count = max(1, self.content.count("\n") + 1)
+        editor = TextArea.code_editor(
+            self.content,
+            language=self.language,
+            read_only=True,
+            show_cursor=False,
+            id="code-editor",
+            classes="code-render",
+        )
+        editor.styles.height = min(max(line_count + 2, 4), 18)
         with Horizontal(classes="code-toolbar"):
             yield Static(self.title, classes="code-title")
             yield Button("Copy", variant="primary", classes="copy-button")
-        yield Static(self.renderable, classes="code-render")
+        yield editor
 
     @on(Button.Pressed)
     def copy_pressed(self) -> None:
@@ -124,6 +133,13 @@ class MuTextualApp(App):
 
     .code-render {
         height: auto;
+        scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 1;
+    }
+
+    #transcript-pane, #activity, #sidebar {
+        scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 1;
     }
     """
 
@@ -183,9 +199,9 @@ class MuTextualApp(App):
         container.mount(RenderableBlock(renderable, classes="transcript-block"))
         container.scroll_end(animate=False)
 
-    def write_transcript_code(self, content: str, renderable, title: str | None = None) -> None:
+    def write_transcript_code(self, content: str, language: str | None = None, title: str | None = None) -> None:
         container = self.query_one("#transcript-pane", VerticalScroll)
-        container.mount(CopyableCodeBlock(content, renderable, title=title))
+        container.mount(CopyableCodeBlock(content, language=language, title=title))
         container.scroll_end(animate=False)
 
     def write_activity(self, renderable) -> None:
@@ -267,11 +283,11 @@ class TextualUI:
         else:
             self._pending_transcript.append(("renderable", (renderable,)))
 
-    def _enqueue_transcript_code(self, content: str, renderable, title: str | None = None):
+    def _enqueue_transcript_code(self, content: str, language: str | None = None, title: str | None = None):
         if self.app.is_running:
-            self.app.call_from_thread(self.app.write_transcript_code, content, renderable, title)
+            self.app.call_from_thread(self.app.write_transcript_code, content, language, title)
         else:
-            self._pending_transcript.append(("code", (content, renderable, title)))
+            self._pending_transcript.append(("code", (content, language, title)))
 
     def flush_pending(self):
         for kind, args in self._pending_transcript:
@@ -311,7 +327,7 @@ class TextualUI:
             if segment.kind == "code":
                 self._enqueue_transcript_code(
                     segment.content or "",
-                    segment.renderable,
+                    segment.lang,
                     segment.title,
                 )
             else:

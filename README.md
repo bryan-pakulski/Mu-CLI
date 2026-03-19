@@ -74,7 +74,7 @@ The interactive shell now opens in a Textual interface with a scrollable transcr
 | `/flush` | | Flush the collation buffer into the next model turn |
 | `/tokens` | | Show current context token usage and estimated cost |
 | `/view` | `/v` | View full conversation history |
-| `/clear` | `/c` | Clear conversation history |
+| `/clear` | `/c` | Clear conversation history, memory, scratchpad, and queued context |
 | `/clearfiles` | `/cf` | Clear all staged files |
 | `/system <txt>` | `/sys` | Update or view the system prompt |
 | `/thinking` | | Toggle thinking/reasoning mode (for supported models) |

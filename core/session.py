@@ -204,10 +204,14 @@ class SessionManager:
     def clear_current_history(self):
         logger.info(f"Clearing history for session: {self.current_session_name}")
         self.history = []
+        self.summary_anchor = 0
+        self.collation_buffer.flush()
+        self.task_memory.clear()
+        self.turn_scratchpad.clear()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.save_history()
         if self.ui:
-            self.ui.show_info("Current chat history cleared.")
+            self.ui.show_info("Current chat history, memory, scratchpad, and queued context cleared.")
 
     def view_history(self):
         if not self.history:

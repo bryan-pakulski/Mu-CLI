@@ -290,3 +290,22 @@ def test_send_message_resets_scratchpad_each_turn():
     session.send_message("hello")
 
     assert session.turn_scratchpad.list_entries() == []
+
+
+def test_clear_current_history_resets_memory_and_collation():
+    sm = SessionManager()
+    sm.history = [{"role": "user", "parts": [{"type": "text", "text": "hello"}]}]
+    sm.summary_anchor = 2
+    sm.collation_buffer.add("read_file", {"filename": "a.py"}, "content")
+    sm.task_memory.save("persistent fact", tags=["fact"], source="test")
+    sm.turn_scratchpad.save("temporary note", tags=["note"], source="test")
+    sm.token_counts = {"input": 1, "output": 2, "total": 3, "total_cost": 0.5}
+
+    sm.clear_current_history()
+
+    assert sm.history == []
+    assert sm.summary_anchor == 0
+    assert sm.collation_buffer.entries == []
+    assert sm.task_memory.entries == []
+    assert sm.turn_scratchpad.entries == []
+    assert sm.token_counts == {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}

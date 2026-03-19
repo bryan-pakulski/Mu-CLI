@@ -1,5 +1,6 @@
 google-genai
 rich
+textual
 prompt-toolkit
 Pillow
 pytest

@@ -1,6 +1,6 @@
 # μCLI (Mu-CLI)
 
-μCLI is an interactive, autonomous AI terminal interface designed for software development. It enables seamless collaboration with Large Language Models (LLMs) directly within your terminal, providing them with the ability to "see" and "interact" with your local codebase.
+μCLI is an interactive, autonomous AI terminal interface designed for software development, now rebuilt around a Textual TUI for reliable resizing, scrolling, and command rendering. It enables seamless collaboration with Large Language Models (LLMs) directly within your terminal, providing them with the ability to "see" and "interact" with your local codebase.
 
 ## Features
 
@@ -11,7 +11,8 @@
 - **Smart Context Management**: Automatic history truncation and summarization to stay within model context limits while keeping costs down.
 - **In-Task Memory Engine**: Agent mode can store and recall concise facts so it does not need to replay large tool outputs.
 - **Turn Scratchpads**: Agent mode can keep temporary notes for the active task loop without polluting durable memory.
-- **Live Memory HUD**: A compact right-aligned terminal widget visualizes context, durable memory, scratchpad usage, and the collation queue as they fill up over time.
+- **Textual Terminal UI**: Scrollable transcript and activity panels, responsive resizing, and in-app command output built with Textual.
+- **Live Memory HUD**: A compact sidebar widget visualizes context, durable memory, scratchpad usage, and the collation queue as they fill up over time.
 - **Customizable Strategies**: Specialized agent modes for Debugging, Feature Implementation, and Research.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 
@@ -43,6 +44,8 @@ Run the tool using:
 ```bash
 python mucli.py
 ```
+
+The interactive shell now opens in a Textual interface with a scrollable transcript, an activity sidebar for command output/tool events, and a persistent input bar.
 
 ### Getting Started
 1. **Select a Provider**: Choose between Gemini, OpenAI, or Ollama.

@@ -298,16 +298,13 @@ class Session:
         self.ui = ui
         self.debug = debug
         self.variables = session_manager.variables
-        self.collation_buffer = session_manager.collation_buffer
-        self.task_memory = session_manager.task_memory
-        self.turn_scratchpad = session_manager.turn_scratchpad
         self.agentic = True
         self.active_context_window = 150
         self.staged_files = []  # list of dicts
         self.disabled_tools = []  # list of tool names strings
         self._auto_promoted_this_turn = 0
 
-        self.folder_context = session_manager.folder_context
+        self.sync_runtime_state()
         if self.folder_context.folders:
             if self.ui:
                 self.ui.show_info(
@@ -358,6 +355,14 @@ class Session:
         if self.ui:
             self.ui.show_info("Staged files cleared.")
 
+    def sync_runtime_state(self):
+        self.folder_context = self.session_manager.folder_context
+        self.collation_buffer = self.session_manager.collation_buffer
+        self.task_memory = self.session_manager.task_memory
+        self.turn_scratchpad = self.session_manager.turn_scratchpad
+        self.variables = self.session_manager.variables
+
+
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
     ) -> list[Message]:
@@ -395,6 +400,12 @@ class Session:
                     )
             messages.append(Message(role=msg_dict["role"], parts=parts))
         return messages
+
+    def _message_has_thought_signature(self, msg_dict: dict) -> bool:
+        for part in msg_dict.get("parts", []):
+            if part.get("thought_signature"):
+                return True
+        return False
 
     def _summarize_message_parts(self, msg_dict: dict) -> str:
         role = msg_dict.get("role", "message")
@@ -444,18 +455,27 @@ class Session:
         if len(tool_messages) <= tool_window:
             return recent_history
 
-        keep_start = len(tool_messages) - tool_window
-        kept_tool_count = 0
+        compressible_tool_messages = [
+            msg for msg in tool_messages if not self._message_has_thought_signature(msg)
+        ]
+        if len(compressible_tool_messages) <= tool_window:
+            return recent_history
+
+        keep_start = len(compressible_tool_messages) - tool_window
+        compressed_tool_count = 0
         summarized_lines = []
         compressed_turn = []
 
         for msg in current_turn:
             if msg.get("role") in {"assistant", "tool"}:
-                if kept_tool_count < keep_start:
-                    summarized_lines.append(self._summarize_message_parts(msg))
-                    kept_tool_count += 1
+                if self._message_has_thought_signature(msg):
+                    compressed_turn.append(msg)
                     continue
-                kept_tool_count += 1
+                if compressed_tool_count < keep_start:
+                    summarized_lines.append(self._summarize_message_parts(msg))
+                    compressed_tool_count += 1
+                    continue
+                compressed_tool_count += 1
             compressed_turn.append(msg)
 
         if summarized_lines:
@@ -794,6 +814,7 @@ class Session:
 
     def send_message(self, text):
         logger.info(f"Sending message: {text[:100]}...")
+        self.sync_runtime_state()
         if self.variables.get("scratchpad_enabled", True):
             self.turn_scratchpad.max_entries = max(
                 1, int(self.variables.get("scratchpad_max_entries", self.turn_scratchpad.max_entries))
@@ -1182,14 +1203,35 @@ class Session:
 
                     # --- End Collation Logic ---
                     if self.variables.get("structured_tool_results", True):
-                        result = self._build_structured_tool_result(
-                            part.tool_name,
-                            part.tool_args,
-                            source_result,
-                        )
+                        promotion_result = None
                         if raw_result != source_result:
-                            result["summary"] = self._clip_preview(raw_result, 220)
-                        promotions = self._maybe_auto_promote_memory(result)
+                            source_text = str(source_result)
+                            result = {
+                                "tool_name": part.tool_name,
+                                "ok": not source_text.startswith("Error"),
+                                "summary": self._clip_preview(raw_result, 220),
+                                "args": _shorten_tool_args(part.tool_args),
+                                "raw": str(raw_result),
+                                "data": {
+                                    "collated": True,
+                                    "pending_items": len(self.collation_buffer.entries),
+                                    "source_char_count": len(source_text),
+                                    "source_line_count": len(source_text.splitlines()),
+                                },
+                            }
+                            promotion_result = self._build_structured_tool_result(
+                                part.tool_name,
+                                part.tool_args,
+                                source_result,
+                            )
+                        else:
+                            result = self._build_structured_tool_result(
+                                part.tool_name,
+                                part.tool_args,
+                                source_result,
+                            )
+                            promotion_result = result
+                        promotions = self._maybe_auto_promote_memory(promotion_result)
                         if promotions:
                             promo_text = "; ".join(promotions)
                             result["summary"] = f"{result.get('summary', '')} [{promo_text}]".strip()

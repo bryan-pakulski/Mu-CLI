@@ -11,9 +11,10 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual._tree_sitter import TREE_SITTER, get_language
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Header, Input, OptionList, RichLog, Static, TextArea
@@ -324,10 +325,10 @@ class MuTextualApp(App):
     """
 
     BINDINGS = [
-        ("ctrl+c", "quit", "Quit"),
-        ("ctrl+l", "clear_input", "Clear input"),
-        ("ctrl+b", "toggle_sidebar", "Toggle sidebar"),
-        ("ctrl+k", "command_palette", "Command palette"),
+        Binding("ctrl+c", "quit", "Quit"),
+        Binding("ctrl+l", "clear_input", "Clear input"),
+        Binding("ctrl+b", "toggle_sidebar", "Toggle sidebar"),
+        Binding("ctrl+k", "command_palette", "Command palette", priority=True),
     ]
 
     def __init__(self, ui: "TextualUI"):
@@ -363,6 +364,7 @@ class MuTextualApp(App):
             self.add_class("sidebar-hidden")
             self.update_status("Sidebar hidden. Press Ctrl+B to restore it.")
 
+    @work(exclusive=True)
     async def action_command_palette(self) -> None:
         command = await self.push_screen_wait(CommandPaletteModal())
         if not command:

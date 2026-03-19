@@ -9,12 +9,13 @@ from rich.panel import Panel
 console = Console()
 
 
-def render_response(text):
+def render_response(text, console_override=None):
     """
     Renders text using Rich.
     """
     if not text.strip():
         return
+    target_console = console_override or console
     pattern = r"(```(?:[\w\+\-\.]+)?\s*\n.*?```|<file_change\s+path='[^']+'>.*?</file_change>|<file_content\s+path='[^']+'>.*?</file_content>|<new_file\s+path='[^']+'>.*?</new_file>)"
     parts = re.split(pattern, text, flags=re.DOTALL)
 
@@ -28,8 +29,8 @@ def render_response(text):
             )
 
         if title:
-            console.print(f"[bold cyan]### {title}[/bold cyan]")
-        console.print(
+            target_console.print(f"[bold cyan]### {title}[/bold cyan]")
+        target_console.print(
             f" [bold cyan]┌── {lang} ─────────────────────────────────[/bold cyan]"
         )
         syntax = Syntax(
@@ -40,8 +41,8 @@ def render_response(text):
             word_wrap=False,
             padding=0,
         )
-        console.print(syntax)
-        console.print(
+        target_console.print(syntax)
+        target_console.print(
             " [bold cyan]└────────────────────────────────────────────[/bold cyan]"
         )
 
@@ -70,5 +71,5 @@ def render_response(text):
                 title = f"{tag.replace('_', ' ').upper()}: {path}"
                 print_code_panel(content.strip(), lang, title)
         else:
-            console.print(Markdown(part.strip()))
-            console.print("")
+            target_console.print(Markdown(part.strip()))
+            target_console.print("")

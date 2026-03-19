@@ -58,3 +58,73 @@ def test_memory_monitor_renders_context_memory_and_queue_labels():
     assert "queue 2 items" in output
     assert "mode" in output
     assert "feature" in output
+
+
+def test_refresh_memory_monitor_prints_when_live_is_inactive():
+    ui = RichUI()
+    session = _build_session()
+    printed = []
+
+    def fake_print(renderable):
+        printed.append(renderable)
+
+    ui.console.print = fake_print
+
+    ui.refresh_memory_monitor(session)
+
+    assert len(printed) == 1
+    assert printed[0] is not None
+
+
+def test_live_memory_monitor_updates_in_place(monkeypatch):
+    events = []
+
+    class FakePause:
+        def __enter__(self):
+            events.append("pause_enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            events.append("pause_exit")
+
+    class FakeLive:
+        def __init__(self, renderable, console, refresh_per_second, auto_refresh, vertical_overflow, transient):
+            self.renderable = renderable
+            self.console = console
+            self.refresh_per_second = refresh_per_second
+            self.auto_refresh = auto_refresh
+            self.vertical_overflow = vertical_overflow
+            self.transient = transient
+
+        def start(self):
+            events.append("start")
+
+        def refresh(self):
+            events.append("refresh")
+
+        def update(self, renderable, refresh):
+            self.renderable = renderable
+            events.append(("update", refresh))
+
+        def stop(self):
+            events.append("stop")
+
+        def pause(self):
+            return FakePause()
+
+    monkeypatch.setattr("ui.rich_ui.Live", FakeLive)
+
+    ui = RichUI()
+    session = _build_session()
+
+    with ui.live_memory_monitor(session):
+        assert ui._memory_hud_live is not None
+        ui.refresh_memory_monitor(session)
+        with ui.show_status("Working..."):
+            events.append("status")
+
+    assert events[0:2] == ["start", "refresh"]
+    assert ("update", True) in events
+    assert "pause_enter" in events
+    assert "pause_exit" in events
+    assert events[-1] == "stop"
+    assert ui._memory_hud_live is None

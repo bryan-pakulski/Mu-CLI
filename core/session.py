@@ -821,7 +821,9 @@ class Session:
             )
             self.turn_scratchpad.clear()
         self._auto_promoted_this_turn = 0
-        
+        if self.ui and hasattr(self.ui, "refresh_memory_monitor"):
+            self.ui.refresh_memory_monitor(self)
+
         parts = list(self.staged_files)
         if text:
             parts.append({"type": "text", "text": text})
@@ -881,33 +883,54 @@ class Session:
 
         logger.info(f"Starting agentic loop (max_iterations={max_iterations})")
 
-        while iteration < max_iterations:
-            iteration += 1
-            logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
+        live_hud = (
+            self.ui.live_memory_monitor(self)
+            if self.ui and hasattr(self.ui, "live_memory_monitor")
+            else nullcontext()
+        )
 
-            try:
-                dynamic_system_prompt = base_system_prompt
-                if self.variables.get("memory_enabled", True):
-                    self.task_memory.max_entries = max(
-                        1, int(self.variables.get("memory_max_entries", self.task_memory.max_entries))
-                    )
-                    memory_summary = self.task_memory.render_summary(
-                        limit=int(self.variables.get("memory_summary_limit", 8))
-                    )
-                    if memory_summary:
-                        dynamic_system_prompt += (
-                            "\n\nPersisted working memory is available below. Prefer using it before"
-                            " re-reading large tool outputs.\n"
-                            f"{memory_summary}"
+        with live_hud:
+            if self.ui and hasattr(self.ui, "refresh_memory_monitor"):
+                self.ui.refresh_memory_monitor(self)
+
+            while iteration < max_iterations:
+                iteration += 1
+                logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
+    
+                try:
+                    dynamic_system_prompt = base_system_prompt
+                    if self.variables.get("memory_enabled", True):
+                        self.task_memory.max_entries = max(
+                            1, int(self.variables.get("memory_max_entries", self.task_memory.max_entries))
                         )
-                if self.variables.get("scratchpad_enabled", True):
-                    scratchpad_summary = self.turn_scratchpad.render_summary(limit=8)
-                    if scratchpad_summary:
-                        dynamic_system_prompt += f"\n\n{scratchpad_summary}"
-
-                status_msg = f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}..."
-                if self.ui:
-                    with self.ui.show_status(status_msg):
+                        memory_summary = self.task_memory.render_summary(
+                            limit=int(self.variables.get("memory_summary_limit", 8))
+                        )
+                        if memory_summary:
+                            dynamic_system_prompt += (
+                                "\n\nPersisted working memory is available below. Prefer using it before"
+                                " re-reading large tool outputs.\n"
+                                f"{memory_summary}"
+                            )
+                    if self.variables.get("scratchpad_enabled", True):
+                        scratchpad_summary = self.turn_scratchpad.render_summary(limit=8)
+                        if scratchpad_summary:
+                            dynamic_system_prompt += f"\n\n{scratchpad_summary}"
+    
+                    status_msg = f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}..."
+                    if self.ui:
+                        with self.ui.show_status(status_msg):
+                            response = self.provider.generate(
+                                messages=messages,
+                                system_prompt=dynamic_system_prompt,
+                                thinking=self.thinking,
+                                tools=(
+                                    active_tools
+                                    if (self.folder_context.folders and self.agentic)
+                                    else None
+                                ),
+                            )
+                    else:
                         response = self.provider.generate(
                             messages=messages,
                             system_prompt=dynamic_system_prompt,
@@ -918,371 +941,372 @@ class Session:
                                 else None
                             ),
                         )
-                else:
-                    response = self.provider.generate(
-                        messages=messages,
-                        system_prompt=dynamic_system_prompt,
-                        thinking=self.thinking,
-                        tools=(
-                            active_tools
-                            if (self.folder_context.folders and self.agentic)
-                            else None
-                        ),
-                    )
-
-                logger.debug(f"Provider response received. Tokens: In {response.input_tokens}, Out {response.output_tokens}")
-
-                ai_parts_archive = []
-                has_tool_call = False
-                has_text = False
-
-                for part in response.parts:
-                    if part.type == "text" and part.text:
-                        has_text = True
-                        if self.ui:
-                            self.ui.render_message(
-                                "assistant", part.text, self.provider.model_name
+    
+                    logger.debug(f"Provider response received. Tokens: In {response.input_tokens}, Out {response.output_tokens}")
+    
+                    ai_parts_archive = []
+                    has_tool_call = False
+                    has_text = False
+    
+                    for part in response.parts:
+                        if part.type == "text" and part.text:
+                            has_text = True
+                            if self.ui:
+                                self.ui.render_message(
+                                    "assistant", part.text, self.provider.model_name
+                                )
+                            logger.debug(f"Assistant text: {part.text[:200]}...")
+                            ai_parts_archive.append({"type": "text", "text": part.text})
+    
+                        elif part.type == "image_inline" and part.inline_data:
+                            display_image_in_terminal(part.inline_data)
+                            ai_parts_archive.append(
+                                {
+                                    "type": "text",
+                                    "text": "[Image Generated and Saved locally]",
+                                }
                             )
-                        logger.debug(f"Assistant text: {part.text[:200]}...")
-                        ai_parts_archive.append({"type": "text", "text": part.text})
-
-                    elif part.type == "image_inline" and part.inline_data:
-                        display_image_in_terminal(part.inline_data)
-                        ai_parts_archive.append(
+    
+                        elif part.type == "tool_call":
+                            has_tool_call = True
+                            ai_parts_archive.append(
+                                {
+                                    "type": "tool_call",
+                                    "tool_name": part.tool_name,
+                                    "tool_args": part.tool_args,
+                                    "thought_signature": part.thought_signature,
+                                }
+                            )
+                            if self.ui:
+                                self.ui.show_info(
+                                    f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
+                                )
+                            logger.info(f"Tool call: {part.tool_name} with args {part.tool_args}")
+    
+                    if ai_parts_archive:
+                        self.session_manager.history.append(
                             {
-                                "type": "text",
-                                "text": "[Image Generated and Saved locally]",
+                                "role": "assistant",
+                                "parts": ai_parts_archive,
                             }
                         )
-
-                    elif part.type == "tool_call":
-                        has_tool_call = True
-                        ai_parts_archive.append(
+    
+                    self.session_manager.token_counts["input"] += response.input_tokens
+                    self.session_manager.token_counts["output"] += response.output_tokens
+                    self.session_manager.token_counts["total"] += response.total_tokens
+    
+                    total_in += response.input_tokens
+                    total_out += response.output_tokens
+    
+                    est_cost = calculate_cost(
+                        self.provider.model_name,
+                        response.input_tokens,
+                        response.output_tokens,
+                    )
+                    cost_str = ""
+                    if est_cost is not None:
+                        total_cost += est_cost
+                        self.session_manager.token_counts["total_cost"] += est_cost
+                        cost_str = (
+                            f"| Est. Cost: ${est_cost:.5f} (Total: ${total_cost:.5f})"
+                        )
+    
+                    if self.ui:
+                        self.ui.show_info(
+                            f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | Total {response.total_tokens} {cost_str}"
+                        )
+                        if hasattr(self.ui, "refresh_memory_monitor"):
+                            self.ui.refresh_memory_monitor(self)
+    
+                    if not has_tool_call:
+                        if not has_text:
+                            logger.warning("Assistant provided empty response. Nudging.")
+    
+                            nudge_msg = {
+                                "role": "user",
+                                "parts": [
+                                    {
+                                        "type": "text",
+                                        "text": "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user.",
+                                    }
+                                ],
+                            }
+                            self.session_manager.history.append(nudge_msg)
+                            messages = self._build_messages_from_history(
+                                self.session_manager.history[-self.active_context_window :],
+                                {"role": "system", "parts": []},
+                            )[:-1]
+                            continue
+    
+                        if self.ui:
+                            self.ui.show_info(
+                                f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}"
+                            )
+    
+                        logger.info("Agentic loop finished (no tool calls).")
+    
+                        if self.variables.get("compact_history", False):
+                            if self.ui:
+                                self.ui.show_info(
+                                    "[dim]Compacting turn history (removing tool metadata)...[/dim]"
+                                )
+                                self.session_manager.compact_completed_turn()
+                            logger.debug("History compacted.")
+    
+                        self.session_manager.save_history(self.folder_context)
+                        if self.ui and hasattr(self.ui, "refresh_memory_monitor"):
+                            self.ui.refresh_memory_monitor(self)
+                        break
+    
+                    strict_mode = self.variables.get("strict_mode", False)
+                    tool_result_parts = []
+                    tool_calls = [p for p in response.parts if p.type == "tool_call"]
+    
+                    # Pre-calculate modifications for tools needing approval
+                    to_approve_data = {}
+                    for idx, part in enumerate(tool_calls):
+                        tool_def = next(
+                            (t for t in TOOLS if t.name == part.tool_name), None
+                        )
+    
+                        if self.variables.get("yolo", False):
+                            continue
+    
+                        if strict_mode or (tool_def and tool_def.requires_approval):
+                            mods = get_modifications(
+                                part.tool_name, part.tool_args, self.folder_context
+                            )
+                            to_approve_data[idx] = mods
+    
+                    # Show bulk diffs if multiple
+                    if len(to_approve_data) > 1:
+                        if self.ui:
+                            self.ui.show_info(
+                                f"\n[bold yellow]Turn contains {len(to_approve_data)} modifications requiring approval.[/bold yellow]"
+                            )
+                        for idx, mods in to_approve_data.items():
+                            for orig, modified, filename in mods:
+                                if (
+                                    filename
+                                    and orig is not None
+                                    and modified is not None
+                                    and not modified.startswith("ERROR:")
+                                ):
+                                    if self.ui:
+                                        self.ui.show_diff(filename, orig, modified)
+    
+                    for i, part in enumerate(tool_calls):
+                        needs_approval = (i in to_approve_data) or strict_mode
+                        if needs_approval:
+                            mods = to_approve_data.get(i, [])
+    
+                            result = None
+                            can_approve = True
+                            error_msg = None
+    
+                            # Validate all modifications in the set (especially for batch_job)
+                            for _, m, f in mods:
+                                if m and str(m).startswith("ERROR:"):
+                                    if "malformed patch" in str(
+                                        m
+                                    ).lower() or "patch: ****" in str(m):
+                                        error_msg = m
+                                        can_approve = False
+                                        break
+                                    if self.ui:
+                                        self.ui.show_error(f"Cannot show diff for {f}: {m}")
+                                    can_approve = False
+                                    logger.error(f"Diff error for {f}: {m}")
+                                    break
+    
+                            if not can_approve and error_msg:
+                                if self.ui:
+                                    self.ui.show_info(
+                                        f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
+                                    )
+                                result = f"Error: Malformed patch detected. Please ensure your diff is correctly formatted. Check hunk headers and context.\n{error_msg}"
+                                logger.warning(f"Malformed patch detected for {part.tool_name}: {error_msg}")
+                                # Fall through to skip Prompt.ask since result is now set
+    
+                            # Show diffs if not already shown in bulk pre-calculation
+                            if result is None and len(to_approve_data) <= 1:
+                                for o, m, f in mods:
+                                    if (
+                                        f
+                                        and o is not None
+                                        and m is not None
+                                        and not str(m).startswith("ERROR:")
+                                    ):
+                                        if self.ui:
+                                            self.ui.show_diff(f, o, m)
+    
+                            # Shorten args for display
+                            display_args = _shorten_tool_args(part.tool_args)
+    
+                            # Add count info to prompt if multiple
+                            count_info = (
+                                f" ({i + 1}/{len(tool_calls)})"
+                                if len(tool_calls) > 1
+                                else ""
+                            )
+    
+                            if result is None:
+                                choice = self._prompt_tool_choice(
+                                    (
+                                        f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
+                                        if can_approve
+                                        else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+                                    ),
+                                    ["y", "n", "e"] if can_approve else ["n", "e"],
+                                    "y" if can_approve else "n",
+                                )
+                                if choice == "n":
+                                    result = "User denied this tool call."
+                                    logger.info(f"Tool call {part.tool_name} denied by user.")
+                                elif choice == "e":
+                                    reason = self.ui.prompt("Provide an explanation to the model")
+                                    result = f"User denied this tool call. Reason: {reason}"
+                                    logger.info(f"Tool call {part.tool_name} denied by user with explanation: {reason}")
+                                else:
+                                    result = self._execute_tool_with_memory(
+                                        part.tool_name,
+                                        part.tool_args,
+                                    )
+                        else:
+                            result = self._execute_tool_with_memory(
+                                part.tool_name,
+                                part.tool_args,
+                            )
+    
+                        source_result = result
+                        raw_result = source_result
+                        logger.debug(f"Tool result ({part.tool_name}): {_sanitize_for_log(raw_result)}")
+    
+                        # --- Collation Logic ---
+                        is_flush = part.tool_name == "flush"
+                        should_collate = (
+                            part.tool_name in COLLATED_TOOLS 
+                            and self.variables.get("collation_enabled", True)
+                        )
+    
+                        if is_flush:
+                            collated_data = self.collation_buffer.flush()
+                            if not collated_data:
+                                raw_result = "No data in collation buffer to flush."
+                            else:
+                                raw_result = "--- Flushed Context ---\n" + "\n\n".join(collated_data)
+                            if self.ui:
+                                self.ui.show_info(f"  [Flushed {len(collated_data)} items from buffer]")
+                        elif should_collate:
+                            # Don't collate if there was an error
+                            if raw_result and not str(raw_result).startswith("Error"):
+                                self.collation_buffer.add(part.tool_name, part.tool_args, raw_result)
+                                count = len(self.collation_buffer.entries)
+                                raw_result = (
+                                    f"Stored '{part.tool_name}' result in collation buffer. "
+                                    f"{count} item(s) currently pending. "
+                                    "Continue gathering or call 'flush' when ready to receive all context."
+                                )
+                                if self.ui:
+                                    self.ui.show_info(f"  [Collated: {part.tool_name}]")
+                            else:
+                                # If it's an error, don't collate it, let the model see the error immediately
+                                if self.ui:
+                                    self.ui.show_tool_result(self._render_tool_result(raw_result))
+                        else:
+                            if self.ui:
+                                self.ui.show_tool_result(self._render_tool_result(raw_result))
+    
+                        # --- End Collation Logic ---
+                        if self.variables.get("structured_tool_results", True):
+                            promotion_result = None
+                            if raw_result != source_result:
+                                source_text = str(source_result)
+                                result = {
+                                    "tool_name": part.tool_name,
+                                    "ok": not source_text.startswith("Error"),
+                                    "summary": self._clip_preview(raw_result, 220),
+                                    "args": _shorten_tool_args(part.tool_args),
+                                    "raw": str(raw_result),
+                                    "data": {
+                                        "collated": True,
+                                        "pending_items": len(self.collation_buffer.entries),
+                                        "source_char_count": len(source_text),
+                                        "source_line_count": len(source_text.splitlines()),
+                                    },
+                                }
+                                promotion_result = self._build_structured_tool_result(
+                                    part.tool_name,
+                                    part.tool_args,
+                                    source_result,
+                                )
+                            else:
+                                result = self._build_structured_tool_result(
+                                    part.tool_name,
+                                    part.tool_args,
+                                    source_result,
+                                )
+                                promotion_result = result
+                            promotions = self._maybe_auto_promote_memory(promotion_result)
+                            if promotions:
+                                promo_text = "; ".join(promotions)
+                                result["summary"] = f"{result.get('summary', '')} [{promo_text}]".strip()
+                        else:
+                            result = raw_result
+    
+                        tool_result_parts.append(
                             {
-                                "type": "tool_call",
+                                "type": "tool_result",
                                 "tool_name": part.tool_name,
-                                "tool_args": part.tool_args,
+                                "tool_result": result,
                                 "thought_signature": part.thought_signature,
                             }
                         )
-                        if self.ui:
-                            self.ui.show_info(
-                                f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
-                            )
-                        logger.info(f"Tool call: {part.tool_name} with args {part.tool_args}")
-
-                if ai_parts_archive:
+                        if self.ui and hasattr(self.ui, "refresh_memory_monitor"):
+                            self.ui.refresh_memory_monitor(self)
+    
+                    tool_result_msg = {"role": "tool", "parts": tool_result_parts}
+                    self.session_manager.history.append(tool_result_msg)
+                    self.session_manager.save_history(self.folder_context)
+                    if self.ui and hasattr(self.ui, "refresh_memory_monitor"):
+                        self.ui.refresh_memory_monitor(self)
+    
+                    messages = self._build_messages_from_history(
+                        self._prepare_runtime_history(turn_start_index),
+                        {"role": "system", "parts": []},
+                    )[:-1]
+    
+                except KeyboardInterrupt:
+                    if self.ui:
+                        self.ui.show_info("\nAgentic loop interrupted by user.")
+                    logger.warning("Agentic loop interrupted by user.")
                     self.session_manager.history.append(
                         {
-                            "role": "assistant",
-                            "parts": ai_parts_archive,
-                        }
-                    )
-
-                self.session_manager.token_counts["input"] += response.input_tokens
-                self.session_manager.token_counts["output"] += response.output_tokens
-                self.session_manager.token_counts["total"] += response.total_tokens
-
-                total_in += response.input_tokens
-                total_out += response.output_tokens
-
-                est_cost = calculate_cost(
-                    self.provider.model_name,
-                    response.input_tokens,
-                    response.output_tokens,
-                )
-                cost_str = ""
-                if est_cost is not None:
-                    total_cost += est_cost
-                    self.session_manager.token_counts["total_cost"] += est_cost
-                    cost_str = (
-                        f"| Est. Cost: ${est_cost:.5f} (Total: ${total_cost:.5f})"
-                    )
-
-                if self.ui:
-                    self.ui.show_info(
-                        f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | Total {response.total_tokens} {cost_str}"
-                    )
-
-                if not has_tool_call:
-                    if not has_text:
-                        logger.warning("Assistant provided empty response. Nudging.")
-
-                        nudge_msg = {
-                            "role": "user",
+                            "role": "tool",
                             "parts": [
                                 {
-                                    "type": "text",
-                                    "text": "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user.",
+                                    "type": "tool_result",
+                                    "tool_name": "system",
+                                    "tool_result": "User interrupted execution.",
                                 }
                             ],
                         }
-                        self.session_manager.history.append(nudge_msg)
-                        messages = self._build_messages_from_history(
-                            self.session_manager.history[-self.active_context_window :],
-                            {"role": "system", "parts": []},
-                        )[:-1]
-                        continue
-
-                    if self.ui:
-                        self.ui.show_info(
-                            f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}"
-                        )
-
-                    logger.info("Agentic loop finished (no tool calls).")
-
-                    if self.variables.get("compact_history", False):
-                        if self.ui:
-                            self.ui.show_info(
-                                "[dim]Compacting turn history (removing tool metadata)...[/dim]"
-                            )
-                            self.session_manager.compact_completed_turn()
-                        logger.debug("History compacted.")
-
+                    )
                     self.session_manager.save_history(self.folder_context)
+                    if self.ui and hasattr(self.ui, "refresh_memory_monitor"):
+                        self.ui.refresh_memory_monitor(self)
                     break
-
-                strict_mode = self.variables.get("strict_mode", False)
-                tool_result_parts = []
-                tool_calls = [p for p in response.parts if p.type == "tool_call"]
-
-                # Pre-calculate modifications for tools needing approval
-                to_approve_data = {}
-                for idx, part in enumerate(tool_calls):
-                    tool_def = next(
-                        (t for t in TOOLS if t.name == part.tool_name), None
-                    )
-
-                    if self.variables.get("yolo", False):
-                        continue
-
-                    if strict_mode or (tool_def and tool_def.requires_approval):
-                        mods = get_modifications(
-                            part.tool_name, part.tool_args, self.folder_context
-                        )
-                        to_approve_data[idx] = mods
-
-                # Show bulk diffs if multiple
-                if len(to_approve_data) > 1:
+                except Exception as e:
                     if self.ui:
-                        self.ui.show_info(
-                            f"\n[bold yellow]Turn contains {len(to_approve_data)} modifications requiring approval.[/bold yellow]"
-                        )
-                    for idx, mods in to_approve_data.items():
-                        for orig, modified, filename in mods:
-                            if (
-                                filename
-                                and orig is not None
-                                and modified is not None
-                                and not modified.startswith("ERROR:")
-                            ):
-                                if self.ui:
-                                    self.ui.show_diff(filename, orig, modified)
-
-                for i, part in enumerate(tool_calls):
-                    needs_approval = (i in to_approve_data) or strict_mode
-                    if needs_approval:
-                        mods = to_approve_data.get(i, [])
-
-                        result = None
-                        can_approve = True
-                        error_msg = None
-
-                        # Validate all modifications in the set (especially for batch_job)
-                        for _, m, f in mods:
-                            if m and str(m).startswith("ERROR:"):
-                                if "malformed patch" in str(
-                                    m
-                                ).lower() or "patch: ****" in str(m):
-                                    error_msg = m
-                                    can_approve = False
-                                    break
-                                if self.ui:
-                                    self.ui.show_error(f"Cannot show diff for {f}: {m}")
-                                can_approve = False
-                                logger.error(f"Diff error for {f}: {m}")
-                                break
-
-                        if not can_approve and error_msg:
-                            if self.ui:
-                                self.ui.show_info(
-                                    f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
-                                )
-                            result = f"Error: Malformed patch detected. Please ensure your diff is correctly formatted. Check hunk headers and context.\n{error_msg}"
-                            logger.warning(f"Malformed patch detected for {part.tool_name}: {error_msg}")
-                            # Fall through to skip Prompt.ask since result is now set
-
-                        # Show diffs if not already shown in bulk pre-calculation
-                        if result is None and len(to_approve_data) <= 1:
-                            for o, m, f in mods:
-                                if (
-                                    f
-                                    and o is not None
-                                    and m is not None
-                                    and not str(m).startswith("ERROR:")
-                                ):
-                                    if self.ui:
-                                        self.ui.show_diff(f, o, m)
-
-                        # Shorten args for display
-                        display_args = _shorten_tool_args(part.tool_args)
-
-                        # Add count info to prompt if multiple
-                        count_info = (
-                            f" ({i + 1}/{len(tool_calls)})"
-                            if len(tool_calls) > 1
-                            else ""
-                        )
-
-                        if result is None:
-                            choice = self._prompt_tool_choice(
-                                (
-                                    f"\n[bold yellow]Permission Required[/bold yellow] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
-                                    if can_approve
-                                    else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{part.tool_name}[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
-                                ),
-                                ["y", "n", "e"] if can_approve else ["n", "e"],
-                                "y" if can_approve else "n",
-                            )
-                            if choice == "n":
-                                result = "User denied this tool call."
-                                logger.info(f"Tool call {part.tool_name} denied by user.")
-                            elif choice == "e":
-                                reason = self.ui.prompt("Provide an explanation to the model")
-                                result = f"User denied this tool call. Reason: {reason}"
-                                logger.info(f"Tool call {part.tool_name} denied by user with explanation: {reason}")
-                            else:
-                                result = self._execute_tool_with_memory(
-                                    part.tool_name,
-                                    part.tool_args,
-                                )
-                    else:
-                        result = self._execute_tool_with_memory(
-                            part.tool_name,
-                            part.tool_args,
-                        )
-
-                    source_result = result
-                    raw_result = source_result
-                    logger.debug(f"Tool result ({part.tool_name}): {_sanitize_for_log(raw_result)}")
-
-                    # --- Collation Logic ---
-                    is_flush = part.tool_name == "flush"
-                    should_collate = (
-                        part.tool_name in COLLATED_TOOLS 
-                        and self.variables.get("collation_enabled", True)
-                    )
-
-                    if is_flush:
-                        collated_data = self.collation_buffer.flush()
-                        if not collated_data:
-                            raw_result = "No data in collation buffer to flush."
-                        else:
-                            raw_result = "--- Flushed Context ---\n" + "\n\n".join(collated_data)
-                        if self.ui:
-                            self.ui.show_info(f"  [Flushed {len(collated_data)} items from buffer]")
-                    elif should_collate:
-                        # Don't collate if there was an error
-                        if raw_result and not str(raw_result).startswith("Error"):
-                            self.collation_buffer.add(part.tool_name, part.tool_args, raw_result)
-                            count = len(self.collation_buffer.entries)
-                            raw_result = (
-                                f"Stored '{part.tool_name}' result in collation buffer. "
-                                f"{count} item(s) currently pending. "
-                                "Continue gathering or call 'flush' when ready to receive all context."
-                            )
-                            if self.ui:
-                                self.ui.show_info(f"  [Collated: {part.tool_name}]")
-                        else:
-                            # If it's an error, don't collate it, let the model see the error immediately
-                            if self.ui:
-                                self.ui.show_tool_result(self._render_tool_result(raw_result))
-                    else:
-                        if self.ui:
-                            self.ui.show_tool_result(self._render_tool_result(raw_result))
-
-                    # --- End Collation Logic ---
-                    if self.variables.get("structured_tool_results", True):
-                        promotion_result = None
-                        if raw_result != source_result:
-                            source_text = str(source_result)
-                            result = {
-                                "tool_name": part.tool_name,
-                                "ok": not source_text.startswith("Error"),
-                                "summary": self._clip_preview(raw_result, 220),
-                                "args": _shorten_tool_args(part.tool_args),
-                                "raw": str(raw_result),
-                                "data": {
-                                    "collated": True,
-                                    "pending_items": len(self.collation_buffer.entries),
-                                    "source_char_count": len(source_text),
-                                    "source_line_count": len(source_text.splitlines()),
-                                },
-                            }
-                            promotion_result = self._build_structured_tool_result(
-                                part.tool_name,
-                                part.tool_args,
-                                source_result,
-                            )
-                        else:
-                            result = self._build_structured_tool_result(
-                                part.tool_name,
-                                part.tool_args,
-                                source_result,
-                            )
-                            promotion_result = result
-                        promotions = self._maybe_auto_promote_memory(promotion_result)
-                        if promotions:
-                            promo_text = "; ".join(promotions)
-                            result["summary"] = f"{result.get('summary', '')} [{promo_text}]".strip()
-                    else:
-                        result = raw_result
-
-                    tool_result_parts.append(
-                        {
-                            "type": "tool_result",
-                            "tool_name": part.tool_name,
-                            "tool_result": result,
-                            "thought_signature": part.thought_signature,
-                        }
-                    )
-
-                tool_result_msg = {"role": "tool", "parts": tool_result_parts}
-                self.session_manager.history.append(tool_result_msg)
-                self.session_manager.save_history(self.folder_context)
-
-                messages = self._build_messages_from_history(
-                    self._prepare_runtime_history(turn_start_index),
-                    {"role": "system", "parts": []},
-                )[:-1]
-
-            except KeyboardInterrupt:
-                if self.ui:
-                    self.ui.show_info("\nAgentic loop interrupted by user.")
-                logger.warning("Agentic loop interrupted by user.")
-                self.session_manager.history.append(
-                    {
-                        "role": "tool",
-                        "parts": [
-                            {
-                                "type": "tool_result",
-                                "tool_name": "system",
-                                "tool_result": "User interrupted execution.",
-                            }
-                        ],
-                    }
-                )
-                self.session_manager.save_history(self.folder_context)
-                break
-            except Exception as e:
-                if self.ui:
-                    self.ui.show_error(f"API Error during agentic loop: {e}")
-                logger.error(f"Error in agentic loop: {e}", exc_info=True)
-
-                # Failsafe for retry
-                if self._confirm_retry():
-                    iteration -= 1  # Decrement so the next loop run tries the same step
-                    continue
-
-                self.session_manager.save_history(self.folder_context)
-                break
+                        self.ui.show_error(f"API Error during agentic loop: {e}")
+                    logger.error(f"Error in agentic loop: {e}", exc_info=True)
+    
+                    # Failsafe for retry
+                    if self._confirm_retry():
+                        iteration -= 1  # Decrement so the next loop run tries the same step
+                        continue
+    
+                    self.session_manager.save_history(self.folder_context)
+                    if self.ui and hasattr(self.ui, "refresh_memory_monitor"):
+                        self.ui.refresh_memory_monitor(self)
+                    break

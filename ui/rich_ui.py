@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
@@ -17,6 +18,8 @@ class RichUI:
     def __init__(self):
         self.console = Console()
         self.input_handler = InputHandler()
+        self._memory_hud_live = None
+        self._memory_hud_session = None
 
     def render_message(self, role, content, model_name=None):
         if role == "user":
@@ -32,7 +35,7 @@ class RichUI:
         else:
             if model_name:
                 self.console.print(f"\nAssistant ({model_name}):")
-            render_response(content)
+            render_response(content, console_override=self.console)
 
     def get_input(self, session_name, staged_files):
         return self.input_handler.get_input(session_name, staged_files)
@@ -111,7 +114,9 @@ class RichUI:
                 )
             ),
         )
-        collation_limit = max(1, int(getattr(session.collation_buffer, "max_bytes", 1) or 1))
+        collation_limit = max(
+            1, int(getattr(session.collation_buffer, "max_bytes", 1) or 1)
+        )
         collation_bytes = sum(
             len(result or "") for _, _, result in session.collation_buffer.entries
         )
@@ -141,7 +146,9 @@ class RichUI:
         if collation_items != 1:
             meta.append("s", style="dim white")
         meta.append("  |  mode ", style="dim white")
-        meta.append(str(session.variables.get("agent_mode", "default")), style="bold magenta")
+        meta.append(
+            str(session.variables.get("agent_mode", "default")), style="bold magenta"
+        )
 
         legend = Text.from_markup(
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
@@ -157,8 +164,44 @@ class RichUI:
             )
         )
 
+    @contextmanager
+    def live_memory_monitor(self, session):
+        if self._memory_hud_live is not None:
+            yield self._memory_hud_live
+            return
+
+        self._memory_hud_session = session
+        live = Live(
+            self.build_memory_monitor(session),
+            console=self.console,
+            refresh_per_second=8,
+            auto_refresh=False,
+            vertical_overflow="visible",
+            transient=False,
+        )
+        self._memory_hud_live = live
+        live.start()
+        live.refresh()
+        try:
+            yield live
+        finally:
+            live.stop()
+            self._memory_hud_live = None
+            self._memory_hud_session = None
+
+    def refresh_memory_monitor(self, session=None):
+        target_session = session or self._memory_hud_session
+        if target_session is None:
+            return
+
+        if self._memory_hud_live is not None:
+            self._memory_hud_live.update(self.build_memory_monitor(target_session), refresh=True)
+            return
+
+        self.console.print(self.build_memory_monitor(target_session))
+
     def show_memory_monitor(self, session):
-        self.console.print(self.build_memory_monitor(session))
+        self.refresh_memory_monitor(session)
 
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""
@@ -285,8 +328,14 @@ class RichUI:
 
     @contextmanager
     def show_status(self, message):
-        with self.console.status(message, spinner="aesthetic") as status:
-            yield status
+        if self._memory_hud_live is None:
+            with self.console.status(message, spinner="aesthetic") as status:
+                yield status
+            return
+
+        with self._memory_hud_live.pause():
+            with self.console.status(message, spinner="aesthetic") as status:
+                yield status
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""

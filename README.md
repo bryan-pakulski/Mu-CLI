@@ -11,7 +11,7 @@
 - **Smart Context Management**: Automatic history truncation and summarization to stay within model context limits while keeping costs down.
 - **In-Task Memory Engine**: Agent mode can store and recall concise facts so it does not need to replay large tool outputs.
 - **Turn Scratchpads**: Agent mode can keep temporary notes for the active task loop without polluting durable memory.
-- **Live Memory HUD**: A compact right-aligned terminal widget visualizes context, durable memory, scratchpad usage, and the collation queue as they fill up over time, including live in-place updates while agentic loops are running.
+- **Live Memory HUD**: A fixed right-hand terminal sidebar visualizes context, durable memory, scratchpad usage, and the collation queue while a live runtime feed updates in place beside it during agentic loops.
 - **Customizable Strategies**: Specialized agent modes for Debugging, Feature Implementation, and Research.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 
@@ -50,7 +50,7 @@ python mucli.py
 3. **Set Workspace**: Use `/folder .` to add your current directory to the agent's context.
 4. **Enable Agentic Mode**: Type `/agentic` to allow the model to use tools.
 5. **Chat**: Ask questions like "How does the authentication logic work?" or "Fix the bug in the user controller."
-6. **Watch the HUD**: Keep an eye on the compact Memory HUD for context growth, memory slots, scratchpad activity, and pending collated tool output.
+6. **Watch the HUD**: Keep an eye on the fixed right-hand Memory HUD for context growth, memory slots, scratchpad activity, and pending collated tool output while the runtime feed updates beside it.
 
 ## Command Overview
 

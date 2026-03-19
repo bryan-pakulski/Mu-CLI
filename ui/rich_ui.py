@@ -1,3 +1,4 @@
+from collections import deque
 from contextlib import contextmanager
 
 from rich import box
@@ -20,6 +21,8 @@ class RichUI:
         self.input_handler = InputHandler()
         self._memory_hud_live = None
         self._memory_hud_session = None
+        self._live_event_buffer = deque(maxlen=18)
+        self._live_status_message = None
 
     def render_message(self, role, content, model_name=None):
         if role == "user":
@@ -52,10 +55,22 @@ class RichUI:
     def prompt(self, message, default=None):
         return Prompt.ask(message, default=default)
 
+    def _append_live_event(self, markup_message):
+        if self._memory_hud_live is None:
+            return False
+
+        self._live_event_buffer.append(str(markup_message))
+        self.refresh_memory_monitor()
+        return True
+
     def show_error(self, message):
+        if self._append_live_event(f"[red]{message}[/red]"):
+            return
         self.console.print(f"[red]{message}[/red]")
 
     def show_info(self, message):
+        if self._append_live_event(str(message)):
+            return
         self.console.print(f"[blue]{message}[/blue]")
 
     def build_meter(
@@ -91,7 +106,7 @@ class RichUI:
         line.append(f" {current}/{maximum}", style="dim white")
         return line
 
-    def build_memory_monitor(self, session):
+    def build_memory_monitor_panel(self, session):
         hist_len = len(session.session_manager.history)
         anchor = session.session_manager.summary_anchor
         active_turns = max(0, hist_len - anchor)
@@ -154,15 +169,44 @@ class RichUI:
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
         )
 
-        return Align.right(
-            Panel(
-                Group(*meters, Text(""), meta, legend),
-                title="[bold white]Memory HUD[/bold white]",
-                border_style="bright_black",
-                box=box.ROUNDED,
-                width=44,
-            )
+        return Panel(
+            Group(*meters, Text(""), meta, legend),
+            title="[bold white]Memory HUD[/bold white]",
+            border_style="bright_black",
+            box=box.ROUNDED,
+            width=44,
         )
+
+    def build_memory_monitor(self, session, align_right=True):
+        panel = self.build_memory_monitor_panel(session)
+        if not align_right:
+            return panel
+        return Align.right(panel)
+
+    def build_live_dashboard(self, session):
+        lines = []
+        if self._live_status_message:
+            lines.append(Text.from_markup(f"[bold cyan]status:[/bold cyan] {self._live_status_message}"))
+            lines.append(Text(""))
+
+        if self._live_event_buffer:
+            lines.extend(Text.from_markup(entry) for entry in self._live_event_buffer)
+        else:
+            lines.append(Text("Waiting for agent events...", style="dim"))
+
+        runtime_panel = Panel(
+            Group(*lines),
+            title="[bold white]Runtime Feed[/bold white]",
+            border_style="cyan",
+            box=box.ROUNDED,
+            expand=True,
+        )
+
+        grid = Table.grid(expand=True)
+        grid.add_column(ratio=1, min_width=60)
+        grid.add_column(width=46)
+        grid.add_row(runtime_panel, self.build_memory_monitor(session, align_right=False))
+        return grid
 
     @contextmanager
     def live_memory_monitor(self, session):
@@ -171,8 +215,10 @@ class RichUI:
             return
 
         self._memory_hud_session = session
+        self._live_event_buffer.clear()
+        self._live_status_message = None
         live = Live(
-            self.build_memory_monitor(session),
+            self.build_live_dashboard(session),
             console=self.console,
             refresh_per_second=8,
             auto_refresh=False,
@@ -188,6 +234,8 @@ class RichUI:
             live.stop()
             self._memory_hud_live = None
             self._memory_hud_session = None
+            self._live_status_message = None
+            self._live_event_buffer.clear()
 
     def refresh_memory_monitor(self, session=None):
         target_session = session or self._memory_hud_session
@@ -195,27 +243,13 @@ class RichUI:
             return
 
         if self._memory_hud_live is not None:
-            self._memory_hud_live.update(self.build_memory_monitor(target_session), refresh=True)
+            self._memory_hud_live.update(self.build_live_dashboard(target_session), refresh=True)
             return
 
         self.console.print(self.build_memory_monitor(target_session))
 
     def show_memory_monitor(self, session):
         self.refresh_memory_monitor(session)
-
-    @contextmanager
-    def suspend_memory_monitor(self):
-        if self._memory_hud_live is None:
-            yield
-            return
-
-        live = self._memory_hud_live
-        live.stop()
-        try:
-            yield
-        finally:
-            live.start()
-            self.refresh_memory_monitor()
 
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""
@@ -342,9 +376,19 @@ class RichUI:
 
     @contextmanager
     def show_status(self, message):
-        with self.suspend_memory_monitor():
+        if self._memory_hud_live is None:
             with self.console.status(message, spinner="aesthetic") as status:
                 yield status
+            return
+
+        previous_status = self._live_status_message
+        self._live_status_message = str(message)
+        self.refresh_memory_monitor()
+        try:
+            yield str(message)
+        finally:
+            self._live_status_message = previous_status
+            self.refresh_memory_monitor()
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""
@@ -355,6 +399,7 @@ class RichUI:
             if "Error" in str(res_preview) or "User denied" in str(res_preview)
             else "green"
         )
-        self.console.print(
-            f"[{color}]  ↳ Result: {res_preview}... ({char_count} chars)[/{color}]"
-        )
+        message = f"[{color}]  ↳ Result: {res_preview}... ({char_count} chars)[/{color}]"
+        if self._append_live_event(message):
+            return
+        self.console.print(message)

@@ -109,12 +109,16 @@ def test_live_memory_monitor_updates_in_place(monkeypatch):
     with ui.live_memory_monitor(session):
         assert ui._memory_hud_live is not None
         ui.refresh_memory_monitor(session)
+        ui.show_info("tooling started")
+        ui.show_tool_result("ok")
+        assert len(ui._live_event_buffer) == 2
         with ui.show_status("Working..."):
             events.append("status")
+            assert ui._live_status_message == "Working..."
 
     assert events[0:2] == ["start", "refresh"]
     assert ("update", True) in events
-    assert events.count("stop") == 2
-    assert events.count("start") == 2
+    assert events.count("stop") == 1
+    assert events.count("start") == 1
     assert events[-1] == "stop"
     assert ui._memory_hud_live is None

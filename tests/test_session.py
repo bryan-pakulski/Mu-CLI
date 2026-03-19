@@ -1,6 +1,6 @@
 import pytest
 from core.session import Session, SessionManager
-from providers.base import LLMProvider, ProviderResponse
+from providers.base import LLMProvider, MessagePart, ProviderResponse
 
 
 class DummyProvider(LLMProvider):
@@ -95,6 +95,140 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
     assert "Compressed prior tool activity" in prepared[1]["parts"][0]["text"]
     assert len(prepared) == 4
 
+
+
+
+def test_prepare_runtime_history_keeps_signed_tool_messages():
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.variables["tool_context_window"] = 2
+
+    sm.history = [
+        {"role": "user", "parts": [{"type": "text", "text": "Investigate bug"}]},
+        {
+            "role": "assistant",
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "tool_name": "read_file",
+                    "tool_args": {"filename": "a.py"},
+                    "thought_signature": "abc123",
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "parts": [
+                {
+                    "type": "tool_result",
+                    "tool_name": "read_file",
+                    "tool_result": "alpha",
+                    "thought_signature": "abc123",
+                }
+            ],
+        },
+        {
+            "role": "assistant",
+            "parts": [{"type": "tool_call", "tool_name": "search_for_string", "tool_args": {"string": "beta"}}],
+        },
+        {
+            "role": "tool",
+            "parts": [{"type": "tool_result", "tool_name": "search_for_string", "tool_result": "beta result"}],
+        },
+        {
+            "role": "assistant",
+            "parts": [{"type": "tool_call", "tool_name": "list_dir", "tool_args": {"path": "."}}],
+        },
+        {
+            "role": "tool",
+            "parts": [{"type": "tool_result", "tool_name": "list_dir", "tool_result": "file.py"}],
+        },
+    ]
+
+    prepared = session._prepare_runtime_history(turn_start_index=0)
+
+    signed_messages = [
+        msg for msg in prepared if any(part.get("thought_signature") for part in msg.get("parts", []))
+    ]
+    assert len(signed_messages) == 2
+    assert signed_messages[0]["parts"][0]["tool_name"] == "read_file"
+    assert not any(
+        msg.get("role") == "system"
+        and "read_file" in msg["parts"][0]["text"]
+        for msg in prepared
+    )
+
+
+def test_session_sync_runtime_state_rebinds_memory_stores():
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+
+    original_memory = session.task_memory
+    original_scratchpad = session.turn_scratchpad
+
+    sm.new_session(name="fresh-session", provider_name="dummy", model_name="dummy")
+    session.sync_runtime_state()
+
+    assert session.task_memory is sm.task_memory
+    assert session.turn_scratchpad is sm.turn_scratchpad
+    assert session.task_memory is not original_memory
+    assert session.turn_scratchpad is not original_scratchpad
+
+
+def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
+    sample = tmp_path / "sample.txt"
+    sample.write_text("important line\n" * 50)
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+
+    class SequencedProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.responses = [
+                ProviderResponse(
+                    text="",
+                    parts=[
+                        MessagePart(
+                            type="tool_call",
+                            tool_name="read_file",
+                            tool_args={"filename": str(sample)},
+                        )
+                    ],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+                ProviderResponse(
+                    text="done",
+                    parts=[MessagePart(type="text", text="done")],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+            ]
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            return self.responses.pop(0)
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager(session_name="collation-test")
+    session = Session(SequencedProvider(), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+
+    session.send_message("inspect the file")
+
+    tool_message = next(msg for msg in reversed(sm.history) if msg["role"] == "tool")
+    tool_result = tool_message["parts"][0]["tool_result"]
+
+    assert tool_result["data"]["collated"] is True
+    assert tool_result["raw"].startswith("Stored 'read_file' result in collation buffer")
+    assert "important line" not in tool_result["raw"]
+    assert tool_result["data"]["source_line_count"] == 50
 
 def test_memory_round_trip_via_session_manager(tmp_path, monkeypatch):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path))

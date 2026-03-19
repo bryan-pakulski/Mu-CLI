@@ -5,7 +5,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from ui.render import build_response_renderables, build_response_segments
-from ui.textual_ui import TextualUI
+from ui.textual_ui import TextualUI, resolve_code_language
 
 
 def _build_session(**overrides):
@@ -77,3 +77,10 @@ def test_build_response_segments_expose_copyable_code_metadata():
     assert code_segment.lang == "python"
     assert code_segment.content == "print(1)"
     assert code_segment.title == "python"
+
+
+def test_resolve_code_language_falls_back_when_treesitter_language_is_missing(monkeypatch):
+    monkeypatch.setattr("ui.textual_ui.TREE_SITTER", True)
+    monkeypatch.setattr("ui.textual_ui.get_language", lambda language: None)
+
+    assert resolve_code_language("cpp") is None

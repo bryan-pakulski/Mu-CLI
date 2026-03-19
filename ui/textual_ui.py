@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from textual import on
+from textual._tree_sitter import TREE_SITTER, get_language
 from textual.app import App, ComposeResult
 from textual.screen import ModalScreen
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -20,6 +21,12 @@ from textual.widgets import Button, Footer, Header, Input, OptionList, RichLog, 
 from .render import build_plain_text, build_response_segments
 
 
+
+
+def resolve_code_language(language: str | None) -> str | None:
+    if not language or not TREE_SITTER:
+        return language
+    return language if get_language(language) is not None else None
 
 
 class ChoiceModal(ModalScreen[str]):
@@ -90,7 +97,7 @@ class CopyableCodeBlock(Vertical):
         line_count = max(1, self.content.count("\n") + 1)
         editor = TextArea.code_editor(
             self.content,
-            language=self.language,
+            language=resolve_code_language(self.language),
             read_only=True,
             show_cursor=False,
             id="code-editor",

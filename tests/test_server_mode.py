@@ -142,6 +142,16 @@ def test_mode_command_without_args_lists_available_modes():
     assert result["data"]["available_modes"]["feature"]["documentation"] == "documentation/feature_plan_engine.md"
 
 
+def test_stats_command_returns_session_snapshot():
+    session = build_test_session()
+
+    result = handle_command(session, "/stats", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["history_turns"] == len(session.session_manager.history)
+    assert "token_counts" in result["data"]
+
+
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):
     session = build_test_session()
     workspace = tmp_path / "workspace"

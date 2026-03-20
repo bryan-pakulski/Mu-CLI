@@ -17,6 +17,14 @@ from prompt_toolkit.formatted_text import HTML
 from utils.config import KNOWN_MODELS, HISTORY_DIR
 
 
+MODE_PROMPT_STYLES = {
+    "debug": "mode-debug",
+    "feature": "mode-feature",
+    "research": "mode-research",
+    "git": "mode-git",
+}
+
+
 def get_session_names():
     if not os.path.exists(HISTORY_DIR):
         return []
@@ -113,6 +121,7 @@ class InputHandler:
                 "/load": session_completer,
                 "/new": None,
                 "/delete": session_completer,
+                "/stats": None,
                 "/tokens": None,
                 "/set": variable_completer,
                 "/get": variable_completer,
@@ -123,9 +132,13 @@ class InputHandler:
 
         self.style = Style.from_dict(
             {
-                "prompt": "ansicyan bold",
+                "prompt": "ansiblue bold",
                 "rprompt": "bg:ansiblue ansiwhite",
                 "files": "ansiyellow",
+                "mode-debug": "ansiyellow bold",
+                "mode-feature": "ansiblue bold",
+                "mode-research": "ansimagenta bold",
+                "mode-git": "ansigreen bold",
             }
         )
 
@@ -159,17 +172,31 @@ class InputHandler:
         """Update the reference to the variables dictionary for completion."""
         self.variables_dict = variables_dict
 
-    def get_input(self, session_name, staged_files):
+    def build_prompt_markup(self, session_name, staged_files, agent_mode="default"):
         files_text = ""
         if staged_files:
             # Note the updated accessor here for our new FileReference schema
             f_names = ", ".join([f["file_ref"]["display_name"] for f in staged_files])
             files_text = f" [Files: {f_names}]"
 
-        message = HTML(
+        mode_name = str(agent_mode or "default").lower()
+        mode_text = ""
+        if mode_name != "default":
+            mode_style = MODE_PROMPT_STYLES.get(mode_name, "prompt")
+            mode_text = f" <{mode_style}>{mode_name}</{mode_style}>"
+
+        return (
             f"<prompt>[{session_name}]</prompt>"
+            f"{mode_text}"
             f"<files>{files_text}</files> "
             f"<prompt>>>></prompt> "
+        )
+
+    def get_input(self, session_name, staged_files, agent_mode="default"):
+        message = HTML(
+            self.build_prompt_markup(
+                session_name, staged_files, agent_mode=agent_mode
+            )
         )
 
         def bottom_toolbar():

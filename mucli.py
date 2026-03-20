@@ -25,8 +25,8 @@ from utils.config import AGENT_MODE_METADATA
 console = Console()
 
 
-def refresh_memory_hud(session, ui):
-    if ui and hasattr(ui, "show_memory_monitor"):
+def refresh_memory_hud(session, ui, *, force=False):
+    if force and ui and hasattr(ui, "show_memory_monitor"):
         ui.show_memory_monitor(session)
 
 
@@ -87,6 +87,7 @@ def print_help():
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
     table.add_row("/quit", "/q", "Exit")
+    table.add_row("/stats", "", "Show a centered snapshot of runtime memory usage")
     table.add_row("/system <txt>", "/sys", "Update system prompt")
     table.add_row("/thinking", "", "Toggle thinking mode")
     table.add_row("/tokens", "", "Show context token usage")
@@ -928,7 +929,7 @@ def handle_command(session, user_input, allow_prompt=True):
             message=f"Usage: {cmd} <enable|disable|list> [toolname]",
         )
 
-    if cmd == "/tokens":
+    if cmd in ["/tokens", "/stats"]:
         stats = {
             "history_turns": len(session.session_manager.history),
             "summary_anchor": session.session_manager.summary_anchor,
@@ -936,7 +937,9 @@ def handle_command(session, user_input, allow_prompt=True):
             - session.session_manager.summary_anchor,
             "token_counts": dict(session.session_manager.token_counts),
         }
-        if allow_prompt:
+        if allow_prompt and cmd == "/stats":
+            refresh_memory_hud(session, ui, force=True)
+        elif allow_prompt:
             console.print("[yellow]--- Context Stats ---")
             console.print(f"Total History Turns: {stats['history_turns']}")
             console.print(f"Summarized Turns:    {stats['summary_anchor']}")
@@ -950,7 +953,6 @@ def handle_command(session, user_input, allow_prompt=True):
             console.print(
                 "[dim](Actual token count is also displayed after each generation)[/dim]"
             )
-        refresh_memory_hud(session, ui)
         return serialize_command_result(session, cmd, data=stats)
 
     if cmd == "/thinking":
@@ -1066,7 +1068,9 @@ def main():
     while True:
         try:
             user_input = ui.get_input(
-                session.session_manager.current_session_name, session.staged_files
+                session.session_manager.current_session_name,
+                session.staged_files,
+                agent_mode=session.variables.get("agent_mode", "default"),
             )
 
             if not user_input:

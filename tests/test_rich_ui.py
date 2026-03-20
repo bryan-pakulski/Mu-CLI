@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from rich.console import Console
 
 from ui.rich_ui import RichUI
+from utils.runtime_metrics import build_live_status_line
 
 
 def _build_session(**overrides):
@@ -49,7 +50,7 @@ def test_memory_monitor_renders_context_memory_and_queue_labels():
     console.print(ui.build_memory_monitor(session))
     output = console.export_text()
 
-    assert "Memory HUD" in output
+    assert "/stats" in output
     assert "CTX" in output
     assert "MEM" in output
     assert "SCRATCH" in output
@@ -59,3 +60,15 @@ def test_memory_monitor_renders_context_memory_and_queue_labels():
     assert "mode" in output
     assert "feature" in output
     assert "Phased Feature Plan Engine" in output
+
+
+def test_live_status_line_renders_inline_bars():
+    session = _build_session()
+
+    status_line = build_live_status_line(session)
+
+    assert "ctx:" in status_line
+    assert "mem:" in status_line
+    assert "scratch:" in status_line
+    assert "queue:" in status_line
+    assert "[" in status_line

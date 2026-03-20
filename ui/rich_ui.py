@@ -12,6 +12,7 @@ from rich.text import Text
 from .input import InputHandler
 from .render import render_response
 from utils.config import AGENT_MODE_METADATA
+from utils.runtime_metrics import build_live_status_line, collect_runtime_metrics
 
 
 class RichUI:
@@ -35,8 +36,10 @@ class RichUI:
                 self.console.print(f"\nAssistant ({model_name}):")
             render_response(content)
 
-    def get_input(self, session_name, staged_files):
-        return self.input_handler.get_input(session_name, staged_files)
+    def get_input(self, session_name, staged_files, agent_mode="default"):
+        return self.input_handler.get_input(
+            session_name, staged_files, agent_mode=agent_mode
+        )
 
     def set_variables(self, variables_dict):
         self.input_handler.set_variables(variables_dict)
@@ -90,59 +93,42 @@ class RichUI:
         return line
 
     def build_memory_monitor(self, session):
-        hist_len = len(session.session_manager.history)
-        anchor = session.session_manager.summary_anchor
-        active_turns = max(0, hist_len - anchor)
-        context_limit = max(1, int(getattr(session, "active_context_window", 1) or 1))
-
-        memory_limit = max(
-            1,
-            int(
-                session.variables.get(
-                    "memory_max_entries", getattr(session.task_memory, "max_entries", 1)
-                )
-            ),
-        )
-        scratch_limit = max(
-            1,
-            int(
-                session.variables.get(
-                    "scratchpad_max_entries",
-                    getattr(session.turn_scratchpad, "max_entries", 1),
-                )
-            ),
-        )
-        collation_limit = max(1, int(getattr(session.collation_buffer, "max_bytes", 1) or 1))
-        collation_bytes = sum(
-            len(result or "") for _, _, result in session.collation_buffer.entries
-        )
-        collation_items = len(session.collation_buffer.entries)
-        token_total = int(session.session_manager.token_counts.get("total", 0) or 0)
+        metrics = collect_runtime_metrics(session)
 
         meters = [
-            self.build_meter("CTX", active_turns, context_limit, color="cyan"),
             self.build_meter(
-                "MEM", len(session.task_memory.entries), memory_limit, color="magenta"
+                "CTX", metrics["ctx"]["current"], metrics["ctx"]["maximum"], color="cyan"
+            ),
+            self.build_meter(
+                "MEM",
+                metrics["mem"]["current"],
+                metrics["mem"]["maximum"],
+                color="magenta",
             ),
             self.build_meter(
                 "SCRATCH",
-                len(session.turn_scratchpad.entries),
-                scratch_limit,
+                metrics["scratch"]["current"],
+                metrics["scratch"]["maximum"],
                 color="green",
             ),
-            self.build_meter("QUEUE", collation_bytes, collation_limit, color="yellow"),
+            self.build_meter(
+                "QUEUE",
+                metrics["queue"]["current"],
+                metrics["queue"]["maximum"],
+                color="yellow",
+            ),
         ]
 
-        current_mode = str(session.variables.get("agent_mode", "default"))
+        current_mode = metrics["mode"]["name"]
         mode_description = AGENT_MODE_METADATA.get(current_mode, {}).get("description", "")
 
         meta = Text()
         meta.append("tokens ", style="dim white")
-        meta.append(str(token_total), style="bold cyan")
+        meta.append(str(metrics["tokens"]["total"]), style="bold cyan")
         meta.append("  |  queue ", style="dim white")
-        meta.append(str(collation_items), style="bold yellow")
+        meta.append(str(metrics["queue_items"]), style="bold yellow")
         meta.append(" item", style="dim white")
-        if collation_items != 1:
+        if metrics["queue_items"] != 1:
             meta.append("s", style="dim white")
         meta.append("  |  mode ", style="dim white")
         meta.append(current_mode, style="bold magenta")
@@ -155,13 +141,13 @@ class RichUI:
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
         )
 
-        return Align.right(
+        return Align.center(
             Panel(
                 Group(*meters, Text(""), meta, mode_line, legend),
-                title="[bold white]Memory HUD[/bold white]",
+                title="[bold white]/stats[/bold white]",
                 border_style="bright_black",
                 box=box.ROUNDED,
-                width=44,
+                width=60,
             )
         )
 
@@ -295,6 +281,12 @@ class RichUI:
     def show_status(self, message):
         with self.console.status(message, spinner="aesthetic") as status:
             yield status
+
+    def build_live_status(self, session, model_name, iteration, max_iterations):
+        return (
+            f"Generating ({model_name}) it {iteration}/{max_iterations} | "
+            f"{build_live_status_line(session)}"
+        )
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""

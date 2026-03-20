@@ -11,7 +11,7 @@
 - **Smart Context Management**: Automatic history truncation and summarization to stay within model context limits while keeping costs down.
 - **In-Task Memory Engine**: Agent mode can store and recall concise facts so it does not need to replay large tool outputs.
 - **Turn Scratchpads**: Agent mode can keep temporary notes for the active task loop without polluting durable memory.
-- **Live Memory HUD**: A compact right-aligned terminal widget visualizes context, durable memory, scratchpad usage, and the collation queue as they fill up over time.
+- **Runtime Stats & Live Metrics**: Use `/stats` for a centered snapshot panel, and watch the generating status line for compact context/memory/scratch/queue utilization bars during agent loops.
 - **Customizable Strategies**: Specialized agent modes for Debugging, phased Feature Implementation, and Research.
 - **Feature Plan Engine**: Feature mode can persist phased plans in `documentation/feature_req_<id>/`, pause on structured blockers, and drive implementation/review loops from those plan files.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
@@ -57,7 +57,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 3. **Set Workspace**: Use `/folder .` to add your current directory to the agent's context.
 4. **Enable Agentic Mode**: Type `/agentic` to allow the model to use tools.
 5. **Chat**: Ask questions like "How does the authentication logic work?" or "Fix the bug in the user controller."
-6. **Watch the HUD**: Keep an eye on the compact Memory HUD for context growth, memory slots, scratchpad activity, and pending collated tool output.
+6. **Watch Runtime Metrics**: Use `/stats` for a snapshot panel and check the `Generating ...` status line for live context, memory, scratchpad, and queue usage.
 
 ## Command Overview
 
@@ -76,6 +76,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 | `/model [name]` | | Show or change the current model |
 | `/provider [name]`| | Change the LLM provider |
 | `/flush` | | Flush the collation buffer into the next model turn |
+| `/stats` | | Show a centered runtime stats panel with memory and queue usage |
 | `/tokens` | | Show current context token usage and estimated cost |
 | `/view` | `/v` | View full conversation history |
 | `/clear` | `/c` | Clear conversation history |

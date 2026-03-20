@@ -19,6 +19,7 @@ from core.tools import (
 )
 from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
+from utils.runtime_metrics import build_live_status_line
 from utils.config import (
     HISTORY_DIR,
     DEFAULT_SESSION_NAME,
@@ -1089,7 +1090,10 @@ class Session:
                     if scratchpad_summary:
                         dynamic_system_prompt += f"\n\n{scratchpad_summary}"
 
-                status_msg = f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}..."
+                status_msg = (
+                    f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}"
+                    f" | {build_live_status_line(self)}"
+                )
                 if self.ui:
                     with self.ui.show_status(status_msg):
                         response = self.provider.generate(

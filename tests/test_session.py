@@ -282,6 +282,20 @@ def test_build_structured_tool_result_and_auto_promote():
     assert memory_results
 
 
+def test_build_structured_tool_result_includes_normalized_error_code():
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+
+    structured = session._build_structured_tool_result(
+        "read_file",
+        {"filename": "missing.txt"},
+        "Error: Access denied or file ignored. 'missing.txt' is outside boundaries or in ignore list.",
+    )
+
+    assert structured["ok"] is False
+    assert structured["error_code"] == "access_denied"
+
+
 def test_send_message_resets_scratchpad_each_turn():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)

@@ -10,7 +10,14 @@ from core.collation import CollationBuffer
 from core.memory import ScratchpadStore, TaskMemoryStore
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
-from core.tools import TOOLS, execute_tool, get_modifications, COLLATED_TOOLS
+from core.tools import (
+    TOOLS,
+    COLLATED_TOOLS,
+    execute_tool,
+    get_modifications,
+    get_tool_definition,
+    infer_tool_error_code,
+)
 from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.config import (
@@ -604,12 +611,14 @@ class Session:
         self, tool_name: str, tool_args: dict, raw_result
     ):
         raw_text = str(raw_result)
+        error_code = infer_tool_error_code(tool_name, raw_text)
         structured = {
             "tool_name": tool_name,
-            "ok": not raw_text.startswith("Error"),
+            "ok": error_code is None,
             "summary": self._clip_preview(raw_text, 220),
             "args": _shorten_tool_args(tool_args),
             "raw": raw_text,
+            "error_code": error_code,
             "data": {},
         }
 
@@ -796,24 +805,6 @@ class Session:
         if tool_name == "clear_scratchpad":
             self.turn_scratchpad.clear()
             return "Turn scratchpad cleared."
-
-        if tool_name == "batch_job":
-            commands = tool_args.get("commands", [])
-            if not isinstance(commands, list):
-                return "Error: 'commands' must be a list."
-            lines = ["--- Batch Job Results ---"]
-            for index, command in enumerate(commands, 1):
-                if not isinstance(command, dict):
-                    lines.append(f"[{index}] Error: Invalid command entry.")
-                    continue
-                nested_name = command.get("tool_name", "")
-                nested_args = command.get("tool_args", {})
-                if nested_name == "batch_job":
-                    lines.append(f"[{index}] Error: nested batch_job not allowed.")
-                    continue
-                nested_result = self._execute_tool_with_memory(nested_name, nested_args)
-                lines.append(f"[{index}] Tool: {nested_name}\n{nested_result}")
-            return "\n\n".join(lines)
 
         return execute_tool(
             tool_name,
@@ -1206,9 +1197,7 @@ class Session:
                 # Pre-calculate modifications for tools needing approval
                 to_approve_data = {}
                 for idx, part in enumerate(tool_calls):
-                    tool_def = next(
-                        (t for t in TOOLS if t.name == part.tool_name), None
-                    )
+                    tool_def = get_tool_definition(part.tool_name)
 
                     if self.variables.get("yolo", False):
                         continue

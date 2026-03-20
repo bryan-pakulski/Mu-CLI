@@ -9,7 +9,13 @@ from threading import Lock
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
-from core.tools import TOOLS, get_modifications
+from core.tools import (
+    TOOLS,
+    get_modifications,
+    get_tool_definition,
+    get_tool_descriptor,
+    serialize_tool_descriptor,
+)
 from providers.ollama import OllamaProvider
 from utils.logger import logger
 from utils.config import validate_and_cast
@@ -505,10 +511,7 @@ def build_state_payload(session) -> dict:
         "token_counts": dict(session.session_manager.token_counts),
         "available_tools": [
             {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-                "requires_approval": tool.requires_approval,
+                **serialize_tool_descriptor(tool.name),
                 "enabled": tool.name not in session.disabled_tools,
             }
             for tool in TOOLS
@@ -580,7 +583,15 @@ def execute_server_tool(session, tool_name: str, tool_args: dict):
     if tool_name in session.disabled_tools:
         raise PermissionError(f"Tool '{tool_name}' is disabled for this session.")
 
-    tool_def = next((tool for tool in TOOLS if tool.name == tool_name), None)
+    descriptor = get_tool_descriptor(tool_name)
+    if not descriptor:
+        raise ValueError(f"Unknown tool: {tool_name}")
+    if descriptor.server_policy != "allowed":
+        raise PermissionError(
+            f"Tool '{tool_name}' is not available for direct server execution."
+        )
+
+    tool_def = get_tool_definition(tool_name)
     if (
         tool_def
         and tool_def.requires_approval

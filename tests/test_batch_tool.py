@@ -1,6 +1,11 @@
 import os
 import pytest
-from core.tools import execute_tool, get_modifications
+from core.tools import (
+    execute_tool,
+    get_modifications,
+    get_tool_descriptor,
+    serialize_tool_descriptor,
+)
 from core.workspace import FolderContext
 
 
@@ -92,3 +97,18 @@ def test_batch_job_execution_with_writes(tmp_path):
 
     with open(file1, "r") as f:
         assert f.read() == "initial"
+
+
+def test_tool_descriptors_expose_execution_metadata():
+    read_descriptor = get_tool_descriptor("read_file")
+    batch_descriptor = get_tool_descriptor("batch_job")
+    payload = serialize_tool_descriptor("git_commit")
+
+    assert read_descriptor is not None
+    assert read_descriptor.execution_kind == "read"
+    assert read_descriptor.result_mode == "structured+collated"
+    assert batch_descriptor is not None
+    assert batch_descriptor.execution_kind == "composite"
+    assert batch_descriptor.handler_key == "batch_job"
+    assert payload["server_policy"] == "allowed"
+    assert payload["preview_policy"] == "optional"

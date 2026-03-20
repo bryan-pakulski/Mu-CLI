@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from threading import Lock
 from uuid import uuid4
 
+import pytest
+
 from core.server import (
     ApprovalManager,
     EventHub,
@@ -11,6 +13,7 @@ from core.server import (
     build_sessions_payload,
     build_state_payload,
     build_workspace_payload,
+    execute_server_tool,
 )
 from core.session import Session, SessionManager
 from mucli import handle_command
@@ -135,7 +138,12 @@ def test_build_state_payload_includes_workspace_and_tools(tmp_path):
 
     assert result["ok"] is True
     assert str(workspace) in state["folders"]
-    assert any(tool["name"] == "read_file" for tool in state["available_tools"])
+    read_file_tool = next(
+        tool for tool in state["available_tools"] if tool["name"] == "read_file"
+    )
+    assert read_file_tool["execution_kind"] == "read"
+    assert read_file_tool["result_mode"] == "structured+collated"
+    assert read_file_tool["server_policy"] == "allowed"
 
 
 def test_runtime_and_sessions_payloads_reflect_state_changes(tmp_path):
@@ -264,6 +272,13 @@ def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
     assert completed["result"]["ok"] is True
     assert completed["result"]["result"]["raw"] == f"Successfully wrote to {target_file}"
     assert target_file.read_text(encoding="utf-8") == "updated\n"
+
+
+def test_execute_server_tool_blocks_session_only_tools():
+    session = build_test_session()
+
+    with pytest.raises(PermissionError):
+        execute_server_tool(session, "flush", {})
 
 
 def test_build_runtime_payload_syncs_saved_variables_into_ollama_provider():

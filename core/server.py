@@ -368,6 +368,7 @@ class TaskManager:
                             tool_name,
                             tool_args,
                             result,
+                            execution_source="server",
                         )
                     else:
                         response_payload = {

@@ -275,6 +275,8 @@ def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
     assert completed["status"] == "completed"
     assert completed["result"]["ok"] is True
     assert completed["result"]["result"]["raw"] == f"Successfully wrote to {target_file}"
+    assert completed["result"]["result"]["telemetry"]["execution_source"] == "server"
+    assert completed["result"]["result"]["modified_files"] == [str(target_file)]
     assert target_file.read_text(encoding="utf-8") == "updated\n"
 
 

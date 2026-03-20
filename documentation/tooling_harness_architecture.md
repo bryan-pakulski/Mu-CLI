@@ -301,31 +301,40 @@ Stage 2 clarifies that the registry should become the authoritative explanation 
 
 ## Stage 4: Structured Results, Events, and Artifact Semantics
 
+**Stage status:** [x] completed
+
 ### Objectives
 
-- Improve downstream usability of tool results for the session loop, server API, and future GUI clients.
-- Distinguish raw command output from structured harness-level summaries.
-- Define how artifacts and multi-part tool outputs should be represented.
+- [x] Improve downstream usability of tool results for the session loop, server API, and future GUI clients.
+- [x] Distinguish raw command output from structured harness-level summaries.
+- [x] Define how artifacts and multi-part tool outputs should be represented.
 
 ### Action Points
 
-- Formalize a result envelope that can carry:
+- [x] Formalize a result envelope that can carry:
   - raw output
   - structured summary fields
   - error state
   - modified files
   - produced artifacts
   - telemetry metadata such as duration or execution source
-- Align server trace events and session tool-result records around the same result concepts.
-- Define how tools that produce large outputs, deferred outputs, or machine-readable payloads should expose them.
-- Specify artifact semantics for future additions such as generated reports, uploads, downloadable files, or richer previews.
-- Ensure structured results remain compact enough for the conversational loop while still being detailed enough for API consumers.
+- [x] Align server trace events and session tool-result records around the same result concepts.
+- [x] Define how tools that produce large outputs, deferred outputs, or machine-readable payloads should expose them.
+- [x] Specify artifact semantics for future additions such as generated reports, uploads, downloadable files, or richer previews.
+- [x] Ensure structured results remain compact enough for the conversational loop while still being detailed enough for API consumers.
+
+### Implementation Notes
+
+- Structured tool results now include `error`, `error_code`, `modified_files`, `artifacts`, and `telemetry`.
+- The session loop and direct server tool execution both emit the same core envelope shape via `_build_structured_tool_result(...)`.
+- Collated tool responses preserve the visible summary while recording collated delivery metadata in `telemetry` and `data`.
+- Artifact semantics are currently explicit-but-empty (`artifacts: []`) so future generated files, previews, and downloads can be added without changing the envelope contract.
 
 ### Exit Criteria
 
-- Tool results have a documented envelope that works across terminal, agentic, and server contexts.
-- Event streams and persisted tool-result records reference the same core semantics.
-- The architecture can describe how artifacts and large outputs will be handled without inventing a new model later.
+- [x] Tool results have a documented envelope that works across terminal, agentic, and server contexts.
+- [x] Event streams and persisted tool-result records reference the same core semantics.
+- [x] The architecture can describe how artifacts and large outputs will be handled without inventing a new model later.
 
 ---
 

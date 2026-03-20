@@ -607,7 +607,12 @@ class Session:
         }
 
     def _build_structured_tool_result(
-        self, tool_name: str, tool_args: dict, raw_result
+        self,
+        tool_name: str,
+        tool_args: dict,
+        raw_result,
+        *,
+        execution_source: str = "session",
     ):
         raw_text = str(raw_result)
         error_code = infer_tool_error_code(tool_name, raw_text)
@@ -618,7 +623,23 @@ class Session:
             "args": _shorten_tool_args(tool_args),
             "raw": raw_text,
             "error_code": error_code,
+            "error": (
+                None
+                if error_code is None
+                else {
+                    "code": error_code,
+                    "message": self._clip_preview(raw_text, 220),
+                }
+            ),
             "data": {},
+            "modified_files": [],
+            "artifacts": [],
+            "telemetry": {
+                "execution_source": execution_source,
+                "delivery_mode": "structured",
+                "raw_char_count": len(raw_text),
+                "raw_line_count": len(raw_text.splitlines()),
+            },
         }
 
         if tool_name == "read_file":
@@ -653,6 +674,8 @@ class Session:
                 "filename": filename,
                 "changed_file": filename,
             }
+            if filename:
+                structured["modified_files"] = [filename]
         elif tool_name == "list_agent_tasks":
             structured["data"] = self._parse_list_agent_tasks(raw_text)
         elif tool_name == "run_agent_task":
@@ -1345,29 +1368,36 @@ class Session:
                         promotion_result = None
                         if raw_result != source_result:
                             source_text = str(source_result)
-                            result = {
-                                "tool_name": part.tool_name,
-                                "ok": not source_text.startswith("Error"),
-                                "summary": self._clip_preview(raw_result, 220),
-                                "args": _shorten_tool_args(part.tool_args),
-                                "raw": str(raw_result),
-                                "data": {
-                                    "collated": True,
-                                    "pending_items": len(self.collation_buffer.entries),
-                                    "source_char_count": len(source_text),
-                                    "source_line_count": len(source_text.splitlines()),
-                                },
+                            result = self._build_structured_tool_result(
+                                part.tool_name,
+                                part.tool_args,
+                                raw_result,
+                                execution_source="session",
+                            )
+                            result["data"] = {
+                                "collated": True,
+                                "pending_items": len(self.collation_buffer.entries),
+                                "source_char_count": len(source_text),
+                                "source_line_count": len(source_text.splitlines()),
                             }
+                            result["telemetry"].update(
+                                {
+                                    "delivery_mode": "collated",
+                                    "visible_char_count": len(str(raw_result)),
+                                }
+                            )
                             promotion_result = self._build_structured_tool_result(
                                 part.tool_name,
                                 part.tool_args,
                                 source_result,
+                                execution_source="session",
                             )
                         else:
                             result = self._build_structured_tool_result(
                                 part.tool_name,
                                 part.tool_args,
                                 source_result,
+                                execution_source="session",
                             )
                             promotion_result = result
                         promotions = self._maybe_auto_promote_memory(promotion_result)

@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 from rich.console import Console
 
+from core.feature_mode import create_feature_plan, update_feature_plan_metadata
+from core.workspace import FolderContext
 from ui.rich_ui import RichUI
 from utils.runtime_metrics import build_live_status_line
 
@@ -13,6 +15,7 @@ def _build_session(**overrides):
             history=[{"role": "user", "parts": []}] * 12,
             summary_anchor=3,
             token_counts=token_counts,
+            get_feature_state=lambda: None,
         ),
         active_context_window=20,
         task_memory=SimpleNamespace(entries=[1, 2, 3], max_entries=64),
@@ -56,6 +59,9 @@ def test_memory_monitor_renders_context_memory_and_queue_labels():
     assert "SCRATCH" in output
     assert "QUEUE" in output
     assert "tokens 200" in output
+    assert "in 120" in output
+    assert "out 80" in output
+    assert "$0.01000" in output
     assert "queue 2 items" in output
     assert "mode" in output
     assert "feature" in output
@@ -72,3 +78,48 @@ def test_live_status_line_renders_inline_bars():
     assert "scratch:" in status_line
     assert "queue:" in status_line
     assert "[" in status_line
+
+
+def test_memory_monitor_renders_feature_progress(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = FolderContext()
+    ctx.add_folder(str(workspace))
+    plan = create_feature_plan(
+        feature_name="Stats Feature",
+        feature_request="Show feature progress in stats",
+        phases=[
+            {
+                "title": "Phase A",
+                "objectives": ["Understand scope"],
+                "action_points": ["Implement change"],
+                "exit_criteria": ["Verify output"],
+            }
+        ],
+        folder_context=ctx,
+        feature_id="stats_feature",
+    )
+    update_feature_plan_metadata(plan.directory, approved=True)
+
+    ui = RichUI()
+    session = _build_session(
+        session_manager=SimpleNamespace(
+            history=[{"role": "user", "parts": []}] * 12,
+            summary_anchor=3,
+            token_counts={"input": 120, "output": 80, "total": 200, "total_cost": 0.01},
+            get_feature_state=lambda: {
+                "type": "feature",
+                "status": "awaiting_input",
+                "directory": plan.directory,
+            },
+        )
+    )
+    console = Console(record=True, width=120)
+
+    console.print(ui.build_memory_monitor(session))
+    output = console.export_text()
+
+    assert "Stats Feature" in output
+    assert "awaiting_input" in output
+    assert "PHASES" in output
+    assert "P1" in output

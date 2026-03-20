@@ -19,6 +19,7 @@ from utils.logger import logger
 from providers.openai import OpenAIProvider
 from core.server import HeadlessUI, serve
 from core.session import SessionManager, Session
+from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
 from ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
 
@@ -48,6 +49,30 @@ def print_mode_overview(session):
 
     console.print(table)
     console.print(f"[dim]Current mode: {current_mode}[/dim]")
+
+
+def build_stats_snapshot(session):
+    stats = {
+        "history_turns": len(session.session_manager.history),
+        "summary_anchor": session.session_manager.summary_anchor,
+        "active_turns": len(session.session_manager.history)
+        - session.session_manager.summary_anchor,
+        "token_counts": dict(session.session_manager.token_counts),
+        "feature_state": session.session_manager.get_feature_state(),
+        "feature_plan": None,
+    }
+
+    feature_state = stats["feature_state"]
+    if isinstance(feature_state, dict):
+        directory = str(feature_state.get("directory", "") or "").strip()
+        if directory:
+            try:
+                plan = refresh_and_persist_feature_plan(directory)
+                stats["feature_plan"] = summarize_feature_plan(plan)
+            except (FileNotFoundError, OSError, ValueError):
+                stats["feature_plan"] = None
+
+    return stats
 
 
 def print_help():
@@ -87,10 +112,13 @@ def print_help():
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
     table.add_row("/quit", "/q", "Exit")
-    table.add_row("/stats", "", "Show a centered snapshot of runtime memory usage")
+    table.add_row(
+        "/stats",
+        "",
+        "Show runtime stats, token/cost totals, and feature progress",
+    )
     table.add_row("/system <txt>", "/sys", "Update system prompt")
     table.add_row("/thinking", "", "Toggle thinking mode")
-    table.add_row("/tokens", "", "Show context token usage")
     table.add_row("/view", "", "View conversation history")
 
     console.print(table)
@@ -929,30 +957,10 @@ def handle_command(session, user_input, allow_prompt=True):
             message=f"Usage: {cmd} <enable|disable|list> [toolname]",
         )
 
-    if cmd in ["/tokens", "/stats"]:
-        stats = {
-            "history_turns": len(session.session_manager.history),
-            "summary_anchor": session.session_manager.summary_anchor,
-            "active_turns": len(session.session_manager.history)
-            - session.session_manager.summary_anchor,
-            "token_counts": dict(session.session_manager.token_counts),
-        }
-        if allow_prompt and cmd == "/stats":
+    if cmd == "/stats":
+        stats = build_stats_snapshot(session)
+        if allow_prompt:
             refresh_memory_hud(session, ui, force=True)
-        elif allow_prompt:
-            console.print("[yellow]--- Context Stats ---")
-            console.print(f"Total History Turns: {stats['history_turns']}")
-            console.print(f"Summarized Turns:    {stats['summary_anchor']}")
-            console.print(f"Active Turns (Window): {stats['active_turns']}")
-            console.print(f"Session Tokens (In):  {stats['token_counts']['input']}")
-            console.print(f"Session Tokens (Out): {stats['token_counts']['output']}")
-            console.print(f"Session Tokens (Total): {stats['token_counts']['total']}")
-            console.print(
-                f"Session Est. Cost:    ${stats['token_counts'].get('total_cost', 0.0):.5f}"
-            )
-            console.print(
-                "[dim](Actual token count is also displayed after each generation)[/dim]"
-            )
         return serialize_command_result(session, cmd, data=stats)
 
     if cmd == "/thinking":

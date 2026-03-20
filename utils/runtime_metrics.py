@@ -1,3 +1,30 @@
+def collect_feature_progress(session):
+    feature_state = None
+    session_manager = getattr(session, "session_manager", None)
+    if session_manager and hasattr(session_manager, "get_feature_state"):
+        feature_state = session_manager.get_feature_state()
+    elif hasattr(session, "feature_state"):
+        feature_state = getattr(session, "feature_state")
+
+    if not isinstance(feature_state, dict):
+        return None
+
+    directory = str(feature_state.get("directory", "") or "").strip()
+    if not directory:
+        return {"state": feature_state, "plan": None}
+
+    try:
+        from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
+
+        plan = refresh_and_persist_feature_plan(directory)
+        return {
+            "state": feature_state,
+            "plan": summarize_feature_plan(plan),
+        }
+    except (FileNotFoundError, OSError, ValueError):
+        return {"state": feature_state, "plan": None}
+
+
 def _max_int(value, fallback=1):
     return max(1, int(value or fallback))
 
@@ -40,8 +67,12 @@ def collect_runtime_metrics(session):
             "input": int(session.session_manager.token_counts.get("input", 0) or 0),
             "output": int(session.session_manager.token_counts.get("output", 0) or 0),
             "total": int(session.session_manager.token_counts.get("total", 0) or 0),
+            "total_cost": float(
+                session.session_manager.token_counts.get("total_cost", 0.0) or 0.0
+            ),
         },
         "mode": {"name": str(session.variables.get("agent_mode", "default"))},
+        "feature": collect_feature_progress(session),
     }
 
 

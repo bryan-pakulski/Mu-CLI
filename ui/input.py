@@ -24,6 +24,14 @@ MODE_PROMPT_STYLES = {
     "git": "mode-git",
 }
 
+MODE_CHOICES = {
+    "default": None,
+    "debug": None,
+    "feature": None,
+    "research": None,
+    "git": None,
+}
+
 
 def get_session_names():
     if not os.path.exists(HISTORY_DIR):
@@ -77,7 +85,7 @@ class InputHandler:
         model_dict = {m: None for m in KNOWN_MODELS}
 
         provider_completer = NestedCompleter.from_nested_dict(
-            {"gemini": None, "ollama": None}
+            {"gemini": None, "ollama": None, "openai": None}
         )
 
         tool_completer = NestedCompleter.from_nested_dict(
@@ -88,47 +96,58 @@ class InputHandler:
             }
         )
 
-        mode_completer = NestedCompleter.from_nested_dict(
-                {"default": None, "debug": None, "feature": None, "research": None, "git": None}
+        mode_completer = NestedCompleter.from_nested_dict(MODE_CHOICES)
+        folder_completer = MergedCompleter(
+            [
+                NestedCompleter.from_nested_dict({"remove": directory_completer}),
+                directory_completer,
+            ]
         )
 
-        self.completer = NestedCompleter.from_nested_dict(
-            {
-                "/file": path_completer,
-                "/f": path_completer,
-                "/clear": None,
-                "/clearfiles": None,
-                "/view": None,
-                "/quit": None,
-                "/exit": None,
-                "/help": None,
-                "/model": model_dict,
-                "/agentic": None,
-                "/folder": MergedCompleter(
-                    [
-                        NestedCompleter.from_nested_dict(
-                            {"remove": directory_completer}
-                        ),
-                        directory_completer,
-                    ]
-                ),
-                "/provider": provider_completer,
-                "/tool": tool_completer,
-                "/mode": mode_completer,
-                "/system": None,
-                "/thinking": None,
-                "/list": None,
-                "/load": session_completer,
-                "/new": None,
-                "/delete": session_completer,
-                "/stats": None,
-                "/tokens": None,
-                "/set": variable_completer,
-                "/get": variable_completer,
-                "/unset": variable_completer,
-                "/variables": None,
-            }
-        )
+        self.command_completions = {
+            "/help": None,
+            "/h": None,
+            "/clear": None,
+            "/c": None,
+            "/clearfiles": None,
+            "/cf": None,
+            "/view": None,
+            "/v": None,
+            "/quit": None,
+            "/exit": None,
+            "/q": None,
+            "/file": path_completer,
+            "/f": path_completer,
+            "/add": path_completer,
+            "/folder": folder_completer,
+            "/dir": folder_completer,
+            "/model": model_dict,
+            "/provider": provider_completer,
+            "/agentic": None,
+            "/mode": mode_completer,
+            "/tool": tool_completer,
+            "/tools": tool_completer,
+            "/system": None,
+            "/sys": None,
+            "/thinking": None,
+            "/list": None,
+            "/ls": None,
+            "/load": session_completer,
+            "/open": session_completer,
+            "/new": None,
+            "/delete": session_completer,
+            "/rm": session_completer,
+            "/stats": None,
+            "/splash": None,
+            "/set": variable_completer,
+            "/get": variable_completer,
+            "/unset": variable_completer,
+            "/variables": None,
+            "/flush": None,
+            "/yolo": None,
+        }
+
+        self.completer = NestedCompleter.from_nested_dict(self.command_completions)
 
         self.style = Style.from_dict(
             {

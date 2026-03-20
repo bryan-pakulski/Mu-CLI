@@ -150,6 +150,16 @@ def test_stats_command_returns_session_snapshot():
     assert result["ok"] is True
     assert result["data"]["history_turns"] == len(session.session_manager.history)
     assert "token_counts" in result["data"]
+    assert "feature_state" in result["data"]
+
+
+def test_tokens_command_is_removed():
+    session = build_test_session()
+
+    result = handle_command(session, "/tokens", allow_prompt=False)
+
+    assert result["ok"] is False
+    assert result["message"] == "Unknown command: /tokens"
 
 
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):

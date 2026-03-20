@@ -133,9 +133,90 @@ class RichUI:
         meta.append("  |  mode ", style="dim white")
         meta.append(current_mode, style="bold magenta")
 
+        token_line = Text()
+        token_line.append("in ", style="dim white")
+        token_line.append(str(metrics["tokens"]["input"]), style="bold cyan")
+        token_line.append("  out ", style="dim white")
+        token_line.append(str(metrics["tokens"]["output"]), style="bold green")
+        token_line.append("  cost ", style="dim white")
+        token_line.append(
+            f"${metrics['tokens']['total_cost']:.5f}",
+            style="bold yellow",
+        )
+
         mode_line = Text()
         mode_line.append("mode info ", style="dim white")
         mode_line.append(mode_description or "No description available.", style="white")
+
+        feature_group = []
+        feature_metrics = metrics.get("feature")
+        if feature_metrics:
+            feature_state = feature_metrics.get("state") or {}
+            feature_plan = feature_metrics.get("plan") or {}
+            feature_name = feature_plan.get(
+                "feature_name", feature_state.get("directory", "Unknown feature")
+            )
+            feature_status = feature_state.get("status", "unknown")
+            feature_group.append(Text(""))
+
+            feature_header = Text()
+            feature_header.append("feature ", style="dim white")
+            feature_header.append(str(feature_name), style="bold cyan")
+            feature_group.append(feature_header)
+
+            feature_meta = Text()
+            feature_meta.append("loop ", style="dim white")
+            feature_meta.append(str(feature_status), style="bold yellow")
+            if feature_plan:
+                feature_meta.append("  |  review ", style="dim white")
+                feature_meta.append(
+                    str(feature_plan.get("review_status", "unknown")),
+                    style="bold magenta",
+                )
+            feature_group.append(feature_meta)
+
+            phases = feature_plan.get("phases", [])
+            completed_phases = sum(
+                1 for phase in phases if phase.get("status") == "completed"
+            )
+            phase_count = max(1, int(feature_plan.get("phase_count", len(phases)) or 1))
+            feature_group.append(
+                self.build_meter(
+                    "PHASES",
+                    completed_phases,
+                    phase_count,
+                    color="blue",
+                )
+            )
+
+            for phase in phases[:4]:
+                counts = phase.get("task_counts", {})
+                total_tasks = max(1, sum(int(value or 0) for value in counts.values()))
+                completed_tasks = int(counts.get("completed", 0) or 0)
+                phase_color = {
+                    "completed": "green",
+                    "in_progress": "yellow",
+                    "not_started": "blue",
+                }.get(phase.get("status"), "cyan")
+                feature_group.append(
+                    self.build_meter(
+                        f"P{phase.get('number', '?')}",
+                        completed_tasks,
+                        total_tasks,
+                        color=phase_color,
+                        width=12,
+                    )
+                )
+
+            next_phase = feature_plan.get("next_phase")
+            if next_phase:
+                next_phase_line = Text()
+                next_phase_line.append("next ", style="dim white")
+                next_phase_line.append(
+                    f"P{next_phase.get('number')}: {next_phase.get('title', '')}",
+                    style="white",
+                )
+                feature_group.append(next_phase_line)
 
         legend = Text.from_markup(
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
@@ -143,11 +224,11 @@ class RichUI:
 
         return Align.center(
             Panel(
-                Group(*meters, Text(""), meta, mode_line, legend),
+                Group(*meters, Text(""), meta, token_line, mode_line, *feature_group, legend),
                 title="[bold white]/stats[/bold white]",
                 border_style="bright_black",
                 box=box.ROUNDED,
-                width=60,
+                width=76,
             )
         )
 

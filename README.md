@@ -77,8 +77,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 | `/model [name]` | | Show or change the current model |
 | `/provider [name]`| | Change the LLM provider |
 | `/flush` | | Flush the collation buffer into the next model turn |
-| `/stats` | | Show a centered runtime stats panel with memory and queue usage |
-| `/tokens` | | Show current context token usage and estimated cost |
+| `/stats` | | Show runtime stats, token/cost totals, and current feature progress |
 | `/view` | `/v` | View full conversation history |
 | `/clear` | `/c` | Clear conversation history |
 | `/clearfiles` | `/cf` | Clear all staged files |

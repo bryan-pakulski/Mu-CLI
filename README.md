@@ -113,6 +113,7 @@ Notes:
 ### API endpoints
 
 For a higher-level assessment of whether the current server stack is ready for GUI work, see `documentation/server_architecture_review.md`.
+For a detailed plan to harden cross-provider tool calling and diff/mutation reliability, see `documentation/tooling_harness_architecture.md`.
 
 - `GET /health` — basic health check.
 - `GET /api/state` — current session state, active model, variables, workspaces, and tool metadata.

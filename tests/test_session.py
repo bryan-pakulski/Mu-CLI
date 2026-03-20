@@ -1,4 +1,11 @@
+import os
+
 import pytest
+from core.feature_mode import (
+    create_feature_plan,
+    summarize_feature_plan,
+    update_feature_plan_metadata,
+)
 from core.session import Session, SessionManager
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 
@@ -372,3 +379,94 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert "FEATURE MODE SYSTEM PROMPT" in provider.last_system_prompt
     assert "You are in Feature Plan Engine mode" in provider.last_system_prompt
     assert provider.last_user_text.endswith("Implement an approvals dashboard")
+
+
+def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-state-tool-sync")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+
+    plan = create_feature_plan(
+        feature_name="Feature state sync",
+        feature_request="Track feature plan progress in the session state.",
+        phases=[
+            {
+                "title": "Plan",
+                "objectives": ["Create the plan"],
+                "action_points": ["Refresh persisted state"],
+                "exit_criteria": ["State summary exists"],
+            }
+        ],
+        folder_context=session.folder_context,
+    )
+    summary = summarize_feature_plan(plan)
+
+    assert sm.get_feature_state() is None
+
+    session._sync_feature_state_for_tool(
+        "get_feature_plan",
+        {"directory": plan.directory},
+        raw_result=summary,
+        structured_result={"ok": True, "data": summary},
+    )
+
+    feature_state = sm.get_feature_state()
+    assert feature_state is not None
+    assert feature_state["type"] == "feature"
+    assert feature_state["directory"] == plan.directory
+    assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
+    assert feature_state["status"] == "awaiting_approval"
+
+
+def test_sync_feature_state_refreshes_after_feature_phase_file_changes(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-state-refresh")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+
+    plan = create_feature_plan(
+        feature_name="Feature refresh",
+        feature_request="Refresh plan status after editing phase markdown.",
+        phases=[
+            {
+                "title": "Phase 1",
+                "objectives": ["Ship the implementation"],
+                "action_points": ["Update the phase file"],
+                "exit_criteria": ["The phase is complete"],
+            }
+        ],
+        folder_context=session.folder_context,
+    )
+    plan = update_feature_plan_metadata(plan.directory, approved=True)
+    session._set_feature_state(feature_plan=summarize_feature_plan(plan), status="running")
+
+    phase_path = os.path.join(plan.directory, "phase_1.md")
+    with open(phase_path, encoding="utf-8") as handle:
+        phase_text = handle.read()
+    updated_phase_text = (
+        phase_text.replace("- [ ] Ship the implementation", "- [x] Ship the implementation")
+        .replace("- [ ] Update the phase file", "- [x] Update the phase file")
+        .replace("- [ ] The phase is complete", "- [x] The phase is complete")
+    )
+    with open(phase_path, "w", encoding="utf-8") as handle:
+        handle.write(updated_phase_text)
+
+    session._sync_feature_state_for_tool(
+        "write_file",
+        {"filename": phase_path},
+        raw_result=f"Successfully wrote to {phase_path}",
+        structured_result={
+            "ok": True,
+            "data": {"changed_file": phase_path},
+            "modified_files": [phase_path],
+        },
+    )
+
+    feature_state = sm.get_feature_state()
+    assert feature_state is not None
+    assert feature_state["feature_plan"]["phases"][0]["status"] == "completed"
+    assert feature_state["feature_plan"]["next_phase"] is None
+    assert feature_state["status"] == "review"

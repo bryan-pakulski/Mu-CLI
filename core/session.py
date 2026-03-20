@@ -9,6 +9,7 @@ from datetime import datetime
 
 from core.approval import build_approval_prompt, collect_approval_plans, ApprovalPlan
 from core.collation import CollationBuffer
+from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
 from core.memory import ScratchpadStore, TaskMemoryStore
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
@@ -53,6 +54,11 @@ def _shorten_tool_args(args: dict) -> dict:
         ):
             shortened[key] = f"({len(shortened[key])} chars)"
     return shortened
+
+
+def _safe_feature_path_prefix(path: str) -> str:
+    normalized = os.path.abspath(path)
+    return normalized if normalized.endswith(os.sep) else f"{normalized}{os.sep}"
 
 
 class SessionManager:
@@ -400,6 +406,113 @@ class Session:
         self.turn_scratchpad = self.session_manager.turn_scratchpad
         self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
+
+    def _derive_feature_state_status(self, feature_plan: dict | None) -> str:
+        if not isinstance(feature_plan, dict):
+            return "running"
+        if not feature_plan.get("approved", False):
+            return "awaiting_approval"
+        if feature_plan.get("review_status") == "completed":
+            return "completed"
+        if feature_plan.get("phases_completed") and feature_plan.get("next_phase") is None:
+            return "review"
+        return "running"
+
+    def _set_feature_state(
+        self,
+        *,
+        feature_plan: dict | None = None,
+        status: str | None = None,
+        blocker: dict | None = None,
+    ):
+        current = self.session_manager.get_feature_state() or {}
+        current_plan = current.get("feature_plan")
+        plan_summary = (
+            feature_plan if isinstance(feature_plan, dict) else current_plan
+        )
+        next_phase = (
+            plan_summary.get("next_phase")
+            if isinstance(plan_summary, dict)
+            else current.get("next_phase")
+        )
+        state = {
+            "type": "feature",
+            "status": status or self._derive_feature_state_status(plan_summary),
+            "feature_id": (
+                plan_summary.get("feature_id")
+                if isinstance(plan_summary, dict)
+                else current.get("feature_id")
+            ),
+            "feature_name": (
+                plan_summary.get("feature_name")
+                if isinstance(plan_summary, dict)
+                else current.get("feature_name")
+            ),
+            "directory": (
+                plan_summary.get("directory")
+                if isinstance(plan_summary, dict)
+                else current.get("directory")
+            ),
+            "next_phase": next_phase,
+            "feature_plan": plan_summary,
+            "blocker": blocker,
+            "updated_at": time.time(),
+        }
+        self.session_manager.set_feature_state(state, self.folder_context)
+        self.sync_runtime_state()
+
+    def _refresh_feature_state_from_directory(self, directory: str, *, status: str | None = None):
+        if not str(directory or "").strip():
+            return
+        try:
+            plan = refresh_and_persist_feature_plan(directory)
+            self._set_feature_state(
+                feature_plan=summarize_feature_plan(plan),
+                status=status,
+            )
+        except (FileNotFoundError, OSError, ValueError):
+            return
+
+    def _sync_feature_state_for_tool(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        raw_result,
+        structured_result,
+    ):
+        if tool_name in {"create_feature_plan", "get_feature_plan", "update_feature_plan"}:
+            data = {}
+            if isinstance(structured_result, dict):
+                data = structured_result.get("data", {}) or {}
+            if not isinstance(data, dict) or "directory" not in data:
+                data = self._parse_json_result(raw_result)
+            if isinstance(data, dict) and data.get("directory"):
+                self._set_feature_state(feature_plan=data)
+            return
+
+        if tool_name == "raise_blocker":
+            data = {}
+            if isinstance(structured_result, dict):
+                data = structured_result.get("data", {}) or {}
+            if not isinstance(data, dict) or not data.get("kind"):
+                data = self._parse_json_result(raw_result)
+            if isinstance(data, dict):
+                self._set_feature_state(status="awaiting_input", blocker=data)
+            return
+
+        if tool_name not in {"write_file", "apply_diff"}:
+            return
+
+        current = self.session_manager.get_feature_state() or {}
+        directory = str(current.get("directory", "") or "").strip()
+        filename = str(tool_args.get("filename", "") or "").strip()
+        if not directory or not filename:
+            return
+
+        feature_prefix = _safe_feature_path_prefix(directory)
+        normalized_filename = os.path.abspath(filename)
+        if normalized_filename.startswith(feature_prefix):
+            self._refresh_feature_state_from_directory(directory)
 
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
@@ -1247,6 +1360,13 @@ class Session:
 
                     logger.info("Agentic loop finished (no tool calls).")
 
+                    if (
+                        str(self.variables.get("agent_mode", "default")).lower()
+                        == "feature"
+                        and self.session_manager.get_feature_state()
+                    ):
+                        self._set_feature_state(status="running")
+
                     if self.variables.get("compact_history", False):
                         if self.ui:
                             self.ui.show_info(
@@ -1475,6 +1595,12 @@ class Session:
                     else:
                         result = raw_result
 
+                    self._sync_feature_state_for_tool(
+                        part.tool_name,
+                        part.tool_args,
+                        source_result,
+                        result,
+                    )
                     tool_result_parts.append(
                         {
                             "type": "tool_result",
@@ -1510,6 +1636,8 @@ class Session:
                     }
                 )
                 self.session_manager.save_history(self.folder_context)
+                if self.session_manager.get_feature_state():
+                    self._set_feature_state(status="interrupted")
                 return self._collect_turn_response(
                     initial_history_len,
                     status="interrupted",
@@ -1529,6 +1657,8 @@ class Session:
                     continue
 
                 self.session_manager.save_history(self.folder_context)
+                if self.session_manager.get_feature_state():
+                    self._set_feature_state(status="error")
                 return self._collect_turn_response(
                     initial_history_len,
                     status="error",
@@ -1539,6 +1669,8 @@ class Session:
                 )
 
         self.session_manager.save_history(self.folder_context)
+        if self.session_manager.get_feature_state():
+            self._set_feature_state(status="max_iterations_reached")
         return self._collect_turn_response(
             initial_history_len,
             status="max_iterations_reached",

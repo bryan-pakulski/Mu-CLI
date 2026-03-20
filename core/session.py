@@ -1416,6 +1416,11 @@ class Session:
                     needs_approval = approval_plan is not None
                     if needs_approval:
                         result = None
+                        if self.variables.get("yolo", False) and approval_plan.can_approve:
+                            result = self._execute_tool_with_memory(
+                                part.tool_name,
+                                part.tool_args,
+                            )
                         if approval_plan.preview_error and self.ui:
                             for modification in approval_plan.modifications:
                                 if modification.preview_error:

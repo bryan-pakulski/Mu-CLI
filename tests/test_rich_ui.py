@@ -123,3 +123,39 @@ def test_memory_monitor_renders_feature_progress(tmp_path):
     assert "awaiting_input" in output
     assert "PHASES" in output
     assert "P1" in output
+
+
+def test_request_tool_approval_uses_input_handler_prompt_choice():
+    ui = RichUI()
+    ui.set_variables({"yolo": False})
+    calls = {}
+
+    def fake_prompt_choice(prompt_text, *, choices, default=None):
+        calls["prompt_text"] = prompt_text
+        calls["choices"] = choices
+        calls["default"] = default
+        return "y"
+
+    ui.input_handler.prompt_choice = fake_prompt_choice
+
+    choice, reason = ui.request_tool_approval(
+        tool_name="write_file",
+        tool_args={"filename": "demo.txt"},
+        display_args={"filename": "demo.txt"},
+        count_info="",
+        can_approve=True,
+        modifications=[],
+        preview_error=None,
+        error_code=None,
+        prompt_text="[bold yellow]Permission Required[/bold yellow]",
+        choices=["y", "n", "e"],
+        default="y",
+    )
+
+    assert choice == "y"
+    assert reason is None
+    assert calls == {
+        "prompt_text": "Approval choice",
+        "choices": ["y", "n", "e"],
+        "default": "y",
+    }

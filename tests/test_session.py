@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from core.approval import ApprovalPlan
 from core.feature_mode import (
     create_feature_plan,
     summarize_feature_plan,
@@ -470,3 +471,122 @@ def test_sync_feature_state_refreshes_after_feature_phase_file_changes(tmp_path,
     assert feature_state["feature_plan"]["phases"][0]["status"] == "completed"
     assert feature_state["feature_plan"]["next_phase"] is None
     assert feature_state["status"] == "review"
+
+
+def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+
+    class SequencedProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.responses = [
+                ProviderResponse(
+                    text="",
+                    parts=[
+                        MessagePart(
+                            type="tool_call",
+                            tool_name="write_file",
+                            tool_args={"filename": str(tmp_path / "one.txt"), "content": "one"},
+                        ),
+                        MessagePart(
+                            type="tool_call",
+                            tool_name="write_file",
+                            tool_args={"filename": str(tmp_path / "two.txt"), "content": "two"},
+                        ),
+                    ],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+                ProviderResponse(
+                    text="done",
+                    parts=[MessagePart(type="text", text="done")],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+            ]
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            return self.responses.pop(0)
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    class ApprovalToggleUI:
+        def __init__(self):
+            self.prompt_count = 0
+            self.variables = None
+
+        def set_variables(self, variables_dict):
+            self.variables = variables_dict
+
+        def request_tool_approval(self, **kwargs):
+            self.prompt_count += 1
+            self.variables["yolo"] = True
+            return "y", None
+
+        def show_info(self, message):
+            return None
+
+        def show_error(self, message):
+            return None
+
+        def show_tool_result(self, result):
+            return None
+
+        def render_message(self, role, content, model_name=None):
+            return None
+
+        def show_status(self, message):
+            class _Status:
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, exc_type, exc, tb):
+                    return False
+
+            return _Status()
+
+    provider = SequencedProvider()
+    ui = ApprovalToggleUI()
+    sm = SessionManager(session_name="mid-loop-yolo")
+    session = Session(provider, False, "system instruction", sm, ui=ui)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+    ui.set_variables(session.variables)
+
+    approval_plan = ApprovalPlan(
+        tool_name="write_file",
+        tool_args={},
+        requires_approval=True,
+        can_approve=True,
+        modifications=[],
+    )
+    monkeypatch.setattr(
+        "core.session.collect_approval_plans",
+        lambda tool_calls, folder_context, strict_mode=False, yolo=False: {
+            0: approval_plan,
+            1: approval_plan,
+        },
+    )
+
+    executed = []
+
+    def fake_execute(tool_name, tool_args, *, invocation_source="session"):
+        executed.append((tool_name, tool_args["filename"]))
+        return f"executed {tool_args['filename']}"
+
+    monkeypatch.setattr(session, "_execute_tool_with_memory", fake_execute)
+
+    session.send_message("do both writes")
+
+    assert ui.prompt_count == 1
+    assert session.variables["yolo"] is True
+    assert executed == [
+        ("write_file", str(tmp_path / "one.txt")),
+        ("write_file", str(tmp_path / "two.txt")),
+    ]

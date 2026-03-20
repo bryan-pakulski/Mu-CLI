@@ -1,6 +1,7 @@
 # InputHandler (prompt_toolkit)
 import os
 import glob
+import re
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -260,6 +261,30 @@ class InputHandler:
             return ""
         except EOFError:
             raise EOFError
+
+    def prompt_choice(self, prompt_text, *, choices, default=None):
+        plain_prompt = re.sub(r"\[[^\]]+\]", "", str(prompt_text)).strip()
+        choices_str = "/".join(str(choice) for choice in choices)
+        default_suffix = f" default={default}" if default else ""
+        message = HTML(
+            f"<prompt>{plain_prompt} [{choices_str}]{default_suffix}</prompt> "
+        )
+
+        def bottom_toolbar():
+            return HTML(
+                " <b>[Shift+Tab]</b> toggles YOLO "
+                f"(<yolo-indicator>{'✦ ON' if self.is_yolo_enabled() else 'OFF'}</yolo-indicator>)"
+            )
+
+        while True:
+            value = self.session.prompt(
+                message,
+                bottom_toolbar=bottom_toolbar,
+                multiline=False,
+                default=default or "",
+            ).strip()
+            if value in choices:
+                return value
 
     def _prompt_continuation(self, width, line_number, is_soft_wrap):
         return HTML(f'<prompt>{("." * (width - 1)) + " "}</prompt>')

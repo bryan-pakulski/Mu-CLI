@@ -53,6 +53,35 @@ class RichUI:
     def prompt(self, message, default=None):
         return Prompt.ask(message, default=default)
 
+    def request_tool_approval(
+        self,
+        *,
+        tool_name,
+        tool_args,
+        display_args,
+        count_info,
+        can_approve,
+        modifications,
+        preview_error,
+        error_code,
+        prompt_text,
+        choices,
+        default,
+    ):
+        self.console.print(prompt_text)
+        self.console.print(
+            "[dim]Tip: press Shift+Tab here to toggle YOLO for this and subsequent approvals in the current loop.[/dim]"
+        )
+        choice = self.input_handler.prompt_choice(
+            "Approval choice",
+            choices=choices,
+            default=default,
+        )
+        reason = None
+        if choice == "e":
+            reason = self.prompt("Provide an explanation to the model")
+        return choice, reason
+
     def show_error(self, message):
         self.console.print(f"[red]{message}[/red]")
 

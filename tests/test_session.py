@@ -210,6 +210,7 @@ def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
             return ["dummy"]
 
         def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.last_system_prompt = system_prompt or ""
             return self.responses.pop(0)
 
         def upload_file(self, file_path, mime_type):
@@ -329,11 +330,13 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
         def __init__(self):
             super().__init__("dummy")
             self.last_user_text = ""
+            self.last_system_prompt = ""
 
         def get_available_models(self):
             return ["dummy"]
 
         def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.last_system_prompt = system_prompt or ""
             for message in reversed(messages):
                 if message.role == "user":
                     for part in message.parts:
@@ -366,4 +369,6 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert "Do not create alternate planning documents" in provider.last_user_text
     assert "do not begin code implementation until the user has reviewed and approved the plan" in provider.last_user_text
     assert "call raise_blocker" in provider.last_user_text
+    assert "FEATURE MODE SYSTEM PROMPT" in provider.last_system_prompt
+    assert "You are in Feature Plan Engine mode" in provider.last_system_prompt
     assert provider.last_user_text.endswith("Implement an approvals dashboard")

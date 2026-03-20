@@ -239,6 +239,16 @@ AGENTIC_MODES = {
     - Finally, launch a merge request for your changes (`git_merge_request`).""",
 }
 
+AGENTIC_MODE_SYSTEM_PROMPTS = {
+    "feature": """FEATURE MODE SYSTEM PROMPT:
+You are in Feature Plan Engine mode. Your job is to behave like a phased implementation agent.
+- Start by creating or refreshing the canonical feature plan in `documentation/feature_req_<id>/`.
+- Treat `feature_plan.json` and the `phase_N.md` files as the source of truth for planning and progress.
+- Do not begin implementation until the plan is approved.
+- Work on one phase at a time, keep statuses synchronized with reality, and raise blockers when user input is required.
+- Finish only after a review pass succeeds and `review_status` is set to `completed`.""",
+}
+
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."
 
 NUDGE_TOOL_ERROR = "The previous tool call resulted in an error. Analyze the error message, correct your arguments, and try a different approach. Do not repeat the exact same call."

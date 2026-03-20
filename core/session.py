@@ -25,6 +25,7 @@ from utils.config import (
     calculate_cost,
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
+    AGENTIC_MODE_SYSTEM_PROMPTS,
     DEFAULT_VARIABLES,
     validate_and_cast,
 )
@@ -1012,9 +1013,15 @@ class Session:
                 mode_instruction = AGENTIC_MODES.get(
                     agent_mode, AGENTIC_MODES["default"]
                 )
+                mode_system_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get(agent_mode, "")
 
                 map_str = self.folder_context.get_tree_map()
                 workspace_context = f"<workspace_map>\n{map_str}\n</workspace_map>\n\n{AGENTIC_SYSTEM_BASE.format(tool_descriptions=tool_desc_str)}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
+                if mode_system_prompt:
+                    workspace_context += (
+                        f"\n\n### {agent_mode.upper()} SYSTEM PROMPT\n"
+                        f"{mode_system_prompt}"
+                    )
             else:
                 logger.debug(
                     f"Using agent_mode={self.variables.get('agent_mode', 'default')}"

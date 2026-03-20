@@ -33,6 +33,28 @@ def test_prompt_markup_shows_yolo_indicator_when_enabled():
     assert "✦" in markup
 
 
+def test_input_toolbar_shows_plain_yolo_status_text():
+    handler = InputHandler()
+    handler.set_variables({"yolo": True})
+
+    toolbar = handler.build_input_toolbar_text()
+
+    assert toolbar == (
+        "[Meta+Enter] or [Esc] [Enter] to submit | "
+        "[Shift+Tab] toggles YOLO (ON) | "
+        "/help for commands"
+    )
+
+
+def test_choice_toolbar_shows_plain_yolo_status_text():
+    handler = InputHandler()
+    handler.set_variables({"yolo": False})
+
+    toolbar = handler.build_choice_toolbar_text()
+
+    assert toolbar == "[Shift+Tab] toggles YOLO (OFF)"
+
+
 def test_toggle_yolo_mode_flips_bound_variable():
     handler = InputHandler()
     variables = {"yolo": False}

@@ -236,6 +236,18 @@ class InputHandler:
             f"<prompt>>>></prompt> "
         )
 
+    def build_input_toolbar_text(self):
+        yolo_status = "ON" if self.is_yolo_enabled() else "OFF"
+        return (
+            "[Meta+Enter] or [Esc] [Enter] to submit | "
+            f"[Shift+Tab] toggles YOLO ({yolo_status}) | "
+            "/help for commands"
+        )
+
+    def build_choice_toolbar_text(self):
+        yolo_status = "ON" if self.is_yolo_enabled() else "OFF"
+        return f"[Shift+Tab] toggles YOLO ({yolo_status})"
+
     def get_input(self, session_name, staged_files, agent_mode="default"):
         message = HTML(
             self.build_prompt_markup(
@@ -244,12 +256,7 @@ class InputHandler:
         )
 
         def bottom_toolbar():
-            return HTML(
-                " <b>[Meta+Enter]</b> or <b>[Esc] [Enter]</b> to submit | "
-                "<b>[Shift+Tab]</b> toggles YOLO "
-                f"(<yolo-indicator>{'✦ ON' if self.is_yolo_enabled() else 'OFF'}</yolo-indicator>) | "
-                "<b>/help</b> for commands"
-            )
+            return self.build_input_toolbar_text()
 
         try:
             return self.session.prompt(
@@ -271,10 +278,7 @@ class InputHandler:
         )
 
         def bottom_toolbar():
-            return HTML(
-                " <b>[Shift+Tab]</b> toggles YOLO "
-                f"(<yolo-indicator>{'✦ ON' if self.is_yolo_enabled() else 'OFF'}</yolo-indicator>)"
-            )
+            return self.build_choice_toolbar_text()
 
         while True:
             value = self.session.prompt(

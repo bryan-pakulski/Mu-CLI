@@ -67,6 +67,7 @@ class SessionManager:
         logger.info(f"Initializing SessionManager (session_name={session_name})")
         self.current_session_name = DEFAULT_SESSION_NAME
         self.history = []  # Stores standardized list of dicts representing messages
+        self.conversation_summary = ""
         self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
         self.collation_buffer = CollationBuffer()
         self.summary_anchor = 0
@@ -89,6 +90,7 @@ class SessionManager:
         filepath = self._get_filepath(name)
         self.current_session_name = name
         self.history = []
+        self.conversation_summary = ""
         self.summary_anchor = 0
         self.provider_config = {}
         self.collation_buffer = CollationBuffer()
@@ -108,6 +110,9 @@ class SessionManager:
                     self.history = data
                 elif isinstance(data, dict):
                     self.history = data.get("history", [])
+                    self.conversation_summary = str(
+                        data.get("conversation_summary", "") or ""
+                    )
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.provider_config = data.get("provider_config", {})
                     self.collation_buffer = CollationBuffer.from_dict(
@@ -148,6 +153,7 @@ class SessionManager:
             os.makedirs(HISTORY_DIR, exist_ok=True)
             data = {
                 "history": self.history,
+                "conversation_summary": self.conversation_summary,
                 "summary_anchor": self.summary_anchor,
                 "provider_config": self.provider_config,
                 "folder_context": self.folder_context.to_dict(),
@@ -197,6 +203,8 @@ class SessionManager:
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
         self.feature_state = None
+        self.conversation_summary = ""
+        self.summary_anchor = 0
         self.history = []
         self.provider_config = {"provider": provider_name, "model": model_name}
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
@@ -249,10 +257,90 @@ class SessionManager:
     def clear_current_history(self):
         logger.info(f"Clearing history for session: {self.current_session_name}")
         self.history = []
+        self.conversation_summary = ""
+        self.summary_anchor = 0
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.save_history()
         if self.ui:
             self.ui.show_info("Current chat history cleared.")
+
+    def _summarize_history_batch(self, entries: list[dict]) -> str:
+        lines = []
+        for entry in entries:
+            lines.append(self._summarize_history_message(entry))
+        return "\n".join(line for line in lines if line)
+
+    def _summarize_history_message(self, entry: dict) -> str:
+        role = str(entry.get("role", "message"))
+        parts = []
+        for part in entry.get("parts", []):
+            part_type = part.get("type")
+            if part_type == "text":
+                text = str(part.get("text", "")).strip().replace("\n", " ")
+                if text:
+                    parts.append(text[:140])
+            elif part_type == "tool_call":
+                parts.append(
+                    f"tool_call:{part.get('tool_name')} args={_shorten_tool_args(part.get('tool_args', {}))}"
+                )
+            elif part_type == "tool_result":
+                result = str(part.get("tool_result", "")).strip().replace("\n", " ")
+                if len(result) > 140:
+                    result = f"{result[:137]}..."
+                if result:
+                    parts.append(f"tool_result:{part.get('tool_name', 'tool')} => {result}")
+            elif part_type == "file":
+                file_ref = part.get("file_ref", {})
+                parts.append(
+                    f"file:{file_ref.get('display_name') or file_ref.get('uri') or 'unknown'}"
+                )
+
+        if not parts:
+            return f"- {role}: [no serializable content]"
+        return f"- {role}: " + " | ".join(parts)
+
+    def _clip_conversation_summary(self, limit: int = 4_000) -> None:
+        if len(self.conversation_summary) <= limit:
+            return
+        clipped = self.conversation_summary[-limit:].lstrip()
+        newline_index = clipped.find("\n")
+        if newline_index > 0:
+            clipped = clipped[newline_index + 1 :]
+        self.conversation_summary = f"...\n{clipped}".strip()
+
+    def roll_history_summary(self, keep_recent: int) -> bool:
+        keep_recent = max(1, int(keep_recent or 1))
+        unsummarized_count = len(self.history) - self.summary_anchor
+        if unsummarized_count <= keep_recent:
+            return False
+
+        target_anchor = len(self.history) - keep_recent
+        for idx in range(target_anchor, len(self.history)):
+            if self.history[idx].get("role") == "user":
+                target_anchor = idx
+                break
+
+        if target_anchor <= self.summary_anchor:
+            return False
+
+        summary_batch = self._summarize_history_batch(
+            self.history[self.summary_anchor : target_anchor]
+        )
+        if not summary_batch:
+            self.summary_anchor = target_anchor
+            return True
+
+        header = (
+            f"### Summarized conversation through message {target_anchor}\n"
+            if not self.conversation_summary
+            else f"\n### Summarized conversation through message {target_anchor}\n"
+        )
+        self.conversation_summary = (
+            f"{self.conversation_summary}{header}{summary_batch}".strip()
+        )
+        self._clip_conversation_summary()
+        self.summary_anchor = target_anchor
+        return True
 
     def view_history(self):
         if not self.history:
@@ -322,7 +410,7 @@ class SessionManager:
             new_history.append({"role": "assistant", "parts": final_assistant_parts})
 
         self.history = new_history
-        self.summary_anchor = 0
+        self.summary_anchor = min(self.summary_anchor, len(self.history))
 
 
 class Session:
@@ -595,7 +683,11 @@ class Session:
     def _prepare_runtime_history(
         self, turn_start_index: int | None = None
     ) -> list[dict]:
-        recent_history = self.session_manager.history[-self.active_context_window :]
+        start_index = max(
+            self.session_manager.summary_anchor,
+            len(self.session_manager.history) - self.active_context_window,
+        )
+        recent_history = self.session_manager.history[start_index:]
         tool_window = max(0, int(self.variables.get("tool_context_window", 6)))
 
         if turn_start_index is None:
@@ -603,8 +695,7 @@ class Session:
 
         start_in_recent = max(
             0,
-            turn_start_index
-            - max(0, len(self.session_manager.history) - self.active_context_window),
+            turn_start_index - start_index,
         )
         prefix = recent_history[:start_in_recent]
         current_turn = recent_history[start_in_recent:]
@@ -653,6 +744,17 @@ class Session:
             )
 
         return prefix + compressed_turn
+
+    def _inject_conversation_summary(self, system_prompt: str) -> str:
+        summary = str(getattr(self.session_manager, "conversation_summary", "") or "").strip()
+        if not summary:
+            return system_prompt
+        return (
+            f"{system_prompt}\n\n"
+            "A rolling summary of older conversation history is available below. "
+            "Use it for long-term continuity before re-reading or re-deriving prior work.\n"
+            f"{summary}"
+        )
 
     def _render_tool_result(self, result) -> str:
         if isinstance(result, dict):
@@ -1180,8 +1282,10 @@ class Session:
         base_system_prompt = self.system_instruction
         if workspace_context:
             base_system_prompt += f"\n\n{workspace_context}"
+        self.session_manager.roll_history_summary(self.active_context_window)
+        base_system_prompt = self._inject_conversation_summary(base_system_prompt)
 
-        recent_history = self.session_manager.history[-self.active_context_window :]
+        recent_history = self._prepare_runtime_history()
         messages = self._build_messages_from_history(recent_history, new_user_message)
 
         initial_history_len = len(self.session_manager.history)
@@ -1358,7 +1462,7 @@ class Session:
                         }
                         self.session_manager.history.append(nudge_msg)
                         messages = self._build_messages_from_history(
-                            self.session_manager.history[-self.active_context_window :],
+                            self._prepare_runtime_history(),
                             {"role": "system", "parts": []},
                         )[:-1]
                         continue

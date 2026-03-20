@@ -105,6 +105,77 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
     assert len(prepared) == 4
 
 
+def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.active_context_window = 4
+
+    sm.history = [
+        {"role": "user", "parts": [{"type": "text", "text": "turn 1"}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "answer 1"}]},
+        {"role": "user", "parts": [{"type": "text", "text": "turn 2"}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "answer 2"}]},
+        {"role": "user", "parts": [{"type": "text", "text": "turn 3"}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "answer 3"}]},
+    ]
+
+    changed = sm.roll_history_summary(session.active_context_window)
+
+    assert changed is True
+    assert sm.summary_anchor == 2
+    assert "turn 1" in sm.conversation_summary
+    assert "answer 1" in sm.conversation_summary
+    assert [msg["parts"][0]["text"] for msg in session._prepare_runtime_history()] == [
+        "turn 2",
+        "answer 2",
+        "turn 3",
+        "answer 3",
+    ]
+
+
+def test_send_message_injects_rolling_conversation_summary():
+    class CaptureProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.last_system_prompt = ""
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.last_system_prompt = system_prompt or ""
+            return ProviderResponse(
+                text="done",
+                parts=[MessagePart(type="text", text="done")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    provider = CaptureProvider()
+    sm = SessionManager(session_name="rolling-summary")
+    session = Session(provider, False, "system instruction", sm)
+    session.active_context_window = 4
+    sm.history = [
+        {"role": "user", "parts": [{"type": "text", "text": "turn 1"}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "answer 1"}]},
+        {"role": "user", "parts": [{"type": "text", "text": "turn 2"}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "answer 2"}]},
+        {"role": "user", "parts": [{"type": "text", "text": "turn 3"}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "answer 3"}]},
+    ]
+
+    session.send_message("turn 4")
+
+    assert "rolling summary of older conversation history" in provider.last_system_prompt.lower()
+    assert "turn 1" in provider.last_system_prompt
+    assert sm.summary_anchor == 2
+    assert "turn 1" in sm.conversation_summary
+
+
 
 
 def test_prepare_runtime_history_keeps_signed_tool_messages():

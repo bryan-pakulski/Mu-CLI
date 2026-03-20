@@ -1,4 +1,5 @@
 import os
+import json
 
 import pytest
 from core.approval import ApprovalPlan
@@ -593,3 +594,71 @@ def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):
         ("write_file", str(tmp_path / "one.txt")),
         ("write_file", str(tmp_path / "two.txt")),
     ]
+
+
+def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+
+    class SequencedProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.responses = [
+                ProviderResponse(
+                    text="",
+                    parts=[
+                        MessagePart(
+                            type="tool_call",
+                            tool_name="create_feature_plan",
+                            tool_args={
+                                "feature_name": "Persistent feature state",
+                                "feature_request": "Persist feature state to the session JSON.",
+                                "phases": [
+                                    {
+                                        "title": "Phase 1",
+                                        "objectives": ["Plan the work"],
+                                        "action_points": ["Write the feature plan"],
+                                        "exit_criteria": ["A plan exists on disk"],
+                                    }
+                                ],
+                            },
+                        )
+                    ],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+                ProviderResponse(
+                    text="planned",
+                    parts=[MessagePart(type="text", text="planned")],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+            ]
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            return self.responses.pop(0)
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager(session_name="feature-state-persisted")
+    session = Session(SequencedProvider(), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+    session.variables["agent_mode"] = "feature"
+
+    session.send_message("Implement the feature workflow")
+
+    session_json = tmp_path / "history" / "feature-state-persisted.json"
+    assert session_json.exists()
+
+    saved = json.loads(session_json.read_text())
+    feature_state = saved.get("feature_state")
+    assert feature_state is not None
+    assert feature_state["type"] == "feature"
+    assert feature_state["status"] == "awaiting_approval"
+    assert feature_state["feature_plan"]["feature_name"] == "Persistent feature state"

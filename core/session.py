@@ -145,6 +145,7 @@ class SessionManager:
             self.folder_context = folder_context_obj
 
         try:
+            os.makedirs(HISTORY_DIR, exist_ok=True)
             data = {
                 "history": self.history,
                 "summary_anchor": self.summary_anchor,
@@ -1374,7 +1375,7 @@ class Session:
                         == "feature"
                         and self.session_manager.get_feature_state()
                     ):
-                        self._set_feature_state(status="running")
+                        self._set_feature_state()
 
                     if self.variables.get("compact_history", False):
                         if self.ui:

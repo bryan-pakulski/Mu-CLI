@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from threading import Lock
 from uuid import uuid4
@@ -153,6 +154,33 @@ def test_stats_command_returns_session_snapshot():
     assert "feature_state" in result["data"]
 
 
+def test_clear_command_resets_context_memory_and_features(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    session.session_manager.history = [{"role": "user", "parts": [{"type": "text", "text": "hello"}]}]
+    session.task_memory.save("remember this", tags=["fact"])
+    session.turn_scratchpad.save("temporary note", tags=["temp"])
+    session.collation_buffer.add("read_file", {"filename": "demo.txt"}, "payload")
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+    handle_command(session, "/feature new Demo Feature", allow_prompt=False)
+    session.staged_files = [{"file_ref": {"display_name": "demo.txt"}}]
+
+    result = handle_command(session, "/clear", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert session.session_manager.history == []
+    assert session.task_memory.entries == []
+    assert session.turn_scratchpad.entries == []
+    assert session.collation_buffer.entries == []
+    assert session.folder_context.folders == []
+    assert session.session_manager.get_feature_state() is None
+    assert session.session_manager.list_features() == []
+    assert session.staged_files == []
+
+
 def test_tokens_command_is_removed():
     session = build_test_session()
 
@@ -160,6 +188,42 @@ def test_tokens_command_is_removed():
 
     assert result["ok"] is False
     assert result["message"] == "Unknown command: /tokens"
+
+
+def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    created = handle_command(session, "/feature new Stats Dashboard", allow_prompt=False)
+    feature = created["data"]["feature"]
+
+    assert created["ok"] is True
+    assert feature["metadata_path"].startswith(str(tmp_path / "history" / "features"))
+    assert feature["directory"].startswith(str(workspace / "documentation"))
+
+    status = handle_command(session, "/feature status", allow_prompt=False)
+    phases = handle_command(session, "/feature phases", allow_prompt=False)
+    listed = handle_command(session, "/feature list", allow_prompt=False)
+    loaded = handle_command(
+        session,
+        f"/feature load {feature['feature_id']}",
+        allow_prompt=False,
+    )
+    deleted = handle_command(
+        session,
+        f"/feature delete {feature['feature_id']}",
+        allow_prompt=False,
+    )
+
+    assert "# Feature: Stats Dashboard" in status["data"]["markdown"]
+    assert "## Phases" in phases["data"]["markdown"]
+    assert listed["data"]["features"][0]["feature_id"] == feature["feature_id"]
+    assert loaded["data"]["feature"]["feature_id"] == feature["feature_id"]
+    assert deleted["ok"] is True
+    assert session.session_manager.list_features() == []
 
 
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):

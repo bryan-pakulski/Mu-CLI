@@ -3,6 +3,7 @@ import os
 import json
 import time
 import glob
+import re
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
@@ -61,6 +62,11 @@ def _safe_feature_path_prefix(path: str) -> str:
     return normalized if normalized.endswith(os.sep) else f"{normalized}{os.sep}"
 
 
+def _slugify_feature_id(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    return slug or "feature"
+
+
 class SessionManager:
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
@@ -76,6 +82,8 @@ class SessionManager:
         self.turn_scratchpad = ScratchpadStore()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.feature_state = None
+        self.feature_registry = {}
+        self.active_feature_id = None
         self.variables = DEFAULT_VARIABLES.copy()
 
         if session_name:
@@ -100,6 +108,8 @@ class SessionManager:
         self.variables.clear()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.feature_state = None
+        self.feature_registry = {}
+        self.active_feature_id = None
         self.variables.update(DEFAULT_VARIABLES)
 
         if os.path.exists(filepath):
@@ -132,6 +142,19 @@ class SessionManager:
                     feature_state = data.get("feature_state")
                     if isinstance(feature_state, dict):
                         self.feature_state = feature_state
+                    self.feature_registry = {
+                        str(key): value
+                        for key, value in (data.get("feature_registry", {}) or {}).items()
+                        if isinstance(value, dict)
+                    }
+                    self.active_feature_id = data.get("active_feature_id")
+                    if (
+                        self.feature_state is None
+                        and self.active_feature_id in self.feature_registry
+                    ):
+                        self.feature_state = deepcopy(
+                            self.feature_registry[self.active_feature_id]
+                        )
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -163,6 +186,8 @@ class SessionManager:
                 "turn_scratchpad": self.turn_scratchpad.to_dict(),
                 "token_counts": self.token_counts,
                 "feature_state": self.feature_state,
+                "feature_registry": self.feature_registry,
+                "active_feature_id": self.active_feature_id,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -174,12 +199,131 @@ class SessionManager:
     def get_feature_state(self):
         return deepcopy(self.feature_state) if isinstance(self.feature_state, dict) else None
 
+    def get_feature_metadata_root(self) -> str:
+        return os.path.join(HISTORY_DIR, "features", self.current_session_name)
+
+    def get_feature_metadata_path(self, feature_id: str) -> str:
+        return os.path.join(
+            self.get_feature_metadata_root(),
+            f"{_slugify_feature_id(feature_id)}.json",
+        )
+
+    def get_feature_metadata_index(self) -> dict[str, str]:
+        index = {}
+        for feature in self.feature_registry.values():
+            directory = str(feature.get("directory", "") or "").strip()
+            metadata_path = str(feature.get("metadata_path", "") or "").strip()
+            if directory and metadata_path:
+                index[directory] = metadata_path
+        return index
+
+    def list_features(self) -> list[dict]:
+        features = [deepcopy(feature) for feature in self.feature_registry.values()]
+        features.sort(key=lambda feature: float(feature.get("updated_at", 0) or 0), reverse=True)
+        return features
+
+    def get_feature(self, feature_id: str | None = None) -> dict | None:
+        resolved_feature_id = feature_id or self.active_feature_id
+        if not resolved_feature_id:
+            return None
+        feature = self.feature_registry.get(str(resolved_feature_id))
+        return deepcopy(feature) if isinstance(feature, dict) else None
+
+    def upsert_feature(self, feature: dict | None) -> dict | None:
+        if not isinstance(feature, dict):
+            return None
+        feature_id = str(
+            feature.get("feature_id")
+            or feature.get("id")
+            or feature.get("feature_name")
+            or ""
+        ).strip()
+        if not feature_id:
+            return None
+        feature_id = _slugify_feature_id(feature_id)
+        record = deepcopy(feature)
+        record["feature_id"] = feature_id
+        record["updated_at"] = float(record.get("updated_at", time.time()) or time.time())
+        self.feature_registry[feature_id] = record
+        return deepcopy(record)
+
+    def activate_feature(self, feature_id: str) -> dict | None:
+        record = self.get_feature(feature_id)
+        if not record:
+            return None
+        self.active_feature_id = record["feature_id"]
+        self.feature_state = deepcopy(record)
+        self.save_history()
+        return deepcopy(record)
+
+    def delete_feature(self, feature_id: str) -> dict | None:
+        resolved_feature_id = _slugify_feature_id(feature_id)
+        record = self.feature_registry.pop(resolved_feature_id, None)
+        if not isinstance(record, dict):
+            return None
+        metadata_path = str(record.get("metadata_path", "") or "").strip()
+        if metadata_path and os.path.exists(metadata_path):
+            os.remove(metadata_path)
+        if self.active_feature_id == resolved_feature_id:
+            self.active_feature_id = None
+            self.feature_state = None
+        self.save_history()
+        return deepcopy(record)
+
+    def create_feature_record(
+        self,
+        feature_name: str,
+        *,
+        directory: str,
+        feature_request: str = "",
+    ) -> dict:
+        feature_id = _slugify_feature_id(feature_name)
+        metadata_path = self.get_feature_metadata_path(feature_id)
+        os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+        record = {
+            "type": "feature",
+            "status": "draft",
+            "feature_id": feature_id,
+            "feature_name": feature_name.strip() or feature_id,
+            "directory": directory,
+            "metadata_path": metadata_path,
+            "feature_plan": {
+                "feature_id": feature_id,
+                "feature_name": feature_name.strip() or feature_id,
+                "feature_request": feature_request.strip() or feature_name.strip() or feature_id,
+                "directory": directory,
+                "metadata_path": metadata_path,
+                "approved": False,
+                "review_status": "pending",
+                "review_notes": "",
+                "overall_status": "not_started",
+                "phases_completed": False,
+                "phase_count": 0,
+                "phases": [],
+                "next_phase": None,
+            },
+            "blocker": None,
+            "updated_at": time.time(),
+        }
+        with open(metadata_path, "w", encoding="utf-8") as handle:
+            json.dump(record["feature_plan"], handle, indent=2)
+        self.upsert_feature(record)
+        self.active_feature_id = feature_id
+        self.feature_state = deepcopy(record)
+        self.save_history()
+        return deepcopy(record)
+
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
         self.feature_state = deepcopy(state) if isinstance(state, dict) else None
+        if isinstance(self.feature_state, dict):
+            record = self.upsert_feature(self.feature_state)
+            if record:
+                self.active_feature_id = record["feature_id"]
         self.save_history(folder_context_obj)
 
     def clear_feature_state(self, folder_context_obj=None):
         self.feature_state = None
+        self.active_feature_id = None
         self.save_history(folder_context_obj)
 
     def switch_session(self, name):
@@ -203,6 +347,8 @@ class SessionManager:
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
         self.feature_state = None
+        self.feature_registry = {}
+        self.active_feature_id = None
         self.conversation_summary = ""
         self.summary_anchor = 0
         self.history = []
@@ -264,6 +410,27 @@ class SessionManager:
         if self.ui:
             self.ui.show_info("Current chat history cleared.")
 
+    def reset_current_session_state(self):
+        logger.info(f"Resetting session state for session: {self.current_session_name}")
+        self.history = []
+        self.conversation_summary = ""
+        self.summary_anchor = 0
+        self.collation_buffer = CollationBuffer()
+        self.folder_context = FolderContext()
+        self.task_memory = TaskMemoryStore()
+        self.turn_scratchpad = ScratchpadStore()
+        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.feature_state = None
+        self.feature_registry = {}
+        self.active_feature_id = None
+
+        feature_root = self.get_feature_metadata_root()
+        if os.path.isdir(feature_root):
+            for entry in glob.glob(os.path.join(feature_root, "*.json")):
+                os.remove(entry)
+
+        self.save_history()
+
     def _summarize_history_batch(self, entries: list[dict]) -> str:
         lines = []
         for entry in entries:
@@ -310,6 +477,8 @@ class SessionManager:
 
     def roll_history_summary(self, keep_recent: int) -> bool:
         keep_recent = max(1, int(keep_recent or 1))
+        if self.summary_anchor > len(self.history):
+            self.summary_anchor = 0
         unsummarized_count = len(self.history) - self.summary_anchor
         if unsummarized_count <= keep_recent:
             return False
@@ -495,6 +664,16 @@ class Session:
         self.turn_scratchpad = self.session_manager.turn_scratchpad
         self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
+        setattr(
+            self.folder_context,
+            "feature_metadata_dir",
+            self.session_manager.get_feature_metadata_root(),
+        )
+        setattr(
+            self.folder_context,
+            "feature_metadata_index",
+            self.session_manager.get_feature_metadata_index(),
+        )
 
     def _derive_feature_state_status(self, feature_plan: dict | None) -> str:
         if not isinstance(feature_plan, dict):
@@ -542,6 +721,11 @@ class Session:
                 if isinstance(plan_summary, dict)
                 else current.get("directory")
             ),
+            "metadata_path": (
+                plan_summary.get("metadata_path")
+                if isinstance(plan_summary, dict)
+                else current.get("metadata_path")
+            ),
             "next_phase": next_phase,
             "feature_plan": plan_summary,
             "blocker": blocker,
@@ -554,7 +738,11 @@ class Session:
         if not str(directory or "").strip():
             return
         try:
-            plan = refresh_and_persist_feature_plan(directory)
+            current = self.session_manager.get_feature_state() or {}
+            plan = refresh_and_persist_feature_plan(
+                directory,
+                metadata_path=current.get("metadata_path"),
+            )
             self._set_feature_state(
                 feature_plan=summarize_feature_plan(plan),
                 status=status,
@@ -683,6 +871,8 @@ class Session:
     def _prepare_runtime_history(
         self, turn_start_index: int | None = None
     ) -> list[dict]:
+        if self.session_manager.summary_anchor > len(self.session_manager.history):
+            self.session_manager.summary_anchor = 0
         start_index = max(
             self.session_manager.summary_anchor,
             len(self.session_manager.history) - self.active_context_window,
@@ -857,7 +1047,7 @@ class Session:
 
     def _build_feature_mode_prompt(self, text: str) -> str:
         base_instruction = (
-            "FEATURE MODE DIRECTIVE: use the feature-plan engine for this request. First call create_feature_plan and create the canonical plan in documentation/feature_req_<id>/feature_plan.json with one phase_N.md file per phase. "
+            "FEATURE MODE DIRECTIVE: use the feature-plan engine for this request. First call create_feature_plan and create the canonical session-managed feature metadata with one documentation/feature_req_<id>/phase_N.md file per phase. "
             "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
             "Each phase file must contain Objectives, Action Points, and Exit Criteria sections, and each checklist item must use exactly one of [ ], [~], or [x]. "
             "After approval, call get_feature_plan at the start of every implementation turn, work on only the next incomplete phase, and keep the phase markdown synchronized with reality as you make code changes. "

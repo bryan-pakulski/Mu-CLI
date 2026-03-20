@@ -733,3 +733,69 @@ def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypat
     assert feature_state["type"] == "feature"
     assert feature_state["status"] == "awaiting_approval"
     assert feature_state["feature_plan"]["feature_name"] == "Persistent feature state"
+
+
+def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+
+    class SequencedProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.responses = [
+                ProviderResponse(
+                    text="",
+                    parts=[
+                        MessagePart(
+                            type="tool_call",
+                            tool_name="create_feature_plan",
+                            tool_args={
+                                "feature_name": "Externalized feature metadata",
+                                "feature_request": "Keep feature JSON under session metadata.",
+                                "phases": [
+                                    {
+                                        "title": "Plan",
+                                        "objectives": ["Capture requirements"],
+                                        "action_points": ["Write the plan"],
+                                        "exit_criteria": ["Plan exists"],
+                                    }
+                                ],
+                            },
+                        )
+                    ],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+                ProviderResponse(
+                    text="planned",
+                    parts=[MessagePart(type="text", text="planned")],
+                    input_tokens=1,
+                    output_tokens=1,
+                    total_tokens=2,
+                ),
+            ]
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            return self.responses.pop(0)
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager(session_name="feature-metadata-location")
+    session = Session(SequencedProvider(), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+    session.variables["agent_mode"] = "feature"
+
+    session.send_message("Create the feature plan")
+
+    feature_state = sm.get_feature_state()
+
+    assert feature_state is not None
+    assert feature_state["metadata_path"].startswith(str(tmp_path / "history" / "features"))
+    assert os.path.exists(feature_state["metadata_path"])
+    assert not os.path.exists(os.path.join(feature_state["directory"], "feature_plan.json"))
+    assert os.path.exists(os.path.join(feature_state["directory"], "phase_1.md"))

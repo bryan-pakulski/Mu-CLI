@@ -542,7 +542,7 @@ TOOLS = [
     ),
     ToolDefinition(
         name="create_feature_plan",
-        description="Creates a structured feature implementation plan under documentation/feature_req_<id>/ with phase markdown files and a feature_plan.json manifest.",
+        description="Creates a structured feature implementation plan with phase markdown files in documentation/feature_req_<id>/ and stores the machine-readable manifest in session metadata.",
         parameters={
             "type": "object",
             "properties": {
@@ -570,7 +570,7 @@ TOOLS = [
     ),
     ToolDefinition(
         name="get_feature_plan",
-        description="Loads a feature plan manifest and phase markdown files, refreshes progress from the markdown checklists, and returns a machine-readable summary.",
+        description="Loads the session-managed feature plan metadata plus phase markdown files, refreshes progress from the markdown checklists, and returns a machine-readable summary.",
         parameters={
             "type": "object",
             "properties": {
@@ -582,7 +582,7 @@ TOOLS = [
     ),
     ToolDefinition(
         name="update_feature_plan",
-        description="Updates feature plan metadata such as approval state and review status after the user approves the plan or the model completes review.",
+        description="Updates session-managed feature plan metadata such as approval state and review status after the user approves the plan or the model completes review.",
         parameters={
             "type": "object",
             "properties": {
@@ -1802,12 +1802,20 @@ def _handle_git_branch(args, folder_context, ui, variables) -> str:
 
 
 def _handle_create_feature_plan(args, folder_context, ui, variables) -> str:
+    feature_id = args.get("feature_id") or args.get("feature_name", "")
+    metadata_dir = getattr(folder_context, "feature_metadata_dir", "") or ""
+    metadata_path = ""
+    if metadata_dir:
+        os.makedirs(metadata_dir, exist_ok=True)
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(feature_id).strip().lower()).strip("_")
+        metadata_path = os.path.join(metadata_dir, f"{slug or 'feature'}.json")
     plan = create_feature_plan(
         args.get("feature_name", ""),
         args.get("feature_request", ""),
         args.get("phases", []),
         folder_context=folder_context,
         feature_id=args.get("feature_id"),
+        metadata_path=metadata_path or None,
     )
     summary = summarize_feature_plan(plan)
     return json.dumps(summary, indent=2, sort_keys=True)
@@ -1815,19 +1823,25 @@ def _handle_create_feature_plan(args, folder_context, ui, variables) -> str:
 
 def _handle_get_feature_plan(args, folder_context, ui, variables) -> str:
     directory = args.get("directory", "")
-    plan = refresh_and_persist_feature_plan(directory)
+    metadata_path = getattr(folder_context, "feature_metadata_index", {}).get(directory)
+    plan = refresh_and_persist_feature_plan(directory, metadata_path=metadata_path)
     return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
 
 
 def _handle_update_feature_plan(args, folder_context, ui, variables) -> str:
     directory = args.get("directory", "")
+    metadata_path = getattr(folder_context, "feature_metadata_index", {}).get(directory)
     plan = update_feature_plan_metadata(
         directory,
         approved=args.get("approved"),
         review_status=args.get("review_status"),
         review_notes=args.get("review_notes"),
+        metadata_path=metadata_path,
     )
-    plan = refresh_and_persist_feature_plan(plan.directory)
+    plan = refresh_and_persist_feature_plan(
+        plan.directory,
+        metadata_path=plan.metadata_path or metadata_path,
+    )
     return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
 
 

@@ -619,7 +619,11 @@ def execute_server_tool(session, tool_name: str, tool_args: dict):
         if choice == "e":
             return f"User denied direct tool call: {tool_name}. Reason: {reason}"
 
-    return session._execute_tool_with_memory(tool_name, tool_args)
+    return session._execute_tool_with_memory(
+        tool_name,
+        tool_args,
+        invocation_source="server",
+    )
 
 
 def serve(session, host: str, port: int, command_handler):

@@ -116,7 +116,7 @@ For a higher-level assessment of whether the current server stack is ready for G
 
 - `GET /health` — basic health check.
 - `GET /api/state` — current session state, active model, variables, workspaces, and tool metadata.
-- `GET /api/tools` — available tool definitions and whether each tool is enabled.
+- `GET /api/tools` — available tool definitions, descriptor metadata (`execution_kind`, `preview_policy`, `server_policy`, `result_mode`, etc.), and whether each tool is enabled.
 - `GET /api/history?limit=50` — serialized conversation history.
 - `GET /api/sessions` — list saved sessions and the currently loaded session.
 - `POST /api/sessions/new` — create a new session using the current provider/model.
@@ -136,7 +136,7 @@ For a higher-level assessment of whether the current server stack is ready for G
 - `POST /api/staged-files/clear` — clear staged files.
 - `POST /api/message` — send a normal chat turn to the active session.
 - `POST /api/command` — execute a slash command such as `/folder .`, `/set yolo true`, or `/tool list`.
-- `POST /api/tool` — invoke a tool directly with JSON arguments for GUI workflows that want structured tool access.
+- `POST /api/tool` — invoke a tool directly with JSON arguments for GUI workflows that want structured tool access. Structured tool responses include envelope fields such as `error`, `error_code`, `modified_files`, `artifacts`, and `telemetry`.
 
 For provider switching, you can still use `POST /api/command` with a slash command such as `{"command":"/provider ollama"}`.
 
@@ -224,6 +224,7 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 - `save_memory`, `search_memory`, `list_memory`: Persist and retrieve concise high-value notes during an agentic task.
 - `save_scratchpad`, `search_scratchpad`, `list_scratchpad`, `clear_scratchpad`: Manage turn-local notes separately from durable memory.
 - Structured tool result summaries are attached during agentic execution so the model can reason over smaller schemas instead of large raw blobs.
+- Structured tool result envelopes now track normalized error state, modified files, artifacts, and telemetry so session, server, and future GUI consumers can share the same result contract.
 - **Git Suite**: `git_init`, `git_status`, `git_log`, `git_diff`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_merge_request`.
 
 ## Additional Notes

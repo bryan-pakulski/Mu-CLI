@@ -390,31 +390,47 @@ Stage 2 clarifies that the registry should become the authoritative explanation 
 
 ## Stage 6: Incremental Rollout and Migration Plan
 
+**Stage status:** [x] completed
+
 ### Objectives
 
-- Deliver improvements in small, low-risk increments.
-- Preserve current behavior for end users while refactoring internals.
-- Create a clear implementation order for follow-on engineering tasks.
+- [x] Deliver improvements in small, low-risk increments.
+- [x] Preserve current behavior for end users while refactoring internals.
+- [x] Create a clear implementation order for follow-on engineering tasks.
 
 ### Action Points
 
-- Implement the harness work in the following order:
+- [x] Implement the harness work in the following order:
   1. document contracts and lifecycle
   2. normalize metadata and result semantics
   3. isolate approval planning
   4. extract reusable harness helpers
   5. expand test coverage
   6. update server and session integration points to consume the refined interfaces
-- Keep each change set behavior-preserving unless the change intentionally improves a documented inconsistency.
-- Use temporary adapter functions where needed so existing tool implementations do not all need to be rewritten at once.
-- Update developer-facing docs when harness contracts change so future contributors do not code against outdated assumptions.
-- Track migration risks explicitly, especially around approval behavior, structured result formatting, and server event compatibility.
+- [x] Keep each change set behavior-preserving unless the change intentionally improves a documented inconsistency.
+- [x] Use temporary adapter functions where needed so existing tool implementations do not all need to be rewritten at once.
+- [x] Update developer-facing docs when harness contracts change so future contributors do not code against outdated assumptions.
+- [x] Track migration risks explicitly, especially around approval behavior, structured result formatting, and server event compatibility.
+
+### Implementation Notes
+
+- Server and session integration points now consume the refined interfaces for descriptor lookup, approval planning, structured result envelopes, and execution-source telemetry.
+- Tools now support the refined execution interface through `ToolExecutionContext`, with compatibility adapters preserving existing handler behavior while new interfaces are adopted.
+- Developer-facing documentation has been updated in `README.md` and this architecture document to reflect descriptor metadata and structured result envelope semantics.
+
+### Migration Risks
+
+| Risk area | Why it matters | Current mitigation |
+| --- | --- | --- |
+| Approval behavior | Refactors could accidentally change when tools require review or how preview failures are surfaced | Shared `ApprovalPlan` logic plus approval success/failure-path tests |
+| Structured result formatting | API/UI consumers may depend on envelope fields or summary formats | Centralized `_build_structured_tool_result(...)` envelope and regression tests |
+| Server event compatibility | GUI clients may rely on current event payload shapes and approval metadata | Descriptor/result fields added compatibly, with direct server-task tests validating payloads |
 
 ### Exit Criteria
 
-- The implementation order is explicit and practical.
-- The harness can be modernized without a disruptive rewrite.
-- Session, CLI, and server integrations continue to work against the refined architecture.
+- [x] The implementation order is explicit and practical.
+- [x] The harness can be modernized without a disruptive rewrite.
+- [x] Session, CLI, and server integrations continue to work against the refined architecture.
 
 ---
 

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from core.approval import build_approval_plan
 from core.session import Session, SessionManager
-from core.tools import execute_tool, serialize_tool_descriptor
+from core.tools import build_tool_context, execute_tool, serialize_tool_descriptor
 from core.workspace import FolderContext
 from providers.base import MessagePart, ProviderResponse
 
@@ -36,6 +36,12 @@ def test_registry_layer_serializes_descriptor_metadata():
     assert payload["preview_policy"] == "none"
     assert payload["result_mode"] == "structured+collated"
     assert payload["handler_key"] == "read_file"
+
+
+def test_refined_execution_interface_tracks_invocation_source():
+    context = build_tool_context(None, invocation_source="server")
+
+    assert context.invocation_source == "server"
 
 
 def test_validation_layer_rejects_empty_path_arguments():

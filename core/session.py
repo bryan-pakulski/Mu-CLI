@@ -781,7 +781,13 @@ class Session:
             promoted.append(f"auto-promoted memory #{entry.id}")
         return promoted
 
-    def _execute_tool_with_memory(self, tool_name: str, tool_args: dict):
+    def _execute_tool_with_memory(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        *,
+        invocation_source: str = "session",
+    ):
         if tool_name == "save_memory":
             entry = self.task_memory.save(
                 tool_args.get("content", ""),
@@ -834,6 +840,7 @@ class Session:
             self.folder_context,
             self.ui,
             self.variables,
+            invocation_source=invocation_source,
         )
 
     def _prompt_tool_choice(

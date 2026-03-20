@@ -20,6 +20,14 @@ class ToolDescriptor:
     summary_builder: str | None = None
 
 
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    folder_context: Any
+    ui: Any = None
+    variables: dict | None = None
+    invocation_source: str = "session"
+
+
 def _build_descriptor(
     definition: ToolDefinition,
     *,
@@ -40,6 +48,21 @@ def _build_descriptor(
         handler_key=handler_key,
         error_mode=error_mode,
         summary_builder=summary_builder,
+    )
+
+
+def build_tool_context(
+    folder_context,
+    ui=None,
+    variables: dict | None = None,
+    *,
+    invocation_source: str = "session",
+) -> ToolExecutionContext:
+    return ToolExecutionContext(
+        folder_context=folder_context,
+        ui=ui,
+        variables=variables,
+        invocation_source=invocation_source,
     )
 
 # --- Tool Definitions (Schemas) ---
@@ -1573,6 +1596,15 @@ def _handle_memory_placeholder(message: str) -> Callable[..., str]:
     return _handler
 
 
+def _legacy_handler(
+    handler: Callable[[dict, Any, Any, dict | None], str]
+) -> Callable[[dict, ToolExecutionContext], str]:
+    def _wrapped(args: dict, context: ToolExecutionContext) -> str:
+        return handler(args, context.folder_context, context.ui, context.variables)
+
+    return _wrapped
+
+
 def _handle_read_file(args, folder_context, ui, variables) -> str:
     return read_file(args.get("filename", ""), folder_context)
 
@@ -1669,7 +1701,7 @@ def _handle_git_branch(args, folder_context, ui, variables) -> str:
     return git_branch(folder_context)
 
 
-def _handle_batch_job(args, folder_context, ui, variables) -> str:
+def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
     commands = args.get("commands", [])
     if not isinstance(commands, list):
         return "Error: 'commands' must be a list."
@@ -1696,10 +1728,17 @@ def _handle_batch_job(args, folder_context, ui, variables) -> str:
             results.append(f"Error: Command {i} - nested batch_job not allowed.")
             continue
 
-        if ui:
-            ui.show_info(f"  [{i+1}/{len(commands)}] Executing in batch: {name}")
+        if context.ui:
+            context.ui.show_info(f"  [{i+1}/{len(commands)}] Executing in batch: {name}")
 
-        res = execute_tool(name, t_args, folder_context, ui, variables)
+        res = execute_tool(
+            name,
+            t_args,
+            context.folder_context,
+            context.ui,
+            context.variables,
+            invocation_source=context.invocation_source,
+        )
         results.append(f"Tool: {name}\nResult: {res}")
 
     return (
@@ -1709,44 +1748,50 @@ def _handle_batch_job(args, folder_context, ui, variables) -> str:
     )
 
 
-TOOL_HANDLERS: dict[str, Callable[[dict, Any, Any, dict | None], str]] = {
-    "get_workspace_details": _handle_get_workspace_details,
-    "flush": _handle_flush,
-    "save_memory": _handle_memory_placeholder("Memory save requested."),
-    "save_scratchpad": _handle_memory_placeholder("Scratchpad save requested."),
-    "search_memory": _handle_memory_placeholder("Memory search requested."),
-    "search_scratchpad": _handle_memory_placeholder("Scratchpad search requested."),
-    "list_memory": _handle_memory_placeholder("Memory listing requested."),
-    "list_scratchpad": _handle_memory_placeholder("Scratchpad listing requested."),
-    "clear_scratchpad": _handle_memory_placeholder("Scratchpad cleared."),
-    "read_file": _handle_read_file,
-    "search_for_string": _handle_search_for_string,
-    "get_chunk": _handle_get_chunk,
-    "get_current_time": _handle_get_current_time,
-    "list_dir": _handle_list_dir,
-    "write_file": _handle_write_file,
-    "list_agent_tasks": _handle_list_agent_tasks,
-    "run_agent_task": _handle_run_agent_task,
-    "apply_diff": _handle_apply_diff,
-    "git_status": _handle_git_status,
-    "git_init": _handle_git_init,
-    "git_log": _handle_git_log,
-    "git_diff": _handle_git_diff,
-    "git_checkout": _handle_git_checkout,
-    "git_add": _handle_git_add,
-    "git_commit": _handle_git_commit,
-    "git_push": _handle_git_push,
-    "git_merge_request": _handle_git_merge_request,
-    "git_pull": _handle_git_pull,
-    "url_grounding": _handle_url_grounding,
-    "read_document": _handle_read_document,
-    "git_branch": _handle_git_branch,
+TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
+    "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
+    "flush": _legacy_handler(_handle_flush),
+    "save_memory": _legacy_handler(_handle_memory_placeholder("Memory save requested.")),
+    "save_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad save requested.")),
+    "search_memory": _legacy_handler(_handle_memory_placeholder("Memory search requested.")),
+    "search_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad search requested.")),
+    "list_memory": _legacy_handler(_handle_memory_placeholder("Memory listing requested.")),
+    "list_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad listing requested.")),
+    "clear_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad cleared.")),
+    "read_file": _legacy_handler(_handle_read_file),
+    "search_for_string": _legacy_handler(_handle_search_for_string),
+    "get_chunk": _legacy_handler(_handle_get_chunk),
+    "get_current_time": _legacy_handler(_handle_get_current_time),
+    "list_dir": _legacy_handler(_handle_list_dir),
+    "write_file": _legacy_handler(_handle_write_file),
+    "list_agent_tasks": _legacy_handler(_handle_list_agent_tasks),
+    "run_agent_task": _legacy_handler(_handle_run_agent_task),
+    "apply_diff": _legacy_handler(_handle_apply_diff),
+    "git_status": _legacy_handler(_handle_git_status),
+    "git_init": _legacy_handler(_handle_git_init),
+    "git_log": _legacy_handler(_handle_git_log),
+    "git_diff": _legacy_handler(_handle_git_diff),
+    "git_checkout": _legacy_handler(_handle_git_checkout),
+    "git_add": _legacy_handler(_handle_git_add),
+    "git_commit": _legacy_handler(_handle_git_commit),
+    "git_push": _legacy_handler(_handle_git_push),
+    "git_merge_request": _legacy_handler(_handle_git_merge_request),
+    "git_pull": _legacy_handler(_handle_git_pull),
+    "url_grounding": _legacy_handler(_handle_url_grounding),
+    "read_document": _legacy_handler(_handle_read_document),
+    "git_branch": _legacy_handler(_handle_git_branch),
     "batch_job": _handle_batch_job,
 }
 
 
 def execute_tool(
-    tool_name: str, args: dict, folder_context, ui=None, variables: dict = None
+    tool_name: str,
+    args: dict,
+    folder_context,
+    ui=None,
+    variables: dict = None,
+    *,
+    invocation_source: str = "session",
 ) -> str:
     """Descriptor-backed dispatcher with argument validation."""
 
@@ -1763,4 +1808,10 @@ def execute_tool(
     if not handler:
         return f"Error: No handler registered for tool '{tool_name}'."
 
-    return handler(args, folder_context, ui, variables)
+    context = build_tool_context(
+        folder_context,
+        ui,
+        variables,
+        invocation_source=invocation_source,
+    )
+    return handler(args, context)

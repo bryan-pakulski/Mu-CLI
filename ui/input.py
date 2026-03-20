@@ -154,6 +154,7 @@ class InputHandler:
                 "prompt": "ansiblue bold",
                 "rprompt": "bg:ansiblue ansiwhite",
                 "files": "ansiyellow",
+                "yolo-indicator": "ansiyellow bold blink",
                 "mode-debug": "ansiyellow bold",
                 "mode-feature": "ansiblue bold",
                 "mode-research": "ansimagenta bold",
@@ -178,6 +179,12 @@ class InputHandler:
         def _(event):
             event.current_buffer.validate_and_handle()
 
+        @self.kb.add("s-tab")
+        def _(event):
+            self.toggle_yolo_mode()
+            if event.app:
+                event.app.invalidate()
+
         self.session = PromptSession(
             history=FileHistory(history_file),
             auto_suggest=AutoSuggestFromHistory(),
@@ -190,6 +197,18 @@ class InputHandler:
     def set_variables(self, variables_dict):
         """Update the reference to the variables dictionary for completion."""
         self.variables_dict = variables_dict
+
+    def is_yolo_enabled(self):
+        if self.variables_dict is None:
+            return False
+        return bool(self.variables_dict.get("yolo", False))
+
+    def toggle_yolo_mode(self):
+        if self.variables_dict is None:
+            return False
+        enabled = not bool(self.variables_dict.get("yolo", False))
+        self.variables_dict["yolo"] = enabled
+        return enabled
 
     def build_prompt_markup(self, session_name, staged_files, agent_mode="default"):
         files_text = ""
@@ -204,9 +223,14 @@ class InputHandler:
             mode_style = MODE_PROMPT_STYLES.get(mode_name, "prompt")
             mode_text = f" <{mode_style}>{mode_name}</{mode_style}>"
 
+        yolo_text = ""
+        if self.is_yolo_enabled():
+            yolo_text = ' <yolo-indicator>✦</yolo-indicator>'
+
         return (
             f"<prompt>[{session_name}]</prompt>"
             f"{mode_text}"
+            f"{yolo_text}"
             f"<files>{files_text}</files> "
             f"<prompt>>>></prompt> "
         )
@@ -220,7 +244,10 @@ class InputHandler:
 
         def bottom_toolbar():
             return HTML(
-                " <b>[Meta+Enter]</b> or <b>[Esc] [Enter]</b> to submit | <b>/help</b> for commands"
+                " <b>[Meta+Enter]</b> or <b>[Esc] [Enter]</b> to submit | "
+                "<b>[Shift+Tab]</b> toggles YOLO "
+                f"(<yolo-indicator>{'✦ ON' if self.is_yolo_enabled() else 'OFF'}</yolo-indicator>) | "
+                "<b>/help</b> for commands"
             )
 
         try:

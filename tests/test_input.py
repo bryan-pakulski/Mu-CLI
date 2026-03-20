@@ -3,6 +3,7 @@ from ui.input import InputHandler
 
 def test_prompt_markup_hides_default_mode():
     handler = InputHandler()
+    handler.set_variables({"yolo": False})
 
     markup = handler.build_prompt_markup("demo", [], agent_mode="default")
 
@@ -13,12 +14,45 @@ def test_prompt_markup_hides_default_mode():
 
 def test_prompt_markup_shows_non_default_mode():
     handler = InputHandler()
+    handler.set_variables({"yolo": False})
 
     markup = handler.build_prompt_markup("demo", [], agent_mode="feature")
 
     assert "[demo]" in markup
     assert "mode-feature" in markup
     assert ">feature<" in markup
+
+
+def test_prompt_markup_shows_yolo_indicator_when_enabled():
+    handler = InputHandler()
+    handler.set_variables({"yolo": True})
+
+    markup = handler.build_prompt_markup("demo", [], agent_mode="default")
+
+    assert "yolo-indicator" in markup
+    assert "✦" in markup
+
+
+def test_toggle_yolo_mode_flips_bound_variable():
+    handler = InputHandler()
+    variables = {"yolo": False}
+    handler.set_variables(variables)
+
+    enabled = handler.toggle_yolo_mode()
+    assert enabled is True
+    assert variables["yolo"] is True
+
+    enabled = handler.toggle_yolo_mode()
+    assert enabled is False
+    assert variables["yolo"] is False
+
+
+def test_shift_tab_keybinding_is_registered_for_yolo_toggle():
+    handler = InputHandler()
+
+    bindings = [binding.keys for binding in handler.kb.bindings]
+
+    assert any(len(keys) == 1 and keys[0] == "s-tab" for keys in bindings)
 
 
 def test_command_completion_covers_all_cli_commands_and_aliases():

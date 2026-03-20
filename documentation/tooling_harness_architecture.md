@@ -264,29 +264,38 @@ Stage 2 clarifies that the registry should become the authoritative explanation 
 
 ## Stage 3: Approval and Modification Planning Layer
 
+**Stage status:** [x] completed
+
 ### Objectives
 
-- Make approval logic a first-class harness stage instead of a loosely adjacent behavior.
-- Standardize how modification previews are produced and surfaced.
-- Ensure all mutating execution paths are predictable for both terminal and server clients.
+- [x] Make approval logic a first-class harness stage instead of a loosely adjacent behavior.
+- [x] Standardize how modification previews are produced and surfaced.
+- [x] Ensure all mutating execution paths are predictable for both terminal and server clients.
 
 ### Action Points
 
-- Extract or formalize an approval-planning layer that answers:
+- [x] Extract or formalize an approval-planning layer that answers:
   - does this request require approval?
   - what files or resources may change?
   - can a preview be generated safely?
   - what should the user or GUI client review?
-- Unify how single-tool and batch-tool modifications are expanded into reviewable units.
-- Define fallback behavior for tools that mutate state but cannot generate exact previews.
-- Tighten the contract between approval planning and execution so approval resolution always maps back to a concrete request payload.
-- Verify that server-side approval objects expose everything a GUI needs without depending on terminal-specific rendering logic.
+- [x] Unify how single-tool and batch-tool modifications are expanded into reviewable units.
+- [x] Define fallback behavior for tools that mutate state but cannot generate exact previews.
+- [x] Tighten the contract between approval planning and execution so approval resolution always maps back to a concrete request payload.
+- [x] Verify that server-side approval objects expose everything a GUI needs without depending on terminal-specific rendering logic.
+
+### Implementation Notes
+
+- A shared approval-planning layer now lives in `core/approval.py`.
+- `ApprovalPlan` and `ModificationPreview` provide the common data model for approval eligibility, preview state, normalized errors, and serialized review payloads.
+- Session-driven execution and direct server tool execution now both use the same plan-building rules before prompting for approval.
+- Approval payloads now include `preview_error` and `error_code` fields so GUI clients can distinguish a renderable diff from a preview failure.
 
 ### Exit Criteria
 
-- Approval planning is clearly separated from raw execution.
-- Mutating tool requests consistently produce reviewable approval metadata.
-- CLI and server approval flows use the same underlying planning rules.
+- [x] Approval planning is clearly separated from raw execution.
+- [x] Mutating tool requests consistently produce reviewable approval metadata.
+- [x] CLI and server approval flows use the same underlying planning rules.
 
 ---
 

@@ -199,6 +199,8 @@ def test_headless_approval_workflow_for_modifying_tool(tmp_path):
     assert len(pending) == 1
     assert pending[0]["tool_name"] == "write_file"
     assert pending[0]["modifications"][0]["filename"] == str(target_file)
+    assert pending[0]["preview_error"] is None
+    assert pending[0]["error_code"] is None
 
     observed_events = []
     while not event_queue.empty():
@@ -261,6 +263,8 @@ def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
     assert len(pending) == 1
     assert pending[0]["tool_name"] == "write_file"
     assert pending[0]["modifications"][0]["filename"] == str(target_file)
+    assert pending[0]["preview_error"] is None
+    assert pending[0]["error_code"] is None
 
     approval_manager.resolve(task["approval_id"], "y")
     completed = task_manager.wait_for_task_state(

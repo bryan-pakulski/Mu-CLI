@@ -1518,7 +1518,12 @@ def infer_tool_error_code(tool_name: str, result: Any) -> str | None:
         return "invalid_args"
     if "argument is empty" in lowered or "must be a list" in lowered:
         return "invalid_args"
-    if "malformed patch" in lowered or "'patch' utility not found" in lowered:
+    if (
+        "malformed patch" in lowered
+        or "'patch' utility not found" in lowered
+        or "patch: ****" in lowered
+        or "only garbage was found in the patch input" in lowered
+    ):
         return "preview_failed"
     if raw_text.startswith("Error"):
         return "execution_failed"

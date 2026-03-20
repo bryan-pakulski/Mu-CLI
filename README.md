@@ -14,6 +14,7 @@
 - **Runtime Stats & Live Metrics**: Use `/stats` for a centered snapshot panel, and watch the generating status line for compact context/memory/scratch/queue utilization bars during agent loops.
 - **Customizable Strategies**: Specialized agent modes for Debugging, phased Feature Implementation, and Research.
 - **Feature Plan Engine**: Feature mode can persist phased plans in `documentation/feature_req_<id>/`, pause on structured blockers, and drive implementation/review loops from those plan files.
+- **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for GUIs**: Launch μCLI with an HTTP API so desktop/web clients can drive sessions, commands, and tool execution.
 

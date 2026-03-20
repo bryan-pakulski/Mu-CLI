@@ -3,6 +3,7 @@ import os
 import json
 import time
 import glob
+from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
 
@@ -67,6 +68,7 @@ class SessionManager:
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.feature_state = None
         self.variables = DEFAULT_VARIABLES.copy()
 
         if session_name:
@@ -89,6 +91,7 @@ class SessionManager:
         self.turn_scratchpad = ScratchpadStore()
         self.variables.clear()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.feature_state = None
         self.variables.update(DEFAULT_VARIABLES)
 
         if os.path.exists(filepath):
@@ -108,10 +111,16 @@ class SessionManager:
                     self.task_memory = TaskMemoryStore.from_dict(
                         data.get("task_memory", {})
                     )
+                    self.turn_scratchpad = ScratchpadStore.from_dict(
+                        data.get("turn_scratchpad", {})
+                    )
                     self.token_counts = data.get(
                         "token_counts",
                         {"input": 0, "output": 0, "total": 0, "total_cost": 0.0},
                     )
+                    feature_state = data.get("feature_state")
+                    if isinstance(feature_state, dict):
+                        self.feature_state = feature_state
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -138,7 +147,9 @@ class SessionManager:
                 "variables": self.variables,
                 "collation_buffer": self.collation_buffer.to_dict(),
                 "task_memory": self.task_memory.to_dict(),
+                "turn_scratchpad": self.turn_scratchpad.to_dict(),
                 "token_counts": self.token_counts,
+                "feature_state": self.feature_state,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -146,6 +157,17 @@ class SessionManager:
             if self.ui:
                 self.ui.show_error(f"Warning: Could not save chat history: {e}")
             logger.error(f"Failed to save history: {e}")
+
+    def get_feature_state(self):
+        return deepcopy(self.feature_state) if isinstance(self.feature_state, dict) else None
+
+    def set_feature_state(self, state: dict | None, folder_context_obj=None):
+        self.feature_state = deepcopy(state) if isinstance(state, dict) else None
+        self.save_history(folder_context_obj)
+
+    def clear_feature_state(self, folder_context_obj=None):
+        self.feature_state = None
+        self.save_history(folder_context_obj)
 
     def switch_session(self, name):
         logger.info(f"Switching to session: {name}")
@@ -167,6 +189,7 @@ class SessionManager:
         self.collation_buffer = CollationBuffer()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
+        self.feature_state = None
         self.history = []
         self.provider_config = {"provider": provider_name, "model": model_name}
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
@@ -375,6 +398,7 @@ class Session:
         self.collation_buffer = self.session_manager.collation_buffer
         self.task_memory = self.session_manager.task_memory
         self.turn_scratchpad = self.session_manager.turn_scratchpad
+        self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
 
     def _build_messages_from_history(

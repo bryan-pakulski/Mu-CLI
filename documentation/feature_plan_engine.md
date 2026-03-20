@@ -18,6 +18,8 @@ This design allows a harness to:
 5. run a final review pass before returning success, and
 6. pause safely when the model raises a blocker that requires user input.
 
+In addition to the plan files on disk, the latest feature-loop runtime state can be stored in the active session JSON so blocked or interrupted loops can be reloaded after a disconnect or application restart.
+
 ## Directory Layout
 
 ```text
@@ -124,6 +126,8 @@ That blocker should include:
 
 When a blocker is raised, the harness should pause the feature loop, expose the task state and conversation history to the user, collect additional context, and then resume the loop with that context.
 
+The persisted feature-loop state should include the current directory, last completed cycle, blocker payload, and the most recent summarized result so the harness can reconstruct the paused task after reconnecting.
+
 ### 5. Review Loop
 
 After all phases are complete, the harness should ask the model to review the completed work against the phase files and actual code changes.
@@ -179,6 +183,8 @@ Behavior:
 6. pauses when a blocker is raised,
 7. resumes after user input is supplied,
 8. stops when review is completed or the loop becomes permanently blocked.
+
+If the server process is restarted, it can restore the latest persisted feature-loop state from the session and continue from the next saved cycle instead of starting from scratch.
 
 ## Prompting Contract
 

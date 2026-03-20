@@ -177,6 +177,7 @@ def test_runtime_and_sessions_payloads_reflect_state_changes(tmp_path):
     session.agentic = False
     session.system_instruction = "updated system prompt"
     session.variables["yolo"] = True
+    session.session_manager.set_feature_state({"status": "awaiting_input", "type": "feature"})
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
@@ -190,6 +191,7 @@ def test_runtime_and_sessions_payloads_reflect_state_changes(tmp_path):
     assert runtime["agentic"] is False
     assert runtime["system_instruction"] == "updated system prompt"
     assert runtime["variables"]["yolo"] is True
+    assert runtime["feature_state"]["status"] == "awaiting_input"
     assert sessions["current_session_name"].startswith("test_")
     assert str(workspace) in workspace_payload["folders"]
 
@@ -636,3 +638,101 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     assert completed["result"]["feature_plan"]["review_status"] == "completed"
     assert completed["result"]["feature_plan"]["phases"][0]["status"] == "completed"
     assert len(completed["result"]["cycles"]) >= 3
+
+
+def test_feature_loop_state_persists_across_session_reload(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    ctx = FolderContext()
+    ctx.add_folder(str(workspace))
+    create_feature_plan(
+        feature_name="Persistent Feature Loop",
+        feature_request="Resume after restarting the app",
+        phases=[
+            {
+                "title": "Build it",
+                "objectives": ["Understand scope"],
+                "action_points": ["Implement the feature"],
+                "exit_criteria": ["Confirm phase completion"],
+            }
+        ],
+        folder_context=ctx,
+        feature_id="persistent_loop_test",
+    )
+    workspace_doc_dir = workspace / "documentation" / "feature_req_persistent_loop_test"
+    update_feature_plan_metadata(str(workspace_doc_dir), approved=True)
+
+    initial_ui = HeadlessUI(auto_approve=True)
+    provider = DummyBlockingFeatureProvider(
+        directory=str(workspace_doc_dir),
+        phase_path=str(workspace_doc_dir / "phase_1.md"),
+    )
+    session = build_test_session(provider=provider, ui=initial_ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    initial_event_hub = EventHub()
+    initial_task_manager = TaskManager(session, Lock(), event_hub=initial_event_hub)
+    initial_approval_manager = ApprovalManager(
+        initial_task_manager, event_hub=initial_event_hub
+    )
+    initial_ui.bind_runtime(initial_task_manager, initial_approval_manager)
+
+    task = initial_task_manager.start_feature_task(
+        str(workspace_doc_dir), initial_approval_manager, max_cycles=5
+    )
+    blocked = initial_task_manager.wait_for_task_state(
+        task["task_id"], {"awaiting_input", "error"}, timeout=10.0
+    )
+
+    assert blocked is not None
+    assert blocked["status"] == "awaiting_input"
+    persisted_state = session.session_manager.get_feature_state()
+    assert persisted_state is not None
+    assert persisted_state["status"] == "awaiting_input"
+    assert persisted_state["directory"] == str(workspace_doc_dir)
+
+    reloaded_ui = HeadlessUI(auto_approve=True)
+    reloaded_manager = SessionManager(
+        ui=reloaded_ui, session_name=session.session_manager.current_session_name
+    )
+    reloaded_manager.provider_config = {"provider": "dummy", "model": provider.model_name}
+    reloaded_session = Session(
+        provider=provider,
+        thinking=False,
+        system_instruction="test system prompt",
+        session_manager=reloaded_manager,
+        ui=reloaded_ui,
+        debug=False,
+    )
+
+    reloaded_event_hub = EventHub()
+    reloaded_task_manager = TaskManager(
+        reloaded_session, Lock(), event_hub=reloaded_event_hub
+    )
+    reloaded_approval_manager = ApprovalManager(
+        reloaded_task_manager, event_hub=reloaded_event_hub
+    )
+    reloaded_ui.bind_runtime(reloaded_task_manager, reloaded_approval_manager)
+
+    restored_task = reloaded_task_manager.get_task(task["task_id"])
+    assert restored_task is not None
+    assert restored_task["status"] == "awaiting_input"
+
+    resumed = reloaded_task_manager.resume_feature_task(
+        task["task_id"],
+        "Use OpenAI for the resumed feature implementation.",
+        reloaded_approval_manager,
+    )
+    assert resumed["status"] == "running"
+
+    completed = reloaded_task_manager.wait_for_task_state(
+        task["task_id"], {"completed", "error", "awaiting_input"}, timeout=10.0
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["result"]["feature_plan"]["review_status"] == "completed"
+    assert (
+        reloaded_session.session_manager.get_feature_state()["status"] == "completed"
+    )

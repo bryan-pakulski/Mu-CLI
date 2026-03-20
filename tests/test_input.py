@@ -101,6 +101,7 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
         "/provider",
         "/agentic",
         "/mode",
+        "/feature",
         "/tool",
         "/tools",
         "/system",

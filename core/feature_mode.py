@@ -57,6 +57,7 @@ class FeaturePlan:
     feature_name: str
     feature_request: str
     directory: str
+    metadata_path: str = ""
     approved: bool = False
     review_status: str = STATUS_REVIEW_PENDING
     review_notes: str = ""
@@ -94,8 +95,8 @@ def _workspace_root(folder_context) -> str:
     return os.getcwd()
 
 
-def feature_plan_path(directory: str) -> str:
-    return os.path.join(directory, FEATURE_PLAN_FILENAME)
+def feature_plan_path(directory: str, metadata_path: str | None = None) -> str:
+    return metadata_path or os.path.join(directory, FEATURE_PLAN_FILENAME)
 
 
 def phase_markdown_path(directory: str, phase_number: int) -> str:
@@ -166,6 +167,7 @@ def _plan_from_dict(data: dict[str, Any]) -> FeaturePlan:
         feature_name=str(data.get("feature_name", "")).strip(),
         feature_request=str(data.get("feature_request", "")).strip(),
         directory=str(data.get("directory", "")).strip(),
+        metadata_path=str(data.get("metadata_path", "") or ""),
         approved=bool(data.get("approved", False)),
         review_status=str(data.get("review_status", STATUS_REVIEW_PENDING) or STATUS_REVIEW_PENDING),
         review_notes=str(data.get("review_notes", "") or ""),
@@ -178,7 +180,10 @@ def save_feature_plan(plan: FeaturePlan) -> FeaturePlan:
     for phase in plan.phases:
         with open(phase_markdown_path(plan.directory, phase.number), "w", encoding="utf-8") as handle:
             handle.write(phase_to_markdown(phase))
-    with open(feature_plan_path(plan.directory), "w", encoding="utf-8") as handle:
+    metadata_path = feature_plan_path(plan.directory, plan.metadata_path)
+    plan.metadata_path = metadata_path
+    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+    with open(metadata_path, "w", encoding="utf-8") as handle:
         json.dump(_plan_to_dict(plan), handle, indent=2)
     return plan
 
@@ -189,6 +194,7 @@ def create_feature_plan(
     phases: list[dict[str, Any]],
     folder_context=None,
     feature_id: str | None = None,
+    metadata_path: str | None = None,
 ) -> FeaturePlan:
     workspace_root = _workspace_root(folder_context)
     slug = _slugify(feature_id or feature_name)
@@ -211,6 +217,7 @@ def create_feature_plan(
         feature_name=feature_name.strip() or slug,
         feature_request=feature_request.strip() or feature_name.strip() or slug,
         directory=directory,
+        metadata_path=feature_plan_path(directory, metadata_path),
         phases=normalized_phases,
     )
     return save_feature_plan(plan)
@@ -264,9 +271,16 @@ def parse_phase_markdown(path: str, fallback_phase: FeaturePhase) -> FeaturePhas
     return phase
 
 
-def load_feature_plan(directory: str, refresh_from_markdown: bool = True) -> FeaturePlan:
-    with open(feature_plan_path(directory), "r", encoding="utf-8") as handle:
+def load_feature_plan(
+    directory: str,
+    refresh_from_markdown: bool = True,
+    metadata_path: str | None = None,
+) -> FeaturePlan:
+    resolved_metadata_path = feature_plan_path(directory, metadata_path)
+    with open(resolved_metadata_path, "r", encoding="utf-8") as handle:
         plan = _plan_from_dict(json.load(handle))
+    if not plan.metadata_path:
+        plan.metadata_path = resolved_metadata_path
 
     if refresh_from_markdown:
         refreshed = []
@@ -280,8 +294,15 @@ def load_feature_plan(directory: str, refresh_from_markdown: bool = True) -> Fea
     return plan
 
 
-def refresh_and_persist_feature_plan(directory: str) -> FeaturePlan:
-    plan = load_feature_plan(directory, refresh_from_markdown=True)
+def refresh_and_persist_feature_plan(
+    directory: str,
+    metadata_path: str | None = None,
+) -> FeaturePlan:
+    plan = load_feature_plan(
+        directory,
+        refresh_from_markdown=True,
+        metadata_path=metadata_path,
+    )
     return save_feature_plan(plan)
 
 
@@ -291,8 +312,13 @@ def update_feature_plan_metadata(
     approved: bool | None = None,
     review_status: str | None = None,
     review_notes: str | None = None,
+    metadata_path: str | None = None,
 ) -> FeaturePlan:
-    plan = load_feature_plan(directory, refresh_from_markdown=True)
+    plan = load_feature_plan(
+        directory,
+        refresh_from_markdown=True,
+        metadata_path=metadata_path,
+    )
     if approved is not None:
         plan.approved = approved
     if review_status is not None:
@@ -325,6 +351,7 @@ def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
         "feature_name": plan.feature_name,
         "feature_request": plan.feature_request,
         "directory": plan.directory,
+        "metadata_path": plan.metadata_path,
         "approved": plan.approved,
         "review_status": plan.review_status,
         "review_notes": plan.review_notes,

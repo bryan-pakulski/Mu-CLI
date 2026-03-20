@@ -2,10 +2,12 @@
 
 import argparse
 import os
+import re
 import shlex
 import sys
 
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt, IntPrompt
 from rich.text import Text
@@ -51,6 +53,125 @@ def print_mode_overview(session):
     console.print(f"[dim]Current mode: {current_mode}[/dim]")
 
 
+def _slugify_feature_id(value):
+    return re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower()).strip("_") or "feature"
+
+
+def _default_feature_directory(session, feature_name):
+    workspace_root = (
+        os.path.abspath(session.folder_context.folders[0])
+        if session.folder_context.folders
+        else os.getcwd()
+    )
+    return os.path.join(
+        workspace_root,
+        "documentation",
+        f"feature_req_{_slugify_feature_id(feature_name)}",
+    )
+
+
+def refresh_feature_record(session, feature_id=None):
+    record = session.session_manager.get_feature(feature_id)
+    if not isinstance(record, dict):
+        return None
+
+    metadata_path = str(record.get("metadata_path", "") or "").strip()
+    directory = str(record.get("directory", "") or "").strip()
+    if not (metadata_path and directory and os.path.exists(metadata_path)):
+        return record
+
+    try:
+        plan = refresh_and_persist_feature_plan(
+            directory,
+            metadata_path=metadata_path,
+        )
+    except (FileNotFoundError, OSError, ValueError):
+        return record
+
+    summary = summarize_feature_plan(plan)
+    updated = {
+        **record,
+        "feature_id": summary["feature_id"],
+        "feature_name": summary["feature_name"],
+        "directory": summary["directory"],
+        "metadata_path": summary.get("metadata_path"),
+        "feature_plan": summary,
+        "next_phase": summary.get("next_phase"),
+        "status": session._derive_feature_state_status(summary),
+        "updated_at": record.get("updated_at"),
+    }
+    session.session_manager.upsert_feature(updated)
+    if session.session_manager.active_feature_id == updated["feature_id"]:
+        session.session_manager.set_feature_state(updated, session.folder_context)
+    else:
+        session.session_manager.save_history(session.folder_context)
+        session.sync_runtime_state()
+    return session.session_manager.get_feature(updated["feature_id"])
+
+
+def build_feature_markdown(feature, *, include_phases=True):
+    if not isinstance(feature, dict):
+        return "## Feature\n\nNo feature is currently selected."
+
+    plan = feature.get("feature_plan") if isinstance(feature.get("feature_plan"), dict) else {}
+    feature_name = feature.get("feature_name") or plan.get("feature_name") or feature.get("feature_id", "feature")
+    lines = [
+        f"# Feature: {feature_name}",
+        "",
+        f"- **ID:** `{feature.get('feature_id', 'unknown')}`",
+        f"- **Status:** `{feature.get('status', 'unknown')}`",
+        f"- **Directory:** `{feature.get('directory', 'n/a')}`",
+        f"- **Metadata:** `{feature.get('metadata_path', 'n/a')}`",
+        f"- **Approved:** `{plan.get('approved', False)}`",
+        f"- **Review:** `{plan.get('review_status', 'pending')}`",
+        "",
+    ]
+
+    request = str(plan.get("feature_request", "") or "").strip()
+    if request:
+        lines.extend(["## Request", "", request, ""])
+
+    next_phase = plan.get("next_phase")
+    if isinstance(next_phase, dict):
+        lines.extend(
+            [
+                "## Next Phase",
+                "",
+                f"- Phase {next_phase.get('number')}: {next_phase.get('title', '')}",
+                "",
+            ]
+        )
+
+    if include_phases:
+        phases = plan.get("phases", [])
+        lines.extend(["## Phases", ""])
+        if phases:
+            for phase in phases:
+                counts = phase.get("task_counts", {})
+                lines.append(
+                    f"- **Phase {phase.get('number')} — {phase.get('title', '')}** "
+                    f"`{phase.get('status', 'unknown')}` "
+                    f"(done: {counts.get('completed', 0)}, in-progress: {counts.get('in_progress', 0)}, remaining: {counts.get('not_started', 0)})"
+                )
+        else:
+            lines.append("- No phases defined yet.")
+        lines.append("")
+
+    blocker = feature.get("blocker")
+    if isinstance(blocker, dict) and any(blocker.values()):
+        lines.extend(
+            [
+                "## Blocker",
+                "",
+                f"- **Summary:** {blocker.get('summary', '')}",
+                f"- **Requested input:** {blocker.get('requested_input', '')}",
+                "",
+            ]
+        )
+
+    return "\n".join(lines).strip()
+
+
 def build_stats_snapshot(session):
     stats = {
         "history_turns": len(session.session_manager.history),
@@ -65,9 +186,13 @@ def build_stats_snapshot(session):
     feature_state = stats["feature_state"]
     if isinstance(feature_state, dict):
         directory = str(feature_state.get("directory", "") or "").strip()
+        metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
         if directory:
             try:
-                plan = refresh_and_persist_feature_plan(directory)
+                plan = refresh_and_persist_feature_plan(
+                    directory,
+                    metadata_path=metadata_path or None,
+                )
                 stats["feature_plan"] = summarize_feature_plan(plan)
             except (FileNotFoundError, OSError, ValueError):
                 stats["feature_plan"] = None
@@ -109,6 +234,11 @@ def print_help():
         "/mode <mode>",
         "",
         "Change the agentic strategy (default, debug, feature, research)",
+    )
+    table.add_row(
+        "/feature <list|new|load|delete|status|phases>",
+        "",
+        "Manage per-session feature plans and switch the active feature",
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
     table.add_row("/quit", "/q", "Exit")
@@ -425,11 +555,13 @@ def handle_command(session, user_input, allow_prompt=True):
         return serialize_command_result(session, cmd, data={"commands_help": True})
 
     if cmd in ["/clear", "/c"]:
-        session.session_manager.clear_current_history()
+        session.session_manager.reset_current_session_state()
         session.staged_files = []
+        session.disabled_tools = []
+        session.sync_runtime_state()
         refresh_memory_hud(session, ui)
         return serialize_command_result(
-            session, cmd, message="Conversation history cleared."
+            session, cmd, message="Session state reset to a blank slate."
         )
 
     if cmd in ["/view", "/v"]:
@@ -885,6 +1017,157 @@ def handle_command(session, user_input, allow_prompt=True):
                 "current_mode": session.variables.get("agent_mode", "default"),
                 "available_modes": AGENT_MODE_METADATA,
             },
+        )
+
+    if cmd == "/feature":
+        feature_parts = arg.split(" ", 1) if arg else ["list"]
+        feature_cmd = feature_parts[0].lower()
+        feature_arg = feature_parts[1].strip() if len(feature_parts) > 1 else ""
+
+        if feature_cmd == "new":
+            if not feature_arg:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /feature new <feature_name>",
+                )
+            record = session.session_manager.create_feature_record(
+                feature_arg,
+                directory=_default_feature_directory(session, feature_arg),
+                feature_request=feature_arg,
+            )
+            session.sync_runtime_state()
+            markdown = build_feature_markdown(record)
+            if allow_prompt:
+                console.print(Markdown(markdown))
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Created feature: {record['feature_id']}",
+                data={
+                    "feature": record,
+                    "markdown": markdown,
+                    "features": session.session_manager.list_features(),
+                },
+            )
+
+        if feature_cmd in {"list", ""}:
+            features = [
+                refresh_feature_record(session, feature["feature_id"]) or feature
+                for feature in session.session_manager.list_features()
+            ]
+            if allow_prompt:
+                table = Table(title="Session Features", box=box.ROUNDED)
+                table.add_column("ID", style="cyan", no_wrap=True)
+                table.add_column("Current", style="yellow", justify="center")
+                table.add_column("Status", style="green")
+                table.add_column("Name", style="white")
+                table.add_column("Directory", style="magenta")
+                if features:
+                    for feature in features:
+                        table.add_row(
+                            feature.get("feature_id", ""),
+                            "*" if feature.get("feature_id") == session.session_manager.active_feature_id else "",
+                            feature.get("status", "unknown"),
+                            feature.get("feature_name", ""),
+                            feature.get("directory", ""),
+                        )
+                else:
+                    table.add_row("-", "", "none", "No features saved", "")
+                console.print(table)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Listed session features.",
+                data={
+                    "features": features,
+                    "active_feature_id": session.session_manager.active_feature_id,
+                },
+            )
+
+        if feature_cmd == "load":
+            if not feature_arg:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /feature load <feature_id>",
+                )
+            record = refresh_feature_record(session, feature_arg)
+            if not isinstance(record, dict):
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message=f"Feature '{feature_arg}' not found.",
+                )
+            activated = session.session_manager.activate_feature(record["feature_id"])
+            session.sync_runtime_state()
+            markdown = build_feature_markdown(activated)
+            if allow_prompt:
+                console.print(Markdown(markdown))
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Loaded feature: {record['feature_id']}",
+                data={"feature": activated, "markdown": markdown},
+            )
+
+        if feature_cmd == "delete":
+            if not feature_arg:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /feature delete <feature_id>",
+                )
+            deleted = session.session_manager.delete_feature(feature_arg)
+            session.sync_runtime_state()
+            refresh_memory_hud(session, ui)
+            if not isinstance(deleted, dict):
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message=f"Feature '{feature_arg}' not found.",
+                )
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Deleted feature: {deleted['feature_id']}",
+                data={"deleted_feature": deleted},
+            )
+
+        if feature_cmd in {"status", "phases"}:
+            feature = refresh_feature_record(session, feature_arg or None)
+            if not isinstance(feature, dict):
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="No feature selected.",
+                )
+            markdown = build_feature_markdown(
+                feature,
+                include_phases=feature_cmd == "phases",
+            )
+            if allow_prompt:
+                console.print(Markdown(markdown))
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Rendered feature {feature_cmd}.",
+                data={"feature": feature, "markdown": markdown},
+            )
+
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=False,
+            message=f"Unknown feature command: {feature_cmd}",
         )
 
     if cmd in ["/tool", "/tools"]:

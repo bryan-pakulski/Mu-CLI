@@ -243,6 +243,16 @@ class TaskManager:
         )
         self.session.sync_runtime_state()
 
+    def _feature_metadata_path(self, directory: str) -> str | None:
+        state = self.session.session_manager.get_feature_state() or {}
+        if str(state.get("directory", "") or "").strip() == str(directory or "").strip():
+            metadata_path = str(state.get("metadata_path", "") or "").strip()
+            if metadata_path:
+                return metadata_path
+        feature_index = self.session.session_manager.get_feature_metadata_index()
+        metadata_path = str(feature_index.get(directory, "") or "").strip()
+        return metadata_path or None
+
     def _build_persisted_feature_state(
         self,
         *,
@@ -261,6 +271,7 @@ class TaskManager:
             "task_id": task_id,
             "type": "feature",
             "directory": directory,
+            "metadata_path": self._feature_metadata_path(directory),
             "max_cycles": max_cycles,
             "next_cycle": next_cycle,
             "previous_signature": previous_signature,
@@ -276,6 +287,7 @@ class TaskManager:
         task_id = str(feature_state.get("task_id", "") or uuid4().hex)
         payload = {
             "directory": feature_state.get("directory", ""),
+            "metadata_path": feature_state.get("metadata_path"),
             "max_cycles": int(feature_state.get("max_cycles", 12) or 12),
             "next_cycle": int(feature_state.get("next_cycle", 1) or 1),
             "previous_signature": feature_state.get("previous_signature"),
@@ -508,7 +520,10 @@ class TaskManager:
                     )
                 )
                 with self.session_lock:
-                    plan = refresh_and_persist_feature_plan(directory)
+                    plan = refresh_and_persist_feature_plan(
+                        directory,
+                        metadata_path=self._feature_metadata_path(directory),
+                    )
                 if not plan.approved:
                     raise ValueError(
                         "Feature plan has not been approved yet. Approve it before starting the implementation loop."
@@ -529,7 +544,10 @@ class TaskManager:
                         )
                     )
                     with self.session_lock:
-                        plan = refresh_and_persist_feature_plan(directory)
+                        plan = refresh_and_persist_feature_plan(
+                            directory,
+                            metadata_path=self._feature_metadata_path(directory),
+                        )
                         plan_summary = summarize_feature_plan(plan)
                         if plan.review_status == "completed":
                             completed_result = self._feature_partial_result(
@@ -572,7 +590,10 @@ class TaskManager:
                             result = self.session.send_message(prompt)
                         finally:
                             self.session.variables["compact_history"] = original_compact_history
-                        updated_plan = refresh_and_persist_feature_plan(directory)
+                        updated_plan = refresh_and_persist_feature_plan(
+                            directory,
+                            metadata_path=self._feature_metadata_path(directory),
+                        )
                         updated_summary = summarize_feature_plan(updated_plan)
                         signature = json.dumps(updated_summary, sort_keys=True)
                         cycle_payload = {
@@ -699,7 +720,10 @@ class TaskManager:
                         )
 
                 with self.session_lock:
-                    final_plan = refresh_and_persist_feature_plan(directory)
+                    final_plan = refresh_and_persist_feature_plan(
+                        directory,
+                        metadata_path=self._feature_metadata_path(directory),
+                    )
                     final_summary = summarize_feature_plan(final_plan)
                 max_cycle_result = self._feature_partial_result(
                     cycles=cycles,
@@ -1088,8 +1112,17 @@ def build_workspace_payload(session) -> dict:
     }
 
 
-def build_feature_plan_payload(directory: str) -> dict:
-    plan = refresh_and_persist_feature_plan(directory)
+def build_feature_plan_payload(session, directory: str) -> dict:
+    state = session.session_manager.get_feature_state() or {}
+    metadata_path = ""
+    if str(state.get("directory", "") or "").strip() == str(directory or "").strip():
+        metadata_path = str(state.get("metadata_path", "") or "").strip()
+    if not metadata_path:
+        metadata_path = session.session_manager.get_feature_metadata_index().get(directory, "")
+    plan = refresh_and_persist_feature_plan(
+        directory,
+        metadata_path=metadata_path or None,
+    )
     return summarize_feature_plan(plan)
 
 
@@ -1335,7 +1368,16 @@ def serve(session, host: str, port: int, command_handler):
                         self._send_json(400, {"ok": False, "error": "Query parameter 'directory' is required."})
                         return
                     try:
-                        self._send_json(200, {"ok": True, "feature_plan": build_feature_plan_payload(directory)})
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "feature_plan": build_feature_plan_payload(
+                                    session,
+                                    directory,
+                                ),
+                            },
+                        )
                     except FileNotFoundError:
                         self._send_json(404, {"ok": False, "error": "Feature plan not found."})
                     return
@@ -1429,13 +1471,23 @@ def serve(session, host: str, port: int, command_handler):
                 review_status = payload.get("review_status")
                 review_notes = payload.get("review_notes")
                 try:
+                    metadata_path = ""
+                    feature_state = session.session_manager.get_feature_state() or {}
+                    if str(feature_state.get("directory", "") or "").strip() == directory:
+                        metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+                    if not metadata_path:
+                        metadata_path = session.session_manager.get_feature_metadata_index().get(directory, "")
                     plan = update_feature_plan_metadata(
                         directory,
                         approved=approved,
                         review_status=None if review_status is None else str(review_status),
                         review_notes=None if review_notes is None else str(review_notes),
+                        metadata_path=metadata_path or None,
                     )
-                    plan = refresh_and_persist_feature_plan(plan.directory)
+                    plan = refresh_and_persist_feature_plan(
+                        plan.directory,
+                        metadata_path=plan.metadata_path or metadata_path or None,
+                    )
                 except FileNotFoundError:
                     self._send_json(404, {"ok": False, "error": "Feature plan not found."})
                     return

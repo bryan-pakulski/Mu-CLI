@@ -97,6 +97,17 @@ class InputHandler:
             }
         )
 
+        feature_completer = NestedCompleter.from_nested_dict(
+            {
+                "list": None,
+                "new": None,
+                "load": None,
+                "delete": None,
+                "status": None,
+                "phases": None,
+            }
+        )
+
         mode_completer = NestedCompleter.from_nested_dict(MODE_CHOICES)
         folder_completer = MergedCompleter(
             [
@@ -126,6 +137,7 @@ class InputHandler:
             "/provider": provider_completer,
             "/agentic": None,
             "/mode": mode_completer,
+            "/feature": feature_completer,
             "/tool": tool_completer,
             "/tools": tool_completer,
             "/system": None,

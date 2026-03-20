@@ -177,7 +177,7 @@ GENERAL RULES:
    Keep memories concise and high-value. Retrieve memory before repeating tool work.
 9. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
 10. In FEATURE mode, you MUST use the feature-plan engine (`create_feature_plan`, `get_feature_plan`, `update_feature_plan`) rather than inventing a separate planning format.
-11. In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in `feature_plan.json`.
+11. In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in the session-managed feature metadata.
 12. In FEATURE mode, only work on the current incomplete phase returned by the plan engine; keep `phase_N.md` updated while you work and never advance early.
 13. In FEATURE mode, if you are blocked on missing user input or an external decision, call `raise_blocker` so the harness can pause and request help instead of looping blindly.
 14. In FEATURE mode, once all phases are complete you must perform a review pass and only finish after setting `review_status` to `completed`, or after documenting why review failed and moving a phase back to `[~]`.
@@ -198,9 +198,9 @@ AGENTIC_MODES = {
 4. Identify the root cause and propose a precise fix.""",
     "feature": """WORKFLOW (Feature Plan Engine):
 1. Understand the user's feature request and summarize it as a durable feature plan request.
-2. Immediately call `create_feature_plan` to create `documentation/feature_req_<id>/feature_plan.json` and `phase_N.md` files. Do not use ad-hoc plan files or alternate locations.
+2. Immediately call `create_feature_plan` to create the canonical feature metadata plus `documentation/feature_req_<id>/phase_N.md` files. Do not use ad-hoc plan files or alternate locations.
 3. Ensure every phase file contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
-4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in `feature_plan.json`.
+4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in the session-managed feature metadata.
 5. Once approved, call `get_feature_plan` at the start of each implementation turn and work on only the next incomplete phase.
 6. During investigation-heavy feature work, use read-only tools to gather context into the collation buffer, save short hypotheses or phase notes with `save_scratchpad`, then call `flush` once before making implementation decisions.
 7. While implementing, continuously update the active `phase_N.md` file so the checklist reflects real progress. Use `[~]` for in-progress or blocked work.
@@ -267,8 +267,8 @@ AGENT_MODE_METADATA = {
 AGENTIC_MODE_SYSTEM_PROMPTS = {
     "feature": """FEATURE MODE SYSTEM PROMPT:
 You are in Feature Plan Engine mode. Your job is to behave like a phased implementation agent.
-- Start by creating or refreshing the canonical feature plan in `documentation/feature_req_<id>/`.
-- Treat `feature_plan.json` and the `phase_N.md` files as the source of truth for planning and progress.
+- Start by creating or refreshing the canonical feature plan for `documentation/feature_req_<id>/`.
+- Treat the session-managed feature metadata plus the `phase_N.md` files as the source of truth for planning and progress.
 - Do not begin implementation until the plan is approved.
 - For investigation-heavy turns, gather read-only context first, store key temporary findings in the scratchpad, and call `flush` before acting on the collected context.
 - Work on one phase at a time, keep statuses synchronized with reality, and raise blockers when user input is required.

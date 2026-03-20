@@ -10,13 +10,17 @@ def collect_feature_progress(session):
         return None
 
     directory = str(feature_state.get("directory", "") or "").strip()
+    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
     if not directory:
         return {"state": feature_state, "plan": None}
 
     try:
         from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
 
-        plan = refresh_and_persist_feature_plan(directory)
+        plan = refresh_and_persist_feature_plan(
+            directory,
+            metadata_path=metadata_path or None,
+        )
         return {
             "state": feature_state,
             "plan": summarize_feature_plan(plan),
@@ -32,6 +36,8 @@ def _max_int(value, fallback=1):
 def collect_runtime_metrics(session):
     hist_len = len(session.session_manager.history)
     anchor = session.session_manager.summary_anchor
+    if anchor > hist_len:
+        anchor = 0
     active_turns = max(0, hist_len - anchor)
     context_limit = _max_int(getattr(session, "active_context_window", 1))
 

@@ -606,6 +606,25 @@ class Session:
             "tasks": tasks[:20],
         }
 
+    def _parse_json_result(self, raw_result: str) -> dict:
+        try:
+            parsed = json.loads(str(raw_result))
+            return parsed if isinstance(parsed, dict) else {"value": parsed}
+        except (TypeError, json.JSONDecodeError):
+            return {"preview": self._clip_preview(raw_result, 260)}
+
+    def _build_feature_mode_prompt(self, text: str) -> str:
+        base_instruction = (
+            "FEATURE MODE DIRECTIVE: use the feature-plan engine for this request. First call create_feature_plan and create the canonical plan in documentation/feature_req_<id>/feature_plan.json with one phase_N.md file per phase. "
+            "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
+            "Each phase file must contain Objectives, Action Points, and Exit Criteria sections, and each checklist item must use exactly one of [ ], [~], or [x]. "
+            "After approval, call get_feature_plan at the start of every implementation turn, work on only the next incomplete phase, and keep the phase markdown synchronized with reality as you make code changes. "
+            "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
+            "Never move to the next phase until all checklist items in the current phase are [x]. "
+            "When all phases are complete, perform a review pass over the phase files and code changes together. If review fails, move the failing items back to [~] and continue implementing. If review succeeds, call update_feature_plan so review_status becomes completed before you report success.\n\n"
+        )
+        return base_instruction + text
+
     def _build_structured_tool_result(
         self,
         tool_name: str,
@@ -685,6 +704,8 @@ class Session:
                 "stderr_present": "STDERR:" in raw_text,
                 "preview": self._clip_preview(raw_text, 260),
             }
+        elif tool_name in {"create_feature_plan", "get_feature_plan", "update_feature_plan", "raise_blocker"}:
+            structured["data"] = self._parse_json_result(raw_text)
         elif tool_name in {"git_status", "git_diff", "git_log", "git_branch"}:
             structured["data"] = {
                 "preview": self._clip_preview(raw_text, 260),
@@ -968,8 +989,11 @@ class Session:
         self._auto_promoted_this_turn = 0
 
         parts = list(self.staged_files)
-        if text:
-            parts.append({"type": "text", "text": text})
+        effective_text = text
+        if text and str(self.variables.get("agent_mode", "default")).lower() == "feature":
+            effective_text = self._build_feature_mode_prompt(text)
+        if effective_text:
+            parts.append({"type": "text", "text": effective_text})
 
         new_user_message = {"role": "user", "parts": parts}
 

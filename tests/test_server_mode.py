@@ -16,6 +16,8 @@ from core.server import (
     execute_server_tool,
 )
 from core.session import Session, SessionManager
+from core.workspace import FolderContext
+from core.feature_mode import create_feature_plan, update_feature_plan_metadata
 from mucli import handle_command
 from providers.base import MessagePart, ProviderResponse
 from providers.ollama import OllamaProvider
@@ -341,3 +343,273 @@ def test_build_runtime_payload_syncs_saved_variables_into_ollama_provider():
 
     assert runtime["variables"]["ollama_host"] == "http://example.local:11434"
     assert session.provider.host == "http://example.local:11434"
+
+
+@dataclass
+class DummyFeatureLoopProvider:
+    directory: str
+    phase_path: str
+    name: str = "dummy"
+    model_name: str = "dummy-feature-model"
+    call_count: int = 0
+
+    def get_available_models(self):
+        return [self.model_name]
+
+    def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+        self.call_count += 1
+        if self.call_count == 1:
+            phase_content = """# Phase 1: Build it\n\n## Objectives\n- [x] Understand scope\n\n## Action Points\n- [x] Implement the feature\n\n## Exit Criteria\n- [x] Confirm phase completion\n"""
+            return ProviderResponse(
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="write_file",
+                        tool_args={"filename": self.phase_path, "content": phase_content},
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
+            )
+        if self.call_count == 2:
+            return ProviderResponse(
+                text="phase complete",
+                parts=[MessagePart(type="text", text="phase complete")],
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
+            )
+        if self.call_count == 3:
+            return ProviderResponse(
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="update_feature_plan",
+                        tool_args={
+                            "directory": self.directory,
+                            "review_status": "completed",
+                            "review_notes": "All criteria satisfied.",
+                        },
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
+            )
+        return ProviderResponse(
+            text="review complete",
+            parts=[MessagePart(type="text", text="review complete")],
+            input_tokens=3,
+            output_tokens=2,
+            total_tokens=5,
+        )
+
+    def upload_file(self, file_path, mime_type):
+        return None
+
+
+def test_feature_loop_runs_until_review_completed(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    ctx = FolderContext()
+    ctx.add_folder(str(workspace))
+    create_feature_plan(
+        feature_name="Feature Loop",
+        feature_request="Implement looped feature delivery",
+        phases=[
+            {
+                "title": "Build it",
+                "objectives": ["Understand scope"],
+                "action_points": ["Implement the feature"],
+                "exit_criteria": ["Confirm phase completion"],
+            }
+        ],
+        folder_context=ctx,
+        feature_id="loop_test",
+    )
+    workspace_doc_dir = workspace / "documentation" / "feature_req_loop_test"
+    update_feature_plan_metadata(str(workspace_doc_dir), approved=True)
+
+    ui = HeadlessUI(auto_approve=True)
+    provider = DummyFeatureLoopProvider(
+        directory=str(workspace_doc_dir),
+        phase_path=str(workspace_doc_dir / "phase_1.md"),
+    )
+    session = build_test_session(provider=provider, ui=ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    event_hub = EventHub()
+    task_manager = TaskManager(session, Lock(), event_hub=event_hub)
+    approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
+    ui.bind_runtime(task_manager, approval_manager)
+
+    task = task_manager.start_feature_task(str(workspace_doc_dir), approval_manager, max_cycles=4)
+    completed = task_manager.wait_for_task_state(task["task_id"], {"completed", "error"}, timeout=10.0)
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["result"]["mode"] == "feature"
+    assert completed["result"]["feature_plan"]["review_status"] == "completed"
+    assert completed["result"]["feature_plan"]["phases"][0]["status"] == "completed"
+
+
+@dataclass
+class DummyBlockingFeatureProvider:
+    directory: str
+    phase_path: str
+    call_count: int = 0
+    name: str = "dummy"
+    model_name: str = "dummy-blocking-feature-model"
+
+    def get_available_models(self):
+        return [self.model_name]
+
+    def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+        self.call_count += 1
+        if self.call_count == 1:
+            return ProviderResponse(
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="raise_blocker",
+                        tool_args={
+                            "summary": "Need a product choice",
+                            "details": "Implementation cannot continue until the user picks the target provider.",
+                            "requested_input": "Choose whether the feature should use OpenAI or Gemini.",
+                            "questions": ["Which provider should the new feature target?"],
+                        },
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
+            )
+        if self.call_count == 2:
+            return ProviderResponse(
+                text="blocked pending user input",
+                parts=[MessagePart(type="text", text="blocked pending user input")],
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
+            )
+        if self.call_count == 3:
+            phase_content = """# Phase 1: Build it\n\n## Objectives\n- [x] Understand scope\n\n## Action Points\n- [x] Implement the feature\n\n## Exit Criteria\n- [x] Confirm phase completion\n\n## Notes\nUser selected OpenAI during blocker resolution.\n"""
+            return ProviderResponse(
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="write_file",
+                        tool_args={"filename": self.phase_path, "content": phase_content},
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
+            )
+        if self.call_count == 4:
+            return ProviderResponse(
+                text="phase complete after unblock",
+                parts=[MessagePart(type="text", text="phase complete after unblock")],
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
+            )
+        if self.call_count == 5:
+            return ProviderResponse(
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="update_feature_plan",
+                        tool_args={
+                            "directory": self.directory,
+                            "review_status": "completed",
+                            "review_notes": "Completed after blocker resolution.",
+                        },
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
+            )
+        return ProviderResponse(
+            text="review complete",
+            parts=[MessagePart(type="text", text="review complete")],
+            input_tokens=3,
+            output_tokens=2,
+            total_tokens=5,
+        )
+
+    def upload_file(self, file_path, mime_type):
+        return None
+
+
+def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    ctx = FolderContext()
+    ctx.add_folder(str(workspace))
+    create_feature_plan(
+        feature_name="Blocking Feature Loop",
+        feature_request="Implement looped feature delivery with blocker handling",
+        phases=[
+            {
+                "title": "Build it",
+                "objectives": ["Understand scope"],
+                "action_points": ["Implement the feature"],
+                "exit_criteria": ["Confirm phase completion"],
+            }
+        ],
+        folder_context=ctx,
+        feature_id="blocking_loop_test",
+    )
+    workspace_doc_dir = workspace / "documentation" / "feature_req_blocking_loop_test"
+    update_feature_plan_metadata(str(workspace_doc_dir), approved=True)
+
+    ui = HeadlessUI(auto_approve=True)
+    provider = DummyBlockingFeatureProvider(
+        directory=str(workspace_doc_dir),
+        phase_path=str(workspace_doc_dir / "phase_1.md"),
+    )
+    session = build_test_session(provider=provider, ui=ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    event_hub = EventHub()
+    task_manager = TaskManager(session, Lock(), event_hub=event_hub)
+    approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
+    ui.bind_runtime(task_manager, approval_manager)
+
+    task = task_manager.start_feature_task(str(workspace_doc_dir), approval_manager, max_cycles=5)
+    blocked = task_manager.wait_for_task_state(
+        task["task_id"], {"awaiting_input", "error"}, timeout=10.0
+    )
+
+    assert blocked is not None
+    assert blocked["status"] == "awaiting_input"
+    assert blocked["blocker"]["summary"] == "Need a product choice"
+    assert blocked["result"]["status"] == "awaiting_input"
+    assert blocked["result"]["cycles"]
+
+    resumed = task_manager.resume_feature_task(
+        task["task_id"],
+        "Use OpenAI for the new feature.",
+        approval_manager,
+    )
+    assert resumed["status"] == "running"
+
+    completed = task_manager.wait_for_task_state(
+        task["task_id"], {"completed", "error", "awaiting_input"}, timeout=10.0
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["result"]["feature_plan"]["review_status"] == "completed"
+    assert completed["result"]["feature_plan"]["phases"][0]["status"] == "completed"
+    assert len(completed["result"]["cycles"]) >= 3

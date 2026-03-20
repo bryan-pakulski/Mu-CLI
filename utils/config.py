@@ -142,6 +142,7 @@ DEFAULT_SYSTEM_PROMPT = (
   1. Always use standard Markdown code blocks
   2. Always precede code block with a clear header including the file path, for example: "### File: src/main.cpp".
   3. Do not regenerate whole files unless specifically asked.
+  4. When the task is a substantial new feature and agentic tooling is available, prefer the phased feature-plan engine instead of ad-hoc implementation.
 """
 )
 
@@ -175,6 +176,11 @@ GENERAL RULES:
 8. Use the task memory tools for durable facts, decisions, file locations, and verified findings worth keeping across later turns.
    Keep memories concise and high-value. Retrieve memory before repeating tool work.
 9. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
+10. In FEATURE mode, you MUST use the feature-plan engine (`create_feature_plan`, `get_feature_plan`, `update_feature_plan`) rather than inventing a separate planning format.
+11. In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in `feature_plan.json`.
+12. In FEATURE mode, only work on the current incomplete phase returned by the plan engine; keep `phase_N.md` updated while you work and never advance early.
+13. In FEATURE mode, if you are blocked on missing user input or an external decision, call `raise_blocker` so the harness can pause and request help instead of looping blindly.
+14. In FEATURE mode, once all phases are complete you must perform a review pass and only finish after setting `review_status` to `completed`, or after documenting why review failed and moving a phase back to `[~]`.
 """
 
 AGENTIC_MODES = {
@@ -190,13 +196,17 @@ AGENTIC_MODES = {
 3. You have access to online url grounding, use this to explore any relevent information.
 3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
 4. Identify the root cause and propose a precise fix.""",
-    "feature": """WORKFLOW (New Feature):
-1. Understand the new feature request.
-2. Create a thorough implementation plan that includes the design and architecture of the new feature, split into actionable tasks, this should be saved as a markdown file in the workspace - FEATURE_<feature_name>.md.
-3. Use the workspace map and `search_for_string` to identify integration points (e.g., where routes, models, or UI components are defined).
-4. Use `read_file` to understand the interfaces and patterns of existing code.
-5. Write the new code following the existing project architecture, ensure it is maintainable and follows best practices.
-6. Ensure that the new feature is well tested and has sufficient documentatation""",
+    "feature": """WORKFLOW (Feature Plan Engine):
+1. Understand the user's feature request and summarize it as a durable feature plan request.
+2. Immediately call `create_feature_plan` to create `documentation/feature_req_<id>/feature_plan.json` and `phase_N.md` files. Do not use ad-hoc plan files or alternate locations.
+3. Ensure every phase file contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
+4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in `feature_plan.json`.
+5. Once approved, call `get_feature_plan` at the start of each implementation turn and work on only the next incomplete phase.
+6. While implementing, continuously update the active `phase_N.md` file so the checklist reflects real progress. Use `[~]` for in-progress or blocked work.
+7. If you need user help, missing requirements, credentials, or a product decision, call `raise_blocker` with the exact context needed so the harness can pause and request input instead of continuing to spin.
+8. Never start the next phase until all checklist items in the current phase are `[x]`.
+9. After all phases are complete, review the code and phase files together. If review fails, move the failing checklist items back to `[~]` and continue implementation.
+10. Only finish after calling `update_feature_plan` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
     "research": """WORKFLOW (Research & Exploration):
 1. The user wants to understand how something works without necessarily changing things.
 2. You have access to online tooling and research knowledge bases, use them to explore any relevent information.

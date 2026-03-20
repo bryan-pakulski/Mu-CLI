@@ -322,3 +322,48 @@ def test_send_message_resets_scratchpad_each_turn():
     session.send_message("hello")
 
     assert session.turn_scratchpad.list_entries() == []
+
+
+def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
+    class CaptureProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.last_user_text = ""
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            for message in reversed(messages):
+                if message.role == "user":
+                    for part in message.parts:
+                        if part.type == "text":
+                            self.last_user_text = part.text
+                            break
+                    break
+            return ProviderResponse(
+                text="planned",
+                parts=[MessagePart(type="text", text="planned")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    provider = CaptureProvider()
+    sm = SessionManager(session_name="feature-mode-prompt")
+    session = Session(provider, False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+    session.variables["agent_mode"] = "feature"
+
+    session.send_message("Implement an approvals dashboard")
+
+    assert "create_feature_plan" in provider.last_user_text
+    assert "phase_N.md" in provider.last_user_text
+    assert "Do not create alternate planning documents" in provider.last_user_text
+    assert "do not begin code implementation until the user has reviewed and approved the plan" in provider.last_user_text
+    assert "call raise_blocker" in provider.last_user_text
+    assert provider.last_user_text.endswith("Implement an approvals dashboard")

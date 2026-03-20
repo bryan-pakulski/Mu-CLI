@@ -1227,10 +1227,18 @@ class Session:
                     if scratchpad_summary:
                         dynamic_system_prompt += f"\n\n{scratchpad_summary}"
 
-                status_msg = (
-                    f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}"
-                    f" | {build_live_status_line(self)}"
-                )
+                if self.ui and hasattr(self.ui, "build_live_status"):
+                    status_msg = self.ui.build_live_status(
+                        self,
+                        self.provider.model_name,
+                        iteration,
+                        max_iterations,
+                    )
+                else:
+                    status_msg = (
+                        f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}"
+                        f" | {build_live_status_line(self)}"
+                    )
                 if self.ui:
                     with self.ui.show_status(status_msg):
                         response = self.provider.generate(

@@ -393,10 +393,16 @@ class RichUI:
             yield status
 
     def build_live_status(self, session, model_name, iteration, max_iterations):
-        return (
-            f"Generating ({model_name}) it {iteration}/{max_iterations} | "
-            f"{build_live_status_line(session)}"
-        )
+        metrics = collect_runtime_metrics(session)
+        status = Text()
+        status.append(f"Generating ({model_name}) it {iteration}/{max_iterations} | ")
+        if metrics["yolo"]["enabled"]:
+            status.append("✦", style="bold yellow blink")
+            status.append(" YOLO | ", style="bold yellow")
+        else:
+            status.append("YOLO:off | ", style="dim")
+        status.append(build_live_status_line(session), style="white")
+        return status
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""

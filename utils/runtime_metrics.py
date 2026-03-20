@@ -72,6 +72,7 @@ def collect_runtime_metrics(session):
             ),
         },
         "mode": {"name": str(session.variables.get("agent_mode", "default"))},
+        "yolo": {"enabled": bool(session.variables.get("yolo", False))},
         "feature": collect_feature_progress(session),
     }
 
@@ -90,6 +91,7 @@ def build_live_status_line(session):
     metrics = collect_runtime_metrics(session)
     return " ".join(
         [
+            f"yolo:{'on' if metrics['yolo']['enabled'] else 'off'}",
             build_inline_meter(
                 "ctx", metrics["ctx"]["current"], metrics["ctx"]["maximum"]
             ),

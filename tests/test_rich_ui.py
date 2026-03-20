@@ -73,11 +73,27 @@ def test_live_status_line_renders_inline_bars():
 
     status_line = build_live_status_line(session)
 
+    assert "yolo:off" in status_line
     assert "ctx:" in status_line
     assert "mem:" in status_line
     assert "scratch:" in status_line
     assert "queue:" in status_line
     assert "[" in status_line
+
+
+def test_build_live_status_shows_yolo_indicator_when_enabled():
+    ui = RichUI()
+    session = _build_session(variables={
+        "memory_max_entries": 64,
+        "scratchpad_max_entries": 24,
+        "agent_mode": "feature",
+        "yolo": True,
+    })
+
+    status = ui.build_live_status(session, "dummy-model", 2, 5)
+
+    assert status.plain.startswith("Generating (dummy-model) it 2/5 | ✦ YOLO | ")
+    assert "yolo:on" in status.plain
 
 
 def test_memory_monitor_renders_feature_progress(tmp_path):

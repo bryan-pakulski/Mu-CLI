@@ -758,6 +758,7 @@ class Session:
             "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
             "Each phase file must contain Objectives, Action Points, and Exit Criteria sections, and each checklist item must use exactly one of [ ], [~], or [x]. "
             "After approval, call get_feature_plan at the start of every implementation turn, work on only the next incomplete phase, and keep the phase markdown synchronized with reality as you make code changes. "
+            "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
             "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
             "Never move to the next phase until all checklist items in the current phase are [x]. "
             "When all phases are complete, perform a review pass over the phase files and code changes together. If review fails, move the failing items back to [~] and continue implementing. If review succeeds, call update_feature_plan so review_status becomes completed before you report success.\n\n"

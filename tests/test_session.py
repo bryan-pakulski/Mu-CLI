@@ -376,9 +376,12 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert "phase_N.md" in provider.last_user_text
     assert "Do not create alternate planning documents" in provider.last_user_text
     assert "do not begin code implementation until the user has reviewed and approved the plan" in provider.last_user_text
+    assert "use save_scratchpad for temporary phase notes" in provider.last_user_text
+    assert "call flush before acting on the collected context" in provider.last_user_text
     assert "call raise_blocker" in provider.last_user_text
     assert "FEATURE MODE SYSTEM PROMPT" in provider.last_system_prompt
     assert "You are in Feature Plan Engine mode" in provider.last_system_prompt
+    assert "gather read-only context first" in provider.last_system_prompt
     assert provider.last_user_text.endswith("Implement an approvals dashboard")
 
 

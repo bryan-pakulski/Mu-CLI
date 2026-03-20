@@ -191,6 +191,9 @@ If the server process is restarted, it can restore the latest persisted feature-
 Feature mode prompts should instruct the agent to:
 
 - always use the feature plan engine,
+- gather read-only investigation context into the collation buffer before acting when a phase requires substantial discovery,
+- store short-lived file targets, hypotheses, and verification checklists in the scratchpad during a phase,
+- call `flush` once enough context has been gathered so implementation decisions are based on the complete collected context,
 - call `raise_blocker` instead of spinning when user help is required,
 - never skip user approval,
 - never start phase `N + 1` before phase `N` is fully complete,

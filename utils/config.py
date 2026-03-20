@@ -202,11 +202,13 @@ AGENTIC_MODES = {
 3. Ensure every phase file contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
 4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in `feature_plan.json`.
 5. Once approved, call `get_feature_plan` at the start of each implementation turn and work on only the next incomplete phase.
-6. While implementing, continuously update the active `phase_N.md` file so the checklist reflects real progress. Use `[~]` for in-progress or blocked work.
-7. If you need user help, missing requirements, credentials, or a product decision, call `raise_blocker` with the exact context needed so the harness can pause and request input instead of continuing to spin.
-8. Never start the next phase until all checklist items in the current phase are `[x]`.
-9. After all phases are complete, review the code and phase files together. If review fails, move the failing checklist items back to `[~]` and continue implementation.
-10. Only finish after calling `update_feature_plan` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
+6. During investigation-heavy feature work, use read-only tools to gather context into the collation buffer, save short hypotheses or phase notes with `save_scratchpad`, then call `flush` once before making implementation decisions.
+7. While implementing, continuously update the active `phase_N.md` file so the checklist reflects real progress. Use `[~]` for in-progress or blocked work.
+8. Use the scratchpad for turn-local phase notes such as file targets, open questions, verification steps, and mini-plans instead of re-reading the same outputs repeatedly.
+9. If you need user help, missing requirements, credentials, or a product decision, call `raise_blocker` with the exact context needed so the harness can pause and request input instead of continuing to spin.
+10. Never start the next phase until all checklist items in the current phase are `[x]`.
+11. After all phases are complete, review the code and phase files together. If review fails, move the failing checklist items back to `[~]` and continue implementation.
+12. Only finish after calling `update_feature_plan` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
     "research": """WORKFLOW (Research & Exploration):
 1. The user wants to understand how something works without necessarily changing things.
 2. You have access to online tooling and research knowledge bases, use them to explore any relevent information.
@@ -268,6 +270,7 @@ You are in Feature Plan Engine mode. Your job is to behave like a phased impleme
 - Start by creating or refreshing the canonical feature plan in `documentation/feature_req_<id>/`.
 - Treat `feature_plan.json` and the `phase_N.md` files as the source of truth for planning and progress.
 - Do not begin implementation until the plan is approved.
+- For investigation-heavy turns, gather read-only context first, store key temporary findings in the scratchpad, and call `flush` before acting on the collected context.
 - Work on one phase at a time, keep statuses synchronized with reality, and raise blockers when user input is required.
 - Finish only after a review pass succeeds and `review_status` is set to `completed`.""",
 }

@@ -20,6 +20,7 @@ from providers.openai import OpenAIProvider
 from core.server import HeadlessUI, serve
 from core.session import SessionManager, Session
 from ui.rich_ui import RichUI
+from utils.config import AGENT_MODE_METADATA
 
 console = Console()
 
@@ -27,6 +28,26 @@ console = Console()
 def refresh_memory_hud(session, ui):
     if ui and hasattr(ui, "show_memory_monitor"):
         ui.show_memory_monitor(session)
+
+
+def print_mode_overview(session):
+    current_mode = str(session.variables.get("agent_mode", "default"))
+    table = Table(title="Available Agent Modes", box=box.SIMPLE_HEAVY)
+    table.add_column("Mode", style="cyan", no_wrap=True)
+    table.add_column("Current", style="yellow", justify="center")
+    table.add_column("Description", style="white")
+    table.add_column("Docs", style="magenta")
+
+    for mode_name, metadata in AGENT_MODE_METADATA.items():
+        table.add_row(
+            mode_name,
+            "*" if mode_name == current_mode else "",
+            metadata.get("description", ""),
+            metadata.get("documentation", ""),
+        )
+
+    console.print(table)
+    console.print(f"[dim]Current mode: {current_mode}[/dim]")
 
 
 def print_help():
@@ -100,6 +121,8 @@ def print_splash(session):
 
     sys_status = "SET" if session.system_instruction else "NONE"
     agent_mode = session.variables.get("agent_mode", "default")
+    mode_meta = AGENT_MODE_METADATA.get(str(agent_mode), {})
+    mode_description = mode_meta.get("description", "")
     yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
 
     # Workspace Folder info
@@ -125,7 +148,7 @@ def print_splash(session):
     [bold magenta]System:[/bold magenta]   {sys_status}                                
     [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
     [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
-    [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan]
+    [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
     [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns
     """
@@ -787,25 +810,52 @@ def handle_command(session, user_input, allow_prompt=True):
         )
 
     if cmd == "/mode":
-        valid_modes = ["default", "debug", "feature", "research", "git"]
+        valid_modes = list(AGENT_MODE_METADATA.keys())
         if arg and arg.lower() in valid_modes:
             session.variables["agent_mode"] = arg.lower()
             session.session_manager.save_history(session.folder_context)
             refresh_memory_hud(session, ui)
+            mode_meta = AGENT_MODE_METADATA[arg.lower()]
             return serialize_command_result(
-                session, cmd, message=f"Agent strategy set to: {arg.lower()}"
+                session,
+                cmd,
+                message=(
+                    f"Agent strategy set to: {arg.lower()} — "
+                    f"{mode_meta.get('description', '')} "
+                    f"({mode_meta.get('documentation', '')})"
+                ).strip(),
+                data={
+                    "current_mode": arg.lower(),
+                    "mode": {
+                        "name": arg.lower(),
+                        **mode_meta,
+                    },
+                    "available_modes": AGENT_MODE_METADATA,
+                },
+            )
+        if not arg:
+            if allow_prompt:
+                print_mode_overview(session)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Listed available agent modes.",
+                data={
+                    "current_mode": session.variables.get("agent_mode", "default"),
+                    "available_modes": AGENT_MODE_METADATA,
+                },
             )
         if allow_prompt:
-            console.print("Usage: /mode <default|debug|feature|research|git>")
-            console.print(
-                f"Current mode: {session.variables.get('agent_mode', 'default')}"
-            )
+            print_mode_overview(session)
         return serialize_command_result(
             session,
             cmd,
             ok=False,
-            message="Usage: /mode <default|debug|feature|research|git>",
-            data={"current_mode": session.variables.get("agent_mode", "default")},
+            message=f"Unknown mode: {arg}",
+            data={
+                "current_mode": session.variables.get("agent_mode", "default"),
+                "available_modes": AGENT_MODE_METADATA,
+            },
         )
 
     if cmd in ["/tool", "/tools"]:

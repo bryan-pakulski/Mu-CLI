@@ -11,6 +11,7 @@ from rich.text import Text
 
 from .input import InputHandler
 from .render import render_response
+from utils.config import AGENT_MODE_METADATA
 
 
 class RichUI:
@@ -132,6 +133,9 @@ class RichUI:
             self.build_meter("QUEUE", collation_bytes, collation_limit, color="yellow"),
         ]
 
+        current_mode = str(session.variables.get("agent_mode", "default"))
+        mode_description = AGENT_MODE_METADATA.get(current_mode, {}).get("description", "")
+
         meta = Text()
         meta.append("tokens ", style="dim white")
         meta.append(str(token_total), style="bold cyan")
@@ -141,7 +145,11 @@ class RichUI:
         if collation_items != 1:
             meta.append("s", style="dim white")
         meta.append("  |  mode ", style="dim white")
-        meta.append(str(session.variables.get("agent_mode", "default")), style="bold magenta")
+        meta.append(current_mode, style="bold magenta")
+
+        mode_line = Text()
+        mode_line.append("mode info ", style="dim white")
+        mode_line.append(mode_description or "No description available.", style="white")
 
         legend = Text.from_markup(
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
@@ -149,7 +157,7 @@ class RichUI:
 
         return Align.right(
             Panel(
-                Group(*meters, Text(""), meta, legend),
+                Group(*meters, Text(""), meta, mode_line, legend),
                 title="[bold white]Memory HUD[/bold white]",
                 border_style="bright_black",
                 box=box.ROUNDED,

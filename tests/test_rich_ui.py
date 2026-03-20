@@ -58,3 +58,4 @@ def test_memory_monitor_renders_context_memory_and_queue_labels():
     assert "queue 2 items" in output
     assert "mode" in output
     assert "feature" in output
+    assert "Phased Feature Plan Engine" in output

@@ -21,6 +21,7 @@ from core.feature_mode import create_feature_plan, update_feature_plan_metadata
 from mucli import handle_command
 from providers.base import MessagePart, ProviderResponse
 from providers.ollama import OllamaProvider
+from utils.config import AGENT_MODE_METADATA
 
 
 @dataclass
@@ -127,6 +128,18 @@ def test_handle_command_updates_variables_non_interactively():
     assert result["ok"] is True
     assert session.variables["yolo"] is True
     assert result["data"]["key"] == "yolo"
+
+
+def test_mode_command_without_args_lists_available_modes():
+    session = build_test_session()
+
+    result = handle_command(session, "/mode", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["current_mode"] == session.variables["agent_mode"]
+    assert result["data"]["available_modes"] == AGENT_MODE_METADATA
+    assert "feature" in result["data"]["available_modes"]
+    assert result["data"]["available_modes"]["feature"]["documentation"] == "documentation/feature_plan_engine.md"
 
 
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):

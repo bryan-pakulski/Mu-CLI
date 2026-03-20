@@ -239,6 +239,29 @@ AGENTIC_MODES = {
     - Finally, launch a merge request for your changes (`git_merge_request`).""",
 }
 
+AGENT_MODE_METADATA = {
+    "default": {
+        "description": "General coding and codebase assistance.",
+        "documentation": "README.md#agent-modes",
+    },
+    "debug": {
+        "description": "Root-cause analysis and targeted debugging workflow.",
+        "documentation": "README.md#agent-modes",
+    },
+    "feature": {
+        "description": "Phased Feature Plan Engine with approval, blockers, and review.",
+        "documentation": "documentation/feature_plan_engine.md",
+    },
+    "research": {
+        "description": "Exploration and explanation mode for understanding systems.",
+        "documentation": "README.md#agent-modes",
+    },
+    "git": {
+        "description": "Autonomous software engineer workflow with git planning and verification.",
+        "documentation": "README.md#agent-modes",
+    },
+}
+
 AGENTIC_MODE_SYSTEM_PROMPTS = {
     "feature": """FEATURE MODE SYSTEM PROMPT:
 You are in Feature Plan Engine mode. Your job is to behave like a phased implementation agent.

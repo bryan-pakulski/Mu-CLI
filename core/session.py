@@ -6,11 +6,17 @@ import glob
 from collections import defaultdict
 from datetime import datetime
 
+from core.approval import build_approval_prompt, collect_approval_plans, ApprovalPlan
 from core.collation import CollationBuffer
 from core.memory import ScratchpadStore, TaskMemoryStore
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
-from core.tools import TOOLS, execute_tool, get_modifications, COLLATED_TOOLS
+from core.tools import (
+    TOOLS,
+    COLLATED_TOOLS,
+    execute_tool,
+    infer_tool_error_code,
+)
 from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.config import (
@@ -601,16 +607,39 @@ class Session:
         }
 
     def _build_structured_tool_result(
-        self, tool_name: str, tool_args: dict, raw_result
+        self,
+        tool_name: str,
+        tool_args: dict,
+        raw_result,
+        *,
+        execution_source: str = "session",
     ):
         raw_text = str(raw_result)
+        error_code = infer_tool_error_code(tool_name, raw_text)
         structured = {
             "tool_name": tool_name,
-            "ok": not raw_text.startswith("Error"),
+            "ok": error_code is None,
             "summary": self._clip_preview(raw_text, 220),
             "args": _shorten_tool_args(tool_args),
             "raw": raw_text,
+            "error_code": error_code,
+            "error": (
+                None
+                if error_code is None
+                else {
+                    "code": error_code,
+                    "message": self._clip_preview(raw_text, 220),
+                }
+            ),
             "data": {},
+            "modified_files": [],
+            "artifacts": [],
+            "telemetry": {
+                "execution_source": execution_source,
+                "delivery_mode": "structured",
+                "raw_char_count": len(raw_text),
+                "raw_line_count": len(raw_text.splitlines()),
+            },
         }
 
         if tool_name == "read_file":
@@ -645,6 +674,8 @@ class Session:
                 "filename": filename,
                 "changed_file": filename,
             }
+            if filename:
+                structured["modified_files"] = [filename]
         elif tool_name == "list_agent_tasks":
             structured["data"] = self._parse_list_agent_tasks(raw_text)
         elif tool_name == "run_agent_task":
@@ -750,7 +781,13 @@ class Session:
             promoted.append(f"auto-promoted memory #{entry.id}")
         return promoted
 
-    def _execute_tool_with_memory(self, tool_name: str, tool_args: dict):
+    def _execute_tool_with_memory(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        *,
+        invocation_source: str = "session",
+    ):
         if tool_name == "save_memory":
             entry = self.task_memory.save(
                 tool_args.get("content", ""),
@@ -797,30 +834,13 @@ class Session:
             self.turn_scratchpad.clear()
             return "Turn scratchpad cleared."
 
-        if tool_name == "batch_job":
-            commands = tool_args.get("commands", [])
-            if not isinstance(commands, list):
-                return "Error: 'commands' must be a list."
-            lines = ["--- Batch Job Results ---"]
-            for index, command in enumerate(commands, 1):
-                if not isinstance(command, dict):
-                    lines.append(f"[{index}] Error: Invalid command entry.")
-                    continue
-                nested_name = command.get("tool_name", "")
-                nested_args = command.get("tool_args", {})
-                if nested_name == "batch_job":
-                    lines.append(f"[{index}] Error: nested batch_job not allowed.")
-                    continue
-                nested_result = self._execute_tool_with_memory(nested_name, nested_args)
-                lines.append(f"[{index}] Tool: {nested_name}\n{nested_result}")
-            return "\n\n".join(lines)
-
         return execute_tool(
             tool_name,
             tool_args,
             self.folder_context,
             self.ui,
             self.variables,
+            invocation_source=invocation_source,
         )
 
     def _prompt_tool_choice(
@@ -841,40 +861,26 @@ class Session:
     def _request_tool_approval(
         self,
         *,
-        tool_name: str,
-        tool_args: dict,
+        approval_plan: ApprovalPlan,
         display_args: dict,
         count_info: str,
-        can_approve: bool,
-        modifications: list[tuple],
     ) -> tuple[str, str | None]:
-        prompt_text = (
-            f"\n[bold yellow]Permission Required[/bold yellow] for tool: "
-            f"[cyan]{tool_name}[/cyan]{count_info}\nArgs: {display_args}\nAllow?"
-            if can_approve
-            else f"\n[bold red]Diff Failed[/bold red] for tool: [cyan]{tool_name}"
-            f"[/cyan]{count_info}\nArgs: {display_args}\nReject or Explain?"
+        prompt_text, choices, default = build_approval_prompt(
+            approval_plan,
+            display_args=display_args,
+            count_info=count_info,
         )
-        choices = ["y", "n", "e"] if can_approve else ["n", "e"]
-        default = "y" if can_approve else "n"
 
         if self.ui and hasattr(self.ui, "request_tool_approval"):
-            serialized_modifications = []
-            for original, modified, filename in modifications:
-                serialized_modifications.append(
-                    {
-                        "filename": filename,
-                        "original_content": original,
-                        "modified_content": modified,
-                    }
-                )
             return self.ui.request_tool_approval(
-                tool_name=tool_name,
-                tool_args=tool_args,
+                tool_name=approval_plan.tool_name,
+                tool_args=approval_plan.tool_args,
                 display_args=display_args,
                 count_info=count_info,
-                can_approve=can_approve,
-                modifications=serialized_modifications,
+                can_approve=approval_plan.can_approve,
+                modifications=[mod.to_payload() for mod in approval_plan.modifications],
+                preview_error=approval_plan.preview_error,
+                error_code=approval_plan.error_code,
                 prompt_text=prompt_text,
                 choices=choices,
                 default=default,
@@ -1203,85 +1209,71 @@ class Session:
                 tool_result_parts = []
                 tool_calls = [p for p in response.parts if p.type == "tool_call"]
 
-                # Pre-calculate modifications for tools needing approval
-                to_approve_data = {}
-                for idx, part in enumerate(tool_calls):
-                    tool_def = next(
-                        (t for t in TOOLS if t.name == part.tool_name), None
-                    )
-
-                    if self.variables.get("yolo", False):
-                        continue
-
-                    if strict_mode or (tool_def and tool_def.requires_approval):
-                        mods = get_modifications(
-                            part.tool_name, part.tool_args, self.folder_context
-                        )
-                        to_approve_data[idx] = mods
+                approval_plans = collect_approval_plans(
+                    tool_calls,
+                    self.folder_context,
+                    strict_mode=strict_mode,
+                    yolo=self.variables.get("yolo", False),
+                )
 
                 # Show bulk diffs if multiple
-                if len(to_approve_data) > 1:
+                if len(approval_plans) > 1:
                     if self.ui:
                         self.ui.show_info(
-                            f"\n[bold yellow]Turn contains {len(to_approve_data)} modifications requiring approval.[/bold yellow]"
+                            f"\n[bold yellow]Turn contains {len(approval_plans)} modifications requiring approval.[/bold yellow]"
                         )
-                    for idx, mods in to_approve_data.items():
-                        for orig, modified, filename in mods:
-                            if (
-                                filename
-                                and orig is not None
-                                and modified is not None
-                                and not modified.startswith("ERROR:")
-                            ):
+                    for approval_plan in approval_plans.values():
+                        for modification in approval_plan.modifications:
+                            if modification.can_render_diff:
                                 if self.ui:
-                                    self.ui.show_diff(filename, orig, modified)
+                                    self.ui.show_diff(
+                                        modification.filename,
+                                        modification.original_content,
+                                        modification.modified_content,
+                                    )
 
                 for i, part in enumerate(tool_calls):
-                    needs_approval = (i in to_approve_data) or strict_mode
+                    approval_plan = approval_plans.get(i)
+                    needs_approval = approval_plan is not None
                     if needs_approval:
-                        mods = to_approve_data.get(i, [])
-
                         result = None
-                        can_approve = True
-                        error_msg = None
-
-                        # Validate all modifications in the set (especially for batch_job)
-                        for _, m, f in mods:
-                            if m and str(m).startswith("ERROR:"):
-                                if "malformed patch" in str(
-                                    m
-                                ).lower() or "patch: ****" in str(m):
-                                    error_msg = m
-                                    can_approve = False
+                        if approval_plan.preview_error and self.ui:
+                            for modification in approval_plan.modifications:
+                                if modification.preview_error:
+                                    self.ui.show_error(
+                                        f"Cannot show diff for {modification.filename}: {modification.preview_error}"
+                                    )
+                                    logger.error(
+                                        f"Diff error for {modification.filename}: {modification.preview_error}"
+                                    )
                                     break
-                                if self.ui:
-                                    self.ui.show_error(f"Cannot show diff for {f}: {m}")
-                                can_approve = False
-                                logger.error(f"Diff error for {f}: {m}")
-                                break
 
-                        if not can_approve and error_msg:
+                        if (
+                            approval_plan.error_code == "preview_failed"
+                            and approval_plan.preview_error
+                        ):
                             if self.ui:
                                 self.ui.show_info(
                                     f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
                                 )
-                            result = f"Error: Malformed patch detected. Please ensure your diff is correctly formatted. Check hunk headers and context.\n{error_msg}"
-                            logger.warning(
-                                f"Malformed patch detected for {part.tool_name}: {error_msg}"
+                            result = (
+                                "Error: Malformed patch detected. Please ensure your diff is correctly "
+                                f"formatted. Check hunk headers and context.\n{approval_plan.preview_error}"
                             )
-                            # Fall through to skip Prompt.ask since result is now set
+                            logger.warning(
+                                f"Malformed patch detected for {part.tool_name}: {approval_plan.preview_error}"
+                            )
 
                         # Show diffs if not already shown in bulk pre-calculation
-                        if result is None and len(to_approve_data) <= 1:
-                            for o, m, f in mods:
-                                if (
-                                    f
-                                    and o is not None
-                                    and m is not None
-                                    and not str(m).startswith("ERROR:")
-                                ):
+                        if result is None and len(approval_plans) <= 1:
+                            for modification in approval_plan.modifications:
+                                if modification.can_render_diff:
                                     if self.ui:
-                                        self.ui.show_diff(f, o, m)
+                                        self.ui.show_diff(
+                                            modification.filename,
+                                            modification.original_content,
+                                            modification.modified_content,
+                                        )
 
                         # Shorten args for display
                         display_args = _shorten_tool_args(part.tool_args)
@@ -1295,12 +1287,9 @@ class Session:
 
                         if result is None:
                             choice, reason = self._request_tool_approval(
-                                tool_name=part.tool_name,
-                                tool_args=part.tool_args,
+                                approval_plan=approval_plan,
                                 display_args=display_args,
                                 count_info=count_info,
-                                can_approve=can_approve,
-                                modifications=mods,
                             )
                             if choice == "n":
                                 result = "User denied this tool call."
@@ -1386,29 +1375,36 @@ class Session:
                         promotion_result = None
                         if raw_result != source_result:
                             source_text = str(source_result)
-                            result = {
-                                "tool_name": part.tool_name,
-                                "ok": not source_text.startswith("Error"),
-                                "summary": self._clip_preview(raw_result, 220),
-                                "args": _shorten_tool_args(part.tool_args),
-                                "raw": str(raw_result),
-                                "data": {
-                                    "collated": True,
-                                    "pending_items": len(self.collation_buffer.entries),
-                                    "source_char_count": len(source_text),
-                                    "source_line_count": len(source_text.splitlines()),
-                                },
+                            result = self._build_structured_tool_result(
+                                part.tool_name,
+                                part.tool_args,
+                                raw_result,
+                                execution_source="session",
+                            )
+                            result["data"] = {
+                                "collated": True,
+                                "pending_items": len(self.collation_buffer.entries),
+                                "source_char_count": len(source_text),
+                                "source_line_count": len(source_text.splitlines()),
                             }
+                            result["telemetry"].update(
+                                {
+                                    "delivery_mode": "collated",
+                                    "visible_char_count": len(str(raw_result)),
+                                }
+                            )
                             promotion_result = self._build_structured_tool_result(
                                 part.tool_name,
                                 part.tool_args,
                                 source_result,
+                                execution_source="session",
                             )
                         else:
                             result = self._build_structured_tool_result(
                                 part.tool_name,
                                 part.tool_args,
                                 source_result,
+                                execution_source="session",
                             )
                             promotion_result = result
                         promotions = self._maybe_auto_promote_memory(promotion_result)

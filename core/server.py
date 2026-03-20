@@ -9,7 +9,13 @@ from threading import Lock
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
-from core.tools import TOOLS, get_modifications
+from core.approval import build_approval_plan
+from core.tools import (
+    TOOLS,
+    get_tool_definition,
+    get_tool_descriptor,
+    serialize_tool_descriptor,
+)
 from providers.ollama import OllamaProvider
 from utils.logger import logger
 from utils.config import validate_and_cast
@@ -111,6 +117,8 @@ class HeadlessUI:
         count_info,
         can_approve,
         modifications,
+        preview_error,
+        error_code,
         prompt_text,
         choices,
         default,
@@ -126,6 +134,8 @@ class HeadlessUI:
             count_info=count_info,
             can_approve=can_approve,
             modifications=modifications,
+            preview_error=preview_error,
+            error_code=error_code,
             prompt_text=prompt_text,
             choices=choices,
             default=default,
@@ -177,6 +187,8 @@ class ApprovalRequest:
     count_info: str
     can_approve: bool
     modifications: list[dict]
+    preview_error: str | None
+    error_code: str | None
     prompt_text: str
     choices: list[str]
     default: str
@@ -196,6 +208,8 @@ class ApprovalRequest:
             "count_info": self.count_info,
             "can_approve": self.can_approve,
             "modifications": self.modifications,
+            "preview_error": self.preview_error,
+            "error_code": self.error_code,
             "prompt_text": self.prompt_text,
             "choices": self.choices,
             "default": self.default,
@@ -354,6 +368,7 @@ class TaskManager:
                             tool_name,
                             tool_args,
                             result,
+                            execution_source="server",
                         )
                     else:
                         response_payload = {
@@ -505,10 +520,7 @@ def build_state_payload(session) -> dict:
         "token_counts": dict(session.session_manager.token_counts),
         "available_tools": [
             {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-                "requires_approval": tool.requires_approval,
+                **serialize_tool_descriptor(tool.name),
                 "enabled": tool.name not in session.disabled_tools,
             }
             for tool in TOOLS
@@ -580,33 +592,38 @@ def execute_server_tool(session, tool_name: str, tool_args: dict):
     if tool_name in session.disabled_tools:
         raise PermissionError(f"Tool '{tool_name}' is disabled for this session.")
 
-    tool_def = next((tool for tool in TOOLS if tool.name == tool_name), None)
-    if (
-        tool_def
-        and tool_def.requires_approval
-        and not session.variables.get("yolo", False)
-    ):
-        modifications = get_modifications(tool_name, tool_args, session.folder_context)
-        can_approve = True
-        for _, modified, _ in modifications:
-            if modified and str(modified).startswith("ERROR:"):
-                can_approve = False
-                break
+    descriptor = get_tool_descriptor(tool_name)
+    if not descriptor:
+        raise ValueError(f"Unknown tool: {tool_name}")
+    if descriptor.server_policy != "allowed":
+        raise PermissionError(
+            f"Tool '{tool_name}' is not available for direct server execution."
+        )
 
+    tool_def = get_tool_definition(tool_name)
+    approval_plan = build_approval_plan(
+        tool_name,
+        tool_args,
+        session.folder_context,
+        strict_mode=False,
+        yolo=session.variables.get("yolo", False),
+    )
+    if tool_def and approval_plan.requires_approval:
         choice, reason = session._request_tool_approval(
-            tool_name=tool_name,
-            tool_args=tool_args,
+            approval_plan=approval_plan,
             display_args=tool_args,
             count_info="",
-            can_approve=can_approve,
-            modifications=modifications,
         )
         if choice == "n":
             return f"User denied direct tool call: {tool_name}"
         if choice == "e":
             return f"User denied direct tool call: {tool_name}. Reason: {reason}"
 
-    return session._execute_tool_with_memory(tool_name, tool_args)
+    return session._execute_tool_with_memory(
+        tool_name,
+        tool_args,
+        invocation_source="server",
+    )
 
 
 def serve(session, host: str, port: int, command_handler):

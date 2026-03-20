@@ -2,8 +2,68 @@ import os
 import datetime
 import difflib
 import re
+from dataclasses import dataclass
+from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
+
+
+@dataclass(frozen=True)
+class ToolDescriptor:
+    definition: ToolDefinition
+    execution_kind: str
+    preview_policy: str
+    server_policy: str
+    result_mode: str
+    handler_key: str
+    error_mode: str = "text_error"
+    summary_builder: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    folder_context: Any
+    ui: Any = None
+    variables: dict | None = None
+    invocation_source: str = "session"
+
+
+def _build_descriptor(
+    definition: ToolDefinition,
+    *,
+    execution_kind: str,
+    preview_policy: str,
+    server_policy: str,
+    result_mode: str,
+    handler_key: str,
+    error_mode: str = "text_error",
+    summary_builder: str | None = None,
+) -> ToolDescriptor:
+    return ToolDescriptor(
+        definition=definition,
+        execution_kind=execution_kind,
+        preview_policy=preview_policy,
+        server_policy=server_policy,
+        result_mode=result_mode,
+        handler_key=handler_key,
+        error_mode=error_mode,
+        summary_builder=summary_builder,
+    )
+
+
+def build_tool_context(
+    folder_context,
+    ui=None,
+    variables: dict | None = None,
+    *,
+    invocation_source: str = "session",
+) -> ToolExecutionContext:
+    return ToolExecutionContext(
+        folder_context=folder_context,
+        ui=ui,
+        variables=variables,
+        invocation_source=invocation_source,
+    )
 
 # --- Tool Definitions (Schemas) ---
 
@@ -475,7 +535,7 @@ TOOLS = [
     ),
 ]
 
-COLLATED_TOOLS = [
+_COLLATED_TOOL_NAMES = {
     "get_workspace_details",
     "read_file",
     "search_for_string",
@@ -488,6 +548,237 @@ COLLATED_TOOLS = [
     "git_branch",
     "url_grounding",
     "read_document",
+}
+
+
+def _default_result_mode(tool_name: str) -> str:
+    return "structured+collated" if tool_name in _COLLATED_TOOL_NAMES else "structured"
+
+
+def _default_server_policy(tool_name: str) -> str:
+    if tool_name in {
+        "flush",
+        "save_memory",
+        "save_scratchpad",
+        "search_memory",
+        "search_scratchpad",
+        "list_memory",
+        "list_scratchpad",
+        "clear_scratchpad",
+    }:
+        return "session_only"
+    return "allowed"
+
+
+TOOL_DESCRIPTOR_OVERRIDES = {
+    "get_workspace_details": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "parse_workspace_details",
+    },
+    "read_file": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "read_file_preview",
+    },
+    "search_for_string": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "parse_search_results",
+    },
+    "get_chunk": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "chunk_preview",
+    },
+    "get_current_time": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "result_mode": "raw",
+    },
+    "list_dir": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "parse_list_dir",
+    },
+    "write_file": {
+        "execution_kind": "mutate",
+        "preview_policy": "required",
+    },
+    "apply_diff": {
+        "execution_kind": "mutate",
+        "preview_policy": "required",
+    },
+    "batch_job": {
+        "execution_kind": "composite",
+        "preview_policy": "optional",
+        "result_mode": "structured",
+    },
+    "list_agent_tasks": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "parse_list_agent_tasks",
+    },
+    "run_agent_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+        "summary_builder": "agent_task_preview",
+    },
+    "git_status": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "git_preview",
+    },
+    "git_log": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "git_preview",
+    },
+    "git_diff": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "git_preview",
+    },
+    "git_checkout": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "git_add": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "git_commit": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "git_push": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "git_pull": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "git_init": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "git_merge_request": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+        "server_policy": "session_only",
+    },
+    "git_branch": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "git_preview",
+    },
+    "url_grounding": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "read_document": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "flush": {
+        "execution_kind": "control",
+        "preview_policy": "none",
+        "result_mode": "raw",
+    },
+    "save_memory": {
+        "execution_kind": "memory",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
+    },
+    "save_scratchpad": {
+        "execution_kind": "memory",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
+    },
+    "search_memory": {
+        "execution_kind": "memory",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
+    },
+    "search_scratchpad": {
+        "execution_kind": "memory",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
+    },
+    "list_memory": {
+        "execution_kind": "memory",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
+    },
+    "list_scratchpad": {
+        "execution_kind": "memory",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
+    },
+    "clear_scratchpad": {
+        "execution_kind": "memory",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
+    },
+}
+
+TOOL_DESCRIPTORS = {
+    tool.name: _build_descriptor(
+        tool,
+        execution_kind=TOOL_DESCRIPTOR_OVERRIDES.get(tool.name, {}).get(
+            "execution_kind",
+            "mutate" if tool.requires_approval else "read",
+        ),
+        preview_policy=TOOL_DESCRIPTOR_OVERRIDES.get(tool.name, {}).get(
+            "preview_policy",
+            "optional" if tool.requires_approval else "none",
+        ),
+        server_policy=TOOL_DESCRIPTOR_OVERRIDES.get(tool.name, {}).get(
+            "server_policy",
+            _default_server_policy(tool.name),
+        ),
+        result_mode=TOOL_DESCRIPTOR_OVERRIDES.get(tool.name, {}).get(
+            "result_mode",
+            _default_result_mode(tool.name),
+        ),
+        handler_key=TOOL_DESCRIPTOR_OVERRIDES.get(tool.name, {}).get(
+            "handler_key",
+            tool.name,
+        ),
+        error_mode=TOOL_DESCRIPTOR_OVERRIDES.get(tool.name, {}).get(
+            "error_mode",
+            "text_error",
+        ),
+        summary_builder=TOOL_DESCRIPTOR_OVERRIDES.get(tool.name, {}).get(
+            "summary_builder"
+        ),
+    )
+    for tool in TOOLS
+}
+
+
+def get_tool_definition(tool_name: str) -> ToolDefinition | None:
+    descriptor = TOOL_DESCRIPTORS.get(tool_name)
+    return descriptor.definition if descriptor else None
+
+
+def get_tool_descriptor(tool_name: str) -> ToolDescriptor | None:
+    return TOOL_DESCRIPTORS.get(tool_name)
+
+
+def list_tool_descriptors() -> list[ToolDescriptor]:
+    return [TOOL_DESCRIPTORS[tool.name] for tool in TOOLS if tool.name in TOOL_DESCRIPTORS]
+
+COLLATED_TOOLS = [
+    *sorted(_COLLATED_TOOL_NAMES),
 ]
 
 
@@ -1119,7 +1410,7 @@ def read_document(filename: str, folder_context) -> str:
 
 def tool_requires_approval(tool_name: str, args: dict) -> bool:
     """Checks if a tool call requires user approval."""
-    tool_def = next((t for t in TOOLS if t.name == tool_name), None)
+    tool_def = get_tool_definition(tool_name)
     if not tool_def:
         return False
 
@@ -1231,123 +1522,296 @@ def get_modifications(
     return []
 
 
+def infer_tool_error_code(tool_name: str, result: Any) -> str | None:
+    raw_text = str(result or "")
+    lowered = raw_text.lower()
+
+    if not raw_text:
+        return None
+
+    if "disabled for this session" in lowered:
+        return "access_denied"
+    if "access denied" in lowered or "outside boundaries" in lowered:
+        return "access_denied"
+    if "nested batch_job not allowed" in lowered:
+        return "unsupported"
+    if "unknown tool" in lowered or "tool_name missing" in lowered:
+        return "not_found"
+    if "field '" in lowered and "required" in lowered:
+        return "invalid_args"
+    if "argument is empty" in lowered or "must be a list" in lowered:
+        return "invalid_args"
+    if (
+        "malformed patch" in lowered
+        or "'patch' utility not found" in lowered
+        or "patch: ****" in lowered
+        or "only garbage was found in the patch input" in lowered
+    ):
+        return "preview_failed"
+    if raw_text.startswith("Error"):
+        return "execution_failed"
+    return None
+
+
+def serialize_tool_descriptor(tool_name: str) -> dict | None:
+    descriptor = get_tool_descriptor(tool_name)
+    if not descriptor:
+        return None
+
+    definition = descriptor.definition
+    return {
+        "name": definition.name,
+        "description": definition.description,
+        "parameters": definition.parameters,
+        "requires_approval": definition.requires_approval,
+        "execution_kind": descriptor.execution_kind,
+        "preview_policy": descriptor.preview_policy,
+        "server_policy": descriptor.server_policy,
+        "result_mode": descriptor.result_mode,
+        "handler_key": descriptor.handler_key,
+        "error_mode": descriptor.error_mode,
+        "summary_builder": descriptor.summary_builder,
+    }
+
+
+def _path_arg_error(key: str) -> str:
+    return (
+        f"Error: The '{key}' argument is empty. "
+        "You must provide a valid file path from the workspace map."
+    )
+
+
+def _handle_get_workspace_details(args, folder_context, ui, variables) -> str:
+    return get_workspace_details(folder_context)
+
+
+def _handle_flush(args, folder_context, ui, variables) -> str:
+    return "Buffer flushed."
+
+
+def _handle_memory_placeholder(message: str) -> Callable[..., str]:
+    def _handler(args, folder_context, ui, variables) -> str:
+        return message
+
+    return _handler
+
+
+def _legacy_handler(
+    handler: Callable[[dict, Any, Any, dict | None], str]
+) -> Callable[[dict, ToolExecutionContext], str]:
+    def _wrapped(args: dict, context: ToolExecutionContext) -> str:
+        return handler(args, context.folder_context, context.ui, context.variables)
+
+    return _wrapped
+
+
+def _handle_read_file(args, folder_context, ui, variables) -> str:
+    return read_file(args.get("filename", ""), folder_context)
+
+
+def _handle_search_for_string(args, folder_context, ui, variables) -> str:
+    return search_for_string(args.get("string", ""), folder_context)
+
+
+def _handle_get_chunk(args, folder_context, ui, variables) -> str:
+    return get_chunk(
+        args.get("file", ""),
+        args.get("start_line", 1),
+        args.get("end_line", 100),
+        folder_context,
+    )
+
+
+def _handle_get_current_time(args, folder_context, ui, variables) -> str:
+    return get_current_time(folder_context)
+
+
+def _handle_list_dir(args, folder_context, ui, variables) -> str:
+    return list_dir(args.get("path", ""), folder_context)
+
+
+def _handle_write_file(args, folder_context, ui, variables) -> str:
+    return write_file(args.get("filename", ""), args.get("content", ""), folder_context)
+
+
+def _handle_list_agent_tasks(args, folder_context, ui, variables) -> str:
+    return list_agent_tasks(folder_context)
+
+
+def _handle_run_agent_task(args, folder_context, ui, variables) -> str:
+    return run_agent_task(args.get("task_name", ""), folder_context, variables)
+
+
+def _handle_apply_diff(args, folder_context, ui, variables) -> str:
+    return apply_diff(args.get("filename", ""), args.get("diff", ""), folder_context)
+
+
+def _handle_git_status(args, folder_context, ui, variables) -> str:
+    return git_status(folder_context)
+
+
+def _handle_git_init(args, folder_context, ui, variables) -> str:
+    return git_init(folder_context)
+
+
+def _handle_git_log(args, folder_context, ui, variables) -> str:
+    return git_log(args.get("limit", 10), folder_context)
+
+
+def _handle_git_diff(args, folder_context, ui, variables) -> str:
+    return git_diff(args.get("cached", False), args.get("filename"), folder_context)
+
+
+def _handle_git_checkout(args, folder_context, ui, variables) -> str:
+    return git_checkout(args.get("branch", ""), args.get("create", False), folder_context)
+
+
+def _handle_git_add(args, folder_context, ui, variables) -> str:
+    return git_add(args.get("files", []), folder_context)
+
+
+def _handle_git_commit(args, folder_context, ui, variables) -> str:
+    return git_commit(args.get("message", ""), folder_context)
+
+
+def _handle_git_push(args, folder_context, ui, variables) -> str:
+    return git_push(args.get("remote", "origin"), args.get("branch"), folder_context)
+
+
+def _handle_git_merge_request(args, folder_context, ui, variables) -> str:
+    return (
+        f"Merge Request '{args.get('title')}' launched successfully!\n"
+        f"Description: {args.get('description')}"
+    )
+
+
+def _handle_git_pull(args, folder_context, ui, variables) -> str:
+    return git_pull(args.get("remote", "origin"), args.get("branch"), folder_context)
+
+
+def _handle_url_grounding(args, folder_context, ui, variables) -> str:
+    return url_grounding(args.get("url", ""), folder_context)
+
+
+def _handle_read_document(args, folder_context, ui, variables) -> str:
+    return read_document(args.get("filename", ""), folder_context)
+
+
+def _handle_git_branch(args, folder_context, ui, variables) -> str:
+    return git_branch(folder_context)
+
+
+def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
+    commands = args.get("commands", [])
+    if not isinstance(commands, list):
+        return "Error: 'commands' must be a list."
+
+    results = []
+    for i, cmd in enumerate(commands):
+        if not isinstance(cmd, dict):
+            results.append(f"Error: Command {i} - invalid command entry.")
+            continue
+
+        name = cmd.get("tool_name")
+        t_args = cmd.get("tool_args", {})
+
+        if not name:
+            results.append(f"Error: Command {i} - tool_name missing.")
+            continue
+
+        nested_descriptor = get_tool_descriptor(name)
+        if not nested_descriptor:
+            results.append(f"Error: Command {i} - unknown tool: {name}")
+            continue
+
+        if nested_descriptor.execution_kind == "composite":
+            results.append(f"Error: Command {i} - nested batch_job not allowed.")
+            continue
+
+        if context.ui:
+            context.ui.show_info(f"  [{i+1}/{len(commands)}] Executing in batch: {name}")
+
+        res = execute_tool(
+            name,
+            t_args,
+            context.folder_context,
+            context.ui,
+            context.variables,
+            invocation_source=context.invocation_source,
+        )
+        results.append(f"Tool: {name}\nResult: {res}")
+
+    return (
+        "--- Batch Job Results ---\n"
+        + "\n\n---\n\n".join(results)
+        + "\n------------------------"
+    )
+
+
+TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
+    "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
+    "flush": _legacy_handler(_handle_flush),
+    "save_memory": _legacy_handler(_handle_memory_placeholder("Memory save requested.")),
+    "save_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad save requested.")),
+    "search_memory": _legacy_handler(_handle_memory_placeholder("Memory search requested.")),
+    "search_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad search requested.")),
+    "list_memory": _legacy_handler(_handle_memory_placeholder("Memory listing requested.")),
+    "list_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad listing requested.")),
+    "clear_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad cleared.")),
+    "read_file": _legacy_handler(_handle_read_file),
+    "search_for_string": _legacy_handler(_handle_search_for_string),
+    "get_chunk": _legacy_handler(_handle_get_chunk),
+    "get_current_time": _legacy_handler(_handle_get_current_time),
+    "list_dir": _legacy_handler(_handle_list_dir),
+    "write_file": _legacy_handler(_handle_write_file),
+    "list_agent_tasks": _legacy_handler(_handle_list_agent_tasks),
+    "run_agent_task": _legacy_handler(_handle_run_agent_task),
+    "apply_diff": _legacy_handler(_handle_apply_diff),
+    "git_status": _legacy_handler(_handle_git_status),
+    "git_init": _legacy_handler(_handle_git_init),
+    "git_log": _legacy_handler(_handle_git_log),
+    "git_diff": _legacy_handler(_handle_git_diff),
+    "git_checkout": _legacy_handler(_handle_git_checkout),
+    "git_add": _legacy_handler(_handle_git_add),
+    "git_commit": _legacy_handler(_handle_git_commit),
+    "git_push": _legacy_handler(_handle_git_push),
+    "git_merge_request": _legacy_handler(_handle_git_merge_request),
+    "git_pull": _legacy_handler(_handle_git_pull),
+    "url_grounding": _legacy_handler(_handle_url_grounding),
+    "read_document": _legacy_handler(_handle_read_document),
+    "git_branch": _legacy_handler(_handle_git_branch),
+    "batch_job": _handle_batch_job,
+}
+
+
 def execute_tool(
-    tool_name: str, args: dict, folder_context, ui=None, variables: dict = None
+    tool_name: str,
+    args: dict,
+    folder_context,
+    ui=None,
+    variables: dict = None,
+    *,
+    invocation_source: str = "session",
 ) -> str:
-    """Dispatcher with argument validation"""
+    """Descriptor-backed dispatcher with argument validation."""
 
-    # 1. Validate Path-based arguments for basic tools
-    path_keys = ["filename", "file", "path"]
-    for k in path_keys:
-        if k in args and (not args[k] or str(args[k]).strip() == ""):
-            return f"Error: The '{k}' argument is empty. You must provide a valid file path from the workspace map."
-
-    if tool_name == "get_workspace_details":
-        return get_workspace_details(folder_context)
-    elif tool_name == "flush":
-        return "Buffer flushed." # This is a placeholder, Session will handle the actual flush
-    elif tool_name == "save_memory":
-        return "Memory save requested."
-    elif tool_name == "save_scratchpad":
-        return "Scratchpad save requested."
-    elif tool_name == "search_memory":
-        return "Memory search requested."
-    elif tool_name == "search_scratchpad":
-        return "Scratchpad search requested."
-    elif tool_name == "list_memory":
-        return "Memory listing requested."
-    elif tool_name == "list_scratchpad":
-        return "Scratchpad listing requested."
-    elif tool_name == "clear_scratchpad":
-        return "Scratchpad cleared."
-    elif tool_name == "read_file":
-        return read_file(args.get("filename", ""), folder_context)
-    elif tool_name == "search_for_string":
-        return search_for_string(args.get("string", ""), folder_context)
-    elif tool_name == "get_chunk":
-        return get_chunk(
-            args.get("file", ""),
-            args.get("start_line", 1),
-            args.get("end_line", 100),
-            folder_context,
-        )
-    elif tool_name == "get_current_time":
-        return get_current_time(folder_context)
-    elif tool_name == "list_dir":
-        return list_dir(args.get("path", ""), folder_context)
-    elif tool_name == "write_file":
-        return write_file(
-            args.get("filename", ""), args.get("content", ""), folder_context
-        )
-    elif tool_name == "list_agent_tasks":
-        return list_agent_tasks(folder_context)
-    elif tool_name == "run_agent_task":
-        return run_agent_task(args.get("task_name", ""), folder_context, variables)
-    elif tool_name == "apply_diff":
-        return apply_diff(
-            args.get("filename", ""), args.get("diff", ""), folder_context
-        )
-    elif tool_name == "git_status":
-        return git_status(folder_context)
-    elif tool_name == "git_init":
-        return git_init(folder_context)
-    elif tool_name == "git_log":
-        return git_log(args.get("limit", 10), folder_context)
-    elif tool_name == "git_diff":
-        return git_diff(args.get("cached", False), args.get("filename"), folder_context)
-    elif tool_name == "git_checkout":
-        return git_checkout(
-            args.get("branch", ""), args.get("create", False), folder_context
-        )
-    elif tool_name == "git_add":
-        return git_add(args.get("files", []), folder_context)
-    elif tool_name == "git_commit":
-        return git_commit(args.get("message", ""), folder_context)
-    elif tool_name == "git_push":
-        return git_push(
-            args.get("remote", "origin"), args.get("branch"), folder_context
-        )
-    elif tool_name == "git_merge_request":
-        return f"Merge Request '{args.get('title')}' launched successfully!\nDescription: {args.get('description')}"
-    elif tool_name == "git_pull":
-        return git_pull(
-            args.get("remote", "origin"), args.get("branch"), folder_context
-        )
-    elif tool_name == "url_grounding":
-        return url_grounding(args.get("url", ""), folder_context)
-    elif tool_name == "read_document":
-        return read_document(args.get("filename", ""), folder_context)
-    elif tool_name == "git_branch":
-        return git_branch(folder_context)
-    elif tool_name == "batch_job":
-        commands = args.get("commands", [])
-        if not isinstance(commands, list):
-            return "Error: 'commands' must be a list."
-
-        results = []
-        for i, cmd in enumerate(commands):
-            name = cmd.get("tool_name")
-            t_args = cmd.get("tool_args", {})
-
-            if not name:
-                results.append(f"Error: Command {i} - tool_name missing.")
-                continue
-
-            if name == "batch_job":
-                results.append(f"Error: Command {i} - nested batch_job not allowed.")
-                continue
-
-            if ui:
-                ui.show_info(f"  [{i+1}/{len(commands)}] Executing in batch: {name}")
-
-            # Recursively execute the tool in the batch
-            res = execute_tool(name, t_args, folder_context, ui, variables)
-            results.append(f"Tool: {name}\nResult: {res}")
-
-        return (
-            "--- Batch Job Results ---\n"
-            + "\n\n---\n\n".join(results)
-            + "\n------------------------"
-        )
-    else:
+    descriptor = get_tool_descriptor(tool_name)
+    if not descriptor:
         return f"Unknown tool: {tool_name}"
+
+    path_keys = ["filename", "file", "path"]
+    for key in path_keys:
+        if key in args and (not args[key] or str(args[key]).strip() == ""):
+            return _path_arg_error(key)
+
+    handler = TOOL_HANDLERS.get(descriptor.handler_key)
+    if not handler:
+        return f"Error: No handler registered for tool '{tool_name}'."
+
+    context = build_tool_context(
+        folder_context,
+        ui,
+        variables,
+        invocation_source=invocation_source,
+    )
+    return handler(args, context)

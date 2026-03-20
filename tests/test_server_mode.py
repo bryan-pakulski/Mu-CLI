@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from threading import Lock
 from uuid import uuid4
 
+import pytest
+
 from core.server import (
     ApprovalManager,
     EventHub,
@@ -11,6 +13,7 @@ from core.server import (
     build_sessions_payload,
     build_state_payload,
     build_workspace_payload,
+    execute_server_tool,
 )
 from core.session import Session, SessionManager
 from mucli import handle_command
@@ -135,7 +138,12 @@ def test_build_state_payload_includes_workspace_and_tools(tmp_path):
 
     assert result["ok"] is True
     assert str(workspace) in state["folders"]
-    assert any(tool["name"] == "read_file" for tool in state["available_tools"])
+    read_file_tool = next(
+        tool for tool in state["available_tools"] if tool["name"] == "read_file"
+    )
+    assert read_file_tool["execution_kind"] == "read"
+    assert read_file_tool["result_mode"] == "structured+collated"
+    assert read_file_tool["server_policy"] == "allowed"
 
 
 def test_runtime_and_sessions_payloads_reflect_state_changes(tmp_path):
@@ -191,6 +199,8 @@ def test_headless_approval_workflow_for_modifying_tool(tmp_path):
     assert len(pending) == 1
     assert pending[0]["tool_name"] == "write_file"
     assert pending[0]["modifications"][0]["filename"] == str(target_file)
+    assert pending[0]["preview_error"] is None
+    assert pending[0]["error_code"] is None
 
     observed_events = []
     while not event_queue.empty():
@@ -253,6 +263,8 @@ def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
     assert len(pending) == 1
     assert pending[0]["tool_name"] == "write_file"
     assert pending[0]["modifications"][0]["filename"] == str(target_file)
+    assert pending[0]["preview_error"] is None
+    assert pending[0]["error_code"] is None
 
     approval_manager.resolve(task["approval_id"], "y")
     completed = task_manager.wait_for_task_state(
@@ -263,7 +275,52 @@ def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
     assert completed["status"] == "completed"
     assert completed["result"]["ok"] is True
     assert completed["result"]["result"]["raw"] == f"Successfully wrote to {target_file}"
+    assert completed["result"]["result"]["telemetry"]["execution_source"] == "server"
+    assert completed["result"]["result"]["modified_files"] == [str(target_file)]
     assert target_file.read_text(encoding="utf-8") == "updated\n"
+
+
+def test_headless_tool_task_rejection_keeps_file_unchanged(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target_file = workspace / "note.txt"
+    target_file.write_text("before\n", encoding="utf-8")
+
+    ui = HeadlessUI()
+    session = build_test_session(ui=ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    event_hub = EventHub()
+    task_manager = TaskManager(session, Lock(), event_hub=event_hub)
+    approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
+    ui.bind_runtime(task_manager, approval_manager)
+
+    task = task_manager.start_tool_task(
+        "write_file",
+        {"filename": str(target_file), "content": "updated\n"},
+        approval_manager,
+    )
+    task = task_manager.wait_for_task_state(
+        task["task_id"], {"awaiting_approval"}, timeout=5.0
+    )
+
+    assert task is not None
+    approval_manager.resolve(task["approval_id"], "n")
+    completed = task_manager.wait_for_task_state(
+        task["task_id"], {"completed"}, timeout=5.0
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["result"]["result"]["raw"] == "User denied direct tool call: write_file"
+    assert target_file.read_text(encoding="utf-8") == "before\n"
+
+
+def test_execute_server_tool_blocks_session_only_tools():
+    session = build_test_session()
+
+    with pytest.raises(PermissionError):
+        execute_server_tool(session, "flush", {})
 
 
 def test_build_runtime_payload_syncs_saved_variables_into_ollama_provider():

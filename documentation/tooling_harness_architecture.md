@@ -340,31 +340,51 @@ Stage 2 clarifies that the registry should become the authoritative explanation 
 
 ## Stage 5: Harness-Oriented Testing Strategy
 
+**Stage status:** [x] completed
+
 ### Objectives
 
-- Move from feature-specific tests toward a coherent harness verification strategy.
-- Ensure that behavior is validated at the right layers.
-- Prevent regressions as the harness becomes more modular.
+- [x] Move from feature-specific tests toward a coherent harness verification strategy.
+- [x] Ensure that behavior is validated at the right layers.
+- [x] Prevent regressions as the harness becomes more modular.
 
 ### Action Points
 
-- Define test coverage by layer:
+- [x] Define test coverage by layer:
   - registry/metadata tests
   - validation tests
   - approval-planning tests
   - execution tests
   - structured-result tests
   - server orchestration tests
-- Expand composite-tool tests so batch flows are verified for mixed read/write operations, error propagation, and approval aggregation.
-- Add golden-path and failure-path tests for server-driven direct tool execution and approval round-trips.
-- Identify which harness rules should be enforced with unit tests versus integration tests.
-- Add regression tests for any extracted helper modules before larger refactors land.
+- [x] Expand composite-tool tests so batch flows are verified for mixed read/write operations, error propagation, and approval aggregation.
+- [x] Add golden-path and failure-path tests for server-driven direct tool execution and approval round-trips.
+- [x] Identify which harness rules should be enforced with unit tests versus integration tests.
+- [x] Add regression tests for any extracted helper modules before larger refactors land.
+
+### Test Matrix
+
+| Layer | Primary focus | Test style |
+| --- | --- | --- |
+| Registry / metadata | Descriptor serialization, policy exposure, handler selection invariants | Unit tests |
+| Validation | Empty args, malformed batch payloads, unsupported patterns | Unit tests |
+| Approval planning | Strict-mode behavior, preview generation, preview failures, aggregated modifications | Unit tests |
+| Execution | Handler dispatch, composite flow propagation, read/write tool behavior | Unit tests |
+| Structured results | Envelope shape, normalized error state, modified-file tracking, telemetry | Unit tests |
+| Server orchestration | Approval round-trips, direct-tool allow/deny behavior, task lifecycle integration | Integration-style tests |
+
+### Implementation Notes
+
+- `tests/test_harness_layers.py` now provides layer-oriented harness tests instead of only feature-specific coverage.
+- `tests/test_batch_tool.py` covers composite flow behavior and approval-plan aggregation details.
+- `tests/test_server_mode.py` now includes both approval success and rejection paths for direct server tool execution.
+- `tests/test_session.py` exercises structured result envelopes, normalized errors, and modified-file telemetry.
 
 ### Exit Criteria
 
-- The harness has a documented test matrix tied to its architectural layers.
-- Core behaviors are covered by deterministic tests instead of incidental end-to-end coverage alone.
-- Future harness refactors can be made with confidence because expected behavior is explicitly tested.
+- [x] The harness has a documented test matrix tied to its architectural layers.
+- [x] Core behaviors are covered by deterministic tests instead of incidental end-to-end coverage alone.
+- [x] Future harness refactors can be made with confidence because expected behavior is explicitly tested.
 
 ---
 

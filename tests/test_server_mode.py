@@ -280,6 +280,42 @@ def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
     assert target_file.read_text(encoding="utf-8") == "updated\n"
 
 
+def test_headless_tool_task_rejection_keeps_file_unchanged(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target_file = workspace / "note.txt"
+    target_file.write_text("before\n", encoding="utf-8")
+
+    ui = HeadlessUI()
+    session = build_test_session(ui=ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    event_hub = EventHub()
+    task_manager = TaskManager(session, Lock(), event_hub=event_hub)
+    approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
+    ui.bind_runtime(task_manager, approval_manager)
+
+    task = task_manager.start_tool_task(
+        "write_file",
+        {"filename": str(target_file), "content": "updated\n"},
+        approval_manager,
+    )
+    task = task_manager.wait_for_task_state(
+        task["task_id"], {"awaiting_approval"}, timeout=5.0
+    )
+
+    assert task is not None
+    approval_manager.resolve(task["approval_id"], "n")
+    completed = task_manager.wait_for_task_state(
+        task["task_id"], {"completed"}, timeout=5.0
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["result"]["result"]["raw"] == "User denied direct tool call: write_file"
+    assert target_file.read_text(encoding="utf-8") == "before\n"
+
+
 def test_execute_server_tool_blocks_session_only_tools():
     session = build_test_session()
 

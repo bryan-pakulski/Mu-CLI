@@ -1,3 +1,4 @@
+import json
 import os
 import datetime
 import difflib
@@ -6,6 +7,12 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
+from core.feature_mode import (
+    create_feature_plan,
+    refresh_and_persist_feature_plan,
+    summarize_feature_plan,
+    update_feature_plan_metadata,
+)
 
 
 @dataclass(frozen=True)
@@ -533,6 +540,76 @@ TOOLS = [
         parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
+    ToolDefinition(
+        name="create_feature_plan",
+        description="Creates a structured feature implementation plan under documentation/feature_req_<id>/ with phase markdown files and a feature_plan.json manifest.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_name": {"type": "string", "description": "Short feature name used in the generated plan."},
+                "feature_request": {"type": "string", "description": "Original user request or concise requirements summary."},
+                "feature_id": {"type": "string", "description": "Optional stable identifier for the feature request directory."},
+                "phases": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "objectives": {"type": "array", "items": {"type": "string"}},
+                            "action_points": {"type": "array", "items": {"type": "string"}},
+                            "exit_criteria": {"type": "array", "items": {"type": "string"}},
+                            "notes": {"type": "string"}
+                        },
+                        "required": ["title", "objectives", "action_points", "exit_criteria"]
+                    }
+                }
+            },
+            "required": ["feature_name", "feature_request", "phases"]
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="get_feature_plan",
+        description="Loads a feature plan manifest and phase markdown files, refreshes progress from the markdown checklists, and returns a machine-readable summary.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "directory": {"type": "string", "description": "Path to the documentation/feature_req_<id> directory."}
+            },
+            "required": ["directory"]
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="update_feature_plan",
+        description="Updates feature plan metadata such as approval state and review status after the user approves the plan or the model completes review.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "directory": {"type": "string", "description": "Path to the documentation/feature_req_<id> directory."},
+                "approved": {"type": "boolean", "description": "Whether the user has approved the feature plan."},
+                "review_status": {"type": "string", "description": "Review lifecycle value, such as pending, in_progress, or completed."},
+                "review_notes": {"type": "string", "description": "Optional review notes or final summary."}
+            },
+            "required": ["directory"]
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="raise_blocker",
+        description="Raises a structured blocker when the feature loop needs user input or an external decision before it can safely continue.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "Short blocker summary shown to the user."},
+                "details": {"type": "string", "description": "Longer explanation of what is blocked and what has already been tried."},
+                "requested_input": {"type": "string", "description": "Describe the exact information or decision needed from the user."},
+                "questions": {"type": "array", "items": {"type": "string"}, "description": "Optional focused questions for the user to answer."}
+            },
+            "required": ["summary", "requested_input"]
+        },
+        requires_approval=False,
+    ),
 ]
 
 _COLLATED_TOOL_NAMES = {
@@ -548,6 +625,7 @@ _COLLATED_TOOL_NAMES = {
     "git_branch",
     "url_grounding",
     "read_document",
+    "get_feature_plan",
 }
 
 
@@ -727,6 +805,28 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "preview_policy": "none",
         "result_mode": "raw",
         "server_policy": "session_only",
+    },
+    "create_feature_plan": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+        "summary_builder": "feature_plan_summary",
+    },
+    "get_feature_plan": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "feature_plan_summary",
+    },
+    "update_feature_plan": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+        "summary_builder": "feature_plan_summary",
+    },
+    "raise_blocker": {
+        "execution_kind": "control",
+        "preview_policy": "none",
+        "result_mode": "structured",
+        "server_policy": "session_only",
+        "summary_builder": "blocker_summary",
     },
 }
 
@@ -1701,6 +1801,47 @@ def _handle_git_branch(args, folder_context, ui, variables) -> str:
     return git_branch(folder_context)
 
 
+def _handle_create_feature_plan(args, folder_context, ui, variables) -> str:
+    plan = create_feature_plan(
+        args.get("feature_name", ""),
+        args.get("feature_request", ""),
+        args.get("phases", []),
+        folder_context=folder_context,
+        feature_id=args.get("feature_id"),
+    )
+    summary = summarize_feature_plan(plan)
+    return json.dumps(summary, indent=2, sort_keys=True)
+
+
+def _handle_get_feature_plan(args, folder_context, ui, variables) -> str:
+    directory = args.get("directory", "")
+    plan = refresh_and_persist_feature_plan(directory)
+    return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
+
+
+def _handle_update_feature_plan(args, folder_context, ui, variables) -> str:
+    directory = args.get("directory", "")
+    plan = update_feature_plan_metadata(
+        directory,
+        approved=args.get("approved"),
+        review_status=args.get("review_status"),
+        review_notes=args.get("review_notes"),
+    )
+    plan = refresh_and_persist_feature_plan(plan.directory)
+    return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
+
+
+def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
+    payload = {
+        "kind": "feature_blocker",
+        "summary": str(args.get("summary", "")).strip(),
+        "details": str(args.get("details", "")).strip(),
+        "requested_input": str(args.get("requested_input", "")).strip(),
+        "questions": [str(item).strip() for item in args.get("questions", []) if str(item).strip()],
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
 def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
     commands = args.get("commands", [])
     if not isinstance(commands, list):
@@ -1780,6 +1921,10 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "url_grounding": _legacy_handler(_handle_url_grounding),
     "read_document": _legacy_handler(_handle_read_document),
     "git_branch": _legacy_handler(_handle_git_branch),
+    "create_feature_plan": _legacy_handler(_handle_create_feature_plan),
+    "get_feature_plan": _legacy_handler(_handle_get_feature_plan),
+    "update_feature_plan": _legacy_handler(_handle_update_feature_plan),
+    "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
 }
 

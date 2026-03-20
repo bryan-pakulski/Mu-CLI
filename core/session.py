@@ -3,11 +3,13 @@ import os
 import json
 import time
 import glob
+from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
 
 from core.approval import build_approval_prompt, collect_approval_plans, ApprovalPlan
 from core.collation import CollationBuffer
+from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
 from core.memory import ScratchpadStore, TaskMemoryStore
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
@@ -19,12 +21,14 @@ from core.tools import (
 )
 from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
+from utils.runtime_metrics import build_live_status_line
 from utils.config import (
     HISTORY_DIR,
     DEFAULT_SESSION_NAME,
     calculate_cost,
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
+    AGENTIC_MODE_SYSTEM_PROMPTS,
     DEFAULT_VARIABLES,
     validate_and_cast,
 )
@@ -52,6 +56,11 @@ def _shorten_tool_args(args: dict) -> dict:
     return shortened
 
 
+def _safe_feature_path_prefix(path: str) -> str:
+    normalized = os.path.abspath(path)
+    return normalized if normalized.endswith(os.sep) else f"{normalized}{os.sep}"
+
+
 class SessionManager:
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
@@ -65,6 +74,7 @@ class SessionManager:
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.feature_state = None
         self.variables = DEFAULT_VARIABLES.copy()
 
         if session_name:
@@ -87,6 +97,7 @@ class SessionManager:
         self.turn_scratchpad = ScratchpadStore()
         self.variables.clear()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.feature_state = None
         self.variables.update(DEFAULT_VARIABLES)
 
         if os.path.exists(filepath):
@@ -106,10 +117,16 @@ class SessionManager:
                     self.task_memory = TaskMemoryStore.from_dict(
                         data.get("task_memory", {})
                     )
+                    self.turn_scratchpad = ScratchpadStore.from_dict(
+                        data.get("turn_scratchpad", {})
+                    )
                     self.token_counts = data.get(
                         "token_counts",
                         {"input": 0, "output": 0, "total": 0, "total_cost": 0.0},
                     )
+                    feature_state = data.get("feature_state")
+                    if isinstance(feature_state, dict):
+                        self.feature_state = feature_state
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -128,6 +145,7 @@ class SessionManager:
             self.folder_context = folder_context_obj
 
         try:
+            os.makedirs(HISTORY_DIR, exist_ok=True)
             data = {
                 "history": self.history,
                 "summary_anchor": self.summary_anchor,
@@ -136,7 +154,9 @@ class SessionManager:
                 "variables": self.variables,
                 "collation_buffer": self.collation_buffer.to_dict(),
                 "task_memory": self.task_memory.to_dict(),
+                "turn_scratchpad": self.turn_scratchpad.to_dict(),
                 "token_counts": self.token_counts,
+                "feature_state": self.feature_state,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -144,6 +164,17 @@ class SessionManager:
             if self.ui:
                 self.ui.show_error(f"Warning: Could not save chat history: {e}")
             logger.error(f"Failed to save history: {e}")
+
+    def get_feature_state(self):
+        return deepcopy(self.feature_state) if isinstance(self.feature_state, dict) else None
+
+    def set_feature_state(self, state: dict | None, folder_context_obj=None):
+        self.feature_state = deepcopy(state) if isinstance(state, dict) else None
+        self.save_history(folder_context_obj)
+
+    def clear_feature_state(self, folder_context_obj=None):
+        self.feature_state = None
+        self.save_history(folder_context_obj)
 
     def switch_session(self, name):
         logger.info(f"Switching to session: {name}")
@@ -165,6 +196,7 @@ class SessionManager:
         self.collation_buffer = CollationBuffer()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
+        self.feature_state = None
         self.history = []
         self.provider_config = {"provider": provider_name, "model": model_name}
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
@@ -373,7 +405,115 @@ class Session:
         self.collation_buffer = self.session_manager.collation_buffer
         self.task_memory = self.session_manager.task_memory
         self.turn_scratchpad = self.session_manager.turn_scratchpad
+        self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
+
+    def _derive_feature_state_status(self, feature_plan: dict | None) -> str:
+        if not isinstance(feature_plan, dict):
+            return "running"
+        if not feature_plan.get("approved", False):
+            return "awaiting_approval"
+        if feature_plan.get("review_status") == "completed":
+            return "completed"
+        if feature_plan.get("phases_completed") and feature_plan.get("next_phase") is None:
+            return "review"
+        return "running"
+
+    def _set_feature_state(
+        self,
+        *,
+        feature_plan: dict | None = None,
+        status: str | None = None,
+        blocker: dict | None = None,
+    ):
+        current = self.session_manager.get_feature_state() or {}
+        current_plan = current.get("feature_plan")
+        plan_summary = (
+            feature_plan if isinstance(feature_plan, dict) else current_plan
+        )
+        next_phase = (
+            plan_summary.get("next_phase")
+            if isinstance(plan_summary, dict)
+            else current.get("next_phase")
+        )
+        state = {
+            "type": "feature",
+            "status": status or self._derive_feature_state_status(plan_summary),
+            "feature_id": (
+                plan_summary.get("feature_id")
+                if isinstance(plan_summary, dict)
+                else current.get("feature_id")
+            ),
+            "feature_name": (
+                plan_summary.get("feature_name")
+                if isinstance(plan_summary, dict)
+                else current.get("feature_name")
+            ),
+            "directory": (
+                plan_summary.get("directory")
+                if isinstance(plan_summary, dict)
+                else current.get("directory")
+            ),
+            "next_phase": next_phase,
+            "feature_plan": plan_summary,
+            "blocker": blocker,
+            "updated_at": time.time(),
+        }
+        self.session_manager.set_feature_state(state, self.folder_context)
+        self.sync_runtime_state()
+
+    def _refresh_feature_state_from_directory(self, directory: str, *, status: str | None = None):
+        if not str(directory or "").strip():
+            return
+        try:
+            plan = refresh_and_persist_feature_plan(directory)
+            self._set_feature_state(
+                feature_plan=summarize_feature_plan(plan),
+                status=status,
+            )
+        except (FileNotFoundError, OSError, ValueError):
+            return
+
+    def _sync_feature_state_for_tool(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        raw_result,
+        structured_result,
+    ):
+        if tool_name in {"create_feature_plan", "get_feature_plan", "update_feature_plan"}:
+            data = {}
+            if isinstance(structured_result, dict):
+                data = structured_result.get("data", {}) or {}
+            if not isinstance(data, dict) or "directory" not in data:
+                data = self._parse_json_result(raw_result)
+            if isinstance(data, dict) and data.get("directory"):
+                self._set_feature_state(feature_plan=data)
+            return
+
+        if tool_name == "raise_blocker":
+            data = {}
+            if isinstance(structured_result, dict):
+                data = structured_result.get("data", {}) or {}
+            if not isinstance(data, dict) or not data.get("kind"):
+                data = self._parse_json_result(raw_result)
+            if isinstance(data, dict):
+                self._set_feature_state(status="awaiting_input", blocker=data)
+            return
+
+        if tool_name not in {"write_file", "apply_diff"}:
+            return
+
+        current = self.session_manager.get_feature_state() or {}
+        directory = str(current.get("directory", "") or "").strip()
+        filename = str(tool_args.get("filename", "") or "").strip()
+        if not directory or not filename:
+            return
+
+        feature_prefix = _safe_feature_path_prefix(directory)
+        normalized_filename = os.path.abspath(filename)
+        if normalized_filename.startswith(feature_prefix):
+            self._refresh_feature_state_from_directory(directory)
 
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
@@ -606,6 +746,26 @@ class Session:
             "tasks": tasks[:20],
         }
 
+    def _parse_json_result(self, raw_result: str) -> dict:
+        try:
+            parsed = json.loads(str(raw_result))
+            return parsed if isinstance(parsed, dict) else {"value": parsed}
+        except (TypeError, json.JSONDecodeError):
+            return {"preview": self._clip_preview(raw_result, 260)}
+
+    def _build_feature_mode_prompt(self, text: str) -> str:
+        base_instruction = (
+            "FEATURE MODE DIRECTIVE: use the feature-plan engine for this request. First call create_feature_plan and create the canonical plan in documentation/feature_req_<id>/feature_plan.json with one phase_N.md file per phase. "
+            "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
+            "Each phase file must contain Objectives, Action Points, and Exit Criteria sections, and each checklist item must use exactly one of [ ], [~], or [x]. "
+            "After approval, call get_feature_plan at the start of every implementation turn, work on only the next incomplete phase, and keep the phase markdown synchronized with reality as you make code changes. "
+            "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
+            "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
+            "Never move to the next phase until all checklist items in the current phase are [x]. "
+            "When all phases are complete, perform a review pass over the phase files and code changes together. If review fails, move the failing items back to [~] and continue implementing. If review succeeds, call update_feature_plan so review_status becomes completed before you report success.\n\n"
+        )
+        return base_instruction + text
+
     def _build_structured_tool_result(
         self,
         tool_name: str,
@@ -685,6 +845,8 @@ class Session:
                 "stderr_present": "STDERR:" in raw_text,
                 "preview": self._clip_preview(raw_text, 260),
             }
+        elif tool_name in {"create_feature_plan", "get_feature_plan", "update_feature_plan", "raise_blocker"}:
+            structured["data"] = self._parse_json_result(raw_text)
         elif tool_name in {"git_status", "git_diff", "git_log", "git_branch"}:
             structured["data"] = {
                 "preview": self._clip_preview(raw_text, 260),
@@ -968,8 +1130,11 @@ class Session:
         self._auto_promoted_this_turn = 0
 
         parts = list(self.staged_files)
-        if text:
-            parts.append({"type": "text", "text": text})
+        effective_text = text
+        if text and str(self.variables.get("agent_mode", "default")).lower() == "feature":
+            effective_text = self._build_feature_mode_prompt(text)
+        if effective_text:
+            parts.append({"type": "text", "text": effective_text})
 
         new_user_message = {"role": "user", "parts": parts}
 
@@ -988,9 +1153,15 @@ class Session:
                 mode_instruction = AGENTIC_MODES.get(
                     agent_mode, AGENTIC_MODES["default"]
                 )
+                mode_system_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get(agent_mode, "")
 
                 map_str = self.folder_context.get_tree_map()
                 workspace_context = f"<workspace_map>\n{map_str}\n</workspace_map>\n\n{AGENTIC_SYSTEM_BASE.format(tool_descriptions=tool_desc_str)}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
+                if mode_system_prompt:
+                    workspace_context += (
+                        f"\n\n### {agent_mode.upper()} SYSTEM PROMPT\n"
+                        f"{mode_system_prompt}"
+                    )
             else:
                 logger.debug(
                     f"Using agent_mode={self.variables.get('agent_mode', 'default')}"
@@ -1058,7 +1229,18 @@ class Session:
                     if scratchpad_summary:
                         dynamic_system_prompt += f"\n\n{scratchpad_summary}"
 
-                status_msg = f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}..."
+                if self.ui and hasattr(self.ui, "build_live_status"):
+                    status_msg = self.ui.build_live_status(
+                        self,
+                        self.provider.model_name,
+                        iteration,
+                        max_iterations,
+                    )
+                else:
+                    status_msg = (
+                        f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}"
+                        f" | {build_live_status_line(self)}"
+                    )
                 if self.ui:
                     with self.ui.show_status(status_msg):
                         response = self.provider.generate(
@@ -1188,6 +1370,13 @@ class Session:
 
                     logger.info("Agentic loop finished (no tool calls).")
 
+                    if (
+                        str(self.variables.get("agent_mode", "default")).lower()
+                        == "feature"
+                        and self.session_manager.get_feature_state()
+                    ):
+                        self._set_feature_state()
+
                     if self.variables.get("compact_history", False):
                         if self.ui:
                             self.ui.show_info(
@@ -1237,6 +1426,11 @@ class Session:
                     needs_approval = approval_plan is not None
                     if needs_approval:
                         result = None
+                        if self.variables.get("yolo", False) and approval_plan.can_approve:
+                            result = self._execute_tool_with_memory(
+                                part.tool_name,
+                                part.tool_args,
+                            )
                         if approval_plan.preview_error and self.ui:
                             for modification in approval_plan.modifications:
                                 if modification.preview_error:
@@ -1416,6 +1610,12 @@ class Session:
                     else:
                         result = raw_result
 
+                    self._sync_feature_state_for_tool(
+                        part.tool_name,
+                        part.tool_args,
+                        source_result,
+                        result,
+                    )
                     tool_result_parts.append(
                         {
                             "type": "tool_result",
@@ -1451,6 +1651,8 @@ class Session:
                     }
                 )
                 self.session_manager.save_history(self.folder_context)
+                if self.session_manager.get_feature_state():
+                    self._set_feature_state(status="interrupted")
                 return self._collect_turn_response(
                     initial_history_len,
                     status="interrupted",
@@ -1470,6 +1672,8 @@ class Session:
                     continue
 
                 self.session_manager.save_history(self.folder_context)
+                if self.session_manager.get_feature_state():
+                    self._set_feature_state(status="error")
                 return self._collect_turn_response(
                     initial_history_len,
                     status="error",
@@ -1480,6 +1684,8 @@ class Session:
                 )
 
         self.session_manager.save_history(self.folder_context)
+        if self.session_manager.get_feature_state():
+            self._set_feature_state(status="max_iterations_reached")
         return self._collect_turn_response(
             initial_history_len,
             status="max_iterations_reached",

@@ -19,14 +19,60 @@ from utils.logger import logger
 from providers.openai import OpenAIProvider
 from core.server import HeadlessUI, serve
 from core.session import SessionManager, Session
+from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
 from ui.rich_ui import RichUI
+from utils.config import AGENT_MODE_METADATA
 
 console = Console()
 
 
-def refresh_memory_hud(session, ui):
-    if ui and hasattr(ui, "show_memory_monitor"):
+def refresh_memory_hud(session, ui, *, force=False):
+    if force and ui and hasattr(ui, "show_memory_monitor"):
         ui.show_memory_monitor(session)
+
+
+def print_mode_overview(session):
+    current_mode = str(session.variables.get("agent_mode", "default"))
+    table = Table(title="Available Agent Modes", box=box.SIMPLE_HEAVY)
+    table.add_column("Mode", style="cyan", no_wrap=True)
+    table.add_column("Current", style="yellow", justify="center")
+    table.add_column("Description", style="white")
+    table.add_column("Docs", style="magenta")
+
+    for mode_name, metadata in AGENT_MODE_METADATA.items():
+        table.add_row(
+            mode_name,
+            "*" if mode_name == current_mode else "",
+            metadata.get("description", ""),
+            metadata.get("documentation", ""),
+        )
+
+    console.print(table)
+    console.print(f"[dim]Current mode: {current_mode}[/dim]")
+
+
+def build_stats_snapshot(session):
+    stats = {
+        "history_turns": len(session.session_manager.history),
+        "summary_anchor": session.session_manager.summary_anchor,
+        "active_turns": len(session.session_manager.history)
+        - session.session_manager.summary_anchor,
+        "token_counts": dict(session.session_manager.token_counts),
+        "feature_state": session.session_manager.get_feature_state(),
+        "feature_plan": None,
+    }
+
+    feature_state = stats["feature_state"]
+    if isinstance(feature_state, dict):
+        directory = str(feature_state.get("directory", "") or "").strip()
+        if directory:
+            try:
+                plan = refresh_and_persist_feature_plan(directory)
+                stats["feature_plan"] = summarize_feature_plan(plan)
+            except (FileNotFoundError, OSError, ValueError):
+                stats["feature_plan"] = None
+
+    return stats
 
 
 def print_help():
@@ -66,9 +112,13 @@ def print_help():
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
     table.add_row("/quit", "/q", "Exit")
+    table.add_row(
+        "/stats",
+        "",
+        "Show runtime stats, token/cost totals, and feature progress",
+    )
     table.add_row("/system <txt>", "/sys", "Update system prompt")
     table.add_row("/thinking", "", "Toggle thinking mode")
-    table.add_row("/tokens", "", "Show context token usage")
     table.add_row("/view", "", "View conversation history")
 
     console.print(table)
@@ -100,6 +150,8 @@ def print_splash(session):
 
     sys_status = "SET" if session.system_instruction else "NONE"
     agent_mode = session.variables.get("agent_mode", "default")
+    mode_meta = AGENT_MODE_METADATA.get(str(agent_mode), {})
+    mode_description = mode_meta.get("description", "")
     yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
 
     # Workspace Folder info
@@ -125,7 +177,7 @@ def print_splash(session):
     [bold magenta]System:[/bold magenta]   {sys_status}                                
     [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
     [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
-    [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan]
+    [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
     [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns
     """
@@ -787,25 +839,52 @@ def handle_command(session, user_input, allow_prompt=True):
         )
 
     if cmd == "/mode":
-        valid_modes = ["default", "debug", "feature", "research", "git"]
+        valid_modes = list(AGENT_MODE_METADATA.keys())
         if arg and arg.lower() in valid_modes:
             session.variables["agent_mode"] = arg.lower()
             session.session_manager.save_history(session.folder_context)
             refresh_memory_hud(session, ui)
+            mode_meta = AGENT_MODE_METADATA[arg.lower()]
             return serialize_command_result(
-                session, cmd, message=f"Agent strategy set to: {arg.lower()}"
+                session,
+                cmd,
+                message=(
+                    f"Agent strategy set to: {arg.lower()} — "
+                    f"{mode_meta.get('description', '')} "
+                    f"({mode_meta.get('documentation', '')})"
+                ).strip(),
+                data={
+                    "current_mode": arg.lower(),
+                    "mode": {
+                        "name": arg.lower(),
+                        **mode_meta,
+                    },
+                    "available_modes": AGENT_MODE_METADATA,
+                },
+            )
+        if not arg:
+            if allow_prompt:
+                print_mode_overview(session)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Listed available agent modes.",
+                data={
+                    "current_mode": session.variables.get("agent_mode", "default"),
+                    "available_modes": AGENT_MODE_METADATA,
+                },
             )
         if allow_prompt:
-            console.print("Usage: /mode <default|debug|feature|research|git>")
-            console.print(
-                f"Current mode: {session.variables.get('agent_mode', 'default')}"
-            )
+            print_mode_overview(session)
         return serialize_command_result(
             session,
             cmd,
             ok=False,
-            message="Usage: /mode <default|debug|feature|research|git>",
-            data={"current_mode": session.variables.get("agent_mode", "default")},
+            message=f"Unknown mode: {arg}",
+            data={
+                "current_mode": session.variables.get("agent_mode", "default"),
+                "available_modes": AGENT_MODE_METADATA,
+            },
         )
 
     if cmd in ["/tool", "/tools"]:
@@ -878,29 +957,10 @@ def handle_command(session, user_input, allow_prompt=True):
             message=f"Usage: {cmd} <enable|disable|list> [toolname]",
         )
 
-    if cmd == "/tokens":
-        stats = {
-            "history_turns": len(session.session_manager.history),
-            "summary_anchor": session.session_manager.summary_anchor,
-            "active_turns": len(session.session_manager.history)
-            - session.session_manager.summary_anchor,
-            "token_counts": dict(session.session_manager.token_counts),
-        }
+    if cmd == "/stats":
+        stats = build_stats_snapshot(session)
         if allow_prompt:
-            console.print("[yellow]--- Context Stats ---")
-            console.print(f"Total History Turns: {stats['history_turns']}")
-            console.print(f"Summarized Turns:    {stats['summary_anchor']}")
-            console.print(f"Active Turns (Window): {stats['active_turns']}")
-            console.print(f"Session Tokens (In):  {stats['token_counts']['input']}")
-            console.print(f"Session Tokens (Out): {stats['token_counts']['output']}")
-            console.print(f"Session Tokens (Total): {stats['token_counts']['total']}")
-            console.print(
-                f"Session Est. Cost:    ${stats['token_counts'].get('total_cost', 0.0):.5f}"
-            )
-            console.print(
-                "[dim](Actual token count is also displayed after each generation)[/dim]"
-            )
-        refresh_memory_hud(session, ui)
+            refresh_memory_hud(session, ui, force=True)
         return serialize_command_result(session, cmd, data=stats)
 
     if cmd == "/thinking":
@@ -1016,7 +1076,9 @@ def main():
     while True:
         try:
             user_input = ui.get_input(
-                session.session_manager.current_session_name, session.staged_files
+                session.session_manager.current_session_name,
+                session.staged_files,
+                agent_mode=session.variables.get("agent_mode", "default"),
             )
 
             if not user_input:

@@ -19,6 +19,13 @@ from core.tools import (
 from providers.ollama import OllamaProvider
 from utils.logger import logger
 from utils.config import validate_and_cast
+from core.feature_mode import (
+    build_phase_execution_prompt,
+    build_review_prompt,
+    refresh_and_persist_feature_plan,
+    summarize_feature_plan,
+    update_feature_plan_metadata,
+)
 
 
 class HeadlessUI:
@@ -38,7 +45,7 @@ class HeadlessUI:
         )
         logger.debug("HeadlessUI render_message role=%s model=%s", role, model_name)
 
-    def get_input(self, session_name, staged_files):
+    def get_input(self, session_name, staged_files, agent_mode="default"):
         return ""
 
     def set_variables(self, variables_dict):
@@ -230,6 +237,65 @@ class TaskManager:
         self.threads = {}
         self.task_local = threading.local()
 
+    def _persist_feature_state(self, state: dict | None):
+        self.session.session_manager.set_feature_state(
+            state, self.session.folder_context
+        )
+        self.session.sync_runtime_state()
+
+    def _build_persisted_feature_state(
+        self,
+        *,
+        task_id: str,
+        directory: str,
+        max_cycles: int,
+        next_cycle: int,
+        previous_signature: str | None,
+        cycles: list[dict],
+        status: str,
+        blocker: dict | None = None,
+        result: dict | None = None,
+        error: str | None = None,
+    ) -> dict:
+        return {
+            "task_id": task_id,
+            "type": "feature",
+            "directory": directory,
+            "max_cycles": max_cycles,
+            "next_cycle": next_cycle,
+            "previous_signature": previous_signature,
+            "cycles": cycles,
+            "status": status,
+            "blocker": blocker,
+            "result": result,
+            "error": error,
+            "updated_at": time.time(),
+        }
+
+    def _restore_feature_task(self, feature_state: dict) -> dict:
+        task_id = str(feature_state.get("task_id", "") or uuid4().hex)
+        payload = {
+            "directory": feature_state.get("directory", ""),
+            "max_cycles": int(feature_state.get("max_cycles", 12) or 12),
+            "next_cycle": int(feature_state.get("next_cycle", 1) or 1),
+            "previous_signature": feature_state.get("previous_signature"),
+        }
+        task = {
+            "task_id": task_id,
+            "type": "feature",
+            "payload": payload,
+            "status": feature_state.get("status", "pending"),
+            "result": feature_state.get("result"),
+            "error": feature_state.get("error"),
+            "created_at": feature_state.get("updated_at", time.time()),
+            "updated_at": feature_state.get("updated_at", time.time()),
+            "approval_id": None,
+            "blocker": feature_state.get("blocker"),
+        }
+        with self.lock:
+            self.tasks[task_id] = task
+        return task
+
     def create_task(self, task_type: str, payload: dict) -> str:
         task_id = uuid4().hex
         with self.lock:
@@ -243,6 +309,7 @@ class TaskManager:
                 "created_at": time.time(),
                 "updated_at": time.time(),
                 "approval_id": None,
+                "blocker": None,
             }
         if self.event_hub:
             self.event_hub.publish(
@@ -289,6 +356,34 @@ class TaskManager:
                 task_id=task_id,
             )
 
+    def set_waiting_for_input(self, task_id: str, blocker: dict, partial_result: dict):
+        self.update_task(
+            task_id,
+            status="awaiting_input",
+            blocker=blocker,
+            result=partial_result,
+            approval_id=None,
+        )
+        if self.event_hub:
+            self.event_hub.publish(
+                "task.awaiting_input",
+                {
+                    "task": self.get_task(task_id),
+                    "blocker": blocker,
+                    "result": partial_result,
+                },
+                task_id=task_id,
+            )
+
+    def clear_waiting_for_input(self, task_id: str):
+        self.update_task(task_id, status="running", blocker=None)
+        if self.event_hub:
+            self.event_hub.publish(
+                "task.running",
+                {"task": self.get_task(task_id)},
+                task_id=task_id,
+            )
+
     def complete_task(self, task_id: str, result: dict):
         self.update_task(task_id, status="completed", result=result, approval_id=None)
         if self.event_hub:
@@ -310,7 +405,16 @@ class TaskManager:
     def get_task(self, task_id: str) -> dict | None:
         with self.lock:
             task = self.tasks.get(task_id)
-            return dict(task) if task else None
+            if task:
+                return dict(task)
+        persisted_state = self.session.session_manager.get_feature_state()
+        if (
+            isinstance(persisted_state, dict)
+            and persisted_state.get("task_id") == task_id
+            and persisted_state.get("type") == "feature"
+        ):
+            return dict(self._restore_feature_task(persisted_state))
+        return None
 
     def list_tasks(self) -> list[dict]:
         with self.lock:
@@ -338,6 +442,418 @@ class TaskManager:
         with self.lock:
             self.threads[task_id] = thread
         thread.start()
+        return self.get_task(task_id)
+
+    def _extract_feature_blocker(self, result: dict) -> dict | None:
+        for tool_result in result.get("tool_results", []):
+            if tool_result.get("tool_name") != "raise_blocker":
+                continue
+            payload = tool_result.get("tool_result")
+            if isinstance(payload, dict):
+                data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+                if data:
+                    return data
+        return None
+
+    def _build_feature_resume_prompt(self, resume_input: str) -> str:
+        return (
+            "Additional user context was provided to unblock the feature loop. Use it together with the current feature phase documents before deciding the next step.\n\n"
+            f"User unblock input:\n{resume_input.strip()}"
+        )
+
+
+    def _feature_partial_result(
+        self,
+        *,
+        cycles: list[dict],
+        feature_plan: dict,
+        status: str,
+        error: str | None = None,
+    ) -> dict:
+        return {
+            "ok": error is None and status == "completed",
+            "status": status,
+            "mode": "feature",
+            "cycles": cycles,
+            "feature_plan": feature_plan,
+            "error": error,
+        }
+
+    def _launch_feature_task_thread(
+        self,
+        *,
+        task_id: str,
+        directory: str,
+        approval_manager,
+        max_cycles: int,
+        start_cycle: int,
+        cycles: list[dict],
+        previous_signature: str | None,
+        resume_input: str | None,
+    ):
+        def runner():
+            self.bind_task(task_id)
+            approval_manager.bind_task(task_id)
+            self.set_running(task_id)
+            try:
+                self._persist_feature_state(
+                    self._build_persisted_feature_state(
+                        task_id=task_id,
+                        directory=directory,
+                        max_cycles=max_cycles,
+                        next_cycle=start_cycle,
+                        previous_signature=previous_signature,
+                        cycles=cycles,
+                        status="running",
+                    )
+                )
+                with self.session_lock:
+                    plan = refresh_and_persist_feature_plan(directory)
+                if not plan.approved:
+                    raise ValueError(
+                        "Feature plan has not been approved yet. Approve it before starting the implementation loop."
+                    )
+
+                active_previous_signature = previous_signature
+                active_resume_input = resume_input
+                for cycle_index in range(start_cycle, max_cycles + 1):
+                    self._persist_feature_state(
+                        self._build_persisted_feature_state(
+                            task_id=task_id,
+                            directory=directory,
+                            max_cycles=max_cycles,
+                            next_cycle=cycle_index,
+                            previous_signature=active_previous_signature,
+                            cycles=cycles,
+                            status="running",
+                        )
+                    )
+                    with self.session_lock:
+                        plan = refresh_and_persist_feature_plan(directory)
+                        plan_summary = summarize_feature_plan(plan)
+                        if plan.review_status == "completed":
+                            completed_result = self._feature_partial_result(
+                                cycles=cycles,
+                                feature_plan=plan_summary,
+                                status="completed",
+                            )
+                            self._persist_feature_state(
+                                self._build_persisted_feature_state(
+                                    task_id=task_id,
+                                    directory=directory,
+                                    max_cycles=max_cycles,
+                                    next_cycle=cycle_index,
+                                    previous_signature=active_previous_signature,
+                                    cycles=cycles,
+                                    status="completed",
+                                    result=completed_result,
+                                ),
+                            )
+                            self.complete_task(
+                                task_id,
+                                completed_result,
+                            )
+                            return
+
+                        phase = plan.next_incomplete_phase()
+                        prompt_type = "review" if phase is None else "implementation"
+                        prompt = (
+                            build_review_prompt(plan)
+                            if phase is None
+                            else build_phase_execution_prompt(plan, phase)
+                        )
+                        if active_resume_input:
+                            prompt = f"{prompt}\n\n{self._build_feature_resume_prompt(active_resume_input)}"
+                            active_resume_input = None
+
+                        original_compact_history = self.session.variables.get("compact_history", False)
+                        self.session.variables["compact_history"] = False
+                        try:
+                            result = self.session.send_message(prompt)
+                        finally:
+                            self.session.variables["compact_history"] = original_compact_history
+                        updated_plan = refresh_and_persist_feature_plan(directory)
+                        updated_summary = summarize_feature_plan(updated_plan)
+                        signature = json.dumps(updated_summary, sort_keys=True)
+                        cycle_payload = {
+                            "cycle": cycle_index,
+                            "prompt_type": prompt_type,
+                            "phase_number": None if phase is None else phase.number,
+                            "result": result,
+                            "feature_plan": updated_summary,
+                        }
+                        cycles.append(cycle_payload)
+
+                        blocker = self._extract_feature_blocker(result)
+                        if blocker:
+                            blocker_payload = {
+                                **blocker,
+                                "history_length": len(self.session.session_manager.history),
+                                "conversation_hint": "Use GET /api/history or the saved task result to inspect prior work before resuming.",
+                            }
+                            partial_result = self._feature_partial_result(
+                                cycles=cycles,
+                                feature_plan=updated_summary,
+                                status="awaiting_input",
+                                error="Feature loop paused on a raised blocker.",
+                            )
+                            self.update_task(
+                                task_id,
+                                payload={
+                                    "directory": directory,
+                                    "max_cycles": max_cycles,
+                                    "next_cycle": cycle_index + 1,
+                                    "previous_signature": signature,
+                                },
+                            )
+                            self._persist_feature_state(
+                                self._build_persisted_feature_state(
+                                    task_id=task_id,
+                                    directory=directory,
+                                    max_cycles=max_cycles,
+                                    next_cycle=cycle_index + 1,
+                                    previous_signature=signature,
+                                    cycles=cycles,
+                                    status="awaiting_input",
+                                    blocker=blocker_payload,
+                                    result=partial_result,
+                                    error="Feature loop paused on a raised blocker.",
+                                ),
+                            )
+                            self.set_waiting_for_input(
+                                task_id,
+                                blocker_payload,
+                                partial_result,
+                            )
+                            return
+
+                        if updated_plan.review_status == "completed":
+                            completed_result = self._feature_partial_result(
+                                cycles=cycles,
+                                feature_plan=updated_summary,
+                                status="completed",
+                            )
+                            self._persist_feature_state(
+                                self._build_persisted_feature_state(
+                                    task_id=task_id,
+                                    directory=directory,
+                                    max_cycles=max_cycles,
+                                    next_cycle=cycle_index + 1,
+                                    previous_signature=signature,
+                                    cycles=cycles,
+                                    status="completed",
+                                    result=completed_result,
+                                ),
+                            )
+                            self.complete_task(
+                                task_id,
+                                completed_result,
+                            )
+                            return
+
+                        if active_previous_signature == signature and result.get("status") == "completed":
+                            blocked_result = self._feature_partial_result(
+                                cycles=cycles,
+                                feature_plan=updated_summary,
+                                status="blocked",
+                                error="Feature loop made no document progress in the last cycle.",
+                            )
+                            self._persist_feature_state(
+                                self._build_persisted_feature_state(
+                                    task_id=task_id,
+                                    directory=directory,
+                                    max_cycles=max_cycles,
+                                    next_cycle=cycle_index + 1,
+                                    previous_signature=signature,
+                                    cycles=cycles,
+                                    status="blocked",
+                                    result=blocked_result,
+                                    error="Feature loop made no document progress in the last cycle.",
+                                ),
+                            )
+                            self.complete_task(
+                                task_id,
+                                blocked_result,
+                            )
+                            return
+                        active_previous_signature = signature
+                        self.update_task(
+                            task_id,
+                            payload={
+                                "directory": directory,
+                                "max_cycles": max_cycles,
+                                "next_cycle": cycle_index + 1,
+                                "previous_signature": active_previous_signature,
+                            },
+                        )
+                        self._persist_feature_state(
+                            self._build_persisted_feature_state(
+                                task_id=task_id,
+                                directory=directory,
+                                max_cycles=max_cycles,
+                                next_cycle=cycle_index + 1,
+                                previous_signature=active_previous_signature,
+                                cycles=cycles,
+                                status="running",
+                            )
+                        )
+
+                with self.session_lock:
+                    final_plan = refresh_and_persist_feature_plan(directory)
+                    final_summary = summarize_feature_plan(final_plan)
+                max_cycle_result = self._feature_partial_result(
+                    cycles=cycles,
+                    feature_plan=final_summary,
+                    status="max_cycles_reached",
+                    error=f"Reached maximum feature cycles ({max_cycles}) before review completed.",
+                )
+                self._persist_feature_state(
+                    self._build_persisted_feature_state(
+                        task_id=task_id,
+                        directory=directory,
+                        max_cycles=max_cycles,
+                        next_cycle=max_cycles + 1,
+                        previous_signature=active_previous_signature,
+                        cycles=cycles,
+                        status="max_cycles_reached",
+                        result=max_cycle_result,
+                        error=f"Reached maximum feature cycles ({max_cycles}) before review completed.",
+                    )
+                )
+                self.complete_task(
+                    task_id,
+                    max_cycle_result,
+                )
+            except Exception as exc:
+                logger.error("Feature task %s failed: %s", task_id, exc, exc_info=True)
+                self.fail_task(task_id, str(exc))
+                self._persist_feature_state(
+                    self._build_persisted_feature_state(
+                        task_id=task_id,
+                        directory=directory,
+                        max_cycles=max_cycles,
+                        next_cycle=start_cycle,
+                        previous_signature=previous_signature,
+                        cycles=cycles,
+                        status="error",
+                        error=str(exc),
+                    )
+                )
+            finally:
+                approval_manager.unbind_task()
+                self.unbind_task()
+
+        thread = threading.Thread(target=runner, daemon=True)
+        with self.lock:
+            self.threads[task_id] = thread
+        thread.start()
+
+    def start_feature_task(
+        self,
+        directory: str,
+        approval_manager,
+        max_cycles: int = 12,
+    ) -> dict:
+        persisted_state = self.session.session_manager.get_feature_state()
+        if (
+            isinstance(persisted_state, dict)
+            and persisted_state.get("type") == "feature"
+            and persisted_state.get("directory") == directory
+        ):
+            restored_task = self._restore_feature_task(persisted_state)
+            restored_status = restored_task.get("status")
+            if restored_status == "awaiting_input":
+                return restored_task
+            if restored_status in {"running", "blocked", "max_cycles_reached", "error"}:
+                cycles = list(persisted_state.get("cycles", []))
+                self._launch_feature_task_thread(
+                    task_id=restored_task["task_id"],
+                    directory=directory,
+                    approval_manager=approval_manager,
+                    max_cycles=max(
+                        int(persisted_state.get("max_cycles", max_cycles) or max_cycles),
+                        max_cycles,
+                    ),
+                    start_cycle=int(persisted_state.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)),
+                    cycles=cycles,
+                    previous_signature=persisted_state.get("previous_signature"),
+                    resume_input=None,
+                )
+                return self.get_task(restored_task["task_id"])
+
+        task_id = self.create_task(
+            "feature",
+            {
+                "directory": directory,
+                "max_cycles": max_cycles,
+                "next_cycle": 1,
+                "previous_signature": None,
+            },
+        )
+        self._persist_feature_state(
+            self._build_persisted_feature_state(
+                task_id=task_id,
+                directory=directory,
+                max_cycles=max_cycles,
+                next_cycle=1,
+                previous_signature=None,
+                cycles=[],
+                status="pending",
+            )
+        )
+        self._launch_feature_task_thread(
+            task_id=task_id,
+            directory=directory,
+            approval_manager=approval_manager,
+            max_cycles=max_cycles,
+            start_cycle=1,
+            cycles=[],
+            previous_signature=None,
+            resume_input=None,
+        )
+        return self.get_task(task_id)
+
+    def resume_feature_task(
+        self,
+        task_id: str,
+        user_input: str,
+        approval_manager,
+    ) -> dict:
+        task = self.get_task(task_id)
+        if not task:
+            raise KeyError(f"Unknown task_id: {task_id}")
+        if task.get("type") != "feature":
+            raise ValueError("Only feature tasks can be resumed.")
+        if task.get("status") != "awaiting_input":
+            raise ValueError("Feature task is not waiting for user input.")
+        if not str(user_input).strip():
+            raise ValueError("Field 'user_input' is required to resume a blocked feature loop.")
+
+        payload = task.get("payload", {})
+        partial_result = task.get("result", {}) or {}
+        cycles = list(partial_result.get("cycles", []))
+        self.clear_waiting_for_input(task_id)
+        self._persist_feature_state(
+            self._build_persisted_feature_state(
+                task_id=task_id,
+                directory=str(payload.get("directory", "") or ""),
+                max_cycles=int(payload.get("max_cycles", 12) or 12),
+                next_cycle=int(payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)),
+                previous_signature=payload.get("previous_signature"),
+                cycles=cycles,
+                status="running",
+            )
+        )
+        self._launch_feature_task_thread(
+            task_id=task_id,
+            directory=str(payload.get("directory", "") or ""),
+            approval_manager=approval_manager,
+            max_cycles=int(payload.get("max_cycles", 12) or 12),
+            start_cycle=int(payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)),
+            cycles=cycles,
+            previous_signature=payload.get("previous_signature"),
+            resume_input=str(user_input),
+        )
         return self.get_task(task_id)
 
     def start_tool_task(
@@ -518,6 +1034,7 @@ def build_state_payload(session) -> dict:
         "variables": dict(session.variables),
         "history_length": len(session.session_manager.history),
         "token_counts": dict(session.session_manager.token_counts),
+        "feature_state": session.session_manager.get_feature_state(),
         "available_tools": [
             {
                 **serialize_tool_descriptor(tool.name),
@@ -558,6 +1075,7 @@ def build_runtime_payload(session) -> dict:
         "agentic": session.agentic,
         "disabled_tools": list(session.disabled_tools),
         "variables": dict(session.variables),
+        "feature_state": session.session_manager.get_feature_state(),
     }
 
 
@@ -568,6 +1086,11 @@ def build_workspace_payload(session) -> dict:
         "tracked_files": session.folder_context.get_file_list(),
         "tracked_file_count": len(session.folder_context.get_file_list()),
     }
+
+
+def build_feature_plan_payload(directory: str) -> dict:
+    plan = refresh_and_persist_feature_plan(directory)
+    return summarize_feature_plan(plan)
 
 
 def build_staged_files_payload(session) -> dict:
@@ -805,6 +1328,17 @@ def serve(session, host: str, port: int, command_handler):
                         200, {"ok": True, **build_workspace_payload(session)}
                     )
                     return
+                if parsed.path == "/api/feature-plan":
+                    query = parse_qs(parsed.query)
+                    directory = str(query.get("directory", [""])[0] or "").strip()
+                    if not directory:
+                        self._send_json(400, {"ok": False, "error": "Query parameter 'directory' is required."})
+                        return
+                    try:
+                        self._send_json(200, {"ok": True, "feature_plan": build_feature_plan_payload(directory)})
+                    except FileNotFoundError:
+                        self._send_json(404, {"ok": False, "error": "Feature plan not found."})
+                    return
                 if parsed.path == "/api/staged-files":
                     self._send_json(
                         200, {"ok": True, **build_staged_files_payload(session)}
@@ -882,6 +1416,99 @@ def serve(session, host: str, port: int, command_handler):
                     return
                 if task["status"] == "completed":
                     self._send_json(200, task["result"])
+                else:
+                    self._send_json(202, {"ok": True, "task": task})
+                return
+
+            if parsed.path == "/api/feature-plan/approve":
+                directory = str(payload.get("directory", "") or "").strip()
+                if not directory:
+                    self._send_json(400, {"ok": False, "error": "Field 'directory' is required."})
+                    return
+                approved = bool(payload.get("approved", True))
+                review_status = payload.get("review_status")
+                review_notes = payload.get("review_notes")
+                try:
+                    plan = update_feature_plan_metadata(
+                        directory,
+                        approved=approved,
+                        review_status=None if review_status is None else str(review_status),
+                        review_notes=None if review_notes is None else str(review_notes),
+                    )
+                    plan = refresh_and_persist_feature_plan(plan.directory)
+                except FileNotFoundError:
+                    self._send_json(404, {"ok": False, "error": "Feature plan not found."})
+                    return
+                self._send_json(200, {"ok": True, "feature_plan": summarize_feature_plan(plan)})
+                return
+
+            if parsed.path == "/api/feature-loop":
+                directory = str(payload.get("directory", "") or "").strip()
+                if not directory:
+                    self._send_json(400, {"ok": False, "error": "Field 'directory' is required."})
+                    return
+                async_mode = bool(payload.get("async", False))
+                max_cycles = int(payload.get("max_cycles", 12) or 12)
+                task = state["task_manager"].start_feature_task(
+                    directory,
+                    state["approval_manager"],
+                    max_cycles=max_cycles,
+                )
+                task_id = task["task_id"]
+                if async_mode:
+                    self._send_json(202, {"ok": True, "task": task})
+                    return
+
+                task = state["task_manager"].wait_for_task_state(
+                    task_id,
+                    {"completed", "error", "awaiting_approval", "awaiting_input"},
+                    timeout=120.0,
+                )
+                if not task:
+                    self._send_json(500, {"ok": False, "error": "Task disappeared."})
+                    return
+                if task["status"] == "completed":
+                    self._send_json(200, task["result"])
+                elif task["status"] == "error":
+                    self._send_json(500, {"ok": False, "error": task["error"], "task": task})
+                else:
+                    self._send_json(202, {"ok": True, "task": task})
+                return
+
+            if parsed.path == "/api/feature-loop/resolve":
+                task_id = str(payload.get("task_id", "") or "").strip()
+                user_input = str(payload.get("user_input", "") or "")
+                if not task_id:
+                    self._send_json(400, {"ok": False, "error": "Field 'task_id' is required."})
+                    return
+                if not user_input.strip():
+                    self._send_json(400, {"ok": False, "error": "Field 'user_input' is required."})
+                    return
+                try:
+                    task = state["task_manager"].resume_feature_task(
+                        task_id,
+                        user_input,
+                        state["approval_manager"],
+                    )
+                except (KeyError, ValueError) as exc:
+                    self._send_json(400, {"ok": False, "error": str(exc)})
+                    return
+                async_mode = bool(payload.get("async", False))
+                if async_mode:
+                    self._send_json(202, {"ok": True, "task": task})
+                    return
+                task = state["task_manager"].wait_for_task_state(
+                    task_id,
+                    {"completed", "error", "awaiting_approval", "awaiting_input"},
+                    timeout=120.0,
+                )
+                if not task:
+                    self._send_json(500, {"ok": False, "error": "Task disappeared."})
+                    return
+                if task["status"] == "completed":
+                    self._send_json(200, task["result"])
+                elif task["status"] == "error":
+                    self._send_json(500, {"ok": False, "error": task["error"], "task": task})
                 else:
                     self._send_json(202, {"ok": True, "task": task})
                 return

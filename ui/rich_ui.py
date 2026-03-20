@@ -11,6 +11,8 @@ from rich.text import Text
 
 from .input import InputHandler
 from .render import render_response
+from utils.config import AGENT_MODE_METADATA
+from utils.runtime_metrics import build_live_status_line, collect_runtime_metrics
 
 
 class RichUI:
@@ -34,8 +36,10 @@ class RichUI:
                 self.console.print(f"\nAssistant ({model_name}):")
             render_response(content)
 
-    def get_input(self, session_name, staged_files):
-        return self.input_handler.get_input(session_name, staged_files)
+    def get_input(self, session_name, staged_files, agent_mode="default"):
+        return self.input_handler.get_input(
+            session_name, staged_files, agent_mode=agent_mode
+        )
 
     def set_variables(self, variables_dict):
         self.input_handler.set_variables(variables_dict)
@@ -48,6 +52,35 @@ class RichUI:
 
     def prompt(self, message, default=None):
         return Prompt.ask(message, default=default)
+
+    def request_tool_approval(
+        self,
+        *,
+        tool_name,
+        tool_args,
+        display_args,
+        count_info,
+        can_approve,
+        modifications,
+        preview_error,
+        error_code,
+        prompt_text,
+        choices,
+        default,
+    ):
+        self.console.print(prompt_text)
+        self.console.print(
+            "[dim]Tip: press Shift+Tab here to toggle YOLO for this and subsequent approvals in the current loop.[/dim]"
+        )
+        choice = self.input_handler.prompt_choice(
+            "Approval choice",
+            choices=choices,
+            default=default,
+        )
+        reason = None
+        if choice == "e":
+            reason = self.prompt("Provide an explanation to the model")
+        return choice, reason
 
     def show_error(self, message):
         self.console.print(f"[red]{message}[/red]")
@@ -89,71 +122,142 @@ class RichUI:
         return line
 
     def build_memory_monitor(self, session):
-        hist_len = len(session.session_manager.history)
-        anchor = session.session_manager.summary_anchor
-        active_turns = max(0, hist_len - anchor)
-        context_limit = max(1, int(getattr(session, "active_context_window", 1) or 1))
-
-        memory_limit = max(
-            1,
-            int(
-                session.variables.get(
-                    "memory_max_entries", getattr(session.task_memory, "max_entries", 1)
-                )
-            ),
-        )
-        scratch_limit = max(
-            1,
-            int(
-                session.variables.get(
-                    "scratchpad_max_entries",
-                    getattr(session.turn_scratchpad, "max_entries", 1),
-                )
-            ),
-        )
-        collation_limit = max(1, int(getattr(session.collation_buffer, "max_bytes", 1) or 1))
-        collation_bytes = sum(
-            len(result or "") for _, _, result in session.collation_buffer.entries
-        )
-        collation_items = len(session.collation_buffer.entries)
-        token_total = int(session.session_manager.token_counts.get("total", 0) or 0)
+        metrics = collect_runtime_metrics(session)
 
         meters = [
-            self.build_meter("CTX", active_turns, context_limit, color="cyan"),
             self.build_meter(
-                "MEM", len(session.task_memory.entries), memory_limit, color="magenta"
+                "CTX", metrics["ctx"]["current"], metrics["ctx"]["maximum"], color="cyan"
+            ),
+            self.build_meter(
+                "MEM",
+                metrics["mem"]["current"],
+                metrics["mem"]["maximum"],
+                color="magenta",
             ),
             self.build_meter(
                 "SCRATCH",
-                len(session.turn_scratchpad.entries),
-                scratch_limit,
+                metrics["scratch"]["current"],
+                metrics["scratch"]["maximum"],
                 color="green",
             ),
-            self.build_meter("QUEUE", collation_bytes, collation_limit, color="yellow"),
+            self.build_meter(
+                "QUEUE",
+                metrics["queue"]["current"],
+                metrics["queue"]["maximum"],
+                color="yellow",
+            ),
         ]
+
+        current_mode = metrics["mode"]["name"]
+        mode_description = AGENT_MODE_METADATA.get(current_mode, {}).get("description", "")
 
         meta = Text()
         meta.append("tokens ", style="dim white")
-        meta.append(str(token_total), style="bold cyan")
+        meta.append(str(metrics["tokens"]["total"]), style="bold cyan")
         meta.append("  |  queue ", style="dim white")
-        meta.append(str(collation_items), style="bold yellow")
+        meta.append(str(metrics["queue_items"]), style="bold yellow")
         meta.append(" item", style="dim white")
-        if collation_items != 1:
+        if metrics["queue_items"] != 1:
             meta.append("s", style="dim white")
         meta.append("  |  mode ", style="dim white")
-        meta.append(str(session.variables.get("agent_mode", "default")), style="bold magenta")
+        meta.append(current_mode, style="bold magenta")
+
+        token_line = Text()
+        token_line.append("in ", style="dim white")
+        token_line.append(str(metrics["tokens"]["input"]), style="bold cyan")
+        token_line.append("  out ", style="dim white")
+        token_line.append(str(metrics["tokens"]["output"]), style="bold green")
+        token_line.append("  cost ", style="dim white")
+        token_line.append(
+            f"${metrics['tokens']['total_cost']:.5f}",
+            style="bold yellow",
+        )
+
+        mode_line = Text()
+        mode_line.append("mode info ", style="dim white")
+        mode_line.append(mode_description or "No description available.", style="white")
+
+        feature_group = []
+        feature_metrics = metrics.get("feature")
+        if feature_metrics:
+            feature_state = feature_metrics.get("state") or {}
+            feature_plan = feature_metrics.get("plan") or {}
+            feature_name = feature_plan.get(
+                "feature_name", feature_state.get("directory", "Unknown feature")
+            )
+            feature_status = feature_state.get("status", "unknown")
+            feature_group.append(Text(""))
+
+            feature_header = Text()
+            feature_header.append("feature ", style="dim white")
+            feature_header.append(str(feature_name), style="bold cyan")
+            feature_group.append(feature_header)
+
+            feature_meta = Text()
+            feature_meta.append("loop ", style="dim white")
+            feature_meta.append(str(feature_status), style="bold yellow")
+            if feature_plan:
+                feature_meta.append("  |  review ", style="dim white")
+                feature_meta.append(
+                    str(feature_plan.get("review_status", "unknown")),
+                    style="bold magenta",
+                )
+            feature_group.append(feature_meta)
+
+            phases = feature_plan.get("phases", [])
+            completed_phases = sum(
+                1 for phase in phases if phase.get("status") == "completed"
+            )
+            phase_count = max(1, int(feature_plan.get("phase_count", len(phases)) or 1))
+            feature_group.append(
+                self.build_meter(
+                    "PHASES",
+                    completed_phases,
+                    phase_count,
+                    color="blue",
+                )
+            )
+
+            for phase in phases[:4]:
+                counts = phase.get("task_counts", {})
+                total_tasks = max(1, sum(int(value or 0) for value in counts.values()))
+                completed_tasks = int(counts.get("completed", 0) or 0)
+                phase_color = {
+                    "completed": "green",
+                    "in_progress": "yellow",
+                    "not_started": "blue",
+                }.get(phase.get("status"), "cyan")
+                feature_group.append(
+                    self.build_meter(
+                        f"P{phase.get('number', '?')}",
+                        completed_tasks,
+                        total_tasks,
+                        color=phase_color,
+                        width=12,
+                    )
+                )
+
+            next_phase = feature_plan.get("next_phase")
+            if next_phase:
+                next_phase_line = Text()
+                next_phase_line.append("next ", style="dim white")
+                next_phase_line.append(
+                    f"P{next_phase.get('number')}: {next_phase.get('title', '')}",
+                    style="white",
+                )
+                feature_group.append(next_phase_line)
 
         legend = Text.from_markup(
             "[cyan]context[/cyan] [magenta]memory[/magenta] [green]scratchpad[/green] [yellow]collation[/yellow]"
         )
 
-        return Align.right(
+        return Align.center(
             Panel(
-                Group(*meters, Text(""), meta, legend),
-                title="[bold white]Memory HUD[/bold white]",
+                Group(*meters, Text(""), meta, token_line, mode_line, *feature_group, legend),
+                title="[bold white]/stats[/bold white]",
                 border_style="bright_black",
                 box=box.ROUNDED,
-                width=44,
+                width=76,
             )
         )
 
@@ -287,6 +391,18 @@ class RichUI:
     def show_status(self, message):
         with self.console.status(message, spinner="aesthetic") as status:
             yield status
+
+    def build_live_status(self, session, model_name, iteration, max_iterations):
+        metrics = collect_runtime_metrics(session)
+        status = Text()
+        status.append(f"Generating ({model_name}) it {iteration}/{max_iterations} | ")
+        if metrics["yolo"]["enabled"]:
+            status.append("✦", style="bold yellow blink")
+            status.append(" YOLO | ", style="bold yellow")
+        else:
+            status.append("YOLO:off | ", style="dim")
+        status.append(build_live_status_line(session), style="white")
+        return status
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""

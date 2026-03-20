@@ -11,8 +11,10 @@
 - **Smart Context Management**: Automatic history truncation and summarization to stay within model context limits while keeping costs down.
 - **In-Task Memory Engine**: Agent mode can store and recall concise facts so it does not need to replay large tool outputs.
 - **Turn Scratchpads**: Agent mode can keep temporary notes for the active task loop without polluting durable memory.
-- **Live Memory HUD**: A compact right-aligned terminal widget visualizes context, durable memory, scratchpad usage, and the collation queue as they fill up over time.
-- **Customizable Strategies**: Specialized agent modes for Debugging, Feature Implementation, and Research.
+- **Runtime Stats & Live Metrics**: Use `/stats` for a centered snapshot panel, and watch the generating status line for compact context/memory/scratch/queue utilization bars during agent loops.
+- **Customizable Strategies**: Specialized agent modes for Debugging, phased Feature Implementation, and Research.
+- **Feature Plan Engine**: Feature mode can persist phased plans in `documentation/feature_req_<id>/`, pause on structured blockers, and drive implementation/review loops from those plan files.
+- **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for GUIs**: Launch μCLI with an HTTP API so desktop/web clients can drive sessions, commands, and tool execution.
 
@@ -56,7 +58,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 3. **Set Workspace**: Use `/folder .` to add your current directory to the agent's context.
 4. **Enable Agentic Mode**: Type `/agentic` to allow the model to use tools.
 5. **Chat**: Ask questions like "How does the authentication logic work?" or "Fix the bug in the user controller."
-6. **Watch the HUD**: Keep an eye on the compact Memory HUD for context growth, memory slots, scratchpad activity, and pending collated tool output.
+6. **Watch Runtime Metrics**: Use `/stats` for a snapshot panel and check the `Generating ...` status line for live context, memory, scratchpad, and queue usage.
 
 ## Command Overview
 
@@ -75,7 +77,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 | `/model [name]` | | Show or change the current model |
 | `/provider [name]`| | Change the LLM provider |
 | `/flush` | | Flush the collation buffer into the next model turn |
-| `/tokens` | | Show current context token usage and estimated cost |
+| `/stats` | | Show runtime stats, token/cost totals, and current feature progress |
 | `/view` | `/v` | View full conversation history |
 | `/clear` | `/c` | Clear conversation history |
 | `/clearfiles` | `/cf` | Clear all staged files |
@@ -113,6 +115,7 @@ Notes:
 ### API endpoints
 
 For a higher-level assessment of whether the current server stack is ready for GUI work, see `documentation/server_architecture_review.md`.
+For the phased feature workflow and plan file format, see `documentation/feature_plan_engine.md`.
 
 - `GET /health` — basic health check.
 - `GET /api/state` — current session state, active model, variables, workspaces, and tool metadata.
@@ -131,9 +134,13 @@ For a higher-level assessment of whether the current server stack is ready for G
 - `GET /api/workspaces` — inspect attached workspace folders and tracked files.
 - `POST /api/workspaces/add` — attach a workspace folder.
 - `POST /api/workspaces/remove` — detach a workspace folder.
+- `GET /api/feature-plan?directory=<path>` — inspect a persisted feature-plan summary refreshed from `feature_plan.json` and `phase_N.md` files.
 - `GET /api/staged-files` — inspect currently staged files for the next turn.
 - `POST /api/staged-files/add` — stage a file by path for the next turn.
 - `POST /api/staged-files/clear` — clear staged files.
+- `POST /api/feature-plan/approve` — update feature-plan approval and review metadata.
+- `POST /api/feature-loop` — run the approved phase-by-phase implementation/review loop on the server.
+- `POST /api/feature-loop/resolve` — resume a paused feature loop after the user supplies blocker context.
 - `POST /api/message` — send a normal chat turn to the active session.
 - `POST /api/command` — execute a slash command such as `/folder .`, `/set yolo true`, or `/tool list`.
 - `POST /api/tool` — invoke a tool directly with JSON arguments for GUI workflows that want structured tool access. Structured tool responses include envelope fields such as `error`, `error_code`, `modified_files`, `artifacts`, and `telemetry`.
@@ -202,7 +209,7 @@ curl -X POST http://127.0.0.1:8765/api/tool \
 
 - **`default`**: Standard programming assistant. Best for general questions and small code changes.
 - **`debug`**: Optimized for bug hunting. The agent focuses on error logs, searching for root causes, and providing precise fixes.
-- **`feature`**: Designed for implementing new features. The agent creates an architecture plan (`FEATURE_<name>.md`) before writing any code.
+- **`feature`**: Uses the feature-plan engine. The agent must create `documentation/feature_req_<id>/feature_plan.json` plus `phase_N.md` files, wait for approval, implement one phase at a time, raise blockers when user input is needed, and complete a review pass before finishing.
 - **`research`**: Focuses on codebase exploration and documentation. The agent traverses function calls and imports to explain how systems work.
 - **`git`**: **Autonomous Software Engineer Mode.** The agent works through a structured workflow: Requirements -> Implementation Plan -> Verification Plan -> Implementation (in a new git branch) -> Verification -> Self-Review -> Merge Request. It creates and follows its own documentation and ensures task completion before finalizing.
 

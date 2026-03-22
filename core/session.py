@@ -1295,6 +1295,7 @@ class Session:
             self.ui,
             self.variables,
             invocation_source=invocation_source,
+                session=self,
         )
 
     def _prompt_tool_choice(
@@ -1332,6 +1333,7 @@ class Session:
                 display_args=display_args,
                 count_info=count_info,
                 can_approve=approval_plan.can_approve,
+            session=self,
                 modifications=[mod.to_payload() for mod in approval_plan.modifications],
                 preview_error=approval_plan.preview_error,
                 error_code=approval_plan.error_code,

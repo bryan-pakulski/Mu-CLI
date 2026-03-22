@@ -33,6 +33,7 @@ class ToolExecutionContext:
     ui: Any = None
     variables: dict | None = None
     invocation_source: str = "session"
+    session: Any = None
 
 
 def _build_descriptor(
@@ -64,13 +65,16 @@ def build_tool_context(
     variables: dict | None = None,
     *,
     invocation_source: str = "session",
+    session: Any = None,
 ) -> ToolExecutionContext:
     return ToolExecutionContext(
         folder_context=folder_context,
         ui=ui,
         variables=variables,
         invocation_source=invocation_source,
+        session=session,
     )
+
 
 # --- Tool Definitions (Schemas) ---
 
@@ -370,8 +374,14 @@ TOOLS = [
         parameters={
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "The title of the merge request."},
-                "description": {"type": "string", "description": "The description of the changes."},
+                "title": {
+                    "type": "string",
+                    "description": "The title of the merge request.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "The description of the changes.",
+                },
             },
         },
         requires_approval=True,
@@ -546,25 +556,48 @@ TOOLS = [
         parameters={
             "type": "object",
             "properties": {
-                "feature_name": {"type": "string", "description": "Short feature name used in the generated plan."},
-                "feature_request": {"type": "string", "description": "Original user request or concise requirements summary."},
-                "feature_id": {"type": "string", "description": "Optional stable identifier for the feature request directory."},
+                "feature_name": {
+                    "type": "string",
+                    "description": "Short feature name used in the generated plan.",
+                },
+                "feature_request": {
+                    "type": "string",
+                    "description": "Original user request or concise requirements summary.",
+                },
+                "feature_id": {
+                    "type": "string",
+                    "description": "Optional stable identifier for the feature request directory.",
+                },
                 "phases": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
                             "title": {"type": "string"},
-                            "objectives": {"type": "array", "items": {"type": "string"}},
-                            "action_points": {"type": "array", "items": {"type": "string"}},
-                            "exit_criteria": {"type": "array", "items": {"type": "string"}},
-                            "notes": {"type": "string"}
+                            "objectives": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "action_points": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "exit_criteria": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "notes": {"type": "string"},
                         },
-                        "required": ["title", "objectives", "action_points", "exit_criteria"]
-                    }
-                }
+                        "required": [
+                            "title",
+                            "objectives",
+                            "action_points",
+                            "exit_criteria",
+                        ],
+                    },
+                },
             },
-            "required": ["feature_name", "feature_request", "phases"]
+            "required": ["feature_name", "feature_request", "phases"],
         },
         requires_approval=True,
     ),
@@ -574,9 +607,11 @@ TOOLS = [
         parameters={
             "type": "object",
             "properties": {
-                "directory": {"type": "string", "description": "Path to the documentation/feature_req_<id> directory."}
+                "directory": {
+                    "type": "string",
+                    "description": "Path to the documentation/feature_req_<id> directory.",
+                }
             },
-            "required": ["directory"]
         },
         requires_approval=False,
     ),
@@ -586,12 +621,23 @@ TOOLS = [
         parameters={
             "type": "object",
             "properties": {
-                "directory": {"type": "string", "description": "Path to the documentation/feature_req_<id> directory."},
-                "approved": {"type": "boolean", "description": "Whether the user has approved the feature plan."},
-                "review_status": {"type": "string", "description": "Review lifecycle value, such as pending, in_progress, or completed."},
-                "review_notes": {"type": "string", "description": "Optional review notes or final summary."}
+                "directory": {
+                    "type": "string",
+                    "description": "Path to the documentation/feature_req_<id> directory.",
+                },
+                "approved": {
+                    "type": "boolean",
+                    "description": "Whether the user has approved the feature plan.",
+                },
+                "review_status": {
+                    "type": "string",
+                    "description": "Review lifecycle value, such as pending, in_progress, or completed.",
+                },
+                "review_notes": {
+                    "type": "string",
+                    "description": "Optional review notes or final summary.",
+                },
             },
-            "required": ["directory"]
         },
         requires_approval=True,
     ),
@@ -601,12 +647,25 @@ TOOLS = [
         parameters={
             "type": "object",
             "properties": {
-                "summary": {"type": "string", "description": "Short blocker summary shown to the user."},
-                "details": {"type": "string", "description": "Longer explanation of what is blocked and what has already been tried."},
-                "requested_input": {"type": "string", "description": "Describe the exact information or decision needed from the user."},
-                "questions": {"type": "array", "items": {"type": "string"}, "description": "Optional focused questions for the user to answer."}
+                "summary": {
+                    "type": "string",
+                    "description": "Short blocker summary shown to the user.",
+                },
+                "details": {
+                    "type": "string",
+                    "description": "Longer explanation of what is blocked and what has already been tried.",
+                },
+                "requested_input": {
+                    "type": "string",
+                    "description": "Describe the exact information or decision needed from the user.",
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional focused questions for the user to answer.",
+                },
             },
-            "required": ["summary", "requested_input"]
+            "required": ["summary", "requested_input"],
         },
         requires_approval=False,
     ),
@@ -875,7 +934,10 @@ def get_tool_descriptor(tool_name: str) -> ToolDescriptor | None:
 
 
 def list_tool_descriptors() -> list[ToolDescriptor]:
-    return [TOOL_DESCRIPTORS[tool.name] for tool in TOOLS if tool.name in TOOL_DESCRIPTORS]
+    return [
+        TOOL_DESCRIPTORS[tool.name] for tool in TOOLS if tool.name in TOOL_DESCRIPTORS
+    ]
+
 
 COLLATED_TOOLS = [
     *sorted(_COLLATED_TOOL_NAMES),
@@ -1071,18 +1133,19 @@ def _sanitize_diff(diff: str, filename: str) -> str:
             header = hlines[0].strip()
             # Try to match standard @@ -start,len +start,len @@
             match = re.match(r"^@@ -(\d+),?\d* \+(\d+),?\d* @@(.*)$", header)
-            
+
             start_old, start_new = "1", "1"
             tail = ""
             if match:
                 start_old, start_new, tail = match.groups()
-            
+
             count_old = 0
             count_new = 0
             content_lines = []
             for hl in hlines[1:]:
-                if not hl: continue
-                
+                if not hl:
+                    continue
+
                 # If model is lazy and doesn't provide prefixes, try to guess
                 if hl.startswith("-"):
                     count_old += 1
@@ -1106,11 +1169,13 @@ def _sanitize_diff(diff: str, filename: str) -> str:
                         count_old += 1
                         count_new += 1
                         content_lines.append(" ")
-            
+
             if not content_lines and header == "@@":
                 return
 
-            new_header = f"@@ -{start_old},{count_old} +{start_new},{count_new} @@{tail}"
+            new_header = (
+                f"@@ -{start_old},{count_old} +{start_new},{count_new} @@{tail}"
+            )
             sanitized.append(new_header)
             sanitized.extend(content_lines)
             return
@@ -1191,7 +1256,9 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
             if result.returncode == 0:
                 return f"Successfully applied diff to {filename}"
             else:
-                logger.error(f"apply_diff: Patch error for {filename}: {result.stderr or result.stdout}")
+                logger.error(
+                    f"apply_diff: Patch error for {filename}: {result.stderr or result.stdout}"
+                )
                 return (
                     f"Error applying diff via 'patch': {result.stderr or result.stdout}"
                 )
@@ -1320,6 +1387,7 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None) -> st
         logger.error(f"run_agent_task: Error executing {task_name}: {e}")
         return f"Error executing task: {e}"
 
+
 def run_git_command(args_list: list[str], folder_context) -> str:
     """Executes a git command in the primary workspace folder."""
     if not folder_context or not folder_context.folders:
@@ -1356,17 +1424,21 @@ def run_git_command(args_list: list[str], folder_context) -> str:
         logger.error(f"run_git_command: Error executing git {' '.join(args_list)}: {e}")
         return f"Error executing git command: {e}"
 
+
 def git_status(folder_context) -> str:
     """Shows the working tree status."""
     return run_git_command(["status"], folder_context)
+
 
 def git_init(folder_context) -> str:
     """Initialize a new git repository."""
     return run_git_command(["init"], folder_context)
 
+
 def git_log(limit: int = 10, folder_context=None) -> str:
     """Shows the commit logs."""
     return run_git_command(["log", "--oneline", "-n", str(limit)], folder_context)
+
 
 def git_diff(cached: bool = False, filename: str = None, folder_context=None) -> str:
     """Shows changes between commits, commit and working tree, etc."""
@@ -1375,10 +1447,11 @@ def git_diff(cached: bool = False, filename: str = None, folder_context=None) ->
         cmd_args.append("--cached")
     if filename:
         if not _check_bounds(filename, folder_context):
-             logger.warning(f"git_diff: Access denied or path ignored: {filename}")
-             return f"Error: Access denied or path ignored. '{filename}'"
+            logger.warning(f"git_diff: Access denied or path ignored: {filename}")
+            return f"Error: Access denied or path ignored. '{filename}'"
         cmd_args.append(filename)
     return run_git_command(cmd_args, folder_context)
+
 
 def git_checkout(branch: str, create: bool = False, folder_context=None) -> str:
     """Switch branches or restore working tree files."""
@@ -1388,19 +1461,22 @@ def git_checkout(branch: str, create: bool = False, folder_context=None) -> str:
     cmd_args.append(branch)
     return run_git_command(cmd_args, folder_context)
 
+
 def git_add(files: list[str], folder_context=None) -> str:
     """Adds file contents to the index."""
     for f in files:
         if f != "." and not _check_bounds(f, folder_context):
-             logger.warning(f"git_add: Access denied or path ignored: {f}")
-             return f"Error: Access denied or path ignored. '{f}'"
-    
+            logger.warning(f"git_add: Access denied or path ignored: {f}")
+            return f"Error: Access denied or path ignored. '{f}'"
+
     cmd_args = ["add"] + files
     return run_git_command(cmd_args, folder_context)
+
 
 def git_commit(message: str, folder_context=None) -> str:
     """Record changes to the repository."""
     return run_git_command(["commit", "-m", message], folder_context)
+
 
 def git_push(remote: str = "origin", branch: str = None, folder_context=None) -> str:
     """Update remote refs."""
@@ -1409,12 +1485,14 @@ def git_push(remote: str = "origin", branch: str = None, folder_context=None) ->
         cmd_args.append(branch)
     return run_git_command(cmd_args, folder_context)
 
+
 def git_pull(remote: str = "origin", branch: str = None, folder_context=None) -> str:
     """Fetch from and integrate with another repository."""
     cmd_args = ["pull", remote]
     if branch:
         cmd_args.append(branch)
     return run_git_command(cmd_args, folder_context)
+
 
 def git_branch(folder_context) -> str:
     """List branches."""
@@ -1433,48 +1511,48 @@ def url_grounding(url: str, folder_context) -> str:
                 browser = p.chromium.launch(headless=True)
             except Exception as e:
                 return f"Error: Failed to launch browser. You may need to run 'playwright install chromium'. Details: {e}"
-                
+
             page = browser.new_page()
-            
+
             # Wait for network idle to ensure JS has rendered content
             page.goto(url, wait_until="networkidle")
-            
+
             content = page.content()
             browser.close()
-            
+
             soup = BeautifulSoup(content, "html.parser")
-            
+
             # Remove script and style elements
             for script_or_style in soup(["script", "style"]):
                 script_or_style.decompose()
 
             # Get text
             text = soup.get_text(separator="\n")
-            
+
             # Clean up whitespace
             lines = (line.strip() for line in text.splitlines())
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = "\n".join(chunk for chunk in chunks if chunk)
-            
+
             return text
     except (ImportError, Exception):
         # Fallback to a simpler method if playwright is not installed or fails
         try:
             import httpx
             from bs4 import BeautifulSoup
-            
+
             response = httpx.get(url, follow_redirects=True, timeout=30.0)
             response.raise_for_status()
-            
+
             soup = BeautifulSoup(response.text, "html.parser")
             for script_or_style in soup(["script", "style"]):
                 script_or_style.decompose()
-            
+
             text = soup.get_text(separator="\n")
             lines = (line.strip() for line in text.splitlines())
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = "\n".join(chunk for chunk in chunks if chunk)
-            
+
             return f"(Note: Playwright not installed or failed, JS-heavy content might be missing)\n\n{text}"
         except Exception as e:
             return f"Error accessing URL: {e}"
@@ -1485,11 +1563,12 @@ def read_document(filename: str, folder_context) -> str:
     if not _check_bounds(filename, folder_context):
         logger.warning(f"read_document: Access denied or file ignored: {filename}")
         return f"Error: Access denied or file ignored. '{filename}'"
-    
+
     ext = os.path.splitext(filename)[1].lower()
     if ext == ".pdf":
         try:
             from pypdf import PdfReader
+
             reader = PdfReader(filename)
             text = ""
             for page in reader.pages:
@@ -1499,11 +1578,13 @@ def read_document(filename: str, folder_context) -> str:
             return text
         except ImportError:
             logger.error("read_document: 'pypdf' not installed.")
-            return "Error: 'pypdf' is not installed. Please install it to parse PDF files."
+            return (
+                "Error: 'pypdf' is not installed. Please install it to parse PDF files."
+            )
         except Exception as e:
             logger.error(f"read_document: Error reading PDF {filename}: {e}")
             return f"Error reading PDF: {e}"
-    
+
     # Default to read_file for other text-based documents
     return read_file(filename, folder_context)
 
@@ -1697,7 +1778,7 @@ def _handle_memory_placeholder(message: str) -> Callable[..., str]:
 
 
 def _legacy_handler(
-    handler: Callable[[dict, Any, Any, dict | None], str]
+    handler: Callable[[dict, Any, Any, dict | None], str],
 ) -> Callable[[dict, ToolExecutionContext], str]:
     def _wrapped(args: dict, context: ToolExecutionContext) -> str:
         return handler(args, context.folder_context, context.ui, context.variables)
@@ -1763,7 +1844,9 @@ def _handle_git_diff(args, folder_context, ui, variables) -> str:
 
 
 def _handle_git_checkout(args, folder_context, ui, variables) -> str:
-    return git_checkout(args.get("branch", ""), args.get("create", False), folder_context)
+    return git_checkout(
+        args.get("branch", ""), args.get("create", False), folder_context
+    )
 
 
 def _handle_git_add(args, folder_context, ui, variables) -> str:
@@ -1805,10 +1888,32 @@ def _handle_create_feature_plan(args, folder_context, ui, variables) -> str:
     feature_id = args.get("feature_id") or args.get("feature_name", "")
     metadata_dir = getattr(folder_context, "feature_metadata_dir", "") or ""
     metadata_path = ""
+    session = getattr(args, "session", None)
     if metadata_dir:
         os.makedirs(metadata_dir, exist_ok=True)
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(feature_id).strip().lower()).strip("_")
         metadata_path = os.path.join(metadata_dir, f"{slug or 'feature'}.json")
+    # Check if plan already exists and handle draft vs approved states
+    existing_plan = None
+    if metadata_path and os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                existing_plan = json.load(f)
+        except Exception:
+            pass
+
+    # If plan exists and is approved, reject recreation
+    if existing_plan and existing_plan.get("approved"):
+        return "Error: Cannot recreate an approved feature plan. To modify the plan structure, you must first update the approval status to false or create a new feature with a different feature_id."
+
+    # If plan exists but is not approved (draft mode), allow overwrite with warning
+    if existing_plan and not existing_plan.get("approved"):
+        logger.info(f"Overwriting draft feature plan: {metadata_path}")
+        if ui:
+            ui.show_info(
+                "⚠️  Overwriting draft feature plan - previous unapproved changes will be lost"
+            )
+
     plan = create_feature_plan(
         args.get("feature_name", ""),
         args.get("feature_request", ""),
@@ -1822,25 +1927,88 @@ def _handle_create_feature_plan(args, folder_context, ui, variables) -> str:
 
 
 def _handle_get_feature_plan(args, folder_context, ui, variables) -> str:
-    directory = args.get("directory", "")
-    metadata_path = getattr(folder_context, "feature_metadata_index", {}).get(directory)
+    session = getattr(args, "session", None)                         
+    if not session:                                                  
+        return "Error: This tool requires an active session context."
+    return _handle_get_feature_plan_session(args, session)
+
+
+def _handle_get_feature_plan_session(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    feature_state = session.session_manager.get_feature_state() if session else None
+
+    directory = args.get("directory")                                           
+    if not directory and feature_state:                                         
+        directory = feature_state.get("directory")                              
+    if not directory:                                                           
+        return "Error: No directory provided and no active feature in session." 
+                                                                                
+    metadata_path = getattr(context.folder_context, "feature_metadata_index", {}).get(
+        directory
+    )
+    if (
+        not metadata_path
+        and feature_state
+        and feature_state.get("directory") == directory
+    ):
+        metadata_path = feature_state.get("metadata_path")
+
+    # Load existing plan to check approval status                                                                   
+    existing_plan = None                                                                                            
+    if metadata_path and os.path.exists(metadata_path):                                                             
+        try:                                                                                                        
+            with open(metadata_path, "r", encoding="utf-8") as f:                                                   
+                existing_plan = json.load(f)                                                                        
+        except Exception:                                                                                           
+            pass                                                                                                    
+                                                                                                                    
+    # If plan is approved, reject structural modifications                                                          
+    # Only allow metadata updates: approved, review_status, review_notes                                            
+    if existing_plan and existing_plan.get("approved"):                                                             
+        # Check if agent is trying to modify structural fields                                                      
+        structural_fields = ["phases", "feature_plan", "feature_name", "feature_request", "feature_id", "directory"]
+        for field in structural_fields:                                                                             
+            if field in args:
+                return f"Error: Cannot modify '{field}' on an approved feature plan. Approved plans are locked from structural changes. Only metadata fields (approved, review_status, review_notes) can be updated. To restructure the plan, set approved=false first or create a new feature."
+                                                                                       
+    # Validate that only allowed metadata fields are being updated                     
+    allowed_fields = {"approved", "review_status", "review_notes", "directory"}        
+    for key in args.keys():                                                            
+        if key not in allowed_fields:                                                  
+            logger.warning(f"update_feature_plan: Ignoring unauthorized field '{key}'")
+                                                                                       
     plan = refresh_and_persist_feature_plan(directory, metadata_path=metadata_path)
     return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
 
 
-def _handle_update_feature_plan(args, folder_context, ui, variables) -> str:
-    directory = args.get("directory", "")
-    metadata_path = getattr(folder_context, "feature_metadata_index", {}).get(directory)
+def _handle_update_feature_plan_session(
+    args: dict, context: ToolExecutionContext
+) -> str:
+    session = context.session
+    feature_state = session.session_manager.get_feature_state() if session else None
+
+    directory = args.get("directory") or (
+        feature_state.get("directory") if feature_state else None
+    )
+    if not directory:
+        return "Error: No directory provided and no active feature in session."
+
+    metadata_path = getattr(context.folder_context, "feature_metadata_index", {}).get(
+        directory
+    )
+    if (
+        not metadata_path
+        and feature_state
+        and feature_state.get("directory") == directory
+    ):
+        metadata_path = feature_state.get("metadata_path")
+
     plan = update_feature_plan_metadata(
         directory,
         approved=args.get("approved"),
         review_status=args.get("review_status"),
         review_notes=args.get("review_notes"),
         metadata_path=metadata_path,
-    )
-    plan = refresh_and_persist_feature_plan(
-        plan.directory,
-        metadata_path=plan.metadata_path or metadata_path,
     )
     return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
 
@@ -1851,7 +2019,9 @@ def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
         "summary": str(args.get("summary", "")).strip(),
         "details": str(args.get("details", "")).strip(),
         "requested_input": str(args.get("requested_input", "")).strip(),
-        "questions": [str(item).strip() for item in args.get("questions", []) if str(item).strip()],
+        "questions": [
+            str(item).strip() for item in args.get("questions", []) if str(item).strip()
+        ],
     }
     return json.dumps(payload, indent=2, sort_keys=True)
 
@@ -1884,7 +2054,9 @@ def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
             continue
 
         if context.ui:
-            context.ui.show_info(f"  [{i+1}/{len(commands)}] Executing in batch: {name}")
+            context.ui.show_info(
+                f"  [{i + 1}/{len(commands)}] Executing in batch: {name}"
+            )
 
         res = execute_tool(
             name,
@@ -1906,13 +2078,27 @@ def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
 TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
     "flush": _legacy_handler(_handle_flush),
-    "save_memory": _legacy_handler(_handle_memory_placeholder("Memory save requested.")),
-    "save_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad save requested.")),
-    "search_memory": _legacy_handler(_handle_memory_placeholder("Memory search requested.")),
-    "search_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad search requested.")),
-    "list_memory": _legacy_handler(_handle_memory_placeholder("Memory listing requested.")),
-    "list_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad listing requested.")),
-    "clear_scratchpad": _legacy_handler(_handle_memory_placeholder("Scratchpad cleared.")),
+    "save_memory": _legacy_handler(
+        _handle_memory_placeholder("Memory save requested.")
+    ),
+    "save_scratchpad": _legacy_handler(
+        _handle_memory_placeholder("Scratchpad save requested.")
+    ),
+    "search_memory": _legacy_handler(
+        _handle_memory_placeholder("Memory search requested.")
+    ),
+    "search_scratchpad": _legacy_handler(
+        _handle_memory_placeholder("Scratchpad search requested.")
+    ),
+    "list_memory": _legacy_handler(
+        _handle_memory_placeholder("Memory listing requested.")
+    ),
+    "list_scratchpad": _legacy_handler(
+        _handle_memory_placeholder("Scratchpad listing requested.")
+    ),
+    "clear_scratchpad": _legacy_handler(
+        _handle_memory_placeholder("Scratchpad cleared.")
+    ),
     "read_file": _legacy_handler(_handle_read_file),
     "search_for_string": _legacy_handler(_handle_search_for_string),
     "get_chunk": _legacy_handler(_handle_get_chunk),
@@ -1936,8 +2122,8 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "read_document": _legacy_handler(_handle_read_document),
     "git_branch": _legacy_handler(_handle_git_branch),
     "create_feature_plan": _legacy_handler(_handle_create_feature_plan),
-    "get_feature_plan": _legacy_handler(_handle_get_feature_plan),
-    "update_feature_plan": _legacy_handler(_handle_update_feature_plan),
+    "get_feature_plan": _handle_get_feature_plan_session,
+    "update_feature_plan": _handle_update_feature_plan_session,
     "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
 }
@@ -1951,6 +2137,7 @@ def execute_tool(
     variables: dict = None,
     *,
     invocation_source: str = "session",
+    session: Any = None,
 ) -> str:
     """Descriptor-backed dispatcher with argument validation."""
 
@@ -1972,5 +2159,6 @@ def execute_tool(
         ui,
         variables,
         invocation_source=invocation_source,
+        session=session,
     )
     return handler(args, context)

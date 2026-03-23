@@ -212,6 +212,7 @@ def print_help():
     table.add_row(
         "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
     )
+    table.add_row("/memory <status|list|clear>", "", "View and manage agent memory stores")
     table.add_row("/help", "", "Show this help menu")
     table.add_row("/list", "/ls", "List saved conversations")
     table.add_row("/load [name]", "/open", "Load a conversation")
@@ -1252,6 +1253,80 @@ def handle_command(session, user_input, allow_prompt=True):
             ok=False,
             message=f"Usage: {cmd} <enable|disable|list> [toolname]",
         )
+
+    if cmd == "/memory":
+        parts = user_input.split()
+        subcommand = parts[1].lower() if len(parts) > 1 else "status"
+
+        if subcommand in ["status", "s"]:
+            if allow_prompt:
+                table = Table(title="Memory Status", box=box.ROUNDED)
+                table.add_column("Type", style="cyan")
+                table.add_column("Entries", style="green", justify="right")
+                table.add_column("Description", style="dim")
+                
+                table.add_row("Task Memory", str(len(session.task_memory.entries)), "Longer-term task context")
+                table.add_row("Scratchpad", str(len(session.turn_scratchpad.entries)), "Short-term turn context")
+                console.print(table)
+            return serialize_command_result(
+                session, cmd, 
+                data={
+                    "task_memory_count": len(session.task_memory.entries),
+                    "scratchpad_count": len(session.turn_scratchpad.entries)
+                }
+            )
+
+        if subcommand in ["list", "ls"]:
+            target = parts[2].lower() if len(parts) > 2 else "all"
+            
+            def get_entries_data(store):
+                return [entry.to_dict() for entry in store.entries]
+
+            if allow_prompt:
+                def print_entries(store, title):
+                    if not store.entries:
+                        console.print(f"[dim]No entries in {title}.[/dim]")
+                        return
+                    table = Table(title=title, box=box.SIMPLE)
+                    table.add_column("ID", style="dim", justify="right")
+                    table.add_column("Tags", style="yellow")
+                    table.add_column("Source", style="blue")
+                    table.add_column("Content")
+                    for entry in store.entries:
+                        tags = ", ".join(entry.tags) if entry.tags else "-"
+                        table.add_row(f"#{entry.id}", tags, entry.source or "-", entry.content)
+                    console.print(table)
+
+                if target in ["all", "task"]:
+                    print_entries(session.task_memory, "Task Memory")
+                if target in ["all", "scratchpad"]:
+                    print_entries(session.turn_scratchpad, "Turn Scratchpad")
+
+            return serialize_command_result(
+                session, cmd,
+                data={
+                    "task_memory": get_entries_data(session.task_memory) if target in ["all", "task"] else [],
+                    "scratchpad": get_entries_data(session.turn_scratchpad) if target in ["all", "scratchpad"] else []
+                }
+            )
+
+        if subcommand == "clear":
+            target = parts[2].lower() if len(parts) > 2 else "all"
+            msg_parts = []
+            if target in ["all", "task"]:
+                session.task_memory.clear()
+                msg_parts.append("Task memory")
+            if target in ["all", "scratchpad"]:
+                session.turn_scratchpad.clear()
+                msg_parts.append("Turn scratchpad")
+            
+            if not msg_parts:
+                return serialize_command_result(session, cmd, ok=False, message="Usage: /memory clear [task|scratchpad|all]")
+            
+            msg = " and ".join(msg_parts) + " cleared."
+            if allow_prompt:
+                console.print(f"[green]{msg}[/green]")
+            return serialize_command_result(session, cmd, message=msg)
 
     if cmd == "/stats":
         stats = build_stats_snapshot(session)

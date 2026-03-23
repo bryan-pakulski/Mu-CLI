@@ -106,6 +106,15 @@ class InputHandler:
             }
         )
 
+        memory_completer = NestedCompleter.from_nested_dict(
+            {
+                "status": None,
+                "list": {"task": None, "scratchpad": None, "all": None},
+                "ls": {"task": None, "scratchpad": None, "all": None},
+                "clear": {"task": None, "scratchpad": None, "all": None},
+            }
+        )
+
         mode_completer = NestedCompleter.from_nested_dict(MODE_CHOICES)
         folder_completer = MergedCompleter(
             [
@@ -136,6 +145,7 @@ class InputHandler:
             "/agentic": None,
             "/mode": mode_completer,
             "/feature": feature_completer,
+            "/memory": memory_completer,
             "/tool": tool_completer,
             "/tools": tool_completer,
             "/system": None,

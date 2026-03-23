@@ -72,6 +72,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 | `/yolo` | | Toggle YOLO mode (no tool approvals) |
 | `/tool <cmd>` | `/tools` | Manage tools: `enable`, `disable`, `list` |
 | `/list` | `/ls` | List saved conversations |
+| `/memory <cmd>` | | View and manage memory: `status`, `list`, `clear` |
 | `/load [name]` | `/open` | Load a conversation session |
 | `/new [name]` | | Start a fresh session |
 | `/model [name]` | | Show or change the current model |

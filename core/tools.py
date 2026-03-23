@@ -551,24 +551,24 @@ TOOLS = [
         requires_approval=False,
     ),
     ToolDefinition(
-        name="create_feature_plan",
-        description="Creates a structured feature implementation plan with phase markdown files in documentation/feature_req_<id>/ and stores the machine-readable manifest in session metadata.",
+        name="create_feature_task",
+        description="Creates a structured feature implementation plan consisting of one or more tasks. Stores metadata internally.",
         parameters={
             "type": "object",
             "properties": {
                 "feature_name": {
                     "type": "string",
-                    "description": "Short feature name used in the generated plan.",
+                    "description": "Short feature name.",
                 },
                 "feature_request": {
                     "type": "string",
-                    "description": "Original user request or concise requirements summary.",
+                    "description": "Full description of the feature request.",
                 },
                 "feature_id": {
                     "type": "string",
-                    "description": "Optional stable identifier for the feature request directory.",
+                    "description": "Optional stable identifier.",
                 },
-                "phases": {
+                "tasks": {
                     "type": "array",
                     "items": {
                         "type": "object",
@@ -597,48 +597,67 @@ TOOLS = [
                     },
                 },
             },
-            "required": ["feature_name", "feature_request", "phases"],
+            "required": ["feature_name", "feature_request", "tasks"],
         },
         requires_approval=True,
     ),
     ToolDefinition(
-        name="get_feature_plan",
-        description="Loads the session-managed feature plan metadata plus phase markdown files, refreshes progress from the markdown checklists, and returns a machine-readable summary.",
+        name="update_feature_task",
+        description="Modifies the details of a task before approval.",
         parameters={
             "type": "object",
             "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Path to the documentation/feature_req_<id> directory.",
-                }
+                "task_id": {"type": "integer"},
+                "title": {"type": "string"},
+                "objectives": {"type": "array", "items": {"type": "string"}},
+                "action_points": {"type": "array", "items": {"type": "string"}},
+                "exit_criteria": {"type": "array", "items": {"type": "string"}},
             },
+            "required": ["task_id"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="approve_feature_task",
+        description="Approves the feature plan, allowing implementation to begin.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "approved": {"type": "boolean", "default": True},
+            },
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="get_current_task",
+        description="Retrieves the currently active task in the feature plan.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="get_tasks",
+        description="Retrieves all tasks in the feature plan (previous, current, and upcoming).",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="update_task_status",
+        description="Updates the status of a specific task.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "status": {"type": "string", "enum": ["not_started", "in_progress", "completed"]},
+                "notes": {"type": "string"},
+            },
+            "required": ["task_id", "status"],
         },
         requires_approval=False,
     ),
     ToolDefinition(
-        name="update_feature_plan",
-        description="Updates session-managed feature plan metadata such as approval state and review status after the user approves the plan or the model completes review.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Path to the documentation/feature_req_<id> directory.",
-                },
-                "approved": {
-                    "type": "boolean",
-                    "description": "Whether the user has approved the feature plan.",
-                },
-                "review_status": {
-                    "type": "string",
-                    "description": "Review lifecycle value, such as pending, in_progress, or completed.",
-                },
-                "review_notes": {
-                    "type": "string",
-                    "description": "Optional review notes or final summary.",
-                },
-            },
-        },
+        name="clear_context",
+        description="Clears the current conversation history to free up space, usually done between tasks. System instructions and feature state are preserved.",
+        parameters={"type": "object", "properties": {}},
         requires_approval=True,
     ),
     ToolDefinition(
@@ -684,7 +703,8 @@ _COLLATED_TOOL_NAMES = {
     "git_branch",
     "url_grounding",
     "read_document",
-    "get_feature_plan",
+    "get_tasks",
+    "get_current_task",
 }
 
 
@@ -865,20 +885,35 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "result_mode": "raw",
         "server_policy": "session_only",
     },
-    "create_feature_plan": {
+    "create_feature_task": {
         "execution_kind": "mutate",
         "preview_policy": "optional",
-        "summary_builder": "feature_plan_summary",
     },
-    "get_feature_plan": {
+    "update_feature_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "approve_feature_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "get_current_task": {
         "execution_kind": "read",
         "preview_policy": "none",
-        "summary_builder": "feature_plan_summary",
     },
-    "update_feature_plan": {
+    "get_tasks": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "update_task_status": {
         "execution_kind": "mutate",
         "preview_policy": "optional",
-        "summary_builder": "feature_plan_summary",
+    },
+    "clear_context": {
+        "execution_kind": "control",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
     },
     "raise_blocker": {
         "execution_kind": "control",

@@ -30,12 +30,12 @@ VARIABLE_SCHEMA = {
     },  # Agent mode, determines the initial system prompt
     "ollama_host": {
         "type": str,
-        "default": "http://localhost:11434",
+        "default": "https://ollama.com",
     },  # Ollama server host
     "strict_mode": {"type": bool, "default": False},  # Forces approval for all tools
     "max_iterations": {
         "type": int,
-        "default": 80,
+        "default": 1000,
     },  # Max number of iterations to run for each conversation
     "compact_history": {
         "type": bool,
@@ -81,6 +81,10 @@ VARIABLE_SCHEMA = {
     "tool_context_window": {
         "type": int,
         "default": 6,
+    },
+    "active_context_window": {
+        "type": int,
+        "default": 150,
     },
     "auto_promote_memory": {
         "type": bool,

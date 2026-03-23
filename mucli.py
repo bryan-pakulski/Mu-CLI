@@ -311,8 +311,17 @@ def print_splash(session):
     [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns
-    """
+"""
+    # Add context warning if exceeding limit
+   context_limit = session.variables.get("active_context_window", 150)
+    if active_history > context_limit:
+        info_grid += f"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns  [bold yellow]⚠[/bold yellow] [dim](dropping old context, limit: {context_limit})[/dim]"""
+    else:
+        info_grid += f"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns"""
+
+    info_grid += "\n    "
 
     console.print(
         Panel(
@@ -593,6 +602,13 @@ def handle_command(session, user_input, allow_prompt=True):
     if cmd in ["/clearfiles", "/cf"]:
         session.clear_files()
         return serialize_command_result(session, cmd, message="Staged files cleared.")
+
+    if cmd in ["/clear-workspace", "/cw"]:
+        session.folder_context.folders.clear()
+        session.folder_context.workspace_file_tree = None
+        session.session_manager.save_history(session.folder_context)
+        refresh_memory_hud(session, ui)
+        return serialize_command_result(session, cmd, message="Workspace folders cleared.")
 
     if cmd in ["/folder", "/dir"]:
         if arg:

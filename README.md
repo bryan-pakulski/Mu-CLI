@@ -82,6 +82,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 | `/view` | `/v` | View full conversation history |
 | `/clear` | `/c` | Clear conversation history |
 | `/clearfiles` | `/cf` | Clear all staged files |
+| `/clear-workspace` | `/cw` | Clear all workspace folders |
 | `/system <txt>` | `/sys` | Update or view the system prompt |
 | `/thinking` | | Toggle thinking/reasoning mode (for supported models) |
 | `/variables` | | Show all session variables |

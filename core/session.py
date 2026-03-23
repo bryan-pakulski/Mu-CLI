@@ -416,7 +416,6 @@ class SessionManager:
         self.conversation_summary = ""
         self.summary_anchor = 0
         self.collation_buffer = CollationBuffer()
-        self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
@@ -601,7 +600,6 @@ class Session:
         self.debug = debug
         self.variables = session_manager.variables
         self.agentic = True
-        self.active_context_window = 150
         self.staged_files = []  # list of dicts
         self.disabled_tools = []  # list of tool names strings
         self._auto_promoted_this_turn = 0
@@ -875,7 +873,7 @@ class Session:
             self.session_manager.summary_anchor = 0
         start_index = max(
             self.session_manager.summary_anchor,
-            len(self.session_manager.history) - self.active_context_window,
+            len(self.session_manager.history) - self.variables.get("active_context_window", 150),
         )
         recent_history = self.session_manager.history[start_index:]
         tool_window = max(0, int(self.variables.get("tool_context_window", 6)))
@@ -1476,7 +1474,7 @@ class Session:
         base_system_prompt = self.system_instruction
         #if workspace_context:
         #    base_system_prompt += f"\n\n{workspace_context}"
-        self.session_manager.roll_history_summary(self.active_context_window)
+        self.session_manager.roll_history_summary(self.variables.get("active_context_window", 150))
         base_system_prompt = self._inject_conversation_summary(base_system_prompt)
 
         recent_history = self._prepare_runtime_history()

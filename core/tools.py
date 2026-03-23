@@ -2061,6 +2061,215 @@ def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
+def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> str:
+    """Creates a structured feature implementation plan."""
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+
+    feature_name = args.get("feature_name", "").strip()
+    feature_request = args.get("feature_request", "").strip()
+    feature_id = args.get("feature_id", "").strip() or None
+    tasks_data = args.get("tasks", [])
+
+    if not feature_name:
+        return "Error: feature_name is required."
+    if not tasks_data:
+        return "Error: tasks array is required."
+
+    # Get or create feature record
+    existing_feature = session.session_manager.get_feature(feature_id)
+    if existing_feature:
+        metadata_path = existing_feature.get("metadata_path", "")
+        directory = existing_feature.get("directory", "")
+    else:
+        # Create new feature
+        directory = _workspace_root(context.folder_context)
+        feature_id = feature_id or re.sub(r"[^a-zA-Z0-9]+", "_", feature_name.lower()).strip("_")
+        metadata_path = session.session_manager.get_feature_metadata_path(feature_id)
+        os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+
+    # Create the feature plan
+    plan = create_feature_plan(
+        feature_name,
+        feature_request,
+        tasks_data,
+        folder_context=context.folder_context,
+        feature_id=feature_id,
+        metadata_path=metadata_path,
+    )
+
+    # Update session state
+    summary = summarize_feature_plan(plan)
+    feature_record = {
+        "type": "feature",
+        "status": "draft",
+        "feature_id": plan.feature_id,
+        "feature_name": plan.feature_name,
+        "directory": directory or plan.directory,
+        "metadata_path": plan.metadata_path,
+        "feature_plan": summary,
+        "blocker": None,
+        "updated_at": time.time(),
+    }
+    session.session_manager.upsert_feature(feature_record)
+    session.session_manager.activate_feature(plan.feature_id)
+    session.session_manager.save_history()
+
+    if context.ui:
+        context.ui.show_info(f"Created feature plan: {plan.feature_id} with {len(plan.tasks)} tasks")
+
+    return json.dumps({"ok": True, "feature_id": plan.feature_id, "task_count": len(plan.tasks), "plan": summary}, indent=2, sort_keys=True)
+
+
+def _handle_update_feature_task(args: dict, context: ToolExecutionContext) -> str:
+    """Updates task content before approval."""
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+
+    task_id = args.get("task_id")
+    if task_id is None:
+        return "Error: task_id is required."
+
+    feature_state = session.session_manager.get_feature_state()
+    if not feature_state:
+        return "Error: No active feature in session."
+
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+
+    plan = update_task_content(
+        metadata_path,
+        task_id,
+        title=args.get("title"),
+        objectives=args.get("objectives"),
+        action_points=args.get("action_points"),
+        exit_criteria=args.get("exit_criteria"),
+        notes=args.get("notes"),
+    )
+
+    summary = summarize_feature_plan(plan)
+    session.session_manager.set_feature_state({"feature_plan": summary, **feature_state})
+
+    return json.dumps({"ok": True, "task_id": task_id, "plan": summary}, indent=2, sort_keys=True)
+
+
+def _handle_approve_feature_task(args: dict, context: ToolExecutionContext) -> str:
+    """Approves or rejects the feature plan."""
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+
+    approved = args.get("approved", True)
+
+    feature_state = session.session_manager.get_feature_state()
+    if not feature_state:
+        return "Error: No active feature in session."
+
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+
+    plan = update_feature_plan_metadata(
+        feature_state.get("directory", ""),
+        approved=approved,
+        metadata_path=metadata_path,
+    )
+
+    summary = summarize_feature_plan(plan)
+    status = "approved" if approved else "rejected"
+
+    if context.ui:
+        context.ui.show_info(f"Feature plan {status}: {plan.feature_id}")
+
+    return json.dumps({"ok": True, "approved": approved, "feature_id": plan.feature_id, "plan": summary}, indent=2, sort_keys=True)
+
+
+def _handle_get_current_task(args: dict, context: ToolExecutionContext) -> str:
+    """Gets the current active task."""
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+
+    feature_state = session.session_manager.get_feature_state()
+    if not feature_state:
+        return json.dumps({"error": "No active feature in session.", "task": None}, indent=2)
+
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return json.dumps({"error": "Feature metadata not found.", "task": None}, indent=2)
+
+    plan = load_feature_plan(metadata_path)
+    next_task = plan.next_incomplete_task()
+
+    if next_task:
+        return json.dumps({"task": asdict(next_task), "feature_id": plan.feature_id}, indent=2, sort_keys=True)
+    else:
+        return json.dumps({"task": None, "message": "All tasks completed.", "feature_id": plan.feature_id}, indent=2)
+
+
+def _handle_get_tasks(args: dict, context: ToolExecutionContext) -> str:
+    """Gets all tasks in the feature plan."""
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+
+    feature_state = session.session_manager.get_feature_state()
+    if not feature_state:
+        return json.dumps({"error": "No active feature in session.", "tasks": []}, indent=2)
+
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return json.dumps({"error": "Feature metadata not found.", "tasks": []}, indent=2)
+
+    plan = load_feature_plan(metadata_path)
+    tasks = [asdict(t) for t in plan.tasks]
+
+    return json.dumps({"tasks": tasks, "feature_id": plan.feature_id, "feature_name": plan.feature_name}, indent=2, sort_keys=True)
+
+
+def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str:
+    """Updates task status during execution."""
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+
+    task_id = args.get("task_id")
+    status = args.get("status")
+    notes = args.get("notes")
+
+    if task_id is None:
+        return "Error: task_id is required."
+    if not status:
+        return "Error: status is required."
+
+    valid_statuses = ["not_started", "in_progress", "completed"]
+    if status not in valid_statuses:
+        return f"Error: status must be one of {valid_statuses}."
+
+    feature_state = session.session_manager.get_feature_state()
+    if not feature_state:
+        return "Error: No active feature in session."
+
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+
+    plan = update_task_status(metadata_path, task_id, status, notes)
+    summary = summarize_feature_plan(plan)
+
+    # Update session state
+    updated_feature = {**feature_state, "feature_plan": summary}
+    session.session_manager.set_feature_state(updated_feature)
+
+    if context.ui:
+        context.ui.show_info(f"Task {task_id} status updated to '{status}'")
+
+    return json.dumps({"ok": True, "task_id": task_id, "status": status, "plan": summary}, indent=2, sort_keys=True)
+
+
 def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
     commands = args.get("commands", [])
     if not isinstance(commands, list):
@@ -2159,6 +2368,12 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "create_feature_plan": _legacy_handler(_handle_create_feature_plan),
     "get_feature_plan": _handle_get_feature_plan_session,
     "update_feature_plan": _handle_update_feature_plan_session,
+    "create_feature_task": _handle_create_feature_task,
+    "update_feature_task": _handle_update_feature_task,
+    "approve_feature_task": _handle_approve_feature_task,
+    "get_current_task": _handle_get_current_task,
+    "get_tasks": _handle_get_tasks,
+    "update_task_status": _handle_update_task_status,
     "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
 }

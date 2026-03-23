@@ -1333,7 +1333,7 @@ class Session:
                 display_args=display_args,
                 count_info=count_info,
                 can_approve=approval_plan.can_approve,
-            session=self,
+                session=self,
                 modifications=[mod.to_payload() for mod in approval_plan.modifications],
                 preview_error=approval_plan.preview_error,
                 error_code=approval_plan.error_code,
@@ -1436,7 +1436,9 @@ class Session:
             self.ui.render_message("user", text)
 
         workspace_context = ""
+
         if self.folder_context.folders:
+            # Let tools auto discover workspace content as needed
             if self.agentic:
                 active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
                 tool_desc_str = "\n".join(
@@ -1448,9 +1450,9 @@ class Session:
                     agent_mode, AGENTIC_MODES["default"]
                 )
                 mode_system_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get(agent_mode, "")
-
-                map_str = self.folder_context.get_tree_map()
-                workspace_context = f"<workspace_map>\n{map_str}\n</workspace_map>\n\n{AGENTIC_SYSTEM_BASE.format(tool_descriptions=tool_desc_str)}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
+                
+                # Providers automatically generated tool prompts so don't need to be embedded into the system prompt 
+                workspace_context = f"{AGENTIC_SYSTEM_BASE}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
                 if mode_system_prompt:
                     workspace_context += (
                         f"\n\n### {agent_mode.upper()} SYSTEM PROMPT\n"
@@ -1472,8 +1474,8 @@ class Session:
                         workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
-        if workspace_context:
-            base_system_prompt += f"\n\n{workspace_context}"
+        #if workspace_context:
+        #    base_system_prompt += f"\n\n{workspace_context}"
         self.session_manager.roll_history_summary(self.active_context_window)
         base_system_prompt = self._inject_conversation_summary(base_system_prompt)
 

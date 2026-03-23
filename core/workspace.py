@@ -21,6 +21,7 @@ class FolderContext:
             ".vscode",
             ".env",
             ".venv",
+            ".key",
         }
 
     def add_folder(self, folder_path):

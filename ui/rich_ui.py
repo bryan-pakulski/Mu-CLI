@@ -56,6 +56,7 @@ class RichUI:
     def request_tool_approval(
         self,
         *,
+        session,
         tool_name,
         tool_args,
         display_args,

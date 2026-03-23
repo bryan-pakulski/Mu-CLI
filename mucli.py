@@ -250,6 +250,7 @@ def print_help():
     table.add_row("/system <txt>", "/sys", "Update system prompt")
     table.add_row("/thinking", "", "Toggle thinking mode")
     table.add_row("/view", "", "View conversation history")
+    table.add_row("/workspace", "", "List workspace metadata")
 
     console.print(table)
     console.print(
@@ -659,6 +660,9 @@ def handle_command(session, user_input, allow_prompt=True):
         if allow_prompt and not session.folder_context.folders:
             console.print("[yellow]No folders currently monitored.[/yellow]")
             console.print("Usage: /folder <path> OR /folder remove <path>")
+        else:
+            console.print(f"[dim]Workspace folders: {session.folder_context.folders}[/dim]")
+
         return serialize_command_result(
             session,
             cmd,
@@ -1018,6 +1022,15 @@ def handle_command(session, user_input, allow_prompt=True):
                 "available_modes": AGENT_MODE_METADATA,
             },
         )
+    
+    if cmd == "/workspace":
+        console.print("\n[bold cyan]Workspace Folders:[/bold cyan]")
+        console.print(session.folder_context.get_tree_map())
+        return serialize_command_result(
+            session,
+            cmd,
+            data={"folders": list(session.folder_context.folders)},
+        )
 
     if cmd == "/feature":
         feature_parts = arg.split(" ", 1) if arg else ["list"]
@@ -1248,6 +1261,7 @@ def handle_command(session, user_input, allow_prompt=True):
 
     if cmd == "/thinking":
         session.thinking = not session.thinking
+        console.print(f"[dim]Thinking mode: {session.thinking}[/dim]")
         refresh_memory_hud(session, ui)
         return serialize_command_result(
             session, cmd, message=f"Thinking mode: {session.thinking}"
@@ -1255,6 +1269,7 @@ def handle_command(session, user_input, allow_prompt=True):
 
     if cmd == "/agentic":
         session.agentic = not session.agentic
+        console.print(f"[dim]Agentic mode: {session.agentic}[/dim]")
         refresh_memory_hud(session, ui)
         return serialize_command_result(
             session, cmd, message=f"Agentic mode: {session.agentic}"
@@ -1264,6 +1279,7 @@ def handle_command(session, user_input, allow_prompt=True):
         current = session.variables.get("yolo", False)
         session.variables["yolo"] = not current
         session.session_manager.save_history(session.folder_context)
+        console.print(f"[dim]YOLO mode: {session.variables['yolo']}[/dim]")
         refresh_memory_hud(session, ui)
         return serialize_command_result(
             session, cmd, message=f"YOLO mode: {session.variables['yolo']}"

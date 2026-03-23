@@ -4,7 +4,7 @@ import time
 import datetime
 import difflib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, field
 from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
@@ -2180,7 +2180,10 @@ def _handle_update_feature_task(args: dict, context: ToolExecutionContext) -> st
 
     summary = summarize_feature_plan(plan)
     session.session_manager.set_feature_state(
-        {"feature_plan": summary, **feature_state}
+        {
+            "feature_plan": summary,
+            **feature_state,
+        }
     )
 
     return json.dumps(

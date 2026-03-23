@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import datetime
 import difflib
 import re
@@ -9,9 +10,13 @@ from providers.base import ToolDefinition
 from utils.logger import logger
 from core.feature_mode import (
     create_feature_plan,
+    load_feature_plan,
+    update_task_status,
+    update_task_content,
     refresh_and_persist_feature_plan,
     summarize_feature_plan,
     update_feature_plan_metadata,
+    _workspace_root,
 )
 
 

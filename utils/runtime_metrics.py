@@ -42,7 +42,7 @@ def collect_runtime_metrics(session):
     if anchor > hist_len:
         anchor = 0
     active_turns = max(0, hist_len - anchor)
-    context_limit = _max_int(getattr(session, "active_context_window", 1))
+    context_limit = _max_int(session.variables.get("active_context_window", 150))
 
     memory_limit = _max_int(
         session.variables.get(

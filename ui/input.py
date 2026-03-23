@@ -245,7 +245,7 @@ class InputHandler:
 
         yolo_text = ""
         if self.is_yolo_enabled():
-            yolo_text = ' <yolo-indicator>✦</yolo-indicator>'
+            yolo_text = " <yolo-indicator>✦</yolo-indicator>"
 
         return (
             f"<prompt>[{session_name}]</prompt>"
@@ -269,9 +269,7 @@ class InputHandler:
 
     def get_input(self, session_name, staged_files, agent_mode="default"):
         message = HTML(
-            self.build_prompt_markup(
-                session_name, staged_files, agent_mode=agent_mode
-            )
+            self.build_prompt_markup(session_name, staged_files, agent_mode=agent_mode)
         )
 
         def bottom_toolbar():

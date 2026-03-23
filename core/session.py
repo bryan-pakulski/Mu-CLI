@@ -144,7 +144,9 @@ class SessionManager:
                         self.feature_state = feature_state
                     self.feature_registry = {
                         str(key): value
-                        for key, value in (data.get("feature_registry", {}) or {}).items()
+                        for key, value in (
+                            data.get("feature_registry", {}) or {}
+                        ).items()
                         if isinstance(value, dict)
                     }
                     self.active_feature_id = data.get("active_feature_id")
@@ -197,7 +199,11 @@ class SessionManager:
             logger.error(f"Failed to save history: {e}")
 
     def get_feature_state(self):
-        return deepcopy(self.feature_state) if isinstance(self.feature_state, dict) else None
+        return (
+            deepcopy(self.feature_state)
+            if isinstance(self.feature_state, dict)
+            else None
+        )
 
     def get_feature_metadata_root(self) -> str:
         return os.path.join(HISTORY_DIR, "features", self.current_session_name)
@@ -219,7 +225,9 @@ class SessionManager:
 
     def list_features(self) -> list[dict]:
         features = [deepcopy(feature) for feature in self.feature_registry.values()]
-        features.sort(key=lambda feature: float(feature.get("updated_at", 0) or 0), reverse=True)
+        features.sort(
+            key=lambda feature: float(feature.get("updated_at", 0) or 0), reverse=True
+        )
         return features
 
     def get_feature(self, feature_id: str | None = None) -> dict | None:
@@ -243,7 +251,9 @@ class SessionManager:
         feature_id = _slugify_feature_id(feature_id)
         record = deepcopy(feature)
         record["feature_id"] = feature_id
-        record["updated_at"] = float(record.get("updated_at", time.time()) or time.time())
+        record["updated_at"] = float(
+            record.get("updated_at", time.time()) or time.time()
+        )
         self.feature_registry[feature_id] = record
         return deepcopy(record)
 
@@ -290,7 +300,9 @@ class SessionManager:
             "feature_plan": {
                 "feature_id": feature_id,
                 "feature_name": feature_name.strip() or feature_id,
-                "feature_request": feature_request.strip() or feature_name.strip() or feature_id,
+                "feature_request": feature_request.strip()
+                or feature_name.strip()
+                or feature_id,
                 "directory": directory,
                 "metadata_path": metadata_path,
                 "approved": False,
@@ -454,7 +466,9 @@ class SessionManager:
                 if len(result) > 140:
                     result = f"{result[:137]}..."
                 if result:
-                    parts.append(f"tool_result:{part.get('tool_name', 'tool')} => {result}")
+                    parts.append(
+                        f"tool_result:{part.get('tool_name', 'tool')} => {result}"
+                    )
             elif part_type == "file":
                 file_ref = part.get("file_ref", {})
                 parts.append(
@@ -680,7 +694,10 @@ class Session:
             return "awaiting_approval"
         if feature_plan.get("review_status") == "completed":
             return "completed"
-        if feature_plan.get("phases_completed") and feature_plan.get("next_phase") is None:
+        if (
+            feature_plan.get("phases_completed")
+            and feature_plan.get("next_phase") is None
+        ):
             return "review"
         return "running"
 
@@ -693,9 +710,7 @@ class Session:
     ):
         current = self.session_manager.get_feature_state() or {}
         current_plan = current.get("feature_plan")
-        plan_summary = (
-            feature_plan if isinstance(feature_plan, dict) else current_plan
-        )
+        plan_summary = feature_plan if isinstance(feature_plan, dict) else current_plan
         next_phase = (
             plan_summary.get("next_phase")
             if isinstance(plan_summary, dict)
@@ -732,7 +747,9 @@ class Session:
         self.session_manager.set_feature_state(state, self.folder_context)
         self.sync_runtime_state()
 
-    def _refresh_feature_state_from_directory(self, directory: str, *, status: str | None = None):
+    def _refresh_feature_state_from_directory(
+        self, directory: str, *, status: str | None = None
+    ):
         if not str(directory or "").strip():
             return
         try:
@@ -755,7 +772,11 @@ class Session:
         raw_result,
         structured_result,
     ):
-        if tool_name in {"create_feature_plan", "get_feature_plan", "update_feature_plan"}:
+        if tool_name in {
+            "create_feature_plan",
+            "get_feature_plan",
+            "update_feature_plan",
+        }:
             data = {}
             if isinstance(structured_result, dict):
                 data = structured_result.get("data", {}) or {}
@@ -873,7 +894,8 @@ class Session:
             self.session_manager.summary_anchor = 0
         start_index = max(
             self.session_manager.summary_anchor,
-            len(self.session_manager.history) - self.variables.get("active_context_window", 150),
+            len(self.session_manager.history)
+            - self.variables.get("active_context_window", 150),
         )
         recent_history = self.session_manager.history[start_index:]
         tool_window = max(0, int(self.variables.get("tool_context_window", 6)))
@@ -934,7 +956,9 @@ class Session:
         return prefix + compressed_turn
 
     def _inject_conversation_summary(self, system_prompt: str) -> str:
-        summary = str(getattr(self.session_manager, "conversation_summary", "") or "").strip()
+        summary = str(
+            getattr(self.session_manager, "conversation_summary", "") or ""
+        ).strip()
         if not summary:
             return system_prompt
         return (
@@ -1135,7 +1159,12 @@ class Session:
                 "stderr_present": "STDERR:" in raw_text,
                 "preview": self._clip_preview(raw_text, 260),
             }
-        elif tool_name in {"create_feature_plan", "get_feature_plan", "update_feature_plan", "raise_blocker"}:
+        elif tool_name in {
+            "create_feature_plan",
+            "get_feature_plan",
+            "update_feature_plan",
+            "raise_blocker",
+        }:
             structured["data"] = self._parse_json_result(raw_text)
         elif tool_name in {"git_status", "git_diff", "git_log", "git_branch"}:
             structured["data"] = {
@@ -1293,7 +1322,7 @@ class Session:
             self.ui,
             self.variables,
             invocation_source=invocation_source,
-                session=self,
+            session=self,
         )
 
     def _prompt_tool_choice(
@@ -1423,7 +1452,10 @@ class Session:
 
         parts = list(self.staged_files)
         effective_text = text
-        if text and str(self.variables.get("agent_mode", "default")).lower() == "feature":
+        if (
+            text
+            and str(self.variables.get("agent_mode", "default")).lower() == "feature"
+        ):
             effective_text = self._build_feature_mode_prompt(text)
         if effective_text:
             parts.append({"type": "text", "text": effective_text})
@@ -1448,8 +1480,8 @@ class Session:
                     agent_mode, AGENTIC_MODES["default"]
                 )
                 mode_system_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get(agent_mode, "")
-                
-                # Providers automatically generated tool prompts so don't need to be embedded into the system prompt 
+
+                # Providers automatically generated tool prompts so don't need to be embedded into the system prompt
                 workspace_context = f"{AGENTIC_SYSTEM_BASE}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
                 if mode_system_prompt:
                     workspace_context += (
@@ -1472,9 +1504,11 @@ class Session:
                         workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
-        #if workspace_context:
+        # if workspace_context:
         #    base_system_prompt += f"\n\n{workspace_context}"
-        self.session_manager.roll_history_summary(self.variables.get("active_context_window", 150))
+        self.session_manager.roll_history_summary(
+            self.variables.get("active_context_window", 150)
+        )
         base_system_prompt = self._inject_conversation_summary(base_system_prompt)
 
         recent_history = self._prepare_runtime_history()
@@ -1722,7 +1756,10 @@ class Session:
                     needs_approval = approval_plan is not None
                     if needs_approval:
                         result = None
-                        if self.variables.get("yolo", False) and approval_plan.can_approve:
+                        if (
+                            self.variables.get("yolo", False)
+                            and approval_plan.can_approve
+                        ):
                             result = self._execute_tool_with_memory(
                                 part.tool_name,
                                 part.tool_args,

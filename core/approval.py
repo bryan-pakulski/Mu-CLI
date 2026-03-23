@@ -79,7 +79,9 @@ def build_approval_plan(
     strict_mode: bool = False,
     yolo: bool = False,
 ) -> ApprovalPlan:
-    requires_approval = False if yolo else (strict_mode or tool_requires_approval(tool_name, tool_args))
+    requires_approval = (
+        False if yolo else (strict_mode or tool_requires_approval(tool_name, tool_args))
+    )
     if not requires_approval:
         return ApprovalPlan(
             tool_name=tool_name,

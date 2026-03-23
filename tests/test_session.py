@@ -81,19 +81,43 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
         {"role": "user", "parts": [{"type": "text", "text": "Implement feature"}]},
         {
             "role": "assistant",
-            "parts": [{"type": "tool_call", "tool_name": "read_file", "tool_args": {"filename": "a.py"}}],
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "tool_name": "read_file",
+                    "tool_args": {"filename": "a.py"},
+                }
+            ],
         },
         {
             "role": "tool",
-            "parts": [{"type": "tool_result", "tool_name": "read_file", "tool_result": "alpha"}],
+            "parts": [
+                {
+                    "type": "tool_result",
+                    "tool_name": "read_file",
+                    "tool_result": "alpha",
+                }
+            ],
         },
         {
             "role": "assistant",
-            "parts": [{"type": "tool_call", "tool_name": "search_for_string", "tool_args": {"string": "beta"}}],
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "tool_name": "search_for_string",
+                    "tool_args": {"string": "beta"},
+                }
+            ],
         },
         {
             "role": "tool",
-            "parts": [{"type": "tool_result", "tool_name": "search_for_string", "tool_result": "beta result"}],
+            "parts": [
+                {
+                    "type": "tool_result",
+                    "tool_name": "search_for_string",
+                    "tool_result": "beta result",
+                }
+            ],
         },
     ]
 
@@ -170,12 +194,13 @@ def test_send_message_injects_rolling_conversation_summary():
 
     session.send_message("turn 4")
 
-    assert "rolling summary of older conversation history" in provider.last_system_prompt.lower()
+    assert (
+        "rolling summary of older conversation history"
+        in provider.last_system_prompt.lower()
+    )
     assert "turn 1" in provider.last_system_prompt
     assert sm.summary_anchor == 2
     assert "turn 1" in sm.conversation_summary
-
-
 
 
 def test_prepare_runtime_history_keeps_signed_tool_messages():
@@ -209,32 +234,57 @@ def test_prepare_runtime_history_keeps_signed_tool_messages():
         },
         {
             "role": "assistant",
-            "parts": [{"type": "tool_call", "tool_name": "search_for_string", "tool_args": {"string": "beta"}}],
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "tool_name": "search_for_string",
+                    "tool_args": {"string": "beta"},
+                }
+            ],
         },
         {
             "role": "tool",
-            "parts": [{"type": "tool_result", "tool_name": "search_for_string", "tool_result": "beta result"}],
+            "parts": [
+                {
+                    "type": "tool_result",
+                    "tool_name": "search_for_string",
+                    "tool_result": "beta result",
+                }
+            ],
         },
         {
             "role": "assistant",
-            "parts": [{"type": "tool_call", "tool_name": "list_dir", "tool_args": {"path": "."}}],
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "tool_name": "list_dir",
+                    "tool_args": {"path": "."},
+                }
+            ],
         },
         {
             "role": "tool",
-            "parts": [{"type": "tool_result", "tool_name": "list_dir", "tool_result": "file.py"}],
+            "parts": [
+                {
+                    "type": "tool_result",
+                    "tool_name": "list_dir",
+                    "tool_result": "file.py",
+                }
+            ],
         },
     ]
 
     prepared = session._prepare_runtime_history(turn_start_index=0)
 
     signed_messages = [
-        msg for msg in prepared if any(part.get("thought_signature") for part in msg.get("parts", []))
+        msg
+        for msg in prepared
+        if any(part.get("thought_signature") for part in msg.get("parts", []))
     ]
     assert len(signed_messages) == 2
     assert signed_messages[0]["parts"][0]["tool_name"] == "read_file"
     assert not any(
-        msg.get("role") == "system"
-        and "read_file" in msg["parts"][0]["text"]
+        msg.get("role") == "system" and "read_file" in msg["parts"][0]["text"]
         for msg in prepared
     )
 
@@ -307,9 +357,12 @@ def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
     tool_result = tool_message["parts"][0]["tool_result"]
 
     assert tool_result["data"]["collated"] is True
-    assert tool_result["raw"].startswith("Stored 'read_file' result in collation buffer")
+    assert tool_result["raw"].startswith(
+        "Stored 'read_file' result in collation buffer"
+    )
     assert "important line" not in tool_result["raw"]
     assert tool_result["data"]["source_line_count"] == 50
+
 
 def test_memory_round_trip_via_session_manager(tmp_path, monkeypatch):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path))
@@ -447,9 +500,14 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert "create_feature_plan" in provider.last_user_text
     assert "phase_N.md" in provider.last_user_text
     assert "Do not create alternate planning documents" in provider.last_user_text
-    assert "do not begin code implementation until the user has reviewed and approved the plan" in provider.last_user_text
+    assert (
+        "do not begin code implementation until the user has reviewed and approved the plan"
+        in provider.last_user_text
+    )
     assert "use save_scratchpad for temporary phase notes" in provider.last_user_text
-    assert "call flush before acting on the collected context" in provider.last_user_text
+    assert (
+        "call flush before acting on the collected context" in provider.last_user_text
+    )
     assert "call raise_blocker" in provider.last_user_text
     assert "FEATURE MODE SYSTEM PROMPT" in provider.last_system_prompt
     assert "You are in Feature Plan Engine mode" in provider.last_system_prompt
@@ -496,7 +554,9 @@ def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypat
     assert feature_state["status"] == "awaiting_approval"
 
 
-def test_sync_feature_state_refreshes_after_feature_phase_file_changes(tmp_path, monkeypatch):
+def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-state-refresh")
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
@@ -517,13 +577,17 @@ def test_sync_feature_state_refreshes_after_feature_phase_file_changes(tmp_path,
         folder_context=session.folder_context,
     )
     plan = update_feature_plan_metadata(plan.directory, approved=True)
-    session._set_feature_state(feature_plan=summarize_feature_plan(plan), status="running")
+    session._set_feature_state(
+        feature_plan=summarize_feature_plan(plan), status="running"
+    )
 
     phase_path = os.path.join(plan.directory, "phase_1.md")
     with open(phase_path, encoding="utf-8") as handle:
         phase_text = handle.read()
     updated_phase_text = (
-        phase_text.replace("- [ ] Ship the implementation", "- [x] Ship the implementation")
+        phase_text.replace(
+            "- [ ] Ship the implementation", "- [x] Ship the implementation"
+        )
         .replace("- [ ] Update the phase file", "- [x] Update the phase file")
         .replace("- [ ] The phase is complete", "- [x] The phase is complete")
     )
@@ -561,12 +625,18 @@ def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):
                         MessagePart(
                             type="tool_call",
                             tool_name="write_file",
-                            tool_args={"filename": str(tmp_path / "one.txt"), "content": "one"},
+                            tool_args={
+                                "filename": str(tmp_path / "one.txt"),
+                                "content": "one",
+                            },
                         ),
                         MessagePart(
                             type="tool_call",
                             tool_name="write_file",
-                            tool_args={"filename": str(tmp_path / "two.txt"), "content": "two"},
+                            tool_args={
+                                "filename": str(tmp_path / "two.txt"),
+                                "content": "two",
+                            },
                         ),
                     ],
                     input_tokens=1,
@@ -795,7 +865,11 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
     feature_state = sm.get_feature_state()
 
     assert feature_state is not None
-    assert feature_state["metadata_path"].startswith(str(tmp_path / "history" / "features"))
+    assert feature_state["metadata_path"].startswith(
+        str(tmp_path / "history" / "features")
+    )
     assert os.path.exists(feature_state["metadata_path"])
-    assert not os.path.exists(os.path.join(feature_state["directory"], "feature_plan.json"))
+    assert not os.path.exists(
+        os.path.join(feature_state["directory"], "feature_plan.json")
+    )
     assert os.path.exists(os.path.join(feature_state["directory"], "phase_1.md"))

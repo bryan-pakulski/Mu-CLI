@@ -245,7 +245,10 @@ class TaskManager:
 
     def _feature_metadata_path(self, directory: str) -> str | None:
         state = self.session.session_manager.get_feature_state() or {}
-        if str(state.get("directory", "") or "").strip() == str(directory or "").strip():
+        if (
+            str(state.get("directory", "") or "").strip()
+            == str(directory or "").strip()
+        ):
             metadata_path = str(state.get("metadata_path", "") or "").strip()
             if metadata_path:
                 return metadata_path
@@ -462,7 +465,11 @@ class TaskManager:
                 continue
             payload = tool_result.get("tool_result")
             if isinstance(payload, dict):
-                data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+                data = (
+                    payload.get("data")
+                    if isinstance(payload.get("data"), dict)
+                    else payload
+                )
                 if data:
                     return data
         return None
@@ -472,7 +479,6 @@ class TaskManager:
             "Additional user context was provided to unblock the feature loop. Use it together with the current feature phase documents before deciding the next step.\n\n"
             f"User unblock input:\n{resume_input.strip()}"
         )
-
 
     def _feature_partial_result(
         self,
@@ -584,12 +590,16 @@ class TaskManager:
                             prompt = f"{prompt}\n\n{self._build_feature_resume_prompt(active_resume_input)}"
                             active_resume_input = None
 
-                        original_compact_history = self.session.variables.get("compact_history", False)
+                        original_compact_history = self.session.variables.get(
+                            "compact_history", False
+                        )
                         self.session.variables["compact_history"] = False
                         try:
                             result = self.session.send_message(prompt)
                         finally:
-                            self.session.variables["compact_history"] = original_compact_history
+                            self.session.variables["compact_history"] = (
+                                original_compact_history
+                            )
                         updated_plan = refresh_and_persist_feature_plan(
                             directory,
                             metadata_path=self._feature_metadata_path(directory),
@@ -609,7 +619,9 @@ class TaskManager:
                         if blocker:
                             blocker_payload = {
                                 **blocker,
-                                "history_length": len(self.session.session_manager.history),
+                                "history_length": len(
+                                    self.session.session_manager.history
+                                ),
                                 "conversation_hint": "Use GET /api/history or the saved task result to inspect prior work before resuming.",
                             }
                             partial_result = self._feature_partial_result(
@@ -672,7 +684,10 @@ class TaskManager:
                             )
                             return
 
-                        if active_previous_signature == signature and result.get("status") == "completed":
+                        if (
+                            active_previous_signature == signature
+                            and result.get("status") == "completed"
+                        ):
                             blocked_result = self._feature_partial_result(
                                 cycles=cycles,
                                 feature_plan=updated_summary,
@@ -795,10 +810,15 @@ class TaskManager:
                     directory=directory,
                     approval_manager=approval_manager,
                     max_cycles=max(
-                        int(persisted_state.get("max_cycles", max_cycles) or max_cycles),
+                        int(
+                            persisted_state.get("max_cycles", max_cycles) or max_cycles
+                        ),
                         max_cycles,
                     ),
-                    start_cycle=int(persisted_state.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)),
+                    start_cycle=int(
+                        persisted_state.get("next_cycle", len(cycles) + 1)
+                        or (len(cycles) + 1)
+                    ),
                     cycles=cycles,
                     previous_signature=persisted_state.get("previous_signature"),
                     resume_input=None,
@@ -851,7 +871,9 @@ class TaskManager:
         if task.get("status") != "awaiting_input":
             raise ValueError("Feature task is not waiting for user input.")
         if not str(user_input).strip():
-            raise ValueError("Field 'user_input' is required to resume a blocked feature loop.")
+            raise ValueError(
+                "Field 'user_input' is required to resume a blocked feature loop."
+            )
 
         payload = task.get("payload", {})
         partial_result = task.get("result", {}) or {}
@@ -862,7 +884,9 @@ class TaskManager:
                 task_id=task_id,
                 directory=str(payload.get("directory", "") or ""),
                 max_cycles=int(payload.get("max_cycles", 12) or 12),
-                next_cycle=int(payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)),
+                next_cycle=int(
+                    payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)
+                ),
                 previous_signature=payload.get("previous_signature"),
                 cycles=cycles,
                 status="running",
@@ -873,7 +897,9 @@ class TaskManager:
             directory=str(payload.get("directory", "") or ""),
             approval_manager=approval_manager,
             max_cycles=int(payload.get("max_cycles", 12) or 12),
-            start_cycle=int(payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)),
+            start_cycle=int(
+                payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)
+            ),
             cycles=cycles,
             previous_signature=payload.get("previous_signature"),
             resume_input=str(user_input),
@@ -1118,7 +1144,9 @@ def build_feature_plan_payload(session, directory: str) -> dict:
     if str(state.get("directory", "") or "").strip() == str(directory or "").strip():
         metadata_path = str(state.get("metadata_path", "") or "").strip()
     if not metadata_path:
-        metadata_path = session.session_manager.get_feature_metadata_index().get(directory, "")
+        metadata_path = session.session_manager.get_feature_metadata_index().get(
+            directory, ""
+        )
     plan = refresh_and_persist_feature_plan(
         directory,
         metadata_path=metadata_path or None,
@@ -1365,7 +1393,13 @@ def serve(session, host: str, port: int, command_handler):
                     query = parse_qs(parsed.query)
                     directory = str(query.get("directory", [""])[0] or "").strip()
                     if not directory:
-                        self._send_json(400, {"ok": False, "error": "Query parameter 'directory' is required."})
+                        self._send_json(
+                            400,
+                            {
+                                "ok": False,
+                                "error": "Query parameter 'directory' is required.",
+                            },
+                        )
                         return
                     try:
                         self._send_json(
@@ -1379,7 +1413,9 @@ def serve(session, host: str, port: int, command_handler):
                             },
                         )
                     except FileNotFoundError:
-                        self._send_json(404, {"ok": False, "error": "Feature plan not found."})
+                        self._send_json(
+                            404, {"ok": False, "error": "Feature plan not found."}
+                        )
                     return
                 if parsed.path == "/api/staged-files":
                     self._send_json(
@@ -1465,7 +1501,9 @@ def serve(session, host: str, port: int, command_handler):
             if parsed.path == "/api/feature-plan/approve":
                 directory = str(payload.get("directory", "") or "").strip()
                 if not directory:
-                    self._send_json(400, {"ok": False, "error": "Field 'directory' is required."})
+                    self._send_json(
+                        400, {"ok": False, "error": "Field 'directory' is required."}
+                    )
                     return
                 approved = bool(payload.get("approved", True))
                 review_status = payload.get("review_status")
@@ -1473,15 +1511,28 @@ def serve(session, host: str, port: int, command_handler):
                 try:
                     metadata_path = ""
                     feature_state = session.session_manager.get_feature_state() or {}
-                    if str(feature_state.get("directory", "") or "").strip() == directory:
-                        metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+                    if (
+                        str(feature_state.get("directory", "") or "").strip()
+                        == directory
+                    ):
+                        metadata_path = str(
+                            feature_state.get("metadata_path", "") or ""
+                        ).strip()
                     if not metadata_path:
-                        metadata_path = session.session_manager.get_feature_metadata_index().get(directory, "")
+                        metadata_path = (
+                            session.session_manager.get_feature_metadata_index().get(
+                                directory, ""
+                            )
+                        )
                     plan = update_feature_plan_metadata(
                         directory,
                         approved=approved,
-                        review_status=None if review_status is None else str(review_status),
-                        review_notes=None if review_notes is None else str(review_notes),
+                        review_status=(
+                            None if review_status is None else str(review_status)
+                        ),
+                        review_notes=(
+                            None if review_notes is None else str(review_notes)
+                        ),
                         metadata_path=metadata_path or None,
                     )
                     plan = refresh_and_persist_feature_plan(
@@ -1489,15 +1540,21 @@ def serve(session, host: str, port: int, command_handler):
                         metadata_path=plan.metadata_path or metadata_path or None,
                     )
                 except FileNotFoundError:
-                    self._send_json(404, {"ok": False, "error": "Feature plan not found."})
+                    self._send_json(
+                        404, {"ok": False, "error": "Feature plan not found."}
+                    )
                     return
-                self._send_json(200, {"ok": True, "feature_plan": summarize_feature_plan(plan)})
+                self._send_json(
+                    200, {"ok": True, "feature_plan": summarize_feature_plan(plan)}
+                )
                 return
 
             if parsed.path == "/api/feature-loop":
                 directory = str(payload.get("directory", "") or "").strip()
                 if not directory:
-                    self._send_json(400, {"ok": False, "error": "Field 'directory' is required."})
+                    self._send_json(
+                        400, {"ok": False, "error": "Field 'directory' is required."}
+                    )
                     return
                 async_mode = bool(payload.get("async", False))
                 max_cycles = int(payload.get("max_cycles", 12) or 12)
@@ -1522,7 +1579,9 @@ def serve(session, host: str, port: int, command_handler):
                 if task["status"] == "completed":
                     self._send_json(200, task["result"])
                 elif task["status"] == "error":
-                    self._send_json(500, {"ok": False, "error": task["error"], "task": task})
+                    self._send_json(
+                        500, {"ok": False, "error": task["error"], "task": task}
+                    )
                 else:
                     self._send_json(202, {"ok": True, "task": task})
                 return
@@ -1531,10 +1590,14 @@ def serve(session, host: str, port: int, command_handler):
                 task_id = str(payload.get("task_id", "") or "").strip()
                 user_input = str(payload.get("user_input", "") or "")
                 if not task_id:
-                    self._send_json(400, {"ok": False, "error": "Field 'task_id' is required."})
+                    self._send_json(
+                        400, {"ok": False, "error": "Field 'task_id' is required."}
+                    )
                     return
                 if not user_input.strip():
-                    self._send_json(400, {"ok": False, "error": "Field 'user_input' is required."})
+                    self._send_json(
+                        400, {"ok": False, "error": "Field 'user_input' is required."}
+                    )
                     return
                 try:
                     task = state["task_manager"].resume_feature_task(
@@ -1560,7 +1623,9 @@ def serve(session, host: str, port: int, command_handler):
                 if task["status"] == "completed":
                     self._send_json(200, task["result"])
                 elif task["status"] == "error":
-                    self._send_json(500, {"ok": False, "error": task["error"], "task": task})
+                    self._send_json(
+                        500, {"ok": False, "error": task["error"], "task": task}
+                    )
                 else:
                     self._send_json(202, {"ok": True, "task": task})
                 return

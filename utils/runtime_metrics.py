@@ -15,7 +15,10 @@ def collect_feature_progress(session):
         return {"state": feature_state, "plan": None}
 
     try:
-        from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
+        from core.feature_mode import (
+            refresh_and_persist_feature_plan,
+            summarize_feature_plan,
+        )
 
         plan = refresh_and_persist_feature_plan(
             directory,
@@ -52,7 +55,9 @@ def collect_runtime_metrics(session):
         )
     )
     collation_limit = _max_int(getattr(session.collation_buffer, "max_bytes", 1))
-    collation_bytes = sum(len(result or "") for _, _, result in session.collation_buffer.entries)
+    collation_bytes = sum(
+        len(result or "") for _, _, result in session.collation_buffer.entries
+    )
 
     return {
         "ctx": {"current": active_turns, "maximum": context_limit},

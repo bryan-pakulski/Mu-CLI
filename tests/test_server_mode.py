@@ -140,7 +140,10 @@ def test_mode_command_without_args_lists_available_modes():
     assert result["data"]["current_mode"] == session.variables["agent_mode"]
     assert result["data"]["available_modes"] == AGENT_MODE_METADATA
     assert "feature" in result["data"]["available_modes"]
-    assert result["data"]["available_modes"]["feature"]["documentation"] == "documentation/feature_plan_engine.md"
+    assert (
+        result["data"]["available_modes"]["feature"]["documentation"]
+        == "documentation/feature_plan_engine.md"
+    )
 
 
 def test_stats_command_returns_session_snapshot():
@@ -160,7 +163,9 @@ def test_clear_command_resets_context_memory_and_features(tmp_path, monkeypatch)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    session.session_manager.history = [{"role": "user", "parts": [{"type": "text", "text": "hello"}]}]
+    session.session_manager.history = [
+        {"role": "user", "parts": [{"type": "text", "text": "hello"}]}
+    ]
     session.task_memory.save("remember this", tags=["fact"])
     session.turn_scratchpad.save("temporary note", tags=["temp"])
     session.collation_buffer.add("read_file", {"filename": "demo.txt"}, "payload")
@@ -197,7 +202,9 @@ def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
     workspace.mkdir()
     handle_command(session, f"/folder {workspace}", allow_prompt=False)
 
-    created = handle_command(session, "/feature new Stats Dashboard", allow_prompt=False)
+    created = handle_command(
+        session, "/feature new Stats Dashboard", allow_prompt=False
+    )
     feature = created["data"]["feature"]
 
     assert created["ok"] is True
@@ -251,7 +258,9 @@ def test_runtime_and_sessions_payloads_reflect_state_changes(tmp_path):
     session.agentic = False
     session.system_instruction = "updated system prompt"
     session.variables["yolo"] = True
-    session.session_manager.set_feature_state({"status": "awaiting_input", "type": "feature"})
+    session.session_manager.set_feature_state(
+        {"status": "awaiting_input", "type": "feature"}
+    )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
@@ -375,7 +384,9 @@ def test_headless_tool_task_requires_approval_for_direct_tool_calls(tmp_path):
     assert completed is not None
     assert completed["status"] == "completed"
     assert completed["result"]["ok"] is True
-    assert completed["result"]["result"]["raw"] == f"Successfully wrote to {target_file}"
+    assert (
+        completed["result"]["result"]["raw"] == f"Successfully wrote to {target_file}"
+    )
     assert completed["result"]["result"]["telemetry"]["execution_source"] == "server"
     assert completed["result"]["result"]["modified_files"] == [str(target_file)]
     assert target_file.read_text(encoding="utf-8") == "updated\n"
@@ -413,7 +424,10 @@ def test_headless_tool_task_rejection_keeps_file_unchanged(tmp_path):
 
     assert completed is not None
     assert completed["status"] == "completed"
-    assert completed["result"]["result"]["raw"] == "User denied direct tool call: write_file"
+    assert (
+        completed["result"]["result"]["raw"]
+        == "User denied direct tool call: write_file"
+    )
     assert target_file.read_text(encoding="utf-8") == "before\n"
 
 
@@ -465,7 +479,10 @@ class DummyFeatureLoopProvider:
                     MessagePart(
                         type="tool_call",
                         tool_name="write_file",
-                        tool_args={"filename": self.phase_path, "content": phase_content},
+                        tool_args={
+                            "filename": self.phase_path,
+                            "content": phase_content,
+                        },
                     )
                 ],
                 input_tokens=5,
@@ -546,8 +563,12 @@ def test_feature_loop_runs_until_review_completed(tmp_path):
     approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
     ui.bind_runtime(task_manager, approval_manager)
 
-    task = task_manager.start_feature_task(str(workspace_doc_dir), approval_manager, max_cycles=4)
-    completed = task_manager.wait_for_task_state(task["task_id"], {"completed", "error"}, timeout=10.0)
+    task = task_manager.start_feature_task(
+        str(workspace_doc_dir), approval_manager, max_cycles=4
+    )
+    completed = task_manager.wait_for_task_state(
+        task["task_id"], {"completed", "error"}, timeout=10.0
+    )
 
     assert completed is not None
     assert completed["status"] == "completed"
@@ -580,7 +601,9 @@ class DummyBlockingFeatureProvider:
                             "summary": "Need a product choice",
                             "details": "Implementation cannot continue until the user picks the target provider.",
                             "requested_input": "Choose whether the feature should use OpenAI or Gemini.",
-                            "questions": ["Which provider should the new feature target?"],
+                            "questions": [
+                                "Which provider should the new feature target?"
+                            ],
                         },
                     )
                 ],
@@ -604,7 +627,10 @@ class DummyBlockingFeatureProvider:
                     MessagePart(
                         type="tool_call",
                         tool_name="write_file",
-                        tool_args={"filename": self.phase_path, "content": phase_content},
+                        tool_args={
+                            "filename": self.phase_path,
+                            "content": phase_content,
+                        },
                     )
                 ],
                 input_tokens=5,
@@ -685,7 +711,9 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
     ui.bind_runtime(task_manager, approval_manager)
 
-    task = task_manager.start_feature_task(str(workspace_doc_dir), approval_manager, max_cycles=5)
+    task = task_manager.start_feature_task(
+        str(workspace_doc_dir), approval_manager, max_cycles=5
+    )
     blocked = task_manager.wait_for_task_state(
         task["task_id"], {"awaiting_input", "error"}, timeout=10.0
     )
@@ -770,7 +798,10 @@ def test_feature_loop_state_persists_across_session_reload(tmp_path):
     reloaded_manager = SessionManager(
         ui=reloaded_ui, session_name=session.session_manager.current_session_name
     )
-    reloaded_manager.provider_config = {"provider": "dummy", "model": provider.model_name}
+    reloaded_manager.provider_config = {
+        "provider": "dummy",
+        "model": provider.model_name,
+    }
     reloaded_session = Session(
         provider=provider,
         thinking=False,
@@ -807,6 +838,4 @@ def test_feature_loop_state_persists_across_session_reload(tmp_path):
     assert completed is not None
     assert completed["status"] == "completed"
     assert completed["result"]["feature_plan"]["review_status"] == "completed"
-    assert (
-        reloaded_session.session_manager.get_feature_state()["status"] == "completed"
-    )
+    assert reloaded_session.session_manager.get_feature_state()["status"] == "completed"

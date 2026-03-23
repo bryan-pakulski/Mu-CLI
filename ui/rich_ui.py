@@ -127,7 +127,10 @@ class RichUI:
 
         meters = [
             self.build_meter(
-                "CTX", metrics["ctx"]["current"], metrics["ctx"]["maximum"], color="cyan"
+                "CTX",
+                metrics["ctx"]["current"],
+                metrics["ctx"]["maximum"],
+                color="cyan",
             ),
             self.build_meter(
                 "MEM",
@@ -150,7 +153,9 @@ class RichUI:
         ]
 
         current_mode = metrics["mode"]["name"]
-        mode_description = AGENT_MODE_METADATA.get(current_mode, {}).get("description", "")
+        mode_description = AGENT_MODE_METADATA.get(current_mode, {}).get(
+            "description", ""
+        )
 
         meta = Text()
         meta.append("tokens ", style="dim white")
@@ -254,7 +259,15 @@ class RichUI:
 
         return Align.center(
             Panel(
-                Group(*meters, Text(""), meta, token_line, mode_line, *feature_group, legend),
+                Group(
+                    *meters,
+                    Text(""),
+                    meta,
+                    token_line,
+                    mode_line,
+                    *feature_group,
+                    legend,
+                ),
                 title="[bold white]/stats[/bold white]",
                 border_style="bright_black",
                 box=box.ROUNDED,

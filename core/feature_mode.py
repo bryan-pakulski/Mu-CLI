@@ -14,6 +14,7 @@ STATUS_REVIEW_PENDING = "pending"
 
 FEATURE_PLAN_FILENAME = "feature_plan.json"
 
+
 @dataclass
 class FeatureTask:
     id: int
@@ -23,6 +24,7 @@ class FeatureTask:
     exit_criteria: list[str] = field(default_factory=list)
     status: str = STATUS_NOT_STARTED
     notes: str = ""
+
 
 @dataclass
 class FeaturePlan:
@@ -66,14 +68,21 @@ class FeaturePlan:
             return STATUS_IN_PROGRESS
         return STATUS_NOT_STARTED
 
+
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower()).strip("_")
     return slug or "feature"
 
+
 def _workspace_root(folder_context) -> str:
-    if folder_context and getattr(folder_context, "folders", None) and folder_context.folders:
+    if (
+        folder_context
+        and getattr(folder_context, "folders", None)
+        and folder_context.folders
+    ):
         return os.path.abspath(folder_context.folders[0])
     return os.getcwd()
+
 
 def save_feature_plan(plan: FeaturePlan) -> FeaturePlan:
     plan.updated_at = time.time()
@@ -82,6 +91,7 @@ def save_feature_plan(plan: FeaturePlan) -> FeaturePlan:
         with open(plan.metadata_path, "w", encoding="utf-8") as handle:
             json.dump(asdict(plan), handle, indent=2)
     return plan
+
 
 def create_feature_plan(
     feature_name: str,
@@ -93,7 +103,7 @@ def create_feature_plan(
 ) -> FeaturePlan:
     workspace_root = _workspace_root(folder_context)
     slug = _slugify(feature_id or feature_name)
-    
+
     tasks = []
     for idx, t in enumerate(tasks_data, start=1):
         tasks.append(
@@ -117,13 +127,15 @@ def create_feature_plan(
     )
     return save_feature_plan(plan)
 
+
 def load_feature_plan(metadata_path: str) -> FeaturePlan:
     with open(metadata_path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
-    
+
     tasks_data = data.pop("tasks", [])
     tasks = [FeatureTask(**t) for t in tasks_data]
     return FeaturePlan(tasks=tasks, **data)
+
 
 def refresh_and_persist_feature_plan(
     directory: str,
@@ -133,25 +145,27 @@ def refresh_and_persist_feature_plan(
         raise ValueError("metadata_path is required for internal feature system")
     return load_feature_plan(metadata_path)
 
+
 def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
     summary = asdict(plan)
     summary["overall_status"] = plan.overall_status()
     summary["tasks_completed"] = plan.tasks_completed()
     summary["task_count"] = len(plan.tasks)
-    
+
     next_task = plan.next_incomplete_task()
     summary["next_task"] = asdict(next_task) if next_task else None
-    
+
     # For backward compatibility with things expecting 'phases'
     summary["phases"] = summary["tasks"]
     summary["next_phase"] = summary["next_task"]
     summary["phase_count"] = summary["task_count"]
     summary["phases_completed"] = summary["tasks_completed"]
-    
+
     return summary
 
+
 def update_feature_plan_metadata(
-    directory: str, # Kept for compatibility
+    directory: str,  # Kept for compatibility
     *,
     approved: bool | None = None,
     review_status: str | None = None,
@@ -169,6 +183,7 @@ def update_feature_plan_metadata(
         plan.review_notes = review_notes
     return save_feature_plan(plan)
 
+
 def update_task_status(
     metadata_path: str,
     task_id: int,
@@ -184,6 +199,7 @@ def update_task_status(
             break
     return save_feature_plan(plan)
 
+
 def update_task_content(
     metadata_path: str,
     task_id: int,
@@ -196,13 +212,19 @@ def update_task_content(
     plan = load_feature_plan(metadata_path)
     for task in plan.tasks:
         if task.id == task_id:
-            if title is not None: task.title = title
-            if objectives is not None: task.objectives = objectives
-            if action_points is not None: task.action_points = action_points
-            if exit_criteria is not None: task.exit_criteria = exit_criteria
-            if notes is not None: task.notes = notes
+            if title is not None:
+                task.title = title
+            if objectives is not None:
+                task.objectives = objectives
+            if action_points is not None:
+                task.action_points = action_points
+            if exit_criteria is not None:
+                task.exit_criteria = exit_criteria
+            if notes is not None:
+                task.notes = notes
             break
     return save_feature_plan(plan)
+
 
 def build_phase_execution_prompt(plan: FeaturePlan, task: FeatureTask) -> str:
     return (
@@ -213,6 +235,7 @@ def build_phase_execution_prompt(plan: FeaturePlan, task: FeatureTask) -> str:
         "Update the task status to 'completed' only when all exit criteria are met. "
         "If you are blocked, explain why in your response."
     )
+
 
 def build_review_prompt(plan: FeaturePlan) -> str:
     return (

@@ -647,7 +647,10 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "task_id": {"type": "integer"},
-                "status": {"type": "string", "enum": ["not_started", "in_progress", "completed"]},
+                "status": {
+                    "type": "string",
+                    "enum": ["not_started", "in_progress", "completed"],
+                },
                 "notes": {"type": "string"},
             },
             "required": ["task_id", "status"],
@@ -1962,8 +1965,8 @@ def _handle_create_feature_plan(args, folder_context, ui, variables) -> str:
 
 
 def _handle_get_feature_plan(args, folder_context, ui, variables) -> str:
-    session = getattr(args, "session", None)                         
-    if not session:                                                  
+    session = getattr(args, "session", None)
+    if not session:
         return "Error: This tool requires an active session context."
     return _handle_get_feature_plan_session(args, session)
 
@@ -1972,12 +1975,12 @@ def _handle_get_feature_plan_session(args: dict, context: ToolExecutionContext) 
     session = context.session
     feature_state = session.session_manager.get_feature_state() if session else None
 
-    directory = args.get("directory")                                           
-    if not directory and feature_state:                                         
-        directory = feature_state.get("directory")                              
-    if not directory:                                                           
-        return "Error: No directory provided and no active feature in session." 
-                                                                                
+    directory = args.get("directory")
+    if not directory and feature_state:
+        directory = feature_state.get("directory")
+    if not directory:
+        return "Error: No directory provided and no active feature in session."
+
     metadata_path = getattr(context.folder_context, "feature_metadata_index", {}).get(
         directory
     )
@@ -1988,30 +1991,37 @@ def _handle_get_feature_plan_session(args: dict, context: ToolExecutionContext) 
     ):
         metadata_path = feature_state.get("metadata_path")
 
-    # Load existing plan to check approval status                                                                   
-    existing_plan = None                                                                                            
-    if metadata_path and os.path.exists(metadata_path):                                                             
-        try:                                                                                                        
-            with open(metadata_path, "r", encoding="utf-8") as f:                                                   
-                existing_plan = json.load(f)                                                                        
-        except Exception:                                                                                           
-            pass                                                                                                    
-                                                                                                                    
-    # If plan is approved, reject structural modifications                                                          
-    # Only allow metadata updates: approved, review_status, review_notes                                            
-    if existing_plan and existing_plan.get("approved"):                                                             
-        # Check if agent is trying to modify structural fields                                                      
-        structural_fields = ["phases", "feature_plan", "feature_name", "feature_request", "feature_id", "directory"]
-        for field in structural_fields:                                                                             
+    # Load existing plan to check approval status
+    existing_plan = None
+    if metadata_path and os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                existing_plan = json.load(f)
+        except Exception:
+            pass
+
+    # If plan is approved, reject structural modifications
+    # Only allow metadata updates: approved, review_status, review_notes
+    if existing_plan and existing_plan.get("approved"):
+        # Check if agent is trying to modify structural fields
+        structural_fields = [
+            "phases",
+            "feature_plan",
+            "feature_name",
+            "feature_request",
+            "feature_id",
+            "directory",
+        ]
+        for field in structural_fields:
             if field in args:
                 return f"Error: Cannot modify '{field}' on an approved feature plan. Approved plans are locked from structural changes. Only metadata fields (approved, review_status, review_notes) can be updated. To restructure the plan, set approved=false first or create a new feature."
-                                                                                       
-    # Validate that only allowed metadata fields are being updated                     
-    allowed_fields = {"approved", "review_status", "review_notes", "directory"}        
-    for key in args.keys():                                                            
-        if key not in allowed_fields:                                                  
+
+    # Validate that only allowed metadata fields are being updated
+    allowed_fields = {"approved", "review_status", "review_notes", "directory"}
+    for key in args.keys():
+        if key not in allowed_fields:
             logger.warning(f"update_feature_plan: Ignoring unauthorized field '{key}'")
-                                                                                       
+
     plan = refresh_and_persist_feature_plan(directory, metadata_path=metadata_path)
     return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
 
@@ -2085,7 +2095,9 @@ def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> st
     else:
         # Create new feature
         directory = _workspace_root(context.folder_context)
-        feature_id = feature_id or re.sub(r"[^a-zA-Z0-9]+", "_", feature_name.lower()).strip("_")
+        feature_id = feature_id or re.sub(
+            r"[^a-zA-Z0-9]+", "_", feature_name.lower()
+        ).strip("_")
         metadata_path = session.session_manager.get_feature_metadata_path(feature_id)
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
 
@@ -2117,9 +2129,20 @@ def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> st
     session.session_manager.save_history()
 
     if context.ui:
-        context.ui.show_info(f"Created feature plan: {plan.feature_id} with {len(plan.tasks)} tasks")
+        context.ui.show_info(
+            f"Created feature plan: {plan.feature_id} with {len(plan.tasks)} tasks"
+        )
 
-    return json.dumps({"ok": True, "feature_id": plan.feature_id, "task_count": len(plan.tasks), "plan": summary}, indent=2, sort_keys=True)
+    return json.dumps(
+        {
+            "ok": True,
+            "feature_id": plan.feature_id,
+            "task_count": len(plan.tasks),
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def _handle_update_feature_task(args: dict, context: ToolExecutionContext) -> str:
@@ -2151,9 +2174,13 @@ def _handle_update_feature_task(args: dict, context: ToolExecutionContext) -> st
     )
 
     summary = summarize_feature_plan(plan)
-    session.session_manager.set_feature_state({"feature_plan": summary, **feature_state})
+    session.session_manager.set_feature_state(
+        {"feature_plan": summary, **feature_state}
+    )
 
-    return json.dumps({"ok": True, "task_id": task_id, "plan": summary}, indent=2, sort_keys=True)
+    return json.dumps(
+        {"ok": True, "task_id": task_id, "plan": summary}, indent=2, sort_keys=True
+    )
 
 
 def _handle_approve_feature_task(args: dict, context: ToolExecutionContext) -> str:
@@ -2184,7 +2211,16 @@ def _handle_approve_feature_task(args: dict, context: ToolExecutionContext) -> s
     if context.ui:
         context.ui.show_info(f"Feature plan {status}: {plan.feature_id}")
 
-    return json.dumps({"ok": True, "approved": approved, "feature_id": plan.feature_id, "plan": summary}, indent=2, sort_keys=True)
+    return json.dumps(
+        {
+            "ok": True,
+            "approved": approved,
+            "feature_id": plan.feature_id,
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def _handle_get_current_task(args: dict, context: ToolExecutionContext) -> str:
@@ -2195,19 +2231,34 @@ def _handle_get_current_task(args: dict, context: ToolExecutionContext) -> str:
 
     feature_state = session.session_manager.get_feature_state()
     if not feature_state:
-        return json.dumps({"error": "No active feature in session.", "task": None}, indent=2)
+        return json.dumps(
+            {"error": "No active feature in session.", "task": None}, indent=2
+        )
 
     metadata_path = feature_state.get("metadata_path", "")
     if not metadata_path or not os.path.exists(metadata_path):
-        return json.dumps({"error": "Feature metadata not found.", "task": None}, indent=2)
+        return json.dumps(
+            {"error": "Feature metadata not found.", "task": None}, indent=2
+        )
 
     plan = load_feature_plan(metadata_path)
     next_task = plan.next_incomplete_task()
 
     if next_task:
-        return json.dumps({"task": asdict(next_task), "feature_id": plan.feature_id}, indent=2, sort_keys=True)
+        return json.dumps(
+            {"task": asdict(next_task), "feature_id": plan.feature_id},
+            indent=2,
+            sort_keys=True,
+        )
     else:
-        return json.dumps({"task": None, "message": "All tasks completed.", "feature_id": plan.feature_id}, indent=2)
+        return json.dumps(
+            {
+                "task": None,
+                "message": "All tasks completed.",
+                "feature_id": plan.feature_id,
+            },
+            indent=2,
+        )
 
 
 def _handle_get_tasks(args: dict, context: ToolExecutionContext) -> str:
@@ -2218,16 +2269,28 @@ def _handle_get_tasks(args: dict, context: ToolExecutionContext) -> str:
 
     feature_state = session.session_manager.get_feature_state()
     if not feature_state:
-        return json.dumps({"error": "No active feature in session.", "tasks": []}, indent=2)
+        return json.dumps(
+            {"error": "No active feature in session.", "tasks": []}, indent=2
+        )
 
     metadata_path = feature_state.get("metadata_path", "")
     if not metadata_path or not os.path.exists(metadata_path):
-        return json.dumps({"error": "Feature metadata not found.", "tasks": []}, indent=2)
+        return json.dumps(
+            {"error": "Feature metadata not found.", "tasks": []}, indent=2
+        )
 
     plan = load_feature_plan(metadata_path)
     tasks = [asdict(t) for t in plan.tasks]
 
-    return json.dumps({"tasks": tasks, "feature_id": plan.feature_id, "feature_name": plan.feature_name}, indent=2, sort_keys=True)
+    return json.dumps(
+        {
+            "tasks": tasks,
+            "feature_id": plan.feature_id,
+            "feature_name": plan.feature_name,
+        },
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str:
@@ -2267,7 +2330,11 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     if context.ui:
         context.ui.show_info(f"Task {task_id} status updated to '{status}'")
 
-    return json.dumps({"ok": True, "task_id": task_id, "status": status, "plan": summary}, indent=2, sort_keys=True)
+    return json.dumps(
+        {"ok": True, "task_id": task_id, "status": status, "plan": summary},
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:

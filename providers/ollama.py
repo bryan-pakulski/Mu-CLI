@@ -19,7 +19,9 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self, model_name: str = "", host: str = "https://ollama.com"):
         if not self.API_KEY:
-            print("[Warning] OLLAMA_API_KEY environment variable is required to use public site, defaulting to localhost.")
+            print(
+                "[Warning] OLLAMA_API_KEY environment variable is required to use public site, defaulting to localhost."
+            )
             host = "http://localhost:11434"
         super().__init__(model_name)
         self.name = "ollama"
@@ -28,9 +30,11 @@ class OllamaProvider(LLMProvider):
     def get_available_models(self) -> List[str]:
         try:
             req = urllib.request.Request(
-                    f"{self.host}/api/tags",
-                    headers={"Authorization": f"Bearer {self.API_KEY}"} if self.API_KEY else {},
-                )
+                f"{self.host}/api/tags",
+                headers=(
+                    {"Authorization": f"Bearer {self.API_KEY}"} if self.API_KEY else {}
+                ),
+            )
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode("utf-8"))
                 return [m["name"] for m in data.get("models", [])]
@@ -106,12 +110,12 @@ class OllamaProvider(LLMProvider):
 
         if self.API_KEY:
             headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.API_KEY}"
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.API_KEY}",
             }
         else:
             headers = {
-                    "Content-Type": "application/json",
+                "Content-Type": "application/json",
             }
 
         req = urllib.request.Request(

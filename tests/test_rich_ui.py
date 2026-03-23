@@ -83,12 +83,14 @@ def test_live_status_line_renders_inline_bars():
 
 def test_build_live_status_shows_yolo_indicator_when_enabled():
     ui = RichUI()
-    session = _build_session(variables={
-        "memory_max_entries": 64,
-        "scratchpad_max_entries": 24,
-        "agent_mode": "feature",
-        "yolo": True,
-    })
+    session = _build_session(
+        variables={
+            "memory_max_entries": 64,
+            "scratchpad_max_entries": 24,
+            "agent_mode": "feature",
+            "yolo": True,
+        }
+    )
 
     status = ui.build_live_status(session, "dummy-model", 2, 5)
 

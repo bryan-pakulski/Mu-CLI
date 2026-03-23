@@ -54,7 +54,10 @@ def print_mode_overview(session):
 
 
 def _slugify_feature_id(value):
-    return re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower()).strip("_") or "feature"
+    return (
+        re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+        or "feature"
+    )
 
 
 def _default_feature_directory(session, feature_name):
@@ -113,8 +116,16 @@ def build_feature_markdown(feature, *, include_phases=True):
     if not isinstance(feature, dict):
         return "## Feature\n\nNo feature is currently selected."
 
-    plan = feature.get("feature_plan") if isinstance(feature.get("feature_plan"), dict) else {}
-    feature_name = feature.get("feature_name") or plan.get("feature_name") or feature.get("feature_id", "feature")
+    plan = (
+        feature.get("feature_plan")
+        if isinstance(feature.get("feature_plan"), dict)
+        else {}
+    )
+    feature_name = (
+        feature.get("feature_name")
+        or plan.get("feature_name")
+        or feature.get("feature_id", "feature")
+    )
     lines = [
         f"# Feature: {feature_name}",
         "",
@@ -212,7 +223,9 @@ def print_help():
     table.add_row(
         "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
     )
-    table.add_row("/memory <status|list|clear>", "", "View and manage agent memory stores")
+    table.add_row(
+        "/memory <status|list|clear>", "", "View and manage agent memory stores"
+    )
     table.add_row("/help", "", "Show this help menu")
     table.add_row("/list", "/ls", "List saved conversations")
     table.add_row("/load [name]", "/open", "Load a conversation")
@@ -313,7 +326,7 @@ def print_splash(session):
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
 """
     # Add context warning if exceeding limit
-   context_limit = session.variables.get("active_context_window", 150)
+    context_limit = session.variables.get("active_context_window", 150)
     if active_history > context_limit:
         info_grid += f"""
     [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns  [bold yellow]⚠[/bold yellow] [dim](dropping old context, limit: {context_limit})[/dim]"""
@@ -608,7 +621,9 @@ def handle_command(session, user_input, allow_prompt=True):
         session.folder_context.workspace_file_tree = None
         session.session_manager.save_history(session.folder_context)
         refresh_memory_hud(session, ui)
-        return serialize_command_result(session, cmd, message="Workspace folders cleared.")
+        return serialize_command_result(
+            session, cmd, message="Workspace folders cleared."
+        )
 
     if cmd in ["/folder", "/dir"]:
         if arg:
@@ -678,7 +693,9 @@ def handle_command(session, user_input, allow_prompt=True):
             console.print("[yellow]No folders currently monitored.[/yellow]")
             console.print("Usage: /folder <path> OR /folder remove <path>")
         else:
-            console.print(f"[dim]Workspace folders: {session.folder_context.folders}[/dim]")
+            console.print(
+                f"[dim]Workspace folders: {session.folder_context.folders}[/dim]"
+            )
 
         return serialize_command_result(
             session,
@@ -1039,7 +1056,7 @@ def handle_command(session, user_input, allow_prompt=True):
                 "available_modes": AGENT_MODE_METADATA,
             },
         )
-    
+
     if cmd == "/workspace":
         console.print("\n[bold cyan]Workspace Folders:[/bold cyan]")
         console.print(session.folder_context.get_tree_map())
@@ -1099,7 +1116,12 @@ def handle_command(session, user_input, allow_prompt=True):
                     for feature in features:
                         table.add_row(
                             feature.get("feature_id", ""),
-                            "*" if feature.get("feature_id") == session.session_manager.active_feature_id else "",
+                            (
+                                "*"
+                                if feature.get("feature_id")
+                                == session.session_manager.active_feature_id
+                                else ""
+                            ),
                             feature.get("status", "unknown"),
                             feature.get("feature_name", ""),
                             feature.get("directory", ""),
@@ -1280,25 +1302,35 @@ def handle_command(session, user_input, allow_prompt=True):
                 table.add_column("Type", style="cyan")
                 table.add_column("Entries", style="green", justify="right")
                 table.add_column("Description", style="dim")
-                
-                table.add_row("Task Memory", str(len(session.task_memory.entries)), "Longer-term task context")
-                table.add_row("Scratchpad", str(len(session.turn_scratchpad.entries)), "Short-term turn context")
+
+                table.add_row(
+                    "Task Memory",
+                    str(len(session.task_memory.entries)),
+                    "Longer-term task context",
+                )
+                table.add_row(
+                    "Scratchpad",
+                    str(len(session.turn_scratchpad.entries)),
+                    "Short-term turn context",
+                )
                 console.print(table)
             return serialize_command_result(
-                session, cmd, 
+                session,
+                cmd,
                 data={
                     "task_memory_count": len(session.task_memory.entries),
-                    "scratchpad_count": len(session.turn_scratchpad.entries)
-                }
+                    "scratchpad_count": len(session.turn_scratchpad.entries),
+                },
             )
 
         if subcommand in ["list", "ls"]:
             target = parts[2].lower() if len(parts) > 2 else "all"
-            
+
             def get_entries_data(store):
                 return [entry.to_dict() for entry in store.entries]
 
             if allow_prompt:
+
                 def print_entries(store, title):
                     if not store.entries:
                         console.print(f"[dim]No entries in {title}.[/dim]")
@@ -1310,7 +1342,9 @@ def handle_command(session, user_input, allow_prompt=True):
                     table.add_column("Content")
                     for entry in store.entries:
                         tags = ", ".join(entry.tags) if entry.tags else "-"
-                        table.add_row(f"#{entry.id}", tags, entry.source or "-", entry.content)
+                        table.add_row(
+                            f"#{entry.id}", tags, entry.source or "-", entry.content
+                        )
                     console.print(table)
 
                 if target in ["all", "task"]:
@@ -1319,11 +1353,20 @@ def handle_command(session, user_input, allow_prompt=True):
                     print_entries(session.turn_scratchpad, "Turn Scratchpad")
 
             return serialize_command_result(
-                session, cmd,
+                session,
+                cmd,
                 data={
-                    "task_memory": get_entries_data(session.task_memory) if target in ["all", "task"] else [],
-                    "scratchpad": get_entries_data(session.turn_scratchpad) if target in ["all", "scratchpad"] else []
-                }
+                    "task_memory": (
+                        get_entries_data(session.task_memory)
+                        if target in ["all", "task"]
+                        else []
+                    ),
+                    "scratchpad": (
+                        get_entries_data(session.turn_scratchpad)
+                        if target in ["all", "scratchpad"]
+                        else []
+                    ),
+                },
             )
 
         if subcommand == "clear":
@@ -1335,10 +1378,15 @@ def handle_command(session, user_input, allow_prompt=True):
             if target in ["all", "scratchpad"]:
                 session.turn_scratchpad.clear()
                 msg_parts.append("Turn scratchpad")
-            
+
             if not msg_parts:
-                return serialize_command_result(session, cmd, ok=False, message="Usage: /memory clear [task|scratchpad|all]")
-            
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /memory clear [task|scratchpad|all]",
+                )
+
             msg = " and ".join(msg_parts) + " cleared."
             if allow_prompt:
                 console.print(f"[green]{msg}[/green]")

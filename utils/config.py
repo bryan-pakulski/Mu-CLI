@@ -137,8 +137,7 @@ def validate_and_cast(key, value):
 
 
 # --- System Prompts & Nudges ---
-DEFAULT_SYSTEM_PROMPT = (
-    """You are a helpful LLM Agent, answer all questions succinctly.
+DEFAULT_SYSTEM_PROMPT = """You are a helpful LLM Agent, answer all questions succinctly.
 
     Reasoning: high
 
@@ -148,7 +147,6 @@ DEFAULT_SYSTEM_PROMPT = (
   3. Do not regenerate whole files unless specifically asked.
   4. When the task is a substantial new feature and agentic tooling is available, prefer the phased feature-plan engine instead of ad-hoc implementation.
 """
-)
 
 AGENTIC_SYSTEM_BASE = """You are an autonomous AI Software Engineer. 
 
@@ -193,16 +191,12 @@ AGENTIC_MODES = {
 2. **Flush**: Call the `flush` tool once you have gathered enough information to analyze the situation.
 3. **Act**: Process the flushed context and provide a solution, use tools available to make needed changes.
 3. **Analyze**: Compare against the original context, determine if the changes are correct, respond with a final summary.""",
-
-
     "debug": """WORKFLOW (Debugging):
 1. Read the error message or issue description provided by the user.
 2. Use tooling to find exactly where the error originates in the codebase.
 3. You have access to online url grounding, use this to explore any relevent information.
 3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
 4. Identify the root cause and propose a precise fix.""",
-
-
     "feature": """WORKFLOW (Feature Plan Engine):
 1. Understand the user's feature request and summarize it as a durable feature plan request.
 2. Immediately call `create_feature_plan` to create the canonical feature metadata plus `documentation/feature_req_<id>/phase_N.md` files. Do not use ad-hoc plan files or alternate locations.
@@ -216,8 +210,6 @@ AGENTIC_MODES = {
 10. Never start the next phase until all checklist items in the current phase are `[x]`.
 11. After all phases are complete, review the code and phase files together. If review fails, move the failing checklist items back to `[~]` and continue implementation.
 12. Only finish after calling `update_feature_plan` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
-
-
     "research": """WORKFLOW (Research & Exploration):
 1. The user wants to understand how something works without necessarily changing things.
 2. You have access to online tooling and research knowledge bases, use them to explore any relevent information.
@@ -227,7 +219,6 @@ AGENTIC_MODES = {
 6. Include citations and references to support your findings.
 7. Any online resources should be cited and referenced in your summary.
 """,
-
 }
 
 AGENT_MODE_METADATA = {

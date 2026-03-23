@@ -105,7 +105,9 @@ class GeminiProvider(LLMProvider):
                             )
                         except (ValueError, TypeError):
                             # Fallback if it was stored as a raw string
-                            resp_part.thought_signature = part.thought_signature.encode()
+                            resp_part.thought_signature = (
+                                part.thought_signature.encode()
+                            )
 
                     # tool_result doesn't take thought_signature - only model functionCall does!
                     gemini_parts.append(resp_part)

@@ -123,7 +123,9 @@ class BaseNoteStore:
         terms = [term for term in str(query or "").lower().split() if term]
         ranked = []
         for entry in self.entries:
-            haystack = " ".join([entry.content, " ".join(entry.tags), entry.source]).lower()
+            haystack = " ".join(
+                [entry.content, " ".join(entry.tags), entry.source]
+            ).lower()
             score = 0
             for term in terms:
                 if term in haystack:
@@ -170,9 +172,7 @@ class BaseNoteStore:
         for entry in entries:
             tags = json.dumps(entry.tags)
             source = entry.source or "n/a"
-            lines.append(
-                f"#{entry.id} tags={tags} source={source} :: {entry.content}"
-            )
+            lines.append(f"#{entry.id} tags={tags} source={source} :: {entry.content}")
         return "\n".join(lines)
 
     def _enforce_limit(self) -> None:

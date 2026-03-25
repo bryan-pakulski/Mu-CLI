@@ -745,7 +745,7 @@ class Session:
         self.session_manager.set_feature_state(state, self.folder_context)
         self.sync_runtime_state()
 
-    def _refresh_feature_state_from_directory(
+    def _refresh_feature_state(
         self, metadata_path: str, *, status: str | None = None
     ):
         try:
@@ -802,6 +802,7 @@ class Session:
         # Check if file exists in feature dir
         directory = os.path.join(HISTORY_DIR, "sessions", self.session_manager.current_session_name, "features")
         if not os.path.exists(os.path.join(directory, filename)):
+            logger.error(f"[red]File {filename} not found in session feature directory.[/red]")
             return
         self._refresh_feature_state(filename)
 

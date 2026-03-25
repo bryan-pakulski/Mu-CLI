@@ -85,7 +85,7 @@ def refresh_feature_record(session, feature_id=None):
 
     try:
         plan = refresh_and_persist_feature_plan(
-            directory,
+            session.session_manager.current_session_name,
             metadata_path=metadata_path,
         )
     except (FileNotFoundError, OSError, ValueError):

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from rich.console import Console
 
-from core.feature_mode import create_feature_plan, update_feature_plan_metadata
+from core.feature_mode import STATUS_NOT_STARTED, create_feature_plan, update_feature_plan_metadata
 from core.workspace import FolderContext
 from ui.rich_ui import RichUI
 from utils.runtime_metrics import build_live_status_line
@@ -104,20 +104,25 @@ def test_memory_monitor_renders_feature_progress(tmp_path):
     ctx = FolderContext()
     ctx.add_folder(str(workspace))
     plan = create_feature_plan(
+        session_id="test",
         feature_name="Stats Feature",
         feature_request="Show feature progress in stats",
-        phases=[
+        tasks_data=[
             {
-                "title": "Phase A",
+                "id": 0,
+                "title": "Phase 1",
                 "objectives": ["Understand scope"],
                 "action_points": ["Implement change"],
                 "exit_criteria": ["Verify output"],
+                "status": STATUS_NOT_STARTED,
+                "notes": "",
             }
         ],
         folder_context=ctx,
         feature_id="stats_feature",
+        metadata_path="stats_feature.json",
     )
-    update_feature_plan_metadata(plan.directory, approved=True)
+    update_feature_plan_metadata(session_id="test", approved=True, metadata_path="stats_feature.json")
 
     ui = RichUI()
     session = _build_session(
@@ -157,14 +162,6 @@ def test_request_tool_approval_uses_input_handler_prompt_choice():
     ui.input_handler.prompt_choice = fake_prompt_choice
 
     choice, reason = ui.request_tool_approval(
-        tool_name="write_file",
-        tool_args={"filename": "demo.txt"},
-        display_args={"filename": "demo.txt"},
-        count_info="",
-        can_approve=True,
-        modifications=[],
-        preview_error=None,
-        error_code=None,
         prompt_text="[bold yellow]Permission Required[/bold yellow]",
         choices=["y", "n", "e"],
         default="y",

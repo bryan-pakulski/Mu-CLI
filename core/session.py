@@ -29,7 +29,6 @@ from utils.config import (
     calculate_cost,
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
-    AGENTIC_MODE_SYSTEM_PROMPTS,
     DEFAULT_VARIABLES,
     validate_and_cast,
 )
@@ -616,7 +615,6 @@ class Session:
         self.agentic = True
         self.staged_files = []  # list of dicts
         self.disabled_tools = []  # list of tool names strings
-        self._auto_promoted_this_turn = 0
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -748,14 +746,12 @@ class Session:
         self.sync_runtime_state()
 
     def _refresh_feature_state_from_directory(
-        self, directory: str, *, status: str | None = None
+        self, metadata_path: str, *, status: str | None = None
     ):
-        if not str(directory or "").strip():
-            return
         try:
             current = self.session_manager.get_feature_state() or {}
             plan = refresh_and_persist_feature_plan(
-                directory,
+                self.session_manager.current_session_name,
                 metadata_path=current.get("metadata_path"),
             )
             self._set_feature_state(
@@ -799,16 +795,15 @@ class Session:
         if tool_name not in {"write_file", "apply_diff"}:
             return
 
-        current = self.session_manager.get_feature_state() or {}
-        directory = str(current.get("directory", "") or "").strip()
         filename = str(tool_args.get("filename", "") or "").strip()
-        if not directory or not filename:
+        if not filename:
             return
-
-        feature_prefix = _safe_feature_path_prefix(directory)
-        normalized_filename = os.path.abspath(filename)
-        if normalized_filename.startswith(feature_prefix):
-            self._refresh_feature_state_from_directory(directory)
+        
+        # Check if file exists in feature dir
+        directory = os.path.join(HISTORY_DIR, "sessions", self.session_manager.current_session_name, "features")
+        if not os.path.exists(os.path.join(directory, filename)):
+            return
+        self._refresh_feature_state(filename)
 
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
@@ -1184,84 +1179,6 @@ class Session:
 
         return structured
 
-    def _auto_promote_memory_candidates(self, structured_result: dict) -> list[dict]:
-        if not structured_result.get("ok", False):
-            return []
-
-        tool_name = structured_result.get("tool_name")
-        data = structured_result.get("data", {})
-        candidates = []
-
-        if tool_name == "search_for_string" and data.get("files"):
-            candidates.append(
-                {
-                    "content": (
-                        f"Search '{data.get('query', '')}' matched {data.get('match_count', 0)} lines "
-                        f"across {data.get('file_count', 0)} files; key files: {', '.join(data.get('files', [])[:5])}."
-                    ),
-                    "tags": ["search", "files"],
-                    "source": tool_name,
-                }
-            )
-        elif tool_name in {"write_file", "apply_diff"} and data.get("changed_file"):
-            candidates.append(
-                {
-                    "content": f"Modified file: {data['changed_file']}.",
-                    "tags": ["file-change"],
-                    "source": tool_name,
-                }
-            )
-        elif tool_name == "list_agent_tasks" and data.get("tasks"):
-            candidates.append(
-                {
-                    "content": f"Available agent tasks: {', '.join(data.get('tasks', [])[:8])}.",
-                    "tags": ["agent-task"],
-                    "source": tool_name,
-                }
-            )
-        elif tool_name == "get_workspace_details" and data.get("folders"):
-            candidates.append(
-                {
-                    "content": (
-                        f"Workspace roots: {', '.join(data.get('folders', [])[:3])}; "
-                        f"tracked files: {data.get('tracked_file_count', 0)}."
-                    ),
-                    "tags": ["workspace"],
-                    "source": tool_name,
-                }
-            )
-        elif tool_name == "run_agent_task" and data.get("task_name"):
-            candidates.append(
-                {
-                    "content": f"Agent task '{data['task_name']}' completed with preview: {data.get('preview', '')}",
-                    "tags": ["agent-task-run"],
-                    "source": tool_name,
-                }
-            )
-
-        return candidates
-
-    def _maybe_auto_promote_memory(self, structured_result: dict) -> list[str]:
-        if not self.variables.get("auto_promote_memory", True):
-            return []
-
-        max_promotions = max(0, int(self.variables.get("auto_promote_max_per_turn", 8)))
-        if self._auto_promoted_this_turn >= max_promotions:
-            return []
-
-        promoted = []
-        for candidate in self._auto_promote_memory_candidates(structured_result):
-            if self._auto_promoted_this_turn >= max_promotions:
-                break
-            entry = self.task_memory.save(
-                candidate["content"],
-                tags=candidate.get("tags", []),
-                source=candidate.get("source", structured_result.get("tool_name", "")),
-            )
-            self._auto_promoted_this_turn += 1
-            promoted.append(f"auto-promoted memory #{entry.id}")
-        return promoted
-
     def _execute_tool_with_memory(
         self,
         tool_name: str,
@@ -1448,7 +1365,6 @@ class Session:
                 ),
             )
             self.turn_scratchpad.clear()
-        self._auto_promoted_this_turn = 0
 
         parts = list(self.staged_files)
         effective_text = text
@@ -1479,15 +1395,9 @@ class Session:
                 mode_instruction = AGENTIC_MODES.get(
                     agent_mode, AGENTIC_MODES["default"]
                 )
-                mode_system_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get(agent_mode, "")
 
                 # Providers automatically generated tool prompts so don't need to be embedded into the system prompt
                 workspace_context = f"{AGENTIC_SYSTEM_BASE}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
-                if mode_system_prompt:
-                    workspace_context += (
-                        f"\n\n### {agent_mode.upper()} SYSTEM PROMPT\n"
-                        f"{mode_system_prompt}"
-                    )
             else:
                 logger.debug(
                     f"Using agent_mode={self.variables.get('agent_mode', 'default')}"
@@ -1504,8 +1414,8 @@ class Session:
                         workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
-        # if workspace_context:
-        #    base_system_prompt += f"\n\n{workspace_context}"
+        if workspace_context:
+            base_system_prompt += f"\n\n{workspace_context}"
         self.session_manager.roll_history_summary(
             self.variables.get("active_context_window", 150)
         )
@@ -1550,8 +1460,7 @@ class Session:
                     )
                     if memory_summary:
                         dynamic_system_prompt += (
-                            "\n\nPersisted working memory is available below. Prefer using it before"
-                            " re-reading large tool outputs.\n"
+                            "\n\nPersisted working memory is available below."
                             f"{memory_summary}"
                         )
                 if self.variables.get("scratchpad_enabled", True):
@@ -1614,7 +1523,7 @@ class Session:
                         ai_parts_archive.append({"type": "text", "text": part.text})
 
                     elif part.type == "image_inline" and part.inline_data:
-                        display_image_in_terminal(part.inline_data)
+                        display_image_in_terminal(self.session_manager.current_session_name, part.inline_data, save=True)
                         ai_parts_archive.append(
                             {
                                 "type": "text",
@@ -1899,7 +1808,6 @@ class Session:
 
                     # --- End Collation Logic ---
                     if self.variables.get("structured_tool_results", True):
-                        promotion_result = None
                         if raw_result != source_result:
                             source_text = str(source_result)
                             result = self._build_structured_tool_result(
@@ -1920,25 +1828,12 @@ class Session:
                                     "visible_char_count": len(str(raw_result)),
                                 }
                             )
-                            promotion_result = self._build_structured_tool_result(
-                                part.tool_name,
-                                part.tool_args,
-                                source_result,
-                                execution_source="session",
-                            )
                         else:
                             result = self._build_structured_tool_result(
                                 part.tool_name,
                                 part.tool_args,
                                 source_result,
                                 execution_source="session",
-                            )
-                            promotion_result = result
-                        promotions = self._maybe_auto_promote_memory(promotion_result)
-                        if promotions:
-                            promo_text = "; ".join(promotions)
-                            result["summary"] = (
-                                f"{result.get('summary', '')} [{promo_text}]".strip()
                             )
                     else:
                         result = raw_result

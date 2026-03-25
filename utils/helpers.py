@@ -7,7 +7,7 @@ import subprocess
 import shutil
 import io
 from rich.console import Console
-from .config import HAS_PIL, IMAGE_DIR
+from .config import HAS_PIL, SESSION_DIR
 
 # Need local PIL import logic for helper
 if HAS_PIL:
@@ -33,7 +33,9 @@ def get_safe_mime_type(file_path):
     return "text/plain"
 
 
-def display_image_in_terminal(image_data, mime_type="image/png"):
+def display_image_in_terminal(
+    session_id, image_data, mime_type="image/png", save=False
+):
     """
     Saves image to disk and attempts to display it inline using CLI protocols.
     """
@@ -44,18 +46,21 @@ def display_image_in_terminal(image_data, mime_type="image/png"):
     timestamp = int(time.time())
     ext = mimetypes.guess_extension(mime_type) or ".png"
     filename = f"img_{timestamp}{ext}"
-    filepath = os.path.join(IMAGE_DIR, filename)
+
+    # Images should be saved under ~/.mucli/sessions/<id>/images
+    filepath = os.path.join(SESSION_DIR, session_id, "images", filename)
 
     try:
-        # Save to disk
         image = Image.open(io.BytesIO(image_data))
-        image.save(filepath)
+        if save:
+            # Save to disk
+            image.save(filepath)
 
-        # 1. Print clickable link
-        file_url = f"file://{filepath}"
-        console.print(
-            f"\n[bold cyan]Image Generated:[/bold cyan] [link={file_url}]{filepath}[/link]"
-        )
+            # 1. Print clickable link
+            file_url = f"file://{filepath}"
+            console.print(
+                f"\n[bold cyan]Image Generated:[/bold cyan] [link={file_url}]{filepath}[/link]"
+            )
 
         # 2. Attempt Inline Display
         term = os.environ.get("TERM_PROGRAM", "")

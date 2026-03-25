@@ -396,28 +396,6 @@ def test_execute_tool_with_memory_handles_scratchpad():
     assert "temporary plan" in search_result
 
 
-def test_build_structured_tool_result_and_auto_promote():
-    sm = SessionManager()
-    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
-    session.variables["auto_promote_memory"] = True
-    session.variables["auto_promote_max_per_turn"] = 4
-
-    structured = session._build_structured_tool_result(
-        "search_for_string",
-        {"string": "needle"},
-        "/tmp/a.py:10 -> needle here\n/tmp/b.py:22 -> another needle",
-    )
-    promoted = session._maybe_auto_promote_memory(structured)
-
-    assert structured["data"]["match_count"] == 2
-    assert structured["data"]["file_count"] == 2
-    assert structured["telemetry"]["execution_source"] == "session"
-    assert structured["artifacts"] == []
-    assert promoted
-    memory_results = session.task_memory.search("needle", limit=5)
-    assert memory_results
-
-
 def test_build_structured_tool_result_includes_normalized_error_code():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)

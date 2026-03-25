@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+from utils.config import HISTORY_DIR
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -11,9 +12,6 @@ STATUS_NOT_STARTED = "not_started"
 STATUS_IN_PROGRESS = "in_progress"
 STATUS_COMPLETED = "completed"
 STATUS_REVIEW_PENDING = "pending"
-
-FEATURE_PLAN_FILENAME = "feature_plan.json"
-
 
 @dataclass
 class FeatureTask:
@@ -84,16 +82,20 @@ def _workspace_root(folder_context) -> str:
     return os.getcwd()
 
 
-def save_feature_plan(plan: FeaturePlan) -> FeaturePlan:
-    plan.updated_at = time.time()
-    if plan.metadata_path:
-        os.makedirs(os.path.dirname(plan.metadata_path), exist_ok=True)
-        with open(plan.metadata_path, "w", encoding="utf-8") as handle:
-            json.dump(asdict(plan), handle, indent=2)
+def save_feature_plan(session_id: str, plan: FeaturePlan) -> FeaturePlan:
+    if plan.metadata_path is None or plan.metadata_path == "":
+        Exception("Unable to save feature plan, empty metadata path")
+
+    # Features should always be saved under ~/.mucli/sessions/<session_id>/features/<feature_id>.json 
+    full_path = os.path.join(HISTORY_DIR, "sessions", session_id, "features", plan.feature_id + ".json")
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, "w", encoding="utf-8") as handle:
+        json.dump(asdict(plan), handle, indent=2)
     return plan
 
 
 def create_feature_plan(
+    session_id: str,
     feature_name: str,
     feature_request: str,
     tasks_data: list[dict[str, Any]],
@@ -125,11 +127,12 @@ def create_feature_plan(
         metadata_path=metadata_path or "",
         tasks=tasks,
     )
-    return save_feature_plan(plan)
+    return save_feature_plan(session_id, plan)
 
 
-def load_feature_plan(metadata_path: str) -> FeaturePlan:
-    with open(metadata_path, "r", encoding="utf-8") as handle:
+def load_feature_plan(session_id: str, metadata_id: str) -> FeaturePlan:
+    full_path = os.path.join(HISTORY_DIR, "sessions", session_id, "features", metadata_id)
+    with open(full_path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
 
     tasks_data = data.pop("tasks", [])
@@ -138,12 +141,12 @@ def load_feature_plan(metadata_path: str) -> FeaturePlan:
 
 
 def refresh_and_persist_feature_plan(
-    directory: str,
+    session_id: str,
     metadata_path: str | None = None,
 ) -> FeaturePlan:
     if not metadata_path:
         raise ValueError("metadata_path is required for internal feature system")
-    return load_feature_plan(metadata_path)
+    return load_feature_plan(session_id, metadata_path)
 
 
 def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
@@ -165,8 +168,8 @@ def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
 
 
 def update_feature_plan_metadata(
-    directory: str,  # Kept for compatibility
     *,
+    session_id: str,
     approved: bool | None = None,
     review_status: str | None = None,
     review_notes: str | None = None,
@@ -181,7 +184,7 @@ def update_feature_plan_metadata(
         plan.review_status = review_status
     if review_notes is not None:
         plan.review_notes = review_notes
-    return save_feature_plan(plan)
+    return save_feature_plan(session_id, plan)
 
 
 def update_task_status(

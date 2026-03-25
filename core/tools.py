@@ -604,7 +604,7 @@ TOOLS = [
             },
             "required": ["feature_name", "feature_request", "tasks"],
         },
-        requires_approval=True,
+        requires_approval=False,
     ),
     ToolDefinition(
         name="update_feature_task",

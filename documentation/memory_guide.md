@@ -33,7 +33,6 @@ Mu-CLI implements a multi-layered memory architecture designed to optimize conte
 - **Deduplication:** Identical content+tags updates existing entry (hits++, updated_at)
 - **LRU eviction:** When limit exceeded, least recently used entries are removed
 - **Searchable:** Full-text search across content, tags, and source
-- **Auto-promotion:** Important tool results automatically saved to memory
 
 **Data structure:**
 ```python
@@ -121,8 +120,8 @@ class MemoryEntry:
          │
          ▼
 ┌─────────────────┐     ┌──────────────────┐
-│  Task Memory    │◄────│  Auto-promotion  │
-│  (persistent)   │     │  of key results  │
+│  Task Memory    │◄────│  Agent saves     │
+│  (persistent)   │     │  key results     │
 └─────────────────┘     └──────────────────┘
          │
          ▼
@@ -144,8 +143,6 @@ class MemoryEntry:
 | `scratchpad_enabled` | `True` | Enable turn-local scratchpad |
 | `scratchpad_max_entries` | `64` | Max scratchpad entries |
 | `collation_enabled` | `True` | Enable deferred tool results |
-| `auto_promote_memory` | `True` | Auto-save important tool results |
-| `auto_promote_max_per_turn` | `8` | Max auto-promotions per turn |
 | `tool_context_window` | `6` | Recent tool messages to keep uncompressed |
 | `active_context_window` | `150` | Messages in LLM context window |
 

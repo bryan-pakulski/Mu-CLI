@@ -60,7 +60,7 @@ That means this work is not a greenfield design. It is a refinement effort: form
 | Layer | Primary responsibility | What it currently owns |
 | --- | --- | --- |
 | `core/tools.py` | Tool registry and raw execution primitives | Declares `ToolDefinition` metadata, approval flags, collated-tool membership, modification preview helpers, bounds checks, and the dispatcher that calls the underlying tool functions. |
-| `core/session.py` | Conversational harness orchestration | Collects model tool calls, pre-computes approval candidates, renders diffs, requests approval, executes tools through memory-aware helpers, applies collation rules, emits tool traces, shapes structured results, auto-promotes memory, and appends persisted `tool_result` records. |
+| `core/session.py` | Conversational harness orchestration | Collects model tool calls, pre-computes approval candidates, renders diffs, requests approval, executes tools through memory-aware helpers, applies collation rules, emits tool traces, shapes structured results, and appends persisted `tool_result` records. |
 | `core/server.py` | Headless and API-facing orchestration | Wraps message/tool execution in async tasks, converts approvals into first-class server objects, publishes SSE events, validates API payloads, and exposes direct tool execution through `/api/tool` and chat execution through `/api/message`. |
 
 #### Implementation concerns vs orchestration concerns
@@ -99,7 +99,7 @@ The current codebase supports one canonical lifecycle, even though pieces of it 
 7. **Event emission**  
    Publish UI traces, approval events, task state changes, and SSE envelopes for headless clients.
 8. **Persistence and memory side effects**  
-   Append tool results to history, save session state, and optionally auto-promote high-value structured results into durable memory.
+   Append tool results to history, save session state, and allow saving high-value structured results into durable memory.
 
 ### Tool Contract Model
 

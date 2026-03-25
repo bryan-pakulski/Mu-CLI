@@ -10,15 +10,13 @@ except ImportError:
     HAS_PIL = False
 
 # Configuration
-HISTORY_DIR = os.path.expanduser("~/.mucli_chats/")
-IMAGE_DIR = os.path.join(HISTORY_DIR, "images")
+HISTORY_DIR = os.path.expanduser("~/.mucli/")
+SESSION_DIR = os.path.join(HISTORY_DIR, "sessions")
 LOG_DIR = os.path.join(HISTORY_DIR, "logs")
 DEFAULT_SESSION_NAME = "default"
 
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
-if not os.path.exists(IMAGE_DIR):
-    os.makedirs(IMAGE_DIR)
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
@@ -85,14 +83,6 @@ VARIABLE_SCHEMA = {
     "active_context_window": {
         "type": int,
         "default": 150,
-    },
-    "auto_promote_memory": {
-        "type": bool,
-        "default": True,
-    },
-    "auto_promote_max_per_turn": {
-        "type": int,
-        "default": 8,
     },
     "structured_tool_results": {
         "type": bool,
@@ -173,15 +163,11 @@ GENERAL RULES:
    Gather everything you think you'll need first in a "context collection" stage, then flush once to process it all.
    Collect at MOST 3 turns of context before flushing and performing a significant action against the knowledge collected.
    Be loop aware, do not repeatedly ask for the same information.
-7. Use the scratchpad tools for turn-local notes, temporary observations, and short plans that only matter during the current task.
-8. Use the task memory tools for durable facts, decisions, file locations, and verified findings worth keeping across later turns.
-   Keep memories concise and high-value. Retrieve memory before repeating tool work.
+7. YOU MUST use the scratchpad tools for temporary observations, goals and short term plans, refer often to the scratchpad to confirm you are on the right track.
+8. YOU MUST use the task memory tools for durable facts, decisions, and verified findings
+   Keep memories concise and high-value.
+   Retrieve memorory before conducting any significant actions or repeating tool work.
 9. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
-10. In FEATURE mode, you MUST use the feature-plan engine (`create_feature_plan`, `get_feature_plan`, `update_feature_plan`) rather than inventing a separate planning format.
-11. In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in the session-managed feature metadata.
-12. In FEATURE mode, only work on the current incomplete phase returned by the plan engine; keep the engine updated using the supporting tool calls while you work and never advance early.
-13. In FEATURE mode, if you are blocked on missing user input or an external decision, call `raise_blocker` so the harness can pause and request help instead of looping blindly.
-14. In FEATURE mode, once all phases are complete you must perform a review pass and only finish after setting `review_status` to `completed`, or after documenting why review failed and moving a phase back to `[~]`.
 """
 
 AGENTIC_MODES = {
@@ -198,9 +184,15 @@ AGENTIC_MODES = {
 3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
 4. Identify the root cause and propose a precise fix.""",
     "feature": """WORKFLOW (Feature Plan Engine):
+In FEATURE mode, you MUST use the feature-plan engine (`create_feature_plan`, `get_feature_plan`, `update_feature_plan`) rather than inventing a separate planning format.
+In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in the session-managed feature metadata.
+In FEATURE mode, only work on the current incomplete phase returned by the plan engine; keep the engine updated using the supporting tool calls while you work and never advance early.
+In FEATURE mode, if you are blocked on missing user input or an external decision, call `raise_blocker` so the harness can pause and request help instead of looping blindly.
+In FEATURE mode, once all phases are complete you must perform a review pass and only finish after setting `review_status` to `completed`, or after documenting why review failed and moving a phase back to `[~]`.
+
 1. Understand the user's feature request and summarize it as a durable feature plan request.
-2. Immediately call `create_feature_plan` to create the canonical feature metadata plus `documentation/feature_req_<id>/phase_N.md` files. Do not use ad-hoc plan files or alternate locations.
-3. Ensure every phase file contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
+2. Immediately call `create_feature_plan` to create the canonical feature metadata. Do not use ad-hoc plan files or alternate locations.
+3. Ensure every phase contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
 4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in the session-managed feature metadata.
 5. Once approved, call `get_feature_plan` at the start of each implementation turn and work on only the next incomplete phase.
 6. During investigation-heavy feature work, use read-only tools to gather context into the collation buffer, save short hypotheses or phase notes with `save_scratchpad`, then call `flush` once before making implementation decisions.

@@ -21,7 +21,7 @@ def collect_feature_progress(session):
         )
 
         plan = refresh_and_persist_feature_plan(
-            directory,
+            session.session_manager.current_session_name,
             metadata_path=metadata_path or None,
         )
         return {

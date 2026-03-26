@@ -149,22 +149,39 @@ def build_inline_meter(label, current, maximum, width=8):
 
 def build_live_status_line(session):
     metrics = collect_runtime_metrics(session)
-    return " ".join(
-        [
-            f"yolo:{'on' if metrics['yolo']['enabled'] else 'off'}",
-            build_inline_meter(
-                "ctx", metrics["ctx"]["current"], metrics["ctx"]["maximum"]
-            ),
-            build_inline_meter(
-                "mem", metrics["mem"]["current"], metrics["mem"]["maximum"]
-            ),
-            build_inline_meter(
-                "scratch",
-                metrics["scratch"]["current"],
-                metrics["scratch"]["maximum"],
-            ),
-            build_inline_meter(
-                "queue", metrics["queue"]["current"], metrics["queue"]["maximum"]
-            ),
-        ]
-    )
+    parts = [
+        f"yolo:{'on' if metrics['yolo']['enabled'] else 'off'}",
+        build_inline_meter("ctx", metrics["ctx"]["current"], metrics["ctx"]["maximum"]),
+        build_inline_meter("mem", metrics["mem"]["current"], metrics["mem"]["maximum"]),
+        build_inline_meter(
+            "scratch",
+            metrics["scratch"]["current"],
+            metrics["scratch"]["maximum"],
+        ),
+        build_inline_meter("queue", metrics["queue"]["current"], metrics["queue"]["maximum"]),
+    ]
+
+    feature_metrics = metrics.get("feature") or {}
+    progress = feature_metrics.get("progress")
+    if isinstance(progress, dict):
+        total_tasks = max(1, int(progress.get("total_tasks", 1) or 1))
+        completed_tasks = max(0, int(progress.get("completed_tasks", 0) or 0))
+        overall_pct = int(round((completed_tasks / total_tasks) * 100))
+
+        next_phase = progress.get("next_phase")
+        phase_pct = 0
+        if isinstance(next_phase, dict):
+            counts = next_phase.get("task_counts", {}) if isinstance(next_phase.get("task_counts"), dict) else {}
+            done = int(counts.get("completed", 0) or 0)
+            total = int(
+                (counts.get("completed", 0) or 0)
+                + (counts.get("in_progress", 0) or 0)
+                + (counts.get("not_started", 0) or 0)
+            )
+            phase_pct = int(round((done / max(1, total)) * 100))
+        elif total_tasks > 0 and completed_tasks >= total_tasks:
+            phase_pct = 100
+
+        parts.extend([f"P:{phase_pct:>3}%", f"O:{overall_pct:>3}%"])
+
+    return " ".join(parts)

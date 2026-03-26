@@ -97,6 +97,50 @@ def test_build_live_status_shows_yolo_indicator_when_enabled():
     assert "yolo:on" in status.plain
 
 
+def test_live_status_line_includes_feature_phase_and_overall_percent(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = FolderContext()
+    ctx.add_folder(str(workspace))
+    plan = create_feature_plan(
+        session_id="test",
+        feature_name="Live Status Feature",
+        feature_request="Show compact feature progress in live status",
+        tasks_data=[
+            {"title": "Task 1", "status": "completed"},
+            {"title": "Task 2", "status": "not_started"},
+        ],
+        folder_context=ctx,
+        feature_id="live_status_feature",
+    )
+    plan = update_feature_plan_metadata(
+        session_id="test",
+        metadata_path=plan.metadata_path,
+        approved=True,
+    )
+
+    token_counts = {"input": 120, "output": 80, "total": 200, "total_cost": 0.01}
+    session = _build_session(
+        session_manager=SimpleNamespace(
+            history=[{"role": "user", "parts": []}] * 12,
+            summary_anchor=3,
+            token_counts=token_counts,
+            current_session_name="test",
+            get_feature_state=lambda: {
+                "directory": plan.directory,
+                "metadata_path": plan.metadata_path,
+                "started_at": 0,
+                "start_tokens": 0,
+            },
+        )
+    )
+
+    status_line = build_live_status_line(session)
+
+    assert "P:" in status_line
+    assert "O:" in status_line
+
+
 def test_memory_monitor_renders_feature_progress(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

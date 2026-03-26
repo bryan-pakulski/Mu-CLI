@@ -273,10 +273,6 @@ class InputHandler:
 
         feature_text = ""
         if isinstance(feature_context, dict):
-            status = str(feature_context.get("status", "unknown") or "unknown").strip()
-            task = str(feature_context.get("task", "") or "").strip() or "n/a"
-            if len(task) > 48:
-                task = f"{task[:45]}…"
             phase_bar = self._progress_bar(
                 feature_context.get("phase_done", 0),
                 feature_context.get("phase_total", 1),
@@ -286,8 +282,7 @@ class InputHandler:
                 feature_context.get("overall_total", 1),
             )
             feature_text = (
-                f" <files>[Feature: {escape(status)} | Task: {escape(task)}"
-                f" | Phase {phase_bar} | Overall {overall_bar}]</files>"
+                f" <files>[P {phase_bar} | O {overall_bar}]</files>"
             )
 
         return (

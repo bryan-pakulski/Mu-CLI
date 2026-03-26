@@ -418,10 +418,6 @@ def print_splash(session):
         if folder_count > 3:
             folder_list += " ..."
 
-    # History info
-    total_history = len(session.session_manager.history)
-    active_history = total_history - session.session_manager.summary_anchor
-
     info_grid = f"""                                                                   
     [bold magenta]Session:[/bold magenta]  [bold yellow]{session.session_manager.current_session_name}[/bold yellow]
     [bold magenta]System:[/bold magenta]   {sys_status}                                
@@ -430,14 +426,18 @@ def print_splash(session):
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
 """
-    # Add context warning if exceeding limit
-    context_limit = session.variables.get("active_context_window", 150)
-    if active_history > context_limit:
+    # Add context warning if nearing token limit
+    context_limit = int(session.variables.get("context_token_limit", 256000) or 256000)
+    trim_threshold = float(session.variables.get("context_trim_threshold", 0.85) or 0.85)
+    trim_threshold = max(0.10, min(trim_threshold, 1.0))
+    context_tokens = int(session.session_manager.estimate_runtime_history_tokens() or 0)
+    threshold_tokens = int(context_limit * trim_threshold)
+    if context_tokens >= threshold_tokens:
         info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns  [bold yellow]⚠[/bold yellow] [dim](dropping old context, limit: {context_limit})[/dim]"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens  [bold yellow]⚠[/bold yellow] [dim](trim threshold: {int(trim_threshold * 100)}%)[/dim]"""
     else:
         info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens"""
 
     info_grid += "\n    "
 

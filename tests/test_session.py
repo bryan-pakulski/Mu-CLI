@@ -132,7 +132,6 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
 def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
-    session.active_context_window = 4
 
     sm.history = [
         {"role": "user", "parts": [{"type": "text", "text": "turn 1"}]},
@@ -143,7 +142,7 @@ def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
         {"role": "assistant", "parts": [{"type": "text", "text": "answer 3"}]},
     ]
 
-    changed = sm.roll_history_summary(session.active_context_window)
+    changed = sm.roll_history_summary(4)
 
     assert changed is True
     assert sm.summary_anchor == 2
@@ -199,7 +198,6 @@ def test_send_message_injects_rolling_conversation_summary():
     provider = CaptureProvider()
     sm = SessionManager(session_name="rolling-summary")
     session = Session(provider, False, "system instruction", sm)
-    session.active_context_window = 4
     session.variables["context_token_limit"] = 32
     session.variables["context_trim_threshold"] = 0.5
     sm.history = [

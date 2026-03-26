@@ -144,7 +144,8 @@ class MemoryEntry:
 | `scratchpad_max_entries` | `64` | Max scratchpad entries |
 | `collation_enabled` | `True` | Enable deferred tool results |
 | `tool_context_window` | `6` | Recent tool messages to keep uncompressed |
-| `active_context_window` | `150` | Messages in LLM context window |
+| `context_token_limit` | `256000` | Token budget used for runtime context/history trimming |
+| `context_trim_threshold` | `0.85` | Begin summarizing once runtime context reaches this fraction of the token budget |
 
 ---
 

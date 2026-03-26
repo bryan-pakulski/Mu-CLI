@@ -17,7 +17,6 @@ def _build_session(**overrides):
             token_counts=token_counts,
             get_feature_state=lambda: None,
         ),
-        active_context_window=20,
         task_memory=SimpleNamespace(entries=[1, 2, 3], max_entries=64),
         turn_scratchpad=SimpleNamespace(entries=[1], max_entries=24),
         collation_buffer=SimpleNamespace(

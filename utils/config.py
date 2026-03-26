@@ -88,10 +88,6 @@ VARIABLE_SCHEMA = {
         "type": float,
         "default": 0.85,
     },
-    "active_context_window": {
-        "type": int,
-        "default": 150,
-    },
     "structured_tool_results": {
         "type": bool,
         "default": True,

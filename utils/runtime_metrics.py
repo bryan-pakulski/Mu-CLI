@@ -20,10 +20,26 @@ def collect_feature_progress(session):
             summarize_feature_plan,
         )
 
-        plan = refresh_and_persist_feature_plan(
-            session.session_manager.current_session_name,
-            metadata_path=metadata_path or None,
-        )
+        if not metadata_path and directory:
+            for candidate in glob.glob(
+                os.path.join(HISTORY_DIR, "sessions", "*", "features", "*.json")
+            ):
+                try:
+                    with open(candidate, "r", encoding="utf-8") as handle:
+                        data = json.load(handle)
+                    if str(data.get("directory", "")).strip() == directory:
+                        metadata_path = candidate
+                        break
+                except (OSError, json.JSONDecodeError):
+                    continue
+
+        if metadata_path:
+            plan = refresh_and_persist_feature_plan(
+                getattr(session.session_manager, "current_session_name", directory),
+                metadata_path=metadata_path,
+            )
+        else:
+            plan = refresh_and_persist_feature_plan(directory)
         return {
             "state": feature_state,
             "plan": summarize_feature_plan(plan),
@@ -119,3 +135,7 @@ def build_live_status_line(session):
             ),
         ]
     )
+import glob
+import json
+import os
+from utils.config import HISTORY_DIR

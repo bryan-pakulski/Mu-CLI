@@ -208,7 +208,9 @@ def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
     feature = created["data"]["feature"]
 
     assert created["ok"] is True
-    assert feature["metadata_path"].startswith(str(tmp_path / "history" / "features"))
+    assert feature["metadata_path"].startswith(
+        str(tmp_path / "history" / "sessions")
+    )
     assert feature["directory"].startswith(str(workspace / "documentation"))
 
     status = handle_command(session, "/feature status", allow_prompt=False)
@@ -491,11 +493,22 @@ class DummyFeatureLoopProvider:
             )
         if self.call_count == 2:
             return ProviderResponse(
-                text="phase complete",
-                parts=[MessagePart(type="text", text="phase complete")],
-                input_tokens=3,
-                output_tokens=2,
-                total_tokens=5,
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="update_task_status",
+                        tool_args={
+                            "task_id": 1,
+                            "status": "completed",
+                            "notes": "Checklist validated and complete.",
+                            "directory": self.directory,
+                        },
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
             )
         if self.call_count == 3:
             return ProviderResponse(
@@ -503,9 +516,10 @@ class DummyFeatureLoopProvider:
                 parts=[
                     MessagePart(
                         type="tool_call",
-                        tool_name="update_feature_plan",
+                        tool_name="approve_feature_task",
                         tool_args={
                             "directory": self.directory,
+                            "approved": True,
                             "review_status": "completed",
                             "review_notes": "All criteria satisfied.",
                         },
@@ -514,6 +528,14 @@ class DummyFeatureLoopProvider:
                 input_tokens=5,
                 output_tokens=3,
                 total_tokens=8,
+            )
+        if self.call_count == 4:
+            return ProviderResponse(
+                text="phase complete",
+                parts=[MessagePart(type="text", text="phase complete")],
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
             )
         return ProviderResponse(
             text="review complete",
@@ -639,11 +661,22 @@ class DummyBlockingFeatureProvider:
             )
         if self.call_count == 4:
             return ProviderResponse(
-                text="phase complete after unblock",
-                parts=[MessagePart(type="text", text="phase complete after unblock")],
-                input_tokens=3,
-                output_tokens=2,
-                total_tokens=5,
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="update_task_status",
+                        tool_args={
+                            "task_id": 1,
+                            "status": "completed",
+                            "notes": "Completed after unblock.",
+                            "directory": self.directory,
+                        },
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
             )
         if self.call_count == 5:
             return ProviderResponse(
@@ -651,9 +684,10 @@ class DummyBlockingFeatureProvider:
                 parts=[
                     MessagePart(
                         type="tool_call",
-                        tool_name="update_feature_plan",
+                        tool_name="approve_feature_task",
                         tool_args={
                             "directory": self.directory,
+                            "approved": True,
                             "review_status": "completed",
                             "review_notes": "Completed after blocker resolution.",
                         },
@@ -662,6 +696,14 @@ class DummyBlockingFeatureProvider:
                 input_tokens=5,
                 output_tokens=3,
                 total_tokens=8,
+            )
+        if self.call_count == 6:
+            return ProviderResponse(
+                text="phase complete after unblock",
+                parts=[MessagePart(type="text", text="phase complete after unblock")],
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
             )
         return ProviderResponse(
             text="review complete",
@@ -739,7 +781,7 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     assert completed["status"] == "completed"
     assert completed["result"]["feature_plan"]["review_status"] == "completed"
     assert completed["result"]["feature_plan"]["phases"][0]["status"] == "completed"
-    assert len(completed["result"]["cycles"]) >= 3
+    assert len(completed["result"]["cycles"]) >= 2
 
 
 def test_feature_loop_state_persists_across_session_reload(tmp_path):

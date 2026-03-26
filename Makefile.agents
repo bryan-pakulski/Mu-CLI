@@ -1,19 +1,28 @@
 .PHONY: test test-tools test-models test-session test-workspace test-batch
 
+TEST_MUCLI_HOME ?= /tmp/mucli-test
+TEST_ENV = MUCLI_HOME=$(TEST_MUCLI_HOME) PYTHONPATH=.
+
 test:
-	PYTHONPATH=. pytest tests
+	rm -rf $(TEST_MUCLI_HOME)
+	$(TEST_ENV) pytest tests
 
 test-tools:
-	PYTHONPATH=. pytest tests/test_tools.py tests/test_multi_diff.py
+	rm -rf $(TEST_MUCLI_HOME)
+	$(TEST_ENV) pytest tests/test_tools.py tests/test_multi_diff.py
 
 test-models:
-	PYTHONPATH=. pytest tests/test_gemini.py tests/test_ollama.py
+	rm -rf $(TEST_MUCLI_HOME)
+	$(TEST_ENV) pytest tests/test_gemini.py tests/test_ollama.py
 
 test-session:
-	PYTHONPATH=. pytest tests/test_session.py
+	rm -rf $(TEST_MUCLI_HOME)
+	$(TEST_ENV) pytest tests/test_session.py
 
 test-workspace:
-	PYTHONPATH=. pytest tests/test_workspace.py
+	rm -rf $(TEST_MUCLI_HOME)
+	$(TEST_ENV) pytest tests/test_workspace.py
 
 test-batch:
-	PYTHONPATH=. pytest tests/test_batch_tool.py
+	rm -rf $(TEST_MUCLI_HOME)
+	$(TEST_ENV) pytest tests/test_batch_tool.py

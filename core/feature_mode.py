@@ -23,6 +23,10 @@ class FeatureTask:
     status: str = STATUS_NOT_STARTED
     notes: str = ""
 
+    @property
+    def number(self) -> int:
+        return self.id
+
 
 @dataclass
 class FeaturePlan:
@@ -83,31 +87,127 @@ def _workspace_root(folder_context) -> str:
 
 
 def save_feature_plan(session_id: str, plan: FeaturePlan) -> FeaturePlan:
-    if plan.metadata_path is None or plan.metadata_path == "":
-        Exception("Unable to save feature plan, empty metadata path")
-
-    # Features should always be saved under ~/.mucli/sessions/<session_id>/features/<feature_id>.json 
-    full_path = os.path.join(HISTORY_DIR, "sessions", session_id, "features", plan.feature_id + ".json")
+    full_path = _resolve_metadata_path(
+        directory=plan.directory,
+        metadata_path=plan.metadata_path,
+        session_id=session_id,
+        feature_id=plan.feature_id,
+    )
+    plan.metadata_path = full_path
+    plan.updated_at = time.time()
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
     with open(full_path, "w", encoding="utf-8") as handle:
         json.dump(asdict(plan), handle, indent=2)
     return plan
 
 
+def _feature_directory(workspace_root: str, feature_id: str) -> str:
+    return os.path.join(workspace_root, "documentation", f"feature_req_{feature_id}")
+
+
+def _resolve_metadata_path(
+    *,
+    directory: str | None,
+    metadata_path: str | None,
+    session_id: str | None = None,
+    feature_id: str | None = None,
+) -> str:
+    if metadata_path:
+        if os.path.isabs(metadata_path):
+            return metadata_path
+        if session_id:
+            return os.path.join(HISTORY_DIR, "sessions", session_id, "features", metadata_path)
+        if directory:
+            return os.path.join(directory, metadata_path)
+        return os.path.abspath(metadata_path)
+    if session_id:
+        return os.path.join(
+            HISTORY_DIR,
+            "sessions",
+            session_id,
+            "features",
+            f"{_slugify(feature_id or 'feature')}.json",
+        )
+    return os.path.join(str(directory or os.getcwd()), "feature_plan.json")
+
+
+def _phase_path(directory: str, task_id: int) -> str:
+    return os.path.join(directory, f"phase_{task_id}.md")
+
+
+def _render_phase_markdown(task: FeatureTask) -> str:
+    def _lines(items: list[str]) -> list[str]:
+        return [f"- [ ] {item}" for item in items] or ["- [ ] (none yet)"]
+
+    lines = [
+        f"# Phase {task.id}: {task.title}",
+        "",
+        "## Objectives",
+        *_lines(task.objectives),
+        "",
+        "## Action Points",
+        *_lines(task.action_points),
+        "",
+        "## Exit Criteria",
+        *_lines(task.exit_criteria),
+        "",
+        "## Notes",
+        task.notes or "",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _write_phase_files(plan: FeaturePlan) -> None:
+    os.makedirs(plan.directory, exist_ok=True)
+    for task in plan.tasks:
+        phase_path = _phase_path(plan.directory, task.id)
+        if not os.path.exists(phase_path):
+            with open(phase_path, "w", encoding="utf-8") as handle:
+                handle.write(_render_phase_markdown(task))
+
+
+def _phase_counts(phase_text: str) -> dict[str, int]:
+    counts = {"not_started": 0, "in_progress": 0, "completed": 0}
+    for line in phase_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- [x]"):
+            counts["completed"] += 1
+        elif stripped.startswith("- [~]"):
+            counts["in_progress"] += 1
+        elif stripped.startswith("- [ ]"):
+            counts["not_started"] += 1
+    return counts
+
+
+def _status_from_counts(counts: dict[str, int], current_status: str) -> str:
+    total = counts["not_started"] + counts["in_progress"] + counts["completed"]
+    if total == 0:
+        return current_status
+    if counts["completed"] == total:
+        return STATUS_COMPLETED
+    if counts["completed"] > 0 or counts["in_progress"] > 0:
+        return STATUS_IN_PROGRESS
+    return STATUS_NOT_STARTED
+
+
 def create_feature_plan(
-    session_id: str,
     feature_name: str,
     feature_request: str,
-    tasks_data: list[dict[str, Any]],
+    tasks_data: list[dict[str, Any]] | None = None,
+    phases: list[dict[str, Any]] | None = None,
     folder_context=None,
+    session_id: str | None = None,
     feature_id: str | None = None,
     metadata_path: str | None = None,
 ) -> FeaturePlan:
     workspace_root = _workspace_root(folder_context)
     slug = _slugify(feature_id or feature_name)
+    directory = _feature_directory(workspace_root, slug)
+    items = tasks_data if tasks_data is not None else phases or []
 
     tasks = []
-    for idx, t in enumerate(tasks_data, start=1):
+    for idx, t in enumerate(items, start=1):
         tasks.append(
             FeatureTask(
                 id=idx,
@@ -115,6 +215,7 @@ def create_feature_plan(
                 objectives=[str(o).strip() for o in t.get("objectives", [])],
                 action_points=[str(a).strip() for a in t.get("action_points", [])],
                 exit_criteria=[str(e).strip() for e in t.get("exit_criteria", [])],
+                status=str(t.get("status", STATUS_NOT_STARTED) or STATUS_NOT_STARTED),
                 notes=str(t.get("notes", "") or ""),
             )
         )
@@ -123,30 +224,50 @@ def create_feature_plan(
         feature_id=slug,
         feature_name=feature_name.strip() or slug,
         feature_request=feature_request.strip() or feature_name.strip() or slug,
-        directory=workspace_root,
-        metadata_path=metadata_path or "",
+        directory=directory,
+        metadata_path=_resolve_metadata_path(
+            directory=directory,
+            metadata_path=metadata_path,
+            session_id=session_id,
+            feature_id=slug,
+        ),
         tasks=tasks,
     )
-    return save_feature_plan(session_id, plan)
+    _write_phase_files(plan)
+    return save_feature_plan(session_id or "", plan)
 
 
-def load_feature_plan(session_id: str, metadata_id: str) -> FeaturePlan:
-    full_path = os.path.join(HISTORY_DIR, "sessions", session_id, "features", metadata_id)
+def load_feature_plan(path_or_session_id: str, metadata_id: str | None = None) -> FeaturePlan:
+    if metadata_id is not None:
+        full_path = _resolve_metadata_path(
+            directory=None,
+            metadata_path=metadata_id,
+            session_id=path_or_session_id,
+        )
+    else:
+        full_path = (
+            os.path.join(path_or_session_id, "feature_plan.json")
+            if os.path.isdir(path_or_session_id)
+            else path_or_session_id
+        )
     with open(full_path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
 
+    data.pop("overall_status", None)
+    data.pop("phases_completed", None)
+    data.pop("phase_count", None)
+    data.pop("phases", None)
+    data.pop("next_phase", None)
     tasks_data = data.pop("tasks", [])
     tasks = [FeatureTask(**t) for t in tasks_data]
     return FeaturePlan(tasks=tasks, **data)
 
 
 def refresh_and_persist_feature_plan(
-    session_id: str,
+    path_or_session_id: str,
     metadata_path: str | None = None,
 ) -> FeaturePlan:
-    if not metadata_path:
-        raise ValueError("metadata_path is required for internal feature system")
-    return load_feature_plan(session_id, metadata_path)
+    return load_feature_plan(path_or_session_id, metadata_path)
 
 
 def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
@@ -158,8 +279,21 @@ def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
     next_task = plan.next_incomplete_task()
     summary["next_task"] = asdict(next_task) if next_task else None
 
-    # For backward compatibility with things expecting 'phases'
-    summary["phases"] = summary["tasks"]
+    phases = []
+    for task in plan.tasks:
+        phase_file = _phase_path(plan.directory, task.id)
+        counts = {"not_started": 0, "in_progress": 0, "completed": 0}
+        if os.path.exists(phase_file):
+            with open(phase_file, "r", encoding="utf-8") as handle:
+                counts = _phase_counts(handle.read())
+        phases.append(
+            {
+                **asdict(task),
+                "number": task.id,
+                "task_counts": counts,
+            }
+        )
+    summary["phases"] = phases
     summary["next_phase"] = summary["next_task"]
     summary["phase_count"] = summary["task_count"]
     summary["phases_completed"] = summary["tasks_completed"]
@@ -168,23 +302,36 @@ def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
 
 
 def update_feature_plan_metadata(
+    path_or_session_id: str | None = None,
     *,
-    session_id: str,
+    session_id: str | None = None,
     approved: bool | None = None,
     review_status: str | None = None,
     review_notes: str | None = None,
     metadata_path: str | None = None,
 ) -> FeaturePlan:
-    if not metadata_path:
+    locator = path_or_session_id or session_id
+    if not locator:
+        raise ValueError("session_id or directory is required")
+    resolved_metadata = metadata_path or (
+        os.path.join(locator, "feature_plan.json")
+        if os.path.isdir(locator)
+        else None
+    )
+    if not resolved_metadata:
         raise ValueError("metadata_path is required")
-    plan = load_feature_plan(metadata_path)
+    plan = (
+        load_feature_plan(locator, resolved_metadata)
+        if session_id
+        else load_feature_plan(resolved_metadata)
+    )
     if approved is not None:
         plan.approved = approved
     if review_status is not None:
         plan.review_status = review_status
     if review_notes is not None:
         plan.review_notes = review_notes
-    return save_feature_plan(session_id, plan)
+    return save_feature_plan(session_id or "", plan)
 
 
 def update_task_status(
@@ -200,7 +347,7 @@ def update_task_status(
             if notes is not None:
                 task.notes = notes
             break
-    return save_feature_plan(plan)
+    return save_feature_plan("", plan)
 
 
 def update_task_content(
@@ -226,7 +373,8 @@ def update_task_content(
             if notes is not None:
                 task.notes = notes
             break
-    return save_feature_plan(plan)
+    _write_phase_files(plan)
+    return save_feature_plan("", plan)
 
 
 def build_phase_execution_prompt(plan: FeaturePlan, task: FeatureTask) -> str:
@@ -235,6 +383,8 @@ def build_phase_execution_prompt(plan: FeaturePlan, task: FeatureTask) -> str:
         f"Work on task {task.id}: '{task.title}' only. "
         f"Objectives: {', '.join(task.objectives)}. "
         f"Exit Criteria: {', '.join(task.exit_criteria)}. "
+        "Perform one bounded step for this task, then verify and record progress before taking the next step. "
+        "Use save_scratchpad for short-lived notes/plans and save_memory for durable findings/decisions during this loop. "
         "Update the task status to 'completed' only when all exit criteria are met. "
         "If you are blocked, explain why in your response."
     )
@@ -243,6 +393,7 @@ def build_phase_execution_prompt(plan: FeaturePlan, task: FeatureTask) -> str:
 def build_review_prompt(plan: FeaturePlan) -> str:
     return (
         f"Review the completed feature '{plan.feature_name}'. "
+        "Use memory and scratchpad context to confirm all decisions and validations are consistent with prior steps. "
         "Verify all tasks and their exit criteria were genuinely met. "
         "If everything passes review, set review_status to 'completed'. "
         "Otherwise, update the failing task status and explain the failure."

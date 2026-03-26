@@ -657,6 +657,7 @@ TOOLS = [
                     "enum": ["not_started", "in_progress", "completed"],
                 },
                 "notes": {"type": "string"},
+                "directory": {"type": "string"},
             },
             "required": ["task_id", "status"],
         },
@@ -1927,142 +1928,6 @@ def _handle_git_branch(args, folder_context, ui, variables) -> str:
     return git_branch(folder_context)
 
 
-def _handle_create_feature_plan(args, folder_context, ui, variables) -> str:
-    feature_id = args.get("feature_id") or args.get("feature_name", "")
-    metadata_dir = getattr(folder_context, "feature_metadata_dir", "") or ""
-    metadata_path = ""
-    session = getattr(args, "session", None)
-    if metadata_dir:
-        os.makedirs(metadata_dir, exist_ok=True)
-        slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(feature_id).strip().lower()).strip("_")
-        metadata_path = os.path.join(metadata_dir, f"{slug or 'feature'}.json")
-    # Check if plan already exists and handle draft vs approved states
-    existing_plan = None
-    if metadata_path and os.path.exists(metadata_path):
-        try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                existing_plan = json.load(f)
-        except Exception:
-            pass
-
-    # If plan exists and is approved, reject recreation
-    if existing_plan and existing_plan.get("approved"):
-        return "Error: Cannot recreate an approved feature plan. To modify the plan structure, you must first update the approval status to false or create a new feature with a different feature_id."
-
-    # If plan exists but is not approved (draft mode), allow overwrite with warning
-    if existing_plan and not existing_plan.get("approved"):
-        logger.info(f"Overwriting draft feature plan: {metadata_path}")
-        if ui:
-            ui.show_info(
-                "⚠️  Overwriting draft feature plan - previous unapproved changes will be lost"
-            )
-
-    plan = create_feature_plan(
-        args.get("feature_name", ""),
-        args.get("feature_request", ""),
-        args.get("phases", []),
-        folder_context=folder_context,
-        feature_id=args.get("feature_id"),
-        metadata_path=metadata_path or None,
-    )
-    summary = summarize_feature_plan(plan)
-    return json.dumps(summary, indent=2, sort_keys=True)
-
-
-def _handle_get_feature_plan(args, folder_context, ui, variables) -> str:
-    session = getattr(args, "session", None)
-    if not session:
-        return "Error: This tool requires an active session context."
-    return _handle_get_feature_plan_session(args, session)
-
-
-def _handle_get_feature_plan_session(args: dict, context: ToolExecutionContext) -> str:
-    session = context.session
-    feature_state = session.session_manager.get_feature_state() if session else None
-
-    directory = args.get("directory")
-    if not directory and feature_state:
-        directory = feature_state.get("directory")
-    if not directory:
-        return "Error: No directory provided and no active feature in session."
-
-    metadata_path = getattr(context.folder_context, "feature_metadata_index", {}).get(
-        directory
-    )
-    if (
-        not metadata_path
-        and feature_state
-        and feature_state.get("directory") == directory
-    ):
-        metadata_path = feature_state.get("metadata_path")
-
-    # Load existing plan to check approval status
-    existing_plan = None
-    if metadata_path and os.path.exists(metadata_path):
-        try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                existing_plan = json.load(f)
-        except Exception:
-            pass
-
-    # If plan is approved, reject structural modifications
-    # Only allow metadata updates: approved, review_status, review_notes
-    if existing_plan and existing_plan.get("approved"):
-        # Check if agent is trying to modify structural fields
-        structural_fields = [
-            "phases",
-            "feature_plan",
-            "feature_name",
-            "feature_request",
-            "feature_id",
-            "directory",
-        ]
-        for field in structural_fields:
-            if field in args:
-                return f"Error: Cannot modify '{field}' on an approved feature plan. Approved plans are locked from structural changes. Only metadata fields (approved, review_status, review_notes) can be updated. To restructure the plan, set approved=false first or create a new feature."
-
-    # Validate that only allowed metadata fields are being updated
-    allowed_fields = {"approved", "review_status", "review_notes", "directory"}
-    for key in args.keys():
-        if key not in allowed_fields:
-            logger.warning(f"update_feature_plan: Ignoring unauthorized field '{key}'")
-
-    plan = refresh_and_persist_feature_plan(directory, metadata_path=metadata_path)
-    return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
-
-
-def _handle_update_feature_plan_session(
-    args: dict, context: ToolExecutionContext
-) -> str:
-    session = context.session
-    feature_state = session.session_manager.get_feature_state() if session else None
-
-    directory = args.get("directory") or (
-        feature_state.get("directory") if feature_state else None
-    )
-    if not directory:
-        return "Error: No directory provided and no active feature in session."
-
-    metadata_path = getattr(context.folder_context, "feature_metadata_index", {}).get(
-        directory
-    )
-    if (
-        not metadata_path
-        and feature_state
-        and feature_state.get("directory") == directory
-    ):
-        metadata_path = feature_state.get("metadata_path")
-
-    plan = update_feature_plan_metadata(
-        directory,
-        approved=args.get("approved"),
-        review_status=args.get("review_status"),
-        review_notes=args.get("review_notes"),
-        metadata_path=metadata_path,
-    )
-    return json.dumps(summarize_feature_plan(plan), indent=2, sort_keys=True)
-
-
 def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
     payload = {
         "kind": "feature_blocker",
@@ -2108,9 +1973,9 @@ def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> st
 
     # Create the feature plan
     plan = create_feature_plan(
-        feature_name,
-        feature_request,
-        tasks_data,
+        feature_name=feature_name,
+        feature_request=feature_request,
+        tasks_data=tasks_data,
         folder_context=context.folder_context,
         feature_id=feature_id,
         metadata_path=metadata_path,
@@ -2199,17 +2064,30 @@ def _handle_approve_feature_task(args: dict, context: ToolExecutionContext) -> s
 
     approved = args.get("approved", True)
 
-    feature_state = session.session_manager.get_feature_state()
-    if not feature_state:
-        return "Error: No active feature in session."
-
-    metadata_path = feature_state.get("metadata_path", "")
+    feature_state = session.session_manager.get_feature_state() or {}
+    directory = str(
+        args.get("directory")
+        or feature_state.get("directory", "")
+        or ""
+    ).strip()
+    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+    if not metadata_path:
+        metadata_path = str(
+            getattr(context.folder_context, "feature_metadata_index", {}).get(
+                directory, ""
+            )
+            or ""
+        ).strip()
+    if not metadata_path and directory:
+        metadata_path = os.path.join(directory, "feature_plan.json")
     if not metadata_path or not os.path.exists(metadata_path):
         return "Error: Feature metadata not found."
 
     plan = update_feature_plan_metadata(
-        feature_state.get("directory", ""),
+        directory or feature_state.get("directory", ""),
         approved=approved,
+        review_status=args.get("review_status"),
+        review_notes=args.get("review_notes"),
         metadata_path=metadata_path,
     )
 
@@ -2320,11 +2198,22 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     if status not in valid_statuses:
         return f"Error: status must be one of {valid_statuses}."
 
-    feature_state = session.session_manager.get_feature_state()
-    if not feature_state:
-        return "Error: No active feature in session."
-
-    metadata_path = feature_state.get("metadata_path", "")
+    feature_state = session.session_manager.get_feature_state() or {}
+    directory = str(
+        args.get("directory")
+        or feature_state.get("directory", "")
+        or ""
+    ).strip()
+    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+    if not metadata_path:
+        metadata_path = str(
+            getattr(context.folder_context, "feature_metadata_index", {}).get(
+                directory, ""
+            )
+            or ""
+        ).strip()
+    if not metadata_path and directory:
+        metadata_path = os.path.join(directory, "feature_plan.json")
     if not metadata_path or not os.path.exists(metadata_path):
         return "Error: Feature metadata not found."
 
@@ -2332,7 +2221,12 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     summary = summarize_feature_plan(plan)
 
     # Update session state
-    updated_feature = {**feature_state, "feature_plan": summary}
+    updated_feature = {
+        **feature_state,
+        "directory": directory or feature_state.get("directory", summary.get("directory")),
+        "metadata_path": metadata_path,
+        "feature_plan": summary,
+    }
     session.session_manager.set_feature_state(updated_feature)
 
     if context.ui:
@@ -2440,9 +2334,6 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "url_grounding": _legacy_handler(_handle_url_grounding),
     "read_document": _legacy_handler(_handle_read_document),
     "git_branch": _legacy_handler(_handle_git_branch),
-    "create_feature_plan": _legacy_handler(_handle_create_feature_plan),
-    "get_feature_plan": _handle_get_feature_plan_session,
-    "update_feature_plan": _handle_update_feature_plan_session,
     "create_feature_task": _handle_create_feature_task,
     "update_feature_task": _handle_update_feature_task,
     "approve_feature_task": _handle_approve_feature_task,

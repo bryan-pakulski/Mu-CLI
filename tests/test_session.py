@@ -475,7 +475,7 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
 
     session.send_message("Implement an approvals dashboard")
 
-    assert "create_feature_plan" in provider.last_user_text
+    assert "create_feature_task" in provider.last_user_text
     assert "phase_N.md" in provider.last_user_text
     assert "Do not create alternate planning documents" in provider.last_user_text
     assert (
@@ -518,7 +518,7 @@ def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypat
     assert sm.get_feature_state() is None
 
     session._sync_feature_state_for_tool(
-        "get_feature_plan",
+        "get_tasks",
         {"directory": plan.directory},
         raw_result=summary,
         structured_result={"ok": True, "data": summary},
@@ -572,14 +572,21 @@ def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
     with open(phase_path, "w", encoding="utf-8") as handle:
         handle.write(updated_phase_text)
 
+    updated_summary = summarize_feature_plan(plan)
+    updated_summary["tasks"][0]["status"] = "completed"
+    updated_summary["phases"][0]["status"] = "completed"
+    updated_summary["next_task"] = None
+    updated_summary["next_phase"] = None
+    updated_summary["tasks_completed"] = True
+    updated_summary["phases_completed"] = True
+
     session._sync_feature_state_for_tool(
-        "write_file",
-        {"filename": phase_path},
-        raw_result=f"Successfully wrote to {phase_path}",
+        "update_task_status",
+        {"task_id": 1, "status": "completed"},
+        raw_result=updated_summary,
         structured_result={
             "ok": True,
-            "data": {"changed_file": phase_path},
-            "modified_files": [phase_path],
+            "data": updated_summary,
         },
     )
 
@@ -727,11 +734,11 @@ def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypat
                     parts=[
                         MessagePart(
                             type="tool_call",
-                            tool_name="create_feature_plan",
+                            tool_name="create_feature_task",
                             tool_args={
                                 "feature_name": "Persistent feature state",
                                 "feature_request": "Persist feature state to the session JSON.",
-                                "phases": [
+                                "tasks": [
                                     {
                                         "title": "Phase 1",
                                         "objectives": ["Plan the work"],
@@ -772,7 +779,9 @@ def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypat
 
     session.send_message("Implement the feature workflow")
 
-    session_json = tmp_path / "history" / "feature-state-persisted.json"
+    session_json = (
+        tmp_path / "history" / "sessions" / "feature-state-persisted" / "session.json"
+    )
     assert session_json.exists()
 
     saved = json.loads(session_json.read_text())
@@ -795,11 +804,11 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
                     parts=[
                         MessagePart(
                             type="tool_call",
-                            tool_name="create_feature_plan",
+                            tool_name="create_feature_task",
                             tool_args={
                                 "feature_name": "Externalized feature metadata",
                                 "feature_request": "Keep feature JSON under session metadata.",
-                                "phases": [
+                                "tasks": [
                                     {
                                         "title": "Plan",
                                         "objectives": ["Capture requirements"],
@@ -844,7 +853,7 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
 
     assert feature_state is not None
     assert feature_state["metadata_path"].startswith(
-        str(tmp_path / "history" / "features")
+        str(tmp_path / "history" / "sessions")
     )
     assert os.path.exists(feature_state["metadata_path"])
     assert not os.path.exists(

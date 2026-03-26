@@ -4,6 +4,7 @@ import json
 import time
 import glob
 import re
+import shutil
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
@@ -91,10 +92,14 @@ class SessionManager:
             self._load_session(DEFAULT_SESSION_NAME)
 
     def _get_filepath(self, name):
-        return os.path.join(HISTORY_DIR, f"{name}.json")
+        return os.path.join(self._get_session_dir(name), "session.json")
+
+    def _get_session_dir(self, name):
+        return os.path.join(HISTORY_DIR, "sessions", name)
 
     def _load_session(self, name):
         filepath = self._get_filepath(name)
+        legacy_filepath = os.path.join(HISTORY_DIR, f"{name}.json")
         self.current_session_name = name
         self.history = []
         self.conversation_summary = ""
@@ -111,9 +116,10 @@ class SessionManager:
         self.active_feature_id = None
         self.variables.update(DEFAULT_VARIABLES)
 
-        if os.path.exists(filepath):
+        source_filepath = filepath if os.path.exists(filepath) else legacy_filepath
+        if os.path.exists(source_filepath):
             try:
-                with open(filepath, "r") as f:
+                with open(source_filepath, "r") as f:
                     data = json.load(f)
                 if isinstance(data, list):
                     self.history = data
@@ -174,7 +180,7 @@ class SessionManager:
             self.folder_context = folder_context_obj
 
         try:
-            os.makedirs(HISTORY_DIR, exist_ok=True)
+            os.makedirs(self._get_session_dir(self.current_session_name), exist_ok=True)
             data = {
                 "history": self.history,
                 "conversation_summary": self.conversation_summary,
@@ -205,7 +211,7 @@ class SessionManager:
         )
 
     def get_feature_metadata_root(self) -> str:
-        return os.path.join(HISTORY_DIR, "features", self.current_session_name)
+        return os.path.join(self._get_session_dir(self.current_session_name), "features")
 
     def get_feature_metadata_path(self, feature_id: str) -> str:
         return os.path.join(
@@ -376,12 +382,12 @@ class SessionManager:
         if not os.path.exists(self._get_filepath(self.current_session_name)):
             self.save_history()
 
-        files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
+        files = glob.glob(os.path.join(HISTORY_DIR, "sessions", "*", "session.json"))
         if self.ui:
             # We might want a specific UI method for listing sessions
             self.ui.show_info("\n=== Available Conversations ===")
             for f in files:
-                name = os.path.basename(f).replace(".json", "")
+                name = os.path.basename(os.path.dirname(f))
                 indicator = "*" if name == self.current_session_name else " "
                 mod_time = datetime.fromtimestamp(os.path.getmtime(f)).strftime(
                     "%Y-%m-%d %H:%M"
@@ -389,10 +395,10 @@ class SessionManager:
                 self.ui.show_info(f" {indicator} {name:<20} ({mod_time})")
 
     def get_session_list(self):
-        files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
+        files = glob.glob(os.path.join(HISTORY_DIR, "sessions", "*", "session.json"))
         sessions = []
         for f in files:
-            sessions.append(os.path.basename(f).replace(".json", ""))
+            sessions.append(os.path.basename(os.path.dirname(f)))
         return sorted(sessions)
 
     def delete_session(self, name):
@@ -402,9 +408,9 @@ class SessionManager:
                 self.ui.show_error("Cannot delete active session.")
             return
 
-        filepath = self._get_filepath(name)
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        session_dir = self._get_session_dir(name)
+        if os.path.exists(session_dir):
+            shutil.rmtree(session_dir)
             if self.ui:
                 self.ui.show_info(f"Deleted session: '{name}'")
         else:
@@ -426,6 +432,7 @@ class SessionManager:
         self.history = []
         self.conversation_summary = ""
         self.summary_anchor = 0
+        self.folder_context = FolderContext()
         self.collation_buffer = CollationBuffer()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
@@ -749,10 +756,9 @@ class Session:
         self, metadata_path: str, *, status: str | None = None
     ):
         try:
-            current = self.session_manager.get_feature_state() or {}
             plan = refresh_and_persist_feature_plan(
                 self.session_manager.current_session_name,
-                metadata_path=current.get("metadata_path"),
+                metadata_path=metadata_path,
             )
             self._set_feature_state(
                 feature_plan=summarize_feature_plan(plan),
@@ -769,16 +775,26 @@ class Session:
         structured_result,
     ):
         if tool_name in {
-            "create_feature_plan",
-            "get_feature_plan",
-            "update_feature_plan",
+            "create_feature_task",
+            "get_tasks",
+            "get_current_task",
+            "approve_feature_task",
+            "update_feature_task",
+            "update_task_status",
         }:
             data = {}
             if isinstance(structured_result, dict):
                 data = structured_result.get("data", {}) or {}
-            if not isinstance(data, dict) or "directory" not in data:
+                if (
+                    tool_name == "create_feature_task"
+                    and isinstance(data.get("plan"), dict)
+                ):
+                    data = data["plan"]
+            if not isinstance(data, dict) or "feature_id" not in data:
                 data = self._parse_json_result(raw_result)
-            if isinstance(data, dict) and data.get("directory"):
+                if isinstance(data.get("plan"), dict):
+                    data = data["plan"]
+            if isinstance(data, dict) and data.get("feature_id"):
                 self._set_feature_state(feature_plan=data)
             return
 
@@ -791,20 +807,6 @@ class Session:
             if isinstance(data, dict):
                 self._set_feature_state(status="awaiting_input", blocker=data)
             return
-
-        if tool_name not in {"write_file", "apply_diff"}:
-            return
-
-        filename = str(tool_args.get("filename", "") or "").strip()
-        if not filename:
-            return
-        
-        # Check if file exists in feature dir
-        directory = os.path.join(HISTORY_DIR, "sessions", self.session_manager.current_session_name, "features")
-        if not os.path.exists(os.path.join(directory, filename)):
-            logger.error(f"[red]File {filename} not found in session feature directory.[/red]")
-            return
-        self._refresh_feature_state(filename)
 
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
@@ -1065,14 +1067,17 @@ class Session:
 
     def _build_feature_mode_prompt(self, text: str) -> str:
         base_instruction = (
-            "FEATURE MODE DIRECTIVE: use the feature-plan engine for this request. First call create_feature_plan and create the canonical session-managed feature metadata with one documentation/feature_req_<id>/phase_N.md file per phase. "
+            "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature_task and create canonical session-managed feature metadata with one documentation/feature_req_<id>/phase_N.md file per task. "
             "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
-            "Each phase file must contain Objectives, Action Points, and Exit Criteria sections, and each checklist item must use exactly one of [ ], [~], or [x]. "
-            "After approval, call get_feature_plan at the start of every implementation turn, work on only the next incomplete phase, and keep the phase markdown synchronized with reality as you make code changes. "
+            "Each task file must contain Objectives, Action Points, and Exit Criteria sections, and each checklist item must use exactly one of [ ], [~], or [x]. "
+            "After approval, call get_current_task/get_tasks at the start of every implementation turn, work on only the next incomplete task, and keep markdown synchronized with reality as you make code changes. "
+            "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
             "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
+            "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
             "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
-            "Never move to the next phase until all checklist items in the current phase are [x]. "
-            "When all phases are complete, perform a review pass over the phase files and code changes together. If review fails, move the failing items back to [~] and continue implementing. If review succeeds, call update_feature_plan so review_status becomes completed before you report success.\n\n"
+            "Never move to the next task until all checklist items in the current task are [x]. "
+            "When all tasks are complete, perform a review pass over the task files and code changes together. If review fails, move failing items back to [~] and continue implementing. If review succeeds, call approve_feature_task with review_status completed before you report success. "
+            "In every turn response, clearly identify: current task, evidence gathered, changes made, verification result, and the immediate next step.\n\n"
         )
         return base_instruction + text
 
@@ -1156,9 +1161,12 @@ class Session:
                 "preview": self._clip_preview(raw_text, 260),
             }
         elif tool_name in {
-            "create_feature_plan",
-            "get_feature_plan",
-            "update_feature_plan",
+            "create_feature_task",
+            "update_feature_task",
+            "approve_feature_task",
+            "get_current_task",
+            "get_tasks",
+            "update_task_status",
             "raise_blocker",
         }:
             structured["data"] = self._parse_json_result(raw_text)
@@ -1278,7 +1286,6 @@ class Session:
                 display_args=display_args,
                 count_info=count_info,
                 can_approve=approval_plan.can_approve,
-                session=self,
                 modifications=[mod.to_payload() for mod in approval_plan.modifications],
                 preview_error=approval_plan.preview_error,
                 error_code=approval_plan.error_code,
@@ -1415,11 +1422,27 @@ class Session:
                         workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
+        if str(self.variables.get("agent_mode", "default")).lower() == "feature":
+            base_system_prompt += (
+                "\n\nFEATURE MODE SYSTEM PROMPT\n"
+                "You are in Feature Plan Engine mode. "
+                "Use the feature-task engine for this request. First call create_feature_task to create canonical feature metadata and phase_N.md files. "
+                "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
+                "Step through one task at a time until completion; never work multiple tasks simultaneously. "
+                "gather read-only context first, use save_scratchpad for temporary phase notes, call flush before acting on collected context, and call raise_blocker when blocked on user input. "
+                "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
+                "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows."
+            )
         if workspace_context:
             base_system_prompt += f"\n\n{workspace_context}"
-        self.session_manager.roll_history_summary(
-            self.variables.get("active_context_window", 150)
+        active_window = int(
+            getattr(
+                self,
+                "active_context_window",
+                self.variables.get("active_context_window", 150),
+            )
         )
+        self.session_manager.roll_history_summary(active_window)
         base_system_prompt = self._inject_conversation_summary(base_system_prompt)
 
         recent_history = self._prepare_runtime_history()

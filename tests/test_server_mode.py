@@ -19,7 +19,7 @@ from core.server import (
 from core.session import Session, SessionManager
 from core.workspace import FolderContext
 from core.feature_mode import create_feature_plan, update_feature_plan_metadata
-from mucli import handle_command, build_feature_markdown
+from mucli import handle_command, build_feature_markdown, get_feature_prompt_context
 from providers.base import MessagePart, ProviderResponse
 from providers.ollama import OllamaProvider
 from utils.config import AGENT_MODE_METADATA
@@ -281,6 +281,41 @@ def test_build_feature_markdown_shows_task_snapshot():
     assert "- ✔ **Implement fixtures/sipp.py**" in markdown
     assert "- ◼ **Implement fixtures/pcap.py**" in markdown
     assert "- ◻ **Implement test_basic_calls.py**" in markdown
+
+
+def test_get_feature_prompt_context_returns_task_and_progress():
+    session = build_test_session()
+    session.session_manager.set_feature_state(
+        {
+            "status": "in_progress",
+            "feature_plan": {
+                "next_task": {"number": 2, "title": "Implement fixtures/pcap.py"},
+                "phases": [
+                    {
+                        "number": 1,
+                        "title": "Implement fixtures/sipp.py",
+                        "status": "completed",
+                        "task_counts": {"completed": 3, "in_progress": 0, "not_started": 0},
+                    },
+                    {
+                        "number": 2,
+                        "title": "Implement fixtures/pcap.py",
+                        "status": "in_progress",
+                        "task_counts": {"completed": 1, "in_progress": 1, "not_started": 2},
+                    },
+                ],
+            },
+        }
+    )
+
+    context = get_feature_prompt_context(session)
+
+    assert context["status"] == "in_progress"
+    assert context["task"] == "Implement fixtures/pcap.py"
+    assert context["phase_done"] == 1
+    assert context["phase_total"] == 4
+    assert context["overall_done"] == 1
+    assert context["overall_total"] == 2
 
 
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):

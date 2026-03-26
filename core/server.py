@@ -46,7 +46,12 @@ class HeadlessUI:
         logger.debug("HeadlessUI render_message role=%s model=%s", role, model_name)
 
     def get_input(
-        self, session_name, staged_files, agent_mode="default", current_task=None
+        self,
+        session_name,
+        staged_files,
+        agent_mode="default",
+        current_task=None,
+        feature_context=None,
     ):
         return ""
 

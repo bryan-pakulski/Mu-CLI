@@ -129,6 +129,56 @@ def get_current_feature_task_label(session):
     return None
 
 
+def get_feature_prompt_context(session):
+    feature_state = session.session_manager.get_feature_state()
+    if not isinstance(feature_state, dict):
+        return None
+
+    plan = feature_state.get("feature_plan")
+    if not isinstance(plan, dict):
+        return None
+
+    tasks = plan.get("phases", [])
+    overall_total = max(1, len(tasks))
+    overall_done = sum(1 for task in tasks if task.get("status") == "completed")
+
+    next_task = plan.get("next_task") or plan.get("next_phase")
+    active_task = None
+    if isinstance(next_task, dict):
+        next_number = next_task.get("number") or next_task.get("id")
+        active_task = next(
+            (task for task in tasks if task.get("number") == next_number),
+            None,
+        )
+    if active_task is None and tasks:
+        active_task = next(
+            (task for task in tasks if task.get("status") != "completed"),
+            tasks[0],
+        )
+
+    phase_done = 0
+    phase_total = 1
+    task_title = "n/a"
+    if isinstance(active_task, dict):
+        task_title = str(active_task.get("title", "") or "").strip() or "n/a"
+        counts = active_task.get("task_counts", {}) or {}
+        phase_done = int(counts.get("completed", 0) or 0)
+        phase_total = int(sum(int(v or 0) for v in counts.values()) or 0)
+        if phase_total <= 0:
+            phase_total = 1
+            if active_task.get("status") == "completed":
+                phase_done = 1
+
+    return {
+        "status": str(feature_state.get("status", "unknown") or "unknown"),
+        "task": task_title,
+        "phase_done": phase_done,
+        "phase_total": phase_total,
+        "overall_done": overall_done,
+        "overall_total": overall_total,
+    }
+
+
 def build_feature_markdown(feature, *, include_phases=True):
     if not isinstance(feature, dict):
         return "## Feature\n\nNo feature is currently selected."
@@ -1582,11 +1632,13 @@ def main():
     while True:
         try:
             current_task = get_current_feature_task_label(session)
+            feature_context = get_feature_prompt_context(session)
             user_input = ui.get_input(
                 session.session_manager.current_session_name,
                 session.staged_files,
                 agent_mode=session.variables.get("agent_mode", "default"),
                 current_task=current_task,
+                feature_context=feature_context,
             )
 
             if not user_input:

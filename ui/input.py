@@ -231,8 +231,22 @@ class InputHandler:
         self.variables_dict["yolo"] = enabled
         return enabled
 
+    @staticmethod
+    def _progress_bar(done, total, width=8):
+        total = max(1, int(total or 1))
+        done = max(0, min(int(done or 0), total))
+        ratio = done / total
+        filled = min(width, int(round(width * ratio)))
+        percent = int(round(ratio * 100))
+        return f"{'█' * filled}{'░' * (width - filled)} {percent:>3}%"
+
     def build_prompt_markup(
-        self, session_name, staged_files, agent_mode="default", current_task=None
+        self,
+        session_name,
+        staged_files,
+        agent_mode="default",
+        current_task=None,
+        feature_context=None,
     ):
         files_text = ""
         if staged_files:
@@ -257,11 +271,31 @@ class InputHandler:
                 task = f"{task[:45]}…"
             task_text = f" <files>[Task: {escape(task)}]</files>"
 
+        feature_text = ""
+        if isinstance(feature_context, dict):
+            status = str(feature_context.get("status", "unknown") or "unknown").strip()
+            task = str(feature_context.get("task", "") or "").strip() or "n/a"
+            if len(task) > 48:
+                task = f"{task[:45]}…"
+            phase_bar = self._progress_bar(
+                feature_context.get("phase_done", 0),
+                feature_context.get("phase_total", 1),
+            )
+            overall_bar = self._progress_bar(
+                feature_context.get("overall_done", 0),
+                feature_context.get("overall_total", 1),
+            )
+            feature_text = (
+                f" <files>[Feature: {escape(status)} | Task: {escape(task)}"
+                f" | Phase {phase_bar} | Overall {overall_bar}]</files>"
+            )
+
         return (
             f"<prompt>[{session_name}]</prompt>"
             f"{mode_text}"
             f"{yolo_text}"
             f"{task_text}"
+            f"{feature_text}"
             f"<files>{files_text}</files> "
             f"<prompt>>>></prompt> "
         )
@@ -279,7 +313,12 @@ class InputHandler:
         return f"[Shift+Tab] toggles YOLO ({yolo_status})"
 
     def get_input(
-        self, session_name, staged_files, agent_mode="default", current_task=None
+        self,
+        session_name,
+        staged_files,
+        agent_mode="default",
+        current_task=None,
+        feature_context=None,
     ):
         message = HTML(
             self.build_prompt_markup(
@@ -287,6 +326,7 @@ class InputHandler:
                 staged_files,
                 agent_mode=agent_mode,
                 current_task=current_task,
+                feature_context=feature_context,
             )
         )
 

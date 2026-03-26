@@ -36,13 +36,19 @@ class RichUI:
             render_response(content)
 
     def get_input(
-        self, session_name, staged_files, agent_mode="default", current_task=None
+        self,
+        session_name,
+        staged_files,
+        agent_mode="default",
+        current_task=None,
+        feature_context=None,
     ):
         return self.input_handler.get_input(
             session_name,
             staged_files,
             agent_mode=agent_mode,
             current_task=current_task,
+            feature_context=feature_context,
         )
 
     def set_variables(self, variables_dict):

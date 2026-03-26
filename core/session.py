@@ -749,6 +749,25 @@ class Session:
             "blocker": blocker,
             "updated_at": time.time(),
         }
+        previous_feature_id = str(current.get("feature_id", "") or "").strip()
+        new_feature_id = str(state.get("feature_id", "") or "").strip()
+        same_feature = previous_feature_id and previous_feature_id == new_feature_id
+        state["started_at"] = (
+            float(current.get("started_at", time.time()) or time.time())
+            if same_feature
+            else time.time()
+        )
+        state["start_tokens"] = (
+            int(
+                current.get(
+                    "start_tokens",
+                    self.session_manager.token_counts.get("total", 0),
+                )
+                or 0
+            )
+            if same_feature
+            else int(self.session_manager.token_counts.get("total", 0) or 0)
+        )
         self.session_manager.set_feature_state(state, self.folder_context)
         self.sync_runtime_state()
 

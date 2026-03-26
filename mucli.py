@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import sys
+import time
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -142,6 +143,21 @@ def build_feature_markdown(feature, *, include_phases=True):
     if request:
         lines.extend(["## Request", "", request, ""])
 
+    phases = plan.get("phases", [])
+    completed = sum(1 for phase in phases if phase.get("status") == "completed")
+    total = len(phases)
+    started_at = float(feature.get("started_at", 0) or 0)
+    elapsed = max(0, int(time.time() - started_at)) if started_at else 0
+    lines.extend(
+        [
+            "## Progress Snapshot",
+            "",
+            f"- **Completed:** {completed}/{total}",
+            f"- **Elapsed:** {elapsed}s",
+            "",
+        ]
+    )
+
     next_phase = plan.get("next_phase")
     if isinstance(next_phase, dict):
         lines.extend(
@@ -154,13 +170,17 @@ def build_feature_markdown(feature, *, include_phases=True):
         )
 
     if include_phases:
-        phases = plan.get("phases", [])
         lines.extend(["## Phases", ""])
         if phases:
             for phase in phases:
                 counts = phase.get("task_counts", {})
+                icon = {
+                    "completed": "✔",
+                    "in_progress": "◼",
+                    "not_started": "◻",
+                }.get(phase.get("status", "not_started"), "◻")
                 lines.append(
-                    f"- **Phase {phase.get('number')} — {phase.get('title', '')}** "
+                    f"- {icon} **Phase {phase.get('number')} — {phase.get('title', '')}** "
                     f"`{phase.get('status', 'unknown')}` "
                     f"(done: {counts.get('completed', 0)}, in-progress: {counts.get('in_progress', 0)}, remaining: {counts.get('not_started', 0)})"
                 )

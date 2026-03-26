@@ -1,3 +1,11 @@
+import glob
+import json
+import os
+import time
+
+from utils.config import HISTORY_DIR
+
+
 def collect_feature_progress(session):
     feature_state = None
     session_manager = getattr(session, "session_manager", None)
@@ -12,7 +20,7 @@ def collect_feature_progress(session):
     directory = str(feature_state.get("directory", "") or "").strip()
     metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
     if not directory:
-        return {"state": feature_state, "plan": None}
+        return {"state": feature_state, "plan": None, "progress": None}
 
     try:
         from core.feature_mode import (
@@ -40,12 +48,31 @@ def collect_feature_progress(session):
             )
         else:
             plan = refresh_and_persist_feature_plan(directory)
+
+        summary = summarize_feature_plan(plan)
+        phases = summary.get("phases", [])
+        completed_tasks = sum(
+            1 for phase in phases if str(phase.get("status", "")) == "completed"
+        )
+        started_at = float(feature_state.get("started_at", 0) or 0)
+        elapsed_seconds = max(0, int(time.time() - started_at)) if started_at else 0
+        start_tokens = int(feature_state.get("start_tokens", 0) or 0)
+        token_total = int(session.session_manager.token_counts.get("total", 0) or 0)
+        token_delta = max(0, token_total - start_tokens)
+
         return {
             "state": feature_state,
-            "plan": summarize_feature_plan(plan),
+            "plan": summary,
+            "progress": {
+                "completed_tasks": completed_tasks,
+                "total_tasks": len(phases),
+                "next_phase": summary.get("next_phase"),
+                "elapsed_seconds": elapsed_seconds,
+                "token_delta": token_delta,
+            },
         }
     except (FileNotFoundError, OSError, ValueError):
-        return {"state": feature_state, "plan": None}
+        return {"state": feature_state, "plan": None, "progress": None}
 
 
 def _max_int(value, fallback=1):
@@ -135,7 +162,3 @@ def build_live_status_line(session):
             ),
         ]
     )
-import glob
-import json
-import os
-from utils.config import HISTORY_DIR

@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import timedelta
 
 from rich import box
 from rich.align import Align
@@ -202,6 +203,7 @@ class RichUI:
             feature_group.append(feature_meta)
 
             phases = feature_plan.get("phases", [])
+            progress = feature_metrics.get("progress") or {}
             completed_phases = sum(
                 1 for phase in phases if phase.get("status") == "completed"
             )
@@ -233,6 +235,48 @@ class RichUI:
                         width=12,
                     )
                 )
+
+            if progress:
+                next_phase = progress.get("next_phase") or {}
+                active_label = next_phase.get("title") or "Review"
+                elapsed = str(
+                    timedelta(seconds=int(progress.get("elapsed_seconds", 0) or 0))
+                )
+                token_delta = int(progress.get("token_delta", 0) or 0)
+                activity = Text()
+                activity.append(f"Implementing {active_label}… ", style="white")
+                activity.append(
+                    f"({elapsed} · ↓ {token_delta:,} tokens)", style="dim white"
+                )
+                feature_group.append(activity)
+
+                completed = int(progress.get("completed_tasks", 0) or 0)
+                remaining = max(0, int(progress.get("total_tasks", 0) or 0) - completed)
+                summary_line = Text()
+                summary_line.append("✔ ", style="green")
+                summary_line.append(f"{completed} completed", style="white")
+                summary_line.append("  ◻ ", style="cyan")
+                summary_line.append(f"{remaining} remaining", style="white")
+                feature_group.append(summary_line)
+
+            for phase in phases[:8]:
+                icon = {
+                    "completed": "✔",
+                    "in_progress": "◼",
+                    "not_started": "◻",
+                }.get(phase.get("status"), "◻")
+                icon_style = {
+                    "completed": "green",
+                    "in_progress": "yellow",
+                    "not_started": "grey70",
+                }.get(phase.get("status"), "grey70")
+                task_line = Text()
+                task_line.append(f"{icon} ", style=icon_style)
+                task_line.append(
+                    f"P{phase.get('number', '?')} {phase.get('title', '')}",
+                    style="white",
+                )
+                feature_group.append(task_line)
 
             next_phase = feature_plan.get("next_phase")
             if next_phase:

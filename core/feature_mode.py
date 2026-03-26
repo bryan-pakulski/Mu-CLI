@@ -131,64 +131,12 @@ def _resolve_metadata_path(
     return os.path.join(str(directory or os.getcwd()), "feature_plan.json")
 
 
-def _phase_path(directory: str, task_id: int) -> str:
-    return os.path.join(directory, f"phase_{task_id}.md")
-
-
-def _render_phase_markdown(task: FeatureTask) -> str:
-    def _lines(items: list[str]) -> list[str]:
-        return [f"- [ ] {item}" for item in items] or ["- [ ] (none yet)"]
-
-    lines = [
-        f"# Phase {task.id}: {task.title}",
-        "",
-        "## Objectives",
-        *_lines(task.objectives),
-        "",
-        "## Action Points",
-        *_lines(task.action_points),
-        "",
-        "## Exit Criteria",
-        *_lines(task.exit_criteria),
-        "",
-        "## Notes",
-        task.notes or "",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def _write_phase_files(plan: FeaturePlan) -> None:
-    os.makedirs(plan.directory, exist_ok=True)
-    for task in plan.tasks:
-        phase_path = _phase_path(plan.directory, task.id)
-        if not os.path.exists(phase_path):
-            with open(phase_path, "w", encoding="utf-8") as handle:
-                handle.write(_render_phase_markdown(task))
-
-
-def _phase_counts(phase_text: str) -> dict[str, int]:
-    counts = {"not_started": 0, "in_progress": 0, "completed": 0}
-    for line in phase_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("- [x]"):
-            counts["completed"] += 1
-        elif stripped.startswith("- [~]"):
-            counts["in_progress"] += 1
-        elif stripped.startswith("- [ ]"):
-            counts["not_started"] += 1
-    return counts
-
-
-def _status_from_counts(counts: dict[str, int], current_status: str) -> str:
-    total = counts["not_started"] + counts["in_progress"] + counts["completed"]
-    if total == 0:
-        return current_status
-    if counts["completed"] == total:
-        return STATUS_COMPLETED
-    if counts["completed"] > 0 or counts["in_progress"] > 0:
-        return STATUS_IN_PROGRESS
-    return STATUS_NOT_STARTED
+def _task_counts_from_status(status: str) -> dict[str, int]:
+    if status == STATUS_COMPLETED:
+        return {"not_started": 0, "in_progress": 0, "completed": 1}
+    if status == STATUS_IN_PROGRESS:
+        return {"not_started": 0, "in_progress": 1, "completed": 0}
+    return {"not_started": 1, "in_progress": 0, "completed": 0}
 
 
 def create_feature_plan(
@@ -233,7 +181,7 @@ def create_feature_plan(
         ),
         tasks=tasks,
     )
-    _write_phase_files(plan)
+    os.makedirs(plan.directory, exist_ok=True)
     return save_feature_plan(session_id or "", plan)
 
 
@@ -281,16 +229,11 @@ def summarize_feature_plan(plan: FeaturePlan) -> dict[str, Any]:
 
     phases = []
     for task in plan.tasks:
-        phase_file = _phase_path(plan.directory, task.id)
-        counts = {"not_started": 0, "in_progress": 0, "completed": 0}
-        if os.path.exists(phase_file):
-            with open(phase_file, "r", encoding="utf-8") as handle:
-                counts = _phase_counts(handle.read())
         phases.append(
             {
                 **asdict(task),
                 "number": task.id,
-                "task_counts": counts,
+                "task_counts": _task_counts_from_status(task.status),
             }
         )
     summary["phases"] = phases
@@ -373,7 +316,6 @@ def update_task_content(
             if notes is not None:
                 task.notes = notes
             break
-    _write_phase_files(plan)
     return save_feature_plan("", plan)
 
 

@@ -869,7 +869,29 @@ class Session:
                 if isinstance(data.get("plan"), dict):
                     data = data["plan"]
             if isinstance(data, dict) and data.get("feature_id"):
-                self._set_feature_state(feature_plan=data)
+                is_plan_summary = any(
+                    key in data
+                    for key in (
+                        "metadata_path",
+                        "directory",
+                        "review_status",
+                        "phases",
+                        "tasks",
+                        "next_task",
+                        "next_phase",
+                    )
+                )
+                if is_plan_summary:
+                    self._set_feature_state(feature_plan=data)
+                elif tool_name in {"get_current_task", "get_tasks"}:
+                    metadata_path = str(
+                        (self.session_manager.get_feature_state() or {}).get(
+                            "metadata_path", ""
+                        )
+                        or ""
+                    ).strip()
+                    if metadata_path:
+                        self._refresh_feature_state(metadata_path)
             return
 
         if tool_name == "raise_blocker":

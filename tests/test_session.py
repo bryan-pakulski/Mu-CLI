@@ -593,6 +593,50 @@ def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypat
     assert feature_state["status"] == "awaiting_approval"
 
 
+def test_get_current_task_sync_does_not_drop_feature_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-state-current-task")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+
+    plan = create_feature_plan(
+        feature_name="Feature state sync",
+        feature_request="Track feature plan metadata stability.",
+        phases=[
+            {
+                "title": "Phase 1",
+                "objectives": ["Gather context"],
+                "action_points": ["Update status"],
+                "exit_criteria": ["Task done"],
+            }
+        ],
+        folder_context=session.folder_context,
+    )
+    summary = summarize_feature_plan(plan)
+    session._sync_feature_state_for_tool(
+        "create_feature_task",
+        {},
+        raw_result={"plan": summary},
+        structured_result={"ok": True, "data": {"plan": summary}},
+    )
+
+    session._sync_feature_state_for_tool(
+        "get_current_task",
+        {},
+        raw_result={"feature_id": summary["feature_id"], "task": {"id": 1}},
+        structured_result={
+            "ok": True,
+            "data": {"feature_id": summary["feature_id"], "task": {"id": 1}},
+        },
+    )
+
+    feature_state = sm.get_feature_state()
+    assert feature_state is not None
+    assert feature_state["metadata_path"] == summary["metadata_path"]
+    assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
+
+
 def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
     tmp_path, monkeypatch
 ):

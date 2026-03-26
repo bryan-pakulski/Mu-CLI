@@ -2,6 +2,7 @@
 import os
 import glob
 import re
+import json
 from html import escape
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -63,6 +64,38 @@ class DynamicVariableCompleter(Completer):
         yield from completer.get_completions(document, complete_event)
 
 
+class DynamicFeatureIdCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        feature_ids = set()
+
+        # Workspace feature directories: documentation/feature_req_<feature_id>
+        for path in glob.glob(os.path.join("documentation", "feature_req_*")):
+            if not os.path.isdir(path):
+                continue
+            name = os.path.basename(path)
+            if name.startswith("feature_req_"):
+                feature_ids.add(name.replace("feature_req_", "", 1))
+
+        # Session-managed feature metadata records.
+        for path in glob.glob(
+            os.path.join(HISTORY_DIR, "sessions", "*", "features", "*.json")
+        ):
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                feature_id = str(payload.get("feature_id", "")).strip()
+                if feature_id:
+                    feature_ids.add(feature_id)
+            except (OSError, json.JSONDecodeError, AttributeError):
+                continue
+
+        if not feature_ids:
+            return
+
+        completer = FuzzyWordCompleter(sorted(feature_ids))
+        yield from completer.get_completions(document, complete_event)
+
+
 class MergedCompleter(Completer):
     """Custom class to merge multiple completers to avoid import errors across versions."""
 
@@ -81,6 +114,7 @@ class InputHandler:
         directory_completer = PathCompleter(expanduser=True, only_directories=True)
         session_completer = DynamicSessionCompleter()
         variable_completer = DynamicVariableCompleter(self)
+        feature_id_completer = DynamicFeatureIdCompleter()
 
         model_dict = {m: None for m in KNOWN_MODELS}
 
@@ -100,10 +134,10 @@ class InputHandler:
             {
                 "list": None,
                 "new": None,
-                "load": None,
-                "delete": None,
-                "status": None,
-                "phases": None,
+                "load": feature_id_completer,
+                "delete": feature_id_completer,
+                "status": feature_id_completer,
+                "phases": feature_id_completer,
             }
         )
 
@@ -273,10 +307,6 @@ class InputHandler:
 
         feature_text = ""
         if isinstance(feature_context, dict):
-            status = str(feature_context.get("status", "unknown") or "unknown").strip()
-            task = str(feature_context.get("task", "") or "").strip() or "n/a"
-            if len(task) > 48:
-                task = f"{task[:45]}…"
             phase_bar = self._progress_bar(
                 feature_context.get("phase_done", 0),
                 feature_context.get("phase_total", 1),
@@ -286,8 +316,7 @@ class InputHandler:
                 feature_context.get("overall_total", 1),
             )
             feature_text = (
-                f" <files>[Feature: {escape(status)} | Task: {escape(task)}"
-                f" | Phase {phase_bar} | Overall {overall_bar}]</files>"
+                f" <files>[P {phase_bar} | O {overall_bar}]</files>"
             )
 
         return (
@@ -296,8 +325,8 @@ class InputHandler:
             f"{yolo_text}"
             f"{task_text}"
             f"{feature_text}"
-            f"<files>{files_text}</files> "
-            f"<prompt>>>></prompt> "
+            f"<files>{files_text}</files>\n"
+            f"<prompt>>></prompt> "
         )
 
     def build_input_toolbar_text(self):
@@ -366,4 +395,4 @@ class InputHandler:
                 return value
 
     def _prompt_continuation(self, width, line_number, is_soft_wrap):
-        return HTML(f'<prompt>{("." * (width - 1)) + " "}</prompt>')
+        return HTML("<prompt>    </prompt>")

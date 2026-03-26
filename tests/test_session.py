@@ -504,7 +504,7 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert "create_feature_task" in provider.last_user_text
     assert "tool calls only" in provider.last_user_text
     assert (
-        "Do not use read_file/get_chunk/write_file/apply_diff on feature plan markdown files"
+        "Use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively to read or change task status"
         in provider.last_user_text
     )
     assert "EXIT CRITERIA" in provider.last_user_text
@@ -525,21 +525,21 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert provider.last_user_text.endswith("Implement an approvals dashboard")
 
 
-def test_feature_mode_blocks_direct_phase_markdown_access(tmp_path, monkeypatch):
+def test_feature_mode_blocks_direct_feature_plan_access(tmp_path, monkeypatch):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-md-block")
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.folder_context.add_folder(str(tmp_path))
     session.sync_runtime_state()
     session.variables["agent_mode"] = "feature"
-    phase_path = tmp_path / "documentation" / "feature_req_demo" / "phase_1.md"
-    phase_path.parent.mkdir(parents=True, exist_ok=True)
-    phase_path.write_text("# Phase 1\n", encoding="utf-8")
+    plan_path = tmp_path / "documentation" / "feature_req_demo" / "feature_plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text("{}", encoding="utf-8")
     session.session_manager.set_feature_state(
         {
             "type": "feature",
             "status": "running",
-            "directory": str(phase_path.parent),
+            "directory": str(plan_path.parent),
             "feature_plan": {"phases": []},
         },
         session.folder_context,
@@ -547,7 +547,7 @@ def test_feature_mode_blocks_direct_phase_markdown_access(tmp_path, monkeypatch)
 
     result = session._execute_tool_with_memory(
         "read_file",
-        {"filename": str(phase_path)},
+        {"filename": str(plan_path)},
     )
 
     assert str(result).startswith("Error: Feature status files are managed")
@@ -695,7 +695,7 @@ def test_wrapped_plan_payloads_update_feature_state(tmp_path, monkeypatch):
     assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
 
 
-def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
+def test_sync_feature_state_refreshes_after_feature_task_status_change(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
@@ -706,12 +706,12 @@ def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
 
     plan = create_feature_plan(
         feature_name="Feature refresh",
-        feature_request="Refresh plan status after editing phase markdown.",
+        feature_request="Refresh plan status after status tool updates.",
         phases=[
             {
                 "title": "Phase 1",
                 "objectives": ["Ship the implementation"],
-                "action_points": ["Update the phase file"],
+                "action_points": ["Update task status"],
                 "exit_criteria": ["The phase is complete"],
             }
         ],
@@ -721,19 +721,6 @@ def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
     session._set_feature_state(
         feature_plan=summarize_feature_plan(plan), status="running"
     )
-
-    phase_path = os.path.join(plan.directory, "phase_1.md")
-    with open(phase_path, encoding="utf-8") as handle:
-        phase_text = handle.read()
-    updated_phase_text = (
-        phase_text.replace(
-            "- [ ] Ship the implementation", "- [x] Ship the implementation"
-        )
-        .replace("- [ ] Update the phase file", "- [x] Update the phase file")
-        .replace("- [ ] The phase is complete", "- [x] The phase is complete")
-    )
-    with open(phase_path, "w", encoding="utf-8") as handle:
-        handle.write(updated_phase_text)
 
     updated_summary = summarize_feature_plan(plan)
     updated_summary["tasks"][0]["status"] = "completed"
@@ -758,6 +745,33 @@ def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
     assert feature_state["feature_plan"]["phases"][0]["status"] == "completed"
     assert feature_state["feature_plan"]["next_phase"] is None
     assert feature_state["status"] == "review"
+
+
+def test_summarize_feature_plan_uses_task_status_for_task_counts(tmp_path):
+    plan = create_feature_plan(
+        feature_name="Feature summary",
+        feature_request="Summarize task status without markdown files.",
+        phases=[
+            {
+                "title": "Phase 1",
+                "objectives": ["Ship implementation"],
+                "action_points": ["Implement feature"],
+                "exit_criteria": ["Confirm implementation"],
+                "status": "in_progress",
+            }
+        ],
+        folder_context=None,
+    )
+
+    summary = summarize_feature_plan(plan)
+
+    assert summary["tasks"][0]["status"] == "in_progress"
+    assert summary["phases"][0]["status"] == "in_progress"
+    assert summary["phases"][0]["task_counts"] == {
+        "not_started": 0,
+        "in_progress": 1,
+        "completed": 0,
+    }
 
 
 def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):
@@ -1022,4 +1036,4 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
     assert not os.path.exists(
         os.path.join(feature_state["directory"], "feature_plan.json")
     )
-    assert os.path.exists(os.path.join(feature_state["directory"], "phase_1.md"))
+    assert not os.path.exists(os.path.join(feature_state["directory"], "phase_1.md"))

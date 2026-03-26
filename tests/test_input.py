@@ -1,3 +1,6 @@
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
+
 from ui.input import InputHandler
 
 
@@ -47,7 +50,7 @@ def test_prompt_markup_includes_current_task_when_present():
     assert "[Task: Implement fixtures/pcap.py]" in markup
 
 
-def test_prompt_markup_includes_feature_status_task_and_progress_bars():
+def test_prompt_markup_compacts_feature_progress_bars():
     handler = InputHandler()
     handler.set_variables({"yolo": False})
 
@@ -65,10 +68,10 @@ def test_prompt_markup_includes_feature_status_task_and_progress_bars():
         },
     )
 
-    assert "Feature: awaiting_input" in markup
-    assert "Task: Implement fixtures/pcap.py" in markup
-    assert "Phase ████░░░░  50%" in markup
-    assert "Overall ██░░░░░░  30%" in markup
+    assert "Feature:" not in markup
+    assert "Task: Implement fixtures/pcap.py" not in markup
+    assert "P ████░░░░  50%" in markup
+    assert "O ██░░░░░░  30%" in markup
 
 
 def test_input_toolbar_shows_plain_yolo_status_text():
@@ -163,3 +166,22 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
     }
 
     assert expected_commands.issubset(set(handler.command_completions.keys()))
+
+
+def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "documentation" / "feature_req_alpha").mkdir(parents=True)
+    (tmp_path / "documentation" / "feature_req_beta").mkdir(parents=True)
+
+    handler = InputHandler()
+    document = Document(text="/feature delete a", cursor_position=len("/feature delete a"))
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "alpha" in completion_texts
+    assert "beta" in completion_texts

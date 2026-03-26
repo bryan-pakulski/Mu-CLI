@@ -546,7 +546,6 @@ def test_build_runtime_payload_syncs_saved_variables_into_ollama_provider():
 @dataclass
 class DummyFeatureLoopProvider:
     directory: str
-    phase_path: str
     name: str = "dummy"
     model_name: str = "dummy-feature-model"
     call_count: int = 0
@@ -557,19 +556,9 @@ class DummyFeatureLoopProvider:
     def generate(self, messages, system_prompt=None, thinking=False, tools=None):
         self.call_count += 1
         if self.call_count == 1:
-            phase_content = """# Phase 1: Build it\n\n## Objectives\n- [x] Understand scope\n\n## Action Points\n- [x] Implement the feature\n\n## Exit Criteria\n- [x] Confirm phase completion\n"""
             return ProviderResponse(
-                text="",
-                parts=[
-                    MessagePart(
-                        type="tool_call",
-                        tool_name="write_file",
-                        tool_args={
-                            "filename": self.phase_path,
-                            "content": phase_content,
-                        },
-                    )
-                ],
+                text="implementation in progress",
+                parts=[MessagePart(type="text", text="implementation in progress")],
                 input_tokens=5,
                 output_tokens=3,
                 total_tokens=8,
@@ -658,7 +647,6 @@ def test_feature_loop_runs_until_review_completed(tmp_path):
     ui = HeadlessUI(auto_approve=True)
     provider = DummyFeatureLoopProvider(
         directory=str(workspace_doc_dir),
-        phase_path=str(workspace_doc_dir / "phase_1.md"),
     )
     session = build_test_session(provider=provider, ui=ui)
     handle_command(session, f"/folder {workspace}", allow_prompt=False)
@@ -685,7 +673,6 @@ def test_feature_loop_runs_until_review_completed(tmp_path):
 @dataclass
 class DummyBlockingFeatureProvider:
     directory: str
-    phase_path: str
     call_count: int = 0
     name: str = "dummy"
     model_name: str = "dummy-blocking-feature-model"
@@ -725,24 +712,6 @@ class DummyBlockingFeatureProvider:
                 total_tokens=5,
             )
         if self.call_count == 3:
-            phase_content = """# Phase 1: Build it\n\n## Objectives\n- [x] Understand scope\n\n## Action Points\n- [x] Implement the feature\n\n## Exit Criteria\n- [x] Confirm phase completion\n\n## Notes\nUser selected OpenAI during blocker resolution.\n"""
-            return ProviderResponse(
-                text="",
-                parts=[
-                    MessagePart(
-                        type="tool_call",
-                        tool_name="write_file",
-                        tool_args={
-                            "filename": self.phase_path,
-                            "content": phase_content,
-                        },
-                    )
-                ],
-                input_tokens=5,
-                output_tokens=3,
-                total_tokens=8,
-            )
-        if self.call_count == 4:
             return ProviderResponse(
                 text="",
                 parts=[
@@ -761,7 +730,7 @@ class DummyBlockingFeatureProvider:
                 output_tokens=3,
                 total_tokens=8,
             )
-        if self.call_count == 5:
+        if self.call_count == 4:
             return ProviderResponse(
                 text="",
                 parts=[
@@ -780,7 +749,7 @@ class DummyBlockingFeatureProvider:
                 output_tokens=3,
                 total_tokens=8,
             )
-        if self.call_count == 6:
+        if self.call_count == 5:
             return ProviderResponse(
                 text="phase complete after unblock",
                 parts=[MessagePart(type="text", text="phase complete after unblock")],
@@ -826,7 +795,6 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     ui = HeadlessUI(auto_approve=True)
     provider = DummyBlockingFeatureProvider(
         directory=str(workspace_doc_dir),
-        phase_path=str(workspace_doc_dir / "phase_1.md"),
     )
     session = build_test_session(provider=provider, ui=ui)
     handle_command(session, f"/folder {workspace}", allow_prompt=False)
@@ -944,7 +912,6 @@ def test_feature_loop_state_persists_across_session_reload(tmp_path):
     initial_ui = HeadlessUI(auto_approve=True)
     provider = DummyBlockingFeatureProvider(
         directory=str(workspace_doc_dir),
-        phase_path=str(workspace_doc_dir / "phase_1.md"),
     )
     session = build_test_session(provider=provider, ui=initial_ui)
     handle_command(session, f"/folder {workspace}", allow_prompt=False)

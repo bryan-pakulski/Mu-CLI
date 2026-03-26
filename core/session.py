@@ -1177,14 +1177,14 @@ class Session:
             "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature_task to create canonical session-managed feature metadata. "
             "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
             "After approval, call get_current_task/get_tasks at the start of every implementation turn, work on only the next incomplete task, and keep task state synchronized via tool calls only. "
-            "Do not use read_file/get_chunk/write_file/apply_diff on feature plan markdown files to track task status; use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively. "
+            "Use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively to read or change task status. "
             "Every task must define explicit EXIT CRITERIA, and you may set update_task_status(..., status='completed') only after all exit criteria for that task are demonstrably met and verified in the current codebase/tests. "
             "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
             "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
             "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
             "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
-            "Never move to the next task until all checklist items in the current task are [x]. "
-            "When all tasks are complete, perform a review pass over the task files and code changes together. If review fails, move failing items back to [~] and continue implementing. If review succeeds, call approve_feature_task with review_status completed before you report success. "
+            "Never move to the next task until the current task's exit criteria are fully satisfied and the task is marked completed via update_task_status. "
+            "When all tasks are complete, perform a review pass over the tasks and code changes together. If review fails, move failing tasks back to in_progress and continue implementing. If review succeeds, call approve_feature_task with review_status completed before you report success. "
             "In every turn response, clearly identify: current task, evidence gathered, changes made, verification result, and the immediate next step.\n\n"
         )
         return base_instruction + text
@@ -1218,7 +1218,7 @@ class Session:
             return None
 
         filename = os.path.basename(candidate)
-        if re.match(r"^phase_\d+\.md$", filename) or filename == "feature_plan.json":
+        if filename == "feature_plan.json":
             return (
                 "Feature status files are managed by the feature-task engine. "
                 f"Do not use {tool_name} on '{filename}'. "

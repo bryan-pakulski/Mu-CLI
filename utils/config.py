@@ -193,11 +193,11 @@ In FEATURE mode, do not begin code implementation until the user has approved th
 In FEATURE mode, only work on the single current incomplete task returned by the plan engine; this is a strict step-by-step harness.
 In FEATURE mode, memory and scratchpad usage is mandatory: capture durable findings with `save_memory`; capture turn-local hypotheses and plans with `save_scratchpad`.
 In FEATURE mode, if you are blocked on missing user input or an external decision, call `raise_blocker` so the harness can pause and request help instead of looping blindly.
-In FEATURE mode, once all tasks are complete you must perform a review pass and only finish after setting `review_status` to `completed` via `approve_feature_task`, or after documenting why review failed and moving a task back to `[~]`.
+In FEATURE mode, once all tasks are complete you must perform a review pass and only finish after setting `review_status` to `completed` via `approve_feature_task`, or after documenting why review failed and moving a task back to `in_progress`.
 
 1. Understand the user's feature request and summarize it as a durable feature task request.
 2. Immediately call `create_feature_task` to create canonical feature metadata. Do not use ad-hoc plan files or alternate locations.
-3. Ensure every task contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
+3. Ensure every task contains Objectives, Action Points, and Exit Criteria sections.
 4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in session-managed metadata.
 5. Once approved, repeat this harness loop until done:
    - call `get_current_task` / `get_tasks`,
@@ -207,11 +207,11 @@ In FEATURE mode, once all tasks are complete you must perform a review pass and 
    - call `flush`,
    - make one bounded implementation step on the current task,
    - verify and update status with `update_task_status`.
-6. While implementing, continuously update the active `phase_N.md` file so the checklist reflects real progress. Use `[~]` for in-progress or blocked work.
+6. Keep canonical task status synchronized using tooling only: call `get_current_task`/`get_tasks` to inspect and `update_task_status` to set `not_started`, `in_progress`, or `completed`.
 7. Reuse `search_memory` / `list_memory` and `search_scratchpad` / `list_scratchpad` before re-collecting large context.
 8. If you need user help, missing requirements, credentials, or a product decision, call `raise_blocker` with exact context and questions.
-9. Never start the next task until all checklist items in the current task are `[x]`.
-10. After all tasks are complete, review code and task files together. If review fails, move failing checklist items back to `[~]` and continue implementation.
+9. Never start the next task until the current task's exit criteria are satisfied and status is explicitly set to `completed` via `update_task_status`.
+10. After all tasks are complete, review code and task metadata together. If review fails, move failing tasks back to `in_progress` and continue implementation.
 11. Only finish after calling `approve_feature_task` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
     "research": """WORKFLOW (Research & Exploration):
 1. The user wants to understand how something works without necessarily changing things.
@@ -247,7 +247,8 @@ AGENTIC_MODE_SYSTEM_PROMPTS = {
     "feature": """FEATURE MODE SYSTEM PROMPT:
 You are in Feature Plan Engine mode. Your job is to behave like a phased implementation agent.
 - Start by creating or refreshing the canonical feature plan for `documentation/feature_req_<id>/`.
-- Treat the session-managed feature metadata plus the `phase_N.md` files as the source of truth for planning and progress.
+- Treat the session-managed feature metadata as the source of truth for planning and progress.
+- Explicitly use `get_current_task`, `get_tasks`, `update_task_status`, and `approve_feature_task` to read and write task/review status.
 - Do not begin implementation until the plan is approved.
 - For investigation-heavy turns, gather read-only context first, store key temporary findings in the scratchpad, and call `flush` before acting on the collected context.
 - Work on one phase at a time, keep statuses synchronized with reality, and raise blockers when user input is required.

@@ -867,6 +867,57 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     assert len(completed["result"]["cycles"]) >= 2
 
 
+def test_feature_loop_pauses_cleanly_when_interrupted(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    ctx = FolderContext()
+    ctx.add_folder(str(workspace))
+    create_feature_plan(
+        feature_name="Interrupted Feature Loop",
+        feature_request="Pause on interrupt and resume later",
+        phases=[
+            {
+                "title": "Build it",
+                "objectives": ["Understand scope"],
+                "action_points": ["Implement the feature"],
+                "exit_criteria": ["Confirm phase completion"],
+            }
+        ],
+        folder_context=ctx,
+        feature_id="interrupted_loop_test",
+    )
+    workspace_doc_dir = workspace / "documentation" / "feature_req_interrupted_loop_test"
+    update_feature_plan_metadata(str(workspace_doc_dir), approved=True)
+
+    ui = HeadlessUI(auto_approve=True)
+    session = build_test_session(ui=ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    session.send_message = lambda _prompt: {
+        "ok": False,
+        "status": "interrupted",
+        "assistant_text": "",
+    }
+
+    event_hub = EventHub()
+    task_manager = TaskManager(session, Lock(), event_hub=event_hub)
+    approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
+    ui.bind_runtime(task_manager, approval_manager)
+
+    task = task_manager.start_feature_task(
+        str(workspace_doc_dir), approval_manager, max_cycles=3
+    )
+    interrupted = task_manager.wait_for_task_state(
+        task["task_id"], {"awaiting_input", "error"}, timeout=10.0
+    )
+
+    assert interrupted is not None
+    assert interrupted["status"] == "awaiting_input"
+    assert interrupted["blocker"]["summary"] == "Feature loop interrupted during execution."
+    assert interrupted["result"]["status"] == "interrupted"
+
+
 def test_feature_loop_state_persists_across_session_reload(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

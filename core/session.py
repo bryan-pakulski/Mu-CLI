@@ -1086,10 +1086,10 @@ class Session:
 
     def _build_feature_mode_prompt(self, text: str) -> str:
         base_instruction = (
-            "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature_task and create canonical session-managed feature metadata with one documentation/feature_req_<id>/phase_N.md file per task. "
+            "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature_task to create canonical session-managed feature metadata. "
             "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
-            "Each task file must contain Objectives, Action Points, and Exit Criteria sections, and each checklist item must use exactly one of [ ], [~], or [x]. "
-            "After approval, call get_current_task/get_tasks at the start of every implementation turn, work on only the next incomplete task, and keep markdown synchronized with reality as you make code changes. "
+            "After approval, call get_current_task/get_tasks at the start of every implementation turn, work on only the next incomplete task, and keep task state synchronized via tool calls only. "
+            "Do not use read_file/get_chunk/write_file/apply_diff on feature plan markdown files to track task status; use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively. "
             "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
             "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
             "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
@@ -1099,6 +1099,43 @@ class Session:
             "In every turn response, clearly identify: current task, evidence gathered, changes made, verification result, and the immediate next step.\n\n"
         )
         return base_instruction + text
+
+    def _feature_doc_tool_violation(self, tool_name: str, tool_args: dict) -> str | None:
+        if str(self.variables.get("agent_mode", "default")).lower() != "feature":
+            return None
+        feature_state = self.session_manager.get_feature_state()
+        if not isinstance(feature_state, dict):
+            return None
+        feature_dir = str(feature_state.get("directory", "") or "").strip()
+        if not feature_dir:
+            return None
+        if tool_name not in {"read_file", "get_chunk", "write_file", "apply_diff"}:
+            return None
+
+        arg_key = "file" if tool_name == "get_chunk" else "filename"
+        target = str(tool_args.get(arg_key, "") or "").strip()
+        if not target:
+            return None
+
+        if os.path.isabs(target):
+            candidate = os.path.abspath(target)
+        elif self.folder_context.folders:
+            candidate = os.path.abspath(os.path.join(self.folder_context.folders[0], target))
+        else:
+            candidate = os.path.abspath(target)
+
+        feature_root = os.path.abspath(feature_dir)
+        if not candidate.startswith(feature_root + os.sep):
+            return None
+
+        filename = os.path.basename(candidate)
+        if re.match(r"^phase_\d+\.md$", filename) or filename == "feature_plan.json":
+            return (
+                "Feature status files are managed by the feature-task engine. "
+                f"Do not use {tool_name} on '{filename}'. "
+                "Use get_tasks/get_current_task/update_task_status/approve_feature_task instead."
+            )
+        return None
 
     def _build_structured_tool_result(
         self,
@@ -1214,6 +1251,10 @@ class Session:
         *,
         invocation_source: str = "session",
     ):
+        feature_violation = self._feature_doc_tool_violation(tool_name, tool_args)
+        if feature_violation:
+            return f"Error: {feature_violation}"
+
         if tool_name == "save_memory":
             entry = self.task_memory.save(
                 tool_args.get("content", ""),

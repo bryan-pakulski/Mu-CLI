@@ -476,7 +476,11 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     session.send_message("Implement an approvals dashboard")
 
     assert "create_feature_task" in provider.last_user_text
-    assert "phase_N.md" in provider.last_user_text
+    assert "tool calls only" in provider.last_user_text
+    assert (
+        "Do not use read_file/get_chunk/write_file/apply_diff on feature plan markdown files"
+        in provider.last_user_text
+    )
     assert "Do not create alternate planning documents" in provider.last_user_text
     assert (
         "do not begin code implementation until the user has reviewed and approved the plan"
@@ -491,6 +495,35 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert "You are in Feature Plan Engine mode" in provider.last_system_prompt
     assert "gather read-only context first" in provider.last_system_prompt
     assert provider.last_user_text.endswith("Implement an approvals dashboard")
+
+
+def test_feature_mode_blocks_direct_phase_markdown_access(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-md-block")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+    session.variables["agent_mode"] = "feature"
+    phase_path = tmp_path / "documentation" / "feature_req_demo" / "phase_1.md"
+    phase_path.parent.mkdir(parents=True, exist_ok=True)
+    phase_path.write_text("# Phase 1\n", encoding="utf-8")
+    session.session_manager.set_feature_state(
+        {
+            "type": "feature",
+            "status": "running",
+            "directory": str(phase_path.parent),
+            "feature_plan": {"phases": []},
+        },
+        session.folder_context,
+    )
+
+    result = session._execute_tool_with_memory(
+        "read_file",
+        {"filename": str(phase_path)},
+    )
+
+    assert str(result).startswith("Error: Feature status files are managed")
+    assert "update_task_status" in str(result)
 
 
 def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypatch):

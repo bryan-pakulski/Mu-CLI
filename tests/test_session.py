@@ -637,6 +637,64 @@ def test_get_current_task_sync_does_not_drop_feature_metadata(tmp_path, monkeypa
     assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
 
 
+def test_wrapped_plan_payloads_update_feature_state(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-state-wrapped-plan")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+
+    plan = create_feature_plan(
+        feature_name="Wrapped payload state sync",
+        feature_request="Ensure wrapped plan payloads sync state.",
+        phases=[
+            {
+                "title": "Phase 1",
+                "objectives": ["Gather context"],
+                "action_points": ["Update status"],
+                "exit_criteria": ["Task done"],
+            }
+        ],
+        folder_context=session.folder_context,
+    )
+    summary = summarize_feature_plan(plan)
+    session._sync_feature_state_for_tool(
+        "create_feature_task",
+        {},
+        raw_result={"ok": True, "feature_id": summary["feature_id"], "plan": summary},
+        structured_result={
+            "ok": True,
+            "data": {"ok": True, "feature_id": summary["feature_id"], "plan": summary},
+        },
+    )
+
+    approved_summary = {**summary, "approved": True, "review_status": "pending"}
+    session._sync_feature_state_for_tool(
+        "approve_feature_task",
+        {},
+        raw_result={
+            "ok": True,
+            "approved": True,
+            "feature_id": summary["feature_id"],
+            "plan": approved_summary,
+        },
+        structured_result={
+            "ok": True,
+            "data": {
+                "ok": True,
+                "approved": True,
+                "feature_id": summary["feature_id"],
+                "plan": approved_summary,
+            },
+        },
+    )
+
+    feature_state = sm.get_feature_state()
+    assert feature_state is not None
+    assert feature_state["feature_plan"]["approved"] is True
+    assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
+
+
 def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
     tmp_path, monkeypatch
 ):

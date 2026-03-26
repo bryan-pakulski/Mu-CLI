@@ -859,10 +859,7 @@ class Session:
             data = {}
             if isinstance(structured_result, dict):
                 data = structured_result.get("data", {}) or {}
-                if (
-                    tool_name == "create_feature_task"
-                    and isinstance(data.get("plan"), dict)
-                ):
+                if isinstance(data.get("plan"), dict):
                     data = data["plan"]
             if not isinstance(data, dict) or "feature_id" not in data:
                 data = self._parse_json_result(raw_result)

@@ -1,4 +1,9 @@
 from contextlib import contextmanager
+import os
+import select
+import sys
+import threading
+import time
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
@@ -483,7 +488,18 @@ class RichUI:
     @contextmanager
     def show_status(self, message):
         with self.console.status(message, spinner="aesthetic") as status:
-            yield status
+            watcher_stop = threading.Event()
+            watcher = self._start_yolo_status_watcher(
+                status=status,
+                base_message=message,
+                stop_event=watcher_stop,
+            )
+            try:
+                yield status
+            finally:
+                watcher_stop.set()
+                if watcher:
+                    watcher.join(timeout=0.2)
 
     def build_live_status(self, session, model_name, iteration, max_iterations):
         metrics = collect_runtime_metrics(session)
@@ -496,6 +512,59 @@ class RichUI:
             status.append("YOLO:off | ", style="dim")
         status.append(build_live_status_line(session), style="white")
         return status
+
+    @staticmethod
+    def _status_with_yolo(base_message, enabled):
+        suffix = "✦ YOLO" if enabled else "YOLO:off"
+        raw = base_message.plain if isinstance(base_message, Text) else str(base_message)
+        raw = raw.replace("YOLO:off", suffix)
+        raw = raw.replace("✦ YOLO", suffix)
+        return raw
+
+    def _start_yolo_status_watcher(self, *, status, base_message, stop_event):
+        fd = None
+        old_attrs = None
+        try:
+            if not sys.stdin.isatty():
+                return None
+            fd = sys.stdin.fileno()
+            import termios
+            import tty
+
+            old_attrs = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except Exception:
+            return None
+
+        def _watch():
+            buffer = ""
+            try:
+                while not stop_event.is_set():
+                    ready, _, _ = select.select([fd], [], [], 0.1)
+                    if not ready:
+                        continue
+                    chunk = os.read(fd, 32).decode(errors="ignore")
+                    if not chunk:
+                        continue
+                    combined = buffer + chunk
+                    while "\x1b[Z" in combined:
+                        combined = combined.replace("\x1b[Z", "", 1)
+                        enabled = self.input_handler.toggle_yolo_mode()
+                        status.update(self._status_with_yolo(base_message, enabled))
+                    buffer = combined[-6:]
+                    time.sleep(0.02)
+            finally:
+                if old_attrs is not None and fd is not None:
+                    try:
+                        import termios
+
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                    except Exception:
+                        pass
+
+        watcher = threading.Thread(target=_watch, daemon=True)
+        watcher.start()
+        return watcher
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""

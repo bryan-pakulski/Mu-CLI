@@ -182,3 +182,13 @@ def test_request_tool_approval_uses_input_handler_prompt_choice():
         "choices": ["y", "n", "e"],
         "default": "y",
     }
+
+
+def test_status_with_yolo_updates_message_text():
+    ui = RichUI()
+
+    off = ui._status_with_yolo("Generating | YOLO:off | ctx:50%", enabled=False)
+    on = ui._status_with_yolo("Generating | YOLO:off | ctx:50%", enabled=True)
+
+    assert "YOLO:off" in off
+    assert "✦ YOLO" in on

@@ -2,6 +2,7 @@
 import os
 import glob
 import re
+from html import escape
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -230,7 +231,9 @@ class InputHandler:
         self.variables_dict["yolo"] = enabled
         return enabled
 
-    def build_prompt_markup(self, session_name, staged_files, agent_mode="default"):
+    def build_prompt_markup(
+        self, session_name, staged_files, agent_mode="default", current_task=None
+    ):
         files_text = ""
         if staged_files:
             # Note the updated accessor here for our new FileReference schema
@@ -247,10 +250,18 @@ class InputHandler:
         if self.is_yolo_enabled():
             yolo_text = " <yolo-indicator>✦</yolo-indicator>"
 
+        task_text = ""
+        if current_task:
+            task = str(current_task).strip()
+            if len(task) > 48:
+                task = f"{task[:45]}…"
+            task_text = f" <files>[Task: {escape(task)}]</files>"
+
         return (
             f"<prompt>[{session_name}]</prompt>"
             f"{mode_text}"
             f"{yolo_text}"
+            f"{task_text}"
             f"<files>{files_text}</files> "
             f"<prompt>>>></prompt> "
         )
@@ -267,9 +278,16 @@ class InputHandler:
         yolo_status = "ON" if self.is_yolo_enabled() else "OFF"
         return f"[Shift+Tab] toggles YOLO ({yolo_status})"
 
-    def get_input(self, session_name, staged_files, agent_mode="default"):
+    def get_input(
+        self, session_name, staged_files, agent_mode="default", current_task=None
+    ):
         message = HTML(
-            self.build_prompt_markup(session_name, staged_files, agent_mode=agent_mode)
+            self.build_prompt_markup(
+                session_name,
+                staged_files,
+                agent_mode=agent_mode,
+                current_task=current_task,
+            )
         )
 
         def bottom_toolbar():

@@ -8,7 +8,9 @@ class BaseUI(ABC):
         pass
 
     @abstractmethod
-    def get_input(self, session_name, staged_files, agent_mode="default"):
+    def get_input(
+        self, session_name, staged_files, agent_mode="default", current_task=None
+    ):
         """Get input from the user."""
         pass
 

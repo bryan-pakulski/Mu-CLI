@@ -35,9 +35,14 @@ class RichUI:
                 self.console.print(f"\nAssistant ({model_name}):")
             render_response(content)
 
-    def get_input(self, session_name, staged_files, agent_mode="default"):
+    def get_input(
+        self, session_name, staged_files, agent_mode="default", current_task=None
+    ):
         return self.input_handler.get_input(
-            session_name, staged_files, agent_mode=agent_mode
+            session_name,
+            staged_files,
+            agent_mode=agent_mode,
+            current_task=current_task,
         )
 
     def set_variables(self, variables_dict):
@@ -55,6 +60,14 @@ class RichUI:
     def request_tool_approval(
         self,
         *,
+        tool_name=None,
+        tool_args=None,
+        display_args=None,
+        count_info="",
+        can_approve=True,
+        modifications=None,
+        preview_error=None,
+        error_code=None,
         prompt_text,
         choices,
         default,

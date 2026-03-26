@@ -113,6 +113,22 @@ def refresh_feature_record(session, feature_id=None):
     return session.session_manager.get_feature(updated["feature_id"])
 
 
+def get_current_feature_task_label(session):
+    feature_state = session.session_manager.get_feature_state()
+    if not isinstance(feature_state, dict):
+        return None
+
+    feature_plan = feature_state.get("feature_plan")
+    if not isinstance(feature_plan, dict):
+        return None
+
+    next_task = feature_plan.get("next_task") or feature_plan.get("next_phase")
+    if isinstance(next_task, dict):
+        title = str(next_task.get("title", "") or "").strip()
+        return title or None
+    return None
+
+
 def build_feature_markdown(feature, *, include_phases=True):
     if not isinstance(feature, dict):
         return "## Feature\n\nNo feature is currently selected."
@@ -1565,10 +1581,12 @@ def main():
 
     while True:
         try:
+            current_task = get_current_feature_task_label(session)
             user_input = ui.get_input(
                 session.session_manager.current_session_name,
                 session.staged_files,
                 agent_mode=session.variables.get("agent_mode", "default"),
+                current_task=current_task,
             )
 
             if not user_input:

@@ -162,6 +162,14 @@ def test_request_tool_approval_uses_input_handler_prompt_choice():
     ui.input_handler.prompt_choice = fake_prompt_choice
 
     choice, reason = ui.request_tool_approval(
+        tool_name="write_file",
+        tool_args={"filename": "x.py"},
+        display_args={"filename": "x.py"},
+        count_info="",
+        can_approve=True,
+        modifications=[],
+        preview_error=None,
+        error_code=None,
         prompt_text="[bold yellow]Permission Required[/bold yellow]",
         choices=["y", "n", "e"],
         default="y",

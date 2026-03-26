@@ -1,3 +1,6 @@
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
+
 from ui.input import InputHandler
 
 
@@ -163,3 +166,22 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
     }
 
     assert expected_commands.issubset(set(handler.command_completions.keys()))
+
+
+def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "documentation" / "feature_req_alpha").mkdir(parents=True)
+    (tmp_path / "documentation" / "feature_req_beta").mkdir(parents=True)
+
+    handler = InputHandler()
+    document = Document(text="/feature delete a", cursor_position=len("/feature delete a"))
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "alpha" in completion_texts
+    assert "beta" in completion_texts

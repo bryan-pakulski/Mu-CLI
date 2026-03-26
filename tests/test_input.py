@@ -33,6 +33,44 @@ def test_prompt_markup_shows_yolo_indicator_when_enabled():
     assert "✦" in markup
 
 
+def test_prompt_markup_includes_current_task_when_present():
+    handler = InputHandler()
+    handler.set_variables({"yolo": False})
+
+    markup = handler.build_prompt_markup(
+        "demo",
+        [],
+        agent_mode="feature",
+        current_task="Implement fixtures/pcap.py",
+    )
+
+    assert "[Task: Implement fixtures/pcap.py]" in markup
+
+
+def test_prompt_markup_includes_feature_status_task_and_progress_bars():
+    handler = InputHandler()
+    handler.set_variables({"yolo": False})
+
+    markup = handler.build_prompt_markup(
+        "demo",
+        [],
+        agent_mode="feature",
+        feature_context={
+            "status": "awaiting_input",
+            "task": "Implement fixtures/pcap.py",
+            "phase_done": 2,
+            "phase_total": 4,
+            "overall_done": 3,
+            "overall_total": 10,
+        },
+    )
+
+    assert "Feature: awaiting_input" in markup
+    assert "Task: Implement fixtures/pcap.py" in markup
+    assert "Phase ████░░░░  50%" in markup
+    assert "Overall ██░░░░░░  30%" in markup
+
+
 def test_input_toolbar_shows_plain_yolo_status_text():
     handler = InputHandler()
     handler.set_variables({"yolo": True})

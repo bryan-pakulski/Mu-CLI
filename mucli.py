@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import sys
+import time
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -112,6 +113,72 @@ def refresh_feature_record(session, feature_id=None):
     return session.session_manager.get_feature(updated["feature_id"])
 
 
+def get_current_feature_task_label(session):
+    feature_state = session.session_manager.get_feature_state()
+    if not isinstance(feature_state, dict):
+        return None
+
+    feature_plan = feature_state.get("feature_plan")
+    if not isinstance(feature_plan, dict):
+        return None
+
+    next_task = feature_plan.get("next_task") or feature_plan.get("next_phase")
+    if isinstance(next_task, dict):
+        title = str(next_task.get("title", "") or "").strip()
+        return title or None
+    return None
+
+
+def get_feature_prompt_context(session):
+    feature_state = session.session_manager.get_feature_state()
+    if not isinstance(feature_state, dict):
+        return None
+
+    plan = feature_state.get("feature_plan")
+    if not isinstance(plan, dict):
+        return None
+
+    tasks = plan.get("phases", [])
+    overall_total = max(1, len(tasks))
+    overall_done = sum(1 for task in tasks if task.get("status") == "completed")
+
+    next_task = plan.get("next_task") or plan.get("next_phase")
+    active_task = None
+    if isinstance(next_task, dict):
+        next_number = next_task.get("number") or next_task.get("id")
+        active_task = next(
+            (task for task in tasks if task.get("number") == next_number),
+            None,
+        )
+    if active_task is None and tasks:
+        active_task = next(
+            (task for task in tasks if task.get("status") != "completed"),
+            tasks[0],
+        )
+
+    phase_done = 0
+    phase_total = 1
+    task_title = "n/a"
+    if isinstance(active_task, dict):
+        task_title = str(active_task.get("title", "") or "").strip() or "n/a"
+        counts = active_task.get("task_counts", {}) or {}
+        phase_done = int(counts.get("completed", 0) or 0)
+        phase_total = int(sum(int(v or 0) for v in counts.values()) or 0)
+        if phase_total <= 0:
+            phase_total = 1
+            if active_task.get("status") == "completed":
+                phase_done = 1
+
+    return {
+        "status": str(feature_state.get("status", "unknown") or "unknown"),
+        "task": task_title,
+        "phase_done": phase_done,
+        "phase_total": phase_total,
+        "overall_done": overall_done,
+        "overall_total": overall_total,
+    }
+
+
 def build_feature_markdown(feature, *, include_phases=True):
     if not isinstance(feature, dict):
         return "## Feature\n\nNo feature is currently selected."
@@ -142,30 +209,68 @@ def build_feature_markdown(feature, *, include_phases=True):
     if request:
         lines.extend(["## Request", "", request, ""])
 
-    next_phase = plan.get("next_phase")
-    if isinstance(next_phase, dict):
+    tasks = plan.get("phases", [])
+    completed = sum(1 for task in tasks if task.get("status") == "completed")
+    total = len(tasks)
+    started_at = float(feature.get("started_at", 0) or 0)
+    elapsed = max(0, int(time.time() - started_at)) if started_at else 0
+    token_total = int(feature.get("token_total", 0) or 0)
+    start_tokens = int(feature.get("start_tokens", 0) or 0)
+    token_delta = max(0, token_total - start_tokens)
+    next_task = plan.get("next_phase")
+    if not isinstance(next_task, dict):
+        next_task = plan.get("next_task")
+
+    def _fmt_elapsed(seconds):
+        minutes, secs = divmod(max(0, int(seconds or 0)), 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours}h {minutes}m {secs}s"
+        return f"{minutes}m {secs}s"
+
+    def _fmt_delta(tokens):
+        if tokens >= 1000:
+            return f"{tokens / 1000:.1f}k"
+        return str(tokens)
+
+    lines.extend(
+        [
+            "## Progress Snapshot",
+            "",
+            f"- **Completed:** {completed}/{total}",
+            f"- **Elapsed:** {_fmt_elapsed(elapsed)}",
+            f"- **Token delta:** ↓ {_fmt_delta(token_delta)} tokens",
+            "",
+        ]
+    )
+
+    if isinstance(next_task, dict):
         lines.extend(
             [
-                "## Next Phase",
+                "### Active Work",
                 "",
-                f"- Phase {next_phase.get('number')}: {next_phase.get('title', '')}",
+                f"*Implementing {next_task.get('title', '')}… ({_fmt_elapsed(elapsed)} · ↓ {_fmt_delta(token_delta)} tokens)*",
                 "",
             ]
         )
 
     if include_phases:
-        phases = plan.get("phases", [])
-        lines.extend(["## Phases", ""])
-        if phases:
-            for phase in phases:
-                counts = phase.get("task_counts", {})
+        lines.extend(["### Task Checklist", ""])
+        if tasks:
+            for task in tasks:
+                counts = task.get("task_counts", {})
+                icon = {
+                    "completed": "✔",
+                    "in_progress": "◼",
+                    "not_started": "◻",
+                }.get(task.get("status", "not_started"), "◻")
                 lines.append(
-                    f"- **Phase {phase.get('number')} — {phase.get('title', '')}** "
-                    f"`{phase.get('status', 'unknown')}` "
+                    f"- {icon} **{task.get('title', '')}** "
+                    f"`{task.get('status', 'unknown')}` "
                     f"(done: {counts.get('completed', 0)}, in-progress: {counts.get('in_progress', 0)}, remaining: {counts.get('not_started', 0)})"
                 )
         else:
-            lines.append("- No phases defined yet.")
+            lines.append("- No tasks defined yet.")
         lines.append("")
 
     blocker = feature.get("blocker")
@@ -313,10 +418,6 @@ def print_splash(session):
         if folder_count > 3:
             folder_list += " ..."
 
-    # History info
-    total_history = len(session.session_manager.history)
-    active_history = total_history - session.session_manager.summary_anchor
-
     info_grid = f"""                                                                   
     [bold magenta]Session:[/bold magenta]  [bold yellow]{session.session_manager.current_session_name}[/bold yellow]
     [bold magenta]System:[/bold magenta]   {sys_status}                                
@@ -325,14 +426,18 @@ def print_splash(session):
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
 """
-    # Add context warning if exceeding limit
-    context_limit = session.variables.get("active_context_window", 150)
-    if active_history > context_limit:
+    # Add context warning if nearing token limit
+    context_limit = int(session.variables.get("context_token_limit", 256000) or 256000)
+    trim_threshold = float(session.variables.get("context_trim_threshold", 0.85) or 0.85)
+    trim_threshold = max(0.10, min(trim_threshold, 1.0))
+    context_tokens = int(session.session_manager.estimate_runtime_history_tokens() or 0)
+    threshold_tokens = int(context_limit * trim_threshold)
+    if context_tokens >= threshold_tokens:
         info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns  [bold yellow]⚠[/bold yellow] [dim](dropping old context, limit: {context_limit})[/dim]"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens  [bold yellow]⚠[/bold yellow] [dim](trim threshold: {int(trim_threshold * 100)}%)[/dim]"""
     else:
         info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{active_history}[/bold cyan] / {total_history} turns"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens"""
 
     info_grid += "\n    "
 
@@ -1085,7 +1190,12 @@ def handle_command(session, user_input, allow_prompt=True):
                 feature_request=feature_arg,
             )
             session.sync_runtime_state()
-            markdown = build_feature_markdown(record)
+            markdown = build_feature_markdown(
+                {
+                    **record,
+                    "token_total": session.session_manager.token_counts.get("total", 0),
+                }
+            )
             if allow_prompt:
                 console.print(Markdown(markdown))
             refresh_memory_hud(session, ui)
@@ -1157,7 +1267,12 @@ def handle_command(session, user_input, allow_prompt=True):
                 )
             activated = session.session_manager.activate_feature(record["feature_id"])
             session.sync_runtime_state()
-            markdown = build_feature_markdown(activated)
+            markdown = build_feature_markdown(
+                {
+                    **activated,
+                    "token_total": session.session_manager.token_counts.get("total", 0),
+                }
+            )
             if allow_prompt:
                 console.print(Markdown(markdown))
             refresh_memory_hud(session, ui)
@@ -1203,7 +1318,10 @@ def handle_command(session, user_input, allow_prompt=True):
                     message="No feature selected.",
                 )
             markdown = build_feature_markdown(
-                feature,
+                {
+                    **feature,
+                    "token_total": session.session_manager.token_counts.get("total", 0),
+                },
                 include_phases=feature_cmd == "phases",
             )
             if allow_prompt:
@@ -1513,10 +1631,14 @@ def main():
 
     while True:
         try:
+            current_task = get_current_feature_task_label(session)
+            feature_context = get_feature_prompt_context(session)
             user_input = ui.get_input(
                 session.session_manager.current_session_name,
                 session.staged_files,
                 agent_mode=session.variables.get("agent_mode", "default"),
+                current_task=current_task,
+                feature_context=feature_context,
             )
 
             if not user_input:

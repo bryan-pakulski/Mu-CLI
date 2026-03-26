@@ -10,7 +10,7 @@ except ImportError:
     HAS_PIL = False
 
 # Configuration
-HISTORY_DIR = os.path.expanduser("~/.mucli/")
+HISTORY_DIR = os.path.expanduser(os.getenv("MUCLI_HOME", "~/.mucli/"))
 SESSION_DIR = os.path.join(HISTORY_DIR, "sessions")
 LOG_DIR = os.path.join(HISTORY_DIR, "logs")
 DEFAULT_SESSION_NAME = "default"
@@ -80,9 +80,13 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 6,
     },
-    "active_context_window": {
+    "context_token_limit": {
         "type": int,
-        "default": 150,
+        "default": 256000,
+    },
+    "context_trim_threshold": {
+        "type": float,
+        "default": 0.85,
     },
     "structured_tool_results": {
         "type": bool,
@@ -183,25 +187,32 @@ AGENTIC_MODES = {
 3. You have access to online url grounding, use this to explore any relevent information.
 3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
 4. Identify the root cause and propose a precise fix.""",
-    "feature": """WORKFLOW (Feature Plan Engine):
-In FEATURE mode, you MUST use the feature-plan engine (`create_feature_plan`, `get_feature_plan`, `update_feature_plan`) rather than inventing a separate planning format.
+    "feature": """WORKFLOW (Feature Task Engine):
+In FEATURE mode, you MUST use the feature-task engine (`create_feature_task`, `get_current_task`, `get_tasks`, `update_task_status`, `approve_feature_task`) rather than inventing a separate planning format.
 In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in the session-managed feature metadata.
-In FEATURE mode, only work on the current incomplete phase returned by the plan engine; keep the engine updated using the supporting tool calls while you work and never advance early.
+In FEATURE mode, only work on the single current incomplete task returned by the plan engine; this is a strict step-by-step harness.
+In FEATURE mode, memory and scratchpad usage is mandatory: capture durable findings with `save_memory`; capture turn-local hypotheses and plans with `save_scratchpad`.
 In FEATURE mode, if you are blocked on missing user input or an external decision, call `raise_blocker` so the harness can pause and request help instead of looping blindly.
-In FEATURE mode, once all phases are complete you must perform a review pass and only finish after setting `review_status` to `completed`, or after documenting why review failed and moving a phase back to `[~]`.
+In FEATURE mode, once all tasks are complete you must perform a review pass and only finish after setting `review_status` to `completed` via `approve_feature_task`, or after documenting why review failed and moving a task back to `[~]`.
 
-1. Understand the user's feature request and summarize it as a durable feature plan request.
-2. Immediately call `create_feature_plan` to create the canonical feature metadata. Do not use ad-hoc plan files or alternate locations.
-3. Ensure every phase contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
-4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in the session-managed feature metadata.
-5. Once approved, call `get_feature_plan` at the start of each implementation turn and work on only the next incomplete phase.
-6. During investigation-heavy feature work, use read-only tools to gather context into the collation buffer, save short hypotheses or phase notes with `save_scratchpad`, then call `flush` once before making implementation decisions.
-7. While implementing, continuously update the active `phase_N.md` file so the checklist reflects real progress. Use `[~]` for in-progress or blocked work.
-8. Use the scratchpad for turn-local phase notes such as file targets, open questions, verification steps, and mini-plans instead of re-reading the same outputs repeatedly.
-9. If you need user help, missing requirements, credentials, or a product decision, call `raise_blocker` with the exact context needed so the harness can pause and request input instead of continuing to spin.
-10. Never start the next phase until all checklist items in the current phase are `[x]`.
-11. After all phases are complete, review the code and phase files together. If review fails, move the failing checklist items back to `[~]` and continue implementation.
-12. Only finish after calling `update_feature_plan` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
+1. Understand the user's feature request and summarize it as a durable feature task request.
+2. Immediately call `create_feature_task` to create canonical feature metadata. Do not use ad-hoc plan files or alternate locations.
+3. Ensure every task contains Objectives, Action Points, and Exit Criteria sections, and every checklist item uses exactly one of `[ ]`, `[~]`, or `[x]`.
+4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in session-managed metadata.
+5. Once approved, repeat this harness loop until done:
+   - call `get_current_task` / `get_tasks`,
+   - gather read-only context,
+   - save quick notes with `save_scratchpad`,
+   - persist durable findings with `save_memory`,
+   - call `flush`,
+   - make one bounded implementation step on the current task,
+   - verify and update status with `update_task_status`.
+6. While implementing, continuously update the active `phase_N.md` file so the checklist reflects real progress. Use `[~]` for in-progress or blocked work.
+7. Reuse `search_memory` / `list_memory` and `search_scratchpad` / `list_scratchpad` before re-collecting large context.
+8. If you need user help, missing requirements, credentials, or a product decision, call `raise_blocker` with exact context and questions.
+9. Never start the next task until all checklist items in the current task are `[x]`.
+10. After all tasks are complete, review code and task files together. If review fails, move failing checklist items back to `[~]` and continue implementation.
+11. Only finish after calling `approve_feature_task` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
     "research": """WORKFLOW (Research & Exploration):
 1. The user wants to understand how something works without necessarily changing things.
 2. You have access to online tooling and research knowledge bases, use them to explore any relevent information.

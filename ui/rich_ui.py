@@ -1,5 +1,9 @@
 from contextlib import contextmanager
-
+import os
+import select
+import sys
+import threading
+import time
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
@@ -36,9 +40,20 @@ class RichUI:
                 self.console.print(f"\nAssistant ({model_name}):")
             render_response(content)
 
-    def get_input(self, session_name, staged_files, agent_mode="default"):
+    def get_input(
+        self,
+        session_name,
+        staged_files,
+        agent_mode="default",
+        current_task=None,
+        feature_context=None,
+    ):
         return self.input_handler.get_input(
-            session_name, staged_files, agent_mode=agent_mode
+            session_name,
+            staged_files,
+            agent_mode=agent_mode,
+            current_task=current_task,
+            feature_context=feature_context,
         )
 
     def set_variables(self, variables_dict):
@@ -56,6 +71,14 @@ class RichUI:
     def request_tool_approval(
         self,
         *,
+        tool_name=None,
+        tool_args=None,
+        display_args=None,
+        count_info="",
+        can_approve=True,
+        modifications=None,
+        preview_error=None,
+        error_code=None,
         prompt_text,
         choices,
         default,
@@ -202,6 +225,7 @@ class RichUI:
             feature_group.append(feature_meta)
 
             phases = feature_plan.get("phases", [])
+            progress = feature_metrics.get("progress") or {}
             completed_phases = sum(
                 1 for phase in phases if phase.get("status") == "completed"
             )
@@ -233,6 +257,59 @@ class RichUI:
                         width=12,
                     )
                 )
+
+            if progress:
+                next_phase = progress.get("next_phase") or {}
+                active_label = next_phase.get("title") or "Review"
+                elapsed_seconds = int(progress.get("elapsed_seconds", 0) or 0)
+                elapsed = self._format_elapsed(elapsed_seconds)
+                token_delta = int(progress.get("token_delta", 0) or 0)
+                activity = Text()
+                activity.append(f"Implementing {active_label}… ", style="white")
+                activity.append(
+                    f"({elapsed} · ↓ {self._format_token_delta(token_delta)} tokens)",
+                    style="dim white",
+                )
+                feature_group.append(activity)
+
+                completed = int(progress.get("completed_tasks", 0) or 0)
+                remaining = max(0, int(progress.get("total_tasks", 0) or 0) - completed)
+                summary_line = Text()
+                summary_line.append("✔ ", style="green")
+                summary_line.append(f"{completed} completed", style="white")
+                summary_line.append("  ◻ ", style="cyan")
+                summary_line.append(f"{remaining} remaining", style="white")
+                feature_group.append(summary_line)
+
+            max_visible_tasks = 10
+            visible_tasks = phases[:max_visible_tasks]
+            hidden_tasks = phases[max_visible_tasks:]
+            hidden_completed = sum(
+                1 for task in hidden_tasks if task.get("status") == "completed"
+            )
+            for phase in visible_tasks:
+                icon = {
+                    "completed": "✔",
+                    "in_progress": "◼",
+                    "not_started": "◻",
+                }.get(phase.get("status"), "◻")
+                icon_style = {
+                    "completed": "green",
+                    "in_progress": "yellow",
+                    "not_started": "grey70",
+                }.get(phase.get("status"), "grey70")
+                task_line = Text()
+                task_line.append(f"{icon} ", style=icon_style)
+                task_line.append(
+                    str(phase.get("title", "")),
+                    style="white",
+                )
+                feature_group.append(task_line)
+            if hidden_completed > 0:
+                hidden_line = Text()
+                hidden_line.append("… ", style="dim white")
+                hidden_line.append(f"+{hidden_completed} completed", style="dim green")
+                feature_group.append(hidden_line)
 
             next_phase = feature_plan.get("next_phase")
             if next_phase:
@@ -268,6 +345,22 @@ class RichUI:
 
     def show_memory_monitor(self, session):
         self.console.print(self.build_memory_monitor(session))
+
+    @staticmethod
+    def _format_elapsed(total_seconds):
+        total_seconds = max(0, int(total_seconds or 0))
+        minutes, seconds = divmod(total_seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        return f"{minutes}m {seconds}s"
+
+    @staticmethod
+    def _format_token_delta(tokens):
+        tokens = max(0, int(tokens or 0))
+        if tokens >= 1000:
+            return f"{tokens / 1000:.1f}k"
+        return str(tokens)
 
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""
@@ -395,7 +488,18 @@ class RichUI:
     @contextmanager
     def show_status(self, message):
         with self.console.status(message, spinner="aesthetic") as status:
-            yield status
+            watcher_stop = threading.Event()
+            watcher = self._start_yolo_status_watcher(
+                status=status,
+                base_message=message,
+                stop_event=watcher_stop,
+            )
+            try:
+                yield status
+            finally:
+                watcher_stop.set()
+                if watcher:
+                    watcher.join(timeout=0.2)
 
     def build_live_status(self, session, model_name, iteration, max_iterations):
         metrics = collect_runtime_metrics(session)
@@ -408,6 +512,59 @@ class RichUI:
             status.append("YOLO:off | ", style="dim")
         status.append(build_live_status_line(session), style="white")
         return status
+
+    @staticmethod
+    def _status_with_yolo(base_message, enabled):
+        suffix = "✦ YOLO" if enabled else "YOLO:off"
+        raw = base_message.plain if isinstance(base_message, Text) else str(base_message)
+        raw = raw.replace("YOLO:off", suffix)
+        raw = raw.replace("✦ YOLO", suffix)
+        return raw
+
+    def _start_yolo_status_watcher(self, *, status, base_message, stop_event):
+        fd = None
+        old_attrs = None
+        try:
+            if not sys.stdin.isatty():
+                return None
+            fd = sys.stdin.fileno()
+            import termios
+            import tty
+
+            old_attrs = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except Exception:
+            return None
+
+        def _watch():
+            buffer = ""
+            try:
+                while not stop_event.is_set():
+                    ready, _, _ = select.select([fd], [], [], 0.1)
+                    if not ready:
+                        continue
+                    chunk = os.read(fd, 32).decode(errors="ignore")
+                    if not chunk:
+                        continue
+                    combined = buffer + chunk
+                    while "\x1b[Z" in combined:
+                        combined = combined.replace("\x1b[Z", "", 1)
+                        enabled = self.input_handler.toggle_yolo_mode()
+                        status.update(self._status_with_yolo(base_message, enabled))
+                    buffer = combined[-6:]
+                    time.sleep(0.02)
+            finally:
+                if old_attrs is not None and fd is not None:
+                    try:
+                        import termios
+
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                    except Exception:
+                        pass
+
+        watcher = threading.Thread(target=_watch, daemon=True)
+        watcher.start()
+        return watcher
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""

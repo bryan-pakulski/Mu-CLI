@@ -132,7 +132,6 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
 def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
-    session.active_context_window = 4
 
     sm.history = [
         {"role": "user", "parts": [{"type": "text", "text": "turn 1"}]},
@@ -143,7 +142,7 @@ def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
         {"role": "assistant", "parts": [{"type": "text", "text": "answer 3"}]},
     ]
 
-    changed = sm.roll_history_summary(session.active_context_window)
+    changed = sm.roll_history_summary(4)
 
     assert changed is True
     assert sm.summary_anchor == 2
@@ -155,6 +154,23 @@ def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
         "turn 3",
         "answer 3",
     ]
+
+
+def test_roll_history_summary_to_token_budget_summarizes_when_over_budget():
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    sm.history = [
+        {"role": "user", "parts": [{"type": "text", "text": "x" * 1200}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "y" * 1200}]},
+        {"role": "user", "parts": [{"type": "text", "text": "z" * 1200}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "w" * 1200}]},
+    ]
+
+    changed = sm.roll_history_summary_to_token_budget(200, keep_recent=2)
+
+    assert changed is True
+    assert sm.summary_anchor > 0
+    assert "Summarized conversation" in sm.conversation_summary
 
 
 def test_send_message_injects_rolling_conversation_summary():
@@ -182,14 +198,24 @@ def test_send_message_injects_rolling_conversation_summary():
     provider = CaptureProvider()
     sm = SessionManager(session_name="rolling-summary")
     session = Session(provider, False, "system instruction", sm)
-    session.active_context_window = 4
+    session.variables["context_token_limit"] = 32
+    session.variables["context_trim_threshold"] = 0.5
     sm.history = [
-        {"role": "user", "parts": [{"type": "text", "text": "turn 1"}]},
-        {"role": "assistant", "parts": [{"type": "text", "text": "answer 1"}]},
-        {"role": "user", "parts": [{"type": "text", "text": "turn 2"}]},
-        {"role": "assistant", "parts": [{"type": "text", "text": "answer 2"}]},
-        {"role": "user", "parts": [{"type": "text", "text": "turn 3"}]},
-        {"role": "assistant", "parts": [{"type": "text", "text": "answer 3"}]},
+        {"role": "user", "parts": [{"type": "text", "text": "turn 1 " + ("a" * 800)}]},
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "answer 1 " + ("b" * 800)}],
+        },
+        {"role": "user", "parts": [{"type": "text", "text": "turn 2 " + ("c" * 800)}]},
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "answer 2 " + ("d" * 800)}],
+        },
+        {"role": "user", "parts": [{"type": "text", "text": "turn 3 " + ("e" * 800)}]},
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "answer 3 " + ("f" * 800)}],
+        },
     ]
 
     session.send_message("turn 4")
@@ -475,8 +501,14 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
 
     session.send_message("Implement an approvals dashboard")
 
-    assert "create_feature_plan" in provider.last_user_text
-    assert "phase_N.md" in provider.last_user_text
+    assert "create_feature_task" in provider.last_user_text
+    assert "tool calls only" in provider.last_user_text
+    assert (
+        "Do not use read_file/get_chunk/write_file/apply_diff on feature plan markdown files"
+        in provider.last_user_text
+    )
+    assert "EXIT CRITERIA" in provider.last_user_text
+    assert "status='completed'" in provider.last_user_text
     assert "Do not create alternate planning documents" in provider.last_user_text
     assert (
         "do not begin code implementation until the user has reviewed and approved the plan"
@@ -491,6 +523,35 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
     assert "You are in Feature Plan Engine mode" in provider.last_system_prompt
     assert "gather read-only context first" in provider.last_system_prompt
     assert provider.last_user_text.endswith("Implement an approvals dashboard")
+
+
+def test_feature_mode_blocks_direct_phase_markdown_access(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-md-block")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+    session.variables["agent_mode"] = "feature"
+    phase_path = tmp_path / "documentation" / "feature_req_demo" / "phase_1.md"
+    phase_path.parent.mkdir(parents=True, exist_ok=True)
+    phase_path.write_text("# Phase 1\n", encoding="utf-8")
+    session.session_manager.set_feature_state(
+        {
+            "type": "feature",
+            "status": "running",
+            "directory": str(phase_path.parent),
+            "feature_plan": {"phases": []},
+        },
+        session.folder_context,
+    )
+
+    result = session._execute_tool_with_memory(
+        "read_file",
+        {"filename": str(phase_path)},
+    )
+
+    assert str(result).startswith("Error: Feature status files are managed")
+    assert "update_task_status" in str(result)
 
 
 def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypatch):
@@ -518,7 +579,7 @@ def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypat
     assert sm.get_feature_state() is None
 
     session._sync_feature_state_for_tool(
-        "get_feature_plan",
+        "get_tasks",
         {"directory": plan.directory},
         raw_result=summary,
         structured_result={"ok": True, "data": summary},
@@ -530,6 +591,108 @@ def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypat
     assert feature_state["directory"] == plan.directory
     assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
     assert feature_state["status"] == "awaiting_approval"
+
+
+def test_get_current_task_sync_does_not_drop_feature_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-state-current-task")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+
+    plan = create_feature_plan(
+        feature_name="Feature state sync",
+        feature_request="Track feature plan metadata stability.",
+        phases=[
+            {
+                "title": "Phase 1",
+                "objectives": ["Gather context"],
+                "action_points": ["Update status"],
+                "exit_criteria": ["Task done"],
+            }
+        ],
+        folder_context=session.folder_context,
+    )
+    summary = summarize_feature_plan(plan)
+    session._sync_feature_state_for_tool(
+        "create_feature_task",
+        {},
+        raw_result={"plan": summary},
+        structured_result={"ok": True, "data": {"plan": summary}},
+    )
+
+    session._sync_feature_state_for_tool(
+        "get_current_task",
+        {},
+        raw_result={"feature_id": summary["feature_id"], "task": {"id": 1}},
+        structured_result={
+            "ok": True,
+            "data": {"feature_id": summary["feature_id"], "task": {"id": 1}},
+        },
+    )
+
+    feature_state = sm.get_feature_state()
+    assert feature_state is not None
+    assert feature_state["metadata_path"] == summary["metadata_path"]
+    assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
+
+
+def test_wrapped_plan_payloads_update_feature_state(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-state-wrapped-plan")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.folder_context.add_folder(str(tmp_path))
+    session.sync_runtime_state()
+
+    plan = create_feature_plan(
+        feature_name="Wrapped payload state sync",
+        feature_request="Ensure wrapped plan payloads sync state.",
+        phases=[
+            {
+                "title": "Phase 1",
+                "objectives": ["Gather context"],
+                "action_points": ["Update status"],
+                "exit_criteria": ["Task done"],
+            }
+        ],
+        folder_context=session.folder_context,
+    )
+    summary = summarize_feature_plan(plan)
+    session._sync_feature_state_for_tool(
+        "create_feature_task",
+        {},
+        raw_result={"ok": True, "feature_id": summary["feature_id"], "plan": summary},
+        structured_result={
+            "ok": True,
+            "data": {"ok": True, "feature_id": summary["feature_id"], "plan": summary},
+        },
+    )
+
+    approved_summary = {**summary, "approved": True, "review_status": "pending"}
+    session._sync_feature_state_for_tool(
+        "approve_feature_task",
+        {},
+        raw_result={
+            "ok": True,
+            "approved": True,
+            "feature_id": summary["feature_id"],
+            "plan": approved_summary,
+        },
+        structured_result={
+            "ok": True,
+            "data": {
+                "ok": True,
+                "approved": True,
+                "feature_id": summary["feature_id"],
+                "plan": approved_summary,
+            },
+        },
+    )
+
+    feature_state = sm.get_feature_state()
+    assert feature_state is not None
+    assert feature_state["feature_plan"]["approved"] is True
+    assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
 
 
 def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
@@ -572,14 +735,21 @@ def test_sync_feature_state_refreshes_after_feature_phase_file_changes(
     with open(phase_path, "w", encoding="utf-8") as handle:
         handle.write(updated_phase_text)
 
+    updated_summary = summarize_feature_plan(plan)
+    updated_summary["tasks"][0]["status"] = "completed"
+    updated_summary["phases"][0]["status"] = "completed"
+    updated_summary["next_task"] = None
+    updated_summary["next_phase"] = None
+    updated_summary["tasks_completed"] = True
+    updated_summary["phases_completed"] = True
+
     session._sync_feature_state_for_tool(
-        "write_file",
-        {"filename": phase_path},
-        raw_result=f"Successfully wrote to {phase_path}",
+        "update_task_status",
+        {"task_id": 1, "status": "completed"},
+        raw_result=updated_summary,
         structured_result={
             "ok": True,
-            "data": {"changed_file": phase_path},
-            "modified_files": [phase_path],
+            "data": updated_summary,
         },
     )
 
@@ -727,11 +897,11 @@ def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypat
                     parts=[
                         MessagePart(
                             type="tool_call",
-                            tool_name="create_feature_plan",
+                            tool_name="create_feature_task",
                             tool_args={
                                 "feature_name": "Persistent feature state",
                                 "feature_request": "Persist feature state to the session JSON.",
-                                "phases": [
+                                "tasks": [
                                     {
                                         "title": "Phase 1",
                                         "objectives": ["Plan the work"],
@@ -772,7 +942,9 @@ def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypat
 
     session.send_message("Implement the feature workflow")
 
-    session_json = tmp_path / "history" / "feature-state-persisted.json"
+    session_json = (
+        tmp_path / "history" / "sessions" / "feature-state-persisted" / "session.json"
+    )
     assert session_json.exists()
 
     saved = json.loads(session_json.read_text())
@@ -795,11 +967,11 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
                     parts=[
                         MessagePart(
                             type="tool_call",
-                            tool_name="create_feature_plan",
+                            tool_name="create_feature_task",
                             tool_args={
                                 "feature_name": "Externalized feature metadata",
                                 "feature_request": "Keep feature JSON under session metadata.",
-                                "phases": [
+                                "tasks": [
                                     {
                                         "title": "Plan",
                                         "objectives": ["Capture requirements"],
@@ -844,7 +1016,7 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
 
     assert feature_state is not None
     assert feature_state["metadata_path"].startswith(
-        str(tmp_path / "history" / "features")
+        str(tmp_path / "history" / "sessions")
     )
     assert os.path.exists(feature_state["metadata_path"])
     assert not os.path.exists(

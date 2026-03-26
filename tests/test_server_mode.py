@@ -19,7 +19,7 @@ from core.server import (
 from core.session import Session, SessionManager
 from core.workspace import FolderContext
 from core.feature_mode import create_feature_plan, update_feature_plan_metadata
-from mucli import handle_command
+from mucli import handle_command, build_feature_markdown, get_feature_prompt_context
 from providers.base import MessagePart, ProviderResponse
 from providers.ollama import OllamaProvider
 from utils.config import AGENT_MODE_METADATA
@@ -208,7 +208,9 @@ def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
     feature = created["data"]["feature"]
 
     assert created["ok"] is True
-    assert feature["metadata_path"].startswith(str(tmp_path / "history" / "features"))
+    assert feature["metadata_path"].startswith(
+        str(tmp_path / "history" / "sessions")
+    )
     assert feature["directory"].startswith(str(workspace / "documentation"))
 
     status = handle_command(session, "/feature status", allow_prompt=False)
@@ -226,11 +228,94 @@ def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
     )
 
     assert "# Feature: Stats Dashboard" in status["data"]["markdown"]
-    assert "## Phases" in phases["data"]["markdown"]
+    assert "### Task Checklist" in phases["data"]["markdown"]
     assert listed["data"]["features"][0]["feature_id"] == feature["feature_id"]
     assert loaded["data"]["feature"]["feature_id"] == feature["feature_id"]
     assert deleted["ok"] is True
     assert session.session_manager.list_features() == []
+
+
+def test_build_feature_markdown_shows_task_snapshot():
+    feature = {
+        "feature_id": "demo",
+        "feature_name": "Demo Feature",
+        "status": "in_progress",
+        "directory": "/tmp/demo",
+        "metadata_path": "/tmp/demo.json",
+        "started_at": 0,
+        "start_tokens": 1000,
+        "token_total": 30100,
+        "feature_plan": {
+            "approved": False,
+            "review_status": "pending",
+            "next_task": {"number": 2, "title": "Implement fixtures/pcap.py"},
+            "phases": [
+                {
+                    "number": 1,
+                    "title": "Implement fixtures/sipp.py",
+                    "status": "completed",
+                    "task_counts": {"completed": 3, "in_progress": 0, "not_started": 0},
+                },
+                {
+                    "number": 2,
+                    "title": "Implement fixtures/pcap.py",
+                    "status": "in_progress",
+                    "task_counts": {"completed": 1, "in_progress": 1, "not_started": 1},
+                },
+                {
+                    "number": 3,
+                    "title": "Implement test_basic_calls.py",
+                    "status": "not_started",
+                    "task_counts": {"completed": 0, "in_progress": 0, "not_started": 2},
+                },
+            ],
+        },
+    }
+
+    markdown = build_feature_markdown(feature)
+
+    assert "## Progress Snapshot" in markdown
+    assert "Token delta:** ↓ 29.1k tokens" in markdown
+    assert "### Active Work" in markdown
+    assert "*Implementing Implement fixtures/pcap.py…" in markdown
+    assert "- ✔ **Implement fixtures/sipp.py**" in markdown
+    assert "- ◼ **Implement fixtures/pcap.py**" in markdown
+    assert "- ◻ **Implement test_basic_calls.py**" in markdown
+
+
+def test_get_feature_prompt_context_returns_task_and_progress():
+    session = build_test_session()
+    session.session_manager.set_feature_state(
+        {
+            "status": "in_progress",
+            "feature_plan": {
+                "next_task": {"number": 2, "title": "Implement fixtures/pcap.py"},
+                "phases": [
+                    {
+                        "number": 1,
+                        "title": "Implement fixtures/sipp.py",
+                        "status": "completed",
+                        "task_counts": {"completed": 3, "in_progress": 0, "not_started": 0},
+                    },
+                    {
+                        "number": 2,
+                        "title": "Implement fixtures/pcap.py",
+                        "status": "in_progress",
+                        "task_counts": {"completed": 1, "in_progress": 1, "not_started": 2},
+                    },
+                ],
+            },
+        }
+    )
+
+    context = get_feature_prompt_context(session)
+
+    assert context["status"] == "in_progress"
+    assert context["task"] == "Implement fixtures/pcap.py"
+    assert context["phase_done"] == 1
+    assert context["phase_total"] == 4
+    assert context["overall_done"] == 1
+    assert context["overall_total"] == 2
 
 
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):
@@ -491,11 +576,22 @@ class DummyFeatureLoopProvider:
             )
         if self.call_count == 2:
             return ProviderResponse(
-                text="phase complete",
-                parts=[MessagePart(type="text", text="phase complete")],
-                input_tokens=3,
-                output_tokens=2,
-                total_tokens=5,
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="update_task_status",
+                        tool_args={
+                            "task_id": 1,
+                            "status": "completed",
+                            "notes": "Checklist validated and complete.",
+                            "directory": self.directory,
+                        },
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
             )
         if self.call_count == 3:
             return ProviderResponse(
@@ -503,9 +599,10 @@ class DummyFeatureLoopProvider:
                 parts=[
                     MessagePart(
                         type="tool_call",
-                        tool_name="update_feature_plan",
+                        tool_name="approve_feature_task",
                         tool_args={
                             "directory": self.directory,
+                            "approved": True,
                             "review_status": "completed",
                             "review_notes": "All criteria satisfied.",
                         },
@@ -514,6 +611,14 @@ class DummyFeatureLoopProvider:
                 input_tokens=5,
                 output_tokens=3,
                 total_tokens=8,
+            )
+        if self.call_count == 4:
+            return ProviderResponse(
+                text="phase complete",
+                parts=[MessagePart(type="text", text="phase complete")],
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
             )
         return ProviderResponse(
             text="review complete",
@@ -639,11 +744,22 @@ class DummyBlockingFeatureProvider:
             )
         if self.call_count == 4:
             return ProviderResponse(
-                text="phase complete after unblock",
-                parts=[MessagePart(type="text", text="phase complete after unblock")],
-                input_tokens=3,
-                output_tokens=2,
-                total_tokens=5,
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="update_task_status",
+                        tool_args={
+                            "task_id": 1,
+                            "status": "completed",
+                            "notes": "Completed after unblock.",
+                            "directory": self.directory,
+                        },
+                    )
+                ],
+                input_tokens=5,
+                output_tokens=3,
+                total_tokens=8,
             )
         if self.call_count == 5:
             return ProviderResponse(
@@ -651,9 +767,10 @@ class DummyBlockingFeatureProvider:
                 parts=[
                     MessagePart(
                         type="tool_call",
-                        tool_name="update_feature_plan",
+                        tool_name="approve_feature_task",
                         tool_args={
                             "directory": self.directory,
+                            "approved": True,
                             "review_status": "completed",
                             "review_notes": "Completed after blocker resolution.",
                         },
@@ -662,6 +779,14 @@ class DummyBlockingFeatureProvider:
                 input_tokens=5,
                 output_tokens=3,
                 total_tokens=8,
+            )
+        if self.call_count == 6:
+            return ProviderResponse(
+                text="phase complete after unblock",
+                parts=[MessagePart(type="text", text="phase complete after unblock")],
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
             )
         return ProviderResponse(
             text="review complete",
@@ -739,7 +864,58 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     assert completed["status"] == "completed"
     assert completed["result"]["feature_plan"]["review_status"] == "completed"
     assert completed["result"]["feature_plan"]["phases"][0]["status"] == "completed"
-    assert len(completed["result"]["cycles"]) >= 3
+    assert len(completed["result"]["cycles"]) >= 2
+
+
+def test_feature_loop_pauses_cleanly_when_interrupted(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    ctx = FolderContext()
+    ctx.add_folder(str(workspace))
+    create_feature_plan(
+        feature_name="Interrupted Feature Loop",
+        feature_request="Pause on interrupt and resume later",
+        phases=[
+            {
+                "title": "Build it",
+                "objectives": ["Understand scope"],
+                "action_points": ["Implement the feature"],
+                "exit_criteria": ["Confirm phase completion"],
+            }
+        ],
+        folder_context=ctx,
+        feature_id="interrupted_loop_test",
+    )
+    workspace_doc_dir = workspace / "documentation" / "feature_req_interrupted_loop_test"
+    update_feature_plan_metadata(str(workspace_doc_dir), approved=True)
+
+    ui = HeadlessUI(auto_approve=True)
+    session = build_test_session(ui=ui)
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    session.send_message = lambda _prompt: {
+        "ok": False,
+        "status": "interrupted",
+        "assistant_text": "",
+    }
+
+    event_hub = EventHub()
+    task_manager = TaskManager(session, Lock(), event_hub=event_hub)
+    approval_manager = ApprovalManager(task_manager, event_hub=event_hub)
+    ui.bind_runtime(task_manager, approval_manager)
+
+    task = task_manager.start_feature_task(
+        str(workspace_doc_dir), approval_manager, max_cycles=3
+    )
+    interrupted = task_manager.wait_for_task_state(
+        task["task_id"], {"awaiting_input", "error"}, timeout=10.0
+    )
+
+    assert interrupted is not None
+    assert interrupted["status"] == "awaiting_input"
+    assert interrupted["blocker"]["summary"] == "Feature loop interrupted during execution."
+    assert interrupted["result"]["status"] == "interrupted"
 
 
 def test_feature_loop_state_persists_across_session_reload(tmp_path):

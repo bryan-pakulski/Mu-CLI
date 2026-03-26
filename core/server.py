@@ -45,7 +45,14 @@ class HeadlessUI:
         )
         logger.debug("HeadlessUI render_message role=%s model=%s", role, model_name)
 
-    def get_input(self, session_name, staged_files, agent_mode="default"):
+    def get_input(
+        self,
+        session_name,
+        staged_files,
+        agent_mode="default",
+        current_task=None,
+        feature_context=None,
+    ):
         return ""
 
     def set_variables(self, variables_dict):
@@ -614,6 +621,51 @@ class TaskManager:
                             "feature_plan": updated_summary,
                         }
                         cycles.append(cycle_payload)
+
+                        if result.get("status") == "interrupted":
+                            interrupt_blocker = {
+                                "summary": "Feature loop interrupted during execution.",
+                                "requested_input": "Resume feature mode to continue from the current task state.",
+                                "history_length": len(
+                                    self.session.session_manager.history
+                                ),
+                                "conversation_hint": "Use GET /api/history or /feature status to inspect progress before resuming.",
+                            }
+                            partial_result = self._feature_partial_result(
+                                cycles=cycles,
+                                feature_plan=updated_summary,
+                                status="interrupted",
+                                error="Feature loop interrupted by user.",
+                            )
+                            self.update_task(
+                                task_id,
+                                payload={
+                                    "directory": directory,
+                                    "max_cycles": max_cycles,
+                                    "next_cycle": cycle_index + 1,
+                                    "previous_signature": signature,
+                                },
+                            )
+                            self._persist_feature_state(
+                                self._build_persisted_feature_state(
+                                    task_id=task_id,
+                                    directory=directory,
+                                    max_cycles=max_cycles,
+                                    next_cycle=cycle_index + 1,
+                                    previous_signature=signature,
+                                    cycles=cycles,
+                                    status="interrupted",
+                                    blocker=interrupt_blocker,
+                                    result=partial_result,
+                                    error="Feature loop interrupted by user.",
+                                ),
+                            )
+                            self.set_waiting_for_input(
+                                task_id,
+                                interrupt_blocker,
+                                partial_result,
+                            )
+                            return
 
                         blocker = self._extract_feature_blocker(result)
                         if blocker:

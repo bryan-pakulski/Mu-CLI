@@ -1,16 +1,15 @@
 import os
 from google import genai
 from google.genai.types import Tool, FunctionDeclaration, Content
-from pytest import skip
+import pytest
 
 
 def test_gemini_agentic_tool_call_with_thought_signature():
     """Test tool calls to verify thought signature handling in 3.0+ API"""
 
-    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-
     if not os.getenv("GOOGLE_API_KEY"):
         pytest.skip("Skipping test because GOOGLE_API_KEY is not set")
+    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
     # Define a simple tool schema for function calling
     get_current_time = FunctionDeclaration(
@@ -119,6 +118,8 @@ def test_gemini_agentic_tool_call_with_thought_signature():
 def test_parallel_function_calls_with_signatures():
     """Test parallel function calls preserve signatures correctly"""
 
+    if not os.getenv("GOOGLE_API_KEY"):
+        pytest.skip("Skipping test because GOOGLE_API_KEY is not set")
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
     # Two parallel tools

@@ -17,7 +17,6 @@ def _build_session(**overrides):
             token_counts=token_counts,
             get_feature_state=lambda: None,
         ),
-        active_context_window=20,
         task_memory=SimpleNamespace(entries=[1, 2, 3], max_entries=64),
         turn_scratchpad=SimpleNamespace(entries=[1], max_entries=24),
         collation_buffer=SimpleNamespace(
@@ -162,6 +161,14 @@ def test_request_tool_approval_uses_input_handler_prompt_choice():
     ui.input_handler.prompt_choice = fake_prompt_choice
 
     choice, reason = ui.request_tool_approval(
+        tool_name="write_file",
+        tool_args={"filename": "x.py"},
+        display_args={"filename": "x.py"},
+        count_info="",
+        can_approve=True,
+        modifications=[],
+        preview_error=None,
+        error_code=None,
         prompt_text="[bold yellow]Permission Required[/bold yellow]",
         choices=["y", "n", "e"],
         default="y",
@@ -174,3 +181,13 @@ def test_request_tool_approval_uses_input_handler_prompt_choice():
         "choices": ["y", "n", "e"],
         "default": "y",
     }
+
+
+def test_status_with_yolo_updates_message_text():
+    ui = RichUI()
+
+    off = ui._status_with_yolo("Generating | YOLO:off | ctx:50%", enabled=False)
+    on = ui._status_with_yolo("Generating | YOLO:off | ctx:50%", enabled=True)
+
+    assert "YOLO:off" in off
+    assert "✦ YOLO" in on

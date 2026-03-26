@@ -291,8 +291,8 @@ class InputHandler:
             f"{yolo_text}"
             f"{task_text}"
             f"{feature_text}"
-            f"<files>{files_text}</files> "
-            f"<prompt>>>></prompt> "
+            f"<files>{files_text}</files>\n"
+            f"<prompt>>></prompt> "
         )
 
     def build_input_toolbar_text(self):
@@ -361,4 +361,4 @@ class InputHandler:
                 return value
 
     def _prompt_continuation(self, width, line_number, is_soft_wrap):
-        return HTML(f'<prompt>{("." * (width - 1)) + " "}</prompt>')
+        return HTML("<prompt>    </prompt>")

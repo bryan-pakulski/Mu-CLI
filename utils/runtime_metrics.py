@@ -85,7 +85,12 @@ def collect_runtime_metrics(session):
     if anchor > hist_len:
         anchor = 0
     active_turns = max(0, hist_len - anchor)
-    context_limit = _max_int(session.variables.get("active_context_window", 150))
+    context_limit = _max_int(session.variables.get("context_token_limit", 256000))
+    if hasattr(session.session_manager, "estimate_runtime_history_tokens"):
+        context_tokens = int(session.session_manager.estimate_runtime_history_tokens() or 0)
+    else:
+        serialized = json.dumps(session.session_manager.history, default=str)
+        context_tokens = max(0, int(len(serialized) / 4))
 
     memory_limit = _max_int(
         session.variables.get(
@@ -103,7 +108,8 @@ def collect_runtime_metrics(session):
     )
 
     return {
-        "ctx": {"current": active_turns, "maximum": context_limit},
+        "ctx": {"current": context_tokens, "maximum": context_limit},
+        "ctx_turns": {"current": active_turns, "maximum": max(1, hist_len)},
         "mem": {
             "current": len(session.task_memory.entries),
             "maximum": memory_limit,

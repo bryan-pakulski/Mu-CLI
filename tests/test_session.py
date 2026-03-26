@@ -157,6 +157,23 @@ def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
     ]
 
 
+def test_roll_history_summary_to_token_budget_summarizes_when_over_budget():
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    sm.history = [
+        {"role": "user", "parts": [{"type": "text", "text": "x" * 1200}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "y" * 1200}]},
+        {"role": "user", "parts": [{"type": "text", "text": "z" * 1200}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "w" * 1200}]},
+    ]
+
+    changed = sm.roll_history_summary_to_token_budget(200, keep_recent=2)
+
+    assert changed is True
+    assert sm.summary_anchor > 0
+    assert "Summarized conversation" in sm.conversation_summary
+
+
 def test_send_message_injects_rolling_conversation_summary():
     class CaptureProvider(LLMProvider):
         def __init__(self):
@@ -183,13 +200,24 @@ def test_send_message_injects_rolling_conversation_summary():
     sm = SessionManager(session_name="rolling-summary")
     session = Session(provider, False, "system instruction", sm)
     session.active_context_window = 4
+    session.variables["context_token_limit"] = 32
+    session.variables["context_trim_threshold"] = 0.5
     sm.history = [
-        {"role": "user", "parts": [{"type": "text", "text": "turn 1"}]},
-        {"role": "assistant", "parts": [{"type": "text", "text": "answer 1"}]},
-        {"role": "user", "parts": [{"type": "text", "text": "turn 2"}]},
-        {"role": "assistant", "parts": [{"type": "text", "text": "answer 2"}]},
-        {"role": "user", "parts": [{"type": "text", "text": "turn 3"}]},
-        {"role": "assistant", "parts": [{"type": "text", "text": "answer 3"}]},
+        {"role": "user", "parts": [{"type": "text", "text": "turn 1 " + ("a" * 800)}]},
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "answer 1 " + ("b" * 800)}],
+        },
+        {"role": "user", "parts": [{"type": "text", "text": "turn 2 " + ("c" * 800)}]},
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "answer 2 " + ("d" * 800)}],
+        },
+        {"role": "user", "parts": [{"type": "text", "text": "turn 3 " + ("e" * 800)}]},
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "answer 3 " + ("f" * 800)}],
+        },
     ]
 
     session.send_message("turn 4")

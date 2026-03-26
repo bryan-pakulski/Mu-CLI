@@ -494,6 +494,44 @@ class SessionManager:
             clipped = clipped[newline_index + 1 :]
         self.conversation_summary = f"...\n{clipped}".strip()
 
+    @staticmethod
+    def _estimate_tokens_from_text(text: str) -> int:
+        raw = str(text or "")
+        if not raw:
+            return 0
+        return max(1, int(len(raw) / 4))
+
+    def _estimate_message_tokens(self, message: dict) -> int:
+        role = str(message.get("role", "") or "")
+        total = 3 + self._estimate_tokens_from_text(role)
+        for part in message.get("parts", []):
+            part_type = str(part.get("type", "") or "")
+            total += self._estimate_tokens_from_text(part_type)
+            if part_type == "text":
+                total += self._estimate_tokens_from_text(part.get("text", ""))
+            elif part_type == "tool_call":
+                total += self._estimate_tokens_from_text(part.get("tool_name", ""))
+                total += self._estimate_tokens_from_text(
+                    json.dumps(part.get("tool_args", {}), default=str)
+                )
+            elif part_type == "tool_result":
+                total += self._estimate_tokens_from_text(part.get("tool_name", ""))
+                total += self._estimate_tokens_from_text(
+                    json.dumps(part.get("tool_result", ""), default=str)
+                )
+            elif part_type == "file":
+                file_ref = part.get("file_ref", {}) or {}
+                total += self._estimate_tokens_from_text(
+                    file_ref.get("display_name") or file_ref.get("uri") or ""
+                )
+        return total
+
+    def estimate_runtime_history_tokens(self, start_index: int | None = None) -> int:
+        start = self.summary_anchor if start_index is None else max(0, int(start_index))
+        return sum(
+            self._estimate_message_tokens(message) for message in self.history[start:]
+        )
+
     def roll_history_summary(self, keep_recent: int) -> bool:
         keep_recent = max(1, int(keep_recent or 1))
         if self.summary_anchor > len(self.history):
@@ -529,6 +567,23 @@ class SessionManager:
         self._clip_conversation_summary()
         self.summary_anchor = target_anchor
         return True
+
+    def roll_history_summary_to_token_budget(
+        self,
+        token_budget: int,
+        *,
+        keep_recent: int = 12,
+        max_passes: int = 8,
+    ) -> bool:
+        token_budget = max(1, int(token_budget or 1))
+        changed = False
+        for _ in range(max(1, int(max_passes or 1))):
+            if self.estimate_runtime_history_tokens() <= token_budget:
+                break
+            if not self.roll_history_summary(keep_recent=keep_recent):
+                break
+            changed = True
+        return changed
 
     def view_history(self):
         if not self.history:
@@ -909,11 +964,25 @@ class Session:
     ) -> list[dict]:
         if self.session_manager.summary_anchor > len(self.session_manager.history):
             self.session_manager.summary_anchor = 0
-        start_index = max(
-            self.session_manager.summary_anchor,
-            len(self.session_manager.history)
-            - self.variables.get("active_context_window", 150),
+        context_limit = max(
+            1024, int(self.variables.get("context_token_limit", 256000) or 256000)
         )
+        trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
+        trim_threshold = max(0.10, min(trim_threshold, 1.0))
+        token_budget = max(512, int(context_limit * trim_threshold))
+        start_index = len(self.session_manager.history)
+        running_tokens = 0
+        while start_index > self.session_manager.summary_anchor:
+            next_index = start_index - 1
+            next_tokens = self.session_manager._estimate_message_tokens(
+                self.session_manager.history[next_index]
+            )
+            if running_tokens + next_tokens > token_budget and next_index < len(
+                self.session_manager.history
+            ) - 1:
+                break
+            running_tokens += next_tokens
+            start_index = next_index
         recent_history = self.session_manager.history[start_index:]
         tool_window = max(0, int(self.variables.get("tool_context_window", 6)))
 
@@ -1486,7 +1555,7 @@ class Session:
             base_system_prompt += (
                 "\n\nFEATURE MODE SYSTEM PROMPT\n"
                 "You are in Feature Plan Engine mode. "
-                "Use the feature-task engine for this request. First call create_feature_task to create canonical feature metadata and phase_N.md files. "
+                "Use the feature-task engine for this request. First call create_feature_task to create canonical feature metadata. "
                 "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
                 "Step through one task at a time until completion; never work multiple tasks simultaneously. "
                 "gather read-only context first, use save_scratchpad for temporary phase notes, call flush before acting on collected context, and call raise_blocker when blocked on user input. "
@@ -1495,14 +1564,15 @@ class Session:
             )
         if workspace_context:
             base_system_prompt += f"\n\n{workspace_context}"
-        active_window = int(
-            getattr(
-                self,
-                "active_context_window",
-                self.variables.get("active_context_window", 150),
-            )
+        context_limit = max(
+            1024, int(self.variables.get("context_token_limit", 256000) or 256000)
         )
-        self.session_manager.roll_history_summary(active_window)
+        trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
+        trim_threshold = max(0.10, min(trim_threshold, 1.0))
+        self.session_manager.roll_history_summary_to_token_budget(
+            int(context_limit * trim_threshold),
+            keep_recent=4,
+        )
         base_system_prompt = self._inject_conversation_summary(base_system_prompt)
 
         recent_history = self._prepare_runtime_history()

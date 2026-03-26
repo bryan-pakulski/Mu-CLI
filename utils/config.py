@@ -80,6 +80,14 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 6,
     },
+    "context_token_limit": {
+        "type": int,
+        "default": 256000,
+    },
+    "context_trim_threshold": {
+        "type": float,
+        "default": 0.85,
+    },
     "active_context_window": {
         "type": int,
         "default": 150,

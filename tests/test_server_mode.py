@@ -19,7 +19,7 @@ from core.server import (
 from core.session import Session, SessionManager
 from core.workspace import FolderContext
 from core.feature_mode import create_feature_plan, update_feature_plan_metadata
-from mucli import handle_command
+from mucli import handle_command, build_feature_markdown
 from providers.base import MessagePart, ProviderResponse
 from providers.ollama import OllamaProvider
 from utils.config import AGENT_MODE_METADATA
@@ -228,11 +228,59 @@ def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
     )
 
     assert "# Feature: Stats Dashboard" in status["data"]["markdown"]
-    assert "## Phases" in phases["data"]["markdown"]
+    assert "### Task Checklist" in phases["data"]["markdown"]
     assert listed["data"]["features"][0]["feature_id"] == feature["feature_id"]
     assert loaded["data"]["feature"]["feature_id"] == feature["feature_id"]
     assert deleted["ok"] is True
     assert session.session_manager.list_features() == []
+
+
+def test_build_feature_markdown_shows_task_snapshot():
+    feature = {
+        "feature_id": "demo",
+        "feature_name": "Demo Feature",
+        "status": "in_progress",
+        "directory": "/tmp/demo",
+        "metadata_path": "/tmp/demo.json",
+        "started_at": 0,
+        "start_tokens": 1000,
+        "token_total": 30100,
+        "feature_plan": {
+            "approved": False,
+            "review_status": "pending",
+            "next_task": {"number": 2, "title": "Implement fixtures/pcap.py"},
+            "phases": [
+                {
+                    "number": 1,
+                    "title": "Implement fixtures/sipp.py",
+                    "status": "completed",
+                    "task_counts": {"completed": 3, "in_progress": 0, "not_started": 0},
+                },
+                {
+                    "number": 2,
+                    "title": "Implement fixtures/pcap.py",
+                    "status": "in_progress",
+                    "task_counts": {"completed": 1, "in_progress": 1, "not_started": 1},
+                },
+                {
+                    "number": 3,
+                    "title": "Implement test_basic_calls.py",
+                    "status": "not_started",
+                    "task_counts": {"completed": 0, "in_progress": 0, "not_started": 2},
+                },
+            ],
+        },
+    }
+
+    markdown = build_feature_markdown(feature)
+
+    assert "## Progress Snapshot" in markdown
+    assert "Token delta:** ↓ 29.1k tokens" in markdown
+    assert "### Active Work" in markdown
+    assert "*Implementing Implement fixtures/pcap.py…" in markdown
+    assert "- ✔ **Implement fixtures/sipp.py**" in markdown
+    assert "- ◼ **Implement fixtures/pcap.py**" in markdown
+    assert "- ◻ **Implement test_basic_calls.py**" in markdown
 
 
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):

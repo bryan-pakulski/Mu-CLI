@@ -50,9 +50,9 @@ def collect_feature_progress(session):
             plan = refresh_and_persist_feature_plan(directory)
 
         summary = summarize_feature_plan(plan)
-        phases = summary.get("phases", [])
+        tasks = summary.get("phases", [])
         completed_tasks = sum(
-            1 for phase in phases if str(phase.get("status", "")) == "completed"
+            1 for task in tasks if str(task.get("status", "")) == "completed"
         )
         started_at = float(feature_state.get("started_at", 0) or 0)
         elapsed_seconds = max(0, int(time.time() - started_at)) if started_at else 0
@@ -65,8 +65,8 @@ def collect_feature_progress(session):
             "plan": summary,
             "progress": {
                 "completed_tasks": completed_tasks,
-                "total_tasks": len(phases),
-                "next_phase": summary.get("next_phase"),
+                "total_tasks": len(tasks),
+                "next_phase": summary.get("next_task") or summary.get("next_phase"),
                 "elapsed_seconds": elapsed_seconds,
                 "token_delta": token_delta,
             },

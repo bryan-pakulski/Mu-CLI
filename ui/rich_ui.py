@@ -1,6 +1,4 @@
 from contextlib import contextmanager
-from datetime import timedelta
-
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
@@ -239,14 +237,14 @@ class RichUI:
             if progress:
                 next_phase = progress.get("next_phase") or {}
                 active_label = next_phase.get("title") or "Review"
-                elapsed = str(
-                    timedelta(seconds=int(progress.get("elapsed_seconds", 0) or 0))
-                )
+                elapsed_seconds = int(progress.get("elapsed_seconds", 0) or 0)
+                elapsed = self._format_elapsed(elapsed_seconds)
                 token_delta = int(progress.get("token_delta", 0) or 0)
                 activity = Text()
                 activity.append(f"Implementing {active_label}… ", style="white")
                 activity.append(
-                    f"({elapsed} · ↓ {token_delta:,} tokens)", style="dim white"
+                    f"({elapsed} · ↓ {self._format_token_delta(token_delta)} tokens)",
+                    style="dim white",
                 )
                 feature_group.append(activity)
 
@@ -259,7 +257,13 @@ class RichUI:
                 summary_line.append(f"{remaining} remaining", style="white")
                 feature_group.append(summary_line)
 
-            for phase in phases[:8]:
+            max_visible_tasks = 10
+            visible_tasks = phases[:max_visible_tasks]
+            hidden_tasks = phases[max_visible_tasks:]
+            hidden_completed = sum(
+                1 for task in hidden_tasks if task.get("status") == "completed"
+            )
+            for phase in visible_tasks:
                 icon = {
                     "completed": "✔",
                     "in_progress": "◼",
@@ -273,10 +277,15 @@ class RichUI:
                 task_line = Text()
                 task_line.append(f"{icon} ", style=icon_style)
                 task_line.append(
-                    f"P{phase.get('number', '?')} {phase.get('title', '')}",
+                    str(phase.get("title", "")),
                     style="white",
                 )
                 feature_group.append(task_line)
+            if hidden_completed > 0:
+                hidden_line = Text()
+                hidden_line.append("… ", style="dim white")
+                hidden_line.append(f"+{hidden_completed} completed", style="dim green")
+                feature_group.append(hidden_line)
 
             next_phase = feature_plan.get("next_phase")
             if next_phase:
@@ -312,6 +321,22 @@ class RichUI:
 
     def show_memory_monitor(self, session):
         self.console.print(self.build_memory_monitor(session))
+
+    @staticmethod
+    def _format_elapsed(total_seconds):
+        total_seconds = max(0, int(total_seconds or 0))
+        minutes, seconds = divmod(total_seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        return f"{minutes}m {seconds}s"
+
+    @staticmethod
+    def _format_token_delta(tokens):
+        tokens = max(0, int(tokens or 0))
+        if tokens >= 1000:
+            return f"{tokens / 1000:.1f}k"
+        return str(tokens)
 
     def show_diff(self, filename, original_content, new_content):
         """Displays a side-by-side diff with context-aware hunks and Git-style highlighting."""

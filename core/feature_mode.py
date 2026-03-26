@@ -385,7 +385,7 @@ def build_phase_execution_prompt(plan: FeaturePlan, task: FeatureTask) -> str:
         f"Exit Criteria: {', '.join(task.exit_criteria)}. "
         "Perform one bounded step for this task, then verify and record progress before taking the next step. "
         "Use save_scratchpad for short-lived notes/plans and save_memory for durable findings/decisions during this loop. "
-        "Update the task status to 'completed' only when all exit criteria are met. "
+        "Update the task status to 'completed' only when all exit criteria are met and verified. "
         "If you are blocked, explain why in your response."
     )
 

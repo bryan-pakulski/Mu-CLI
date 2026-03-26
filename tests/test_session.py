@@ -507,6 +507,8 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
         "Do not use read_file/get_chunk/write_file/apply_diff on feature plan markdown files"
         in provider.last_user_text
     )
+    assert "EXIT CRITERIA" in provider.last_user_text
+    assert "status='completed'" in provider.last_user_text
     assert "Do not create alternate planning documents" in provider.last_user_text
     assert (
         "do not begin code implementation until the user has reviewed and approved the plan"

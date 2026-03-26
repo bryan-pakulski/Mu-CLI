@@ -557,7 +557,7 @@ TOOLS = [
     ),
     ToolDefinition(
         name="create_feature_task",
-        description="Creates a structured feature implementation plan consisting of one or more tasks. Stores metadata internally.",
+        description="Creates a structured feature implementation plan consisting of one or more tasks. Each task must include explicit exit_criteria. Stores metadata internally.",
         parameters={
             "type": "object",
             "properties": {
@@ -647,7 +647,7 @@ TOOLS = [
     ),
     ToolDefinition(
         name="update_task_status",
-        description="Updates the status of a specific task.",
+        description="Updates the status of a specific task. Set status='completed' only after all exit_criteria for the task are verified.",
         parameters={
             "type": "object",
             "properties": {

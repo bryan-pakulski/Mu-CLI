@@ -1,5 +1,6 @@
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
+from types import SimpleNamespace
 
 from ui.input import InputHandler
 
@@ -147,6 +148,7 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
         "/agentic",
         "/mode",
         "/feature",
+        "/features",
         "/tool",
         "/tools",
         "/system",
@@ -170,6 +172,61 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
     }
 
     assert expected_commands.issubset(set(handler.command_completions.keys()))
+
+
+def test_unset_completion_includes_all_keyword():
+    handler = InputHandler()
+    document = Document(
+        text="/unset --",
+        cursor_position=len("/unset --"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "--all" in completion_texts
+
+
+def test_folder_completion_includes_clear_subcommand():
+    handler = InputHandler()
+    document = Document(
+        text="/folder c",
+        cursor_position=len("/folder c"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "clear" in completion_texts
+
+
+def test_tool_enable_completion_suggests_tool_names(monkeypatch):
+    monkeypatch.setattr(
+        "core.tools.TOOLS",
+        [SimpleNamespace(name="read_file"), SimpleNamespace(name="write_file")],
+    )
+    handler = InputHandler()
+    document = Document(
+        text="/tool enable wr",
+        cursor_position=len("/tool enable wr"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "write_file" in completion_texts
 
 
 def test_memory_clear_completion_includes_scratch_alias():

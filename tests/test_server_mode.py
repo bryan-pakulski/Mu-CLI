@@ -310,6 +310,23 @@ def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
     assert session.session_manager.list_features() == []
 
 
+def test_features_alias_routes_to_feature_command(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+    created = handle_command(
+        session, "/feature new Alias Demo", allow_prompt=False
+    )
+    feature_id = created["data"]["feature"]["feature_id"]
+
+    result = handle_command(session, f"/features load {feature_id}", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["feature"]["feature_id"] == feature_id
+
+
 def test_build_feature_markdown_shows_task_snapshot():
     feature = {
         "feature_id": "demo",

@@ -365,7 +365,7 @@ def print_help():
     )
     table.add_row(
         "/feature <list|new|load|delete|status|phases>",
-        "",
+        "/features",
         "Manage per-session feature plans and switch the active feature",
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
@@ -1342,7 +1342,7 @@ def handle_command(session, user_input, allow_prompt=True):
             data={"folders": list(session.folder_context.folders)},
         )
 
-    if cmd == "/feature":
+    if cmd in ["/feature", "/features"]:
         feature_parts = arg.split(" ", 1) if arg else ["list"]
         feature_cmd = feature_parts[0].lower()
         feature_arg = feature_parts[1].strip() if len(feature_parts) > 1 else ""

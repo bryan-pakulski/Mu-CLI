@@ -330,7 +330,10 @@ def print_help():
 
     table.add_row("/clear", "", "Clear conversation history")
     table.add_row("/new [name]", "", "Start a new conversation")
+    table.add_row("/delete <name>", "/rm", "Delete a saved conversation")
     table.add_row("/file <path>", "/f", "Attach a file")
+    table.add_row("/clearfiles", "/cf", "Clear staged files")
+    table.add_row("/clear-workspace", "/cw", "Clear all workspace folders")
     table.add_row(
         "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
     )

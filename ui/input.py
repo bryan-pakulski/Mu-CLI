@@ -146,14 +146,26 @@ class InputHandler:
                 "status": None,
                 "list": {"task": None, "scratchpad": None, "all": None},
                 "ls": {"task": None, "scratchpad": None, "all": None},
-                "clear": {"task": None, "scratchpad": None, "all": None},
+                "clear": {
+                    "task": None,
+                    "scratchpad": None,
+                    "scratch": None,
+                    "longterm": None,
+                    "long-term": None,
+                    "all": None,
+                },
             }
         )
 
         mode_completer = NestedCompleter.from_nested_dict(MODE_CHOICES)
         folder_completer = MergedCompleter(
             [
-                NestedCompleter.from_nested_dict({"remove": directory_completer}),
+                NestedCompleter.from_nested_dict(
+                    {
+                        "remove": directory_completer,
+                        "clear": None,
+                    }
+                ),
                 directory_completer,
             ]
         )
@@ -165,6 +177,8 @@ class InputHandler:
             "/c": None,
             "/clearfiles": None,
             "/cf": None,
+            "/clear-workspace": None,
+            "/cw": None,
             "/view": None,
             "/v": None,
             "/quit": None,
@@ -177,6 +191,8 @@ class InputHandler:
             "/dir": folder_completer,
             "/model": model_dict,
             "/provider": provider_completer,
+            "/workspace": NestedCompleter.from_nested_dict({"clear": None}),
+            "/update": None,
             "/agentic": None,
             "/mode": mode_completer,
             "/feature": feature_completer,

@@ -128,6 +128,8 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
         "/c",
         "/clearfiles",
         "/cf",
+        "/clear-workspace",
+        "/cw",
         "/view",
         "/v",
         "/quit",
@@ -140,6 +142,8 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
         "/dir",
         "/model",
         "/provider",
+        "/workspace",
+        "/update",
         "/agentic",
         "/mode",
         "/feature",
@@ -166,6 +170,40 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
     }
 
     assert expected_commands.issubset(set(handler.command_completions.keys()))
+
+
+def test_memory_clear_completion_includes_scratch_alias():
+    handler = InputHandler()
+    document = Document(
+        text="/memory clear scr",
+        cursor_position=len("/memory clear scr"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "scratch" in completion_texts
+
+
+def test_workspace_completion_includes_clear_subcommand():
+    handler = InputHandler()
+    document = Document(
+        text="/workspace c",
+        cursor_position=len("/workspace c"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "clear" in completion_texts
 
 
 def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):

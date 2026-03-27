@@ -364,7 +364,7 @@ def print_help():
         "Change the agentic strategy (default, debug, feature, research)",
     )
     table.add_row(
-        "/feature <list|new|load|delete|status|phases>",
+        "/feature <list|new|load|delete|status|phases|exit>",
         "/features",
         "Manage per-session feature plans and switch the active feature",
     )
@@ -1346,6 +1346,27 @@ def handle_command(session, user_input, allow_prompt=True):
         feature_parts = arg.split(" ", 1) if arg else ["list"]
         feature_cmd = feature_parts[0].lower()
         feature_arg = feature_parts[1].strip() if len(feature_parts) > 1 else ""
+
+        if feature_cmd in {"exit", "unload"}:
+            if not isinstance(session.session_manager.get_feature_state(), dict):
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="No active feature to exit.",
+                )
+            session.session_manager.clear_feature_state(session.folder_context)
+            session.sync_runtime_state()
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Exited active feature context.",
+                data={
+                    "active_feature_id": session.session_manager.active_feature_id,
+                    "feature": session.session_manager.get_feature_state(),
+                },
+            )
 
         if feature_cmd == "new":
             if not feature_arg:

@@ -263,6 +263,23 @@ def test_workspace_completion_includes_clear_subcommand():
     assert "clear" in completion_texts
 
 
+def test_feature_completion_includes_exit_subcommand():
+    handler = InputHandler()
+    document = Document(
+        text="/feature e",
+        cursor_position=len("/feature e"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "exit" in completion_texts
+
+
 def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "documentation" / "feature_req_alpha").mkdir(parents=True)

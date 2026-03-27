@@ -71,6 +71,7 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/folder <path>` | `/dir` | Monitor a folder for context |
 | `/file <path>` | `/f` | Attach a specific file as context |
 | `/mode <mode>` | | Change strategy: `default`, `debug`, `feature`, `research`, `git` |
+| `/feature <cmd>` | `/features` | Manage feature flows (`list`, `new`, `load`, `status`, `phases`, `exit`) |
 | `/yolo` | | Toggle YOLO mode (no tool approvals) |
 | `/tool <cmd>` | `/tools` | Manage tools: `enable`, `disable`, `list` |
 | `/list` | `/ls` | List saved conversations |

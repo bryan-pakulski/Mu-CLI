@@ -154,6 +154,8 @@ class InputHandler:
                 "delete": feature_id_completer,
                 "status": feature_id_completer,
                 "phases": feature_id_completer,
+                "exit": None,
+                "unload": None,
             }
         )
 

@@ -162,6 +162,21 @@ def test_stats_command_returns_session_snapshot():
     assert "feature_state" in result["data"]
 
 
+def test_memory_status_includes_hit_statistics():
+    session = build_test_session()
+    session.task_memory.save("remember auth flow", tags=["auth"])
+    session.task_memory.search("auth", limit=1)
+    session.turn_scratchpad.save("temporary todo", tags=["todo"])
+
+    result = handle_command(session, "/memory status", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["task_memory_stats"]["entries"] == 1
+    assert result["data"]["task_memory_stats"]["total_hits"] >= 1
+    assert result["data"]["task_memory_stats"]["top_entries"][0]["content"] == "remember auth flow"
+    assert result["data"]["scratchpad_stats"]["entries"] == 1
+
+
 def test_clear_command_only_resets_conversation_history(tmp_path, monkeypatch):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
     session = build_test_session()

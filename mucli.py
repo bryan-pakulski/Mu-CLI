@@ -1585,30 +1585,83 @@ def handle_command(session, user_input, allow_prompt=True):
         parts = user_input.split()
         subcommand = parts[1].lower() if len(parts) > 1 else "status"
 
+        def build_memory_stats(store):
+            entries = list(store.entries)
+            total_hits = sum(int(entry.hits or 0) for entry in entries)
+            top_entries = sorted(
+                entries,
+                key=lambda entry: (int(entry.hits or 0), float(entry.updated_at or 0)),
+                reverse=True,
+            )[:3]
+            return {
+                "entries": len(entries),
+                "total_hits": total_hits,
+                "avg_hits": (total_hits / len(entries)) if entries else 0.0,
+                "top_entries": [entry.to_dict() for entry in top_entries],
+            }
+
         if subcommand in ["status", "s"]:
+            task_stats = build_memory_stats(session.task_memory)
+            scratch_stats = build_memory_stats(session.turn_scratchpad)
             if allow_prompt:
                 table = Table(title="Memory Status", box=box.ROUNDED)
                 table.add_column("Type", style="cyan")
                 table.add_column("Entries", style="green", justify="right")
+                table.add_column("Hits", style="yellow", justify="right")
+                table.add_column("Avg Hits", style="magenta", justify="right")
                 table.add_column("Description", style="dim")
 
                 table.add_row(
                     "Task Memory",
-                    str(len(session.task_memory.entries)),
+                    str(task_stats["entries"]),
+                    str(task_stats["total_hits"]),
+                    f"{task_stats['avg_hits']:.2f}",
                     "Longer-term task context",
                 )
                 table.add_row(
                     "Scratchpad",
-                    str(len(session.turn_scratchpad.entries)),
+                    str(scratch_stats["entries"]),
+                    str(scratch_stats["total_hits"]),
+                    f"{scratch_stats['avg_hits']:.2f}",
                     "Short-term turn context",
                 )
                 console.print(table)
+
+                def print_top_entries(title, stats):
+                    console.print(f"[bold cyan]{title} Top Entries[/bold cyan]")
+                    if not stats["top_entries"]:
+                        console.print("[dim]No entries yet.[/dim]")
+                        return
+                    top_table = Table(box=box.SIMPLE)
+                    top_table.add_column("ID", style="dim", justify="right")
+                    top_table.add_column("Hits", style="yellow", justify="right")
+                    top_table.add_column("Tags", style="magenta")
+                    top_table.add_column("Source", style="blue")
+                    top_table.add_column("Preview", style="white")
+                    for entry in stats["top_entries"]:
+                        tags = ", ".join(entry.get("tags", [])) or "-"
+                        preview = str(entry.get("content", "")).replace("\n", " ").strip()
+                        if len(preview) > 90:
+                            preview = preview[:87] + "..."
+                        top_table.add_row(
+                            f"#{entry.get('id')}",
+                            str(entry.get("hits", 0)),
+                            tags,
+                            entry.get("source") or "-",
+                            preview or "(empty)",
+                        )
+                    console.print(top_table)
+
+                print_top_entries("Task Memory", task_stats)
+                print_top_entries("Scratchpad", scratch_stats)
             return serialize_command_result(
                 session,
                 cmd,
                 data={
-                    "task_memory_count": len(session.task_memory.entries),
-                    "scratchpad_count": len(session.turn_scratchpad.entries),
+                    "task_memory_count": task_stats["entries"],
+                    "scratchpad_count": scratch_stats["entries"],
+                    "task_memory_stats": task_stats,
+                    "scratchpad_stats": scratch_stats,
                 },
             )
 
@@ -1626,13 +1679,18 @@ def handle_command(session, user_input, allow_prompt=True):
                         return
                     table = Table(title=title, box=box.SIMPLE)
                     table.add_column("ID", style="dim", justify="right")
+                    table.add_column("Hits", style="yellow", justify="right")
                     table.add_column("Tags", style="yellow")
                     table.add_column("Source", style="blue")
                     table.add_column("Content")
                     for entry in store.entries:
                         tags = ", ".join(entry.tags) if entry.tags else "-"
                         table.add_row(
-                            f"#{entry.id}", tags, entry.source or "-", entry.content
+                            f"#{entry.id}",
+                            str(entry.hits),
+                            tags,
+                            entry.source or "-",
+                            entry.content,
                         )
                     console.print(table)
 

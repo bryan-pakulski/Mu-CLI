@@ -60,6 +60,8 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 5. **Chat**: Ask questions like "How does the authentication logic work?" or "Fix the bug in the user controller."
 6. **Watch Runtime Metrics**: Use `/stats` for a snapshot panel and check the `Generating ...` status line for live context, memory, scratchpad, and queue usage.
 
+On startup, μCLI checks for newer GitHub releases (when `origin` points to GitHub) and can prompt you to run `/update` automatically.
+
 ## Command Overview
 
 | Command | Alias | Description |
@@ -77,6 +79,7 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 | `/new [name]` | | Start a fresh session |
 | `/model [name]` | | Show or change the current model |
 | `/provider [name]`| | Change the LLM provider |
+| `/update` | | Pull latest changes and refresh dependencies |
 | `/flush` | | Flush the collation buffer into the next model turn |
 | `/stats` | | Show runtime stats, token/cost totals, and current feature progress |
 | `/view` | `/v` | View full conversation history |

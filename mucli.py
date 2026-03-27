@@ -1,16 +1,21 @@
 #!/usr/bin/env python
 
 import argparse
+import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.prompt import Prompt, IntPrompt
+from rich.prompt import Prompt, IntPrompt, Confirm
 from rich.text import Text
 from rich.table import Table
 from rich import box
@@ -27,6 +32,7 @@ from ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
 
 console = Console()
+GITHUB_API_BASE = "https://api.github.com"
 
 
 def refresh_memory_hud(session, ui, *, force=False):
@@ -360,6 +366,9 @@ def print_help():
         "Manage per-session feature plans and switch the active feature",
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
+    table.add_row(
+        "/update", "", "Attempt to update μCLI from the configured git remote"
+    )
     table.add_row("/quit", "/q", "Exit")
     table.add_row(
         "/stats",
@@ -466,6 +475,150 @@ def init_provider(provider_name, model_name, ollama_host=None):
     else:
         return None
     return provider
+
+
+def _run_command(command, cwd=None):
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _parse_github_repo(remote_url):
+    if not remote_url:
+        return None
+    value = remote_url.strip()
+    if value.endswith(".git"):
+        value = value[:-4]
+
+    ssh_match = re.match(r"^git@github\.com:([^/]+)/([^/]+)$", value)
+    if ssh_match:
+        return f"{ssh_match.group(1)}/{ssh_match.group(2)}"
+
+    parsed = urllib.parse.urlparse(value)
+    if parsed.netloc.lower() != "github.com":
+        return None
+    path = parsed.path.strip("/")
+    parts = path.split("/")
+    if len(parts) < 2:
+        return None
+    return f"{parts[0]}/{parts[1]}"
+
+
+def fetch_latest_github_release(repo_slug):
+    url = f"{GITHUB_API_BASE}/repos/{repo_slug}/releases/latest"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "mucli-updater",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return {
+        "tag_name": str(payload.get("tag_name", "") or "").strip(),
+        "name": str(payload.get("name", "") or "").strip(),
+        "html_url": str(payload.get("html_url", "") or "").strip(),
+    }
+
+
+def get_release_update_status():
+    origin = _run_command(["git", "remote", "get-url", "origin"])
+    if origin.returncode != 0:
+        return {"ok": False, "message": "No git origin configured for update checks."}
+
+    repo_slug = _parse_github_repo(origin.stdout.strip())
+    if not repo_slug:
+        return {"ok": False, "message": "Origin is not a GitHub repository."}
+
+    try:
+        release = fetch_latest_github_release(repo_slug)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {
+                "ok": False,
+                "message": "No published GitHub releases found for this repository.",
+            }
+        return {"ok": False, "message": f"Release lookup failed (HTTP {exc.code})."}
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        return {"ok": False, "message": f"Release lookup failed: {exc}"}
+
+    latest_tag = release.get("tag_name")
+    if not latest_tag:
+        return {"ok": False, "message": "Latest release did not include a tag."}
+
+    local_tags = _run_command(["git", "tag", "--points-at", "HEAD"])
+    if local_tags.returncode != 0:
+        return {"ok": False, "message": "Unable to inspect local git tags."}
+    head_tags = {tag.strip() for tag in local_tags.stdout.splitlines() if tag.strip()}
+
+    return {
+        "ok": True,
+        "repo": repo_slug,
+        "latest_release": release,
+        "head_tags": sorted(head_tags),
+        "update_available": latest_tag not in head_tags,
+    }
+
+
+def run_auto_update():
+    repo_root_result = _run_command(["git", "rev-parse", "--show-toplevel"])
+    if repo_root_result.returncode != 0:
+        return {
+            "ok": False,
+            "message": "Unable to locate git repository root for update.",
+            "steps": [],
+        }
+
+    repo_root = repo_root_result.stdout.strip()
+    steps = []
+
+    pull_result = _run_command(["git", "pull", "--ff-only"], cwd=repo_root)
+    steps.append(
+        {
+            "name": "git pull --ff-only",
+            "returncode": pull_result.returncode,
+            "stdout": pull_result.stdout.strip(),
+            "stderr": pull_result.stderr.strip(),
+        }
+    )
+    if pull_result.returncode != 0:
+        return {
+            "ok": False,
+            "message": "Update failed while pulling latest changes from git remote.",
+            "steps": steps,
+        }
+
+    requirements_path = os.path.join(repo_root, "requirements.txt")
+    if os.path.exists(requirements_path):
+        pip_result = _run_command(
+            [sys.executable, "-m", "pip", "install", "-r", requirements_path],
+            cwd=repo_root,
+        )
+        steps.append(
+            {
+                "name": f"{sys.executable} -m pip install -r requirements.txt",
+                "returncode": pip_result.returncode,
+                "stdout": pip_result.stdout.strip(),
+                "stderr": pip_result.stderr.strip(),
+            }
+        )
+        if pip_result.returncode != 0:
+            return {
+                "ok": False,
+                "message": "Git update succeeded, but dependency refresh failed.",
+                "steps": steps,
+            }
+
+    return {
+        "ok": True,
+        "message": "μCLI update completed successfully.",
+        "steps": steps,
+    }
 
 
 def select_provider_and_model(
@@ -1548,6 +1701,28 @@ def handle_command(session, user_input, allow_prompt=True):
         refresh_memory_hud(session, ui)
         return serialize_command_result(session, cmd, data={"splash": True})
 
+    if cmd == "/update":
+        if allow_prompt:
+            console.print("[dim]Running manual update (git pull + dependency refresh)...[/dim]")
+        update_result = run_auto_update()
+        if allow_prompt:
+            if update_result["ok"]:
+                ui.show_info(update_result["message"])
+            else:
+                ui.show_error(update_result["message"])
+            for step in update_result.get("steps", []):
+                status = "OK" if step["returncode"] == 0 else "FAILED"
+                console.print(f"[dim]{status} · {step['name']}[/dim]")
+                if step.get("stderr"):
+                    console.print(f"[dim]{step['stderr']}[/dim]")
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=update_result["ok"],
+            message=update_result["message"],
+            data={"steps": update_result.get("steps", [])},
+        )
+
     if ui:
         ui.show_error(f"Unknown command: {cmd}")
     return serialize_command_result(
@@ -1627,6 +1802,32 @@ def main():
         return
 
     print_splash(session)
+    release_status = get_release_update_status()
+    if release_status.get("ok") and release_status.get("update_available"):
+        release = release_status.get("latest_release", {})
+        tag = release.get("tag_name", "unknown")
+        release_url = release.get("html_url", "")
+        console.print(
+            f"[yellow]New μCLI release available: {tag} "
+            f"(repo: {release_status.get('repo')}).[/yellow]"
+        )
+        if release_url:
+            console.print(f"[dim]{release_url}[/dim]")
+        if Confirm.ask("Would you like to update now?", default=False):
+            update_result = run_auto_update()
+            if update_result["ok"]:
+                ui.show_info(update_result["message"])
+            else:
+                ui.show_error(update_result["message"])
+            for step in update_result.get("steps", []):
+                status = "OK" if step["returncode"] == 0 else "FAILED"
+                console.print(f"[dim]{status} · {step['name']}[/dim]")
+                if step.get("stderr"):
+                    console.print(f"[dim]{step['stderr']}[/dim]")
+    elif release_status.get("ok") and release_status.get("latest_release"):
+        latest_tag = release_status["latest_release"].get("tag_name", "")
+        if latest_tag:
+            console.print(f"[dim]μCLI is up to date ({latest_tag}).[/dim]")
     refresh_memory_hud(session, ui)
 
     while True:

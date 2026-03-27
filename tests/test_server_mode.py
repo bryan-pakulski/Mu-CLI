@@ -162,7 +162,7 @@ def test_stats_command_returns_session_snapshot():
     assert "feature_state" in result["data"]
 
 
-def test_clear_command_resets_context_memory_and_features(tmp_path, monkeypatch):
+def test_clear_command_only_resets_conversation_history(tmp_path, monkeypatch):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
     session = build_test_session()
     workspace = tmp_path / "workspace"
@@ -182,13 +182,35 @@ def test_clear_command_resets_context_memory_and_features(tmp_path, monkeypatch)
 
     assert result["ok"] is True
     assert session.session_manager.history == []
-    assert session.task_memory.entries == []
+    assert session.task_memory.entries != []
+    assert session.turn_scratchpad.entries != []
+    assert session.collation_buffer.entries != []
+    assert session.folder_context.folders != []
+    assert session.session_manager.get_feature_state() is not None
+    assert session.session_manager.list_features() != []
+    assert session.staged_files != []
+
+
+def test_memory_clear_accepts_scratch_alias():
+    session = build_test_session()
+    session.turn_scratchpad.save("temporary note", tags=["temp"])
+
+    result = handle_command(session, "/memory clear scratch", allow_prompt=False)
+
+    assert result["ok"] is True
     assert session.turn_scratchpad.entries == []
-    assert session.collation_buffer.entries == []
+
+
+def test_workspace_clear_command_clears_folders(tmp_path):
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    result = handle_command(session, "/workspace clear", allow_prompt=False)
+
+    assert result["ok"] is True
     assert session.folder_context.folders == []
-    assert session.session_manager.get_feature_state() is None
-    assert session.session_manager.list_features() == []
-    assert session.staged_files == []
 
 
 def test_tokens_command_is_removed():

@@ -335,7 +335,7 @@ def print_help():
         "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
     )
     table.add_row(
-        "/memory <status|list|clear>", "", "View and manage agent memory stores"
+        "/memory <status|list|clear>", "", "Manage memory (e.g. clear scratch|task|all)"
     )
     table.add_row("/help", "", "Show this help menu")
     table.add_row("/list", "/ls", "List saved conversations")
@@ -378,7 +378,7 @@ def print_help():
     table.add_row("/system <txt>", "/sys", "Update system prompt")
     table.add_row("/thinking", "", "Toggle thinking mode")
     table.add_row("/view", "", "View conversation history")
-    table.add_row("/workspace", "", "List workspace metadata")
+    table.add_row("/workspace [clear]", "", "List or clear workspace metadata")
 
     console.print(table)
     console.print(
@@ -837,13 +837,10 @@ def handle_command(session, user_input, allow_prompt=True):
         return serialize_command_result(session, cmd, data={"commands_help": True})
 
     if cmd in ["/clear", "/c"]:
-        session.session_manager.reset_current_session_state()
-        session.staged_files = []
-        session.disabled_tools = []
-        session.sync_runtime_state()
+        session.session_manager.clear_current_history()
         refresh_memory_hud(session, ui)
         return serialize_command_result(
-            session, cmd, message="Session state reset to a blank slate."
+            session, cmd, message="Conversation history cleared."
         )
 
     if cmd in ["/view", "/v"]:
@@ -886,6 +883,14 @@ def handle_command(session, user_input, allow_prompt=True):
     if cmd in ["/folder", "/dir"]:
         if arg:
             sub_parts = arg.split(" ", 1)
+            if sub_parts[0] == "clear":
+                session.folder_context.folders.clear()
+                session.folder_context.workspace_file_tree = None
+                session.session_manager.save_history(session.folder_context)
+                refresh_memory_hud(session, ui)
+                return serialize_command_result(
+                    session, cmd, message="Workspace folders cleared."
+                )
             if sub_parts[0] == "remove" and len(sub_parts) > 1:
                 path_to_remove = sub_parts[1].strip("'\"")
                 removed = session.folder_context.remove_folder(path_to_remove)
@@ -1316,6 +1321,16 @@ def handle_command(session, user_input, allow_prompt=True):
         )
 
     if cmd == "/workspace":
+        workspace_arg = arg.strip().lower()
+        if workspace_arg == "clear":
+            session.folder_context.folders.clear()
+            session.folder_context.workspace_file_tree = None
+            session.session_manager.save_history(session.folder_context)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session, cmd, message="Workspace folders cleared."
+            )
+
         console.print("\n[bold cyan]Workspace Folders:[/bold cyan]")
         console.print(session.folder_context.get_tree_map())
         return serialize_command_result(
@@ -1642,6 +1657,15 @@ def handle_command(session, user_input, allow_prompt=True):
 
         if subcommand == "clear":
             target = parts[2].lower() if len(parts) > 2 else "all"
+            target_aliases = {
+                "scratch": "scratchpad",
+                "scratchpad": "scratchpad",
+                "task": "task",
+                "longterm": "task",
+                "long-term": "task",
+                "all": "all",
+            }
+            target = target_aliases.get(target, target)
             msg_parts = []
             if target in ["all", "task"]:
                 session.task_memory.clear()

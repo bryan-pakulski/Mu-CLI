@@ -74,7 +74,7 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/yolo` | | Toggle YOLO mode (no tool approvals) |
 | `/tool <cmd>` | `/tools` | Manage tools: `enable`, `disable`, `list` |
 | `/list` | `/ls` | List saved conversations |
-| `/memory <cmd>` | | View and manage memory: `status`, `list`, `clear` |
+| `/memory <cmd>` | | View and manage memory: `status`, `list`, `clear scratch|task|all` |
 | `/load [name]` | `/open` | Load a conversation session |
 | `/new [name]` | | Start a fresh session |
 | `/model [name]` | | Show or change the current model |
@@ -86,6 +86,7 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/clear` | `/c` | Clear conversation history |
 | `/clearfiles` | `/cf` | Clear all staged files |
 | `/clear-workspace` | `/cw` | Clear all workspace folders |
+| `/workspace [clear]` | | View workspace metadata or clear all workspace folders |
 | `/system <txt>` | `/sys` | Update or view the system prompt |
 | `/thinking` | | Toggle thinking/reasoning mode (for supported models) |
 | `/variables` | | Show all session variables |

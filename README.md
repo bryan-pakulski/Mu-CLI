@@ -60,6 +60,8 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 5. **Chat**: Ask questions like "How does the authentication logic work?" or "Fix the bug in the user controller."
 6. **Watch Runtime Metrics**: Use `/stats` for a snapshot panel and check the `Generating ...` status line for live context, memory, scratchpad, and queue usage.
 
+On startup, μCLI checks for newer GitHub releases (when `origin` points to GitHub) and can prompt you to run `/update` automatically.
+
 ## Command Overview
 
 | Command | Alias | Description |
@@ -69,20 +71,23 @@ python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
 | `/folder <path>` | `/dir` | Monitor a folder for context |
 | `/file <path>` | `/f` | Attach a specific file as context |
 | `/mode <mode>` | | Change strategy: `default`, `debug`, `feature`, `research`, `git` |
+| `/feature <cmd>` | `/features` | Manage feature flows (`list`, `new`, `load`, `status`, `phases`, `exit`) |
 | `/yolo` | | Toggle YOLO mode (no tool approvals) |
 | `/tool <cmd>` | `/tools` | Manage tools: `enable`, `disable`, `list` |
 | `/list` | `/ls` | List saved conversations |
-| `/memory <cmd>` | | View and manage memory: `status`, `list`, `clear` |
+| `/memory <cmd>` | | View and manage memory: `status`, `list`, `clear scratch|task|all` |
 | `/load [name]` | `/open` | Load a conversation session |
 | `/new [name]` | | Start a fresh session |
 | `/model [name]` | | Show or change the current model |
 | `/provider [name]`| | Change the LLM provider |
+| `/update` | | Pull latest changes and refresh dependencies |
 | `/flush` | | Flush the collation buffer into the next model turn |
 | `/stats` | | Show runtime stats, token/cost totals, and current feature progress |
 | `/view` | `/v` | View full conversation history |
 | `/clear` | `/c` | Clear conversation history |
 | `/clearfiles` | `/cf` | Clear all staged files |
 | `/clear-workspace` | `/cw` | Clear all workspace folders |
+| `/workspace [clear]` | | View workspace metadata or clear all workspace folders |
 | `/system <txt>` | `/sys` | Update or view the system prompt |
 | `/thinking` | | Toggle thinking/reasoning mode (for supported models) |
 | `/variables` | | Show all session variables |

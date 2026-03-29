@@ -1,7 +1,8 @@
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
+from types import SimpleNamespace
 
-from ui.input import InputHandler
+from ui.input import InputHandler, get_session_names
 
 
 def test_prompt_markup_hides_default_mode():
@@ -128,6 +129,8 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
         "/c",
         "/clearfiles",
         "/cf",
+        "/clear-workspace",
+        "/cw",
         "/view",
         "/v",
         "/quit",
@@ -140,9 +143,12 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
         "/dir",
         "/model",
         "/provider",
+        "/workspace",
+        "/update",
         "/agentic",
         "/mode",
         "/feature",
+        "/features",
         "/tool",
         "/tools",
         "/system",
@@ -168,6 +174,112 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
     assert expected_commands.issubset(set(handler.command_completions.keys()))
 
 
+def test_unset_completion_includes_all_keyword():
+    handler = InputHandler()
+    document = Document(
+        text="/unset --",
+        cursor_position=len("/unset --"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "--all" in completion_texts
+
+
+def test_folder_completion_includes_clear_subcommand():
+    handler = InputHandler()
+    document = Document(
+        text="/folder c",
+        cursor_position=len("/folder c"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "clear" in completion_texts
+
+
+def test_tool_enable_completion_suggests_tool_names(monkeypatch):
+    monkeypatch.setattr(
+        "core.tools.TOOLS",
+        [SimpleNamespace(name="read_file"), SimpleNamespace(name="write_file")],
+    )
+    handler = InputHandler()
+    document = Document(
+        text="/tool enable wr",
+        cursor_position=len("/tool enable wr"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "write_file" in completion_texts
+
+
+def test_memory_clear_completion_includes_scratch_alias():
+    handler = InputHandler()
+    document = Document(
+        text="/memory clear scr",
+        cursor_position=len("/memory clear scr"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "scratch" in completion_texts
+
+
+def test_workspace_completion_includes_clear_subcommand():
+    handler = InputHandler()
+    document = Document(
+        text="/workspace c",
+        cursor_position=len("/workspace c"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "clear" in completion_texts
+
+
+def test_feature_completion_includes_exit_subcommand():
+    handler = InputHandler()
+    document = Document(
+        text="/feature e",
+        cursor_position=len("/feature e"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "exit" in completion_texts
+
+
 def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "documentation" / "feature_req_alpha").mkdir(parents=True)
@@ -185,3 +297,36 @@ def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
 
     assert "alpha" in completion_texts
     assert "beta" in completion_texts
+
+
+def test_get_session_names_supports_session_directory_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+    (tmp_path / "sessions" / "alpha").mkdir(parents=True)
+    (tmp_path / "sessions" / "alpha" / "session.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "sessions" / "beta").mkdir(parents=True)
+    (tmp_path / "sessions" / "beta" / "session.json").write_text("{}", encoding="utf-8")
+
+    sessions = get_session_names()
+
+    assert sessions == ["alpha", "beta"]
+
+
+def test_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+    (tmp_path / "sessions" / "my_session").mkdir(parents=True)
+    (tmp_path / "sessions" / "my_session" / "session.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+
+    handler = InputHandler()
+    document = Document(text="/load my", cursor_position=len("/load my"))
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "my_session" in completion_texts

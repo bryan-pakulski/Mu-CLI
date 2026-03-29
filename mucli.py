@@ -1,16 +1,21 @@
 #!/usr/bin/env python
 
 import argparse
+import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.prompt import Prompt, IntPrompt
+from rich.prompt import Prompt, IntPrompt, Confirm
 from rich.text import Text
 from rich.table import Table
 from rich import box
@@ -27,6 +32,7 @@ from ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
 
 console = Console()
+GITHUB_API_BASE = "https://api.github.com"
 
 
 def refresh_memory_hud(session, ui, *, force=False):
@@ -324,12 +330,15 @@ def print_help():
 
     table.add_row("/clear", "", "Clear conversation history")
     table.add_row("/new [name]", "", "Start a new conversation")
+    table.add_row("/delete <name>", "/rm", "Delete a saved conversation")
     table.add_row("/file <path>", "/f", "Attach a file")
+    table.add_row("/clearfiles", "/cf", "Clear staged files")
+    table.add_row("/clear-workspace", "/cw", "Clear all workspace folders")
     table.add_row(
         "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
     )
     table.add_row(
-        "/memory <status|list|clear>", "", "View and manage agent memory stores"
+        "/memory <status|list|clear>", "", "Manage memory (e.g. clear scratch|task|all)"
     )
     table.add_row("/help", "", "Show this help menu")
     table.add_row("/list", "/ls", "List saved conversations")
@@ -355,11 +364,14 @@ def print_help():
         "Change the agentic strategy (default, debug, feature, research)",
     )
     table.add_row(
-        "/feature <list|new|load|delete|status|phases>",
-        "",
+        "/feature <list|new|load|delete|status|phases|exit>",
+        "/features",
         "Manage per-session feature plans and switch the active feature",
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
+    table.add_row(
+        "/update", "", "Attempt to update μCLI from the configured git remote"
+    )
     table.add_row("/quit", "/q", "Exit")
     table.add_row(
         "/stats",
@@ -369,7 +381,7 @@ def print_help():
     table.add_row("/system <txt>", "/sys", "Update system prompt")
     table.add_row("/thinking", "", "Toggle thinking mode")
     table.add_row("/view", "", "View conversation history")
-    table.add_row("/workspace", "", "List workspace metadata")
+    table.add_row("/workspace [clear]", "", "List or clear workspace metadata")
 
     console.print(table)
     console.print(
@@ -466,6 +478,150 @@ def init_provider(provider_name, model_name, ollama_host=None):
     else:
         return None
     return provider
+
+
+def _run_command(command, cwd=None):
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _parse_github_repo(remote_url):
+    if not remote_url:
+        return None
+    value = remote_url.strip()
+    if value.endswith(".git"):
+        value = value[:-4]
+
+    ssh_match = re.match(r"^git@github\.com:([^/]+)/([^/]+)$", value)
+    if ssh_match:
+        return f"{ssh_match.group(1)}/{ssh_match.group(2)}"
+
+    parsed = urllib.parse.urlparse(value)
+    if parsed.netloc.lower() != "github.com":
+        return None
+    path = parsed.path.strip("/")
+    parts = path.split("/")
+    if len(parts) < 2:
+        return None
+    return f"{parts[0]}/{parts[1]}"
+
+
+def fetch_latest_github_release(repo_slug):
+    url = f"{GITHUB_API_BASE}/repos/{repo_slug}/releases/latest"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "mucli-updater",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return {
+        "tag_name": str(payload.get("tag_name", "") or "").strip(),
+        "name": str(payload.get("name", "") or "").strip(),
+        "html_url": str(payload.get("html_url", "") or "").strip(),
+    }
+
+
+def get_release_update_status():
+    origin = _run_command(["git", "remote", "get-url", "origin"])
+    if origin.returncode != 0:
+        return {"ok": False, "message": "No git origin configured for update checks."}
+
+    repo_slug = _parse_github_repo(origin.stdout.strip())
+    if not repo_slug:
+        return {"ok": False, "message": "Origin is not a GitHub repository."}
+
+    try:
+        release = fetch_latest_github_release(repo_slug)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {
+                "ok": False,
+                "message": "No published GitHub releases found for this repository.",
+            }
+        return {"ok": False, "message": f"Release lookup failed (HTTP {exc.code})."}
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        return {"ok": False, "message": f"Release lookup failed: {exc}"}
+
+    latest_tag = release.get("tag_name")
+    if not latest_tag:
+        return {"ok": False, "message": "Latest release did not include a tag."}
+
+    local_tags = _run_command(["git", "tag", "--points-at", "HEAD"])
+    if local_tags.returncode != 0:
+        return {"ok": False, "message": "Unable to inspect local git tags."}
+    head_tags = {tag.strip() for tag in local_tags.stdout.splitlines() if tag.strip()}
+
+    return {
+        "ok": True,
+        "repo": repo_slug,
+        "latest_release": release,
+        "head_tags": sorted(head_tags),
+        "update_available": latest_tag not in head_tags,
+    }
+
+
+def run_auto_update():
+    repo_root_result = _run_command(["git", "rev-parse", "--show-toplevel"])
+    if repo_root_result.returncode != 0:
+        return {
+            "ok": False,
+            "message": "Unable to locate git repository root for update.",
+            "steps": [],
+        }
+
+    repo_root = repo_root_result.stdout.strip()
+    steps = []
+
+    pull_result = _run_command(["git", "pull", "--ff-only"], cwd=repo_root)
+    steps.append(
+        {
+            "name": "git pull --ff-only",
+            "returncode": pull_result.returncode,
+            "stdout": pull_result.stdout.strip(),
+            "stderr": pull_result.stderr.strip(),
+        }
+    )
+    if pull_result.returncode != 0:
+        return {
+            "ok": False,
+            "message": "Update failed while pulling latest changes from git remote.",
+            "steps": steps,
+        }
+
+    requirements_path = os.path.join(repo_root, "requirements.txt")
+    if os.path.exists(requirements_path):
+        pip_result = _run_command(
+            [sys.executable, "-m", "pip", "install", "-r", requirements_path],
+            cwd=repo_root,
+        )
+        steps.append(
+            {
+                "name": f"{sys.executable} -m pip install -r requirements.txt",
+                "returncode": pip_result.returncode,
+                "stdout": pip_result.stdout.strip(),
+                "stderr": pip_result.stderr.strip(),
+            }
+        )
+        if pip_result.returncode != 0:
+            return {
+                "ok": False,
+                "message": "Git update succeeded, but dependency refresh failed.",
+                "steps": steps,
+            }
+
+    return {
+        "ok": True,
+        "message": "μCLI update completed successfully.",
+        "steps": steps,
+    }
 
 
 def select_provider_and_model(
@@ -684,13 +840,10 @@ def handle_command(session, user_input, allow_prompt=True):
         return serialize_command_result(session, cmd, data={"commands_help": True})
 
     if cmd in ["/clear", "/c"]:
-        session.session_manager.reset_current_session_state()
-        session.staged_files = []
-        session.disabled_tools = []
-        session.sync_runtime_state()
+        session.session_manager.clear_current_history()
         refresh_memory_hud(session, ui)
         return serialize_command_result(
-            session, cmd, message="Session state reset to a blank slate."
+            session, cmd, message="Conversation history cleared."
         )
 
     if cmd in ["/view", "/v"]:
@@ -733,6 +886,14 @@ def handle_command(session, user_input, allow_prompt=True):
     if cmd in ["/folder", "/dir"]:
         if arg:
             sub_parts = arg.split(" ", 1)
+            if sub_parts[0] == "clear":
+                session.folder_context.folders.clear()
+                session.folder_context.workspace_file_tree = None
+                session.session_manager.save_history(session.folder_context)
+                refresh_memory_hud(session, ui)
+                return serialize_command_result(
+                    session, cmd, message="Workspace folders cleared."
+                )
             if sub_parts[0] == "remove" and len(sub_parts) > 1:
                 path_to_remove = sub_parts[1].strip("'\"")
                 removed = session.folder_context.remove_folder(path_to_remove)
@@ -1163,6 +1324,16 @@ def handle_command(session, user_input, allow_prompt=True):
         )
 
     if cmd == "/workspace":
+        workspace_arg = arg.strip().lower()
+        if workspace_arg == "clear":
+            session.folder_context.folders.clear()
+            session.folder_context.workspace_file_tree = None
+            session.session_manager.save_history(session.folder_context)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session, cmd, message="Workspace folders cleared."
+            )
+
         console.print("\n[bold cyan]Workspace Folders:[/bold cyan]")
         console.print(session.folder_context.get_tree_map())
         return serialize_command_result(
@@ -1171,10 +1342,31 @@ def handle_command(session, user_input, allow_prompt=True):
             data={"folders": list(session.folder_context.folders)},
         )
 
-    if cmd == "/feature":
+    if cmd in ["/feature", "/features"]:
         feature_parts = arg.split(" ", 1) if arg else ["list"]
         feature_cmd = feature_parts[0].lower()
         feature_arg = feature_parts[1].strip() if len(feature_parts) > 1 else ""
+
+        if feature_cmd in {"exit", "unload"}:
+            if not isinstance(session.session_manager.get_feature_state(), dict):
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="No active feature to exit.",
+                )
+            session.session_manager.clear_feature_state(session.folder_context)
+            session.sync_runtime_state()
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Exited active feature context.",
+                data={
+                    "active_feature_id": session.session_manager.active_feature_id,
+                    "feature": session.session_manager.get_feature_state(),
+                },
+            )
 
         if feature_cmd == "new":
             if not feature_arg:
@@ -1414,30 +1606,83 @@ def handle_command(session, user_input, allow_prompt=True):
         parts = user_input.split()
         subcommand = parts[1].lower() if len(parts) > 1 else "status"
 
+        def build_memory_stats(store):
+            entries = list(store.entries)
+            total_hits = sum(int(entry.hits or 0) for entry in entries)
+            top_entries = sorted(
+                entries,
+                key=lambda entry: (int(entry.hits or 0), float(entry.updated_at or 0)),
+                reverse=True,
+            )[:3]
+            return {
+                "entries": len(entries),
+                "total_hits": total_hits,
+                "avg_hits": (total_hits / len(entries)) if entries else 0.0,
+                "top_entries": [entry.to_dict() for entry in top_entries],
+            }
+
         if subcommand in ["status", "s"]:
+            task_stats = build_memory_stats(session.task_memory)
+            scratch_stats = build_memory_stats(session.turn_scratchpad)
             if allow_prompt:
                 table = Table(title="Memory Status", box=box.ROUNDED)
                 table.add_column("Type", style="cyan")
                 table.add_column("Entries", style="green", justify="right")
+                table.add_column("Hits", style="yellow", justify="right")
+                table.add_column("Avg Hits", style="magenta", justify="right")
                 table.add_column("Description", style="dim")
 
                 table.add_row(
                     "Task Memory",
-                    str(len(session.task_memory.entries)),
+                    str(task_stats["entries"]),
+                    str(task_stats["total_hits"]),
+                    f"{task_stats['avg_hits']:.2f}",
                     "Longer-term task context",
                 )
                 table.add_row(
                     "Scratchpad",
-                    str(len(session.turn_scratchpad.entries)),
+                    str(scratch_stats["entries"]),
+                    str(scratch_stats["total_hits"]),
+                    f"{scratch_stats['avg_hits']:.2f}",
                     "Short-term turn context",
                 )
                 console.print(table)
+
+                def print_top_entries(title, stats):
+                    console.print(f"[bold cyan]{title} Top Entries[/bold cyan]")
+                    if not stats["top_entries"]:
+                        console.print("[dim]No entries yet.[/dim]")
+                        return
+                    top_table = Table(box=box.SIMPLE)
+                    top_table.add_column("ID", style="dim", justify="right")
+                    top_table.add_column("Hits", style="yellow", justify="right")
+                    top_table.add_column("Tags", style="magenta")
+                    top_table.add_column("Source", style="blue")
+                    top_table.add_column("Preview", style="white")
+                    for entry in stats["top_entries"]:
+                        tags = ", ".join(entry.get("tags", [])) or "-"
+                        preview = str(entry.get("content", "")).replace("\n", " ").strip()
+                        if len(preview) > 90:
+                            preview = preview[:87] + "..."
+                        top_table.add_row(
+                            f"#{entry.get('id')}",
+                            str(entry.get("hits", 0)),
+                            tags,
+                            entry.get("source") or "-",
+                            preview or "(empty)",
+                        )
+                    console.print(top_table)
+
+                print_top_entries("Task Memory", task_stats)
+                print_top_entries("Scratchpad", scratch_stats)
             return serialize_command_result(
                 session,
                 cmd,
                 data={
-                    "task_memory_count": len(session.task_memory.entries),
-                    "scratchpad_count": len(session.turn_scratchpad.entries),
+                    "task_memory_count": task_stats["entries"],
+                    "scratchpad_count": scratch_stats["entries"],
+                    "task_memory_stats": task_stats,
+                    "scratchpad_stats": scratch_stats,
                 },
             )
 
@@ -1455,13 +1700,18 @@ def handle_command(session, user_input, allow_prompt=True):
                         return
                     table = Table(title=title, box=box.SIMPLE)
                     table.add_column("ID", style="dim", justify="right")
+                    table.add_column("Hits", style="yellow", justify="right")
                     table.add_column("Tags", style="yellow")
                     table.add_column("Source", style="blue")
                     table.add_column("Content")
                     for entry in store.entries:
                         tags = ", ".join(entry.tags) if entry.tags else "-"
                         table.add_row(
-                            f"#{entry.id}", tags, entry.source or "-", entry.content
+                            f"#{entry.id}",
+                            str(entry.hits),
+                            tags,
+                            entry.source or "-",
+                            entry.content,
                         )
                     console.print(table)
 
@@ -1489,6 +1739,15 @@ def handle_command(session, user_input, allow_prompt=True):
 
         if subcommand == "clear":
             target = parts[2].lower() if len(parts) > 2 else "all"
+            target_aliases = {
+                "scratch": "scratchpad",
+                "scratchpad": "scratchpad",
+                "task": "task",
+                "longterm": "task",
+                "long-term": "task",
+                "all": "all",
+            }
+            target = target_aliases.get(target, target)
             msg_parts = []
             if target in ["all", "task"]:
                 session.task_memory.clear()
@@ -1547,6 +1806,28 @@ def handle_command(session, user_input, allow_prompt=True):
             print_splash(session)
         refresh_memory_hud(session, ui)
         return serialize_command_result(session, cmd, data={"splash": True})
+
+    if cmd == "/update":
+        if allow_prompt:
+            console.print("[dim]Running manual update (git pull + dependency refresh)...[/dim]")
+        update_result = run_auto_update()
+        if allow_prompt:
+            if update_result["ok"]:
+                ui.show_info(update_result["message"])
+            else:
+                ui.show_error(update_result["message"])
+            for step in update_result.get("steps", []):
+                status = "OK" if step["returncode"] == 0 else "FAILED"
+                console.print(f"[dim]{status} · {step['name']}[/dim]")
+                if step.get("stderr"):
+                    console.print(f"[dim]{step['stderr']}[/dim]")
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=update_result["ok"],
+            message=update_result["message"],
+            data={"steps": update_result.get("steps", [])},
+        )
 
     if ui:
         ui.show_error(f"Unknown command: {cmd}")
@@ -1627,6 +1908,32 @@ def main():
         return
 
     print_splash(session)
+    release_status = get_release_update_status()
+    if release_status.get("ok") and release_status.get("update_available"):
+        release = release_status.get("latest_release", {})
+        tag = release.get("tag_name", "unknown")
+        release_url = release.get("html_url", "")
+        console.print(
+            f"[yellow]New μCLI release available: {tag} "
+            f"(repo: {release_status.get('repo')}).[/yellow]"
+        )
+        if release_url:
+            console.print(f"[dim]{release_url}[/dim]")
+        if Confirm.ask("Would you like to update now?", default=False):
+            update_result = run_auto_update()
+            if update_result["ok"]:
+                ui.show_info(update_result["message"])
+            else:
+                ui.show_error(update_result["message"])
+            for step in update_result.get("steps", []):
+                status = "OK" if step["returncode"] == 0 else "FAILED"
+                console.print(f"[dim]{status} · {step['name']}[/dim]")
+                if step.get("stderr"):
+                    console.print(f"[dim]{step['stderr']}[/dim]")
+    elif release_status.get("ok") and release_status.get("latest_release"):
+        latest_tag = release_status["latest_release"].get("tag_name", "")
+        if latest_tag:
+            console.print(f"[dim]μCLI is up to date ({latest_tag}).[/dim]")
     refresh_memory_hud(session, ui)
 
     while True:

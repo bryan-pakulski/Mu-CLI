@@ -19,7 +19,12 @@ from core.server import (
 from core.session import Session, SessionManager
 from core.workspace import FolderContext
 from core.feature_mode import create_feature_plan, update_feature_plan_metadata
-from mucli import handle_command, build_feature_markdown, get_feature_prompt_context
+from mucli import (
+    handle_command,
+    build_feature_markdown,
+    get_feature_prompt_context,
+    run_auto_update,
+)
 from providers.base import MessagePart, ProviderResponse
 from providers.ollama import OllamaProvider
 from utils.config import AGENT_MODE_METADATA
@@ -157,7 +162,22 @@ def test_stats_command_returns_session_snapshot():
     assert "feature_state" in result["data"]
 
 
-def test_clear_command_resets_context_memory_and_features(tmp_path, monkeypatch):
+def test_memory_status_includes_hit_statistics():
+    session = build_test_session()
+    session.task_memory.save("remember auth flow", tags=["auth"])
+    session.task_memory.search("auth", limit=1)
+    session.turn_scratchpad.save("temporary todo", tags=["todo"])
+
+    result = handle_command(session, "/memory status", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["task_memory_stats"]["entries"] == 1
+    assert result["data"]["task_memory_stats"]["total_hits"] >= 1
+    assert result["data"]["task_memory_stats"]["top_entries"][0]["content"] == "remember auth flow"
+    assert result["data"]["scratchpad_stats"]["entries"] == 1
+
+
+def test_clear_command_only_resets_conversation_history(tmp_path, monkeypatch):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
     session = build_test_session()
     workspace = tmp_path / "workspace"
@@ -177,13 +197,35 @@ def test_clear_command_resets_context_memory_and_features(tmp_path, monkeypatch)
 
     assert result["ok"] is True
     assert session.session_manager.history == []
-    assert session.task_memory.entries == []
+    assert session.task_memory.entries != []
+    assert session.turn_scratchpad.entries != []
+    assert session.collation_buffer.entries != []
+    assert session.folder_context.folders != []
+    assert session.session_manager.get_feature_state() is not None
+    assert session.session_manager.list_features() != []
+    assert session.staged_files != []
+
+
+def test_memory_clear_accepts_scratch_alias():
+    session = build_test_session()
+    session.turn_scratchpad.save("temporary note", tags=["temp"])
+
+    result = handle_command(session, "/memory clear scratch", allow_prompt=False)
+
+    assert result["ok"] is True
     assert session.turn_scratchpad.entries == []
-    assert session.collation_buffer.entries == []
+
+
+def test_workspace_clear_command_clears_folders(tmp_path):
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    result = handle_command(session, "/workspace clear", allow_prompt=False)
+
+    assert result["ok"] is True
     assert session.folder_context.folders == []
-    assert session.session_manager.get_feature_state() is None
-    assert session.session_manager.list_features() == []
-    assert session.staged_files == []
 
 
 def test_tokens_command_is_removed():
@@ -193,6 +235,54 @@ def test_tokens_command_is_removed():
 
     assert result["ok"] is False
     assert result["message"] == "Unknown command: /tokens"
+
+
+def test_update_command_runs_auto_update(monkeypatch):
+    session = build_test_session()
+
+    monkeypatch.setattr(
+        "mucli.run_auto_update",
+        lambda: {
+            "ok": True,
+            "message": "μCLI update completed successfully.",
+            "steps": [{"name": "git pull --ff-only", "returncode": 0, "stderr": ""}],
+        },
+    )
+
+    result = handle_command(session, "/update", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert "update completed" in result["message"].lower()
+    assert result["data"]["steps"][0]["name"] == "git pull --ff-only"
+
+
+def test_run_auto_update_performs_git_pull(monkeypatch, tmp_path):
+    calls = []
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("pytest\n", encoding="utf-8")
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(command, cwd=None):
+        calls.append((tuple(command), cwd))
+        if command[:3] == ["git", "rev-parse", "--show-toplevel"]:
+            return Result(stdout=str(tmp_path))
+        if command[:3] == ["git", "pull", "--ff-only"]:
+            return Result(stdout="Already up to date.")
+        if command[0:3] == [os.sys.executable, "-m", "pip"]:
+            return Result(stdout="Requirement already satisfied")
+        return Result(returncode=1, stderr="unexpected command")
+
+    monkeypatch.setattr("mucli._run_command", fake_run)
+
+    result = run_auto_update()
+
+    assert result["ok"] is True
+    assert any(cmd[:3] == ("git", "pull", "--ff-only") for cmd, _ in calls)
 
 
 def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
@@ -233,6 +323,42 @@ def test_feature_commands_manage_session_scoped_features(tmp_path, monkeypatch):
     assert loaded["data"]["feature"]["feature_id"] == feature["feature_id"]
     assert deleted["ok"] is True
     assert session.session_manager.list_features() == []
+
+
+def test_features_alias_routes_to_feature_command(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+    created = handle_command(
+        session, "/feature new Alias Demo", allow_prompt=False
+    )
+    feature_id = created["data"]["feature"]["feature_id"]
+
+    result = handle_command(session, f"/features load {feature_id}", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["feature"]["feature_id"] == feature_id
+
+
+def test_feature_exit_clears_only_active_feature_state(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+    created = handle_command(
+        session, "/feature new Exit Demo", allow_prompt=False
+    )
+    feature_id = created["data"]["feature"]["feature_id"]
+
+    result = handle_command(session, "/feature exit", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert session.session_manager.get_feature_state() is None
+    assert session.session_manager.active_feature_id is None
+    assert session.session_manager.get_feature(feature_id) is not None
 
 
 def test_build_feature_markdown_shows_task_snapshot():

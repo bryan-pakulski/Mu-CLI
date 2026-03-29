@@ -37,17 +37,22 @@ MODE_CHOICES = {
 def get_session_names():
     if not os.path.exists(HISTORY_DIR):
         return []
-    files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
-    return [os.path.basename(f).replace(".json", "") for f in files]
+    session_files = glob.glob(os.path.join(HISTORY_DIR, "sessions", "*", "session.json"))
+    sessions = [os.path.basename(os.path.dirname(path)) for path in session_files]
+
+    # Backward compatibility for legacy single-file session storage.
+    legacy_files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
+    for path in legacy_files:
+        sessions.append(os.path.basename(path).replace(".json", ""))
+
+    return sorted(set(sessions))
 
 
 class DynamicSessionCompleter(Completer):
     def get_completions(self, document, complete_event):
-        if not os.path.exists(HISTORY_DIR):
-            return []
-        files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
-        sessions = [os.path.basename(f).replace(".json", "") for f in files]
-
+        sessions = get_session_names()
+        if not sessions:
+            return
         completer = FuzzyWordCompleter(sessions)
         yield from completer.get_completions(document, complete_event)
 
@@ -96,6 +101,20 @@ class DynamicFeatureIdCompleter(Completer):
         yield from completer.get_completions(document, complete_event)
 
 
+class DynamicToolCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        try:
+            from core.tools import TOOLS
+
+            tool_names = sorted({tool.name for tool in TOOLS if getattr(tool, "name", "")})
+        except Exception:
+            tool_names = []
+        if not tool_names:
+            return
+        completer = FuzzyWordCompleter(tool_names)
+        yield from completer.get_completions(document, complete_event)
+
+
 class MergedCompleter(Completer):
     """Custom class to merge multiple completers to avoid import errors across versions."""
 
@@ -115,6 +134,7 @@ class InputHandler:
         session_completer = DynamicSessionCompleter()
         variable_completer = DynamicVariableCompleter(self)
         feature_id_completer = DynamicFeatureIdCompleter()
+        tool_name_completer = DynamicToolCompleter()
 
         model_dict = {m: None for m in KNOWN_MODELS}
 
@@ -122,10 +142,10 @@ class InputHandler:
             {"gemini": None, "ollama": None, "openai": None}
         )
 
-        tool_completer = NestedCompleter.from_nested_dict(
+        tool_command_completer = NestedCompleter.from_nested_dict(
             {
-                "enable": None,
-                "disable": None,
+                "enable": tool_name_completer,
+                "disable": tool_name_completer,
                 "list": None,
             }
         )
@@ -133,27 +153,48 @@ class InputHandler:
         feature_completer = NestedCompleter.from_nested_dict(
             {
                 "list": None,
+                "show": None,
                 "new": None,
                 "load": feature_id_completer,
                 "delete": feature_id_completer,
                 "status": feature_id_completer,
                 "phases": feature_id_completer,
+                "exit": None,
+                "unload": None,
             }
         )
 
         memory_completer = NestedCompleter.from_nested_dict(
             {
                 "status": None,
-                "list": {"task": None, "scratchpad": None, "all": None},
-                "ls": {"task": None, "scratchpad": None, "all": None},
-                "clear": {"task": None, "scratchpad": None, "all": None},
+                "list": {"task": None, "scratchpad": None, "scratch": None, "all": None},
+                "ls": {"task": None, "scratchpad": None, "scratch": None, "all": None},
+                "clear": {
+                    "task": None,
+                    "scratchpad": None,
+                    "scratch": None,
+                    "longterm": None,
+                    "long-term": None,
+                    "all": None,
+                },
             }
         )
 
         mode_completer = NestedCompleter.from_nested_dict(MODE_CHOICES)
+        unset_completer = MergedCompleter(
+            [
+                variable_completer,
+                FuzzyWordCompleter(["--all"]),
+            ]
+        )
         folder_completer = MergedCompleter(
             [
-                NestedCompleter.from_nested_dict({"remove": directory_completer}),
+                NestedCompleter.from_nested_dict(
+                    {
+                        "remove": directory_completer,
+                        "clear": None,
+                    }
+                ),
                 directory_completer,
             ]
         )
@@ -165,6 +206,8 @@ class InputHandler:
             "/c": None,
             "/clearfiles": None,
             "/cf": None,
+            "/clear-workspace": None,
+            "/cw": None,
             "/view": None,
             "/v": None,
             "/quit": None,
@@ -177,12 +220,15 @@ class InputHandler:
             "/dir": folder_completer,
             "/model": model_dict,
             "/provider": provider_completer,
+            "/workspace": NestedCompleter.from_nested_dict({"clear": None}),
+            "/update": None,
             "/agentic": None,
             "/mode": mode_completer,
             "/feature": feature_completer,
+            "/features": feature_completer,
             "/memory": memory_completer,
-            "/tool": tool_completer,
-            "/tools": tool_completer,
+            "/tool": tool_command_completer,
+            "/tools": tool_command_completer,
             "/system": None,
             "/sys": None,
             "/thinking": None,
@@ -197,7 +243,7 @@ class InputHandler:
             "/splash": None,
             "/set": variable_completer,
             "/get": variable_completer,
-            "/unset": variable_completer,
+            "/unset": unset_completer,
             "/variables": None,
             "/flush": None,
             "/yolo": None,

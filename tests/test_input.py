@@ -2,7 +2,7 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from types import SimpleNamespace
 
-from ui.input import InputHandler
+from ui.input import InputHandler, get_session_names
 
 
 def test_prompt_markup_hides_default_mode():
@@ -297,3 +297,36 @@ def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
 
     assert "alpha" in completion_texts
     assert "beta" in completion_texts
+
+
+def test_get_session_names_supports_session_directory_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+    (tmp_path / "sessions" / "alpha").mkdir(parents=True)
+    (tmp_path / "sessions" / "alpha" / "session.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "sessions" / "beta").mkdir(parents=True)
+    (tmp_path / "sessions" / "beta" / "session.json").write_text("{}", encoding="utf-8")
+
+    sessions = get_session_names()
+
+    assert sessions == ["alpha", "beta"]
+
+
+def test_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+    (tmp_path / "sessions" / "my_session").mkdir(parents=True)
+    (tmp_path / "sessions" / "my_session" / "session.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+
+    handler = InputHandler()
+    document = Document(text="/load my", cursor_position=len("/load my"))
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "my_session" in completion_texts

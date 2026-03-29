@@ -37,17 +37,22 @@ MODE_CHOICES = {
 def get_session_names():
     if not os.path.exists(HISTORY_DIR):
         return []
-    files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
-    return [os.path.basename(f).replace(".json", "") for f in files]
+    session_files = glob.glob(os.path.join(HISTORY_DIR, "sessions", "*", "session.json"))
+    sessions = [os.path.basename(os.path.dirname(path)) for path in session_files]
+
+    # Backward compatibility for legacy single-file session storage.
+    legacy_files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
+    for path in legacy_files:
+        sessions.append(os.path.basename(path).replace(".json", ""))
+
+    return sorted(set(sessions))
 
 
 class DynamicSessionCompleter(Completer):
     def get_completions(self, document, complete_event):
-        if not os.path.exists(HISTORY_DIR):
-            return []
-        files = glob.glob(os.path.join(HISTORY_DIR, "*.json"))
-        sessions = [os.path.basename(f).replace(".json", "") for f in files]
-
+        sessions = get_session_names()
+        if not sessions:
+            return
         completer = FuzzyWordCompleter(sessions)
         yield from completer.get_completions(document, complete_event)
 

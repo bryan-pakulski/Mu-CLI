@@ -132,6 +132,7 @@ For the phased feature workflow and plan file format, see `documentation/feature
 - `POST /api/sessions/new` — create a new session using the current provider/model.
 - `POST /api/sessions/load` — switch to another saved session.
 - `POST /api/sessions/delete` — delete a saved session.
+- `POST /api/sessions/rename` — rename an existing saved session.
 - `GET /api/events` — subscribe to live server-sent events for task, approval, command, tool, runtime, workspace, staged-file, stream lifecycle, and live trace updates (`trace.info`, `trace.tool`, `trace.tool_result`, etc.).
 - `GET /api/tasks` / `GET /api/tasks/<task_id>` — inspect async message task state.
 - `GET /api/approvals` / `GET /api/approvals/<approval_id>` — inspect pending approval requests for modifying tools.

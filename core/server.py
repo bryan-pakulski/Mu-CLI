@@ -1846,6 +1846,46 @@ def serve(session, host: str, port: int, command_handler):
                         )
                         return
 
+                    if parsed.path == "/api/sessions/rename":
+                        old_name = str(payload.get("old_name", "") or "").strip()
+                        new_name = str(payload.get("new_name", "") or "").strip()
+                        if not old_name or not new_name:
+                            self._send_json(
+                                400,
+                                {
+                                    "ok": False,
+                                    "error": "Fields 'old_name' and 'new_name' are required.",
+                                },
+                            )
+                            return
+                        try:
+                            session.session_manager.rename_session(old_name, new_name)
+                        except FileNotFoundError as exc:
+                            self._send_json(404, {"ok": False, "error": str(exc)})
+                            return
+                        except (ValueError, FileExistsError) as exc:
+                            self._send_json(400, {"ok": False, "error": str(exc)})
+                            return
+                        publish_server_event(
+                            state,
+                            "session.renamed",
+                            {
+                                "old_name": old_name,
+                                "new_name": new_name,
+                                "session_name": session.session_manager.current_session_name,
+                                "sessions": session.session_manager.get_session_list(),
+                            },
+                        )
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "message": f"Renamed session '{old_name}' to '{new_name}'.",
+                                **build_sessions_payload(session),
+                            },
+                        )
+                        return
+
                     if parsed.path == "/api/runtime":
                         if "provider" in payload:
                             self._send_json(

@@ -6,6 +6,8 @@ const state = {
   eventSource: null,
   tools: [],
   runtime: null,
+  sessions: [],
+  currentSession: "",
 };
 
 const VARIABLE_DEFS = [
@@ -37,6 +39,7 @@ const ui = {
   collapseBtn: el("collapseBtn"),
   expandBtn: el("expandBtn"),
   configPanel: el("configPanel"),
+  appShell: document.querySelector(".app-shell"),
   openSettingsBtn: el("openSettingsBtn"),
   closeSettingsBtn: el("closeSettingsBtn"),
   saveSettingsBtn: el("saveSettingsBtn"),
@@ -49,6 +52,14 @@ const ui = {
   settingsModelInput: el("settingsModelInput"),
   themeModeSelect: el("themeModeSelect"),
   accentSelect: el("accentSelect"),
+  sessionTabs: el("sessionTabs"),
+  newSessionBtn: el("newSessionBtn"),
+  newSessionModal: el("newSessionModal"),
+  closeNewSessionBtn: el("closeNewSessionBtn"),
+  createSessionConfirmBtn: el("createSessionConfirmBtn"),
+  newSessionNameInput: el("newSessionNameInput"),
+  newSessionProviderSelect: el("newSessionProviderSelect"),
+  newSessionModelInput: el("newSessionModelInput"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -114,6 +125,17 @@ async function refreshRuntime() {
   } catch (err) {
     setConnected(false, `Error: ${err.message}`);
     pushEvent("runtime.error", String(err));
+  }
+}
+
+async function refreshSessions() {
+  try {
+    const data = await fetchJson("/api/sessions");
+    state.sessions = data.sessions || [];
+    state.currentSession = data.current_session_name || "";
+    renderSessionTabs();
+  } catch (err) {
+    pushEvent("sessions.error", String(err));
   }
 }
 
@@ -211,6 +233,84 @@ function openModal() {
 function closeModal() {
   ui.settingsModal.classList.remove("show");
   setTimeout(() => ui.settingsModal.classList.add("hidden"), 180);
+}
+
+function openSimpleModal(modalEl) {
+  modalEl.classList.remove("hidden");
+  requestAnimationFrame(() => modalEl.classList.add("show"));
+}
+
+function closeSimpleModal(modalEl) {
+  modalEl.classList.remove("show");
+  setTimeout(() => modalEl.classList.add("hidden"), 180);
+}
+
+function renderSessionTabs() {
+  ui.sessionTabs.innerHTML = "";
+  for (const sessionName of state.sessions) {
+    const wrapper = document.createElement("div");
+    wrapper.className = `session-tab ${sessionName === state.currentSession ? "active" : ""}`;
+
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "name";
+    loadBtn.textContent = sessionName;
+    loadBtn.title = sessionName;
+    loadBtn.addEventListener("click", () => loadSession(sessionName));
+
+    const menuBtn = document.createElement("button");
+    menuBtn.className = "menu-btn";
+    menuBtn.textContent = "⋯";
+    menuBtn.title = "Session actions";
+    menuBtn.addEventListener("click", () => {
+      const action = window.prompt("Session action: rename / delete", "rename");
+      if (!action) return;
+      if (action.toLowerCase().startsWith("del")) deleteSession(sessionName);
+      if (action.toLowerCase().startsWith("ren")) renameSession(sessionName);
+    });
+
+    wrapper.appendChild(loadBtn);
+    wrapper.appendChild(menuBtn);
+    ui.sessionTabs.appendChild(wrapper);
+  }
+}
+
+async function loadSession(name) {
+  try {
+    await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
+    pushEvent("session.loaded", name);
+    await refreshRuntime();
+    await refreshSessions();
+  } catch (err) {
+    pushEvent("session.load_error", String(err));
+  }
+}
+
+async function deleteSession(name) {
+  if (!window.confirm(`Delete session '${name}'?`)) return;
+  try {
+    await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
+    pushEvent("session.deleted", name);
+    await refreshRuntime();
+    await refreshSessions();
+  } catch (err) {
+    pushEvent("session.delete_error", String(err));
+  }
+}
+
+async function renameSession(name) {
+  const newName = window.prompt("New session name", name);
+  if (!newName || newName === name) return;
+  try {
+    await fetchJson("/api/sessions/rename", {
+      method: "POST",
+      body: JSON.stringify({ old_name: name, new_name: newName }),
+    });
+    pushEvent("session.renamed", `${name} → ${newName}`);
+    await refreshRuntime();
+    await refreshSessions();
+  } catch (err) {
+    pushEvent("session.rename_error", String(err));
+  }
 }
 
 function applyTheme() {
@@ -342,7 +442,10 @@ function setupHandlers() {
     if (evt.target === ui.settingsModal) closeModal();
   });
   document.addEventListener("keydown", (evt) => {
-    if (evt.key === "Escape") closeModal();
+    if (evt.key === "Escape") {
+      closeModal();
+      closeSimpleModal(ui.newSessionModal);
+    }
     if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") sendMessage();
   });
   ui.saveSettingsBtn.addEventListener("click", saveSettings);
@@ -358,11 +461,49 @@ function setupHandlers() {
 
   ui.collapseBtn.addEventListener("click", () => {
     ui.configPanel.classList.add("collapsed");
+    ui.appShell.classList.add("panel-collapsed");
     ui.expandBtn.classList.remove("hidden");
   });
   ui.expandBtn.addEventListener("click", () => {
     ui.configPanel.classList.remove("collapsed");
+    ui.appShell.classList.remove("panel-collapsed");
     ui.expandBtn.classList.add("hidden");
+  });
+
+  ui.newSessionBtn.addEventListener("click", () => openSimpleModal(ui.newSessionModal));
+  ui.closeNewSessionBtn.addEventListener("click", () => closeSimpleModal(ui.newSessionModal));
+  ui.newSessionModal.addEventListener("click", (evt) => {
+    if (evt.target === ui.newSessionModal) closeSimpleModal(ui.newSessionModal);
+  });
+  ui.createSessionConfirmBtn.addEventListener("click", async () => {
+    const name = ui.newSessionNameInput.value.trim();
+    const provider = ui.newSessionProviderSelect.value.trim();
+    const model = ui.newSessionModelInput.value.trim();
+
+    try {
+      await fetchJson("/api/sessions/new", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      if (provider) {
+        await fetchJson("/api/command", {
+          method: "POST",
+          body: JSON.stringify({ command: `/provider ${provider}` }),
+        });
+      }
+      if (model) {
+        await fetchJson("/api/runtime", {
+          method: "POST",
+          body: JSON.stringify({ model }),
+        });
+      }
+      closeSimpleModal(ui.newSessionModal);
+      pushEvent("session.created", { name: name || "(auto)", provider, model });
+      await refreshRuntime();
+      await refreshSessions();
+    } catch (err) {
+      pushEvent("session.create_error", String(err));
+    }
   });
 }
 
@@ -372,7 +513,9 @@ applyTheme();
 connectSSE();
 refreshRuntime();
 refreshTools();
+refreshSessions();
 setInterval(() => {
   refreshRuntime();
   refreshTools();
+  refreshSessions();
 }, 12000);

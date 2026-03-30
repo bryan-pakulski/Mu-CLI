@@ -61,6 +61,11 @@
       </aside>
 
       <main class="main-view">
+        <section class="session-bar">
+          <div id="sessionTabs" class="session-tabs"></div>
+          <button id="newSessionBtn" class="accent-btn">＋</button>
+        </section>
+
         <header class="topbar">
           <button id="expandBtn" class="ghost-btn hidden">☰</button>
           <div>
@@ -166,6 +171,37 @@
 
         <div class="row end">
           <button id="saveSettingsBtn" class="accent-btn">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="newSessionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="newSessionTitle">
+      <div class="modal-card compact-card">
+        <div class="modal-header">
+          <h3 id="newSessionTitle">Create Session</h3>
+          <button id="closeNewSessionBtn" class="ghost-btn">✕</button>
+        </div>
+        <label class="field">
+          Session name
+          <input id="newSessionNameInput" type="text" placeholder="optional" />
+        </label>
+        <div class="settings-grid two">
+          <label class="field">
+            Provider
+            <select id="newSessionProviderSelect">
+              <option value="">Current provider</option>
+              <option value="openai">openai</option>
+              <option value="ollama">ollama</option>
+              <option value="gemini">gemini</option>
+            </select>
+          </label>
+          <label class="field">
+            Model
+            <input id="newSessionModelInput" type="text" placeholder="optional model override" />
+          </label>
+        </div>
+        <div class="row end">
+          <button id="createSessionConfirmBtn" class="accent-btn">Create Session</button>
         </div>
       </div>
     </div>

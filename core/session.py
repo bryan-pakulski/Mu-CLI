@@ -420,6 +420,29 @@ class SessionManager:
             if self.ui:
                 self.ui.show_error(f"Session '{name}' not found.")
 
+    def rename_session(self, old_name: str, new_name: str) -> bool:
+        old_name = str(old_name or "").strip()
+        new_name = str(new_name or "").strip()
+        if not old_name or not new_name:
+            raise ValueError("Both old_name and new_name are required.")
+        if old_name == new_name:
+            return True
+
+        old_dir = self._get_session_dir(old_name)
+        new_dir = self._get_session_dir(new_name)
+        if not os.path.exists(old_dir):
+            raise FileNotFoundError(f"Session '{old_name}' not found.")
+        if os.path.exists(new_dir):
+            raise FileExistsError(f"Session '{new_name}' already exists.")
+
+        os.rename(old_dir, new_dir)
+        if self.current_session_name == old_name:
+            self.current_session_name = new_name
+            self.save_history()
+        if self.ui:
+            self.ui.show_info(f"Renamed session '{old_name}' to '{new_name}'.")
+        return True
+
     def clear_current_history(self):
         logger.info(f"Clearing history for session: {self.current_session_name}")
         self.history = []

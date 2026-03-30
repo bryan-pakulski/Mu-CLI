@@ -98,7 +98,7 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
 }
 .mono-box.small { min-height: 120px; max-height: 180px; overflow: auto; }
 
-.main-view { display: grid; grid-template-rows: auto auto 1fr auto; min-width: 0; }
+.main-view { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
 .session-bar {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
@@ -106,6 +106,11 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
   gap: .45rem;
   align-items: center;
   padding: .45rem .7rem;
+}
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
 }
 .session-tabs { display: flex; gap: .35rem; overflow-x: auto; flex: 1; }
 .session-tab {
@@ -201,12 +206,18 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
   color: var(--error);
   background: transparent;
 }
-.topbar { display: flex; align-items: center; gap: .6rem; padding: .75rem 1rem; border-bottom: 1px solid var(--border); background: var(--surface); }
-.topbar h2 { margin: 0; font-size: 1rem; }
-.topbar p { margin: .1rem 0 0; color: var(--muted); font-size: .74rem; }
 .composer { padding: .65rem 1rem; border-top: 1px solid var(--border); background: var(--surface); }
 .workspace-split { padding: .75rem 1rem; min-height: 0; display: grid; grid-template-columns: 1fr auto; gap: .75rem; }
-.chat-wrap { min-width: 0; position: relative; }
+.chat-wrap {
+  min-width: 0;
+  position: relative;
+  background:
+    radial-gradient(80% 120px at 50% 100%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 72%),
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 94%, var(--overlay-1)) 0%, color-mix(in oklab, var(--surface) 98%, transparent) 100%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: .55rem .65rem .35rem;
+}
 .chat-wrap.needs-approval .chat-stream { filter: blur(2px); opacity: .6; pointer-events: none; }
 .approval-overlay {
   position: absolute;
@@ -228,7 +239,7 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
 .meta-panel { width: 380px; border-left: 1px solid var(--border); padding-left: .7rem; transition: width .2s ease, opacity .2s ease, padding .2s ease; }
 .meta-panel.collapsed { width: 0; opacity: 0; overflow: hidden; padding-left: 0; border-left: 0; }
 .stream-title { font-size: .75rem; color: var(--muted); margin-bottom: .45rem; }
-.stream { height: calc(100vh - 275px); overflow: auto; border-top: 1px solid var(--border); background: transparent; padding: .2rem 0; display: flex; flex-direction: column; gap: 0; }
+.stream { height: calc(100vh - 255px); overflow: auto; border-top: 1px solid var(--border); background: transparent; padding: .2rem 0; display: flex; flex-direction: column; gap: 0; }
 .chat-stream .event-card { border-bottom: 1px solid var(--border); background: transparent; border-radius: 0; padding: .48rem .1rem; }
 .meta-stream .event-card { border-bottom: 1px solid var(--border); padding: .28rem .1rem; }
 .event-head {
@@ -363,6 +374,9 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
   font-family: 'Roboto Mono', monospace;
   font-size: .72rem;
 }
+.workspace-controls {
+  align-items: end;
+}
 .workspace-tree details { margin-left: .55rem; }
 .workspace-tree details > summary { cursor: pointer; color: var(--text); }
 .workspace-tree .tree-file { margin-left: 1.4rem; color: var(--muted); }
@@ -402,4 +416,10 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
   .settings-tabs { flex-direction: row; overflow-x: auto; }
   .workspace-split { grid-template-columns: 1fr; }
   .meta-panel { width: 100%; border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: .5rem; }
+  .composer-actions { flex-wrap: wrap; }
+}
+
+.composer-actions {
+  gap: .65rem;
+  padding-top: .55rem;
 }

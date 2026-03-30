@@ -59,6 +59,14 @@
             </div>
           </details>
           <div class="section-title">Workspace Explorer</div>
+          <div class="settings-grid two workspace-controls">
+            <label class="field">
+              Add folder
+              <input id="workspaceAddInput" type="text" placeholder="/path/to/folder" />
+            </label>
+            <button id="workspaceAddBtn" class="accent-btn">＋ Add Folder</button>
+          </div>
+          <div id="workspaceFoldersList" class="settings-grid"></div>
           <div id="workspaceTree" class="workspace-tree"></div>
           <details class="tool-group">
             <summary>Session</summary>
@@ -80,16 +88,12 @@
       <main class="main-view">
         <section class="session-bar">
           <div id="sessionTabs" class="session-tabs"></div>
-          <button id="newSessionBtn" class="accent-btn">＋</button>
-        </section>
-
-        <header class="topbar">
-          <button id="expandBtn" class="ghost-btn hidden">☰</button>
-          <div>
-            <h2>Mu-CLI Control Center</h2>
-            <p>Compact reactive client for server mode</p>
+          <div class="session-actions">
+            <button id="expandBtn" class="ghost-btn hidden">☰</button>
+            <button id="toggleMetaBtn" class="ghost-btn">Metadata ▶</button>
+            <button id="newSessionBtn" class="accent-btn">＋</button>
           </div>
-        </header>
+        </section>
 
         <section class="workspace-split">
           <div id="chatWrap" class="chat-wrap">
@@ -119,11 +123,10 @@
 
         <section class="composer">
           <textarea id="messageInput" rows="3" placeholder="Send a message to μCLI..."></textarea>
-          <div class="row">
+          <div class="row composer-actions">
             <button id="sendBtn" class="accent-btn">Send</button>
             <button id="refreshBtn" class="ghost-btn">Refresh State</button>
             <button id="clearLogBtn" class="ghost-btn">Clear View</button>
-            <button id="toggleMetaBtn" class="ghost-btn">Metadata ▶</button>
           </div>
         </section>
       </main>
@@ -141,7 +144,6 @@
             <button class="settings-tab active" data-tab="tools">Tools</button>
             <button class="settings-tab" data-tab="variables">Variables</button>
             <button class="settings-tab" data-tab="memory">Memory & Context</button>
-            <button class="settings-tab" data-tab="management">Management</button>
             <button class="settings-tab" data-tab="system">System</button>
             <button class="settings-tab" data-tab="appearance">Appearance</button>
           </nav>
@@ -167,21 +169,6 @@
               <div class="settings-group">
                 <h4>Memory & Context</h4>
                 <div class="settings-grid" id="memoryList"></div>
-              </div>
-            </div>
-
-            <div class="settings-pane" data-pane="management">
-              <div class="settings-group">
-                <h4>Workspace Management</h4>
-                <p class="muted">Manage attached folders and inspect tracked files.</p>
-                <div class="settings-grid two">
-                  <label class="field">
-                    Add folder
-                    <input id="workspaceAddInput" type="text" placeholder="/path/to/folder" />
-                  </label>
-                  <button id="workspaceAddBtn" class="accent-btn">＋ Add Folder</button>
-                </div>
-                <div id="workspaceFoldersList" class="settings-grid"></div>
               </div>
             </div>
 

@@ -10,6 +10,8 @@ from core.server import (
     EventHub,
     HeadlessUI,
     TaskManager,
+    _encode_json_response,
+    _write_response_body,
     build_runtime_payload,
     build_sessions_payload,
     build_state_payload,
@@ -28,6 +30,19 @@ from mucli import (
 from providers.base import MessagePart, ProviderResponse
 from providers.ollama import OllamaProvider
 from utils.config import AGENT_MODE_METADATA
+
+
+class _BodyWriter:
+    def __init__(self):
+        self.data = b""
+
+    def write(self, body):
+        self.data += body
+
+
+class _BrokenWriter:
+    def write(self, _body):
+        raise BrokenPipeError("socket closed")
 
 
 @dataclass
@@ -112,6 +127,21 @@ def build_test_session(provider=None, ui=None):
         ui=ui,
         debug=False,
     )
+
+
+def test_encode_json_response_returns_empty_body_for_no_content():
+    assert _encode_json_response(204, {"ok": True}) == b""
+
+
+def test_write_response_body_handles_broken_pipe():
+    assert _write_response_body(_BrokenWriter(), b"{}") is False
+
+
+def test_write_response_body_writes_payload():
+    writer = _BodyWriter()
+
+    assert _write_response_body(writer, b'{"ok": true}') is True
+    assert writer.data == b'{"ok": true}'
 
 
 def test_send_message_returns_structured_turn_data():

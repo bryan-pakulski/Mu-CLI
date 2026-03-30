@@ -697,6 +697,14 @@ async function loadSession(name) {
   await refreshHistory(name);
   renderApprovalOverlay();
   if (name === state.serverActiveSession) return;
+  const activeServerStatus = state.sessionStatus[state.serverActiveSession] || "idle";
+  if (["thinking", "approval"].includes(activeServerStatus)) {
+    pushEvent(
+      "session.load_deferred",
+      `Deferring server session switch to '${name}' until '${state.serverActiveSession}' is idle.`,
+    );
+    return;
+  }
   try {
     await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
     state.serverActiveSession = name;
@@ -814,6 +822,8 @@ async function monitorMessageTask(taskId, sessionName) {
       state.sessionStatus[sessionName] = "idle";
       if (state.currentSession === sessionName) {
         await refreshHistory();
+      } else if (state.currentSession) {
+        await loadSession(state.currentSession);
       }
       renderSessionTabs();
       renderConversation();
@@ -825,6 +835,9 @@ async function monitorMessageTask(taskId, sessionName) {
       renderSessionTabs();
       renderConversation();
       pushEvent("message.error", task.error || "Task failed");
+      if (state.currentSession && state.currentSession !== sessionName) {
+        await loadSession(state.currentSession);
+      }
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 900));
@@ -1077,12 +1090,18 @@ setupTabSwitching();
 applyTheme();
 renderEvents();
 connectSSE();
-refreshRuntime();
-refreshTools();
-refreshSessions();
-refreshHistory();
-refreshStats();
-refreshWorkspace();
+
+async function initializeApp() {
+  await refreshRuntime();
+  await refreshTools();
+  await refreshSessions();
+  await refreshHistory();
+  await refreshStats();
+  await refreshWorkspace();
+}
+
+initializeApp().catch((err) => pushEvent("init.error", String(err)));
+
 setInterval(() => {
   refreshRuntime();
   refreshTools();

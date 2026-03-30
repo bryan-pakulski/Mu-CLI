@@ -28,6 +28,21 @@ from core.feature_mode import (
 )
 
 
+def _encode_json_response(status_code: int, payload: dict) -> bytes:
+    if status_code == 204:
+        return b""
+    return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+
+
+def _write_response_body(stream, body: bytes) -> bool:
+    try:
+        stream.write(body)
+        return True
+    except (BrokenPipeError, ConnectionResetError):
+        logger.info("HTTP client disconnected before response body was fully sent.")
+        return False
+
+
 class HeadlessUI:
     def __init__(self, auto_approve: bool = False):
         self.auto_approve = auto_approve
@@ -1338,15 +1353,20 @@ def serve(session, host: str, port: int, command_handler):
                 raise ValueError(f"Invalid JSON body: {exc}") from exc
 
         def _send_json(self, status_code: int, payload: dict):
-            body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+            body = _encode_json_response(status_code, payload)
             self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.end_headers()
+            except (BrokenPipeError, ConnectionResetError):
+                logger.info("HTTP client disconnected before response headers were sent.")
+                return
+            if body:
+                _write_response_body(self.wfile, body)
 
         def _not_found(self):
             self._send_json(404, {"ok": False, "error": "Endpoint not found."})

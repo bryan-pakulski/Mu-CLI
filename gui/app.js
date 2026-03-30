@@ -8,6 +8,7 @@ const state = {
   runtime: null,
   sessions: [],
   currentSession: "",
+  selectedSessionAction: "",
 };
 
 const VARIABLE_DEFS = [
@@ -60,6 +61,11 @@ const ui = {
   newSessionNameInput: el("newSessionNameInput"),
   newSessionProviderSelect: el("newSessionProviderSelect"),
   newSessionModelInput: el("newSessionModelInput"),
+  sessionActionModal: el("sessionActionModal"),
+  closeSessionActionBtn: el("closeSessionActionBtn"),
+  sessionActionNameInput: el("sessionActionNameInput"),
+  saveSessionActionBtn: el("saveSessionActionBtn"),
+  deleteSessionActionBtn: el("deleteSessionActionBtn"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -293,17 +299,18 @@ function renderSessionTabs() {
     menuBtn.className = "menu-btn";
     menuBtn.textContent = "⋯";
     menuBtn.title = "Session actions";
-    menuBtn.addEventListener("click", () => {
-      const action = window.prompt("Session action: rename / delete", "rename");
-      if (!action) return;
-      if (action.toLowerCase().startsWith("del")) deleteSession(sessionName);
-      if (action.toLowerCase().startsWith("ren")) renameSession(sessionName);
-    });
+    menuBtn.addEventListener("click", () => openSessionActionModal(sessionName));
 
     wrapper.appendChild(loadBtn);
     wrapper.appendChild(menuBtn);
     ui.sessionTabs.appendChild(wrapper);
   }
+}
+
+function openSessionActionModal(sessionName) {
+  state.selectedSessionAction = sessionName;
+  ui.sessionActionNameInput.value = sessionName;
+  openSimpleModal(ui.sessionActionModal);
 }
 
 async function loadSession(name) {
@@ -318,7 +325,6 @@ async function loadSession(name) {
 }
 
 async function deleteSession(name) {
-  if (!window.confirm(`Delete session '${name}'?`)) return;
   try {
     await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
     pushEvent("session.deleted", name);
@@ -330,7 +336,7 @@ async function deleteSession(name) {
 }
 
 async function renameSession(name) {
-  const newName = window.prompt("New session name", name);
+  const newName = ui.sessionActionNameInput.value.trim();
   if (!newName || newName === name) return;
   try {
     await fetchJson("/api/sessions/rename", {
@@ -477,6 +483,7 @@ function setupHandlers() {
     if (evt.key === "Escape") {
       closeModal();
       closeSimpleModal(ui.newSessionModal);
+      closeSimpleModal(ui.sessionActionModal);
     }
     if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") sendMessage();
   });
@@ -506,6 +513,20 @@ function setupHandlers() {
   ui.closeNewSessionBtn.addEventListener("click", () => closeSimpleModal(ui.newSessionModal));
   ui.newSessionModal.addEventListener("click", (evt) => {
     if (evt.target === ui.newSessionModal) closeSimpleModal(ui.newSessionModal);
+  });
+  ui.closeSessionActionBtn.addEventListener("click", () => closeSimpleModal(ui.sessionActionModal));
+  ui.sessionActionModal.addEventListener("click", (evt) => {
+    if (evt.target === ui.sessionActionModal) closeSimpleModal(ui.sessionActionModal);
+  });
+  ui.saveSessionActionBtn.addEventListener("click", async () => {
+    if (!state.selectedSessionAction) return;
+    await renameSession(state.selectedSessionAction);
+    closeSimpleModal(ui.sessionActionModal);
+  });
+  ui.deleteSessionActionBtn.addEventListener("click", async () => {
+    if (!state.selectedSessionAction) return;
+    await deleteSession(state.selectedSessionAction);
+    closeSimpleModal(ui.sessionActionModal);
   });
   ui.createSessionConfirmBtn.addEventListener("click", async () => {
     const name = ui.newSessionNameInput.value.trim();

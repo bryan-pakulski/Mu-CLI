@@ -93,18 +93,26 @@ button {
 }
 .session-tabs { display: flex; gap: .35rem; overflow-x: auto; flex: 1; }
 .session-tab {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  border-radius: 999px;
+  background: transparent;
+  border: 0;
   display: flex;
   align-items: center;
   min-width: 0;
+  position: relative;
+  padding-right: .35rem;
+}
+.session-tab::after {
+  content: "|";
+  color: var(--border);
+  margin-left: .25rem;
 }
 .session-tab > button {
   border: 0;
   background: transparent;
-  color: var(--text);
-  padding: .32rem .5rem;
+  color: var(--muted);
+  padding: .22rem .2rem;
+  font-size: .8rem;
+  border-radius: 0;
 }
 .session-tab .name {
   max-width: 180px;
@@ -113,9 +121,13 @@ button {
   text-overflow: ellipsis;
 }
 .session-tab.active {
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 60%, transparent);
+  font-weight: 700;
 }
-.menu-btn { color: var(--muted); }
+.session-tab.active .name {
+  color: color-mix(in oklab, var(--text) 88%, #000 12%);
+  font-weight: 700;
+}
+.menu-btn { color: var(--muted); letter-spacing: .06em; }
 .topbar { display: flex; align-items: center; gap: .6rem; padding: .75rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel); }
 .topbar h2 { margin: 0; font-size: 1rem; }
 .topbar p { margin: .1rem 0 0; color: var(--muted); font-size: .74rem; }

@@ -206,6 +206,23 @@
       </div>
     </div>
 
+    <div id="sessionActionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sessionActionTitle">
+      <div class="modal-card compact-card">
+        <div class="modal-header">
+          <h3 id="sessionActionTitle">Session Options</h3>
+          <button id="closeSessionActionBtn" class="ghost-btn">✕</button>
+        </div>
+        <label class="field">
+          Session name
+          <input id="sessionActionNameInput" type="text" />
+        </label>
+        <div class="row end">
+          <button id="deleteSessionActionBtn" class="ghost-btn">Delete</button>
+          <button id="saveSessionActionBtn" class="accent-btn">Save Name</button>
+        </div>
+      </div>
+    </div>
+
     <script src="./app.js" type="module"></script>
   </body>
 </html>

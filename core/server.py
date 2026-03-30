@@ -1147,14 +1147,22 @@ def build_state_payload(session) -> dict:
     }
 
 
-def build_history_payload(session, limit: int | None = None) -> dict:
-    history = session.session_manager.history
+def build_history_payload(
+    session, limit: int | None = None, session_name: str | None = None
+) -> dict:
+    requested_name = str(session_name or "").strip()
+    if requested_name:
+        history = session.session_manager.get_session_history(requested_name)
+        response_session_name = requested_name
+    else:
+        history = session.session_manager.history
+        response_session_name = session.session_manager.current_session_name
     if limit is not None and limit >= 0:
         history = history[-limit:]
     return {
-        "session_name": session.session_manager.current_session_name,
+        "session_name": response_session_name,
         "history": history,
-        "history_length": len(session.session_manager.history),
+        "history_length": len(history),
     }
 
 
@@ -1389,6 +1397,22 @@ def serve(session, host: str, port: int, command_handler):
                     return
                 self._send_json(200, {"ok": True, "approval": approval})
                 return
+            if parsed.path == "/api/history":
+                query = parse_qs(parsed.query)
+                limit = query.get("limit", [None])[0]
+                session_name = str(query.get("session_name", [""])[0] or "").strip()
+                limit_value = int(limit) if limit is not None else None
+                session = state["session"]
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        **build_history_payload(
+                            session, limit_value, session_name=session_name or None
+                        ),
+                    },
+                )
+                return
 
             with state["session_lock"]:
                 session = state["session"]
@@ -1413,18 +1437,6 @@ def serve(session, host: str, port: int, command_handler):
                         {
                             "ok": True,
                             "tools": build_state_payload(session)["available_tools"],
-                        },
-                    )
-                    return
-                if parsed.path == "/api/history":
-                    query = parse_qs(parsed.query)
-                    limit = query.get("limit", [None])[0]
-                    limit_value = int(limit) if limit is not None else None
-                    self._send_json(
-                        200,
-                        {
-                            "ok": True,
-                            **build_history_payload(session, limit_value),
                         },
                     )
                     return

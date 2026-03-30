@@ -119,11 +119,9 @@ class SessionManager:
         self.active_feature_id = None
         self.variables.update(DEFAULT_VARIABLES)
 
-        source_filepath = filepath if os.path.exists(filepath) else legacy_filepath
-        if os.path.exists(source_filepath):
+        data = self.read_session_data(name)
+        if data is not None:
             try:
-                with open(source_filepath, "r") as f:
-                    data = json.load(f)
                 if isinstance(data, list):
                     self.history = data
                 elif isinstance(data, dict):
@@ -175,6 +173,28 @@ class SessionManager:
                             pass
             except (json.JSONDecodeError, IOError):
                 self.history = []
+
+    def read_session_data(self, name):
+        filepath = self._get_filepath(name)
+        legacy_filepath = os.path.join(HISTORY_DIR, f"{name}.json")
+        source_filepath = filepath if os.path.exists(filepath) else legacy_filepath
+        if not os.path.exists(source_filepath):
+            return None
+        try:
+            with open(source_filepath, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def get_session_history(self, name):
+        data = self.read_session_data(name)
+        if data is None:
+            return []
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("history", [])
+        return []
 
     def save_history(self, folder_context_obj=None):
         logger.debug(f"Saving history for session: {self.current_session_name}")

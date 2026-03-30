@@ -277,6 +277,29 @@ button {
 }
 .tool-group[open] > summary { color: var(--accent); }
 .tool-group-body { padding: .15rem 0 .35rem; display: grid; gap: .2rem; }
+.workspace-tree {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .4rem;
+  min-height: 140px;
+  max-height: 280px;
+  overflow: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .72rem;
+}
+.workspace-tree details { margin-left: .55rem; }
+.workspace-tree details > summary { cursor: pointer; color: var(--text); }
+.workspace-tree .tree-file { margin-left: 1.4rem; color: var(--muted); }
+.workspace-folder-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .5rem;
+  align-items: center;
+}
+.workspace-remove-btn {
+  border-color: #d95a5a;
+  color: #d95a5a;
+}
 @keyframes blink {
   0%, 80%, 100% { opacity: .25; }
   40% { opacity: 1; }

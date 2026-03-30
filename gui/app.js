@@ -12,6 +12,8 @@ const state = {
   pendingBySession: {},
   currentConversation: [],
   approvalsBySession: {},
+  workspace: { folders: [], tracked_files: [] },
+  serverActiveSession: "",
 };
 try {
   const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
@@ -82,6 +84,10 @@ const ui = {
   approveBtn: el("approveBtn"),
   rejectBtn: el("rejectBtn"),
   explainBtn: el("explainBtn"),
+  workspaceTree: el("workspaceTree"),
+  workspaceAddInput: el("workspaceAddInput"),
+  workspaceAddBtn: el("workspaceAddBtn"),
+  workspaceFoldersList: el("workspaceFoldersList"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -182,10 +188,13 @@ function renderApprovalOverlay() {
   ].join("\n\n");
 }
 
-async function refreshHistory() {
+async function refreshHistory(sessionName = state.currentSession) {
   try {
-    const payload = await fetchJson("/api/history?limit=120");
-    renderConversation(payload.history || []);
+    if (!sessionName) return;
+    const payload = await fetchJson(`/api/history?limit=120&session_name=${encodeURIComponent(sessionName)}`);
+    if (sessionName === state.currentSession) {
+      renderConversation(payload.history || []);
+    }
   } catch (err) {
     pushEvent("history.error", String(err));
   }
@@ -208,6 +217,8 @@ async function refreshRuntime() {
   try {
     const runtime = await fetchJson("/api/runtime");
     state.runtime = runtime;
+    state.serverActiveSession = runtime.session_name || "";
+    if (!state.currentSession) state.currentSession = state.serverActiveSession;
     ui.modelInput.value = runtime.model || "";
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
@@ -255,13 +266,132 @@ async function refreshSessions() {
   try {
     const data = await fetchJson("/api/sessions");
     state.sessions = data.sessions || [];
-    state.currentSession = data.current_session_name || "";
+    const candidate = state.currentSession || data.current_session_name || "";
+    state.currentSession = state.sessions.includes(candidate) ? candidate : (data.current_session_name || state.sessions[0] || "");
     for (const name of state.sessions) {
       if (!state.sessionStatus[name]) state.sessionStatus[name] = "idle";
     }
     renderSessionTabs();
   } catch (err) {
     pushEvent("sessions.error", String(err));
+  }
+}
+
+function normalizePath(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function buildWorkspaceTree(folders, trackedFiles) {
+  const root = {};
+  const normalizedFolders = folders.map(normalizePath);
+  for (const filePath of trackedFiles || []) {
+    const normalizedFile = normalizePath(filePath);
+    const baseFolder = normalizedFolders.find((folder) => normalizedFile.startsWith(`${folder}/`) || normalizedFile === folder);
+    if (!baseFolder) continue;
+    const relPath = normalizedFile.slice(baseFolder.length + 1);
+    if (!relPath) continue;
+    const segments = relPath.split("/").filter(Boolean);
+    let cursor = root[baseFolder] || (root[baseFolder] = { __files: [], __dirs: {} });
+    for (let i = 0; i < segments.length; i += 1) {
+      const seg = segments[i];
+      const isLeaf = i === segments.length - 1;
+      if (isLeaf) {
+        cursor.__files.push(seg);
+      } else {
+        cursor.__dirs[seg] = cursor.__dirs[seg] || { __files: [], __dirs: {} };
+        cursor = cursor.__dirs[seg];
+      }
+    }
+  }
+  return root;
+}
+
+function renderTreeNode(container, name, node) {
+  const details = document.createElement("details");
+  details.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = `📁 ${name}`;
+  details.appendChild(summary);
+  const dirNames = Object.keys(node.__dirs || {}).sort((a, b) => a.localeCompare(b));
+  for (const dir of dirNames) {
+    renderTreeNode(details, dir, node.__dirs[dir]);
+  }
+  const files = [...(node.__files || [])].sort((a, b) => a.localeCompare(b));
+  for (const file of files) {
+    const row = document.createElement("div");
+    row.className = "tree-file";
+    row.textContent = `📄 ${file}`;
+    details.appendChild(row);
+  }
+  container.appendChild(details);
+}
+
+function renderWorkspace() {
+  const folders = state.workspace.folders || [];
+  const tracked = state.workspace.tracked_files || [];
+  ui.workspaceTree.innerHTML = "";
+  ui.workspaceFoldersList.innerHTML = "";
+
+  if (!folders.length) {
+    ui.workspaceTree.textContent = "No folders attached.";
+    return;
+  }
+
+  const tree = buildWorkspaceTree(folders, tracked);
+  for (const folder of folders) {
+    const folderNode = tree[normalizePath(folder)] || { __files: [], __dirs: {} };
+    renderTreeNode(ui.workspaceTree, folder.split("/").filter(Boolean).pop() || folder, folderNode);
+
+    const row = document.createElement("div");
+    row.className = "workspace-folder-row";
+    const label = document.createElement("div");
+    label.className = "desc";
+    label.textContent = folder;
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "ghost-btn workspace-remove-btn";
+    removeBtn.textContent = "− Remove";
+    removeBtn.addEventListener("click", async () => {
+      await removeWorkspaceFolder(folder);
+    });
+    row.appendChild(label);
+    row.appendChild(removeBtn);
+    ui.workspaceFoldersList.appendChild(row);
+  }
+}
+
+async function refreshWorkspace() {
+  try {
+    const data = await fetchJson("/api/workspaces");
+    state.workspace = {
+      folders: data.folders || [],
+      tracked_files: data.tracked_files || [],
+    };
+    renderWorkspace();
+  } catch (err) {
+    pushEvent("workspace.error", String(err));
+  }
+}
+
+async function addWorkspaceFolder(path) {
+  const value = String(path || "").trim();
+  if (!value) return;
+  try {
+    await fetchJson("/api/workspaces/add", { method: "POST", body: JSON.stringify({ path: value }) });
+    ui.workspaceAddInput.value = "";
+    pushEvent("workspace.added", value);
+    await refreshWorkspace();
+  } catch (err) {
+    pushEvent("workspace.add_error", String(err));
+  }
+}
+
+async function removeWorkspaceFolder(path) {
+  try {
+    await fetchJson("/api/workspaces/remove", { method: "POST", body: JSON.stringify({ path }) });
+    pushEvent("workspace.removed", path);
+    await refreshWorkspace();
+  } catch (err) {
+    pushEvent("workspace.remove_error", String(err));
   }
 }
 
@@ -469,12 +599,19 @@ function renderSessionTabs() {
 }
 
 async function loadSession(name) {
+  state.currentSession = name;
+  renderSessionTabs();
+  await refreshHistory(name);
+  renderApprovalOverlay();
+  if (name === state.serverActiveSession) return;
   try {
     await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
+    state.serverActiveSession = name;
     pushEvent("session.loaded", name);
     await refreshRuntime();
     await refreshSessions();
-    await refreshHistory();
+    await refreshHistory(name);
+    await refreshWorkspace();
     renderApprovalOverlay();
   } catch (err) {
     pushEvent("session.load_error", String(err));
@@ -522,6 +659,13 @@ async function sendMessage() {
   const sessionName = state.currentSession;
   ui.messageInput.value = "";
   pushEvent("message.out", text);
+  if (state.currentSession && state.currentSession !== state.serverActiveSession) {
+    await loadSession(state.currentSession);
+    if (state.currentSession !== state.serverActiveSession) {
+      pushEvent("message.error", "Could not activate selected session. Message not sent.");
+      return;
+    }
+  }
   state.pendingBySession[sessionName] = { userText: text };
   state.sessionStatus[sessionName] = "thinking";
   renderSessionTabs();
@@ -720,8 +864,7 @@ function setupHandlers() {
   ui.chooseWorkspaceBtn.addEventListener("click", async () => {
     const path = window.prompt("Workspace folder path");
     if (!path) return;
-    await runCommand(`/folder ${path}`);
-    await refreshRuntime();
+    await addWorkspaceFolder(path);
   });
   ui.approveBtn.addEventListener("click", () => resolveApproval("approve"));
   ui.rejectBtn.addEventListener("click", () => resolveApproval("reject"));
@@ -731,6 +874,7 @@ function setupHandlers() {
     openModal();
     await refreshRuntime();
     await refreshTools();
+    await refreshWorkspace();
     renderToolsSettings();
     renderVariableSections();
   });
@@ -747,6 +891,13 @@ function setupHandlers() {
     if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") sendMessage();
   });
   ui.saveSettingsBtn.addEventListener("click", saveSettings);
+  ui.workspaceAddBtn.addEventListener("click", async () => addWorkspaceFolder(ui.workspaceAddInput.value));
+  ui.workspaceAddInput.addEventListener("keydown", async (evt) => {
+    if (evt.key === "Enter") {
+      evt.preventDefault();
+      await addWorkspaceFolder(ui.workspaceAddInput.value);
+    }
+  });
 
   ui.themeModeSelect.addEventListener("change", () => {
     localStorage.setItem("mucli_gui_theme_mode", ui.themeModeSelect.value);
@@ -819,9 +970,11 @@ refreshTools();
 refreshSessions();
 refreshHistory();
 refreshStats();
+refreshWorkspace();
 setInterval(() => {
   refreshRuntime();
   refreshTools();
   refreshSessions();
   refreshStats();
+  refreshWorkspace();
 }, 12000);

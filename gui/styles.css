@@ -40,11 +40,11 @@ body {
 
 .app-shell { display: grid; grid-template-columns: 330px 1fr; height: 100vh; transition: grid-template-columns .24s ease; }
 .app-shell.panel-collapsed { grid-template-columns: 0 1fr; }
-.config-panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; opacity: 1; transform: translateX(0); transition: opacity .2s ease, transform .2s ease; }
+.config-panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; opacity: 1; transform: translateX(0); transition: opacity .2s ease, transform .2s ease; }
 .config-panel.collapsed { width: 0; overflow: hidden; border-right: none; opacity: 0; transform: translateX(-8px); transition: opacity .2s ease, transform .2s ease; }
 .panel-header { display: flex; align-items: center; justify-content: space-between; padding: .85rem; border-bottom: 1px solid var(--border); }
 .panel-header h1 { margin: 0; font-size: 1rem; }
-.panel-content { padding: .8rem; display: flex; flex-direction: column; gap: .65rem; overflow: auto; }
+.panel-content { padding: .8rem; display: flex; flex-direction: column; gap: .65rem; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 
 .field { display: flex; flex-direction: column; gap: .35rem; font-size: .78rem; color: var(--muted); }
 .field input, .field textarea, .field select, textarea {

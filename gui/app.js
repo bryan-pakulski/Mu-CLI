@@ -232,6 +232,16 @@ function setupHandlers() {
   ui.closeSettingsBtn.addEventListener("click", () => {
     ui.settingsModal.classList.add("hidden");
   });
+  ui.settingsModal.addEventListener("click", (evt) => {
+    if (evt.target === ui.settingsModal) {
+      ui.settingsModal.classList.add("hidden");
+    }
+  });
+  document.addEventListener("keydown", (evt) => {
+    if (evt.key === "Escape") {
+      ui.settingsModal.classList.add("hidden");
+    }
+  });
   ui.saveSettingsBtn.addEventListener("click", saveSettings);
 
   ui.collapseBtn.addEventListener("click", () => {

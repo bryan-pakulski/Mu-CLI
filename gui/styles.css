@@ -225,8 +225,6 @@ button {
   white-space: pre-wrap;
 }
 
-.hidden { display: none; }
-
 .modal {
   position: fixed;
   inset: 0;
@@ -234,6 +232,9 @@ button {
   display: grid;
   place-items: center;
 }
+
+.hidden { display: none; }
+.modal.hidden { display: none; }
 
 .modal-card {
   width: min(760px, 94vw);

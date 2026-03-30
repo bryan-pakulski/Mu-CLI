@@ -77,6 +77,18 @@ body {
   background: color-mix(in oklab, var(--surface-2) 92%, var(--overlay-1)); border: 1px solid var(--border); border-radius: 10px; padding: .5rem;
   display: flex; justify-content: space-between; align-items: center; font-size: .76rem; color: var(--muted);
 }
+.toggle-field.inline-toggle {
+  min-width: 110px;
+  padding: .38rem .5rem;
+}
+.compact-field {
+  gap: .2rem;
+  min-width: 120px;
+}
+.compact-field select {
+  padding: .4rem .5rem;
+  font-size: .8rem;
+}
 
 button {
   border: 1px solid var(--border); border-radius: 999px; font-size: .78rem; font-weight: 500; padding: .45rem .8rem; cursor: pointer;
@@ -222,8 +234,8 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
   min-width: 0;
   position: relative;
   background:
-    radial-gradient(80% 120px at 50% 100%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 72%),
-    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 94%, var(--overlay-1)) 0%, color-mix(in oklab, var(--surface) 98%, transparent) 100%);
+    radial-gradient(78% 170px at 50% 100%, color-mix(in oklab, var(--primary) 22%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 88%, #ffffff 4%) 0%, color-mix(in oklab, var(--surface) 90%, #ffffff 10%) 100%);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: .55rem .65rem .35rem;
@@ -432,4 +444,5 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
 .composer-actions {
   gap: .65rem;
   padding-top: .55rem;
+  align-items: end;
 }

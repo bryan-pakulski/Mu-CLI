@@ -20,26 +20,10 @@
     <div class="app-shell">
       <aside id="configPanel" class="config-panel expanded">
         <div class="panel-header">
-          <h1>μCLI</h1>
           <button id="collapseBtn" class="ghost-btn" title="Collapse panel">◀</button>
+          <h1>μCLI</h1>
         </div>
         <div class="panel-content">
-          <label class="field">
-            API Base URL
-            <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
-          </label>
-
-          <div class="row two-cols compact">
-            <label class="toggle-field">
-              <span>Agentic</span>
-              <input id="agenticToggle" type="checkbox" />
-            </label>
-            <label class="toggle-field">
-              <span>Thinking</span>
-              <input id="thinkingToggle" type="checkbox" />
-            </label>
-          </div>
-
           <label class="field">
             Model
             <select id="modelInput"></select>
@@ -50,14 +34,6 @@
             <button id="openSettingsBtn" class="ghost-btn">Settings</button>
           </div>
 
-          <div class="section-title">Actions</div>
-          <details class="tool-group" open>
-            <summary>Workspace</summary>
-            <div class="tool-group-body">
-              <button class="ghost-btn cmd-btn" data-cmd="/workspace">List workspace</button>
-              <button id="chooseWorkspaceBtn" class="ghost-btn">Choose folder…</button>
-            </div>
-          </details>
           <div class="section-title">Workspace Explorer</div>
           <div class="settings-grid two workspace-controls">
             <label class="field">
@@ -87,12 +63,12 @@
 
       <main class="main-view">
         <section class="session-bar">
+          <button id="expandBtn" class="ghost-btn hidden">☰</button>
           <div class="session-tabs-wrap">
             <div id="sessionTabs" class="session-tabs"></div>
             <button id="newSessionBtn" class="accent-btn session-new-btn">＋</button>
           </div>
           <div class="session-actions">
-            <button id="expandBtn" class="ghost-btn hidden">☰</button>
             <button id="toggleMetaBtn" class="ghost-btn">Metadata ▶</button>
           </div>
         </section>
@@ -129,6 +105,23 @@
             <button id="sendBtn" class="accent-btn">Send</button>
             <button id="refreshBtn" class="ghost-btn">Refresh State</button>
             <button id="clearLogBtn" class="ghost-btn">Clear View</button>
+            <label class="field compact-field">
+              Mode
+              <select id="chatModeSelect">
+                <option value="default">default</option>
+                <option value="debug">debug</option>
+                <option value="feature">feature</option>
+                <option value="research">research</option>
+              </select>
+            </label>
+            <label class="toggle-field inline-toggle">
+              <span>Agentic</span>
+              <input id="agenticToggle" type="checkbox" />
+            </label>
+            <label class="toggle-field inline-toggle">
+              <span>Thinking</span>
+              <input id="thinkingToggle" type="checkbox" />
+            </label>
           </div>
         </section>
       </main>
@@ -177,6 +170,10 @@
             <div class="settings-pane" data-pane="system">
               <div class="settings-group">
                 <h4>System Prompt</h4>
+                <label class="field">
+                  API Base URL
+                  <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
+                </label>
                 <label class="field">
                   Runtime model
                   <select id="settingsModelInput"></select>

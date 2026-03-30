@@ -82,8 +82,8 @@ const ui = {
   newSessionProviderSelect: el("newSessionProviderSelect"),
   newSessionModelInput: el("newSessionModelInput"),
   toggleMetaBtn: el("toggleMetaBtn"),
+  chatModeSelect: el("chatModeSelect"),
   metaPanel: el("metaPanel"),
-  chooseWorkspaceBtn: el("chooseWorkspaceBtn"),
   chatWrap: el("chatWrap"),
   approvalOverlay: el("approvalOverlay"),
   approvalSummary: el("approvalSummary"),
@@ -285,6 +285,7 @@ async function refreshRuntime() {
     setModelSelectOptions(ui.settingsModelInput, state.modelsByProvider[runtime.provider] || [], runtime.model || "");
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
+    ui.chatModeSelect.value = runtime.variables?.agent_mode || "default";
     ui.systemPromptInput.value = runtime.system_instruction || "";
     ui.agenticBasePromptInput.value = runtime.agentic_system_base || "";
     ui.agenticModeDefaultInput.value = runtime.agentic_mode_prompts?.default || "";
@@ -1055,10 +1056,10 @@ function setupHandlers() {
   });
 
   document.querySelectorAll(".cmd-btn").forEach((btn) => btn.addEventListener("click", () => runCommand(btn.dataset.cmd)));
-  ui.chooseWorkspaceBtn.addEventListener("click", async () => {
-    const path = window.prompt("Workspace folder path");
-    if (!path) return;
-    await addWorkspaceFolder(path);
+  ui.chatModeSelect.addEventListener("change", async () => {
+    const mode = ui.chatModeSelect.value || "default";
+    await runCommand(`/mode ${mode}`);
+    await refreshRuntime();
   });
   ui.approveBtn.addEventListener("click", () => resolveApproval("approve"));
   ui.rejectBtn.addEventListener("click", () => resolveApproval("reject"));

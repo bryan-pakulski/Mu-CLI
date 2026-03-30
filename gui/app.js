@@ -10,6 +10,12 @@ const state = {
   currentSession: "",
   selectedSessionAction: "",
 };
+try {
+  const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
+  if (Array.isArray(persistedEvents)) state.events = persistedEvents.slice(0, 300);
+} catch {
+  state.events = [];
+}
 
 const VARIABLE_DEFS = [
   { key: "yolo", label: "YOLO mode", type: "bool", group: "variables", description: "Auto-approve tool actions without prompting." },
@@ -86,6 +92,7 @@ function clip(text, max = 1800) {
 function pushEvent(kind, payload) {
   state.events.unshift({ ts: new Date().toLocaleTimeString(), kind, payload: clip(payload) });
   state.events = state.events.slice(0, 300);
+  localStorage.setItem("mucli_gui_events", JSON.stringify(state.events));
   renderEvents();
 }
 
@@ -132,6 +139,7 @@ function renderConversation(history) {
     card.querySelector(".event-body").textContent = textParts.join("\n\n");
     ui.chatStream.appendChild(card);
   }
+  ui.chatStream.scrollTop = ui.chatStream.scrollHeight;
 }
 
 async function refreshHistory() {
@@ -528,6 +536,7 @@ function setupHandlers() {
   });
   ui.clearLogBtn.addEventListener("click", () => {
     state.events = [];
+    localStorage.removeItem("mucli_gui_events");
     renderEvents();
   });
   ui.toggleMetaBtn.addEventListener("click", () => {
@@ -643,6 +652,7 @@ function setupHandlers() {
 setupHandlers();
 setupTabSwitching();
 applyTheme();
+renderEvents();
 connectSSE();
 refreshRuntime();
 refreshTools();

@@ -12,16 +12,16 @@ const state = {
 };
 
 const VARIABLE_DEFS = [
-  { key: "yolo", label: "YOLO mode", type: "bool", group: "variables" },
-  { key: "strict_mode", label: "Strict approvals", type: "bool", group: "variables" },
-  { key: "agent_mode", label: "Agent mode", type: "select", options: ["default", "debug", "feature", "research"], group: "variables" },
-  { key: "memory_enabled", label: "Memory enabled", type: "bool", group: "memory" },
-  { key: "compact_history", label: "Compact history", type: "bool", group: "memory" },
-  { key: "collation_enabled", label: "Collation enabled", type: "bool", group: "memory" },
-  { key: "max_iterations", label: "Max iterations", type: "number", group: "memory" },
-  { key: "make_timeout", label: "Make timeout", type: "number", group: "memory" },
-  { key: "make_max_output", label: "Make max output", type: "number", group: "memory" },
-  { key: "ollama_host", label: "Ollama host", type: "text", group: "memory" },
+  { key: "yolo", label: "YOLO mode", type: "bool", group: "variables", description: "Auto-approve tool actions without prompting." },
+  { key: "strict_mode", label: "Strict approvals", type: "bool", group: "variables", description: "Request approval for more tool operations." },
+  { key: "agent_mode", label: "Agent mode", type: "select", options: ["default", "debug", "feature", "research"], group: "variables", description: "Controls system behavior and prompting strategy." },
+  { key: "memory_enabled", label: "Memory enabled", type: "bool", group: "memory", description: "Enables persistent memory summarization in long loops." },
+  { key: "compact_history", label: "Compact history", type: "bool", group: "memory", description: "Reduces tool metadata in saved history to save tokens." },
+  { key: "collation_enabled", label: "Collation enabled", type: "bool", group: "memory", description: "Batches read-heavy tool outputs into delayed context flushes." },
+  { key: "max_iterations", label: "Max iterations", type: "number", group: "memory", description: "Upper bound for agentic tool-call loop iterations." },
+  { key: "make_timeout", label: "Make timeout", type: "number", group: "memory", description: "Timeout (seconds) for long-running run_agent_task commands." },
+  { key: "make_max_output", label: "Make max output", type: "number", group: "memory", description: "Maximum output characters returned from run_agent_task." },
+  { key: "ollama_host", label: "Ollama host", type: "text", group: "memory", description: "Base URL for Ollama provider endpoint." },
 ];
 
 const ui = {
@@ -218,7 +218,8 @@ function renderSettingField(def, values) {
   const wrapper = document.createElement("div");
   wrapper.className = "setting-item";
   const left = document.createElement("div");
-  left.innerHTML = `<div class="label">${def.label}</div><div class="desc">${def.key}</div>`;
+  left.innerHTML = `<div class="label">${def.label}</div><div class="desc">${def.description || def.key}</div>`;
+  wrapper.title = `${def.key}: ${def.description || ""}`;
   wrapper.appendChild(left);
 
   const value = values[def.key];
@@ -284,7 +285,8 @@ function renderToolsSettings() {
     for (const tool of tools) {
       const item = document.createElement("div");
       item.className = "setting-item";
-      item.innerHTML = `<div><div class="label">${tool.name}</div><div class="desc">${tool.execution_kind} · ${tool.server_policy}</div></div>`;
+      item.innerHTML = `<div><div class="label">${tool.name}</div><div class="desc">${tool.description || `${tool.execution_kind} · ${tool.server_policy}`}</div></div>`;
+      item.title = `${tool.name}: ${tool.description || `${tool.execution_kind} · ${tool.server_policy}`}`;
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = !disabled.has(tool.name);

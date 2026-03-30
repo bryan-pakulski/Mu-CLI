@@ -11,6 +11,7 @@ const state = {
   sessionStatus: {},
   pendingBySession: {},
   currentConversation: [],
+  approvalsBySession: {},
 };
 try {
   const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
@@ -74,6 +75,13 @@ const ui = {
   toggleMetaBtn: el("toggleMetaBtn"),
   metaPanel: el("metaPanel"),
   chooseWorkspaceBtn: el("chooseWorkspaceBtn"),
+  chatWrap: el("chatWrap"),
+  approvalOverlay: el("approvalOverlay"),
+  approvalSummary: el("approvalSummary"),
+  approvalReasonInput: el("approvalReasonInput"),
+  approveBtn: el("approveBtn"),
+  rejectBtn: el("rejectBtn"),
+  explainBtn: el("explainBtn"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -155,6 +163,23 @@ function renderConversation(history) {
     ui.chatStream.appendChild(agentCard);
   }
   ui.chatStream.scrollTop = ui.chatStream.scrollHeight;
+  renderApprovalOverlay();
+}
+
+function renderApprovalOverlay() {
+  const approval = state.approvalsBySession[state.currentSession];
+  if (!approval) {
+    ui.chatWrap.classList.remove("needs-approval");
+    ui.approvalOverlay.classList.add("hidden");
+    return;
+  }
+  ui.chatWrap.classList.add("needs-approval");
+  ui.approvalOverlay.classList.remove("hidden");
+  ui.approvalSummary.textContent = [
+    `Tool: ${approval.tool_name || "unknown"}`,
+    `Prompt: ${approval.prompt_text || ""}`,
+    `Args: ${JSON.stringify(approval.display_args || approval.tool_args || {}, null, 2)}`,
+  ].join("\n\n");
 }
 
 async function refreshHistory() {
@@ -450,6 +475,7 @@ async function loadSession(name) {
     await refreshRuntime();
     await refreshSessions();
     await refreshHistory();
+    renderApprovalOverlay();
   } catch (err) {
     pushEvent("session.load_error", String(err));
   }
@@ -530,12 +556,24 @@ async function monitorMessageTask(taskId, sessionName) {
     const task = taskPayload.task || {};
     if (task.status === "awaiting_approval") {
       state.sessionStatus[sessionName] = "approval";
+      if (task.approval_id) {
+        try {
+          const approvalPayload = await fetchJson(`/api/approvals/${task.approval_id}`);
+          state.approvalsBySession[sessionName] = approvalPayload.approval;
+        } catch (err) {
+          pushEvent("approval.fetch_error", String(err));
+        }
+      }
       renderSessionTabs();
+      renderApprovalOverlay();
     } else if (task.status === "running" || task.status === "pending") {
       state.sessionStatus[sessionName] = "thinking";
+      delete state.approvalsBySession[sessionName];
       renderSessionTabs();
+      renderApprovalOverlay();
     } else if (task.status === "completed") {
       delete state.pendingBySession[sessionName];
+      delete state.approvalsBySession[sessionName];
       state.sessionStatus[sessionName] = "idle";
       if (state.currentSession === sessionName) {
         await refreshHistory();
@@ -545,6 +583,7 @@ async function monitorMessageTask(taskId, sessionName) {
       return;
     } else if (task.status === "error") {
       delete state.pendingBySession[sessionName];
+      delete state.approvalsBySession[sessionName];
       state.sessionStatus[sessionName] = "error";
       renderSessionTabs();
       renderConversation();
@@ -618,6 +657,26 @@ async function runCommand(command) {
   }
 }
 
+async function resolveApproval(decision) {
+  const approval = state.approvalsBySession[state.currentSession];
+  if (!approval) return;
+  try {
+    await fetchJson("/api/approvals/resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        approval_id: approval.approval_id,
+        decision,
+        reason: ui.approvalReasonInput.value.trim() || undefined,
+      }),
+    });
+    pushEvent("approval.resolved", { decision, approval_id: approval.approval_id });
+    delete state.approvalsBySession[state.currentSession];
+    renderApprovalOverlay();
+  } catch (err) {
+    pushEvent("approval.resolve_error", String(err));
+  }
+}
+
 function setupTabSwitching() {
   ui.settingsTabs.querySelectorAll(".settings-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -664,6 +723,9 @@ function setupHandlers() {
     await runCommand(`/folder ${path}`);
     await refreshRuntime();
   });
+  ui.approveBtn.addEventListener("click", () => resolveApproval("approve"));
+  ui.rejectBtn.addEventListener("click", () => resolveApproval("reject"));
+  ui.explainBtn.addEventListener("click", () => resolveApproval("explain"));
 
   ui.openSettingsBtn.addEventListener("click", async () => {
     openModal();

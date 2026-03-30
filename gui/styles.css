@@ -190,7 +190,25 @@ button {
 .topbar p { margin: .1rem 0 0; color: var(--muted); font-size: .74rem; }
 .composer { padding: .65rem 1rem; border-top: 1px solid var(--border); background: var(--panel); }
 .workspace-split { padding: .75rem 1rem; min-height: 0; display: grid; grid-template-columns: 1fr auto; gap: .75rem; }
-.chat-wrap { min-width: 0; }
+.chat-wrap { min-width: 0; position: relative; }
+.chat-wrap.needs-approval .chat-stream { filter: blur(2px); opacity: .6; pointer-events: none; }
+.approval-overlay {
+  position: absolute;
+  inset: 2.1rem 0 0 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--panel) 62%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.approval-card {
+  width: min(560px, 92%);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: .7rem;
+  background: var(--panel);
+}
+.approval-card h4 { margin: 0 0 .55rem; font-size: .9rem; }
 .meta-panel { width: 380px; border-left: 1px solid var(--border); padding-left: .7rem; transition: width .2s ease, opacity .2s ease, padding .2s ease; }
 .meta-panel.collapsed { width: 0; opacity: 0; overflow: hidden; padding-left: 0; border-left: 0; }
 .stream-title { font-size: .75rem; color: var(--muted); margin-bottom: .45rem; }

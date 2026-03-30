@@ -86,9 +86,24 @@
         </header>
 
         <section class="workspace-split">
-          <div class="chat-wrap">
+          <div id="chatWrap" class="chat-wrap">
             <div class="stream-title">Conversation</div>
             <div id="chatStream" class="stream chat-stream"></div>
+            <div id="approvalOverlay" class="approval-overlay hidden">
+              <div class="approval-card">
+                <h4>Tool approval required</h4>
+                <pre id="approvalSummary" class="mono-box"></pre>
+                <label class="field">
+                  Optional explanation
+                  <input id="approvalReasonInput" type="text" placeholder="reason for reject/explain" />
+                </label>
+                <div class="row end">
+                  <button id="approveBtn" class="accent-btn">Approve</button>
+                  <button id="rejectBtn" class="ghost-btn">Reject</button>
+                  <button id="explainBtn" class="ghost-btn">Explain</button>
+                </div>
+              </div>
+            </div>
           </div>
           <aside id="metaPanel" class="meta-panel collapsed">
             <div class="stream-title">Metadata Timeline</div>

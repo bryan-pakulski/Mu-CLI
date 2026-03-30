@@ -18,7 +18,7 @@ from core.tools import (
 )
 from providers.ollama import OllamaProvider
 from utils.logger import logger
-from utils.config import validate_and_cast
+from utils.config import validate_and_cast, AGENTIC_SYSTEM_BASE, AGENTIC_MODES
 from core.feature_mode import (
     build_phase_execution_prompt,
     build_review_prompt,
@@ -1147,14 +1147,22 @@ def build_state_payload(session) -> dict:
     }
 
 
-def build_history_payload(session, limit: int | None = None) -> dict:
-    history = session.session_manager.history
+def build_history_payload(
+    session, limit: int | None = None, session_name: str | None = None
+) -> dict:
+    requested_name = str(session_name or "").strip()
+    if requested_name:
+        history = session.session_manager.get_session_history(requested_name)
+        response_session_name = requested_name
+    else:
+        history = session.session_manager.history
+        response_session_name = session.session_manager.current_session_name
     if limit is not None and limit >= 0:
         history = history[-limit:]
     return {
-        "session_name": session.session_manager.current_session_name,
+        "session_name": response_session_name,
         "history": history,
-        "history_length": len(session.session_manager.history),
+        "history_length": len(history),
     }
 
 
@@ -1168,11 +1176,22 @@ def build_sessions_payload(session) -> dict:
 def build_runtime_payload(session) -> dict:
     session.sync_runtime_state()
     sync_live_provider_settings(session)
+    agentic_mode_prompts = {
+        mode: str(
+            session.variables.get(f"agentic_mode_prompt_{mode}", default_prompt) or ""
+        )
+        for mode, default_prompt in AGENTIC_MODES.items()
+    }
     return {
         "session_name": session.session_manager.current_session_name,
         "provider": session.provider.name,
         "model": session.provider.model_name,
         "system_instruction": session.system_instruction,
+        "agentic_system_base": str(
+            session.variables.get("agentic_system_base_override", AGENTIC_SYSTEM_BASE)
+            or ""
+        ),
+        "agentic_mode_prompts": agentic_mode_prompts,
         "thinking": session.thinking,
         "agentic": session.agentic,
         "disabled_tools": list(session.disabled_tools),
@@ -1188,6 +1207,32 @@ def build_workspace_payload(session) -> dict:
         "tracked_files": session.folder_context.get_file_list(),
         "tracked_file_count": len(session.folder_context.get_file_list()),
     }
+
+
+def discover_provider_models(session, provider_name: str) -> dict:
+    normalized = str(provider_name or session.provider.name or "").strip().lower()
+    models = []
+    error = None
+    try:
+        if normalized == session.provider.name:
+            sync_live_provider_settings(session)
+            models = list(session.provider.get_available_models() or [])
+        elif normalized == "openai":
+            from providers.openai import OpenAIProvider
+
+            models = list(OpenAIProvider().get_available_models() or [])
+        elif normalized == "ollama":
+            host = session.variables.get("ollama_host", "http://localhost:11434")
+            models = list(OllamaProvider(host=host).get_available_models() or [])
+        elif normalized == "gemini":
+            from providers.gemini import GeminiProvider
+
+            models = list(GeminiProvider().get_available_models() or [])
+    except BaseException as exc:  # noqa: BLE001
+        error = str(exc)
+        models = []
+    unique_models = sorted({str(m).strip() for m in models if str(m).strip()})
+    return {"provider": normalized, "models": unique_models, "error": error}
 
 
 def build_feature_plan_payload(session, directory: str) -> dict:
@@ -1389,6 +1434,22 @@ def serve(session, host: str, port: int, command_handler):
                     return
                 self._send_json(200, {"ok": True, "approval": approval})
                 return
+            if parsed.path == "/api/history":
+                query = parse_qs(parsed.query)
+                limit = query.get("limit", [None])[0]
+                session_name = str(query.get("session_name", [""])[0] or "").strip()
+                limit_value = int(limit) if limit is not None else None
+                session = state["session"]
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        **build_history_payload(
+                            session, limit_value, session_name=session_name or None
+                        ),
+                    },
+                )
+                return
 
             with state["session_lock"]:
                 session = state["session"]
@@ -1416,18 +1477,6 @@ def serve(session, host: str, port: int, command_handler):
                         },
                     )
                     return
-                if parsed.path == "/api/history":
-                    query = parse_qs(parsed.query)
-                    limit = query.get("limit", [None])[0]
-                    limit_value = int(limit) if limit is not None else None
-                    self._send_json(
-                        200,
-                        {
-                            "ok": True,
-                            **build_history_payload(session, limit_value),
-                        },
-                    )
-                    return
                 if parsed.path == "/api/sessions":
                     self._send_json(
                         200, {"ok": True, **build_sessions_payload(session)}
@@ -1439,6 +1488,23 @@ def serve(session, host: str, port: int, command_handler):
                 if parsed.path == "/api/workspaces":
                     self._send_json(
                         200, {"ok": True, **build_workspace_payload(session)}
+                    )
+                    return
+                if parsed.path == "/api/models":
+                    query = parse_qs(parsed.query)
+                    provider_name = str(query.get("provider", [""])[0] or "").strip()
+                    payload = discover_provider_models(
+                        session,
+                        provider_name or session.provider.name,
+                    )
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "current_provider": session.provider.name,
+                            "current_model": session.provider.model_name,
+                            **payload,
+                        },
                     )
                     return
                 if parsed.path == "/api/feature-plan":
@@ -1846,6 +1912,46 @@ def serve(session, host: str, port: int, command_handler):
                         )
                         return
 
+                    if parsed.path == "/api/sessions/rename":
+                        old_name = str(payload.get("old_name", "") or "").strip()
+                        new_name = str(payload.get("new_name", "") or "").strip()
+                        if not old_name or not new_name:
+                            self._send_json(
+                                400,
+                                {
+                                    "ok": False,
+                                    "error": "Fields 'old_name' and 'new_name' are required.",
+                                },
+                            )
+                            return
+                        try:
+                            session.session_manager.rename_session(old_name, new_name)
+                        except FileNotFoundError as exc:
+                            self._send_json(404, {"ok": False, "error": str(exc)})
+                            return
+                        except (ValueError, FileExistsError) as exc:
+                            self._send_json(400, {"ok": False, "error": str(exc)})
+                            return
+                        publish_server_event(
+                            state,
+                            "session.renamed",
+                            {
+                                "old_name": old_name,
+                                "new_name": new_name,
+                                "session_name": session.session_manager.current_session_name,
+                                "sessions": session.session_manager.get_session_list(),
+                            },
+                        )
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "message": f"Renamed session '{old_name}' to '{new_name}'.",
+                                **build_sessions_payload(session),
+                            },
+                        )
+                        return
+
                     if parsed.path == "/api/runtime":
                         if "provider" in payload:
                             self._send_json(
@@ -1861,6 +1967,18 @@ def serve(session, host: str, port: int, command_handler):
                             session.system_instruction = str(
                                 payload.get("system_instruction") or ""
                             )
+                        if "agentic_system_base" in payload:
+                            session.variables["agentic_system_base_override"] = str(
+                                payload.get("agentic_system_base") or ""
+                            )
+                        if "agentic_mode_prompts" in payload:
+                            mode_prompts = payload.get("agentic_mode_prompts") or {}
+                            if isinstance(mode_prompts, dict):
+                                for mode in AGENTIC_MODES:
+                                    if mode in mode_prompts:
+                                        session.variables[
+                                            f"agentic_mode_prompt_{mode}"
+                                        ] = str(mode_prompts.get(mode) or "")
                         if "thinking" in payload:
                             session.thinking = bool(payload.get("thinking"))
                         if "agentic" in payload:

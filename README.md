@@ -132,6 +132,7 @@ For the phased feature workflow and plan file format, see `documentation/feature
 - `POST /api/sessions/new` — create a new session using the current provider/model.
 - `POST /api/sessions/load` — switch to another saved session.
 - `POST /api/sessions/delete` — delete a saved session.
+- `POST /api/sessions/rename` — rename an existing saved session.
 - `GET /api/events` — subscribe to live server-sent events for task, approval, command, tool, runtime, workspace, staged-file, stream lifecycle, and live trace updates (`trace.info`, `trace.tool`, `trace.tool_result`, etc.).
 - `GET /api/tasks` / `GET /api/tasks/<task_id>` — inspect async message task state.
 - `GET /api/approvals` / `GET /api/approvals/<approval_id>` — inspect pending approval requests for modifying tools.
@@ -153,6 +154,22 @@ For the phased feature workflow and plan file format, see `documentation/feature
 - `POST /api/tool` — invoke a tool directly with JSON arguments for GUI workflows that want structured tool access. Structured tool responses include envelope fields such as `error`, `error_code`, `modified_files`, `artifacts`, and `telemetry`.
 
 For provider switching, you can still use `POST /api/command` with a slash command such as `{"command":"/provider ollama"}`.
+
+### Lightweight GUI launcher
+
+You can launch the API server and a compact reactive browser GUI together:
+
+```bash
+./start_gui.sh
+```
+
+Optional flags are forwarded to `gui/launcher.py`:
+
+```bash
+./start_gui.sh --server-host 127.0.0.1 --server-port 8765 --gui-host 127.0.0.1 --gui-port 4173 --provider openai --model gpt-5
+```
+
+The GUI is served from `gui/` and logs with rollover are written to `~/.mucli/gui/logs/`.
 
 ### Example requests
 

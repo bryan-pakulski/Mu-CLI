@@ -156,6 +156,11 @@ def create_feature_plan(
 
     tasks = []
     for idx, t in enumerate(items, start=1):
+        if not isinstance(t, dict):
+            raise ValueError(
+                "Invalid tasks_data entry at index "
+                f"{idx}: expected object, got {type(t).__name__} ({t!r})"
+            )
         tasks.append(
             FeatureTask(
                 id=idx,

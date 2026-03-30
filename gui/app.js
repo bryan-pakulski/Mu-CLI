@@ -156,8 +156,10 @@ function renderConversation(history) {
 
     const card = document.createElement("div");
     card.className = "event-card";
-    card.innerHTML = `<div class="event-head">${message.role}</div><div class="event-body"></div>`;
-    card.querySelector(".event-body").textContent = textParts.join("\n\n");
+    card.innerHTML = `<div class="event-head"><span>${message.role}</span><button class="ghost-btn copy-entry-btn" title="Copy full message">Copy</button></div><div class="event-body markdown-body"></div>`;
+    const fullText = textParts.join("\n\n");
+    renderMarkdown(card.querySelector(".event-body"), fullText);
+    card.querySelector(".copy-entry-btn").addEventListener("click", async () => copyText(fullText));
     ui.chatStream.appendChild(card);
   }
 
@@ -165,8 +167,9 @@ function renderConversation(history) {
   if (pending) {
     const userCard = document.createElement("div");
     userCard.className = "event-card pending";
-    userCard.innerHTML = `<div class="event-head">user</div><div class="event-body"></div>`;
-    userCard.querySelector(".event-body").textContent = pending.userText;
+    userCard.innerHTML = `<div class="event-head"><span>user</span><button class="ghost-btn copy-entry-btn" title="Copy full message">Copy</button></div><div class="event-body markdown-body"></div>`;
+    renderMarkdown(userCard.querySelector(".event-body"), pending.userText);
+    userCard.querySelector(".copy-entry-btn").addEventListener("click", async () => copyText(pending.userText));
     ui.chatStream.appendChild(userCard);
 
     const agentCard = document.createElement("div");
@@ -176,6 +179,32 @@ function renderConversation(history) {
   }
   ui.chatStream.scrollTop = ui.chatStream.scrollHeight;
   renderApprovalOverlay();
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text || "");
+    pushEvent("copy.success", "Copied to clipboard.");
+  } catch (err) {
+    pushEvent("copy.error", String(err));
+  }
+}
+
+function renderMarkdown(container, text) {
+  const source = String(text || "");
+  const rendered = window.marked ? window.marked.parse(source, { gfm: true, breaks: true }) : source;
+  const sanitized = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
+  container.innerHTML = sanitized;
+  container.querySelectorAll("pre code").forEach((block) => {
+    if (window.hljs) window.hljs.highlightElement(block);
+    const pre = block.closest("pre");
+    if (!pre || pre.querySelector(".copy-code-btn")) return;
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "ghost-btn copy-code-btn";
+    copyBtn.textContent = "Copy code";
+    copyBtn.addEventListener("click", async () => copyText(block.textContent || ""));
+    pre.appendChild(copyBtn);
+  });
 }
 
 function renderApprovalOverlay() {

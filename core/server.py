@@ -18,7 +18,7 @@ from core.tools import (
 )
 from providers.ollama import OllamaProvider
 from utils.logger import logger
-from utils.config import validate_and_cast
+from utils.config import validate_and_cast, AGENTIC_SYSTEM_BASE, AGENTIC_MODES
 from core.feature_mode import (
     build_phase_execution_prompt,
     build_review_prompt,
@@ -1176,11 +1176,22 @@ def build_sessions_payload(session) -> dict:
 def build_runtime_payload(session) -> dict:
     session.sync_runtime_state()
     sync_live_provider_settings(session)
+    agentic_mode_prompts = {
+        mode: str(
+            session.variables.get(f"agentic_mode_prompt_{mode}", default_prompt) or ""
+        )
+        for mode, default_prompt in AGENTIC_MODES.items()
+    }
     return {
         "session_name": session.session_manager.current_session_name,
         "provider": session.provider.name,
         "model": session.provider.model_name,
         "system_instruction": session.system_instruction,
+        "agentic_system_base": str(
+            session.variables.get("agentic_system_base_override", AGENTIC_SYSTEM_BASE)
+            or ""
+        ),
+        "agentic_mode_prompts": agentic_mode_prompts,
         "thinking": session.thinking,
         "agentic": session.agentic,
         "disabled_tools": list(session.disabled_tools),
@@ -1956,6 +1967,18 @@ def serve(session, host: str, port: int, command_handler):
                             session.system_instruction = str(
                                 payload.get("system_instruction") or ""
                             )
+                        if "agentic_system_base" in payload:
+                            session.variables["agentic_system_base_override"] = str(
+                                payload.get("agentic_system_base") or ""
+                            )
+                        if "agentic_mode_prompts" in payload:
+                            mode_prompts = payload.get("agentic_mode_prompts") or {}
+                            if isinstance(mode_prompts, dict):
+                                for mode in AGENTIC_MODES:
+                                    if mode in mode_prompts:
+                                        session.variables[
+                                            f"agentic_mode_prompt_{mode}"
+                                        ] = str(mode_prompts.get(mode) or "")
                         if "thinking" in payload:
                             session.thinking = bool(payload.get("thinking"))
                         if "agentic" in payload:

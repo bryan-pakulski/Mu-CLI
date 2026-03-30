@@ -1595,12 +1595,25 @@ class Session:
                 )
 
                 agent_mode = str(self.variables.get("agent_mode", "default")).lower()
-                mode_instruction = AGENTIC_MODES.get(
+                default_mode_instruction = AGENTIC_MODES.get(
                     agent_mode, AGENTIC_MODES["default"]
+                )
+                mode_instruction = str(
+                    self.variables.get(
+                        f"agentic_mode_prompt_{agent_mode}",
+                        default_mode_instruction,
+                    )
+                    or default_mode_instruction
+                )
+                agentic_system_base = str(
+                    self.variables.get(
+                        "agentic_system_base_override", AGENTIC_SYSTEM_BASE
+                    )
+                    or AGENTIC_SYSTEM_BASE
                 )
 
                 # Providers automatically generated tool prompts so don't need to be embedded into the system prompt
-                workspace_context = f"{AGENTIC_SYSTEM_BASE}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
+                workspace_context = f"{agentic_system_base}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
             else:
                 logger.debug(
                     f"Using agent_mode={self.variables.get('agent_mode', 'default')}"

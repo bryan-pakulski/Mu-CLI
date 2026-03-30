@@ -64,6 +64,11 @@ const ui = {
   variablesList: el("variablesList"),
   memoryList: el("memoryList"),
   systemPromptInput: el("systemPromptInput"),
+  agenticBasePromptInput: el("agenticBasePromptInput"),
+  agenticModeDefaultInput: el("agenticModeDefaultInput"),
+  agenticModeDebugInput: el("agenticModeDebugInput"),
+  agenticModeFeatureInput: el("agenticModeFeatureInput"),
+  agenticModeResearchInput: el("agenticModeResearchInput"),
   settingsModelInput: el("settingsModelInput"),
   themeModeSelect: el("themeModeSelect"),
   accentSelect: el("accentSelect"),
@@ -226,6 +231,11 @@ async function refreshRuntime() {
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
     ui.systemPromptInput.value = runtime.system_instruction || "";
+    ui.agenticBasePromptInput.value = runtime.agentic_system_base || "";
+    ui.agenticModeDefaultInput.value = runtime.agentic_mode_prompts?.default || "";
+    ui.agenticModeDebugInput.value = runtime.agentic_mode_prompts?.debug || "";
+    ui.agenticModeFeatureInput.value = runtime.agentic_mode_prompts?.feature || "";
+    ui.agenticModeResearchInput.value = runtime.agentic_mode_prompts?.research || "";
 
     ui.runtimeSummary.textContent = [
       `session: ${runtime.session_name}`,
@@ -814,6 +824,13 @@ async function saveSettings() {
         variables,
         model: ui.settingsModelInput.value.trim(),
         system_instruction: ui.systemPromptInput.value,
+        agentic_system_base: ui.agenticBasePromptInput.value,
+        agentic_mode_prompts: {
+          default: ui.agenticModeDefaultInput.value,
+          debug: ui.agenticModeDebugInput.value,
+          feature: ui.agenticModeFeatureInput.value,
+          research: ui.agenticModeResearchInput.value,
+        },
       }),
     });
     pushEvent("settings.saved", res);

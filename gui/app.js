@@ -34,6 +34,7 @@ const ui = {
   chatStream: el("chatStream"),
   stateBadge: el("stateBadge"),
   runtimeSummary: el("runtimeSummary"),
+  statsSummary: el("statsSummary"),
   modelInput: el("modelInput"),
   agenticToggle: el("agenticToggle"),
   thinkingToggle: el("thinkingToggle"),
@@ -177,6 +178,28 @@ async function refreshRuntime() {
   } catch (err) {
     setConnected(false, `Error: ${err.message}`);
     pushEvent("runtime.error", String(err));
+  }
+}
+
+async function refreshStats() {
+  try {
+    const statePayload = await fetchJson("/api/state");
+    const token = statePayload.state?.token_counts || {};
+    const historyLength = statePayload.state?.history_length ?? 0;
+    const disabledTools = (statePayload.state?.disabled_tools || []).length;
+    const memoryInfo = performance?.memory
+      ? `${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)}MB / ${(performance.memory.totalJSHeapSize / 1024 / 1024).toFixed(1)}MB`
+      : "n/a";
+    ui.statsSummary.textContent = [
+      `history_length: ${historyLength}`,
+      `tokens_total: ${token.total ?? 0}`,
+      `tokens_in/out: ${token.input ?? 0} / ${token.output ?? 0}`,
+      `est_cost_total: ${token.total_cost ?? 0}`,
+      `disabled_tools: ${disabledTools}`,
+      `browser_memory: ${memoryInfo}`,
+    ].join("\n");
+  } catch (err) {
+    ui.statsSummary.textContent = `stats error: ${String(err)}`;
   }
 }
 
@@ -501,6 +524,7 @@ function setupHandlers() {
   ui.refreshBtn.addEventListener("click", async () => {
     await refreshRuntime();
     await refreshTools();
+    await refreshStats();
   });
   ui.clearLogBtn.addEventListener("click", () => {
     state.events = [];
@@ -524,11 +548,11 @@ function setupHandlers() {
   document.querySelectorAll(".cmd-btn").forEach((btn) => btn.addEventListener("click", () => runCommand(btn.dataset.cmd)));
 
   ui.openSettingsBtn.addEventListener("click", async () => {
+    openModal();
     await refreshRuntime();
     await refreshTools();
     renderToolsSettings();
     renderVariableSections();
-    openModal();
   });
   ui.closeSettingsBtn.addEventListener("click", closeModal);
   ui.settingsModal.addEventListener("click", (evt) => {
@@ -624,8 +648,10 @@ refreshRuntime();
 refreshTools();
 refreshSessions();
 refreshHistory();
+refreshStats();
 setInterval(() => {
   refreshRuntime();
   refreshTools();
   refreshSessions();
+  refreshStats();
 }, 12000);

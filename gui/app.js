@@ -8,6 +8,9 @@ const state = {
   runtime: null,
   sessions: [],
   currentSession: "",
+  sessionStatus: {},
+  pendingBySession: {},
+  currentConversation: [],
 };
 try {
   const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
@@ -119,8 +122,11 @@ function inferMetaTag(kind) {
 }
 
 function renderConversation(history) {
+  if (history) {
+    state.currentConversation = history;
+  }
   ui.chatStream.innerHTML = "";
-  for (const message of history || []) {
+  for (const message of state.currentConversation || []) {
     if (!["user", "assistant"].includes(message.role)) continue;
     const textParts = (message.parts || [])
       .filter((part) => part.type === "text")
@@ -133,6 +139,20 @@ function renderConversation(history) {
     card.innerHTML = `<div class="event-head">${message.role}</div><div class="event-body"></div>`;
     card.querySelector(".event-body").textContent = textParts.join("\n\n");
     ui.chatStream.appendChild(card);
+  }
+
+  const pending = state.pendingBySession[state.currentSession];
+  if (pending) {
+    const userCard = document.createElement("div");
+    userCard.className = "event-card pending";
+    userCard.innerHTML = `<div class="event-head">user</div><div class="event-body"></div>`;
+    userCard.querySelector(".event-body").textContent = pending.userText;
+    ui.chatStream.appendChild(userCard);
+
+    const agentCard = document.createElement("div");
+    agentCard.className = "event-card pending";
+    agentCard.innerHTML = `<div class="event-head">assistant</div><div class="event-body"><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></div>`;
+    ui.chatStream.appendChild(agentCard);
   }
   ui.chatStream.scrollTop = ui.chatStream.scrollHeight;
 }
@@ -211,6 +231,9 @@ async function refreshSessions() {
     const data = await fetchJson("/api/sessions");
     state.sessions = data.sessions || [];
     state.currentSession = data.current_session_name || "";
+    for (const name of state.sessions) {
+      if (!state.sessionStatus[name]) state.sessionStatus[name] = "idle";
+    }
     renderSessionTabs();
   } catch (err) {
     pushEvent("sessions.error", String(err));
@@ -365,7 +388,8 @@ function renderSessionTabs() {
 
     const loadBtn = document.createElement("button");
     loadBtn.className = "name";
-    loadBtn.textContent = sessionName;
+    const status = state.sessionStatus[sessionName] || "idle";
+    loadBtn.innerHTML = `<span class="status-light ${status}"></span>${sessionName}`;
     loadBtn.title = sessionName;
     loadBtn.addEventListener("click", () => loadSession(sessionName));
 
@@ -469,15 +493,68 @@ function applyTheme() {
 async function sendMessage() {
   const text = ui.messageInput.value.trim();
   if (!text) return;
+  const sessionName = state.currentSession;
   ui.messageInput.value = "";
   pushEvent("message.out", text);
+  state.pendingBySession[sessionName] = { userText: text };
+  state.sessionStatus[sessionName] = "thinking";
+  renderSessionTabs();
+  renderConversation();
   try {
-    const result = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text }) });
-    pushEvent("message.in", result);
-    await refreshHistory();
+    const result = await fetchJson("/api/message", {
+      method: "POST",
+      body: JSON.stringify({ text, async: true }),
+    });
+    const taskId = result?.task?.task_id;
+    if (!taskId) {
+      delete state.pendingBySession[sessionName];
+      state.sessionStatus[sessionName] = "idle";
+      await refreshHistory();
+      renderSessionTabs();
+      renderConversation();
+      return;
+    }
+    await monitorMessageTask(taskId, sessionName);
   } catch (err) {
     pushEvent("message.error", String(err));
+    delete state.pendingBySession[sessionName];
+    state.sessionStatus[sessionName] = "error";
+    renderSessionTabs();
+    renderConversation();
   }
+}
+
+async function monitorMessageTask(taskId, sessionName) {
+  for (let i = 0; i < 240; i += 1) {
+    const taskPayload = await fetchJson(`/api/tasks/${taskId}`);
+    const task = taskPayload.task || {};
+    if (task.status === "awaiting_approval") {
+      state.sessionStatus[sessionName] = "approval";
+      renderSessionTabs();
+    } else if (task.status === "running" || task.status === "pending") {
+      state.sessionStatus[sessionName] = "thinking";
+      renderSessionTabs();
+    } else if (task.status === "completed") {
+      delete state.pendingBySession[sessionName];
+      state.sessionStatus[sessionName] = "idle";
+      if (state.currentSession === sessionName) {
+        await refreshHistory();
+      }
+      renderSessionTabs();
+      renderConversation();
+      return;
+    } else if (task.status === "error") {
+      delete state.pendingBySession[sessionName];
+      state.sessionStatus[sessionName] = "error";
+      renderSessionTabs();
+      renderConversation();
+      pushEvent("message.error", task.error || "Task failed");
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 900));
+  }
+  state.sessionStatus[sessionName] = "error";
+  renderSessionTabs();
 }
 
 async function applyRuntime() {

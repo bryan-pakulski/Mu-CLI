@@ -92,17 +92,79 @@
           <button id="closeSettingsBtn" class="ghost-btn">✕</button>
         </div>
 
-        <label class="field">
-          Disabled tools (comma separated)
-          <input id="disabledToolsInput" type="text" placeholder="git_push, git_merge_request" />
-        </label>
+        <div class="settings-layout">
+          <nav class="settings-tabs" id="settingsTabs">
+            <button class="settings-tab active" data-tab="tools">Tools</button>
+            <button class="settings-tab" data-tab="variables">Variables</button>
+            <button class="settings-tab" data-tab="memory">Memory & Context</button>
+            <button class="settings-tab" data-tab="system">System</button>
+            <button class="settings-tab" data-tab="appearance">Appearance</button>
+          </nav>
 
-        <label class="field">
-          Variables JSON
-          <textarea id="variablesInput" rows="8" class="mono"></textarea>
-        </label>
+          <section class="settings-content">
+            <div class="settings-pane active" data-pane="tools">
+              <div class="settings-group">
+                <h4>Tool Access</h4>
+                <p class="muted">Enable or disable tools individually.</p>
+                <div id="toolsList" class="settings-grid"></div>
+              </div>
+            </div>
 
-        <div class="row">
+            <div class="settings-pane" data-pane="variables">
+              <div class="settings-group">
+                <h4>Execution Variables</h4>
+                <p class="muted">Toggle common variable flags individually.</p>
+                <div class="settings-grid" id="variablesList"></div>
+              </div>
+            </div>
+
+            <div class="settings-pane" data-pane="memory">
+              <div class="settings-group">
+                <h4>Memory & Context</h4>
+                <div class="settings-grid" id="memoryList"></div>
+              </div>
+            </div>
+
+            <div class="settings-pane" data-pane="system">
+              <div class="settings-group">
+                <h4>System Prompt</h4>
+                <label class="field">
+                  Runtime model
+                  <input id="settingsModelInput" type="text" />
+                </label>
+                <label class="field">
+                  System instruction
+                  <textarea id="systemPromptInput" rows="7"></textarea>
+                </label>
+              </div>
+            </div>
+
+            <div class="settings-pane" data-pane="appearance">
+              <div class="settings-group">
+                <h4>Theme</h4>
+                <div class="settings-grid two">
+                  <label class="field">
+                    Mode
+                    <select id="themeModeSelect">
+                      <option value="dark">Dark</option>
+                      <option value="light">Light</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    Highlight
+                    <select id="accentSelect">
+                      <option value="orange">Orange</option>
+                      <option value="purple">Purple</option>
+                      <option value="teal">Teal</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="row end">
           <button id="saveSettingsBtn" class="accent-btn">Save Settings</button>
         </div>
       </div>

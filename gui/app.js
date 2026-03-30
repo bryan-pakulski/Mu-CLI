@@ -4,7 +4,22 @@ const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
   events: [],
   eventSource: null,
+  tools: [],
+  runtime: null,
 };
+
+const VARIABLE_DEFS = [
+  { key: "yolo", label: "YOLO mode", type: "bool", group: "variables" },
+  { key: "strict_mode", label: "Strict approvals", type: "bool", group: "variables" },
+  { key: "agent_mode", label: "Agent mode", type: "select", options: ["default", "debug", "feature", "research"], group: "variables" },
+  { key: "memory_enabled", label: "Memory enabled", type: "bool", group: "memory" },
+  { key: "compact_history", label: "Compact history", type: "bool", group: "memory" },
+  { key: "collation_enabled", label: "Collation enabled", type: "bool", group: "memory" },
+  { key: "max_iterations", label: "Max iterations", type: "number", group: "memory" },
+  { key: "make_timeout", label: "Make timeout", type: "number", group: "memory" },
+  { key: "make_max_output", label: "Make max output", type: "number", group: "memory" },
+  { key: "ollama_host", label: "Ollama host", type: "text", group: "memory" },
+];
 
 const ui = {
   apiBaseInput: el("apiBaseInput"),
@@ -26,8 +41,14 @@ const ui = {
   closeSettingsBtn: el("closeSettingsBtn"),
   saveSettingsBtn: el("saveSettingsBtn"),
   settingsModal: el("settingsModal"),
-  disabledToolsInput: el("disabledToolsInput"),
-  variablesInput: el("variablesInput"),
+  settingsTabs: el("settingsTabs"),
+  toolsList: el("toolsList"),
+  variablesList: el("variablesList"),
+  memoryList: el("memoryList"),
+  systemPromptInput: el("systemPromptInput"),
+  settingsModelInput: el("settingsModelInput"),
+  themeModeSelect: el("themeModeSelect"),
+  accentSelect: el("accentSelect"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -42,11 +63,7 @@ function clip(text, max = 1800) {
 }
 
 function pushEvent(kind, payload) {
-  state.events.unshift({
-    ts: new Date().toLocaleTimeString(),
-    kind,
-    payload: clip(payload),
-  });
+  state.events.unshift({ ts: new Date().toLocaleTimeString(), kind, payload: clip(payload) });
   state.events = state.events.slice(0, 300);
   renderEvents();
 }
@@ -56,46 +73,34 @@ function renderEvents() {
   for (const event of state.events) {
     const card = document.createElement("div");
     card.className = "event-card";
-    card.innerHTML = `
-      <div class="event-head">${event.ts} · ${event.kind}</div>
-      <div class="event-body"></div>
-    `;
+    card.innerHTML = `<div class="event-head">${event.ts} · ${event.kind}</div><div class="event-body"></div>`;
     card.querySelector(".event-body").textContent = event.payload;
     ui.eventStream.appendChild(card);
   }
 }
 
 async function fetchJson(path, options = {}) {
-  const resp = await fetch(api(path), {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const resp = await fetch(api(path), { headers: { "Content-Type": "application/json" }, ...options });
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(data.error || `HTTP ${resp.status}`);
-  }
+  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
   return data;
 }
 
 function setConnected(connected, text = "Connected") {
   ui.stateBadge.classList.remove("connected", "error");
-  if (connected) {
-    ui.stateBadge.classList.add("connected");
-    ui.stateBadge.textContent = text;
-  } else {
-    ui.stateBadge.classList.add("error");
-    ui.stateBadge.textContent = text;
-  }
+  ui.stateBadge.classList.add(connected ? "connected" : "error");
+  ui.stateBadge.textContent = text;
 }
 
 async function refreshRuntime() {
   try {
     const runtime = await fetchJson("/api/runtime");
+    state.runtime = runtime;
     ui.modelInput.value = runtime.model || "";
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
-    ui.disabledToolsInput.value = (runtime.disabled_tools || []).join(", ");
-    ui.variablesInput.value = JSON.stringify(runtime.variables || {}, null, 2);
+    ui.settingsModelInput.value = runtime.model || "";
+    ui.systemPromptInput.value = runtime.system_instruction || "";
 
     ui.runtimeSummary.textContent = [
       `session: ${runtime.session_name}`,
@@ -105,7 +110,6 @@ async function refreshRuntime() {
       `thinking: ${runtime.thinking}`,
       `disabled_tools: ${(runtime.disabled_tools || []).length}`,
     ].join("\n");
-
     setConnected(true, "Connected");
   } catch (err) {
     setConnected(false, `Error: ${err.message}`);
@@ -113,12 +117,18 @@ async function refreshRuntime() {
   }
 }
 
-function connectSSE() {
-  if (state.eventSource) {
-    state.eventSource.close();
+async function refreshTools() {
+  try {
+    const data = await fetchJson("/api/tools");
+    state.tools = data.tools || [];
+  } catch (err) {
+    pushEvent("tools.error", String(err));
   }
-  state.eventSource = new EventSource(api("/api/events"));
+}
 
+function connectSSE() {
+  if (state.eventSource) state.eventSource.close();
+  state.eventSource = new EventSource(api("/api/events"));
   state.eventSource.onmessage = (evt) => {
     try {
       const payload = JSON.parse(evt.data);
@@ -127,10 +137,89 @@ function connectSSE() {
       pushEvent("event", evt.data);
     }
   };
+  state.eventSource.onerror = () => setConnected(false, "SSE disconnected");
+}
 
-  state.eventSource.onerror = () => {
-    setConnected(false, "SSE disconnected");
-  };
+function renderSettingField(def, values) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "setting-item";
+  const left = document.createElement("div");
+  left.innerHTML = `<div class="label">${def.label}</div><div class="desc">${def.key}</div>`;
+  wrapper.appendChild(left);
+
+  const value = values[def.key];
+  let input;
+  if (def.type === "bool") {
+    input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !!value;
+  } else if (def.type === "number") {
+    input = document.createElement("input");
+    input.type = "number";
+    input.value = Number(value ?? 0);
+  } else if (def.type === "select") {
+    input = document.createElement("select");
+    for (const option of def.options || []) {
+      const opt = document.createElement("option");
+      opt.value = option;
+      opt.textContent = option;
+      if ((value ?? "") === option) opt.selected = true;
+      input.appendChild(opt);
+    }
+  } else {
+    input = document.createElement("input");
+    input.type = "text";
+    input.value = value ?? "";
+  }
+  input.dataset.varKey = def.key;
+  wrapper.appendChild(input);
+  return wrapper;
+}
+
+function renderToolsSettings() {
+  const disabled = new Set(state.runtime?.disabled_tools || []);
+  ui.toolsList.innerHTML = "";
+  for (const tool of state.tools) {
+    const item = document.createElement("div");
+    item.className = "setting-item";
+    item.innerHTML = `<div><div class="label">${tool.name}</div><div class="desc">${tool.execution_kind} · ${tool.server_policy}</div></div>`;
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = !disabled.has(tool.name);
+    checkbox.dataset.toolName = tool.name;
+    item.appendChild(checkbox);
+    ui.toolsList.appendChild(item);
+  }
+}
+
+function renderVariableSections() {
+  const vars = state.runtime?.variables || {};
+  ui.variablesList.innerHTML = "";
+  ui.memoryList.innerHTML = "";
+  for (const def of VARIABLE_DEFS) {
+    const field = renderSettingField(def, vars);
+    if (def.group === "memory") ui.memoryList.appendChild(field);
+    else ui.variablesList.appendChild(field);
+  }
+}
+
+function openModal() {
+  ui.settingsModal.classList.remove("hidden");
+  requestAnimationFrame(() => ui.settingsModal.classList.add("show"));
+}
+
+function closeModal() {
+  ui.settingsModal.classList.remove("show");
+  setTimeout(() => ui.settingsModal.classList.add("hidden"), 180);
+}
+
+function applyTheme() {
+  const mode = localStorage.getItem("mucli_gui_theme_mode") || "dark";
+  const accent = localStorage.getItem("mucli_gui_accent") || "orange";
+  document.documentElement.setAttribute("data-theme", mode);
+  document.documentElement.setAttribute("data-accent", accent);
+  ui.themeModeSelect.value = mode;
+  ui.accentSelect.value = accent;
 }
 
 async function sendMessage() {
@@ -139,10 +228,7 @@ async function sendMessage() {
   ui.messageInput.value = "";
   pushEvent("message.out", text);
   try {
-    const result = await fetchJson("/api/message", {
-      method: "POST",
-      body: JSON.stringify({ text }),
-    });
+    const result = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text }) });
     pushEvent("message.in", result);
   } catch (err) {
     pushEvent("message.error", String(err));
@@ -150,15 +236,10 @@ async function sendMessage() {
 }
 
 async function applyRuntime() {
-  const payload = {
-    model: ui.modelInput.value.trim(),
-    agentic: ui.agenticToggle.checked,
-    thinking: ui.thinkingToggle.checked,
-  };
   try {
     const res = await fetchJson("/api/runtime", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ model: ui.modelInput.value.trim(), agentic: ui.agenticToggle.checked, thinking: ui.thinkingToggle.checked }),
     });
     pushEvent("runtime.updated", res);
     await refreshRuntime();
@@ -168,26 +249,38 @@ async function applyRuntime() {
 }
 
 async function saveSettings() {
-  let variables = {};
-  try {
-    variables = JSON.parse(ui.variablesInput.value || "{}");
-  } catch (err) {
-    pushEvent("settings.error", `Invalid variables JSON: ${err.message}`);
-    return;
-  }
-  const disabled_tools = ui.disabledToolsInput.value
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
+  const disabled_tools = [];
+  ui.toolsList.querySelectorAll("input[data-tool-name]").forEach((input) => {
+    if (!input.checked) disabled_tools.push(input.dataset.toolName);
+  });
+
+  const variables = { ...(state.runtime?.variables || {}) };
+  [...ui.variablesList.querySelectorAll("[data-var-key]"), ...ui.memoryList.querySelectorAll("[data-var-key]")].forEach((input) => {
+    const key = input.dataset.varKey;
+    if (!key) return;
+    if (input.type === "checkbox") variables[key] = input.checked;
+    else if (input.type === "number") variables[key] = Number(input.value || 0);
+    else variables[key] = input.value;
+  });
+
+  localStorage.setItem("mucli_gui_theme_mode", ui.themeModeSelect.value);
+  localStorage.setItem("mucli_gui_accent", ui.accentSelect.value);
+  applyTheme();
 
   try {
     const res = await fetchJson("/api/runtime", {
       method: "POST",
-      body: JSON.stringify({ disabled_tools, variables }),
+      body: JSON.stringify({
+        disabled_tools,
+        variables,
+        model: ui.settingsModelInput.value.trim(),
+        system_instruction: ui.systemPromptInput.value,
+      }),
     });
     pushEvent("settings.saved", res);
-    ui.settingsModal.classList.add("hidden");
+    closeModal();
     await refreshRuntime();
+    await refreshTools();
   } catch (err) {
     pushEvent("settings.save_error", String(err));
   }
@@ -195,10 +288,7 @@ async function saveSettings() {
 
 async function runCommand(command) {
   try {
-    const res = await fetchJson("/api/command", {
-      method: "POST",
-      body: JSON.stringify({ command }),
-    });
+    const res = await fetchJson("/api/command", { method: "POST", body: JSON.stringify({ command }) });
     pushEvent(`command ${command}`, res);
     await refreshRuntime();
   } catch (err) {
@@ -206,43 +296,65 @@ async function runCommand(command) {
   }
 }
 
+function setupTabSwitching() {
+  ui.settingsTabs.querySelectorAll(".settings-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const name = tab.dataset.tab;
+      ui.settingsTabs.querySelectorAll(".settings-tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".settings-pane").forEach((pane) => pane.classList.remove("active"));
+      tab.classList.add("active");
+      document.querySelector(`.settings-pane[data-pane="${name}"]`)?.classList.add("active");
+    });
+  });
+}
+
 function setupHandlers() {
   ui.sendBtn.addEventListener("click", sendMessage);
-  ui.refreshBtn.addEventListener("click", refreshRuntime);
+  ui.refreshBtn.addEventListener("click", async () => {
+    await refreshRuntime();
+    await refreshTools();
+  });
   ui.clearLogBtn.addEventListener("click", () => {
     state.events = [];
     renderEvents();
   });
   ui.applyRuntimeBtn.addEventListener("click", applyRuntime);
 
-  ui.apiBaseInput.addEventListener("change", () => {
+  ui.apiBaseInput.addEventListener("change", async () => {
     state.apiBase = ui.apiBaseInput.value.trim().replace(/\/$/, "");
     localStorage.setItem("mucli_gui_api_base", state.apiBase);
     connectSSE();
-    refreshRuntime();
+    await refreshRuntime();
+    await refreshTools();
   });
 
-  document.querySelectorAll(".cmd-btn").forEach((btn) => {
-    btn.addEventListener("click", () => runCommand(btn.dataset.cmd));
-  });
+  document.querySelectorAll(".cmd-btn").forEach((btn) => btn.addEventListener("click", () => runCommand(btn.dataset.cmd)));
 
-  ui.openSettingsBtn.addEventListener("click", () => {
-    ui.settingsModal.classList.remove("hidden");
+  ui.openSettingsBtn.addEventListener("click", async () => {
+    await refreshRuntime();
+    await refreshTools();
+    renderToolsSettings();
+    renderVariableSections();
+    openModal();
   });
-  ui.closeSettingsBtn.addEventListener("click", () => {
-    ui.settingsModal.classList.add("hidden");
-  });
+  ui.closeSettingsBtn.addEventListener("click", closeModal);
   ui.settingsModal.addEventListener("click", (evt) => {
-    if (evt.target === ui.settingsModal) {
-      ui.settingsModal.classList.add("hidden");
-    }
+    if (evt.target === ui.settingsModal) closeModal();
   });
   document.addEventListener("keydown", (evt) => {
-    if (evt.key === "Escape") {
-      ui.settingsModal.classList.add("hidden");
-    }
+    if (evt.key === "Escape") closeModal();
+    if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") sendMessage();
   });
   ui.saveSettingsBtn.addEventListener("click", saveSettings);
+
+  ui.themeModeSelect.addEventListener("change", () => {
+    localStorage.setItem("mucli_gui_theme_mode", ui.themeModeSelect.value);
+    applyTheme();
+  });
+  ui.accentSelect.addEventListener("change", () => {
+    localStorage.setItem("mucli_gui_accent", ui.accentSelect.value);
+    applyTheme();
+  });
 
   ui.collapseBtn.addEventListener("click", () => {
     ui.configPanel.classList.add("collapsed");
@@ -252,15 +364,15 @@ function setupHandlers() {
     ui.configPanel.classList.remove("collapsed");
     ui.expandBtn.classList.add("hidden");
   });
-
-  ui.messageInput.addEventListener("keydown", (evt) => {
-    if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") {
-      sendMessage();
-    }
-  });
 }
 
 setupHandlers();
+setupTabSwitching();
+applyTheme();
 connectSSE();
 refreshRuntime();
-setInterval(refreshRuntime, 12000);
+refreshTools();
+setInterval(() => {
+  refreshRuntime();
+  refreshTools();
+}, 12000);

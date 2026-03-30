@@ -112,12 +112,22 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
   align-items: center;
   gap: .45rem;
 }
-.session-tabs { display: flex; gap: .35rem; overflow-x: auto; flex: 1; }
+.session-tabs-wrap {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+.session-tabs { display: flex; gap: .35rem; min-width: max-content; }
+.session-new-btn { flex: 0 0 auto; }
 .session-tab {
   background: transparent;
   border: 0;
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   min-width: 0;
   position: relative;
   padding-right: .35rem;
@@ -171,9 +181,9 @@ button:hover { background: color-mix(in oklab, var(--text) 9%, transparent); }
 }
 .menu-btn { color: var(--muted); letter-spacing: .06em; }
 .session-menu {
-  position: absolute;
-  top: 1.25rem;
-  right: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
   min-width: 180px;
   border: 1px solid var(--border);
   border-radius: 8px;

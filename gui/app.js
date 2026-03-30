@@ -727,6 +727,11 @@ function renderSessionTabs() {
       evt.preventDefault();
       evt.stopPropagation();
       document.querySelectorAll(".session-menu.open").forEach((m) => m.classList.remove("open"));
+      const rect = menuBtn.getBoundingClientRect();
+      const menuWidth = 220;
+      const left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
+      dropdown.style.left = `${left}px`;
+      dropdown.style.top = `${rect.bottom + 6}px`;
       dropdown.classList.toggle("open");
     });
     dropdown.addEventListener("click", (evt) => evt.stopPropagation());

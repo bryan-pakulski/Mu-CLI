@@ -136,7 +136,7 @@ button {
 .hidden { display: none; }
 
 .modal-card {
-  width: min(980px, 96vw); min-height: min(640px, 88vh); background: var(--panel); border: 1px solid var(--border);
+  width: min(980px, 96vw); height: min(720px, 88vh); background: var(--panel); border: 1px solid var(--border);
   border-radius: 16px; padding: .95rem; display: flex; flex-direction: column; gap: .7rem;
   transform: translateY(10px) scale(.99); transition: transform .22s ease;
   box-shadow: 0 20px 80px #00000052;
@@ -150,7 +150,7 @@ button {
 .settings-tab { background: transparent; border-color: transparent; color: var(--muted); text-align: left; padding: .52rem .58rem; }
 .settings-tab.active { background: color-mix(in oklab, var(--accent) 30%, var(--panel-2)); color: var(--text); }
 
-.settings-content { border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); padding: .65rem; overflow: auto; }
+.settings-content { border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); padding: .65rem; overflow: auto; min-height: 0; }
 .settings-pane { display: none; }
 .settings-pane.active { display: block; }
 .settings-group { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: .7rem; margin-bottom: .6rem; }
@@ -166,6 +166,23 @@ button {
 .setting-item .label { font-size: .78rem; color: var(--text); }
 .setting-item .desc { font-size: .7rem; color: var(--muted); }
 .setting-item input[type="number"], .setting-item input[type="text"], .setting-item select { max-width: 170px; }
+
+.tool-groups { display: flex; flex-direction: column; gap: .45rem; max-height: 430px; overflow: auto; padding-right: .15rem; }
+.tool-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.tool-group > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: .76rem;
+  font-weight: 600;
+  padding: .48rem .6rem;
+  border-bottom: 1px solid var(--border);
+}
+.tool-group[open] > summary { color: var(--accent); }
+.tool-group-body { padding: .45rem; display: grid; gap: .4rem; }
 
 @media (max-width: 900px) {
   .app-shell, .app-shell.panel-collapsed { grid-template-columns: 1fr; }

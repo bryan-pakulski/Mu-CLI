@@ -201,17 +201,49 @@ function renderSettingField(def, values) {
 function renderToolsSettings() {
   const disabled = new Set(state.runtime?.disabled_tools || []);
   ui.toolsList.innerHTML = "";
+
+  const grouped = new Map();
+  const bucketForTool = (tool) => {
+    if (tool.name.startsWith("git_")) return "GIT";
+    if (tool.name.includes("url") || tool.name.includes("document")) return "Internet / External";
+    if (tool.execution_kind === "read") return "Read";
+    if (tool.execution_kind === "mutate") return "Write / Mutate";
+    if (tool.execution_kind === "memory") return "Memory";
+    if (tool.execution_kind === "control") return "Control";
+    return "Other";
+  };
+
   for (const tool of state.tools) {
-    const item = document.createElement("div");
-    item.className = "setting-item";
-    item.innerHTML = `<div><div class="label">${tool.name}</div><div class="desc">${tool.execution_kind} · ${tool.server_policy}</div></div>`;
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = !disabled.has(tool.name);
-    checkbox.dataset.toolName = tool.name;
-    item.appendChild(checkbox);
-    ui.toolsList.appendChild(item);
+    const bucket = bucketForTool(tool);
+    if (!grouped.has(bucket)) grouped.set(bucket, []);
+    grouped.get(bucket).push(tool);
   }
+
+  const groupsContainer = document.createElement("div");
+  groupsContainer.className = "tool-groups";
+  for (const [groupName, tools] of grouped.entries()) {
+    const group = document.createElement("details");
+    group.className = "tool-group";
+    group.open = true;
+    group.innerHTML = `<summary>${groupName} (${tools.length})</summary>`;
+
+    const body = document.createElement("div");
+    body.className = "tool-group-body";
+    for (const tool of tools) {
+      const item = document.createElement("div");
+      item.className = "setting-item";
+      item.innerHTML = `<div><div class="label">${tool.name}</div><div class="desc">${tool.execution_kind} · ${tool.server_policy}</div></div>`;
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !disabled.has(tool.name);
+      checkbox.dataset.toolName = tool.name;
+      item.appendChild(checkbox);
+      body.appendChild(item);
+    }
+    group.appendChild(body);
+    groupsContainer.appendChild(group);
+  }
+  ui.toolsList.appendChild(groupsContainer);
 }
 
 function renderVariableSections() {

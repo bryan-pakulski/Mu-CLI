@@ -46,13 +46,22 @@
             <button id="openSettingsBtn" class="ghost-btn">Settings</button>
           </div>
 
-          <div class="section-title">Quick Commands</div>
-          <div class="row two-cols">
-            <button class="ghost-btn cmd-btn" data-cmd="/tools">/tools</button>
-            <button class="ghost-btn cmd-btn" data-cmd="/variables">/variables</button>
-            <button class="ghost-btn cmd-btn" data-cmd="/feature status">/feature status</button>
-            <button class="ghost-btn cmd-btn" data-cmd="/workspace">/workspace</button>
-          </div>
+          <div class="section-title">Actions</div>
+          <details class="tool-group" open>
+            <summary>Workspace</summary>
+            <div class="tool-group-body">
+              <button class="ghost-btn cmd-btn" data-cmd="/workspace">List workspace</button>
+              <button id="chooseWorkspaceBtn" class="ghost-btn">Choose folder…</button>
+            </div>
+          </details>
+          <details class="tool-group">
+            <summary>Session</summary>
+            <div class="tool-group-body">
+              <button class="ghost-btn cmd-btn" data-cmd="/variables">Variables</button>
+              <button class="ghost-btn cmd-btn" data-cmd="/tools">Tools</button>
+              <button class="ghost-btn cmd-btn" data-cmd="/feature status">Feature status</button>
+            </div>
+          </details>
 
           <div class="section-title">Live State</div>
           <div id="stateBadge" class="badge">Disconnected</div>
@@ -214,23 +223,6 @@
         </div>
         <div class="row end">
           <button id="createSessionConfirmBtn" class="accent-btn">Create Session</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="sessionActionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sessionActionTitle">
-      <div class="modal-card compact-card">
-        <div class="modal-header">
-          <h3 id="sessionActionTitle">Session Options</h3>
-          <button id="closeSessionActionBtn" class="ghost-btn">✕</button>
-        </div>
-        <label class="field">
-          Session name
-          <input id="sessionActionNameInput" type="text" />
-        </label>
-        <div class="row end">
-          <button id="deleteSessionActionBtn" class="ghost-btn">Delete</button>
-          <button id="saveSessionActionBtn" class="accent-btn">Save Name</button>
         </div>
       </div>
     </div>

@@ -8,7 +8,6 @@ const state = {
   runtime: null,
   sessions: [],
   currentSession: "",
-  selectedSessionAction: "",
 };
 try {
   const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
@@ -71,11 +70,7 @@ const ui = {
   newSessionModelInput: el("newSessionModelInput"),
   toggleMetaBtn: el("toggleMetaBtn"),
   metaPanel: el("metaPanel"),
-  sessionActionModal: el("sessionActionModal"),
-  closeSessionActionBtn: el("closeSessionActionBtn"),
-  sessionActionNameInput: el("sessionActionNameInput"),
-  saveSessionActionBtn: el("saveSessionActionBtn"),
-  deleteSessionActionBtn: el("deleteSessionActionBtn"),
+  chooseWorkspaceBtn: el("chooseWorkspaceBtn"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -378,18 +373,50 @@ function renderSessionTabs() {
     menuBtn.className = "menu-btn";
     menuBtn.textContent = "⋯";
     menuBtn.title = "Session actions";
-    menuBtn.addEventListener("click", () => openSessionActionModal(sessionName));
+    const dropdown = document.createElement("div");
+    dropdown.className = "session-menu";
+
+    const editRow = document.createElement("div");
+    editRow.className = "session-menu-row";
+    editRow.innerHTML = "<span>Edit Name</span>";
+    const renameInput = document.createElement("input");
+    renameInput.type = "text";
+    renameInput.className = "session-rename-input";
+    renameInput.value = sessionName;
+    renameInput.addEventListener("keydown", async (evt) => {
+      if (evt.key === "Enter") {
+        await renameSession(sessionName, renameInput.value.trim());
+        dropdown.classList.remove("open");
+      }
+    });
+    renameInput.addEventListener("blur", async () => {
+      if (renameInput.value.trim() && renameInput.value.trim() !== sessionName) {
+        await renameSession(sessionName, renameInput.value.trim());
+      }
+    });
+    editRow.appendChild(renameInput);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "session-delete-btn";
+    deleteBtn.innerHTML = "🗑 Delete";
+    deleteBtn.addEventListener("click", async () => {
+      await deleteSession(sessionName);
+      dropdown.classList.remove("open");
+    });
+
+    dropdown.appendChild(editRow);
+    dropdown.appendChild(deleteBtn);
+    menuBtn.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      document.querySelectorAll(".session-menu.open").forEach((m) => m.classList.remove("open"));
+      dropdown.classList.toggle("open");
+    });
 
     wrapper.appendChild(loadBtn);
     wrapper.appendChild(menuBtn);
+    wrapper.appendChild(dropdown);
     ui.sessionTabs.appendChild(wrapper);
   }
-}
-
-function openSessionActionModal(sessionName) {
-  state.selectedSessionAction = sessionName;
-  ui.sessionActionNameInput.value = sessionName;
-  openSimpleModal(ui.sessionActionModal);
 }
 
 async function loadSession(name) {
@@ -415,8 +442,7 @@ async function deleteSession(name) {
   }
 }
 
-async function renameSession(name) {
-  const newName = ui.sessionActionNameInput.value.trim();
+async function renameSession(name, newName) {
   if (!newName || newName === name) return;
   try {
     await fetchJson("/api/sessions/rename", {
@@ -555,6 +581,12 @@ function setupHandlers() {
   });
 
   document.querySelectorAll(".cmd-btn").forEach((btn) => btn.addEventListener("click", () => runCommand(btn.dataset.cmd)));
+  ui.chooseWorkspaceBtn.addEventListener("click", async () => {
+    const path = window.prompt("Workspace folder path");
+    if (!path) return;
+    await runCommand(`/folder ${path}`);
+    await refreshRuntime();
+  });
 
   ui.openSettingsBtn.addEventListener("click", async () => {
     openModal();
@@ -571,7 +603,7 @@ function setupHandlers() {
     if (evt.key === "Escape") {
       closeModal();
       closeSimpleModal(ui.newSessionModal);
-      closeSimpleModal(ui.sessionActionModal);
+      document.querySelectorAll(".session-menu.open").forEach((m) => m.classList.remove("open"));
     }
     if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") sendMessage();
   });
@@ -601,20 +633,6 @@ function setupHandlers() {
   ui.closeNewSessionBtn.addEventListener("click", () => closeSimpleModal(ui.newSessionModal));
   ui.newSessionModal.addEventListener("click", (evt) => {
     if (evt.target === ui.newSessionModal) closeSimpleModal(ui.newSessionModal);
-  });
-  ui.closeSessionActionBtn.addEventListener("click", () => closeSimpleModal(ui.sessionActionModal));
-  ui.sessionActionModal.addEventListener("click", (evt) => {
-    if (evt.target === ui.sessionActionModal) closeSimpleModal(ui.sessionActionModal);
-  });
-  ui.saveSessionActionBtn.addEventListener("click", async () => {
-    if (!state.selectedSessionAction) return;
-    await renameSession(state.selectedSessionAction);
-    closeSimpleModal(ui.sessionActionModal);
-  });
-  ui.deleteSessionActionBtn.addEventListener("click", async () => {
-    if (!state.selectedSessionAction) return;
-    await deleteSession(state.selectedSessionAction);
-    closeSimpleModal(ui.sessionActionModal);
   });
   ui.createSessionConfirmBtn.addEventListener("click", async () => {
     const name = ui.newSessionNameInput.value.trim();
@@ -646,6 +664,9 @@ function setupHandlers() {
     } catch (err) {
       pushEvent("session.create_error", String(err));
     }
+  });
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".session-menu.open").forEach((m) => m.classList.remove("open"));
   });
 }
 

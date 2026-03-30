@@ -128,6 +128,42 @@ button {
   font-weight: 700;
 }
 .menu-btn { color: var(--muted); letter-spacing: .06em; }
+.session-menu {
+  position: absolute;
+  top: 1.25rem;
+  right: 0;
+  min-width: 180px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: .4rem;
+  display: none;
+  z-index: 20;
+}
+.session-menu.open { display: block; }
+.session-menu-row {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  font-size: .68rem;
+  color: var(--muted);
+  margin-bottom: .45rem;
+}
+.session-rename-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  padding: .35rem .45rem;
+  font-size: .74rem;
+}
+.session-delete-btn {
+  width: 100%;
+  border-color: #d95a5a;
+  color: #d95a5a;
+  background: transparent;
+}
 .topbar { display: flex; align-items: center; gap: .6rem; padding: .75rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel); }
 .topbar h2 { margin: 0; font-size: 1rem; }
 .topbar p { margin: .1rem 0 0; color: var(--muted); font-size: .74rem; }

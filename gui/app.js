@@ -15,6 +15,7 @@ const state = {
   workspace: { folders: [], tracked_files: [] },
   serverActiveSession: "",
   modelsByProvider: {},
+  historyMetaBySession: {},
 };
 try {
   const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
@@ -116,7 +117,9 @@ function pushEvent(kind, payload) {
 
 function renderEvents() {
   ui.eventStream.innerHTML = "";
-  for (const event of state.events) {
+  const historyMeta = state.historyMetaBySession[state.currentSession] || [];
+  const merged = [...historyMeta, ...state.events].slice(0, 400);
+  for (const event of merged) {
     const card = document.createElement("div");
     card.className = "event-card";
     const tag = inferMetaTag(event.kind);
@@ -129,6 +132,46 @@ function renderEvents() {
     card.querySelector(".event-body").textContent = event.payload;
     ui.eventStream.appendChild(card);
   }
+}
+
+function buildHistoryMetadata(history = []) {
+  const entries = [];
+  for (const message of history || []) {
+    const role = message.role || "unknown";
+    for (const part of message.parts || []) {
+      if (part.type === "tool_call") {
+        entries.unshift({
+          ts: "history",
+          kind: "tool.call",
+          payload: clip({
+            role,
+            tool_name: part.tool_name,
+            tool_args: part.tool_args || {},
+          }),
+        });
+      } else if (part.type === "tool_result") {
+        entries.unshift({
+          ts: "history",
+          kind: "tool.result",
+          payload: clip({
+            role,
+            tool_name: part.tool_name,
+            tool_result: part.tool_result,
+          }),
+        });
+      } else if (part.type === "file") {
+        entries.unshift({
+          ts: "history",
+          kind: "file.ref",
+          payload: clip({
+            role,
+            file_ref: part.file_ref || {},
+          }),
+        });
+      }
+    }
+  }
+  return entries.slice(0, 200);
 }
 
 function inferMetaTag(kind) {
@@ -227,6 +270,8 @@ async function refreshHistory(sessionName = state.currentSession) {
   try {
     if (!sessionName) return;
     const payload = await fetchJson(`/api/history?limit=120&session_name=${encodeURIComponent(sessionName)}`);
+    state.historyMetaBySession[sessionName] = buildHistoryMetadata(payload.history || []);
+    if (sessionName === state.currentSession) renderEvents();
     if (sessionName === state.currentSession) {
       renderConversation(payload.history || []);
     }

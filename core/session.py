@@ -5,6 +5,7 @@ import time
 import glob
 import re
 import shutil
+import traceback
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
@@ -46,6 +47,8 @@ def _shorten_tool_args(args: dict) -> dict:
     """Shortens long string arguments (like 'content' or 'diff') for display."""
     if not args:
         return {}
+    if not isinstance(args, dict):
+        return {"_raw_args": str(args)}
     shortened = args.copy()
     for key in ["content", "diff"]:
         if (
@@ -1618,6 +1621,8 @@ class Session:
         while iteration < max_iterations:
             iteration += 1
             logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
+            current_tool_name = None
+            current_tool_args = None
 
             try:
                 dynamic_system_prompt = base_system_prompt
@@ -1836,6 +1841,8 @@ class Session:
                                     )
 
                 for i, part in enumerate(tool_calls):
+                    current_tool_name = part.tool_name
+                    current_tool_args = part.tool_args
                     approval_plan = approval_plans.get(i)
                     needs_approval = approval_plan is not None
                     if needs_approval:
@@ -2027,6 +2034,8 @@ class Session:
                             "thought_signature": part.thought_signature,
                         }
                     )
+                    current_tool_name = None
+                    current_tool_args = None
 
                 tool_result_msg = {"role": "tool", "parts": tool_result_parts}
                 self.session_manager.history.append(tool_result_msg)
@@ -2065,8 +2074,19 @@ class Session:
                     error="User interrupted execution.",
                 )
             except Exception as e:
+                traceback_text = traceback.format_exc()
+                tool_context = ""
+                if current_tool_name:
+                    tool_context = (
+                        f" | Last tool: {current_tool_name}("
+                        f"{_shorten_tool_args(current_tool_args or {})})"
+                    )
                 if self.ui:
-                    self.ui.show_error(f"API Error during agentic loop: {e}")
+                    self.ui.show_error(f"API Error during agentic loop: {e}{tool_context}")
+                    self.ui.show_error(
+                        "Traceback (most recent call last):\n"
+                        + "\n".join(traceback_text.strip().splitlines()[-8:])
+                    )
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
 
                 # Failsafe for retry
@@ -2083,7 +2103,7 @@ class Session:
                     total_in=total_in,
                     total_out=total_out,
                     total_cost=total_cost,
-                    error=str(e),
+                    error=f"{e}{tool_context}",
                 )
 
         self.session_manager.save_history(self.folder_context)

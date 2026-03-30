@@ -1957,6 +1957,37 @@ def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> st
     if not tasks_data:
         return "Error: tasks array is required."
 
+    if isinstance(tasks_data, str):
+        raw_tasks = tasks_data.strip()
+        try:
+            tasks_data = json.loads(raw_tasks)
+        except json.JSONDecodeError as exc:
+            return (
+                "Error: tasks must be a JSON array of task objects. "
+                f"Received an invalid JSON string ({exc.msg} at pos {exc.pos})."
+            )
+
+    if not isinstance(tasks_data, list):
+        return (
+            "Error: tasks must be an array of task objects, "
+            f"got {type(tasks_data).__name__}."
+        )
+
+    first_invalid = next(
+        (
+            (idx, item)
+            for idx, item in enumerate(tasks_data, start=1)
+            if not isinstance(item, dict)
+        ),
+        None,
+    )
+    if first_invalid:
+        idx, item = first_invalid
+        return (
+            "Error: tasks must be an array of objects. "
+            f"Task #{idx} is {type(item).__name__}: {item!r}"
+        )
+
     # Get or create feature record
     existing_feature = session.session_manager.get_feature(feature_id)
     if existing_feature:
@@ -2361,6 +2392,12 @@ def execute_tool(
     if not descriptor:
         return f"Unknown tool: {tool_name}"
 
+    if not isinstance(args, dict):
+        return (
+            f"Error: Tool '{tool_name}' arguments must be an object/dict, "
+            f"got {type(args).__name__}. Please re-issue the tool call with JSON object arguments."
+        )
+
     path_keys = ["filename", "file", "path"]
     for key in path_keys:
         if key in args and (not args[key] or str(args[key]).strip() == ""):
@@ -2377,4 +2414,19 @@ def execute_tool(
         invocation_source=invocation_source,
         session=session,
     )
-    return handler(args, context)
+    try:
+        return handler(args, context)
+    except Exception as exc:
+        hint = ""
+        if isinstance(exc, AttributeError) and "'str' object has no attribute 'get'" in str(
+            exc
+        ):
+            hint = (
+                " Hint: A string was used where an object was expected "
+                "(commonly malformed tool arguments like tasks)."
+            )
+        logger.error("Tool execution failed for %s: %s", tool_name, exc, exc_info=True)
+        return (
+            f"Error: Tool '{tool_name}' failed with {type(exc).__name__}: {exc}."
+            f"{hint} Please fix arguments and retry."
+        )

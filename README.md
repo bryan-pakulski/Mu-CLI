@@ -154,6 +154,22 @@ For the phased feature workflow and plan file format, see `documentation/feature
 
 For provider switching, you can still use `POST /api/command` with a slash command such as `{"command":"/provider ollama"}`.
 
+### Lightweight GUI launcher
+
+You can launch the API server and a compact reactive browser GUI together:
+
+```bash
+./start_gui.sh
+```
+
+Optional flags are forwarded to `gui/launcher.py`:
+
+```bash
+./start_gui.sh --server-host 127.0.0.1 --server-port 8765 --gui-host 127.0.0.1 --gui-port 4173 --provider openai --model gpt-5
+```
+
+The GUI is served from `gui/` and logs with rollover are written to `~/.mucli/gui/logs/`.
+
 ### Example requests
 
 Send a chat message:

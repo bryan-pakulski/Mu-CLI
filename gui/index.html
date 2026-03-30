@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mu-CLI GUI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="configPanel" class="config-panel expanded">
+        <div class="panel-header">
+          <h1>μCLI</h1>
+          <button id="collapseBtn" class="ghost-btn" title="Collapse panel">◀</button>
+        </div>
+        <div class="panel-content">
+          <label class="field">
+            API Base URL
+            <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
+          </label>
+
+          <div class="row two-cols compact">
+            <label class="toggle-field">
+              <span>Agentic</span>
+              <input id="agenticToggle" type="checkbox" />
+            </label>
+            <label class="toggle-field">
+              <span>Thinking</span>
+              <input id="thinkingToggle" type="checkbox" />
+            </label>
+          </div>
+
+          <label class="field">
+            Model
+            <input id="modelInput" type="text" placeholder="e.g. gpt-5" />
+          </label>
+
+          <div class="row two-cols">
+            <button id="applyRuntimeBtn" class="accent-btn">Apply Runtime</button>
+            <button id="openSettingsBtn" class="ghost-btn">Settings</button>
+          </div>
+
+          <div class="section-title">Quick Commands</div>
+          <div class="row two-cols">
+            <button class="ghost-btn cmd-btn" data-cmd="/tools">/tools</button>
+            <button class="ghost-btn cmd-btn" data-cmd="/variables">/variables</button>
+            <button class="ghost-btn cmd-btn" data-cmd="/feature status">/feature status</button>
+            <button class="ghost-btn cmd-btn" data-cmd="/workspace">/workspace</button>
+          </div>
+
+          <div class="section-title">Live State</div>
+          <div id="stateBadge" class="badge">Disconnected</div>
+          <pre id="runtimeSummary" class="mono-box small"></pre>
+        </div>
+      </aside>
+
+      <main class="main-view">
+        <header class="topbar">
+          <button id="expandBtn" class="ghost-btn hidden">☰</button>
+          <div>
+            <h2>Mu-CLI Control Center</h2>
+            <p>Compact reactive client for server mode</p>
+          </div>
+        </header>
+
+        <section class="composer">
+          <textarea id="messageInput" rows="3" placeholder="Send a message to μCLI..."></textarea>
+          <div class="row">
+            <button id="sendBtn" class="accent-btn">Send</button>
+            <button id="refreshBtn" class="ghost-btn">Refresh State</button>
+            <button id="clearLogBtn" class="ghost-btn">Clear View</button>
+          </div>
+        </section>
+
+        <section class="stream-wrap">
+          <div class="stream-title">Events & Responses</div>
+          <div id="eventStream" class="stream"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="settingsTitle">Settings</h3>
+          <button id="closeSettingsBtn" class="ghost-btn">✕</button>
+        </div>
+
+        <label class="field">
+          Disabled tools (comma separated)
+          <input id="disabledToolsInput" type="text" placeholder="git_push, git_merge_request" />
+        </label>
+
+        <label class="field">
+          Variables JSON
+          <textarea id="variablesInput" rows="8" class="mono"></textarea>
+        </label>
+
+        <div class="row">
+          <button id="saveSettingsBtn" class="accent-btn">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

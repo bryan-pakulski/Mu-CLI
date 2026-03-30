@@ -1198,6 +1198,32 @@ def build_workspace_payload(session) -> dict:
     }
 
 
+def discover_provider_models(session, provider_name: str) -> dict:
+    normalized = str(provider_name or session.provider.name or "").strip().lower()
+    models = []
+    error = None
+    try:
+        if normalized == session.provider.name:
+            sync_live_provider_settings(session)
+            models = list(session.provider.get_available_models() or [])
+        elif normalized == "openai":
+            from providers.openai import OpenAIProvider
+
+            models = list(OpenAIProvider().get_available_models() or [])
+        elif normalized == "ollama":
+            host = session.variables.get("ollama_host", "http://localhost:11434")
+            models = list(OllamaProvider(host=host).get_available_models() or [])
+        elif normalized == "gemini":
+            from providers.gemini import GeminiProvider
+
+            models = list(GeminiProvider().get_available_models() or [])
+    except BaseException as exc:  # noqa: BLE001
+        error = str(exc)
+        models = []
+    unique_models = sorted({str(m).strip() for m in models if str(m).strip()})
+    return {"provider": normalized, "models": unique_models, "error": error}
+
+
 def build_feature_plan_payload(session, directory: str) -> dict:
     state = session.session_manager.get_feature_state() or {}
     metadata_path = ""
@@ -1451,6 +1477,23 @@ def serve(session, host: str, port: int, command_handler):
                 if parsed.path == "/api/workspaces":
                     self._send_json(
                         200, {"ok": True, **build_workspace_payload(session)}
+                    )
+                    return
+                if parsed.path == "/api/models":
+                    query = parse_qs(parsed.query)
+                    provider_name = str(query.get("provider", [""])[0] or "").strip()
+                    payload = discover_provider_models(
+                        session,
+                        provider_name or session.provider.name,
+                    )
+                    self._send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "current_provider": session.provider.name,
+                            "current_model": session.provider.model_name,
+                            **payload,
+                        },
                     )
                     return
                 if parsed.path == "/api/feature-plan":

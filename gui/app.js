@@ -14,6 +14,7 @@ const state = {
   approvalsBySession: {},
   workspace: { folders: [], tracked_files: [] },
   serverActiveSession: "",
+  modelsByProvider: {},
 };
 try {
   const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
@@ -219,10 +220,11 @@ async function refreshRuntime() {
     state.runtime = runtime;
     state.serverActiveSession = runtime.session_name || "";
     if (!state.currentSession) state.currentSession = state.serverActiveSession;
-    ui.modelInput.value = runtime.model || "";
+    await refreshModels(runtime.provider);
+    setModelSelectOptions(ui.modelInput, state.modelsByProvider[runtime.provider] || [], runtime.model || "");
+    setModelSelectOptions(ui.settingsModelInput, state.modelsByProvider[runtime.provider] || [], runtime.model || "");
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
-    ui.settingsModelInput.value = runtime.model || "";
     ui.systemPromptInput.value = runtime.system_instruction || "";
 
     ui.runtimeSummary.textContent = [
@@ -237,6 +239,38 @@ async function refreshRuntime() {
   } catch (err) {
     setConnected(false, `Error: ${err.message}`);
     pushEvent("runtime.error", String(err));
+  }
+}
+
+function setModelSelectOptions(selectEl, models, selectedValue = "") {
+  const options = Array.isArray(models) ? models.filter(Boolean) : [];
+  const current = String(selectedValue || "").trim();
+  const uniq = [...new Set(options)];
+  if (current && !uniq.includes(current)) uniq.unshift(current);
+  if (!uniq.length) uniq.push(current || "");
+
+  selectEl.innerHTML = "";
+  for (const model of uniq) {
+    const opt = document.createElement("option");
+    opt.value = model;
+    opt.textContent = model || "(provider default)";
+    if (model === current) opt.selected = true;
+    selectEl.appendChild(opt);
+  }
+}
+
+async function refreshModels(providerName = state.runtime?.provider || "openai") {
+  const provider = String(providerName || "").trim();
+  if (!provider) return;
+  try {
+    const data = await fetchJson(`/api/models?provider=${encodeURIComponent(provider)}`);
+    state.modelsByProvider[provider] = data.models || [];
+    if (data.error) {
+      pushEvent("models.warning", `${provider}: ${data.error}`);
+    }
+  } catch (err) {
+    pushEvent("models.error", String(err));
+    if (!state.modelsByProvider[provider]) state.modelsByProvider[provider] = [];
   }
 }
 
@@ -858,6 +892,7 @@ function setupHandlers() {
     connectSSE();
     await refreshRuntime();
     await refreshTools();
+    await refreshModels(state.runtime?.provider);
   });
 
   document.querySelectorAll(".cmd-btn").forEach((btn) => btn.addEventListener("click", () => runCommand(btn.dataset.cmd)));
@@ -874,6 +909,7 @@ function setupHandlers() {
     openModal();
     await refreshRuntime();
     await refreshTools();
+    await refreshModels(state.runtime?.provider);
     await refreshWorkspace();
     renderToolsSettings();
     renderVariableSections();
@@ -920,6 +956,16 @@ function setupHandlers() {
   });
 
   ui.newSessionBtn.addEventListener("click", () => openSimpleModal(ui.newSessionModal));
+  ui.newSessionBtn.addEventListener("click", async () => {
+    const provider = ui.newSessionProviderSelect.value || state.runtime?.provider || "openai";
+    await refreshModels(provider);
+    setModelSelectOptions(ui.newSessionModelInput, state.modelsByProvider[provider] || [], "");
+  });
+  ui.newSessionProviderSelect.addEventListener("change", async () => {
+    const provider = ui.newSessionProviderSelect.value || state.runtime?.provider || "openai";
+    await refreshModels(provider);
+    setModelSelectOptions(ui.newSessionModelInput, state.modelsByProvider[provider] || [], "");
+  });
   ui.closeNewSessionBtn.addEventListener("click", () => closeSimpleModal(ui.newSessionModal));
   ui.newSessionModal.addEventListener("click", (evt) => {
     if (evt.target === ui.newSessionModal) closeSimpleModal(ui.newSessionModal);

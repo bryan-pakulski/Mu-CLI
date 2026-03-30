@@ -15,6 +15,7 @@ const state = {
   workspace: { folders: [], tracked_files: [] },
   serverActiveSession: "",
   modelsByProvider: {},
+  monitoredTasks: new Set(),
 };
 try {
   const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
@@ -176,7 +177,14 @@ function renderConversation(history) {
 
     const agentCard = document.createElement("div");
     agentCard.className = "event-card pending";
-    agentCard.innerHTML = `<div class="event-head">assistant</div><div class="event-body"><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></div>`;
+    if (pending.assistantText) {
+      agentCard.innerHTML = `<div class="event-head"><span>assistant</span><button class="ghost-btn copy-entry-btn" title="Copy full message">Copy</button></div><div class="event-body markdown-body"></div>`;
+      renderMarkdown(agentCard.querySelector(".event-body"), pending.assistantText);
+      const streamCopyBtn = agentCard.querySelector(".copy-entry-btn");
+      streamCopyBtn.addEventListener("click", async () => copyText(pending.assistantText, streamCopyBtn));
+    } else {
+      agentCard.innerHTML = `<div class="event-head">assistant</div><div class="event-body"><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></div>`;
+    }
     ui.chatStream.appendChild(agentCard);
   }
   ui.chatStream.scrollTop = ui.chatStream.scrollHeight;
@@ -498,14 +506,53 @@ async function refreshTools() {
 function connectSSE() {
   if (state.eventSource) state.eventSource.close();
   state.eventSource = new EventSource(api("/api/events"));
-  state.eventSource.onmessage = (evt) => {
+  const handleSSEEvent = (evt) => {
     try {
-      const payload = JSON.parse(evt.data);
-      pushEvent(payload.event || "event", payload.payload || payload);
+      const envelope = JSON.parse(evt.data);
+      const eventName = envelope.event || evt.type || "event";
+      const payload = envelope.payload || {};
+
+      if (eventName === "trace.message") {
+        const role = String(payload.role || "");
+        const content = String(payload.content || "");
+        if (role === "assistant" && content.trim()) {
+          const sessionName = state.serverActiveSession;
+          const pending = state.pendingBySession[sessionName] || { userText: "" };
+          pending.assistantText = `${pending.assistantText || ""}${pending.assistantText ? "\n\n" : ""}${content}`.trim();
+          state.pendingBySession[sessionName] = pending;
+          state.sessionStatus[sessionName] = state.sessionStatus[sessionName] || "thinking";
+          if (state.currentSession === sessionName) renderConversation();
+        }
+      }
+      if (eventName === "task.completed" || eventName === "task.error") {
+        const task = payload.task || {};
+        if (task.task_id) state.monitoredTasks.delete(task.task_id);
+      }
+      pushEvent(eventName, payload);
     } catch {
       pushEvent("event", evt.data);
     }
   };
+
+  state.eventSource.onmessage = handleSSEEvent;
+  [
+    "stream.open",
+    "task.created",
+    "task.running",
+    "task.awaiting_approval",
+    "task.awaiting_input",
+    "task.completed",
+    "task.error",
+    "trace.message",
+    "trace.tool",
+    "trace.tool_result",
+    "trace.error",
+    "trace.info",
+    "session.loaded",
+    "session.created",
+    "session.deleted",
+    "session.renamed",
+  ].forEach((name) => state.eventSource.addEventListener(name, handleSSEEvent));
   state.eventSource.onerror = () => setConnected(false, "SSE disconnected");
 }
 
@@ -796,6 +843,8 @@ async function sendMessage() {
 }
 
 async function monitorMessageTask(taskId, sessionName) {
+  if (state.monitoredTasks.has(taskId)) return;
+  state.monitoredTasks.add(taskId);
   for (let i = 0; i < 240; i += 1) {
     const taskPayload = await fetchJson(`/api/tasks/${taskId}`);
     const task = taskPayload.task || {};
@@ -820,6 +869,7 @@ async function monitorMessageTask(taskId, sessionName) {
       delete state.pendingBySession[sessionName];
       delete state.approvalsBySession[sessionName];
       state.sessionStatus[sessionName] = "idle";
+      state.monitoredTasks.delete(taskId);
       if (state.currentSession === sessionName) {
         await refreshHistory();
       } else if (state.currentSession) {
@@ -832,6 +882,7 @@ async function monitorMessageTask(taskId, sessionName) {
       delete state.pendingBySession[sessionName];
       delete state.approvalsBySession[sessionName];
       state.sessionStatus[sessionName] = "error";
+      state.monitoredTasks.delete(taskId);
       renderSessionTabs();
       renderConversation();
       pushEvent("message.error", task.error || "Task failed");
@@ -843,7 +894,31 @@ async function monitorMessageTask(taskId, sessionName) {
     await new Promise((resolve) => setTimeout(resolve, 900));
   }
   state.sessionStatus[sessionName] = "error";
+  state.monitoredTasks.delete(taskId);
   renderSessionTabs();
+}
+
+async function refreshActiveMessageTask() {
+  try {
+    const payload = await fetchJson("/api/tasks");
+    const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+    const runningTask = tasks
+      .filter((task) => task.type === "message" && ["pending", "running", "awaiting_approval"].includes(task.status))
+      .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))[0];
+    if (!runningTask || !state.serverActiveSession) return;
+
+    const sessionName = state.serverActiveSession;
+    state.pendingBySession[sessionName] = {
+      userText: String(runningTask.payload?.text || ""),
+      assistantText: state.pendingBySession[sessionName]?.assistantText || "",
+    };
+    state.sessionStatus[sessionName] = runningTask.status === "awaiting_approval" ? "approval" : "thinking";
+    renderSessionTabs();
+    if (state.currentSession === sessionName) renderConversation();
+    await monitorMessageTask(runningTask.task_id, sessionName);
+  } catch (err) {
+    pushEvent("tasks.error", String(err));
+  }
 }
 
 async function applyRuntime() {
@@ -1098,6 +1173,7 @@ async function initializeApp() {
   await refreshHistory();
   await refreshStats();
   await refreshWorkspace();
+  await refreshActiveMessageTask();
 }
 
 initializeApp().catch((err) => pushEvent("init.error", String(err)));
@@ -1108,4 +1184,5 @@ setInterval(() => {
   refreshSessions();
   refreshStats();
   refreshWorkspace();
+  refreshActiveMessageTask();
 }, 12000);

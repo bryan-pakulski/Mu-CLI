@@ -31,6 +31,7 @@ const ui = {
   refreshBtn: el("refreshBtn"),
   clearLogBtn: el("clearLogBtn"),
   eventStream: el("eventStream"),
+  chatStream: el("chatStream"),
   stateBadge: el("stateBadge"),
   runtimeSummary: el("runtimeSummary"),
   modelInput: el("modelInput"),
@@ -61,6 +62,8 @@ const ui = {
   newSessionNameInput: el("newSessionNameInput"),
   newSessionProviderSelect: el("newSessionProviderSelect"),
   newSessionModelInput: el("newSessionModelInput"),
+  toggleMetaBtn: el("toggleMetaBtn"),
+  metaPanel: el("metaPanel"),
   sessionActionModal: el("sessionActionModal"),
   closeSessionActionBtn: el("closeSessionActionBtn"),
   sessionActionNameInput: el("sessionActionNameInput"),
@@ -90,9 +93,52 @@ function renderEvents() {
   for (const event of state.events) {
     const card = document.createElement("div");
     card.className = "event-card";
-    card.innerHTML = `<div class="event-head">${event.ts} · ${event.kind}</div><div class="event-body"></div>`;
+    const tag = inferMetaTag(event.kind);
+    card.innerHTML = `
+      <details class="meta-entry">
+        <summary>${event.ts} · ${event.kind}<span class="meta-tag">${tag}</span></summary>
+        <div class="event-body"></div>
+      </details>
+    `;
     card.querySelector(".event-body").textContent = event.payload;
     ui.eventStream.appendChild(card);
+  }
+}
+
+function inferMetaTag(kind) {
+  const lower = (kind || "").toLowerCase();
+  if (lower.includes("tool")) return "tool";
+  if (lower.includes("error")) return "error";
+  if (lower.includes("debug")) return "debug";
+  if (lower.includes("info")) return "info";
+  if (lower.includes("session")) return "session";
+  return "event";
+}
+
+function renderConversation(history) {
+  ui.chatStream.innerHTML = "";
+  for (const message of history || []) {
+    if (!["user", "assistant"].includes(message.role)) continue;
+    const textParts = (message.parts || [])
+      .filter((part) => part.type === "text")
+      .map((part) => part.text || "")
+      .filter(Boolean);
+    if (!textParts.length) continue;
+
+    const card = document.createElement("div");
+    card.className = "event-card";
+    card.innerHTML = `<div class="event-head">${message.role}</div><div class="event-body"></div>`;
+    card.querySelector(".event-body").textContent = textParts.join("\n\n");
+    ui.chatStream.appendChild(card);
+  }
+}
+
+async function refreshHistory() {
+  try {
+    const payload = await fetchJson("/api/history?limit=120");
+    renderConversation(payload.history || []);
+  } catch (err) {
+    pushEvent("history.error", String(err));
   }
 }
 
@@ -319,6 +365,7 @@ async function loadSession(name) {
     pushEvent("session.loaded", name);
     await refreshRuntime();
     await refreshSessions();
+    await refreshHistory();
   } catch (err) {
     pushEvent("session.load_error", String(err));
   }
@@ -368,6 +415,7 @@ async function sendMessage() {
   try {
     const result = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text }) });
     pushEvent("message.in", result);
+    await refreshHistory();
   } catch (err) {
     pushEvent("message.error", String(err));
   }
@@ -455,6 +503,11 @@ function setupHandlers() {
   ui.clearLogBtn.addEventListener("click", () => {
     state.events = [];
     renderEvents();
+  });
+  ui.toggleMetaBtn.addEventListener("click", () => {
+    ui.metaPanel.classList.toggle("collapsed");
+    const collapsed = ui.metaPanel.classList.contains("collapsed");
+    ui.toggleMetaBtn.textContent = collapsed ? "Metadata ▶" : "Metadata ◀";
   });
   ui.applyRuntimeBtn.addEventListener("click", applyRuntime);
 
@@ -554,6 +607,7 @@ function setupHandlers() {
       pushEvent("session.created", { name: name || "(auto)", provider, model });
       await refreshRuntime();
       await refreshSessions();
+      await refreshHistory();
     } catch (err) {
       pushEvent("session.create_error", String(err));
     }
@@ -567,6 +621,7 @@ connectSSE();
 refreshRuntime();
 refreshTools();
 refreshSessions();
+refreshHistory();
 setInterval(() => {
   refreshRuntime();
   refreshTools();

@@ -80,12 +80,19 @@
             <button id="sendBtn" class="accent-btn">Send</button>
             <button id="refreshBtn" class="ghost-btn">Refresh State</button>
             <button id="clearLogBtn" class="ghost-btn">Clear View</button>
+            <button id="toggleMetaBtn" class="ghost-btn">Metadata ▶</button>
           </div>
         </section>
 
-        <section class="stream-wrap">
-          <div class="stream-title">Events & Responses</div>
-          <div id="eventStream" class="stream"></div>
+        <section class="workspace-split">
+          <div class="chat-wrap">
+            <div class="stream-title">Conversation</div>
+            <div id="chatStream" class="stream chat-stream"></div>
+          </div>
+          <aside id="metaPanel" class="meta-panel collapsed">
+            <div class="stream-title">Metadata Timeline</div>
+            <div id="eventStream" class="stream meta-stream"></div>
+          </aside>
         </section>
       </main>
     </div>

@@ -1037,3 +1037,17 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
         os.path.join(feature_state["directory"], "feature_plan.json")
     )
     assert not os.path.exists(os.path.join(feature_state["directory"], "phase_1.md"))
+
+
+def test_session_manager_can_rename_session(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="rename-src")
+    sm.new_session(name="rename-src", provider_name="dummy", model_name="dummy")
+    sm.new_session(name="rename-dst", provider_name="dummy", model_name="dummy")
+    sm.switch_session("rename-src")
+
+    sm.rename_session("rename-src", "renamed-session")
+
+    sessions = sm.get_session_list()
+    assert "rename-src" not in sessions
+    assert "renamed-session" in sessions

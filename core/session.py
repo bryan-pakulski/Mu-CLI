@@ -5,6 +5,7 @@ import time
 import glob
 import re
 import shutil
+import traceback
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
@@ -46,6 +47,8 @@ def _shorten_tool_args(args: dict) -> dict:
     """Shortens long string arguments (like 'content' or 'diff') for display."""
     if not args:
         return {}
+    if not isinstance(args, dict):
+        return {"_raw_args": str(args)}
     shortened = args.copy()
     for key in ["content", "diff"]:
         if (
@@ -116,11 +119,9 @@ class SessionManager:
         self.active_feature_id = None
         self.variables.update(DEFAULT_VARIABLES)
 
-        source_filepath = filepath if os.path.exists(filepath) else legacy_filepath
-        if os.path.exists(source_filepath):
+        data = self.read_session_data(name)
+        if data is not None:
             try:
-                with open(source_filepath, "r") as f:
-                    data = json.load(f)
                 if isinstance(data, list):
                     self.history = data
                 elif isinstance(data, dict):
@@ -172,6 +173,28 @@ class SessionManager:
                             pass
             except (json.JSONDecodeError, IOError):
                 self.history = []
+
+    def read_session_data(self, name):
+        filepath = self._get_filepath(name)
+        legacy_filepath = os.path.join(HISTORY_DIR, f"{name}.json")
+        source_filepath = filepath if os.path.exists(filepath) else legacy_filepath
+        if not os.path.exists(source_filepath):
+            return None
+        try:
+            with open(source_filepath, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def get_session_history(self, name):
+        data = self.read_session_data(name)
+        if data is None:
+            return []
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("history", [])
+        return []
 
     def save_history(self, folder_context_obj=None):
         logger.debug(f"Saving history for session: {self.current_session_name}")
@@ -416,6 +439,29 @@ class SessionManager:
         else:
             if self.ui:
                 self.ui.show_error(f"Session '{name}' not found.")
+
+    def rename_session(self, old_name: str, new_name: str) -> bool:
+        old_name = str(old_name or "").strip()
+        new_name = str(new_name or "").strip()
+        if not old_name or not new_name:
+            raise ValueError("Both old_name and new_name are required.")
+        if old_name == new_name:
+            return True
+
+        old_dir = self._get_session_dir(old_name)
+        new_dir = self._get_session_dir(new_name)
+        if not os.path.exists(old_dir):
+            raise FileNotFoundError(f"Session '{old_name}' not found.")
+        if os.path.exists(new_dir):
+            raise FileExistsError(f"Session '{new_name}' already exists.")
+
+        os.rename(old_dir, new_dir)
+        if self.current_session_name == old_name:
+            self.current_session_name = new_name
+            self.save_history()
+        if self.ui:
+            self.ui.show_info(f"Renamed session '{old_name}' to '{new_name}'.")
+        return True
 
     def clear_current_history(self):
         logger.info(f"Clearing history for session: {self.current_session_name}")
@@ -1549,12 +1595,25 @@ class Session:
                 )
 
                 agent_mode = str(self.variables.get("agent_mode", "default")).lower()
-                mode_instruction = AGENTIC_MODES.get(
+                default_mode_instruction = AGENTIC_MODES.get(
                     agent_mode, AGENTIC_MODES["default"]
+                )
+                mode_instruction = str(
+                    self.variables.get(
+                        f"agentic_mode_prompt_{agent_mode}",
+                        default_mode_instruction,
+                    )
+                    or default_mode_instruction
+                )
+                agentic_system_base = str(
+                    self.variables.get(
+                        "agentic_system_base_override", AGENTIC_SYSTEM_BASE
+                    )
+                    or AGENTIC_SYSTEM_BASE
                 )
 
                 # Providers automatically generated tool prompts so don't need to be embedded into the system prompt
-                workspace_context = f"{AGENTIC_SYSTEM_BASE}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
+                workspace_context = f"{agentic_system_base}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
             else:
                 logger.debug(
                     f"Using agent_mode={self.variables.get('agent_mode', 'default')}"
@@ -1618,6 +1677,8 @@ class Session:
         while iteration < max_iterations:
             iteration += 1
             logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
+            current_tool_name = None
+            current_tool_args = None
 
             try:
                 dynamic_system_prompt = base_system_prompt
@@ -1836,6 +1897,8 @@ class Session:
                                     )
 
                 for i, part in enumerate(tool_calls):
+                    current_tool_name = part.tool_name
+                    current_tool_args = part.tool_args
                     approval_plan = approval_plans.get(i)
                     needs_approval = approval_plan is not None
                     if needs_approval:
@@ -2027,6 +2090,8 @@ class Session:
                             "thought_signature": part.thought_signature,
                         }
                     )
+                    current_tool_name = None
+                    current_tool_args = None
 
                 tool_result_msg = {"role": "tool", "parts": tool_result_parts}
                 self.session_manager.history.append(tool_result_msg)
@@ -2065,8 +2130,19 @@ class Session:
                     error="User interrupted execution.",
                 )
             except Exception as e:
+                traceback_text = traceback.format_exc()
+                tool_context = ""
+                if current_tool_name:
+                    tool_context = (
+                        f" | Last tool: {current_tool_name}("
+                        f"{_shorten_tool_args(current_tool_args or {})})"
+                    )
                 if self.ui:
-                    self.ui.show_error(f"API Error during agentic loop: {e}")
+                    self.ui.show_error(f"API Error during agentic loop: {e}{tool_context}")
+                    self.ui.show_error(
+                        "Traceback (most recent call last):\n"
+                        + "\n".join(traceback_text.strip().splitlines()[-8:])
+                    )
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
 
                 # Failsafe for retry
@@ -2083,7 +2159,7 @@ class Session:
                     total_in=total_in,
                     total_out=total_out,
                     total_cost=total_cost,
-                    error=str(e),
+                    error=f"{e}{tool_context}",
                 )
 
         self.session_manager.save_history(self.folder_context)

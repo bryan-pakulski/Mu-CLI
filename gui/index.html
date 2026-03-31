@@ -3,291 +3,59 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mu-CLI GUI</title>
+    <title>Mu-CLI</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
-      <aside id="configPanel" class="config-panel expanded">
-        <div class="panel-header">
-          <h1>μCLI</h1>
-          <button id="collapseBtn" class="ghost-btn" title="Collapse panel">◀</button>
-        </div>
-        <div class="panel-content">
+      <aside class="sidebar">
+        <div class="brand">μCLI</div>
+
+        <section class="side-section">
+          <div class="section-head">
+            <h2>Sessions</h2>
+            <button id="newSessionBtn" class="btn btn-primary">+ New</button>
+          </div>
+          <div id="sessionList" class="session-list"></div>
+        </section>
+
+        <section class="side-section">
+          <h2>Settings</h2>
           <label class="field">
-            API Base URL
+            API Base
             <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
           </label>
-
-          <div class="row two-cols compact">
-            <label class="toggle-field">
-              <span>Agentic</span>
-              <input id="agenticToggle" type="checkbox" />
-            </label>
-            <label class="toggle-field">
-              <span>Thinking</span>
-              <input id="thinkingToggle" type="checkbox" />
-            </label>
-          </div>
-
           <label class="field">
             Model
             <select id="modelInput"></select>
           </label>
-
-          <div class="row two-cols">
-            <button id="applyRuntimeBtn" class="accent-btn">Apply Runtime</button>
-            <button id="openSettingsBtn" class="ghost-btn">Settings</button>
+          <div class="toggle-row">
+            <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
+            <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
           </div>
-
-          <div class="section-title">Actions</div>
-          <details class="tool-group" open>
-            <summary>Workspace</summary>
-            <div class="tool-group-body">
-              <button class="ghost-btn cmd-btn" data-cmd="/workspace">List workspace</button>
-              <button id="chooseWorkspaceBtn" class="ghost-btn">Choose folder…</button>
-            </div>
-          </details>
-          <div class="section-title">Workspace Explorer</div>
-          <div id="workspaceTree" class="workspace-tree"></div>
-          <details class="tool-group">
-            <summary>Session</summary>
-            <div class="tool-group-body">
-              <button class="ghost-btn cmd-btn" data-cmd="/variables">Variables</button>
-              <button class="ghost-btn cmd-btn" data-cmd="/tools">Tools</button>
-              <button class="ghost-btn cmd-btn" data-cmd="/feature status">Feature status</button>
-            </div>
-          </details>
-
-          <div class="section-title">Live State</div>
-          <div id="stateBadge" class="badge">Disconnected</div>
-          <pre id="runtimeSummary" class="mono-box small"></pre>
-          <div class="section-title">Stats & Monitoring</div>
-          <pre id="statsSummary" class="mono-box small"></pre>
-        </div>
+          <button id="applyRuntimeBtn" class="btn">Apply</button>
+          <div id="statusBadge" class="status-badge">Disconnected</div>
+        </section>
       </aside>
 
-      <main class="main-view">
-        <section class="session-bar">
-          <div id="sessionTabs" class="session-tabs"></div>
-          <button id="newSessionBtn" class="accent-btn">＋</button>
-        </section>
-
-        <header class="topbar">
-          <button id="expandBtn" class="ghost-btn hidden">☰</button>
-          <div>
-            <h2>Mu-CLI Control Center</h2>
-            <p>Compact reactive client for server mode</p>
-          </div>
+      <main class="main-panel">
+        <header class="main-header">
+          <h1 id="activeSessionTitle">Session</h1>
+          <button id="refreshBtn" class="btn">Refresh</button>
         </header>
 
-        <section class="workspace-split">
-          <div id="chatWrap" class="chat-wrap">
-            <div class="stream-title">Conversation</div>
-            <div id="chatStream" class="stream chat-stream"></div>
-            <div id="approvalOverlay" class="approval-overlay hidden">
-              <div class="approval-card">
-                <h4>Tool approval required</h4>
-                <pre id="approvalSummary" class="mono-box"></pre>
-                <label class="field">
-                  Optional explanation
-                  <input id="approvalReasonInput" type="text" placeholder="reason for reject/explain" />
-                </label>
-                <div class="row end">
-                  <button id="approveBtn" class="accent-btn">Approve</button>
-                  <button id="rejectBtn" class="ghost-btn">Reject</button>
-                  <button id="explainBtn" class="ghost-btn">Explain</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <aside id="metaPanel" class="meta-panel collapsed">
-            <div class="stream-title">Metadata Timeline</div>
-            <div id="eventStream" class="stream meta-stream"></div>
-          </aside>
-        </section>
+        <section id="feed" class="feed" aria-live="polite"></section>
 
-        <section class="composer">
-          <textarea id="messageInput" rows="3" placeholder="Send a message to μCLI..."></textarea>
-          <div class="row">
-            <button id="sendBtn" class="accent-btn">Send</button>
-            <button id="refreshBtn" class="ghost-btn">Refresh State</button>
-            <button id="clearLogBtn" class="ghost-btn">Clear View</button>
-            <button id="toggleMetaBtn" class="ghost-btn">Metadata ▶</button>
-          </div>
-        </section>
+        <form id="composer" class="composer">
+          <textarea id="messageInput" rows="2" placeholder="Type a message..."></textarea>
+          <button id="sendBtn" class="btn btn-primary" type="submit">Send</button>
+        </form>
       </main>
     </div>
 
-    <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3 id="settingsTitle">Settings</h3>
-          <button id="closeSettingsBtn" class="ghost-btn">✕</button>
-        </div>
-
-        <div class="settings-layout">
-          <nav class="settings-tabs" id="settingsTabs">
-            <button class="settings-tab active" data-tab="tools">Tools</button>
-            <button class="settings-tab" data-tab="variables">Variables</button>
-            <button class="settings-tab" data-tab="memory">Memory & Context</button>
-            <button class="settings-tab" data-tab="management">Management</button>
-            <button class="settings-tab" data-tab="system">System</button>
-            <button class="settings-tab" data-tab="appearance">Appearance</button>
-          </nav>
-
-          <section class="settings-content">
-            <div class="settings-pane active" data-pane="tools">
-              <div class="settings-group">
-                <h4>Tool Access</h4>
-                <p class="muted">Enable or disable tools individually.</p>
-                <div id="toolsList" class="settings-grid"></div>
-              </div>
-            </div>
-
-            <div class="settings-pane" data-pane="variables">
-              <div class="settings-group">
-                <h4>Execution Variables</h4>
-                <p class="muted">Toggle common variable flags individually.</p>
-                <div class="settings-grid" id="variablesList"></div>
-              </div>
-            </div>
-
-            <div class="settings-pane" data-pane="memory">
-              <div class="settings-group">
-                <h4>Memory & Context</h4>
-                <div class="settings-grid" id="memoryList"></div>
-              </div>
-            </div>
-
-            <div class="settings-pane" data-pane="management">
-              <div class="settings-group">
-                <h4>Workspace Management</h4>
-                <p class="muted">Manage attached folders and inspect tracked files.</p>
-                <div class="settings-grid two">
-                  <label class="field">
-                    Add folder
-                    <input id="workspaceAddInput" type="text" placeholder="/path/to/folder" />
-                  </label>
-                  <button id="workspaceAddBtn" class="accent-btn">＋ Add Folder</button>
-                </div>
-                <div id="workspaceFoldersList" class="settings-grid"></div>
-              </div>
-            </div>
-
-            <div class="settings-pane" data-pane="system">
-              <div class="settings-group">
-                <h4>System Prompt</h4>
-                <label class="field">
-                  Runtime model
-                  <select id="settingsModelInput"></select>
-                </label>
-                <p class="muted">Set the active model for API requests in this session.</p>
-                <label class="field">
-                  System instruction
-                  <textarea id="systemPromptInput" rows="7"></textarea>
-                </label>
-                <p class="muted">Global system prompt applied to new model turns.</p>
-                <label class="field">
-                  Agentic system base prompt
-                  <textarea id="agenticBasePromptInput" rows="8"></textarea>
-                </label>
-                <p class="muted">Base prompt prepended in agentic mode.</p>
-                <label class="field">
-                  Agent mode: default prompt
-                  <textarea id="agenticModeDefaultInput" rows="6"></textarea>
-                </label>
-                <label class="field">
-                  Agent mode: debug prompt
-                  <textarea id="agenticModeDebugInput" rows="6"></textarea>
-                </label>
-                <label class="field">
-                  Agent mode: feature prompt
-                  <textarea id="agenticModeFeatureInput" rows="8"></textarea>
-                </label>
-                <label class="field">
-                  Agent mode: research prompt
-                  <textarea id="agenticModeResearchInput" rows="6"></textarea>
-                </label>
-              </div>
-            </div>
-
-            <div class="settings-pane" data-pane="appearance">
-              <div class="settings-group">
-                <h4>Theme</h4>
-                <div class="settings-grid two">
-                  <label class="field">
-                    Mode
-                    <select id="themeModeSelect">
-                      <option value="dark">Dark</option>
-                      <option value="light">Light</option>
-                    </select>
-                  </label>
-                  <label class="field">
-                    Highlight
-                    <select id="accentSelect">
-                      <option value="orange">Orange</option>
-                      <option value="purple">Purple</option>
-                      <option value="teal">Teal</option>
-                    </select>
-                  </label>
-                </div>
-                <p class="muted">Theme settings are local to this browser and saved automatically.</p>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <div class="row end">
-          <button id="saveSettingsBtn" class="accent-btn">Save Settings</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="newSessionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="newSessionTitle">
-      <div class="modal-card compact-card">
-        <div class="modal-header">
-          <h3 id="newSessionTitle">Create Session</h3>
-          <button id="closeNewSessionBtn" class="ghost-btn">✕</button>
-        </div>
-        <label class="field">
-          Session name
-          <input id="newSessionNameInput" type="text" placeholder="optional" />
-        </label>
-        <div class="settings-grid two">
-          <label class="field">
-            Provider
-            <select id="newSessionProviderSelect">
-              <option value="">Current provider</option>
-              <option value="openai">openai</option>
-              <option value="ollama">ollama</option>
-              <option value="gemini">gemini</option>
-            </select>
-          </label>
-          <label class="field">
-            Model
-            <select id="newSessionModelInput"></select>
-          </label>
-        </div>
-        <div class="row end">
-          <button id="createSessionConfirmBtn" class="accent-btn">Create Session</button>
-        </div>
-      </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
-    <script src="./app.js" type="module"></script>
+    <script src="./app.js"></script>
   </body>
 </html>

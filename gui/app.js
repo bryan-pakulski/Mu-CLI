@@ -73,7 +73,7 @@ function renderFeed(resetToBottom = false) {
   ui.feed.innerHTML = "";
   for (const item of slice) {
     const card = document.createElement("article");
-    card.className = "message";
+    card.className = `message role-${item.role}`;
     card.innerHTML = `<div class="role">${item.role}</div><div class="text"></div>`;
     card.querySelector(".text").textContent = item.text;
     ui.feed.appendChild(card);

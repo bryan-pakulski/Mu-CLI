@@ -14,31 +14,27 @@
       <aside class="sidebar">
         <div class="brand">μCLI</div>
 
-        <section class="side-section">
-          <div class="section-head">
-            <h2>Sessions</h2>
-            <button id="newSessionBtn" class="btn btn-primary">+ New</button>
-          </div>
-          <div id="sessionList" class="session-list"></div>
-        </section>
+        <div class="section-head">
+          <h2>Sessions</h2>
+          <button id="newSessionBtn" class="btn btn-primary">+ New</button>
+        </div>
+        <div id="sessionList" class="session-list"></div>
 
-        <section class="side-section">
-          <h2>Settings</h2>
-          <label class="field">
-            API Base
-            <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
-          </label>
-          <label class="field">
-            Model
-            <select id="modelInput"></select>
-          </label>
-          <div class="toggle-row">
-            <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
-            <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
-          </div>
-          <button id="applyRuntimeBtn" class="btn">Apply</button>
-          <div id="statusBadge" class="status-badge">Disconnected</div>
-        </section>
+        <h2>Settings</h2>
+        <label class="field">
+          API Base
+          <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
+        </label>
+        <label class="field">
+          Model
+          <select id="modelInput"></select>
+        </label>
+        <div class="toggle-row">
+          <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
+          <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
+        </div>
+        <button id="applyRuntimeBtn" class="btn">Apply</button>
+        <div id="statusBadge" class="status-badge">Disconnected</div>
       </aside>
 
       <main class="main-panel">
@@ -47,7 +43,9 @@
           <button id="refreshBtn" class="btn">Refresh</button>
         </header>
 
-        <section id="feed" class="feed" aria-live="polite"></section>
+        <section class="feed-wrap">
+          <section id="feed" class="feed" aria-live="polite"></section>
+        </section>
 
         <form id="composer" class="composer">
           <textarea id="messageInput" rows="2" placeholder="Type a message..."></textarea>

@@ -7,6 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -38,11 +42,6 @@
       </aside>
 
       <main class="main-panel">
-        <header class="main-header">
-          <h1 id="activeSessionTitle">Session</h1>
-          <button id="refreshBtn" class="btn">Refresh</button>
-        </header>
-
         <section class="feed-wrap">
           <section id="feed" class="feed" aria-live="polite"></section>
         </section>
@@ -54,6 +53,9 @@
       </main>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

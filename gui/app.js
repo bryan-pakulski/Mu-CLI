@@ -19,8 +19,6 @@ const ui = {
   statusBadge: el("statusBadge"),
   sessionList: el("sessionList"),
   newSessionBtn: el("newSessionBtn"),
-  activeSessionTitle: el("activeSessionTitle"),
-  refreshBtn: el("refreshBtn"),
   feed: el("feed"),
   composer: el("composer"),
   messageInput: el("messageInput"),
@@ -64,6 +62,17 @@ function normalizedMessages(history = []) {
     .filter((m) => m.text);
 }
 
+
+function renderMarkdown(container, text) {
+  const source = String(text || "");
+  const rendered = window.marked ? window.marked.parse(source, { gfm: true, breaks: true }) : source;
+  const sanitized = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
+  container.innerHTML = sanitized;
+  container.querySelectorAll("pre code").forEach((block) => {
+    if (window.hljs) window.hljs.highlightElement(block);
+  });
+}
+
 function renderFeed(resetToBottom = false) {
   const prevHeight = ui.feed.scrollHeight;
   const prevTop = ui.feed.scrollTop;
@@ -75,7 +84,7 @@ function renderFeed(resetToBottom = false) {
     const card = document.createElement("article");
     card.className = `message role-${item.role}`;
     card.innerHTML = `<div class="role">${item.role}</div><div class="text"></div>`;
-    card.querySelector(".text").textContent = item.text;
+    renderMarkdown(card.querySelector(".text"), item.text);
     ui.feed.appendChild(card);
   }
 
@@ -140,7 +149,6 @@ async function refreshHistory(resetToBottom = true) {
   const payload = await fetchJson(`/api/history?limit=300&session_name=${encodeURIComponent(state.currentSession)}`);
   state.loadedMessages = normalizedMessages(payload.history || []);
   state.visibleCount = Math.min(24, state.loadedMessages.length || 24);
-  ui.activeSessionTitle.textContent = state.currentSession;
   renderFeed(resetToBottom);
 }
 
@@ -248,13 +256,6 @@ function wireEvents() {
     }
   });
 
-  ui.refreshBtn.addEventListener("click", async () => {
-    try {
-      await bootstrap();
-    } catch (err) {
-      setStatus(`Error: ${err.message}`, "error");
-    }
-  });
 
   ui.feed.addEventListener("scroll", () => {
     if (ui.feed.scrollTop < 40 && state.visibleCount < state.loadedMessages.length) {

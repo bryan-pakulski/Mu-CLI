@@ -30,7 +30,8 @@ body {
   padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  align-items: center;
   overflow: auto;
 }
 
@@ -130,24 +131,11 @@ textarea { resize: vertical; min-height: 48px; }
 
 .main-panel {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: 1fr auto;
   min-width: 0;
   height: 100vh;
 }
 
-.main-header {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.main-header h1 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-}
 
 .feed-wrap {
   position: relative;
@@ -172,12 +160,14 @@ textarea { resize: vertical; min-height: 48px; }
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  align-items: center;
 }
 
 .message {
   padding: 0;
-  max-width: 100%;
+  width: min(920px, 92%);
+  max-width: 920px;
   border: 0;
   background: transparent;
 }
@@ -203,4 +193,25 @@ textarea { resize: vertical; min-height: 48px; }
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 10px;
+}
+
+
+.message .text p { margin: 0.15rem 0 0.45rem; }
+.message .text pre {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  overflow: auto;
+  margin: 0.45rem 0;
+  background: rgba(8, 6, 27, 0.75);
+}
+.message .text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.message .text :not(pre) > code {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  background: rgba(11, 8, 35, 0.7);
 }

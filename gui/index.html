@@ -48,6 +48,7 @@
               <div id="chatMenu" class="chat-menu options-menu hidden">
                 <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
                 <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
+                <button id="memoryOption" type="button" class="menu-item">Memory</button>
                 <button id="clearChatOption" type="button" class="menu-item">Clear conversation</button>
               </div>
               <button id="sendBtn" class="btn send-btn" type="submit">➤</button>
@@ -135,6 +136,19 @@
         <div class="modal-actions">
           <button id="attachFolderConfirmBtn" class="btn btn-primary" type="button">Attach</button>
           <button id="closeFolderModalBtn" class="btn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="memoryModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="folder-modal-card memory-modal-card">
+        <h3>Memory inspector</h3>
+        <p class="muted">Live memory and scratchpad usage for the current session.</p>
+        <div id="memoryRuntimeList" class="memory-list"></div>
+        <h4>Recent memory tool activity</h4>
+        <div id="memoryActivityList" class="memory-list"></div>
+        <div class="modal-actions">
+          <button id="closeMemoryModalBtn" class="btn" type="button">Close</button>
         </div>
       </div>
     </div>

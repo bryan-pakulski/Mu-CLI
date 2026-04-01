@@ -98,8 +98,13 @@ input,select,textarea{padding:8px 10px}
 .message .text :not(pre)>code{border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;background:var(--surface-2)}
 
 .folder-modal-card{width:min(560px,92vw);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;}
+.memory-modal-card{width:min(760px,94vw);max-height:min(82vh,760px);overflow:auto}
 .folder-row{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0 12px;}
 .muted{color:var(--muted);font-size:12px;}
+.memory-list{display:grid;gap:6px;margin:8px 0 12px}
+.memory-item{border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--surface-2)}
+.memory-item-title{font-size:12px;color:var(--muted)}
+.memory-item-body{font-size:13px;white-space:pre-wrap;word-break:break-word}
 
 .composer textarea{background:#2a2b30;border:0;outline:none;resize:none;max-height:180px;min-height:28px;padding:6px 4px;color:var(--text);line-height:1.4;}
 .menu-item{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:var(--text);padding:8px 10px;border-radius:10px;text-align:left;}

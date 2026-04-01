@@ -14,7 +14,10 @@ const state = {
   pendingBySession: {},
   activityBySession: {},
   taskBySession: {},
+  memoryBySession: {},
+  lastMemoryToolBySession: {},
   taskPollTimer: null,
+  memoryPollTimer: null,
   activeEventSource: null,
 };
 
@@ -37,6 +40,7 @@ const ui = {
   sendBtn: el("sendBtn"),
   menuBtn: el("menuBtn"),
   chatMenu: el("chatMenu"),
+  memoryOption: el("memoryOption"),
   clearChatOption: el("clearChatOption"),
   fileBtn: el("fileBtn"),
   fileInput: el("fileInput"),
@@ -51,6 +55,10 @@ const ui = {
   folderPathInput: el("folderPathInput"),
   attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
   closeFolderModalBtn: el("closeFolderModalBtn"),
+  memoryModal: el("memoryModal"),
+  memoryRuntimeList: el("memoryRuntimeList"),
+  memoryActivityList: el("memoryActivityList"),
+  closeMemoryModalBtn: el("closeMemoryModalBtn"),
   settingsBtn: el("settingsBtn"),
   settingsModal: el("settingsModal"),
   closeSettingsBtn: el("closeSettingsBtn"),
@@ -98,6 +106,11 @@ function persistActivity() {
 }
 
 state.activityBySession = loadPersistedActivity();
+
+function sessionMemory(sessionName = state.currentSession) {
+  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [] };
+  return state.memoryBySession[sessionName];
+}
 
 function applyThemeFromStorage() {
   const mode = localStorage.getItem("mucli_theme_mode") || "dark";
@@ -297,6 +310,61 @@ function renderActivityPanel() {
     ui.activitySummary.textContent = "Error";
   } else {
     ui.activitySummary.textContent = "Done";
+  }
+}
+
+function memoryToolName(name = "") {
+  return /^(save_memory|search_memory|list_memory|save_scratchpad|search_scratchpad|list_scratchpad|clear_scratchpad)$/i.test(String(name || ""));
+}
+
+function pushMemoryEvent(sessionName, title, body = "") {
+  const mem = sessionMemory(sessionName);
+  mem.activity.push({ title, body, at: Date.now() });
+  if (mem.activity.length > 80) mem.activity.splice(0, mem.activity.length - 80);
+  if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) {
+    renderMemoryModal();
+  }
+}
+
+async function refreshMemoryRuntime(sessionName = state.currentSession) {
+  try {
+    const payload = await fetchJson("/api/state");
+    const variables = payload.state?.variables || payload.variables || {};
+    const filtered = Object.fromEntries(
+      Object.entries(variables).filter(([k]) => /(memory|scratchpad|collat|compact)/i.test(k)),
+    );
+    sessionMemory(sessionName).runtime = filtered;
+    if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
+  } catch {
+    return;
+  }
+}
+
+function renderMemoryModal() {
+  const mem = sessionMemory(state.currentSession);
+  const runtimeEntries = Object.entries(mem.runtime || {});
+  ui.memoryRuntimeList.innerHTML = runtimeEntries.length
+    ? runtimeEntries.map(([k, v]) => `<article class="memory-item"><div class="memory-item-title">${k}</div><div class="memory-item-body">${String(v)}</div></article>`).join("")
+    : '<div class="activity-empty">No runtime memory variables available.</div>';
+
+  ui.memoryActivityList.innerHTML = mem.activity.length
+    ? mem.activity.slice(-60).reverse().map((e) => `<article class="memory-item"><div class="memory-item-title">${e.title} · ${new Date(e.at).toLocaleTimeString()}</div><div class="memory-item-body">${e.body || ""}</div></article>`).join("")
+    : '<div class="activity-empty">No memory tool activity yet.</div>';
+}
+
+function openMemoryModal() {
+  ui.memoryModal.classList.remove("hidden");
+  renderMemoryModal();
+  refreshMemoryRuntime();
+  if (state.memoryPollTimer) clearInterval(state.memoryPollTimer);
+  state.memoryPollTimer = setInterval(() => refreshMemoryRuntime(), 2000);
+}
+
+function closeMemoryModal() {
+  ui.memoryModal.classList.add("hidden");
+  if (state.memoryPollTimer) {
+    clearInterval(state.memoryPollTimer);
+    state.memoryPollTimer = null;
   }
 }
 
@@ -638,6 +706,19 @@ function startTaskEventStream(taskId, sessionName) {
       if (evt.event === "task.awaiting_input") state.taskBySession[sessionName].status = "awaiting_input";
       if (evt.event === "task.running") state.taskBySession[sessionName].status = "running";
     }
+    if (evt.event === "trace.tool" && memoryToolName(evt.payload?.tool_name)) {
+      const toolName = String(evt.payload?.tool_name || "");
+      state.lastMemoryToolBySession[sessionName] = toolName;
+      pushMemoryEvent(sessionName, `Tool: ${toolName}`, JSON.stringify(evt.payload?.tool_args || {}, null, 2));
+      refreshMemoryRuntime(sessionName);
+    }
+    if (evt.event === "trace.tool_result" && state.lastMemoryToolBySession[sessionName]) {
+      pushMemoryEvent(
+        sessionName,
+        `Result: ${state.lastMemoryToolBySession[sessionName]}`,
+        String(evt.payload?.preview || evt.payload?.result || "").slice(0, 600),
+      );
+    }
     pushActivity(sessionName, mapped.title, mapped.detail);
     const pending = state.pendingBySession[sessionName];
     if (pending) pending.latestActivity = mapped.title;
@@ -759,6 +840,10 @@ function wireEvents() {
   ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
   ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
   ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
+  ui.memoryOption.addEventListener("click", () => {
+    ui.chatMenu.classList.add("hidden");
+    openMemoryModal();
+  });
   ui.clearChatOption.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
     clearConversationContext().catch((err) => setStatus(`Error: ${err.message}`, "error"));
@@ -819,6 +904,7 @@ ${marker}` : marker;
     await refreshWorkspace();
   });
   ui.closeFolderModalBtn.addEventListener("click", () => ui.folderModal.classList.add("hidden"));
+  ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);
 
   ui.settingsBtn.addEventListener("click", async () => {
     await refreshTools();
@@ -849,6 +935,7 @@ async function bootstrap() {
   await refreshSessions();
   await refreshHistory(true);
   await refreshWorkspace();
+  await refreshMemoryRuntime();
 }
 
 wireEvents();

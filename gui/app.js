@@ -1,5 +1,6 @@
 const el = (id) => document.getElementById(id);
 const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
+const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 
 const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
@@ -75,6 +76,13 @@ const ui = {
 };
 
 ui.apiBaseInput.value = state.apiBase;
+try {
+  const cached = JSON.parse(localStorage.getItem(SESSIONS_STORAGE_KEY) || "{}");
+  if (Array.isArray(cached.sessions)) state.sessions = cached.sessions;
+  if (cached.currentSession) state.currentSession = cached.currentSession;
+} catch {
+  // ignore session cache parse errors
+}
 
 function loadPersistedActivity() {
   try {
@@ -136,8 +144,15 @@ function api(path) {
   return `${state.apiBase}${path}`;
 }
 
-async function fetchJson(path, options = {}) {
-  const resp = await fetch(api(path), { headers: { "Content-Type": "application/json" }, ...options });
+async function fetchJson(path, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let resp;
+  try {
+    resp = await fetch(api(path), { headers: { "Content-Type": "application/json" }, ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
   return data;
@@ -599,9 +614,14 @@ async function refreshStateVariables() {
 }
 
 async function refreshSessions() {
-  const data = await fetchJson("/api/sessions");
-  state.sessions = data.sessions || [];
-  if (!state.currentSession) state.currentSession = data.current || state.sessions[0] || "";
+  try {
+    const data = await fetchJson("/api/sessions", {}, 2500);
+    state.sessions = data.sessions || state.sessions || [];
+    if (!state.currentSession) state.currentSession = data.current || state.sessions[0] || "";
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
+  } catch {
+    if (!state.currentSession) state.currentSession = state.sessions[0] || "";
+  }
   renderSessions();
 }
 
@@ -661,8 +681,16 @@ async function refreshHistory(resetToBottom = true) {
 }
 
 async function loadSession(name) {
+  if (state.isSending) {
+    state.currentSession = name;
+    renderSessions();
+    await refreshHistory(true);
+    renderActivityPanel();
+    return;
+  }
   await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
   state.currentSession = name;
+  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
   await refreshSessions();
   await refreshRuntime();
   await refreshHistory(true);
@@ -1011,14 +1039,19 @@ ${marker}` : marker;
 
 async function bootstrap() {
   applyThemeFromStorage();
-  await refreshRuntime();
-  await refreshTools();
-  await refreshStateVariables();
-  await refreshSessions();
-  await refreshHistory(true);
-  await refreshWorkspace();
-  await refreshMemoryRuntime();
-  await refreshMemoryBuffers();
+  renderSessions();
+  await Promise.allSettled([
+    refreshRuntime(),
+    refreshTools(),
+    refreshStateVariables(),
+    refreshSessions(),
+  ]);
+  await Promise.allSettled([
+    refreshHistory(true),
+    refreshWorkspace(),
+    refreshMemoryRuntime(),
+    refreshMemoryBuffers(),
+  ]);
 }
 
 wireEvents();

@@ -7,10 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
-    />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -24,7 +21,7 @@
         </div>
         <div id="sessionList" class="session-list"></div>
 
-        <h2>Settings</h2>
+        <h2>Runtime</h2>
         <label class="field">
           API Base
           <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
@@ -39,8 +36,8 @@
 
       <main class="main-panel">
         <section class="feed-wrap">
+          <button id="settingsBtn" class="settings-btn" title="Settings">⚙</button>
           <section id="feed" class="feed" aria-live="polite"></section>
-
           <div class="workspace-status" id="workspaceStatus">Workspace: (none)</div>
 
           <form id="composer" class="composer" enctype="multipart/form-data">
@@ -60,6 +57,56 @@
           </form>
         </section>
       </main>
+    </div>
+
+    <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-card">
+        <div class="modal-layout">
+          <nav class="settings-nav" id="settingsTabs">
+            <button class="settings-tab active" data-tab="tools">Tools</button>
+            <button class="settings-tab" data-tab="variables">Variables</button>
+            <button class="settings-tab" data-tab="memory">Memory</button>
+            <button class="settings-tab" data-tab="theme">Theme</button>
+          </nav>
+
+          <section class="settings-main">
+            <div class="settings-pane active" data-pane="tools">
+              <h3>Tools</h3>
+              <div id="toolsList" class="settings-list"></div>
+            </div>
+            <div class="settings-pane" data-pane="variables">
+              <h3>Variables</h3>
+              <div id="variablesList" class="settings-list"></div>
+            </div>
+            <div class="settings-pane" data-pane="memory">
+              <h3>Memory</h3>
+              <div id="memoryList" class="settings-list"></div>
+            </div>
+            <div class="settings-pane" data-pane="theme">
+              <h3>Theme</h3>
+              <label class="field">Mode
+                <select id="themeModeSelect">
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </label>
+              <label class="field">Accent
+                <select id="accentSelect">
+                  <option value="indigo">Indigo</option>
+                  <option value="teal">Teal</option>
+                  <option value="amber">Amber</option>
+                  <option value="rose">Rose</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="modal-actions">
+              <button id="saveSettingsBtn" class="btn btn-primary">Save</button>
+              <button id="closeSettingsBtn" class="btn">Close</button>
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js"></script>

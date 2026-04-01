@@ -5,6 +5,7 @@ const state = {
   currentSession: "",
   sessions: [],
   runtime: null,
+  tools: [],
   loadedMessages: [],
   visibleCount: 24,
   isSending: false,
@@ -28,19 +29,35 @@ const ui = {
   fileBtn: el("fileBtn"),
   fileInput: el("fileInput"),
   workspaceStatus: el("workspaceStatus"),
+  settingsBtn: el("settingsBtn"),
+  settingsModal: el("settingsModal"),
+  closeSettingsBtn: el("closeSettingsBtn"),
+  saveSettingsBtn: el("saveSettingsBtn"),
+  settingsTabs: el("settingsTabs"),
+  toolsList: el("toolsList"),
+  variablesList: el("variablesList"),
+  memoryList: el("memoryList"),
+  themeModeSelect: el("themeModeSelect"),
+  accentSelect: el("accentSelect"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
+
+function applyThemeFromStorage() {
+  const mode = localStorage.getItem("mucli_theme_mode") || "dark";
+  const accent = localStorage.getItem("mucli_theme_accent") || "indigo";
+  document.documentElement.dataset.mode = mode;
+  document.documentElement.dataset.accent = accent;
+  ui.themeModeSelect.value = mode;
+  ui.accentSelect.value = accent;
+}
 
 function api(path) {
   return `${state.apiBase}${path}`;
 }
 
 async function fetchJson(path, options = {}) {
-  const resp = await fetch(api(path), {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const resp = await fetch(api(path), { headers: { "Content-Type": "application/json" }, ...options });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
   return data;
@@ -53,63 +70,62 @@ function setStatus(text, kind = "") {
 }
 
 function textFromParts(parts = []) {
-  return parts
-    .filter((p) => p && p.type === "text")
-    .map((p) => p.text || "")
-    .filter(Boolean)
-    .join("\n\n");
+  return parts.filter((p) => p?.type === "text").map((p) => p.text || "").filter(Boolean).join("\n\n");
 }
 
 function normalizedMessages(history = []) {
-  return history
-    .filter((m) => ["user", "assistant"].includes(m.role))
-    .map((m) => ({ role: m.role, text: textFromParts(m.parts || []) }))
-    .filter((m) => m.text);
+  return history.filter((m) => ["user", "assistant"].includes(m.role)).map((m) => ({ role: m.role, text: textFromParts(m.parts || []) })).filter((m) => m.text);
 }
 
-
 function renderMarkdown(container, text) {
-  const source = String(text || "");
-  const rendered = window.marked ? window.marked.parse(source, { gfm: true, breaks: true }) : source;
-  const sanitized = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
-  container.innerHTML = sanitized;
-  container.querySelectorAll("pre code").forEach((block) => {
-    if (window.hljs) window.hljs.highlightElement(block);
-  });
+  const rendered = window.marked ? window.marked.parse(String(text || ""), { gfm: true, breaks: true }) : String(text || "");
+  container.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
+  container.querySelectorAll("pre code").forEach((block) => window.hljs?.highlightElement(block));
 }
 
 function renderFeed(resetToBottom = false) {
   const prevHeight = ui.feed.scrollHeight;
   const prevTop = ui.feed.scrollTop;
   const start = Math.max(0, state.loadedMessages.length - state.visibleCount);
-  const slice = state.loadedMessages.slice(start);
-
   ui.feed.innerHTML = "";
-  for (const item of slice) {
+  for (const item of state.loadedMessages.slice(start)) {
     const card = document.createElement("article");
-    card.className = `message role-${item.role}`;
-    card.innerHTML = `<div class="role">${item.role}</div><div class="text"></div>`;
+    card.className = "message";
+    card.innerHTML = `<span class="role">${item.role}</span><span class="text"></span>`;
     renderMarkdown(card.querySelector(".text"), item.text);
     ui.feed.appendChild(card);
   }
-
-  if (resetToBottom) {
-    ui.feed.scrollTop = ui.feed.scrollHeight;
-    return;
-  }
-
+  if (resetToBottom) return void (ui.feed.scrollTop = ui.feed.scrollHeight);
   const grew = ui.feed.scrollHeight - prevHeight;
-  if (prevTop < 60 && grew > 0) {
-    ui.feed.scrollTop = prevTop + grew;
+  if (prevTop < 60 && grew > 0) ui.feed.scrollTop = prevTop + grew;
+}
+
+function renderSettingsList(target, items, keyPrefix) {
+  target.innerHTML = "";
+  for (const item of items) {
+    const row = document.createElement("label");
+    row.className = "settings-row";
+    row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" ${item.enabled ? "checked" : ""} />`;
+    target.appendChild(row);
   }
 }
 
+function populateSettingsPanels() {
+  const toolItems = state.tools.map((t) => ({ key: t.name, label: t.name, enabled: !t.disabled }));
+  renderSettingsList(ui.toolsList, toolItems, "tool");
+
+  const vars = state.runtime?.variables || {};
+  const variableKeys = ["yolo", "strict_mode", "agent_mode"];
+  const memoryKeys = ["memory_enabled", "compact_history", "collation_enabled"];
+
+  renderSettingsList(ui.variablesList, variableKeys.map((k) => ({ key: k, label: k, enabled: !!vars[k] })), "var");
+  renderSettingsList(ui.memoryList, memoryKeys.map((k) => ({ key: k, label: k, enabled: !!vars[k] })), "mem");
+}
 
 async function refreshWorkspace() {
   try {
     const data = await fetchJson("/api/workspaces");
-    const folders = Array.isArray(data.folders) ? data.folders : [];
-    const label = folders.length ? folders[0] : "(none)";
+    const label = (data.folders || [])[0] || "(none)";
     ui.workspaceStatus.textContent = `Workspace: ${label}`;
   } catch {
     ui.workspaceStatus.textContent = "Workspace: unavailable";
@@ -121,16 +137,22 @@ async function refreshRuntime() {
     const runtime = await fetchJson("/api/runtime");
     state.runtime = runtime;
     if (!state.currentSession) state.currentSession = runtime.session_name || "";
-
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
-
     const model = runtime.model || "";
     ui.modelInput.innerHTML = `<option value="${model}">${model || "(default)"}</option>`;
-
     setStatus("Connected", "connected");
   } catch (err) {
     setStatus(`Error: ${err.message}`, "error");
+  }
+}
+
+async function refreshTools() {
+  try {
+    const data = await fetchJson("/api/tools");
+    state.tools = data.tools || [];
+  } catch {
+    state.tools = [];
   }
 }
 
@@ -138,22 +160,11 @@ async function refreshSessions() {
   const data = await fetchJson("/api/sessions");
   state.sessions = data.sessions || [];
   if (!state.currentSession) state.currentSession = data.current || state.sessions[0] || "";
-  renderSessions();
-}
-
-function renderSessions() {
   ui.sessionList.innerHTML = "";
   for (const name of state.sessions) {
     const item = document.createElement("div");
     item.className = `session-item ${name === state.currentSession ? "active" : ""}`;
-    item.innerHTML = `
-      <button class="session-title">${name}</button>
-      <div class="session-actions">
-        <button class="btn" data-action="rename">Rename</button>
-        <button class="btn" data-action="delete">Delete</button>
-      </div>
-    `;
-
+    item.innerHTML = `<button class="session-title">${name}</button><div class="session-actions"><button class="btn" data-action="rename">Rename</button><button class="btn" data-action="delete">Delete</button></div>`;
     item.querySelector(".session-title").addEventListener("click", () => loadSession(name));
     item.querySelector('[data-action="rename"]').addEventListener("click", () => renameSessionPrompt(name));
     item.querySelector('[data-action="delete"]').addEventListener("click", () => deleteSession(name));
@@ -170,10 +181,7 @@ async function refreshHistory(resetToBottom = true) {
 }
 
 async function loadSession(name) {
-  await fetchJson("/api/sessions/load", {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
+  await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
   state.currentSession = name;
   await refreshSessions();
   await refreshRuntime();
@@ -184,10 +192,7 @@ async function loadSession(name) {
 async function createSession() {
   const name = prompt("New session name:");
   if (!name) return;
-  await fetchJson("/api/sessions/new", {
-    method: "POST",
-    body: JSON.stringify({ name: name.trim() }),
-  });
+  await fetchJson("/api/sessions/new", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
   state.currentSession = name.trim();
   await refreshSessions();
   await loadSession(state.currentSession);
@@ -196,10 +201,7 @@ async function createSession() {
 async function renameSessionPrompt(currentName) {
   const newName = prompt("Rename session:", currentName);
   if (!newName || newName === currentName) return;
-  await fetchJson("/api/sessions/rename", {
-    method: "POST",
-    body: JSON.stringify({ name: currentName, new_name: newName.trim() }),
-  });
+  await fetchJson("/api/sessions/rename", { method: "POST", body: JSON.stringify({ name: currentName, new_name: newName.trim() }) });
   if (state.currentSession === currentName) state.currentSession = newName.trim();
   await refreshSessions();
   await refreshHistory(false);
@@ -207,10 +209,7 @@ async function renameSessionPrompt(currentName) {
 
 async function deleteSession(name) {
   if (!confirm(`Delete session '${name}'?`)) return;
-  await fetchJson("/api/sessions/delete", {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
+  await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
   if (state.currentSession === name) state.currentSession = "";
   await refreshSessions();
   await refreshRuntime();
@@ -218,14 +217,23 @@ async function deleteSession(name) {
 }
 
 async function applyRuntime() {
-  await fetchJson("/api/runtime", {
-    method: "POST",
-    body: JSON.stringify({
-      model: ui.modelInput.value,
-      agentic: ui.agenticToggle.checked,
-      thinking: ui.thinkingToggle.checked,
-    }),
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: ui.modelInput.value, agentic: ui.agenticToggle.checked, thinking: ui.thinkingToggle.checked }) });
+  await refreshRuntime();
+}
+
+async function saveSettings() {
+  const disabled_tools = [...ui.toolsList.querySelectorAll('input[type="checkbox"]')].filter((x) => !x.checked).map((x) => x.dataset.key);
+  const variables = {};
+  [...ui.variablesList.querySelectorAll('input[type="checkbox"]'), ...ui.memoryList.querySelectorAll('input[type="checkbox"]')].forEach((x) => {
+    variables[x.dataset.key] = x.checked;
   });
+
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ disabled_tools, variables }) });
+
+  localStorage.setItem("mucli_theme_mode", ui.themeModeSelect.value);
+  localStorage.setItem("mucli_theme_accent", ui.accentSelect.value);
+  applyThemeFromStorage();
+  ui.settingsModal.classList.add("hidden");
   await refreshRuntime();
 }
 
@@ -234,18 +242,13 @@ async function sendMessage(evt) {
   if (state.isSending) return;
   const text = ui.messageInput.value.trim();
   if (!text) return;
-
   state.isSending = true;
   ui.sendBtn.disabled = true;
-
   try {
-    await fetchJson("/api/message", {
-      method: "POST",
-      body: JSON.stringify({ text, session_name: state.currentSession }),
-    });
+    await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: state.currentSession }) });
     ui.messageInput.value = "";
     await refreshHistory(true);
-  await refreshWorkspace();
+    await refreshWorkspace();
   } finally {
     state.isSending = false;
     ui.sendBtn.disabled = false;
@@ -258,66 +261,51 @@ function wireEvents() {
     localStorage.setItem("mucli_gui_api_base", state.apiBase);
     await bootstrap();
   });
-
-  ui.applyRuntimeBtn.addEventListener("click", async () => {
-    try {
-      await applyRuntime();
-    } catch (err) {
-      setStatus(`Error: ${err.message}`, "error");
-    }
-  });
-
-  ui.newSessionBtn.addEventListener("click", async () => {
-    try {
-      await createSession();
-    } catch (err) {
-      setStatus(`Error: ${err.message}`, "error");
-    }
-  });
+  ui.applyRuntimeBtn.addEventListener("click", () => applyRuntime().catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.newSessionBtn.addEventListener("click", () => createSession().catch((err) => setStatus(`Error: ${err.message}`, "error")));
 
   ui.feed.addEventListener("scroll", () => {
     if (ui.feed.scrollTop < 40 && state.visibleCount < state.loadedMessages.length) {
-      const next = Math.min(state.loadedMessages.length, state.visibleCount + 16);
-      if (next !== state.visibleCount) {
-        state.visibleCount = next;
-        renderFeed(false);
-      }
+      state.visibleCount = Math.min(state.loadedMessages.length, state.visibleCount + 16);
+      renderFeed(false);
     }
   });
 
-  ui.composer.addEventListener("submit", async (evt) => {
-    try {
-      await sendMessage(evt);
-    } catch (err) {
-      setStatus(`Error: ${err.message}`, "error");
-    }
-  });
-
-  ui.menuBtn.addEventListener("click", (evt) => {
-    evt.stopPropagation();
-    ui.chatMenu.classList.toggle("hidden");
-  });
-
+  ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
   ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
-
-  document.addEventListener("click", () => {
-    ui.chatMenu.classList.add("hidden");
-  });
+  document.addEventListener("click", () => ui.chatMenu.classList.add("hidden"));
 
   ui.fileBtn.addEventListener("click", () => ui.fileInput.click());
-
   ui.fileInput.addEventListener("change", () => {
     const file = ui.fileInput.files?.[0];
     if (!file) return;
-    const current = ui.messageInput.value.trim();
-    const attachment = `[attached file: ${file.name}]`;
-    ui.messageInput.value = current ? `${current}
-${attachment}` : attachment;
+    const marker = `[attached file: ${file.name}]`;
+    ui.messageInput.value = ui.messageInput.value.trim() ? `${ui.messageInput.value.trim()}\n${marker}` : marker;
+  });
+
+  ui.settingsBtn.addEventListener("click", async () => {
+    await refreshTools();
+    await refreshRuntime();
+    populateSettingsPanels();
+    ui.settingsModal.classList.remove("hidden");
+  });
+  ui.closeSettingsBtn.addEventListener("click", () => ui.settingsModal.classList.add("hidden"));
+  ui.saveSettingsBtn.addEventListener("click", () => saveSettings().catch((err) => setStatus(`Error: ${err.message}`, "error")));
+
+  ui.settingsTabs.addEventListener("click", (evt) => {
+    const btn = evt.target.closest(".settings-tab");
+    if (!btn) return;
+    const tab = btn.dataset.tab;
+    ui.settingsTabs.querySelectorAll(".settings-tab").forEach((x) => x.classList.toggle("active", x === btn));
+    ui.settingsModal.querySelectorAll(".settings-pane").forEach((pane) => pane.classList.toggle("active", pane.dataset.pane === tab));
   });
 }
 
 async function bootstrap() {
+  applyThemeFromStorage();
   await refreshRuntime();
+  await refreshTools();
   await refreshSessions();
   await refreshHistory(true);
   await refreshWorkspace();

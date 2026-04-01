@@ -97,7 +97,7 @@ input,select,textarea{padding:8px 10px}
 .message .text :not(pre)>code{border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;background:var(--surface-2)}
 
 .folder-modal-card{width:min(560px,92vw);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;}
-.folder-row{display:grid;grid-template-columns:1fr auto;gap:8px;margin:10px 0 12px;}
+.folder-row{display:grid;grid-template-columns:1fr;gap:8px;margin:10px 0 12px;}
 .muted{color:var(--muted);font-size:12px;}
 
 .composer textarea{background:#2a2b30;border:0;outline:none;resize:none;max-height:180px;min-height:28px;padding:6px 4px;color:var(--text);line-height:1.4;}

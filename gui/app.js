@@ -41,8 +41,6 @@ const ui = {
   workspaceFolders: el("workspaceFolders"),
   folderModal: el("folderModal"),
   folderPathInput: el("folderPathInput"),
-  browseFolderBtn: el("browseFolderBtn"),
-  folderPickerInput: el("folderPickerInput"),
   attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
   closeFolderModalBtn: el("closeFolderModalBtn"),
   settingsBtn: el("settingsBtn"),
@@ -475,14 +473,6 @@ ${marker}` : marker;
   };
 
   ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
-  ui.browseFolderBtn.addEventListener("click", () => ui.folderPickerInput.click());
-  ui.folderPickerInput.addEventListener("change", () => {
-    const first = ui.folderPickerInput.files?.[0];
-    if (!first) return;
-    const nativePath = first.path || "";
-    const fallback = first.webkitRelativePath ? first.webkitRelativePath.split("/")[0] : first.name;
-    ui.folderPathInput.value = nativePath || fallback;
-  });
   ui.attachFolderConfirmBtn.addEventListener("click", async () => {
     const path = ui.folderPathInput.value.trim();
     if (!path) return;

@@ -31,6 +31,10 @@ const ui = {
   chatMenu: el("chatMenu"),
   fileBtn: el("fileBtn"),
   fileInput: el("fileInput"),
+  attachMenu: el("attachMenu"),
+  attachFileOption: el("attachFileOption"),
+  attachFolderOption: el("attachFolderOption"),
+  attachCloseOption: el("attachCloseOption"),
   workspaceStatus: el("workspaceStatus"),
   workspaceAddBtn: el("workspaceAddBtn"),
   workspaceEmptyPrompt: el("workspaceEmptyPrompt"),
@@ -376,6 +380,7 @@ async function sendMessage(evt) {
   try {
     await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: state.currentSession }) });
     ui.messageInput.value = "";
+    ui.messageInput.style.height = "auto";
     await refreshHistory(true);
     await refreshWorkspace();
   } finally {
@@ -407,16 +412,41 @@ function wireEvents() {
   ui.thinkingToggle.addEventListener("change", () => { if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked; });
   document.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
+    ui.attachMenu.classList.add("hidden");
     ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
     ui.sessionList.querySelectorAll(".session-item").forEach((i) => i.classList.remove("menu-open"));
   });
 
-  ui.fileBtn.addEventListener("click", () => ui.fileInput.click());
+  const autoResizeInput = () => {
+    ui.messageInput.style.height = "auto";
+    ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+  };
+  ui.messageInput.addEventListener("input", autoResizeInput);
+  autoResizeInput();
+
+  ui.fileBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    ui.chatMenu.classList.add("hidden");
+    ui.attachMenu.classList.toggle("hidden");
+  });
+  ui.attachMenu.addEventListener("click", (evt) => evt.stopPropagation());
+  ui.attachFileOption.addEventListener("click", () => {
+    ui.attachMenu.classList.add("hidden");
+    ui.fileInput.click();
+  });
+  ui.attachFolderOption.addEventListener("click", () => {
+    ui.attachMenu.classList.add("hidden");
+    ui.folderModal.classList.remove("hidden");
+  });
+  ui.attachCloseOption.addEventListener("click", () => ui.attachMenu.classList.add("hidden"));
+
   ui.fileInput.addEventListener("change", () => {
     const file = ui.fileInput.files?.[0];
     if (!file) return;
     const marker = `[attached file: ${file.name}]`;
-    ui.messageInput.value = ui.messageInput.value.trim() ? `${ui.messageInput.value.trim()}\n${marker}` : marker;
+    ui.messageInput.value = ui.messageInput.value.trim() ? `${ui.messageInput.value.trim()}
+${marker}` : marker;
+    autoResizeInput();
   });
 
   ui.settingsBtn.addEventListener("click", async () => {

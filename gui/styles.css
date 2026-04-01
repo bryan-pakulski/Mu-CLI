@@ -63,6 +63,7 @@ button { cursor: pointer; }
 .hidden { display: none; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 20; }
+.modal.hidden { display: none !important; }
 .modal-card { width: min(940px, 92vw); height: min(640px, 88vh); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .modal-layout { height: 100%; display: grid; grid-template-columns: 220px 1fr; }
 .settings-nav { border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface-2); }

@@ -50,7 +50,9 @@ input,select,textarea{padding:8px 10px}
 .btn{padding:7px 10px;cursor:pointer}
 .btn-primary,.send-btn{background:var(--accent);border-color:var(--accent);color:#fff}
 
-.workspace-add-row{display:grid;grid-template-columns:1fr auto;gap:6px}
+.workspace-head{display:flex;justify-content:flex-end}
+.workspace-add{padding:4px 8px;font-size:12px}
+.workspace-empty{width:100%;text-align:left;padding:8px;border:1px dashed var(--border);background:transparent;color:var(--muted);border-radius:8px}
 .workspace-folders{display:grid;gap:2px;max-height:120px;overflow:auto}
 .workspace-folder{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px}
 .workspace-folder span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -60,8 +62,9 @@ input,select,textarea{padding:8px 10px}
 
 .main-panel{background:#202123;position:relative}
 .feed-wrap{position:relative;height:100%}
+.feed-wrap::before{content:"";position:absolute;top:0;left:0;right:0;height:72px;pointer-events:none;z-index:2;background:linear-gradient(to bottom, #202123, rgba(32,33,35,0));}
 .settings-btn{position:absolute;top:10px;right:10px;z-index:4;width:32px;height:32px;border-radius:999px;background:#2d2d33;border:1px solid #3d3e45;color:#d7d8dd}
-.feed{position:absolute;inset:0 0 74px 0;overflow:auto;padding:20px 16px;display:flex;flex-direction:column;gap:12px;align-items:center}
+.feed{position:absolute;inset:0 0 74px 0;overflow:auto;padding:20px 16px;display:flex;flex-direction:column;gap:12px;align-items:center;z-index:1}
 .message{width:min(920px,92%)}
 .message .role{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:8px}
 .message .text{display:inline;line-height:1.56}
@@ -93,3 +96,7 @@ input,select,textarea{padding:8px 10px}
 .message .text p{margin:.15rem 0 .45rem}
 .message .text pre{border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto;margin:.45rem 0;background:var(--surface)}
 .message .text :not(pre)>code{border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;background:var(--surface-2)}
+
+.folder-modal-card{width:min(560px,92vw);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;}
+.folder-row{display:grid;grid-template-columns:1fr auto;gap:8px;margin:10px 0 12px;}
+.muted{color:var(--muted);font-size:12px;}

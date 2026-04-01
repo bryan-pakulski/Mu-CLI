@@ -17,6 +17,8 @@ const ui = {
   modelInput: el("modelInput"),
   agenticToggle: el("agenticToggle"),
   thinkingToggle: el("thinkingToggle"),
+  agenticToggleSettings: el("agenticToggleSettings"),
+  thinkingToggleSettings: el("thinkingToggleSettings"),
   applyRuntimeBtn: el("applyRuntimeBtn"),
   statusBadge: el("statusBadge"),
   sessionList: el("sessionList"),
@@ -31,7 +33,8 @@ const ui = {
   fileInput: el("fileInput"),
   workspaceStatus: el("workspaceStatus"),
   addWorkspaceBtn: el("addWorkspaceBtn"),
-  removeWorkspaceBtn: el("removeWorkspaceBtn"),
+  workspacePathInput: el("workspacePathInput"),
+  workspaceFolders: el("workspaceFolders"),
   settingsBtn: el("settingsBtn"),
   settingsModal: el("settingsModal"),
   closeSettingsBtn: el("closeSettingsBtn"),
@@ -182,11 +185,22 @@ async function refreshWorkspace() {
     const data = await fetchJson("/api/workspaces");
     const folders = Array.isArray(data.folders) ? data.folders : [];
     const tracked = Array.isArray(data.tracked_files) ? data.tracked_files.length : 0;
-    if (!folders.length) {
-      ui.workspaceStatus.textContent = "No workspace attached";
-      return;
+    ui.workspaceFolders.innerHTML = "";
+
+    for (const folder of folders) {
+      const row = document.createElement("div");
+      row.className = "workspace-folder";
+      row.innerHTML = `<span title="${folder}">${folder}</span><button class="workspace-remove" title="Remove">−</button>`;
+      row.querySelector(".workspace-remove").addEventListener("click", async () => {
+        await fetchJson("/api/workspaces/remove", { method: "POST", body: JSON.stringify({ path: folder }) });
+        await refreshWorkspace();
+      });
+      ui.workspaceFolders.appendChild(row);
     }
-    ui.workspaceStatus.textContent = `${folders[0]}${folders.length > 1 ? ` (+${folders.length - 1} more)` : ""} • ${tracked} tracked file${tracked === 1 ? "" : "s"}`;
+
+    ui.workspaceStatus.textContent = folders.length
+      ? `${folders.length} folder${folders.length === 1 ? "" : "s"} • ${tracked} tracked file${tracked === 1 ? "" : "s"}`
+      : "No workspace attached";
   } catch {
     ui.workspaceStatus.textContent = "Workspace unavailable";
   }
@@ -199,6 +213,8 @@ async function refreshRuntime() {
     if (!state.currentSession) state.currentSession = runtime.session_name || "";
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
+    if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = !!runtime.agentic;
+    if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = !!runtime.thinking;
     const model = runtime.model || "";
     ui.modelInput.innerHTML = `<option value="${model}">${model || "(default)"}</option>`;
     setStatus("Connected", "connected");
@@ -319,7 +335,9 @@ async function deleteSession(name) {
 }
 
 async function applyRuntime() {
-  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: ui.modelInput.value, agentic: ui.agenticToggle.checked, thinking: ui.thinkingToggle.checked }) });
+  const agentic = ui.agenticToggleSettings?.checked ?? ui.agenticToggle.checked;
+  const thinking = ui.thinkingToggleSettings?.checked ?? ui.thinkingToggle.checked;
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: ui.modelInput.value, agentic, thinking }) });
   await refreshRuntime();
 }
 
@@ -377,6 +395,8 @@ function wireEvents() {
   ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
   ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
   ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
+  ui.agenticToggle.addEventListener("change", () => { if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = ui.agenticToggle.checked; });
+  ui.thinkingToggle.addEventListener("change", () => { if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked; });
   document.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
     ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
@@ -394,6 +414,8 @@ function wireEvents() {
   ui.settingsBtn.addEventListener("click", async () => {
     await refreshTools();
     await refreshRuntime();
+    if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = ui.agenticToggle.checked;
+    if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked;
     await refreshStateVariables();
     populateSettingsPanels();
     ui.settingsModal.classList.remove("hidden");

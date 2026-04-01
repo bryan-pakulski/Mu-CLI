@@ -22,26 +22,17 @@
         </div>
         <div id="sessionList" class="session-list"></div>
 
-        <h2>Runtime</h2>
-        <label class="field">
-          API Base
-          <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" />
-        </label>
-        <label class="field">
-          Model
-          <select id="modelInput"></select>
-        </label>
-        <button id="applyRuntimeBtn" class="btn">Apply</button>
-        <div id="statusBadge" class="status-badge">Disconnected</div>
-
         <h2>Workspace</h2>
-        <div class="workspace-head">
-          <span id="workspaceStatus" class="workspace-status">(none)</span>
-          <div class="workspace-actions">
+        <label class="field">
+          Add folder
+          <div class="workspace-add-row">
+            <input id="workspacePathInput" type="text" placeholder="/path/to/folder" />
             <button id="addWorkspaceBtn" type="button" class="btn">+ Add</button>
-            <button id="removeWorkspaceBtn" type="button" class="btn">Remove</button>
           </div>
-        </div>
+        </label>
+        <div id="workspaceFolders" class="workspace-folders"></div>
+        <div id="workspaceStatus" class="workspace-status">No workspace attached</div>
+        <div id="statusBadge" class="status-badge">Disconnected</div>
       </aside>
 
       <main class="main-panel">
@@ -72,14 +63,24 @@
       <div class="modal-card">
         <div class="modal-layout">
           <nav class="settings-nav" id="settingsTabs">
-            <button class="settings-tab active" data-tab="tools">Tools</button>
+            <button class="settings-tab active" data-tab="runtime">Runtime</button>
+            <button class="settings-tab" data-tab="tools">Tools</button>
             <button class="settings-tab" data-tab="variables">Variables</button>
             <button class="settings-tab" data-tab="memory">Memory</button>
             <button class="settings-tab" data-tab="theme">Theme</button>
           </nav>
 
           <section class="settings-main">
-            <div class="settings-pane active" data-pane="tools">
+            <div class="settings-pane active" data-pane="runtime">
+              <h3>Runtime</h3>
+              <label class="field">API Base <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" /></label>
+              <label class="field">Model <select id="modelInput"></select></label>
+              <label class="field"><input id="agenticToggleSettings" type="checkbox" /> Agentic</label>
+              <label class="field"><input id="thinkingToggleSettings" type="checkbox" /> Thinking</label>
+              <button id="applyRuntimeBtn" class="btn btn-primary">Apply Runtime</button>
+            </div>
+
+            <div class="settings-pane" data-pane="tools">
               <h3>Tools</h3>
               <div id="toolsList" class="settings-list"></div>
             </div>

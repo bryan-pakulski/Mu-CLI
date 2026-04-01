@@ -36,8 +36,7 @@ const ui = {
   attachFolderOption: el("attachFolderOption"),
   attachCloseOption: el("attachCloseOption"),
   workspaceStatus: el("workspaceStatus"),
-  workspaceAddBtn: el("workspaceAddBtn"),
-  workspaceEmptyPrompt: el("workspaceEmptyPrompt"),
+  workspaceAddTrigger: el("workspaceAddTrigger"),
   workspaceFolders: el("workspaceFolders"),
   folderModal: el("folderModal"),
   folderPathInput: el("folderPathInput"),
@@ -196,9 +195,6 @@ async function refreshWorkspace() {
     const folders = Array.isArray(data.folders) ? data.folders : [];
     const tracked = Array.isArray(data.tracked_files) ? data.tracked_files.length : 0;
     ui.workspaceFolders.innerHTML = "";
-    ui.workspaceAddBtn.classList.toggle("hidden", folders.length === 0);
-    ui.workspaceEmptyPrompt.classList.toggle("hidden", folders.length > 0);
-
     for (const folder of folders) {
       const row = document.createElement("div");
       row.className = "workspace-folder";

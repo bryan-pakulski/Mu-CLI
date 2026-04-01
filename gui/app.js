@@ -78,6 +78,29 @@ function normalizedMessages(history = []) {
   return history.filter((m) => ["user", "assistant"].includes(m.role)).map((m) => ({ role: m.role, text: textFromParts(m.parts || []) })).filter((m) => m.text);
 }
 
+
+function groupTools(tools = []) {
+  const groups = { "Workspace & Files": [], "Execution": [], "Git": [], "System": [], "Other": [] };
+  for (const tool of tools) {
+    const name = String(tool.name || "");
+    if (/(workspace|file|dir|chunk|search)/i.test(name)) groups["Workspace & Files"].push(tool);
+    else if (/(run_|batch|agent_task|task)/i.test(name)) groups["Execution"].push(tool);
+    else if (/git/i.test(name)) groups["Git"].push(tool);
+    else if (/(time|status|tool|variable|model|provider)/i.test(name)) groups["System"].push(tool);
+    else groups["Other"].push(tool);
+  }
+  return Object.entries(groups).filter(([, items]) => items.length);
+}
+
+function parseVariableValue(raw, typeHint = "") {
+  const type = String(typeHint || "").toLowerCase();
+  if (type === "bool" || type === "boolean") return raw === "true";
+  if (type === "int" || type === "number") return Number(raw);
+  if (raw === "true" || raw === "false") return raw === "true";
+  if (!Number.isNaN(Number(raw)) && raw !== "") return Number(raw);
+  return raw;
+}
+
 function renderMarkdown(container, text) {
   const rendered = window.marked ? window.marked.parse(String(text || ""), { gfm: true, breaks: true }) : String(text || "");
   container.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;

@@ -6,6 +6,7 @@ const state = {
   sessions: [],
   runtime: null,
   tools: [],
+  allVariables: {},
   loadedMessages: [],
   visibleCount: 24,
   isSending: false,
@@ -100,26 +101,47 @@ function renderFeed(resetToBottom = false) {
   if (prevTop < 60 && grew > 0) ui.feed.scrollTop = prevTop + grew;
 }
 
-function renderSettingsList(target, items, keyPrefix) {
+function renderSettingsList(target, items, mode = "checkbox") {
   target.innerHTML = "";
   for (const item of items) {
     const row = document.createElement("label");
     row.className = "settings-row";
-    row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" ${item.enabled ? "checked" : ""} />`;
+    if (mode === "text") {
+      if (item.kind === "bool") {
+        row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" data-kind="bool" ${item.value ? "checked" : ""} />`;
+      } else {
+        row.innerHTML = `<span>${item.label}</span><input data-key="${item.key}" data-kind="${item.kind || "text"}" value="${String(item.value ?? "")}" />`;
+      }
+    } else {
+      row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" ${item.enabled ? "checked" : ""} />`;
+    }
     target.appendChild(row);
   }
 }
 
+function renderGroupedTools() {
+  ui.toolsList.innerHTML = "";
+  for (const [groupName, items] of groupTools(state.tools)) {
+    const group = document.createElement("section");
+    group.className = "settings-group";
+    group.innerHTML = `<h4>${groupName}</h4><div class="settings-list"></div>`;
+    const list = group.querySelector(".settings-list");
+    renderSettingsList(list, items.map((t) => ({ key: t.name, label: t.name, enabled: !t.disabled })), "checkbox");
+    ui.toolsList.appendChild(group);
+  }
+}
+
 function populateSettingsPanels() {
-  const toolItems = state.tools.map((t) => ({ key: t.name, label: t.name, enabled: !t.disabled }));
-  renderSettingsList(ui.toolsList, toolItems, "tool");
+  renderGroupedTools();
 
-  const vars = state.runtime?.variables || {};
-  const variableKeys = ["yolo", "strict_mode", "agent_mode"];
-  const memoryKeys = ["memory_enabled", "compact_history", "collation_enabled"];
+  const vars = state.allVariables || state.runtime?.variables || {};
+  const entries = Object.entries(vars);
+  const memoryEntries = entries.filter(([k]) => /(memory|compact|collation|timeout|max_)/i.test(k));
+  const generalEntries = entries.filter(([k]) => !/(memory|compact|collation|timeout|max_)/i.test(k));
 
-  renderSettingsList(ui.variablesList, variableKeys.map((k) => ({ key: k, label: k, enabled: !!vars[k] })), "var");
-  renderSettingsList(ui.memoryList, memoryKeys.map((k) => ({ key: k, label: k, enabled: !!vars[k] })), "mem");
+  const toItem = ([key, value]) => ({ key, label: key, value, kind: typeof value === "boolean" ? "bool" : typeof value === "number" ? "number" : "text" });
+  renderSettingsList(ui.variablesList, generalEntries.map(toItem), "text");
+  renderSettingsList(ui.memoryList, memoryEntries.map(toItem), "text");
 }
 
 async function refreshWorkspace() {
@@ -153,6 +175,15 @@ async function refreshTools() {
     state.tools = data.tools || [];
   } catch {
     state.tools = [];
+  }
+}
+
+async function refreshStateVariables() {
+  try {
+    const data = await fetchJson("/api/state");
+    state.allVariables = data.variables || state.runtime?.variables || {};
+  } catch {
+    state.allVariables = state.runtime?.variables || {};
   }
 }
 
@@ -224,8 +255,9 @@ async function applyRuntime() {
 async function saveSettings() {
   const disabled_tools = [...ui.toolsList.querySelectorAll('input[type="checkbox"]')].filter((x) => !x.checked).map((x) => x.dataset.key);
   const variables = {};
-  [...ui.variablesList.querySelectorAll('input[type="checkbox"]'), ...ui.memoryList.querySelectorAll('input[type="checkbox"]')].forEach((x) => {
-    variables[x.dataset.key] = x.checked;
+  [...ui.variablesList.querySelectorAll("input[data-key]"), ...ui.memoryList.querySelectorAll("input[data-key]")].forEach((x) => {
+    const raw = x.type === "checkbox" ? String(x.checked) : x.value;
+    variables[x.dataset.key] = parseVariableValue(raw, x.dataset.kind);
   });
 
   await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ disabled_tools, variables }) });
@@ -287,6 +319,7 @@ function wireEvents() {
   ui.settingsBtn.addEventListener("click", async () => {
     await refreshTools();
     await refreshRuntime();
+    await refreshStateVariables();
     populateSettingsPanels();
     ui.settingsModal.classList.remove("hidden");
   });
@@ -306,6 +339,7 @@ async function bootstrap() {
   applyThemeFromStorage();
   await refreshRuntime();
   await refreshTools();
+  await refreshStateVariables();
   await refreshSessions();
   await refreshHistory(true);
   await refreshWorkspace();

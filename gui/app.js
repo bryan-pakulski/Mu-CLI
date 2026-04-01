@@ -1,4 +1,5 @@
 const el = (id) => document.getElementById(id);
+const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
 
 const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
@@ -63,6 +64,40 @@ const ui = {
 };
 
 ui.apiBaseInput.value = state.apiBase;
+
+function loadPersistedActivity() {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const cleaned = {};
+    for (const [sessionName, items] of Object.entries(parsed)) {
+      if (!Array.isArray(items)) continue;
+      cleaned[sessionName] = items
+        .filter((x) => x && typeof x.title === "string")
+        .slice(-120)
+        .map((x) => ({
+          title: String(x.title || ""),
+          detail: String(x.detail || ""),
+          at: Number(x.at || Date.now()),
+        }));
+    }
+    return cleaned;
+  } catch {
+    return {};
+  }
+}
+
+function persistActivity() {
+  try {
+    localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(state.activityBySession || {}));
+  } catch {
+    return;
+  }
+}
+
+state.activityBySession = loadPersistedActivity();
 
 function applyThemeFromStorage() {
   const mode = localStorage.getItem("mucli_theme_mode") || "dark";
@@ -218,6 +253,7 @@ function pushActivity(sessionName, title, detail = "") {
   const bucket = sessionActivity(sessionName);
   bucket.push({ title, detail, at: Date.now() });
   if (bucket.length > 120) bucket.splice(0, bucket.length - 120);
+  persistActivity();
   if (sessionName === state.currentSession) renderActivityPanel();
 }
 
@@ -499,6 +535,11 @@ async function createSession() {
 
 async function renameSession(currentName, newName) {
   await fetchJson("/api/sessions/rename", { method: "POST", body: JSON.stringify({ name: currentName, new_name: newName.trim() }) });
+  if (state.activityBySession[currentName] && currentName !== newName.trim()) {
+    state.activityBySession[newName.trim()] = state.activityBySession[currentName];
+    delete state.activityBySession[currentName];
+    persistActivity();
+  }
   if (state.currentSession === currentName) state.currentSession = newName.trim();
   await refreshSessions();
   await refreshHistory(false);
@@ -506,6 +547,10 @@ async function renameSession(currentName, newName) {
 
 async function deleteSession(name) {
   await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
+  if (state.activityBySession[name]) {
+    delete state.activityBySession[name];
+    persistActivity();
+  }
   if (state.currentSession === name) state.currentSession = "";
   await refreshSessions();
   await refreshRuntime();

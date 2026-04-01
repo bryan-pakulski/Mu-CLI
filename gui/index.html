@@ -33,10 +33,6 @@
           Model
           <select id="modelInput"></select>
         </label>
-        <div class="toggle-row">
-          <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
-          <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
-        </div>
         <button id="applyRuntimeBtn" class="btn">Apply</button>
         <div id="statusBadge" class="status-badge">Disconnected</div>
       </aside>
@@ -44,12 +40,25 @@
       <main class="main-panel">
         <section class="feed-wrap">
           <section id="feed" class="feed" aria-live="polite"></section>
-        </section>
 
-        <form id="composer" class="composer">
-          <textarea id="messageInput" rows="2" placeholder="Type a message..."></textarea>
-          <button id="sendBtn" class="btn btn-primary" type="submit">Send</button>
-        </form>
+          <div class="workspace-status" id="workspaceStatus">Workspace: (none)</div>
+
+          <form id="composer" class="composer" enctype="multipart/form-data">
+            <div class="composer-top">
+              <button id="fileBtn" type="button" class="icon-btn" title="Attach file">+</button>
+              <input id="fileInput" type="file" hidden />
+              <button id="menuBtn" type="button" class="icon-btn" title="Chat options">...</button>
+              <div id="chatMenu" class="chat-menu hidden">
+                <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
+                <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
+              </div>
+            </div>
+            <div class="composer-row">
+              <textarea id="messageInput" rows="2" placeholder="Type a message..."></textarea>
+              <button id="sendBtn" class="btn send-btn" type="submit">Send</button>
+            </div>
+          </form>
+        </section>
       </main>
     </div>
 

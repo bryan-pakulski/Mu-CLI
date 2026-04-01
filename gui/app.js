@@ -23,6 +23,11 @@ const ui = {
   composer: el("composer"),
   messageInput: el("messageInput"),
   sendBtn: el("sendBtn"),
+  menuBtn: el("menuBtn"),
+  chatMenu: el("chatMenu"),
+  fileBtn: el("fileBtn"),
+  fileInput: el("fileInput"),
+  workspaceStatus: el("workspaceStatus"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -99,6 +104,18 @@ function renderFeed(resetToBottom = false) {
   }
 }
 
+
+async function refreshWorkspace() {
+  try {
+    const data = await fetchJson("/api/workspaces");
+    const folders = Array.isArray(data.folders) ? data.folders : [];
+    const label = folders.length ? folders[0] : "(none)";
+    ui.workspaceStatus.textContent = `Workspace: ${label}`;
+  } catch {
+    ui.workspaceStatus.textContent = "Workspace: unavailable";
+  }
+}
+
 async function refreshRuntime() {
   try {
     const runtime = await fetchJson("/api/runtime");
@@ -161,6 +178,7 @@ async function loadSession(name) {
   await refreshSessions();
   await refreshRuntime();
   await refreshHistory(true);
+  await refreshWorkspace();
 }
 
 async function createSession() {
@@ -227,6 +245,7 @@ async function sendMessage(evt) {
     });
     ui.messageInput.value = "";
     await refreshHistory(true);
+  await refreshWorkspace();
   } finally {
     state.isSending = false;
     ui.sendBtn.disabled = false;
@@ -256,7 +275,6 @@ function wireEvents() {
     }
   });
 
-
   ui.feed.addEventListener("scroll", () => {
     if (ui.feed.scrollTop < 40 && state.visibleCount < state.loadedMessages.length) {
       const next = Math.min(state.loadedMessages.length, state.visibleCount + 16);
@@ -274,12 +292,35 @@ function wireEvents() {
       setStatus(`Error: ${err.message}`, "error");
     }
   });
+
+  ui.menuBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    ui.chatMenu.classList.toggle("hidden");
+  });
+
+  ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
+
+  document.addEventListener("click", () => {
+    ui.chatMenu.classList.add("hidden");
+  });
+
+  ui.fileBtn.addEventListener("click", () => ui.fileInput.click());
+
+  ui.fileInput.addEventListener("change", () => {
+    const file = ui.fileInput.files?.[0];
+    if (!file) return;
+    const current = ui.messageInput.value.trim();
+    const attachment = `[attached file: ${file.name}]`;
+    ui.messageInput.value = current ? `${current}
+${attachment}` : attachment;
+  });
 }
 
 async function bootstrap() {
   await refreshRuntime();
   await refreshSessions();
   await refreshHistory(true);
+  await refreshWorkspace();
 }
 
 wireEvents();

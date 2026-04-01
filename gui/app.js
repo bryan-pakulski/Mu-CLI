@@ -125,7 +125,37 @@ function parseVariableValue(raw, typeHint = "") {
 function renderMarkdown(container, text) {
   const rendered = window.marked ? window.marked.parse(String(text || ""), { gfm: true, breaks: true }) : String(text || "");
   container.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
-  container.querySelectorAll("pre code").forEach((block) => window.hljs?.highlightElement(block));
+  container.querySelectorAll("pre code").forEach((block) => {
+    window.hljs?.highlightElement(block);
+    const pre = block.closest("pre");
+    if (!pre || pre.querySelector(".copy-code-btn")) return;
+    const btn = document.createElement("button");
+    btn.className = "copy-code-btn";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", () => copyText(block.textContent || "", btn));
+    pre.appendChild(btn);
+  });
+}
+
+
+async function copyText(value, button) {
+  try {
+    await navigator.clipboard.writeText(value || "");
+    if (button) {
+      button.classList.add("copied");
+      const original = button.textContent;
+      button.textContent = "✓";
+      setTimeout(() => {
+        button.classList.remove("copied");
+        button.textContent = original;
+      }, 900);
+    }
+  } catch {
+    if (button) {
+      button.classList.add("copy-fail");
+      setTimeout(() => button.classList.remove("copy-fail"), 900);
+    }
+  }
 }
 
 function renderFeed(resetToBottom = false) {
@@ -138,6 +168,17 @@ function renderFeed(resetToBottom = false) {
     card.className = "message";
     card.innerHTML = `<span class="role">${item.role}</span><span class="text"></span>`;
     renderMarkdown(card.querySelector(".text"), item.text);
+    if (item.role === "assistant") {
+      const footer = document.createElement("div");
+      footer.className = "message-footer";
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "copy-msg-btn";
+      copyBtn.textContent = "⧉";
+      copyBtn.title = "Copy response";
+      copyBtn.addEventListener("click", () => copyText(item.text, copyBtn));
+      footer.appendChild(copyBtn);
+      card.appendChild(footer);
+    }
     ui.feed.appendChild(card);
   }
 
@@ -391,10 +432,10 @@ async function sendMessage(evt) {
 
   state.isSending = true;
   ui.sendBtn.disabled = true;
+  ui.messageInput.value = "";
+  ui.messageInput.style.height = "auto";
   try {
     await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend }) });
-    ui.messageInput.value = "";
-    ui.messageInput.style.height = "auto";
   } finally {
     delete state.pendingBySession[sessionAtSend];
     state.isSending = false;

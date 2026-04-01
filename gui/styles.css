@@ -69,8 +69,8 @@ input,select,textarea{padding:8px 10px}
 .message .role{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:8px}
 .message .text{display:inline;line-height:1.56}
 
-.composer{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;width:min(820px,calc(100% - 28px));padding:0;background:transparent;border:0}
-.composer-row{position:relative;display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:end;background:#2a2b30;border:1px solid #3a3b41;border-radius:26px;padding:8px 8px 8px 10px}
+.composer{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;width:min(820px,calc(100% - 28px));padding:8px;background:#2a2b30;border:1px solid #3a3b41;border-radius:26px;z-index:5;isolation:isolate}
+.composer-row{position:relative;display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:end;padding:0}
 .icon-btn{min-width:34px;height:34px;border-radius:999px;background:#2d2d33;border:1px solid #3d3e45;color:#cfd1d8;font-size:18px;line-height:1;font-family:Inter,Arial,sans-serif;display:grid;place-items:center;padding:0}
 .chat-menu{position:absolute;left:0;bottom:48px;display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:8px;font-size:13px;color:var(--text);min-width:240px;box-shadow:0 16px 32px rgba(0,0,0,.35);z-index:6}
 .hidden{display:none}
@@ -100,7 +100,7 @@ input,select,textarea{padding:8px 10px}
 .folder-row{display:grid;grid-template-columns:1fr auto;gap:8px;margin:10px 0 12px;}
 .muted{color:var(--muted);font-size:12px;}
 
-.composer textarea{background:transparent;border:0;outline:none;resize:none;max-height:180px;min-height:28px;padding:6px 4px;color:var(--text);line-height:1.4;}
+.composer textarea{background:#2a2b30;border:0;outline:none;resize:none;max-height:180px;min-height:28px;padding:6px 4px;color:var(--text);line-height:1.4;}
 .menu-item{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:var(--text);padding:8px 10px;border-radius:10px;text-align:left;}
 .menu-item:hover{background:var(--surface-3);}
 

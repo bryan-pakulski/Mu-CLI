@@ -53,7 +53,7 @@ button { cursor: pointer; }
 
 .main-panel { min-width: 0; height: 100vh; background: var(--surface-2); }
 .feed-wrap { position: relative; height: 100%; }
-.settings-btn { position: absolute; top: 10px; right: 10px; z-index: 4; width: 32px; height: 32px; border-radius: 50%; }
+.settings-btn { position: absolute; top: 10px; right: 10px; z-index: 4; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); border-color: var(--accent); color: #fff; }
 .feed-wrap::before { content:""; position:absolute; top:0; left:0; right:0; height:72px; z-index:2; pointer-events:none; background: linear-gradient(to bottom, var(--surface-2), rgba(0,0,0,0)); }
 .feed { position:absolute; inset:0 0 74px 0; overflow:auto; padding:18px 14px 20px; display:flex; flex-direction:column; gap:12px; align-items:center; }
 .message { width:min(920px,92%); }
@@ -67,8 +67,8 @@ button { cursor: pointer; }
 .composer { position:absolute; left:50%; transform:translateX(-50%); bottom:10px; width:min(760px,calc(100% - 28px)); border:0; border-radius:0; background:transparent; padding:0; }
 .composer-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; position:relative; }
 .composer-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; }
-.icon-btn { min-width:30px; height:28px; border-radius:8px; }
-.chat-menu { position:absolute; right:0; top:32px; display:flex; flex-direction:column; gap:8px; background:var(--surface-2); border:1px solid var(--border); padding:8px; font-size:12px; color:var(--muted); }
+.icon-btn { min-width:30px; height:28px; border-radius:8px; background: var(--accent); border-color: var(--accent); color: #fff; }
+.chat-menu { position:absolute; right:0; top:32px; display:flex; flex-direction:column; gap:8px; background:var(--surface); border:1px solid var(--accent); padding:8px; font-size:12px; color:var(--text); }
 .hidden { display: none; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 20; }

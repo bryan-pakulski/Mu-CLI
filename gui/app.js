@@ -18,8 +18,10 @@ const state = {
   taskBySession: {},
   memoryBySession: {},
   lastMemoryToolBySession: {},
+  pendingApprovals: [],
   taskPollTimersBySession: {},
   memoryPollTimer: null,
+  approvalPollTimer: null,
   eventSourceBySession: {},
 };
 
@@ -28,6 +30,7 @@ const ui = {
   modelInput: el("modelInput"),
   agenticToggle: el("agenticToggle"),
   thinkingToggle: el("thinkingToggle"),
+  yoloToggle: el("yoloToggle"),
   agenticToggleSettings: el("agenticToggleSettings"),
   thinkingToggleSettings: el("thinkingToggleSettings"),
   applyRuntimeBtn: el("applyRuntimeBtn"),
@@ -35,6 +38,11 @@ const ui = {
   sessionList: el("sessionList"),
   newSessionBtn: el("newSessionBtn"),
   feed: el("feed"),
+  approvalBar: el("approvalBar"),
+  approvalText: el("approvalText"),
+  approvalApproveBtn: el("approvalApproveBtn"),
+  approvalRejectBtn: el("approvalRejectBtn"),
+  approvalExplainBtn: el("approvalExplainBtn"),
   activityList: el("activityList"),
   activitySummary: el("activitySummary"),
   composer: el("composer"),
@@ -346,6 +354,40 @@ function renderActivityPanel() {
   }
 }
 
+async function refreshApprovals() {
+  try {
+    const data = await fetchJson("/api/approvals", {}, 2500);
+    state.pendingApprovals = data.pending_approvals || [];
+  } catch {
+    state.pendingApprovals = [];
+  }
+  renderApprovalBar();
+}
+
+function renderApprovalBar() {
+  const next = state.pendingApprovals[0];
+  if (!next) {
+    ui.approvalBar.classList.add("hidden");
+    return;
+  }
+  ui.approvalBar.classList.remove("hidden");
+  const tool = next.tool_name || "tool";
+  const count = state.pendingApprovals.length;
+  ui.approvalText.textContent = `${tool} requires approval${count > 1 ? ` (${count} pending)` : ""}`;
+}
+
+async function resolveApproval(decision) {
+  const next = state.pendingApprovals[0];
+  if (!next?.approval_id) return;
+  let reason = undefined;
+  if (decision === "e") reason = prompt("Explain request to the model (optional):") || "";
+  await fetchJson("/api/approvals/resolve", {
+    method: "POST",
+    body: JSON.stringify({ approval_id: next.approval_id, decision, reason }),
+  });
+  await refreshApprovals();
+}
+
 function memoryToolName(name = "") {
   return /^(save_memory|search_memory|list_memory|save_scratchpad|search_scratchpad|list_scratchpad|clear_scratchpad)$/i.test(String(name || ""));
 }
@@ -600,6 +642,7 @@ async function refreshRuntime() {
     if (!state.currentSession) state.currentSession = runtime.session_name || "";
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
+    ui.yoloToggle.checked = !!runtime.variables?.yolo;
     if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = !!runtime.agentic;
     if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = !!runtime.thinking;
     const model = runtime.model || "";
@@ -644,10 +687,11 @@ function renderSessions() {
   ui.sessionList.innerHTML = "";
   for (const name of state.sessions) {
     const item = document.createElement("div");
-    item.className = `session-item ${name === state.currentSession ? "active" : ""}`;
+    const isPending = !!state.pendingBySession[name];
+    item.className = `session-item ${name === state.currentSession ? "active" : ""} ${isPending ? "pending" : ""}`;
     item.innerHTML = `
       <div class="session-row">
-        <button class="session-title">${name}</button>
+        <button class="session-title">${isPending ? '<span class="session-pending-dot"></span>' : ""}${name}</button>
         <button class="session-menu-btn" title="Session options">⋯</button>
       </div>
       <div class="session-popup hidden">
@@ -916,6 +960,7 @@ async function sendMessage(evt) {
   state.draftBySession[sessionAtSend] = "";
   persistDrafts();
   pushActivity(sessionAtSend, "Message sent", text.slice(0, 220));
+  renderSessions();
   if (state.currentSession === sessionAtSend) renderFeed(true);
 
   ui.messageInput.value = "";
@@ -939,6 +984,7 @@ async function sendMessage(evt) {
     closeEventStream(sessionAtSend);
     stopTaskTicker(sessionAtSend);
     delete state.pendingBySession[sessionAtSend];
+    renderSessions();
     ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
     if (state.taskBySession[sessionAtSend]?.status === "running") {
       state.taskBySession[sessionAtSend].status = "completed";
@@ -980,6 +1026,13 @@ function wireEvents() {
   });
   ui.agenticToggle.addEventListener("change", () => { if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = ui.agenticToggle.checked; });
   ui.thinkingToggle.addEventListener("change", () => { if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked; });
+  ui.yoloToggle.addEventListener("change", () => {
+    fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ variables: { yolo: !!ui.yoloToggle.checked } }) })
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.approvalApproveBtn.addEventListener("click", () => resolveApproval("y").catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.approvalRejectBtn.addEventListener("click", () => resolveApproval("n").catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.approvalExplainBtn.addEventListener("click", () => resolveApproval("e").catch((err) => setStatus(`Error: ${err.message}`, "error")));
   document.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
     ui.attachMenu.classList.add("hidden");
@@ -1080,7 +1133,10 @@ async function bootstrap() {
     refreshWorkspace(),
     refreshMemoryRuntime(),
     refreshMemoryBuffers(),
+    refreshApprovals(),
   ]);
+  if (state.approvalPollTimer) clearInterval(state.approvalPollTimer);
+  state.approvalPollTimer = setInterval(() => refreshApprovals(), 2000);
   ui.messageInput.value = state.draftBySession[state.currentSession] || "";
   ui.messageInput.style.height = "auto";
   ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;

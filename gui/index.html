@@ -32,6 +32,14 @@
       <main class="main-panel">
         <section class="feed-wrap">
           <button id="settingsBtn" class="settings-btn" title="Settings">⚙</button>
+          <div id="approvalBar" class="approval-bar hidden">
+            <span id="approvalText"></span>
+            <div class="approval-actions">
+              <button id="approvalApproveBtn" class="btn btn-primary" type="button">Approve</button>
+              <button id="approvalRejectBtn" class="btn" type="button">Reject</button>
+              <button id="approvalExplainBtn" class="btn" type="button">Explain</button>
+            </div>
+          </div>
           <section id="feed" class="feed" aria-live="polite"></section>
 
           <form id="composer" class="composer" enctype="multipart/form-data">
@@ -48,6 +56,7 @@
               <div id="chatMenu" class="chat-menu options-menu hidden">
                 <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
                 <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
+                <label><input id="yoloToggle" type="checkbox" /> YOLO mode</label>
                 <button id="memoryOption" type="button" class="menu-item">Memory</button>
                 <button id="clearChatOption" type="button" class="menu-item">Clear conversation</button>
               </div>

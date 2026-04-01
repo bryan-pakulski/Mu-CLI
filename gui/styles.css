@@ -36,7 +36,9 @@ body{margin:0;min-height:100vh;font-family:Manrope,Inter,sans-serif;background:v
 .session-item{position:relative;padding:2px 4px;border-radius:8px}
 .session-item:hover{background:#2a2b31}
 .session-item.active{background:#33343a}
+.session-item.pending{border:1px solid color-mix(in oklab, var(--accent) 48%, transparent)}
 .session-row{display:flex;align-items:center;gap:4px}
+.session-pending-dot{width:7px;height:7px;border-radius:999px;background:var(--accent);display:inline-block;margin-right:6px;animation:dotPulse 1s infinite ease-in-out}
 .session-title{flex:1;border:0;background:transparent;color:var(--text);text-align:left;padding:6px 4px;font-size:14px}
 .session-menu-btn{width:22px;height:22px;padding:0;opacity:0;pointer-events:none;transition:opacity .12s;border:0;background:transparent;color:var(--muted)}
 .session-item:hover .session-menu-btn,.session-item.menu-open .session-menu-btn,.session-item:focus-within .session-menu-btn{opacity:1;pointer-events:auto}
@@ -64,6 +66,8 @@ input,select,textarea{padding:8px 10px}
 .feed-wrap{position:relative;height:100%;border-right:1px solid #2d2e33;min-height:0}
 .feed-wrap::before{content:"";position:absolute;top:0;left:0;right:0;height:72px;pointer-events:none;z-index:2;background:linear-gradient(to bottom, #202123, rgba(32,33,35,0));}
 .settings-btn{position:absolute;top:10px;right:10px;z-index:4;width:32px;height:32px;border-radius:999px;background:#2d2d33;border:1px solid #3d3e45;color:#d7d8dd}
+.approval-bar{position:absolute;top:10px;left:12px;right:56px;z-index:4;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:color-mix(in oklab, var(--surface) 88%, var(--accent) 12%);font-size:12px}
+.approval-actions{display:flex;gap:6px}
 .feed{position:absolute;inset:0 0 74px 0;overflow:auto;padding:20px 16px;display:flex;flex-direction:column;gap:12px;align-items:center;z-index:1}
 .message{width:min(920px,92%)}
 .message .role{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:8px}

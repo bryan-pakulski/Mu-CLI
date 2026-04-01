@@ -56,7 +56,10 @@ const ui = {
   attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
   closeFolderModalBtn: el("closeFolderModalBtn"),
   memoryModal: el("memoryModal"),
+  memorySearchInput: el("memorySearchInput"),
   memoryRuntimeList: el("memoryRuntimeList"),
+  memoryBufferList: el("memoryBufferList"),
+  scratchpadBufferList: el("scratchpadBufferList"),
   memoryActivityList: el("memoryActivityList"),
   closeMemoryModalBtn: el("closeMemoryModalBtn"),
   settingsBtn: el("settingsBtn"),
@@ -108,7 +111,7 @@ function persistActivity() {
 state.activityBySession = loadPersistedActivity();
 
 function sessionMemory(sessionName = state.currentSession) {
-  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [] };
+  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], query: "" };
   return state.memoryBySession[sessionName];
 }
 
@@ -340,12 +343,81 @@ async function refreshMemoryRuntime(sessionName = state.currentSession) {
   }
 }
 
+function toolResultText(payload = {}) {
+  const candidates = [
+    payload.result,
+    payload.output,
+    payload.visible_result,
+    payload.tool_result,
+    payload.message,
+    payload.data,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string") return c;
+    if (c && typeof c === "object") {
+      if (typeof c.result === "string") return c.result;
+      if (typeof c.output === "string") return c.output;
+      if (typeof c.message === "string") return c.message;
+    }
+  }
+  return JSON.stringify(payload || {}, null, 2);
+}
+
+function parseMemoryRows(raw) {
+  const rows = String(raw || "").split("\n").map((x) => x.trim()).filter(Boolean);
+  return rows.map((line) => {
+    const match = line.match(/^#(\d+)\s+tags=(\[[^\]]*\])\s+source=([^:]+)\s+::\s+([\s\S]+)$/);
+    if (!match) return { id: "", tags: [], source: "", content: line };
+    let tags = [];
+    try { tags = JSON.parse(match[2]); } catch { tags = []; }
+    return {
+      id: match[1],
+      tags,
+      source: match[3],
+      content: match[4],
+    };
+  });
+}
+
+async function refreshMemoryBuffers(sessionName = state.currentSession) {
+  try {
+    const [memoryRes, scratchRes] = await Promise.all([
+      fetchJson("/api/tool", { method: "POST", body: JSON.stringify({ tool_name: "list_memory", tool_args: { limit: 50 }, structured: false }) }),
+      fetchJson("/api/tool", { method: "POST", body: JSON.stringify({ tool_name: "list_scratchpad", tool_args: { limit: 50 }, structured: false }) }),
+    ]);
+    const mem = sessionMemory(sessionName);
+    mem.buffer = parseMemoryRows(toolResultText(memoryRes));
+    mem.scratchpad = parseMemoryRows(toolResultText(scratchRes));
+    if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
+  } catch {
+    return;
+  }
+}
+
 function renderMemoryModal() {
   const mem = sessionMemory(state.currentSession);
+  const query = String(mem.query || "").trim().toLowerCase();
+  const filtered = (items) => {
+    if (!query) return items;
+    return items.filter((item) => {
+      const hay = `${item.id} ${(item.tags || []).join(" ")} ${item.source} ${item.content}`.toLowerCase();
+      return hay.includes(query);
+    });
+  };
   const runtimeEntries = Object.entries(mem.runtime || {});
   ui.memoryRuntimeList.innerHTML = runtimeEntries.length
     ? runtimeEntries.map(([k, v]) => `<article class="memory-item"><div class="memory-item-title">${k}</div><div class="memory-item-body">${String(v)}</div></article>`).join("")
     : '<div class="activity-empty">No runtime memory variables available.</div>';
+
+  const memoryEntries = filtered(mem.buffer || []);
+  ui.memoryBufferList.innerHTML = memoryEntries.length
+    ? memoryEntries.map((e) => `<article class="memory-item"><div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div><div class="memory-item-body">${e.content || ""}</div></article>`).join("")
+    : '<div class="activity-empty">No memory entries found.</div>';
+
+  const scratchEntries = filtered(mem.scratchpad || []);
+  ui.scratchpadBufferList.innerHTML = scratchEntries.length
+    ? scratchEntries.map((e) => `<article class="memory-item"><div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div><div class="memory-item-body">${e.content || ""}</div></article>`).join("")
+    : '<div class="activity-empty">No scratchpad entries found.</div>';
 
   ui.memoryActivityList.innerHTML = mem.activity.length
     ? mem.activity.slice(-60).reverse().map((e) => `<article class="memory-item"><div class="memory-item-title">${e.title} · ${new Date(e.at).toLocaleTimeString()}</div><div class="memory-item-body">${e.body || ""}</div></article>`).join("")
@@ -354,10 +426,15 @@ function renderMemoryModal() {
 
 function openMemoryModal() {
   ui.memoryModal.classList.remove("hidden");
+  ui.memorySearchInput.value = sessionMemory(state.currentSession).query || "";
   renderMemoryModal();
   refreshMemoryRuntime();
+  refreshMemoryBuffers();
   if (state.memoryPollTimer) clearInterval(state.memoryPollTimer);
-  state.memoryPollTimer = setInterval(() => refreshMemoryRuntime(), 2000);
+  state.memoryPollTimer = setInterval(() => {
+    refreshMemoryRuntime();
+    refreshMemoryBuffers();
+  }, 2500);
 }
 
 function closeMemoryModal() {
@@ -711,6 +788,7 @@ function startTaskEventStream(taskId, sessionName) {
       state.lastMemoryToolBySession[sessionName] = toolName;
       pushMemoryEvent(sessionName, `Tool: ${toolName}`, JSON.stringify(evt.payload?.tool_args || {}, null, 2));
       refreshMemoryRuntime(sessionName);
+      refreshMemoryBuffers(sessionName);
     }
     if (evt.event === "trace.tool_result" && state.lastMemoryToolBySession[sessionName]) {
       pushMemoryEvent(
@@ -905,6 +983,10 @@ ${marker}` : marker;
   });
   ui.closeFolderModalBtn.addEventListener("click", () => ui.folderModal.classList.add("hidden"));
   ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);
+  ui.memorySearchInput.addEventListener("input", () => {
+    sessionMemory(state.currentSession).query = ui.memorySearchInput.value || "";
+    renderMemoryModal();
+  });
 
   ui.settingsBtn.addEventListener("click", async () => {
     await refreshTools();
@@ -936,6 +1018,7 @@ async function bootstrap() {
   await refreshHistory(true);
   await refreshWorkspace();
   await refreshMemoryRuntime();
+  await refreshMemoryBuffers();
 }
 
 wireEvents();

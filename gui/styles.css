@@ -113,3 +113,24 @@ input,select,textarea{padding:8px 10px}
 .icon-plus{font-weight:600;font-size:22px;}
 
 .options-menu{left:auto;right:44px;}
+
+
+button, .session-title, .workspace-empty, .menu-item, .settings-tab {
+  transition: background-color .14s ease, border-color .14s ease, color .14s ease, transform .08s ease, box-shadow .14s ease;
+}
+
+button:hover, .session-title:hover, .workspace-empty:hover, .menu-item:hover, .settings-tab:hover {
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface-2));
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  color: var(--text);
+}
+
+button:active, .session-title:active, .workspace-empty:active, .menu-item:active, .settings-tab:active {
+  transform: scale(0.98);
+  animation: clickFlash .18s ease;
+}
+
+@keyframes clickFlash {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 65%, transparent); }
+  100% { box-shadow: 0 0 0 8px transparent; }
+}

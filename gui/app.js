@@ -14,6 +14,7 @@ const state = {
   loadedMessages: [],
   visibleCount: 24,
   pendingBySession: {},
+  sendQueue: [],
   draftBySession: {},
   activityBySession: {},
   taskBySession: {},
@@ -961,22 +962,28 @@ async function waitForTaskDone(taskId, sessionName) {
   }
 }
 
-async function sendMessage(evt) {
-  evt?.preventDefault();
-  const text = ui.messageInput.value.trim();
-  if (!text) return;
+function runningPendingSessions() {
+  return Object.entries(state.pendingBySession).filter(([, p]) => (p?.status || "running") !== "queued").map(([name]) => name);
+}
 
-  const sessionAtSend = state.currentSession;
-  if (Object.keys(state.pendingBySession).some((name) => name !== sessionAtSend)) {
-    setStatus("Another session is waiting for a response. Please wait for it to finish first.", "error");
-    return;
+async function processQueuedSends() {
+  if (runningPendingSessions().length) return;
+  const next = state.sendQueue.shift();
+  if (!next) return;
+  if (state.pendingBySession[next.sessionName]?.status === "queued") {
+    delete state.pendingBySession[next.sessionName];
+    renderSessions();
   }
+  await executeSend(next.sessionName, next.text);
+}
+
+async function executeSend(sessionAtSend, text) {
   if (state.serverSession !== sessionAtSend) {
     await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name: sessionAtSend }) });
     state.serverSession = sessionAtSend;
   }
   if (state.pendingBySession[sessionAtSend]) return;
-  state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now() };
+  state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now(), status: "running" };
   state.taskBySession[sessionAtSend] = { status: "running", startedAt: Date.now(), taskId: "" };
   state.draftBySession[sessionAtSend] = "";
   persistDrafts();
@@ -1015,7 +1022,32 @@ async function sendMessage(evt) {
       await refreshWorkspace();
       renderActivityPanel();
     }
+    processQueuedSends().catch((err) => setStatus(`Error: ${err.message}`, "error"));
   }
+}
+
+async function sendMessage(evt) {
+  evt?.preventDefault();
+  const text = ui.messageInput.value.trim();
+  if (!text) return;
+  const sessionAtSend = state.currentSession;
+  if (state.pendingBySession[sessionAtSend]) return;
+
+  const running = runningPendingSessions();
+  if (running.length) {
+    state.sendQueue.push({ sessionName: sessionAtSend, text });
+    state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: `Queued behind ${running[0]}`, startedAt: Date.now(), status: "queued" };
+    state.draftBySession[sessionAtSend] = "";
+    persistDrafts();
+    pushActivity(sessionAtSend, "Message queued", `Queued while ${running[0]} is running.`);
+    renderSessions();
+    if (state.currentSession === sessionAtSend) renderFeed(true);
+    ui.messageInput.value = "";
+    ui.messageInput.style.height = "auto";
+    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+    return;
+  }
+  await executeSend(sessionAtSend, text);
 }
 
 function wireEvents() {

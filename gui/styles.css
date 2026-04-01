@@ -53,7 +53,11 @@ button { cursor: pointer; }
 .message { width:min(920px,92%); }
 .message .role { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-right: 8px; }
 .message .text { display: inline; line-height: 1.56; }
-.workspace-status { position:absolute; left:14px; right:14px; bottom:70px; font-size:11px; color:var(--muted); border-top:1px solid var(--border); padding-top:6px; background: linear-gradient(to top, var(--surface-2) 45%, transparent); }
+.workspace-panel { position:absolute; left:14px; right:14px; bottom:70px; border-top:1px solid var(--border); padding-top:6px; background: linear-gradient(to top, var(--surface-2) 45%, transparent); }
+.workspace-head { display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--muted); margin-bottom:4px; }
+.workspace-actions { display:flex; gap:6px; }
+.workspace-actions .btn { padding: 3px 8px; font-size: 11px; }
+.workspace-status { font-size:11px; color:var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .composer { position:absolute; left:50%; transform:translateX(-50%); bottom:10px; width:min(760px,calc(100% - 28px)); border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:8px; }
 .composer-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; position:relative; }

@@ -30,6 +30,8 @@ const ui = {
   fileBtn: el("fileBtn"),
   fileInput: el("fileInput"),
   workspaceStatus: el("workspaceStatus"),
+  addWorkspaceBtn: el("addWorkspaceBtn"),
+  removeWorkspaceBtn: el("removeWorkspaceBtn"),
   settingsBtn: el("settingsBtn"),
   settingsModal: el("settingsModal"),
   closeSettingsBtn: el("closeSettingsBtn"),
@@ -170,10 +172,15 @@ function populateSettingsPanels() {
 async function refreshWorkspace() {
   try {
     const data = await fetchJson("/api/workspaces");
-    const label = (data.folders || [])[0] || "(none)";
-    ui.workspaceStatus.textContent = `Workspace: ${label}`;
+    const folders = Array.isArray(data.folders) ? data.folders : [];
+    const tracked = Array.isArray(data.tracked_files) ? data.tracked_files.length : 0;
+    if (!folders.length) {
+      ui.workspaceStatus.textContent = "No workspace attached";
+      return;
+    }
+    ui.workspaceStatus.textContent = `${folders[0]}${folders.length > 1 ? ` (+${folders.length - 1} more)` : ""} • ${tracked} tracked file${tracked === 1 ? "" : "s"}`;
   } catch {
-    ui.workspaceStatus.textContent = "Workspace: unavailable";
+    ui.workspaceStatus.textContent = "Workspace unavailable";
   }
 }
 

@@ -10,6 +10,7 @@ const state = {
   loadedMessages: [],
   visibleCount: 24,
   isSending: false,
+  pendingBySession: {},
 };
 
 const ui = {
@@ -140,6 +141,20 @@ function renderFeed(resetToBottom = false) {
     card.innerHTML = `<span class="role">${item.role}</span><span class="text"></span>`;
     renderMarkdown(card.querySelector(".text"), item.text);
     ui.feed.appendChild(card);
+  }
+
+  const pending = state.pendingBySession[state.currentSession];
+  if (pending) {
+    const userCard = document.createElement("article");
+    userCard.className = "message pending";
+    userCard.innerHTML = `<span class="role">user</span><span class="text"></span>`;
+    renderMarkdown(userCard.querySelector(".text"), pending.userText);
+    ui.feed.appendChild(userCard);
+
+    const aiCard = document.createElement("article");
+    aiCard.className = "message pending";
+    aiCard.innerHTML = `<span class="role">assistant</span><span class="text"><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></span>`;
+    ui.feed.appendChild(aiCard);
   }
   if (resetToBottom) return void (ui.feed.scrollTop = ui.feed.scrollHeight);
   const grew = ui.feed.scrollHeight - prevHeight;
@@ -371,17 +386,25 @@ async function sendMessage(evt) {
   if (state.isSending) return;
   const text = ui.messageInput.value.trim();
   if (!text) return;
+
+  const sessionAtSend = state.currentSession;
+  state.pendingBySession[sessionAtSend] = { userText: text };
+  if (state.currentSession === sessionAtSend) renderFeed(true);
+
   state.isSending = true;
   ui.sendBtn.disabled = true;
   try {
-    await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: state.currentSession }) });
+    await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend }) });
     ui.messageInput.value = "";
     ui.messageInput.style.height = "auto";
-    await refreshHistory(true);
-    await refreshWorkspace();
   } finally {
+    delete state.pendingBySession[sessionAtSend];
     state.isSending = false;
     ui.sendBtn.disabled = false;
+    if (state.currentSession === sessionAtSend) {
+      await refreshHistory(true);
+      await refreshWorkspace();
+    }
   }
 }
 

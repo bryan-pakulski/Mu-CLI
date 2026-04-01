@@ -1170,6 +1170,14 @@ ${marker}` : marker;
     ui.settingsTabs.querySelectorAll(".settings-tab").forEach((x) => x.classList.toggle("active", x === btn));
     ui.settingsModal.querySelectorAll(".settings-pane").forEach((pane) => pane.classList.toggle("active", pane.dataset.pane === tab));
   });
+  ui.themeModeSelect.addEventListener("change", () => {
+    localStorage.setItem("mucli_theme_mode", ui.themeModeSelect.value);
+    applyThemeFromStorage();
+  });
+  ui.accentSelect.addEventListener("change", () => {
+    localStorage.setItem("mucli_theme_accent", ui.accentSelect.value);
+    applyThemeFromStorage();
+  });
 }
 
 async function bootstrap() {

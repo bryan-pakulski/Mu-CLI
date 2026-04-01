@@ -36,6 +36,7 @@ const ui = {
   sendBtn: el("sendBtn"),
   menuBtn: el("menuBtn"),
   chatMenu: el("chatMenu"),
+  clearChatOption: el("clearChatOption"),
   fileBtn: el("fileBtn"),
   fileInput: el("fileInput"),
   attachMenu: el("attachMenu"),
@@ -535,6 +536,15 @@ async function saveSettings() {
   await refreshRuntime();
 }
 
+async function clearConversationContext() {
+  await fetchJson("/api/command", { method: "POST", body: JSON.stringify({ command: "/clear" }) });
+  state.loadedMessages = [];
+  delete state.pendingBySession[state.currentSession];
+  state.taskBySession[state.currentSession] = { status: "completed", startedAt: Date.now(), taskId: "" };
+  pushActivity(state.currentSession, "Conversation cleared", "Cleared chat history for the current session.");
+  await refreshHistory(true);
+}
+
 function closeEventStream() {
   if (state.activeEventSource) {
     state.activeEventSource.close();
@@ -704,6 +714,10 @@ function wireEvents() {
   ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
   ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
   ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
+  ui.clearChatOption.addEventListener("click", () => {
+    ui.chatMenu.classList.add("hidden");
+    clearConversationContext().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
   ui.agenticToggle.addEventListener("change", () => { if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = ui.agenticToggle.checked; });
   ui.thinkingToggle.addEventListener("change", () => { if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked; });
   document.addEventListener("click", () => {

@@ -2,8 +2,8 @@
   --bg: #f4f6fb;
   --surface: #ffffff;
   --surface-2: #f1f3f9;
-  --text: #1f2937;
-  --muted: #667085;
+  --text: #384457;
+  --muted: #7b8798;
   --border: #d5dce8;
   --accent: #4f46e5;
   --accent-soft: #e0e7ff;
@@ -12,8 +12,8 @@
   --bg: #0f172a;
   --surface: #111827;
   --surface-2: #1f2937;
-  --text: #e5e7eb;
-  --muted: #94a3b8;
+  --text: #c6cfdb;
+  --muted: #9aa7bb;
   --border: #334155;
   --accent-soft: #1e293b;
 }
@@ -22,7 +22,7 @@
 :root[data-accent="rose"] { --accent: #e11d48; }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; font-family: Sora, Inter, sans-serif; background: var(--bg); color: var(--text); }
+body { margin: 0; min-height: 100vh; font-family: Manrope, Inter, sans-serif; background: var(--bg); color: var(--text); }
 
 .app-shell { height: 100vh; display: grid; grid-template-columns: 280px 1fr; }
 .sidebar { border-right: 1px solid var(--border); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow: auto; }

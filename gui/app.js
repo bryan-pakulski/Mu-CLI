@@ -101,8 +101,20 @@ function textFromParts(parts = []) {
   return parts.filter((p) => p?.type === "text").map((p) => p.text || "").filter(Boolean).join("\n\n");
 }
 
+function stripLeakedDirectiveText(text) {
+  const raw = String(text || "");
+  const trimmed = raw.trimStart();
+  if (!/^(FEATURE MODE DIRECTIVE:|SYSTEM PROMPT:)/i.test(trimmed)) return raw;
+  const cut = raw.search(/\n{2,}/);
+  if (cut < 0) return "";
+  return raw.slice(cut).trim();
+}
+
 function normalizedMessages(history = []) {
-  return history.filter((m) => ["user", "assistant"].includes(m.role)).map((m) => ({ role: m.role, text: textFromParts(m.parts || []) })).filter((m) => m.text);
+  return history
+    .filter((m) => ["user", "assistant"].includes(m.role))
+    .map((m) => ({ role: m.role, text: stripLeakedDirectiveText(textFromParts(m.parts || [])) }))
+    .filter((m) => m.text);
 }
 
 
@@ -128,8 +140,40 @@ function parseVariableValue(raw, typeHint = "") {
   return raw;
 }
 
+function normalizeNestedCodeFences(text) {
+  const lines = String(text || "").split("\n");
+  const fenceIndices = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*```+/.test(lines[i])) fenceIndices.push(i);
+  }
+  if (fenceIndices.length < 3) return String(text || "");
+
+  let i = 0;
+  while (i < lines.length) {
+    const openMatch = lines[i].match(/^(\s*)(`{3,})(.*)$/);
+    if (!openMatch) {
+      i += 1;
+      continue;
+    }
+    const openLen = openMatch[2].length;
+    const closeCandidates = [];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (new RegExp(`^\\s*\`{${openLen},}\\s*$`).test(lines[j])) closeCandidates.push(j);
+    }
+    if (!closeCandidates.length) break;
+    const close = closeCandidates[closeCandidates.length - 1];
+    if (closeCandidates.length > 1) {
+      lines[i] = `${openMatch[1]}${"`".repeat(openLen + 1)}${openMatch[3] || ""}`;
+      lines[close] = lines[close].replace(new RegExp(`\`{${openLen},}`), "`".repeat(openLen + 1));
+    }
+    i = close + 1;
+  }
+  return lines.join("\n");
+}
+
 function renderMarkdown(container, text) {
-  const rendered = window.marked ? window.marked.parse(String(text || ""), { gfm: true, breaks: true }) : String(text || "");
+  const normalizedText = normalizeNestedCodeFences(text);
+  const rendered = window.marked ? window.marked.parse(normalizedText, { gfm: true, breaks: true }) : normalizedText;
   container.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
   container.querySelectorAll("pre code").forEach((block) => {
     window.hljs?.highlightElement(block);

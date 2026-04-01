@@ -1,6 +1,7 @@
 const el = (id) => document.getElementById(id);
 const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
 const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
+const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
 
 const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
@@ -11,15 +12,15 @@ const state = {
   allVariables: {},
   loadedMessages: [],
   visibleCount: 24,
-  isSending: false,
   pendingBySession: {},
+  draftBySession: {},
   activityBySession: {},
   taskBySession: {},
   memoryBySession: {},
   lastMemoryToolBySession: {},
-  taskPollTimer: null,
+  taskPollTimersBySession: {},
   memoryPollTimer: null,
-  activeEventSource: null,
+  eventSourceBySession: {},
 };
 
 const ui = {
@@ -83,6 +84,12 @@ try {
 } catch {
   // ignore session cache parse errors
 }
+try {
+  const drafts = JSON.parse(localStorage.getItem(DRAFTS_STORAGE_KEY) || "{}");
+  if (drafts && typeof drafts === "object") state.draftBySession = drafts;
+} catch {
+  state.draftBySession = {};
+}
 
 function loadPersistedActivity() {
   try {
@@ -117,6 +124,14 @@ function persistActivity() {
 }
 
 state.activityBySession = loadPersistedActivity();
+
+function persistDrafts() {
+  try {
+    localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(state.draftBySession || {}));
+  } catch {
+    return;
+  }
+}
 
 function sessionMemory(sessionName = state.currentSession) {
   if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], query: "" };
@@ -681,10 +696,14 @@ async function refreshHistory(resetToBottom = true) {
 }
 
 async function loadSession(name) {
-  if (state.isSending) {
+  if (Object.keys(state.pendingBySession).length > 0) {
     state.currentSession = name;
     renderSessions();
     await refreshHistory(true);
+    ui.messageInput.value = state.draftBySession[state.currentSession] || "";
+    ui.messageInput.style.height = "auto";
+    ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
     renderActivityPanel();
     return;
   }
@@ -695,6 +714,10 @@ async function loadSession(name) {
   await refreshRuntime();
   await refreshHistory(true);
   await refreshWorkspace();
+  ui.messageInput.value = state.draftBySession[state.currentSession] || "";
+  ui.messageInput.style.height = "auto";
+  ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
 }
 
 async function createSession() {
@@ -763,10 +786,11 @@ async function clearConversationContext() {
   await refreshHistory(true);
 }
 
-function closeEventStream() {
-  if (state.activeEventSource) {
-    state.activeEventSource.close();
-    state.activeEventSource = null;
+function closeEventStream(sessionName) {
+  const src = state.eventSourceBySession[sessionName];
+  if (src) {
+    src.close();
+    delete state.eventSourceBySession[sessionName];
   }
 }
 
@@ -791,9 +815,9 @@ function mapEventToActivity(evt) {
 }
 
 function startTaskEventStream(taskId, sessionName) {
-  closeEventStream();
+  closeEventStream(sessionName);
   const es = new EventSource(api(`/api/events?task_id=${encodeURIComponent(taskId)}`));
-  state.activeEventSource = es;
+  state.eventSourceBySession[sessionName] = es;
   const handleEvent = (raw) => {
     if (!raw?.data) return;
     let evt;
@@ -846,13 +870,13 @@ function startTaskEventStream(taskId, sessionName) {
   ].forEach((name) => es.addEventListener(name, handleEvent));
   es.onerror = () => {
     pushActivity(sessionName, "Activity stream disconnected", "Waiting for task status updates.");
-    closeEventStream();
+    closeEventStream(sessionName);
   };
 }
 
 function startTaskTicker(sessionName) {
-  if (state.taskPollTimer) clearInterval(state.taskPollTimer);
-  state.taskPollTimer = setInterval(() => {
+  if (state.taskPollTimersBySession[sessionName]) clearInterval(state.taskPollTimersBySession[sessionName]);
+  state.taskPollTimersBySession[sessionName] = setInterval(() => {
     if (!state.pendingBySession[sessionName]) return;
     if (sessionName === state.currentSession) {
       renderFeed(false);
@@ -861,10 +885,10 @@ function startTaskTicker(sessionName) {
   }, 1000);
 }
 
-function stopTaskTicker() {
-  if (state.taskPollTimer) {
-    clearInterval(state.taskPollTimer);
-    state.taskPollTimer = null;
+function stopTaskTicker(sessionName) {
+  if (state.taskPollTimersBySession[sessionName]) {
+    clearInterval(state.taskPollTimersBySession[sessionName]);
+    delete state.taskPollTimersBySession[sessionName];
   }
 }
 
@@ -882,21 +906,22 @@ async function waitForTaskDone(taskId, sessionName) {
 
 async function sendMessage(evt) {
   evt?.preventDefault();
-  if (state.isSending) return;
   const text = ui.messageInput.value.trim();
   if (!text) return;
 
   const sessionAtSend = state.currentSession;
+  if (state.pendingBySession[sessionAtSend]) return;
   state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now() };
   state.taskBySession[sessionAtSend] = { status: "running", startedAt: Date.now(), taskId: "" };
+  state.draftBySession[sessionAtSend] = "";
+  persistDrafts();
   pushActivity(sessionAtSend, "Message sent", text.slice(0, 220));
   if (state.currentSession === sessionAtSend) renderFeed(true);
 
-  state.isSending = true;
-  ui.sendBtn.disabled = true;
   ui.messageInput.value = "";
   ui.messageInput.style.height = "auto";
   startTaskTicker(sessionAtSend);
+  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
   try {
     const start = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend, async: true }) });
     const taskId = start.task?.task_id;
@@ -911,11 +936,10 @@ async function sendMessage(evt) {
     }
     pushActivity(sessionAtSend, "Final response received", "");
   } finally {
-    closeEventStream();
-    stopTaskTicker();
+    closeEventStream(sessionAtSend);
+    stopTaskTicker(sessionAtSend);
     delete state.pendingBySession[sessionAtSend];
-    state.isSending = false;
-    ui.sendBtn.disabled = false;
+    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
     if (state.taskBySession[sessionAtSend]?.status === "running") {
       state.taskBySession[sessionAtSend].status = "completed";
     }
@@ -967,7 +991,12 @@ function wireEvents() {
     ui.messageInput.style.height = "auto";
     ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
   };
-  ui.messageInput.addEventListener("input", autoResizeInput);
+  ui.messageInput.addEventListener("input", () => {
+    autoResizeInput();
+    if (!state.currentSession) return;
+    state.draftBySession[state.currentSession] = ui.messageInput.value;
+    persistDrafts();
+  });
   autoResizeInput();
 
   ui.fileBtn.addEventListener("click", (evt) => {
@@ -1052,6 +1081,10 @@ async function bootstrap() {
     refreshMemoryRuntime(),
     refreshMemoryBuffers(),
   ]);
+  ui.messageInput.value = state.draftBySession[state.currentSession] || "";
+  ui.messageInput.style.height = "auto";
+  ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
 }
 
 wireEvents();

@@ -468,6 +468,30 @@ ${marker}` : marker;
     autoResizeInput();
   });
 
+
+  const openFolderModal = () => {
+    ui.folderPathInput.value = "";
+    ui.folderModal.classList.remove("hidden");
+  };
+
+  ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
+  ui.browseFolderBtn.addEventListener("click", () => ui.folderPickerInput.click());
+  ui.folderPickerInput.addEventListener("change", () => {
+    const first = ui.folderPickerInput.files?.[0];
+    if (!first) return;
+    const nativePath = first.path || "";
+    const fallback = first.webkitRelativePath ? first.webkitRelativePath.split("/")[0] : first.name;
+    ui.folderPathInput.value = nativePath || fallback;
+  });
+  ui.attachFolderConfirmBtn.addEventListener("click", async () => {
+    const path = ui.folderPathInput.value.trim();
+    if (!path) return;
+    await fetchJson("/api/workspaces/add", { method: "POST", body: JSON.stringify({ path }) });
+    ui.folderModal.classList.add("hidden");
+    await refreshWorkspace();
+  });
+  ui.closeFolderModalBtn.addEventListener("click", () => ui.folderModal.classList.add("hidden"));
+
   ui.settingsBtn.addEventListener("click", async () => {
     await refreshTools();
     await refreshRuntime();

@@ -221,14 +221,48 @@ async function refreshSessions() {
   const data = await fetchJson("/api/sessions");
   state.sessions = data.sessions || [];
   if (!state.currentSession) state.currentSession = data.current || state.sessions[0] || "";
+  renderSessions();
+}
+
+function renderSessions() {
   ui.sessionList.innerHTML = "";
   for (const name of state.sessions) {
     const item = document.createElement("div");
     item.className = `session-item ${name === state.currentSession ? "active" : ""}`;
-    item.innerHTML = `<button class="session-title">${name}</button><div class="session-actions"><button class="btn" data-action="rename">Rename</button><button class="btn" data-action="delete">Delete</button></div>`;
+    item.innerHTML = `
+      <div class="session-row">
+        <button class="session-title">${name}</button>
+        <button class="session-menu-btn" title="Session options">⋯</button>
+      </div>
+      <div class="session-popup hidden">
+        <input class="session-rename-input" value="${name}" />
+        <div class="session-popup-actions">
+          <button class="btn" data-action="apply-rename">Rename</button>
+          <button class="btn" data-action="delete">Delete</button>
+          <button class="btn" data-action="close">Close</button>
+        </div>
+      </div>
+    `;
+
     item.querySelector(".session-title").addEventListener("click", () => loadSession(name));
-    item.querySelector('[data-action="rename"]').addEventListener("click", () => renameSessionPrompt(name));
-    item.querySelector('[data-action="delete"]').addEventListener("click", () => deleteSession(name));
+    const popup = item.querySelector(".session-popup");
+    item.querySelector(".session-menu-btn").addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
+      popup.classList.toggle("hidden");
+    });
+
+    item.querySelector('[data-action="apply-rename"]').addEventListener("click", async () => {
+      const newName = item.querySelector(".session-rename-input").value.trim();
+      if (!newName || newName === name) return;
+      await renameSession(name, newName);
+    });
+
+    item.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+      await deleteSession(name);
+    });
+
+    item.querySelector('[data-action="close"]').addEventListener("click", () => popup.classList.add("hidden"));
     ui.sessionList.appendChild(item);
   }
 }
@@ -259,9 +293,7 @@ async function createSession() {
   await loadSession(state.currentSession);
 }
 
-async function renameSessionPrompt(currentName) {
-  const newName = prompt("Rename session:", currentName);
-  if (!newName || newName === currentName) return;
+async function renameSession(currentName, newName) {
   await fetchJson("/api/sessions/rename", { method: "POST", body: JSON.stringify({ name: currentName, new_name: newName.trim() }) });
   if (state.currentSession === currentName) state.currentSession = newName.trim();
   await refreshSessions();
@@ -269,7 +301,6 @@ async function renameSessionPrompt(currentName) {
 }
 
 async function deleteSession(name) {
-  if (!confirm(`Delete session '${name}'?`)) return;
   await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
   if (state.currentSession === name) state.currentSession = "";
   await refreshSessions();
@@ -336,7 +367,10 @@ function wireEvents() {
   ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
   ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
   ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
-  document.addEventListener("click", () => ui.chatMenu.classList.add("hidden"));
+  document.addEventListener("click", () => {
+    ui.chatMenu.classList.add("hidden");
+    ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
+  });
 
   ui.fileBtn.addEventListener("click", () => ui.fileInput.click());
   ui.fileInput.addEventListener("change", () => {

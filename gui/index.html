@@ -32,22 +32,21 @@
         </label>
         <button id="applyRuntimeBtn" class="btn">Apply</button>
         <div id="statusBadge" class="status-badge">Disconnected</div>
+
+        <h2>Workspace</h2>
+        <div class="workspace-head">
+          <span id="workspaceStatus" class="workspace-status">(none)</span>
+          <div class="workspace-actions">
+            <button id="addWorkspaceBtn" type="button" class="btn">+ Add</button>
+            <button id="removeWorkspaceBtn" type="button" class="btn">Remove</button>
+          </div>
+        </div>
       </aside>
 
       <main class="main-panel">
         <section class="feed-wrap">
           <button id="settingsBtn" class="settings-btn" title="Settings">⚙</button>
           <section id="feed" class="feed" aria-live="polite"></section>
-          <section class="workspace-panel" id="workspacePanel">
-            <div class="workspace-head">
-              <span>Workspace</span>
-              <div class="workspace-actions">
-                <button id="addWorkspaceBtn" type="button" class="btn">+ Add</button>
-                <button id="removeWorkspaceBtn" type="button" class="btn">Remove</button>
-              </div>
-            </div>
-            <div id="workspaceStatus" class="workspace-status">(none)</div>
-          </section>
 
           <form id="composer" class="composer" enctype="multipart/form-data">
             <div class="composer-top">

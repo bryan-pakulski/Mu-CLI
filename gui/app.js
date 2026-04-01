@@ -7,6 +7,7 @@ const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
   currentSession: "",
   sessions: [],
+  serverSession: "",
   runtime: null,
   tools: [],
   allVariables: {},
@@ -639,6 +640,7 @@ async function refreshRuntime() {
   try {
     const runtime = await fetchJson("/api/runtime");
     state.runtime = runtime;
+    state.serverSession = runtime.session_name || state.serverSession;
     if (!state.currentSession) state.currentSession = runtime.session_name || "";
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
@@ -759,6 +761,7 @@ async function loadSession(name) {
     return;
   }
   await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
+  state.serverSession = name;
   state.currentSession = name;
   localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
   await refreshSessions();
@@ -775,6 +778,7 @@ async function createSession() {
   const name = prompt("New session name:");
   if (!name) return;
   await fetchJson("/api/sessions/new", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+  state.serverSession = name.trim();
   state.currentSession = name.trim();
   await refreshSessions();
   await loadSession(state.currentSession);
@@ -782,6 +786,7 @@ async function createSession() {
 
 async function renameSession(currentName, newName) {
   await fetchJson("/api/sessions/rename", { method: "POST", body: JSON.stringify({ name: currentName, new_name: newName.trim() }) });
+  if (state.serverSession === currentName) state.serverSession = newName.trim();
   if (state.activityBySession[currentName] && currentName !== newName.trim()) {
     state.activityBySession[newName.trim()] = state.activityBySession[currentName];
     delete state.activityBySession[currentName];
@@ -794,6 +799,7 @@ async function renameSession(currentName, newName) {
 
 async function deleteSession(name) {
   await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
+  if (state.serverSession === name) state.serverSession = "";
   if (state.activityBySession[name]) {
     delete state.activityBySession[name];
     persistActivity();
@@ -964,6 +970,10 @@ async function sendMessage(evt) {
   if (Object.keys(state.pendingBySession).some((name) => name !== sessionAtSend)) {
     setStatus("Another session is waiting for a response. Please wait for it to finish first.", "error");
     return;
+  }
+  if (state.serverSession !== sessionAtSend) {
+    await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name: sessionAtSend }) });
+    state.serverSession = sessionAtSend;
   }
   if (state.pendingBySession[sessionAtSend]) return;
   state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now() };

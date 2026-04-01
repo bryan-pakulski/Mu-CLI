@@ -53,6 +53,14 @@ function applyThemeFromStorage() {
   document.documentElement.dataset.accent = accent;
   ui.themeModeSelect.value = mode;
   ui.accentSelect.value = accent;
+
+  const darkCss = document.getElementById("hljsDark");
+  const lightCss = document.getElementById("hljsLight");
+  if (darkCss && lightCss) {
+    const isDark = mode === "dark";
+    darkCss.disabled = !isDark;
+    lightCss.disabled = isDark;
+  }
 }
 
 function api(path) {
@@ -249,7 +257,9 @@ function renderSessions() {
     item.querySelector(".session-menu-btn").addEventListener("click", (evt) => {
       evt.stopPropagation();
       ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
+      ui.sessionList.querySelectorAll(".session-item").forEach((i) => i.classList.remove("menu-open"));
       popup.classList.toggle("hidden");
+      item.classList.toggle("menu-open", !popup.classList.contains("hidden"));
     });
 
     item.querySelector('[data-action="apply-rename"]').addEventListener("click", async () => {
@@ -262,7 +272,7 @@ function renderSessions() {
       await deleteSession(name);
     });
 
-    item.querySelector('[data-action="close"]').addEventListener("click", () => popup.classList.add("hidden"));
+    item.querySelector('[data-action="close"]').addEventListener("click", () => { popup.classList.add("hidden"); item.classList.remove("menu-open"); });
     ui.sessionList.appendChild(item);
   }
 }
@@ -370,6 +380,7 @@ function wireEvents() {
   document.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
     ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
+    ui.sessionList.querySelectorAll(".session-item").forEach((i) => i.classList.remove("menu-open"));
   });
 
   ui.fileBtn.addEventListener("click", () => ui.fileInput.click());

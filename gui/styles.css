@@ -30,15 +30,18 @@ body { margin: 0; min-height: 100vh; font-family: Manrope, Inter, sans-serif; ba
 .sidebar h2 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
 .section-head { display: flex; justify-content: space-between; align-items: center; }
 .session-list { display: flex; flex-direction: column; gap: 4px; max-height: 34vh; overflow: auto; }
-.session-item { border: 1px solid var(--border); padding: 4px 6px; }
-.session-item.active { border-color: var(--accent); }
+.session-item { position: relative; padding: 2px 4px; border-radius: 6px; }
+.session-item:hover { background: color-mix(in oklab, var(--surface-2) 70%, transparent); }
+.session-item.active { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); }
 .session-row { display: flex; align-items: center; gap: 4px; }
-.session-title { flex: 1; text-align: left; border: 0; background: transparent; color: var(--text); padding: 2px 0; cursor: pointer; font-size: 12px; }
-.session-menu-btn { width: 24px; height: 22px; padding: 0; }
-.session-popup { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 4px; display: grid; gap: 4px; }
+.session-title { flex: 1; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 4px; cursor: pointer; font-size: 12px; }
+.session-menu-btn { width: 22px; height: 22px; padding: 0; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.session-item:hover .session-menu-btn, .session-item.menu-open .session-menu-btn { opacity: 1; pointer-events: auto; }
+.session-item:focus-within .session-menu-btn { opacity: 1; pointer-events: auto; }
+.session-popup { position: absolute; right: 6px; top: 30px; width: 170px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.25); padding: 8px; z-index: 5; display: grid; gap: 6px; }
 .session-rename-input { width: 100%; }
-.session-popup-actions { display: flex; gap: 4px; }
-.session-popup-actions .btn { padding: 3px 6px; font-size: 11px; }
+.session-popup-actions { display: grid; gap: 4px; }
+.session-popup-actions .btn { padding: 5px 8px; font-size: 11px; text-align: left; }
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 
 input, select, textarea, button { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 4px; font-family: inherit; font-size: 13px; }

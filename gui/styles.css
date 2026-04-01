@@ -70,10 +70,9 @@ input,select,textarea{padding:8px 10px}
 .message .text{display:inline;line-height:1.56}
 
 .composer{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;width:min(820px,calc(100% - 28px));padding:0;background:transparent;border:0}
-.composer-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;position:relative}
-.composer-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;background:#2a2b30;border:1px solid #3a3b41;border-radius:26px;padding:8px 8px 8px 10px}
-.icon-btn{min-width:34px;height:34px;border-radius:999px;background:#2d2d33;border:1px solid #3d3e45;color:#cfd1d8;font-size:16px;line-height:1}
-.chat-menu{position:absolute;left:0;top:36px;display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:8px;font-size:13px;color:var(--text);min-width:240px;box-shadow:0 16px 32px rgba(0,0,0,.35)}
+.composer-row{position:relative;display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:end;background:#2a2b30;border:1px solid #3a3b41;border-radius:26px;padding:8px 8px 8px 10px}
+.icon-btn{min-width:34px;height:34px;border-radius:999px;background:#2d2d33;border:1px solid #3d3e45;color:#cfd1d8;font-size:18px;line-height:1;font-family:Inter,Arial,sans-serif;display:grid;place-items:center;padding:0}
+.chat-menu{position:absolute;left:0;bottom:48px;display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:8px;font-size:13px;color:var(--text);min-width:240px;box-shadow:0 16px 32px rgba(0,0,0,.35);z-index:6}
 .hidden{display:none}
 
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.58);display:grid;place-items:center;z-index:9999}
@@ -110,3 +109,7 @@ input,select,textarea{padding:8px 10px}
 .typing-dots span:nth-child(2){animation-delay:.12s;}
 .typing-dots span:nth-child(3){animation-delay:.24s;}
 @keyframes dotPulse{0%,80%,100%{opacity:.25;}40%{opacity:1;}}
+
+.icon-plus{font-weight:600;font-size:22px;}
+
+.options-menu{left:auto;right:44px;}

@@ -35,22 +35,20 @@
           <section id="feed" class="feed" aria-live="polite"></section>
 
           <form id="composer" class="composer" enctype="multipart/form-data">
-            <div class="composer-top">
-              <button id="fileBtn" type="button" class="icon-btn" title="Add">＋</button>
+            <div class="composer-row">
+              <button id="fileBtn" type="button" class="icon-btn icon-plus" title="Add">+</button>
               <div id="attachMenu" class="chat-menu hidden">
-                <button id="attachFileOption" type="button" class="menu-item">📎 Add photos & files</button>
-                <button id="attachFolderOption" type="button" class="menu-item">📁 Attach folder</button>
-                <button id="attachCloseOption" type="button" class="menu-item">✕ Close</button>
+                <button id="attachFileOption" type="button" class="menu-item">Add photos & files</button>
+                <button id="attachFolderOption" type="button" class="menu-item">Attach folder</button>
+                <button id="attachCloseOption" type="button" class="menu-item">Close</button>
               </div>
               <input id="fileInput" type="file" hidden />
-              <button id="menuBtn" type="button" class="icon-btn" title="Chat options">⚙</button>
-              <div id="chatMenu" class="chat-menu hidden">
+              <textarea id="messageInput" rows="2" placeholder="Type a message..."></textarea>
+              <button id="menuBtn" type="button" class="icon-btn" title="Chat options">⋯</button>
+              <div id="chatMenu" class="chat-menu options-menu hidden">
                 <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
                 <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
               </div>
-            </div>
-            <div class="composer-row">
-              <textarea id="messageInput" rows="2" placeholder="Type a message..."></textarea>
               <button id="sendBtn" class="btn send-btn" type="submit">➤</button>
             </div>
           </form>

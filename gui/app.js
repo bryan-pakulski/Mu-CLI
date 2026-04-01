@@ -11,6 +11,10 @@ const state = {
   visibleCount: 24,
   isSending: false,
   pendingBySession: {},
+  activityBySession: {},
+  taskBySession: {},
+  taskPollTimer: null,
+  activeEventSource: null,
 };
 
 const ui = {
@@ -25,6 +29,8 @@ const ui = {
   sessionList: el("sessionList"),
   newSessionBtn: el("newSessionBtn"),
   feed: el("feed"),
+  activityList: el("activityList"),
+  activitySummary: el("activitySummary"),
   composer: el("composer"),
   messageInput: el("messageInput"),
   sendBtn: el("sendBtn"),
@@ -158,6 +164,61 @@ async function copyText(value, button) {
   }
 }
 
+function sessionActivity(sessionName = state.currentSession) {
+  if (!state.activityBySession[sessionName]) state.activityBySession[sessionName] = [];
+  return state.activityBySession[sessionName];
+}
+
+function pushActivity(sessionName, title, detail = "") {
+  const bucket = sessionActivity(sessionName);
+  bucket.push({ title, detail, at: Date.now() });
+  if (bucket.length > 120) bucket.splice(0, bucket.length - 120);
+  if (sessionName === state.currentSession) renderActivityPanel();
+}
+
+function formatSince(ts) {
+  const secs = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m ${rem}s`;
+}
+
+function renderActivityPanel() {
+  const sessionName = state.currentSession;
+  const items = sessionActivity(sessionName);
+  const taskMeta = state.taskBySession[sessionName];
+  ui.activityList.innerHTML = "";
+  if (!items.length) {
+    ui.activityList.innerHTML = '<div class="activity-empty">No recent activity yet.</div>';
+  } else {
+    for (const item of items.slice(-50).reverse()) {
+      const card = document.createElement("article");
+      card.className = "activity-item";
+      card.innerHTML = `
+        <div class="activity-title">${item.title}</div>
+        ${item.detail ? `<div class="activity-detail">${item.detail}</div>` : ""}
+        <div class="activity-time">${new Date(item.at).toLocaleTimeString()}</div>
+      `;
+      ui.activityList.appendChild(card);
+    }
+  }
+
+  if (!taskMeta) {
+    ui.activitySummary.textContent = "Idle";
+  } else if (taskMeta.status === "running") {
+    ui.activitySummary.textContent = `Thinking • ${formatSince(taskMeta.startedAt)}`;
+  } else if (taskMeta.status === "awaiting_approval") {
+    ui.activitySummary.textContent = "Awaiting approval";
+  } else if (taskMeta.status === "awaiting_input") {
+    ui.activitySummary.textContent = "Awaiting input";
+  } else if (taskMeta.status === "error") {
+    ui.activitySummary.textContent = "Error";
+  } else {
+    ui.activitySummary.textContent = "Done";
+  }
+}
+
 function renderFeed(resetToBottom = false) {
   const prevHeight = ui.feed.scrollHeight;
   const prevTop = ui.feed.scrollTop;
@@ -192,7 +253,15 @@ function renderFeed(resetToBottom = false) {
 
     const aiCard = document.createElement("article");
     aiCard.className = "message pending";
-    aiCard.innerHTML = `<span class="role">assistant</span><span class="text"><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></span>`;
+    const latestActivity = pending.latestActivity || "Thinking through response";
+    const runtimeMeta = pending.startedAt ? `Running for ${formatSince(pending.startedAt)}` : "Running";
+    aiCard.innerHTML = `
+      <span class="role">assistant</span>
+      <span class="text">
+        <span class="thinking-status"><span class="thinking-pulse"></span>${latestActivity}</span>
+        <div class="thinking-meta">${runtimeMeta}</div>
+      </span>
+    `;
     ui.feed.appendChild(aiCard);
   }
   if (resetToBottom) return void (ui.feed.scrollTop = ui.feed.scrollHeight);
@@ -353,6 +422,7 @@ function renderSessions() {
     item.querySelector('[data-action="close"]').addEventListener("click", () => { popup.classList.add("hidden"); item.classList.remove("menu-open"); });
     ui.sessionList.appendChild(item);
   }
+  renderActivityPanel();
 }
 
 async function refreshHistory(resetToBottom = true) {
@@ -361,6 +431,7 @@ async function refreshHistory(resetToBottom = true) {
   state.loadedMessages = normalizedMessages(payload.history || []);
   state.visibleCount = Math.min(24, state.loadedMessages.length || 24);
   renderFeed(resetToBottom);
+  renderActivityPanel();
 }
 
 async function loadSession(name) {
@@ -420,6 +491,109 @@ async function saveSettings() {
   await refreshRuntime();
 }
 
+function closeEventStream() {
+  if (state.activeEventSource) {
+    state.activeEventSource.close();
+    state.activeEventSource = null;
+  }
+}
+
+function mapEventToActivity(evt) {
+  const payload = evt.payload || {};
+  if (evt.event === "trace.tool") {
+    return {
+      title: `Using tool: ${payload.tool_name || "unknown"}`,
+      detail: payload.visible_result ? String(payload.visible_result).slice(0, 220) : "",
+    };
+  }
+  if (evt.event === "trace.tool_result") return { title: "Tool result", detail: payload.preview || "" };
+  if (evt.event === "trace.info") return { title: "Info", detail: payload.message || "" };
+  if (evt.event === "trace.error") return { title: "Error", detail: payload.message || "" };
+  if (evt.event === "trace.message") return { title: `Model message (${payload.role || "assistant"})`, detail: String(payload.content || "").slice(0, 220) };
+  if (evt.event === "task.awaiting_approval") return { title: "Awaiting approval", detail: "A tool call needs approval before continuing." };
+  if (evt.event === "task.awaiting_input") return { title: "Awaiting input", detail: payload.blocker?.reason || "Task requires more input." };
+  if (evt.event === "task.running") return { title: "Task running", detail: "" };
+  if (evt.event === "task.completed") return { title: "Task complete", detail: "" };
+  if (evt.event === "task.error") return { title: "Task error", detail: payload.error || "" };
+  return null;
+}
+
+function startTaskEventStream(taskId, sessionName) {
+  closeEventStream();
+  const es = new EventSource(api(`/api/events?task_id=${encodeURIComponent(taskId)}`));
+  state.activeEventSource = es;
+  const handleEvent = (raw) => {
+    if (!raw?.data) return;
+    let evt;
+    try {
+      evt = JSON.parse(raw.data);
+    } catch {
+      return;
+    }
+    const mapped = mapEventToActivity(evt);
+    if (!mapped) return;
+    if (state.taskBySession[sessionName]) {
+      if (evt.event === "task.completed") state.taskBySession[sessionName].status = "completed";
+      if (evt.event === "task.error") state.taskBySession[sessionName].status = "error";
+      if (evt.event === "task.awaiting_approval") state.taskBySession[sessionName].status = "awaiting_approval";
+      if (evt.event === "task.awaiting_input") state.taskBySession[sessionName].status = "awaiting_input";
+      if (evt.event === "task.running") state.taskBySession[sessionName].status = "running";
+    }
+    pushActivity(sessionName, mapped.title, mapped.detail);
+    const pending = state.pendingBySession[sessionName];
+    if (pending) pending.latestActivity = mapped.title;
+    renderFeed(false);
+  };
+  [
+    "stream.open",
+    "task.created",
+    "task.running",
+    "task.awaiting_approval",
+    "task.awaiting_input",
+    "task.completed",
+    "task.error",
+    "trace.tool",
+    "trace.tool_result",
+    "trace.message",
+    "trace.info",
+    "trace.error",
+  ].forEach((name) => es.addEventListener(name, handleEvent));
+  es.onerror = () => {
+    pushActivity(sessionName, "Activity stream disconnected", "Waiting for task status updates.");
+    closeEventStream();
+  };
+}
+
+function startTaskTicker(sessionName) {
+  if (state.taskPollTimer) clearInterval(state.taskPollTimer);
+  state.taskPollTimer = setInterval(() => {
+    if (!state.pendingBySession[sessionName]) return;
+    if (sessionName === state.currentSession) {
+      renderFeed(false);
+      renderActivityPanel();
+    }
+  }, 1000);
+}
+
+function stopTaskTicker() {
+  if (state.taskPollTimer) {
+    clearInterval(state.taskPollTimer);
+    state.taskPollTimer = null;
+  }
+}
+
+async function waitForTaskDone(taskId, sessionName) {
+  while (true) {
+    const payload = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}`);
+    const task = payload.task || {};
+    const status = task.status || "pending";
+    state.taskBySession[sessionName].status = status;
+    renderActivityPanel();
+    if (status === "completed" || status === "error") return task;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+}
+
 async function sendMessage(evt) {
   evt?.preventDefault();
   if (state.isSending) return;
@@ -427,22 +601,42 @@ async function sendMessage(evt) {
   if (!text) return;
 
   const sessionAtSend = state.currentSession;
-  state.pendingBySession[sessionAtSend] = { userText: text };
+  state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now() };
+  state.taskBySession[sessionAtSend] = { status: "running", startedAt: Date.now(), taskId: "" };
+  pushActivity(sessionAtSend, "Message sent", text.slice(0, 220));
   if (state.currentSession === sessionAtSend) renderFeed(true);
 
   state.isSending = true;
   ui.sendBtn.disabled = true;
   ui.messageInput.value = "";
   ui.messageInput.style.height = "auto";
+  startTaskTicker(sessionAtSend);
   try {
-    await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend }) });
+    const start = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend, async: true }) });
+    const taskId = start.task?.task_id;
+    if (!taskId) throw new Error("Task ID missing from async response.");
+    state.taskBySession[sessionAtSend].taskId = taskId;
+    state.pendingBySession[sessionAtSend].latestActivity = "Thinking";
+    pushActivity(sessionAtSend, "Task started", `Task ID: ${taskId}`);
+    startTaskEventStream(taskId, sessionAtSend);
+    const finalTask = await waitForTaskDone(taskId, sessionAtSend);
+    if (finalTask.status === "error") {
+      throw new Error(finalTask.error || "Task failed.");
+    }
+    pushActivity(sessionAtSend, "Final response received", "");
   } finally {
+    closeEventStream();
+    stopTaskTicker();
     delete state.pendingBySession[sessionAtSend];
     state.isSending = false;
     ui.sendBtn.disabled = false;
+    if (state.taskBySession[sessionAtSend]?.status === "running") {
+      state.taskBySession[sessionAtSend].status = "completed";
+    }
     if (state.currentSession === sessionAtSend) {
       await refreshHistory(true);
       await refreshWorkspace();
+      renderActivityPanel();
     }
   }
 }

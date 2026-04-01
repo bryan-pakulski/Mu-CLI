@@ -731,8 +731,15 @@ function renderSessions() {
 }
 
 async function refreshHistory(resetToBottom = true) {
-  if (!state.currentSession) return;
-  const payload = await fetchJson(`/api/history?limit=300&session_name=${encodeURIComponent(state.currentSession)}`);
+  const path = state.currentSession
+    ? `/api/history?limit=300&session_name=${encodeURIComponent(state.currentSession)}`
+    : "/api/history?limit=300";
+  const payload = await fetchJson(path, {}, 3000);
+  if (!state.currentSession && payload.session_name) {
+    state.currentSession = payload.session_name;
+    if (!state.sessions.includes(payload.session_name)) state.sessions.unshift(payload.session_name);
+    renderSessions();
+  }
   state.loadedMessages = normalizedMessages(payload.history || []);
   state.visibleCount = Math.min(24, state.loadedMessages.length || 24);
   renderFeed(resetToBottom);
@@ -954,6 +961,10 @@ async function sendMessage(evt) {
   if (!text) return;
 
   const sessionAtSend = state.currentSession;
+  if (Object.keys(state.pendingBySession).some((name) => name !== sessionAtSend)) {
+    setStatus("Another session is waiting for a response. Please wait for it to finish first.", "error");
+    return;
+  }
   if (state.pendingBySession[sessionAtSend]) return;
   state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now() };
   state.taskBySession[sessionAtSend] = { status: "running", startedAt: Date.now(), taskId: "" };

@@ -63,7 +63,11 @@ input,select,textarea{padding:8px 10px}
 .workspace-status,.status-badge{font-size:12px;color:var(--muted)}
 
 .main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0;overflow:hidden}
-.feed-wrap{position:relative;height:100%;border-right:1px solid var(--border);min-height:0}
+.center-panel{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;border-right:1px solid var(--border)}
+.view-tabs{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface)}
+.view-tab{padding:6px 12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
+.view-tab.active{background:color-mix(in oklab, var(--accent) 16%, var(--surface-2));border-color:var(--accent)}
+.feed-wrap{position:relative;height:100%;min-height:0}
 .feed-wrap::before{content:"";position:absolute;top:0;left:0;right:0;height:72px;pointer-events:none;z-index:2;background:linear-gradient(to bottom, var(--bg), color-mix(in oklab, var(--bg) 0%, transparent));}
 .settings-btn{position:absolute;top:10px;right:10px;z-index:4;width:32px;height:32px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)}
 .approval-bar{position:absolute;top:10px;left:12px;right:56px;z-index:4;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:color-mix(in oklab, var(--surface) 88%, var(--accent) 12%);font-size:12px}
@@ -194,3 +198,35 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
 *::-webkit-scrollbar-thumb:hover{
   background-color: color-mix(in oklab, var(--muted) 65%, transparent);
 }
+
+.board-view{display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:10px;padding:10px 12px;min-height:0;overflow:hidden}
+.board-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.board-title-wrap h2{margin:0;font-size:16px}
+.board-summary{font-size:12px;color:var(--muted)}
+.board-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.board-controls input,.board-controls select{height:34px}
+.board-toggle{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.board-error{padding:8px 10px;border:1px solid #ef4444;border-radius:8px;color:#ef4444;background:color-mix(in oklab, #ef4444 8%, transparent)}
+.board-lanes{display:grid;grid-template-columns:repeat(4,minmax(220px,1fr));gap:10px;min-height:0;overflow:auto;padding-right:4px}
+.board-lane{border:1px solid var(--border);border-radius:12px;background:var(--surface);display:grid;grid-template-rows:auto minmax(0,1fr);min-height:420px}
+.board-lane-head{display:flex;justify-content:space-between;align-items:center;padding:10px;border-bottom:1px solid var(--border);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+.board-lane-count{font-size:11px;color:var(--muted)}
+.board-lane-body{padding:8px;display:flex;flex-direction:column;gap:8px;overflow:auto}
+.board-empty{font-size:12px;color:var(--muted);padding:6px}
+.phase-group{border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.phase-group summary{cursor:pointer;list-style:none;padding:8px 10px;font-size:12px;font-weight:600;display:flex;justify-content:space-between}
+.phase-group summary::-webkit-details-marker{display:none}
+.phase-group-cards{display:grid;gap:8px;padding:0 8px 8px}
+.task-card{border:1px solid var(--border);border-radius:10px;padding:8px;background:var(--surface);display:grid;gap:6px}
+.task-card.active{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent)}
+.task-title{font-size:13px;font-weight:600}
+.task-meta{font-size:11px;color:var(--muted)}
+.task-actions{display:flex;gap:6px}
+.task-actions select{flex:1}
+.task-open-btn{padding:4px 8px;font-size:12px}
+.board-detail{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:10px;overflow:auto}
+.board-detail h3{margin:0 0 8px}
+.detail-grid{display:grid;gap:8px}
+.detail-section{border-top:1px solid var(--border);padding-top:8px}
+.detail-list{margin:0;padding-left:18px;font-size:12px}
+.detail-nav{display:flex;justify-content:space-between;gap:8px;margin-top:10px}

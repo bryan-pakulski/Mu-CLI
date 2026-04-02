@@ -40,6 +40,15 @@ const state = {
   memoryPollTimer: null,
   approvalPollTimer: null,
   eventSourceBySession: {},
+  board: {
+    modeBySession: {},
+    planBySession: {},
+    selectedTaskIdBySession: {},
+    filterBySession: {},
+    pollTimer: null,
+    stream: null,
+    refreshQueued: false,
+  },
 };
 
 const ui = {
@@ -103,6 +112,19 @@ const ui = {
   accentSwatches: el("accentSwatches"),
   accentCustomBtn: el("accentCustomBtn"),
   customAccentInput: el("customAccentInput"),
+  chatViewBtn: el("chatViewBtn"),
+  boardViewBtn: el("boardViewBtn"),
+  chatView: el("chatView"),
+  boardView: el("boardView"),
+  boardSummary: el("boardSummary"),
+  boardSearchInput: el("boardSearchInput"),
+  boardPhaseFilter: el("boardPhaseFilter"),
+  boardStatusFilter: el("boardStatusFilter"),
+  boardBlockedOnly: el("boardBlockedOnly"),
+  boardRefreshBtn: el("boardRefreshBtn"),
+  boardLanes: el("boardLanes"),
+  boardDetailPanel: el("boardDetailPanel"),
+  boardError: el("boardError"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -410,6 +432,302 @@ function renderActivityPanel() {
   } else {
     ui.activitySummary.textContent = "Done";
   }
+}
+
+function boardMode(sessionName = state.currentSession) {
+  return state.board.modeBySession[sessionName] || "chat";
+}
+
+function setBoardError(message = "") {
+  if (!ui.boardError) return;
+  if (!message) {
+    ui.boardError.classList.add("hidden");
+    ui.boardError.textContent = "";
+    return;
+  }
+  ui.boardError.classList.remove("hidden");
+  ui.boardError.textContent = message;
+}
+
+function boardFilters(sessionName = state.currentSession) {
+  if (!state.board.filterBySession[sessionName]) {
+    state.board.filterBySession[sessionName] = {
+      search: "",
+      phase: "",
+      status: "",
+      blockedOnly: false,
+    };
+  }
+  return state.board.filterBySession[sessionName];
+}
+
+function setViewMode(mode, sessionName = state.currentSession) {
+  state.board.modeBySession[sessionName] = mode;
+  const boardActive = mode === "board";
+  ui.chatViewBtn?.classList.toggle("active", !boardActive);
+  ui.boardViewBtn?.classList.toggle("active", boardActive);
+  ui.chatView?.classList.toggle("hidden", boardActive);
+  ui.boardView?.classList.toggle("hidden", !boardActive);
+  if (boardActive) renderBoard();
+}
+
+function allowedTransitions(status) {
+  const model = {
+    pending: ["in_progress", "blocked", "completed"],
+    not_started: ["in_progress", "blocked", "completed"],
+    in_progress: ["blocked", "completed", "not_started"],
+    blocked: ["in_progress", "not_started"],
+    completed: ["archived", "in_progress", "not_started"],
+    archived: [],
+  };
+  return model[String(status || "").toLowerCase()] || [];
+}
+
+function laneForStatus(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "in_progress") return "in_progress";
+  if (normalized === "blocked") return "blocked";
+  if (normalized === "completed") return "completed";
+  return "pending";
+}
+
+function currentBoardPlan(sessionName = state.currentSession) {
+  return state.board.planBySession[sessionName] || null;
+}
+
+async function moveBoardTask(taskId, status) {
+  try {
+    const result = await fetchJson("/api/command", {
+      method: "POST",
+      body: JSON.stringify({ command: `/feature move ${taskId} ${status}` }),
+    });
+    if (!result?.ok) throw new Error(result?.message || "Unable to move task.");
+    setBoardError("");
+    await refreshBoardData({ force: true });
+  } catch (err) {
+    setBoardError(`Could not move task: ${err.message}`);
+  }
+}
+
+function findTaskById(plan, taskId) {
+  const phases = Array.isArray(plan?.phases) ? plan.phases : [];
+  return phases.find((task) => Number(task.id) === Number(taskId) || Number(task.number) === Number(taskId));
+}
+
+function findPhaseForTask(plan, task) {
+  if (!task) return null;
+  const phasesMeta = Array.isArray(plan?.phases_meta) ? plan.phases_meta : [];
+  return phasesMeta.find((phase) => Number(phase.id) === Number(task.phase_id)) || null;
+}
+
+function filteredBoardTasks(plan, filters) {
+  const all = Array.isArray(plan?.phases) ? plan.phases : [];
+  return all.filter((task) => {
+    if (filters.phase && String(task.phase_id || "") !== String(filters.phase)) return false;
+    if (filters.status && laneForStatus(task.status) !== filters.status) return false;
+    if (filters.blockedOnly && laneForStatus(task.status) !== "blocked") return false;
+    if (!filters.search) return true;
+    const hay = `${task.title || ""} ${(task.overview || "")} ${(task.notes || "")}`.toLowerCase();
+    return hay.includes(filters.search.toLowerCase());
+  });
+}
+
+function renderBoardDetail(plan, taskId) {
+  const task = findTaskById(plan, taskId);
+  if (!task) {
+    ui.boardDetailPanel.innerHTML = '<div class="board-detail-empty">Select a task card to view details.</div>';
+    return;
+  }
+  const phase = findPhaseForTask(plan, task);
+  const events = (plan.event_log || []).filter((evt) => Number(evt.entity_id) === Number(task.id)).slice(-15).reverse();
+  const list = (items) => (items?.length ? `<ul class="detail-list">${items.map((x) => `<li>${x}</li>`).join("")}</ul>` : "<div class='activity-empty'>None</div>");
+  ui.boardDetailPanel.innerHTML = `
+    <h3>Task ${task.id}: ${task.title || ""}</h3>
+    <div class="detail-grid">
+      <div><strong>Status:</strong> ${task.status || "unknown"}</div>
+      <div><strong>Phase:</strong> ${phase?.title || `#${task.phase_id || "-"}`}</div>
+      <div><strong>Overview:</strong> ${task.overview || task.notes || "n/a"}</div>
+      <div><strong>Objectives:</strong> ${(task.objectives || []).join("; ") || "n/a"}</div>
+      <div><strong>Action points:</strong> ${(task.action_points || []).join("; ") || "n/a"}</div>
+    </div>
+    <div class="detail-section"><strong>Exit criteria</strong>${list(task.exit_criteria || [])}</div>
+    <div class="detail-section"><strong>Original payload</strong><pre>${JSON.stringify(task, null, 2)}</pre></div>
+    <div class="detail-section"><strong>Event log (latest)</strong>${events.length ? `<ul class="detail-list">${events.map((evt) => `<li>${evt.kind || evt.type || "event"} · ${new Date((evt.created_at || Date.now()/1000) * 1000).toLocaleTimeString()}</li>`).join("")}</ul>` : "<div class='activity-empty'>No task events.</div>"}</div>
+    <div class="detail-nav">
+      <button class="btn" data-nav="prev">Previous</button>
+      <button class="btn" data-nav="next">Next</button>
+    </div>
+  `;
+  ui.boardDetailPanel.querySelectorAll("[data-nav]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const items = (plan.phases || []).map((t) => Number(t.id));
+      const idx = items.findIndex((id) => id === Number(task.id));
+      if (idx < 0) return;
+      const dir = btn.dataset.nav === "next" ? 1 : -1;
+      const next = items[idx + dir];
+      if (!next) return;
+      state.board.selectedTaskIdBySession[state.currentSession] = next;
+      renderBoard();
+    });
+  });
+}
+
+function renderBoard() {
+  if (boardMode() !== "board") return;
+  const plan = currentBoardPlan();
+  if (!plan) {
+    ui.boardSummary.textContent = "No active feature.";
+    ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan available for this session.</div>';
+    ui.boardDetailPanel.innerHTML = '<div class="board-detail-empty">Select a task card to view details.</div>';
+    return;
+  }
+  const filters = boardFilters();
+  ui.boardSummary.textContent = `${plan.feature_name || plan.feature_id || "Feature"} · ${plan.task_count || 0} tasks`;
+  const phasesMeta = Array.isArray(plan.phases_meta) ? plan.phases_meta : [];
+  ui.boardPhaseFilter.innerHTML = `<option value="">All phases</option>${phasesMeta.map((p) => `<option value="${p.id}">${p.title || `Phase ${p.id}`}</option>`).join("")}`;
+  ui.boardPhaseFilter.value = filters.phase || "";
+  ui.boardStatusFilter.value = filters.status || "";
+  ui.boardBlockedOnly.checked = !!filters.blockedOnly;
+  ui.boardSearchInput.value = filters.search || "";
+
+  const tasks = filteredBoardTasks(plan, filters);
+  const lanes = {
+    pending: tasks.filter((t) => laneForStatus(t.status) === "pending"),
+    in_progress: tasks.filter((t) => laneForStatus(t.status) === "in_progress"),
+    blocked: tasks.filter((t) => laneForStatus(t.status) === "blocked"),
+    completed: tasks.filter((t) => laneForStatus(t.status) === "completed"),
+  };
+  const laneOrder = [
+    ["pending", "Pending"],
+    ["in_progress", "In Progress"],
+    ["blocked", "Blocked"],
+    ["completed", "Completed"],
+  ];
+  ui.boardLanes.innerHTML = "";
+  for (const [laneId, laneLabel] of laneOrder) {
+    const laneEl = document.createElement("section");
+    laneEl.className = "board-lane";
+    laneEl.innerHTML = `<div class="board-lane-head"><span>${laneLabel}</span><span class="board-lane-count">${lanes[laneId].length}</span></div><div class="board-lane-body"></div>`;
+    const laneBody = laneEl.querySelector(".board-lane-body");
+    const byPhase = new Map();
+    for (const task of lanes[laneId]) {
+      const pid = String(task.phase_id || "none");
+      if (!byPhase.has(pid)) byPhase.set(pid, []);
+      byPhase.get(pid).push(task);
+    }
+    if (!byPhase.size) {
+      laneBody.innerHTML = '<div class="board-empty">No tasks in this lane.</div>';
+    } else {
+      for (const [phaseId, items] of byPhase.entries()) {
+        const phaseMeta = phasesMeta.find((p) => String(p.id) === phaseId);
+        const wrap = document.createElement("details");
+        wrap.className = "phase-group";
+        wrap.open = true;
+        wrap.innerHTML = `<summary><span>${phaseMeta?.title || "Unassigned"}</span><span>${items.length}</span></summary><div class="phase-group-cards"></div>`;
+        const cardWrap = wrap.querySelector(".phase-group-cards");
+        for (const task of items) {
+          const card = document.createElement("article");
+          const selected = Number(state.board.selectedTaskIdBySession[state.currentSession]) === Number(task.id);
+          card.className = `task-card${selected ? " active" : ""}`;
+          const options = allowedTransitions(task.status)
+            .filter((target) => laneForStatus(target) !== laneForStatus(task.status))
+            .map((target) => `<option value="${target}">${target}</option>`)
+            .join("");
+          card.innerHTML = `
+            <div class="task-title">${task.title || `Task ${task.id}`}</div>
+            <div class="task-meta">#${task.id} · ${task.status || "unknown"}</div>
+            <div class="task-actions">
+              <button class="btn task-open-btn" data-action="open">Details</button>
+              <select data-action="target"><option value="">Move…</option>${options}</select>
+              <button class="btn task-open-btn" data-action="move">Apply</button>
+            </div>
+          `;
+          card.querySelector('[data-action="open"]').addEventListener("click", () => {
+            state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
+            renderBoard();
+          });
+          card.querySelector('[data-action="move"]').addEventListener("click", () => {
+            const target = card.querySelector('[data-action="target"]').value;
+            if (!target) return setBoardError("Pick a valid status transition first.");
+            moveBoardTask(task.id, target);
+          });
+          cardWrap.appendChild(card);
+        }
+        laneBody.appendChild(wrap);
+      }
+    }
+    ui.boardLanes.appendChild(laneEl);
+  }
+  renderBoardDetail(plan, state.board.selectedTaskIdBySession[state.currentSession]);
+}
+
+function relevantBoardEvent(evt) {
+  const eventName = String(evt?.event || "");
+  if (/^task\./.test(eventName)) return true;
+  if (eventName === "command.completed") {
+    const command = String(evt?.payload?.command || "");
+    return command.startsWith("/feature");
+  }
+  return false;
+}
+
+function scheduleBoardRefresh() {
+  if (state.board.refreshQueued) return;
+  state.board.refreshQueued = true;
+  setTimeout(async () => {
+    state.board.refreshQueued = false;
+    await refreshBoardData();
+  }, 250);
+}
+
+function startBoardEventStream() {
+  if (state.board.stream) return;
+  const es = new EventSource(api("/api/events"));
+  state.board.stream = es;
+  const handle = (raw) => {
+    if (!raw?.data) return;
+    try {
+      const evt = JSON.parse(raw.data);
+      if (relevantBoardEvent(evt)) scheduleBoardRefresh();
+    } catch {
+      return;
+    }
+  };
+  ["task.created", "task.running", "task.awaiting_input", "task.completed", "task.error", "command.completed"].forEach((name) => es.addEventListener(name, handle));
+  es.onerror = () => {
+    if (state.board.stream) {
+      state.board.stream.close();
+      state.board.stream = null;
+    }
+    setTimeout(startBoardEventStream, 1500);
+  };
+}
+
+async function refreshBoardData({ force = false } = {}) {
+  const sessionName = state.currentSession;
+  if (!sessionName) return;
+  if (!force && boardMode(sessionName) !== "board") return;
+  try {
+    const statePayload = await fetchJson("/api/state", {}, 3000);
+    const featureState = statePayload?.feature_state || state.runtime?.feature_state || {};
+    const directory = String(featureState?.directory || "").trim();
+    if (!directory) {
+      state.board.planBySession[sessionName] = null;
+      setBoardError("");
+      renderBoard();
+      return;
+    }
+    const planPayload = await fetchJson(`/api/feature-plan?directory=${encodeURIComponent(directory)}`, {}, 4000);
+    state.board.planBySession[sessionName] = planPayload?.feature_plan || null;
+    const selected = state.board.selectedTaskIdBySession[sessionName];
+    if (!selected && (planPayload?.feature_plan?.phases || []).length) {
+      state.board.selectedTaskIdBySession[sessionName] = Number(planPayload.feature_plan.phases[0].id);
+    }
+    setBoardError("");
+  } catch (err) {
+    setBoardError(`Board refresh failed: ${err.message}`);
+  }
+  renderBoard();
 }
 
 async function refreshApprovals() {
@@ -815,6 +1133,8 @@ async function loadSession(name) {
     ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
     ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
     renderActivityPanel();
+    setViewMode(boardMode(name), name);
+    await refreshBoardData({ force: true });
     return;
   }
   await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
@@ -829,6 +1149,8 @@ async function loadSession(name) {
   ui.messageInput.style.height = "auto";
   ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
   ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+  setViewMode(boardMode(name), name);
+  await refreshBoardData({ force: true });
 }
 
 async function createSession() {
@@ -1274,6 +1596,29 @@ ${marker}` : marker;
     localStorage.setItem(THEME_ACCENT_KEY, ui.customAccentInput.value);
     applyThemeFromStorage();
   });
+
+  ui.chatViewBtn?.addEventListener("click", () => setViewMode("chat"));
+  ui.boardViewBtn?.addEventListener("click", async () => {
+    setViewMode("board");
+    await refreshBoardData({ force: true });
+  });
+  ui.boardRefreshBtn?.addEventListener("click", () => refreshBoardData({ force: true }));
+  ui.boardSearchInput?.addEventListener("input", () => {
+    boardFilters().search = ui.boardSearchInput.value || "";
+    renderBoard();
+  });
+  ui.boardPhaseFilter?.addEventListener("change", () => {
+    boardFilters().phase = ui.boardPhaseFilter.value || "";
+    renderBoard();
+  });
+  ui.boardStatusFilter?.addEventListener("change", () => {
+    boardFilters().status = ui.boardStatusFilter.value || "";
+    renderBoard();
+  });
+  ui.boardBlockedOnly?.addEventListener("change", () => {
+    boardFilters().blockedOnly = !!ui.boardBlockedOnly.checked;
+    renderBoard();
+  });
 }
 
 async function bootstrap() {
@@ -1292,7 +1637,14 @@ async function bootstrap() {
     refreshMemoryRuntime(),
     refreshMemoryBuffers(),
     refreshApprovals(),
+    refreshBoardData({ force: true }),
   ]);
+  startBoardEventStream();
+  if (state.board.pollTimer) clearInterval(state.board.pollTimer);
+  state.board.pollTimer = setInterval(() => {
+    if (boardMode() === "board") refreshBoardData();
+  }, 3000);
+  setViewMode(boardMode(), state.currentSession);
   if (state.approvalPollTimer) clearInterval(state.approvalPollTimer);
   state.approvalPollTimer = setInterval(() => refreshApprovals(), 2000);
   ui.messageInput.value = state.draftBySession[state.currentSession] || "";

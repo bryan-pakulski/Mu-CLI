@@ -30,7 +30,13 @@
       </aside>
 
       <main class="main-panel">
-        <section class="feed-wrap">
+        <section class="center-panel">
+          <div class="view-tabs">
+            <button id="chatViewBtn" class="view-tab active" type="button">Chat</button>
+            <button id="boardViewBtn" class="view-tab" type="button">Board</button>
+          </div>
+
+        <section id="chatView" class="feed-wrap">
           <button id="settingsBtn" class="settings-btn" title="Settings">⚙</button>
           <div id="approvalBar" class="approval-bar hidden">
             <span id="approvalText"></span>
@@ -63,6 +69,38 @@
               <button id="sendBtn" class="btn send-btn" type="submit">➤</button>
             </div>
           </form>
+        </section>
+        <section id="boardView" class="board-view hidden">
+          <header class="board-head">
+            <div class="board-title-wrap">
+              <h2>Feature Board</h2>
+              <span id="boardSummary" class="board-summary">No active feature.</span>
+            </div>
+            <div class="board-controls">
+              <input id="boardSearchInput" type="text" placeholder="Search tasks..." />
+              <select id="boardPhaseFilter">
+                <option value="">All phases</option>
+              </select>
+              <select id="boardStatusFilter">
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="in_progress">In progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="completed">Completed</option>
+              </select>
+              <label class="board-toggle">
+                <input id="boardBlockedOnly" type="checkbox" />
+                Blocked only
+              </label>
+              <button id="boardRefreshBtn" class="btn" type="button">Refresh</button>
+            </div>
+          </header>
+          <div id="boardError" class="board-error hidden"></div>
+          <div id="boardLanes" class="board-lanes"></div>
+          <aside id="boardDetailPanel" class="board-detail">
+            <div class="board-detail-empty">Select a task card to view details.</div>
+          </aside>
+        </section>
         </section>
         <aside class="activity-panel">
           <div class="activity-head">

@@ -1777,42 +1777,59 @@ function isTerminalTaskStatus(status) {
 }
 
 async function refreshServerTaskState(sessionName = state.currentSession) {
-  if (!sessionName) return;
+  if (!sessionName && !state.sessions.length) return;
   try {
     const payload = await fetchJson("/api/tasks", {}, 2500);
     const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
-    const active = tasks
+    const activeTasks = tasks
       .filter((task) => !isTerminalTaskStatus(task.status))
-      .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0))[0];
-    if (!active) {
-      const existing = state.pendingBySession[sessionName];
-      if (existing && existing.status !== "queued") {
-        delete state.pendingBySession[sessionName];
-        renderSessions();
-        updateComposerState();
-        if (state.currentSession === sessionName) renderFeed(false);
-      }
-      return;
+      .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+
+    const activeBySession = new Map();
+    for (const task of activeTasks) {
+      const taskSession = String(task?.payload?.session_name || task?.session_name || "").trim() || state.currentSession;
+      if (!taskSession || activeBySession.has(taskSession)) continue;
+      activeBySession.set(taskSession, task);
     }
 
-    const status = String(active.status || "running");
-    const pretty = status.replaceAll("_", " ");
-    state.taskBySession[sessionName] = {
-      ...(state.taskBySession[sessionName] || {}),
-      taskId: String(active.task_id || ""),
-      status,
-      startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
-    };
-    state.pendingBySession[sessionName] = {
-      ...(state.pendingBySession[sessionName] || {}),
-      userText: state.pendingBySession[sessionName]?.userText || "",
-      latestActivity: pretty.charAt(0).toUpperCase() + pretty.slice(1),
-      startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
-      status: "running",
-    };
+    const knownSessions = new Set([...(state.sessions || []), sessionName, state.currentSession].filter(Boolean));
+    for (const session of knownSessions) {
+      const active = activeBySession.get(session);
+      if (!active) {
+        const existing = state.pendingBySession[session];
+        if (existing && existing.status !== "queued") {
+          delete state.pendingBySession[session];
+          if (state.taskBySession[session]?.status === "running") {
+            state.taskBySession[session].status = "completed";
+          }
+        }
+        continue;
+      }
+
+      const status = String(active.status || "running");
+      const pretty = status.replaceAll("_", " ");
+      state.taskBySession[session] = {
+        ...(state.taskBySession[session] || {}),
+        taskId: String(active.task_id || ""),
+        status,
+        startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
+      };
+      state.pendingBySession[session] = {
+        ...(state.pendingBySession[session] || {}),
+        userText: state.pendingBySession[session]?.userText || "",
+        latestActivity: pretty.charAt(0).toUpperCase() + pretty.slice(1),
+        startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
+        status: "running",
+      };
+    }
+
     renderSessions();
     updateComposerState();
     if (state.currentSession === sessionName) renderFeed(false);
+    if (state.currentSession && state.pendingBySession[state.currentSession]) {
+      refreshHistory(false).catch(() => {});
+      if (state.currentView === "board") refreshBoardData().catch(() => {});
+    }
   } catch {
     return;
   }

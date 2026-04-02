@@ -2351,6 +2351,72 @@ def serve(session, host: str, port: int, command_handler):
                         )
                         return
 
+                    if parsed.path == "/api/features/archive":
+                        feature_id = str(payload.get("feature_id", "") or "").strip()
+                        if not feature_id:
+                            self._send_json(
+                                400,
+                                {"ok": False, "error": "Field 'feature_id' is required."},
+                            )
+                            return
+                        feature = session.session_manager.get_feature(feature_id)
+                        if not feature:
+                            self._send_json(
+                                404,
+                                {
+                                    "ok": False,
+                                    "error": f"Feature '{feature_id}' not found.",
+                                },
+                            )
+                            return
+                        feature["status"] = "archived"
+                        record = session.session_manager.upsert_feature(feature) or feature
+                        active = session.session_manager.get_feature_state() or {}
+                        if str(active.get("feature_id", "")).strip() == str(feature_id):
+                            active["status"] = "archived"
+                            session.session_manager.set_feature_state(active)
+                        self._send_json(
+                            200,
+                            {"ok": True, "feature": record, **build_runtime_payload(session)},
+                        )
+                        return
+
+                    if parsed.path == "/api/features/delete":
+                        feature_id = str(payload.get("feature_id", "") or "").strip()
+                        if not feature_id:
+                            self._send_json(
+                                400,
+                                {"ok": False, "error": "Field 'feature_id' is required."},
+                            )
+                            return
+                        deleted = session.session_manager.delete_feature(feature_id)
+                        if not deleted:
+                            self._send_json(
+                                404,
+                                {
+                                    "ok": False,
+                                    "error": f"Feature '{feature_id}' not found.",
+                                },
+                            )
+                            return
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "deleted_feature_id": feature_id,
+                                **build_runtime_payload(session),
+                            },
+                        )
+                        return
+
+                    if parsed.path == "/api/features/unload":
+                        session.session_manager.clear_feature_state()
+                        self._send_json(
+                            200,
+                            {"ok": True, **build_runtime_payload(session)},
+                        )
+                        return
+
                     if parsed.path == "/api/workspaces/browse":
                         path, error = pick_workspace_folder()
                         if error:

@@ -26,17 +26,18 @@
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;font-family:Manrope,Inter,sans-serif;background:var(--bg);color:var(--text)}
 .top-flash{
-  position:fixed;top:10px;left:50%;transform:translate(-50%,-18px);
-  z-index:12000;min-width:260px;max-width:min(780px,92vw);
-  padding:10px 14px;border-radius:12px;border:1px solid var(--border);
+  position:fixed;left:14px;bottom:14px;transform:translateY(14px);
+  z-index:12000;min-width:220px;max-width:min(420px,88vw);
+  padding:8px 12px;border-radius:10px;border:1px solid var(--border);
   background:color-mix(in oklab,var(--surface) 90%, var(--accent) 10%);
-  color:var(--text);box-shadow:0 14px 28px rgba(0,0,0,.25);opacity:0;
+  color:var(--text);box-shadow:0 10px 22px rgba(0,0,0,.2);opacity:0;
   transition:opacity .22s ease,transform .22s ease,filter .22s ease;
   backdrop-filter:blur(6px);
 }
-.top-flash.show{opacity:1;transform:translate(-50%,0)}
+.top-flash.show{opacity:1;transform:translateY(0)}
 .top-flash.error{border-color:color-mix(in oklab,#ef4444 60%,var(--border));background:color-mix(in oklab,#ef4444 14%,var(--surface))}
 .top-flash.connected{border-color:color-mix(in oklab,#10b981 45%,var(--border));background:color-mix(in oklab,#10b981 11%,var(--surface))}
+.top-flash.warning{border-color:color-mix(in oklab,#f59e0b 52%,var(--border));background:color-mix(in oklab,#f59e0b 14%,var(--surface))}
 
 .app-shell{height:100vh;display:grid;grid-template-columns:280px 1fr;min-height:0}
 .sidebar{background:var(--surface);border-right:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:visible;position:relative;z-index:30}
@@ -159,9 +160,12 @@ input,select,textarea{padding:8px 10px}
 .folder-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin:10px 0 12px;}
 .muted{color:var(--muted);font-size:12px;}
 .memory-list{display:grid;gap:6px;margin:8px 0 12px}
-.memory-item{border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--surface-2)}
-.memory-item-title{font-size:12px;color:var(--muted)}
-.memory-item-body{font-size:13px;white-space:pre-wrap;word-break:break-word}
+.memory-item{border:1px solid color-mix(in oklab, var(--border) 88%, transparent);border-radius:10px;padding:10px;background:color-mix(in oklab, var(--surface-2) 92%, transparent)}
+.memory-item-title{font-size:11px;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
+.memory-item-body{font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.45;margin-top:6px}
+.memory-item details{margin-top:8px}
+.memory-item summary{cursor:pointer;color:var(--accent);font-size:12px}
+.memory-item-full{max-height:260px;overflow:auto;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
 
 .composer textarea{background:var(--surface-2);border:0;outline:none;resize:none;max-height:180px;min-height:28px;padding:6px 4px;color:var(--text);line-height:1.4;}
 .composer textarea:disabled{opacity:.8;cursor:not-allowed}

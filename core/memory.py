@@ -8,13 +8,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 
-def _truncate(text: str, limit: int = 400) -> str:
-    text = str(text or "").strip()
-    if len(text) <= limit:
-        return text
-    return f"{text[: limit - 3]}..."
-
-
 @dataclass
 class MemoryEntry:
     id: int
@@ -91,7 +84,7 @@ class BaseNoteStore:
         source: str = "",
     ) -> MemoryEntry:
         tags = [str(tag).strip().lower() for tag in (tags or []) if str(tag).strip()]
-        content = _truncate(content, 600)
+        content = str(content or "").strip()
 
         existing = next(
             (

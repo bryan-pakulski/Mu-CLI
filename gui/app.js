@@ -150,6 +150,9 @@ const ui = {
   centerPanel: document.querySelector(".center-panel"),
   boardSummary: el("boardSummary"),
   boardFeatureSelect: el("boardFeatureSelect"),
+  boardFeatureArchiveBtn: el("boardFeatureArchiveBtn"),
+  boardFeatureDeleteBtn: el("boardFeatureDeleteBtn"),
+  boardFeatureUnloadBtn: el("boardFeatureUnloadBtn"),
   boardSearchInput: el("boardSearchInput"),
   boardPhaseFilter: el("boardPhaseFilter"),
   boardRefreshBtn: el("boardRefreshBtn"),
@@ -345,11 +348,12 @@ async function fetchJson(path, options = {}, timeoutMs = 8000) {
 }
 
 function setStatus(text, kind = "") {
-  ui.statusBadge.classList.remove("connected", "error");
+  ui.statusBadge.classList.remove("connected", "error", "warning");
   if (kind) ui.statusBadge.classList.add(kind);
   ui.statusBadge.textContent = text;
+  if (!["error", "warning"].includes(String(kind || "").toLowerCase())) return;
   if (!ui.topFlash) return;
-  ui.topFlash.classList.remove("connected", "error", "show", "hidden");
+  ui.topFlash.classList.remove("connected", "error", "warning", "show", "hidden");
   if (kind) ui.topFlash.classList.add(kind);
   ui.topFlash.textContent = text;
   requestAnimationFrame(() => ui.topFlash.classList.add("show"));
@@ -395,6 +399,21 @@ function renderFeatureSelectors(sessionName = state.currentSession) {
   }
   const featureModeEnabled = String(ui.agentModeSelect?.value || "default") === "feature";
   ui.chatFeatureWrap?.classList.toggle("hidden", !featureModeEnabled);
+  const record = selectedFeatureRecord(sessionName);
+  if (ui.boardFeatureArchiveBtn) ui.boardFeatureArchiveBtn.disabled = !record || String(record.status || "").toLowerCase() === "archived";
+  if (ui.boardFeatureDeleteBtn) ui.boardFeatureDeleteBtn.disabled = !record;
+}
+
+function selectedFeatureRecord(sessionName = state.currentSession) {
+  const featureId = String(state.board.selectedFeatureIdBySession[sessionName] || "").trim();
+  const list = state.board.featureListBySession[sessionName] || [];
+  if (featureId) return list.find((feature) => String(feature.feature_id || "") === featureId) || null;
+  return list.find((feature) => String(feature.active || "").toLowerCase() === "true") || null;
+}
+
+function selectedFeatureArchived(sessionName = state.currentSession) {
+  const record = selectedFeatureRecord(sessionName);
+  return String(record?.status || "").toLowerCase() === "archived";
 }
 
 function textFromParts(parts = []) {
@@ -639,6 +658,10 @@ function currentBoardPlan(sessionName = state.currentSession) {
 }
 
 async function moveBoardTask(taskId, status) {
+  if (selectedFeatureArchived()) {
+    setBoardError("Archived features are read-only.");
+    return;
+  }
   try {
     const result = await fetchJson("/api/command", {
       method: "POST",
@@ -679,7 +702,7 @@ function openTicketModal(taskId) {
   if (!task) return;
   const phase = findPhaseForTask(plan, task);
   const events = (plan.event_log || []).filter((evt) => Number(evt.entity_id) === Number(task.id)).slice(-12).reverse();
-  const editable = ["pending", "not_started"].includes(String(task.status || "").toLowerCase());
+  const editable = !selectedFeatureArchived() && ["pending", "not_started"].includes(String(task.status || "").toLowerCase());
 
   state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
   ui.ticketTitle.textContent = `Task ${task.id}: ${task.title || ""}`;
@@ -698,7 +721,7 @@ function openTicketModal(taskId) {
     <div class="settings-row"><span>Status</span><span>${task.status || "unknown"}</span></div>
     <div class="settings-row"><span>Phase</span><span>${phase?.title || `#${task.phase_id || "-"}`}</span></div>
     <div class="settings-row"><span>Task ID</span><span>${task.id}</span></div>
-    <div class="settings-row"><span>Editable</span><span>${editable ? "Yes" : "No (only pending)"}</span></div>
+    <div class="settings-row"><span>Editable</span><span>${editable ? "Yes" : "No (only pending and non-archived feature)"}</span></div>
   `;
   ui.ticketEvents.innerHTML = events.length
     ? events.map((evt) => `<div class="settings-row"><span>${evt.kind || evt.type || "event"}</span><span>${new Date((evt.created_at || Date.now() / 1000) * 1000).toLocaleTimeString()}</span></div>`).join("")
@@ -737,6 +760,7 @@ function renderBoard() {
   if (ui.boardView?.classList.contains("hidden")) return;
   const plan = currentBoardPlan();
   renderFeatureSelectors(state.currentSession);
+  const featureIsArchived = selectedFeatureArchived(state.currentSession);
   if (!plan) {
     ui.boardSummary.textContent = "No active feature.";
     ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan available for this session.</div>';
@@ -797,7 +821,7 @@ function renderBoard() {
           const card = document.createElement("article");
           const selected = Number(state.board.selectedTaskIdBySession[state.currentSession]) === Number(task.id);
           card.className = `task-card${selected ? " active" : ""}`;
-          card.draggable = true;
+          card.draggable = !featureIsArchived;
           card.dataset.taskId = String(task.id);
           card.dataset.currentLane = laneForStatus(task.status);
           card.innerHTML = `
@@ -1036,6 +1060,7 @@ async function refreshMemoryBuffers(sessionName = state.currentSession) {
 
 function renderMemoryModal() {
   const mem = sessionMemory(state.currentSession);
+  const expanded = mem.expanded || {};
   const query = String(mem.query || "").trim().toLowerCase();
   const filtered = (items) => {
     if (!query) return items;
@@ -1045,28 +1070,40 @@ function renderMemoryModal() {
     });
   };
   const memoryEntries = filtered(mem.buffer || []);
-  const renderEntry = (e) => {
+  const renderEntry = (e, bucket) => {
     const preview = String(e.content || "").slice(0, 200);
     const full = String(e.content || "");
     const hasMore = full.length > preview.length;
+    const entryKey = `${bucket}:${e.id || "?"}`;
+    const isOpen = !!expanded[entryKey];
     return `<article class="memory-item">
       <div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div>
       <div class="memory-item-body">${preview || ""}${hasMore ? "…" : ""}</div>
-      ${hasMore ? `<details><summary>View full context</summary><div class="memory-item-body">${full}</div></details>` : ""}
+      ${hasMore ? `<details data-memory-key="${entryKey}" ${isOpen ? "open" : ""}><summary>View full context</summary><div class="memory-item-body memory-item-full">${full}</div></details>` : ""}
     </article>`;
   };
   ui.memoryBufferList.innerHTML = memoryEntries.length
-    ? memoryEntries.map(renderEntry).join("")
+    ? memoryEntries.map((entry) => renderEntry(entry, "memory")).join("")
     : '<div class="activity-empty">No memory entries found.</div>';
 
   const scratchEntries = filtered(mem.scratchpad || []);
   ui.scratchpadBufferList.innerHTML = scratchEntries.length
-    ? scratchEntries.map(renderEntry).join("")
+    ? scratchEntries.map((entry) => renderEntry(entry, "scratchpad")).join("")
     : '<div class="activity-empty">No scratchpad entries found.</div>';
 
   ui.memoryActivityList.innerHTML = mem.activity.length
     ? mem.activity.slice(-60).reverse().map((e) => `<article class="memory-item"><div class="memory-item-title">${e.title} · ${new Date(e.at).toLocaleTimeString()}</div><div class="memory-item-body">${e.body || ""}</div></article>`).join("")
     : '<div class="activity-empty">No memory tool activity yet.</div>';
+  [ui.memoryBufferList, ui.scratchpadBufferList].forEach((listEl) => {
+    listEl?.querySelectorAll("details[data-memory-key]").forEach((detailsEl) => {
+      detailsEl.addEventListener("toggle", () => {
+        const key = detailsEl.getAttribute("data-memory-key");
+        if (!key) return;
+        mem.expanded = mem.expanded || {};
+        mem.expanded[key] = detailsEl.open;
+      });
+    });
+  });
 }
 
 function openMemoryModal() {
@@ -1467,6 +1504,41 @@ async function activateFeature(featureId) {
   await refreshRuntime();
   await refreshBoardData({ force: true });
   setStatus("Active feature updated.", "connected");
+}
+
+async function archiveSelectedFeature() {
+  const record = selectedFeatureRecord();
+  if (!record?.feature_id) return setStatus("No feature selected.", "warning");
+  await fetchJson("/api/features/archive", {
+    method: "POST",
+    body: JSON.stringify({ feature_id: record.feature_id }),
+  });
+  await refreshBoardData({ force: true });
+  setStatus("Feature archived. It is now read-only.", "warning");
+}
+
+async function deleteSelectedFeature() {
+  const record = selectedFeatureRecord();
+  if (!record?.feature_id) return setStatus("No feature selected.", "warning");
+  await fetchJson("/api/features/delete", {
+    method: "POST",
+    body: JSON.stringify({ feature_id: record.feature_id }),
+  });
+  state.board.selectedFeatureIdBySession[state.currentSession] = "";
+  await refreshBoardData({ force: true });
+  setStatus("Feature deleted.", "warning");
+}
+
+async function unloadFeature() {
+  await fetchJson("/api/features/unload", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  state.board.selectedFeatureIdBySession[state.currentSession] = "";
+  state.board.planBySession[state.currentSession] = null;
+  renderFeatureSelectors(state.currentSession);
+  renderBoard();
+  setStatus("Feature unloaded.", "warning");
 }
 
 async function saveSettings() {
@@ -1945,6 +2017,15 @@ ${marker}` : marker;
   });
   ui.boardFeatureSelect?.addEventListener("change", async () => {
     await activateFeature(ui.boardFeatureSelect.value);
+  });
+  ui.boardFeatureArchiveBtn?.addEventListener("click", () => {
+    archiveSelectedFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.boardFeatureDeleteBtn?.addEventListener("click", () => {
+    deleteSelectedFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.boardFeatureUnloadBtn?.addEventListener("click", () => {
+    unloadFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
 }
 

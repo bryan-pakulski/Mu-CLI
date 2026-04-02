@@ -2197,7 +2197,69 @@ def _resolve_feature_state(session, requested_feature_id: str | None = None):
         feature_state = session.session_manager.get_feature(requested_feature_id)
     if not feature_state:
         feature_state = session.session_manager.get_feature_state()
+    if not isinstance(feature_state, dict):
+        return feature_state
+
+    feature_id = str(feature_state.get("feature_id", "") or "").strip()
+    directory = str(feature_state.get("directory", "") or "").strip()
+    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+
+    candidates = [metadata_path]
+    if feature_id and hasattr(session.session_manager, "get_feature_metadata_path"):
+        try:
+            candidates.append(
+                str(session.session_manager.get_feature_metadata_path(feature_id) or "").strip()
+            )
+        except TypeError:
+            pass
+    if directory and hasattr(session.session_manager, "get_feature_metadata_index"):
+        metadata_index = session.session_manager.get_feature_metadata_index() or {}
+        if isinstance(metadata_index, dict):
+            candidates.append(str(metadata_index.get(directory, "") or "").strip())
+    if directory:
+        candidates.append(os.path.join(directory, "feature_plan.json"))
+
+    resolved = next((path for path in candidates if path and os.path.exists(path)), "")
+    if resolved and resolved != metadata_path:
+        feature_state["metadata_path"] = resolved
+        if feature_id:
+            session.session_manager.upsert_feature(feature_state)
+        if session.session_manager.get_feature_state():
+            session.session_manager.set_feature_state(feature_state)
+        session.session_manager.save_history()
     return feature_state
+
+
+def _resolve_feature_metadata_path(
+    session,
+    context: ToolExecutionContext,
+    *,
+    feature_id: str | None = None,
+    directory: str | None = None,
+) -> str:
+    feature_state = _resolve_feature_state(session, feature_id)
+    candidates: list[str] = []
+    if isinstance(feature_state, dict):
+        candidates.append(str(feature_state.get("metadata_path", "") or "").strip())
+        if not directory:
+            directory = str(feature_state.get("directory", "") or "").strip()
+    if feature_id and hasattr(session.session_manager, "get_feature_metadata_path"):
+        try:
+            candidates.append(
+                str(session.session_manager.get_feature_metadata_path(feature_id) or "").strip()
+            )
+        except TypeError:
+            pass
+    if directory and hasattr(session.session_manager, "get_feature_metadata_index"):
+        metadata_index = session.session_manager.get_feature_metadata_index() or {}
+        if isinstance(metadata_index, dict):
+            candidates.append(str(metadata_index.get(directory, "") or "").strip())
+    if directory:
+        candidates.append(os.path.join(directory, "feature_plan.json"))
+    folder_index = getattr(context.folder_context, "feature_metadata_index", {}) or {}
+    if directory and isinstance(folder_index, dict):
+        candidates.append(str(folder_index.get(directory, "") or "").strip())
+    return next((path for path in candidates if path and os.path.exists(path)), "")
 
 
 def _handle_create_feature(args: dict, context: ToolExecutionContext) -> str:
@@ -2348,8 +2410,13 @@ def _handle_get_execution_state(args: dict, context: ToolExecutionContext) -> st
     feature_state = _resolve_feature_state(session, feature_id)
     if not feature_state:
         return "Error: No active feature in session."
-    metadata_path = feature_state.get("metadata_path", "")
-    if not metadata_path or not os.path.exists(metadata_path):
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=feature_id,
+        directory=str(feature_state.get("directory", "") or "").strip(),
+    )
+    if not metadata_path:
         return "Error: Feature metadata not found."
     plan = load_feature_plan(metadata_path)
     snapshot = feature_execution_snapshot(plan)
@@ -2803,14 +2870,19 @@ def _handle_get_current_task(args: dict, context: ToolExecutionContext) -> str:
     if not session:
         return "Error: This tool requires an active session context."
 
-    feature_state = session.session_manager.get_feature_state()
+    feature_state = _resolve_feature_state(session)
     if not feature_state:
         return json.dumps(
             {"error": "No active feature in session.", "task": None}, indent=2
         )
 
-    metadata_path = feature_state.get("metadata_path", "")
-    if not metadata_path or not os.path.exists(metadata_path):
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=str(feature_state.get("feature_id", "") or "").strip() or None,
+        directory=str(feature_state.get("directory", "") or "").strip(),
+    )
+    if not metadata_path:
         return json.dumps(
             {"error": "Feature metadata not found.", "task": None}, indent=2
         )
@@ -2841,14 +2913,19 @@ def _handle_get_tasks(args: dict, context: ToolExecutionContext) -> str:
     if not session:
         return "Error: This tool requires an active session context."
 
-    feature_state = session.session_manager.get_feature_state()
+    feature_state = _resolve_feature_state(session)
     if not feature_state:
         return json.dumps(
             {"error": "No active feature in session.", "tasks": []}, indent=2
         )
 
-    metadata_path = feature_state.get("metadata_path", "")
-    if not metadata_path or not os.path.exists(metadata_path):
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=str(feature_state.get("feature_id", "") or "").strip() or None,
+        directory=str(feature_state.get("directory", "") or "").strip(),
+    )
+    if not metadata_path:
         return json.dumps(
             {"error": "Feature metadata not found.", "tasks": []}, indent=2
         )
@@ -2894,23 +2971,19 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     if status not in valid_statuses:
         return f"Error: status must be one of {valid_statuses}."
 
-    feature_state = session.session_manager.get_feature_state() or {}
+    feature_state = _resolve_feature_state(session) or {}
     directory = str(
         args.get("directory")
         or feature_state.get("directory", "")
         or ""
     ).strip()
-    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=str(feature_state.get("feature_id", "") or "").strip() or None,
+        directory=directory,
+    )
     if not metadata_path:
-        metadata_path = str(
-            getattr(context.folder_context, "feature_metadata_index", {}).get(
-                directory, ""
-            )
-            or ""
-        ).strip()
-    if not metadata_path and directory:
-        metadata_path = os.path.join(directory, "feature_plan.json")
-    if not metadata_path or not os.path.exists(metadata_path):
         return "Error: Feature metadata not found."
 
     if status == "completed":

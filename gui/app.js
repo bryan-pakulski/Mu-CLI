@@ -2,6 +2,7 @@ const el = (id) => document.getElementById(id);
 const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
 const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
+const BOARD_MODE_STORAGE_KEY = "mucli_gui_board_modes_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
 
@@ -139,6 +140,12 @@ try {
   if (drafts && typeof drafts === "object") state.draftBySession = drafts;
 } catch {
   state.draftBySession = {};
+}
+try {
+  const boardModes = JSON.parse(localStorage.getItem(BOARD_MODE_STORAGE_KEY) || "{}");
+  if (boardModes && typeof boardModes === "object") state.board.modeBySession = boardModes;
+} catch {
+  state.board.modeBySession = {};
 }
 
 function loadPersistedActivity() {
@@ -437,6 +444,14 @@ function boardMode(sessionName = state.currentSession) {
   return state.board.modeBySession[sessionName] || "chat";
 }
 
+function persistBoardModes() {
+  try {
+    localStorage.setItem(BOARD_MODE_STORAGE_KEY, JSON.stringify(state.board.modeBySession || {}));
+  } catch {
+    return;
+  }
+}
+
 function setBoardError(message = "") {
   if (!ui.boardError) return;
   if (!message) {
@@ -462,6 +477,7 @@ function boardFilters(sessionName = state.currentSession) {
 
 function setViewMode(mode, sessionName = state.currentSession) {
   state.board.modeBySession[sessionName] = mode;
+  persistBoardModes();
   const boardActive = mode === "board";
   ui.chatViewBtn?.classList.toggle("active", !boardActive);
   ui.boardViewBtn?.classList.toggle("active", boardActive);

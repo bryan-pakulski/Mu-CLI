@@ -360,6 +360,44 @@ def test_update_task_status_requires_verified_exit_criteria_for_completion(tmp_p
     assert "Cannot mark task completed" in result
 
 
+def test_update_task_status_recovers_missing_feature_metadata_path(tmp_path):
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+    session = _SessionStub(str(tmp_path / "feature_plan.json"))
+    tool_ctx = ToolExecutionContext(folder_context=ctx, session=session)
+    _handle_create_feature_task(
+        {
+            "feature_name": "Recovery",
+            "feature_request": "Recover metadata path",
+            "tasks": [
+                {
+                    "title": "Task A",
+                    "objectives": ["Goal A"],
+                    "action_points": ["Action A"],
+                    "exit_criteria": ["Criterion A"],
+                }
+            ],
+        },
+        tool_ctx,
+    )
+    session.session_manager.feature_state = {
+        "feature_id": session.session_manager.record["feature_id"],
+        "directory": session.session_manager.record["directory"],
+        "metadata_path": "",
+    }
+
+    result = execute_tool(
+        "update_task_status",
+        {"task_id": 1, "status": "in_progress"},
+        ctx,
+        session=session,
+    )
+    payload = json.loads(result)
+
+    assert payload["ok"] is True
+    assert payload["status"] == "in_progress"
+
+
 def test_apply_diff_requires_approved_proposal_in_review_mode(tmp_path):
     ctx = FolderContext()
     ctx.add_folder(str(tmp_path))

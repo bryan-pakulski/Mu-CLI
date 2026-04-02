@@ -1470,6 +1470,27 @@ def build_feature_plan_payload(session, directory: str) -> dict:
     return summarize_feature_plan(plan)
 
 
+def build_features_payload(session) -> dict:
+    records: list[dict] = []
+    for feature in session.session_manager.list_features():
+        if not isinstance(feature, dict):
+            continue
+        records.append(
+            {
+                "feature_id": str(feature.get("feature_id", "") or "").strip(),
+                "feature_name": str(
+                    feature.get("feature_name")
+                    or feature.get("feature_id")
+                    or "feature"
+                ).strip(),
+                "status": str(feature.get("status", "") or "").strip(),
+                "directory": str(feature.get("directory", "") or "").strip(),
+                "updated_at": feature.get("updated_at"),
+            }
+        )
+    return {"features": records}
+
+
 def build_staged_files_payload(session) -> dict:
     return {
         "staged_files": list(session.staged_files),
@@ -1771,6 +1792,12 @@ def serve(session, host: str, port: int, command_handler):
                         self._send_json(
                             404, {"ok": False, "error": "Feature plan not found."}
                         )
+                    return
+                if parsed.path == "/api/features":
+                    self._send_json(
+                        200,
+                        {"ok": True, **build_features_payload(session)},
+                    )
                     return
                 if parsed.path == "/api/staged-files":
                     self._send_json(

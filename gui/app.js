@@ -67,6 +67,8 @@ const state = {
   board: {
     modeBySession: {},
     planBySession: {},
+    featureListBySession: {},
+    selectedFeatureIdBySession: {},
     selectedTaskIdBySession: {},
     filterBySession: {},
     pollTimer: null,
@@ -83,10 +85,12 @@ const ui = {
   agenticToggle: el("agenticToggle"),
   thinkingToggle: el("thinkingToggle"),
   yoloToggle: el("yoloToggle"),
+  agentModeSelect: el("agentModeSelect"),
   agenticToggleSettings: el("agenticToggleSettings"),
   thinkingToggleSettings: el("thinkingToggleSettings"),
   applyRuntimeBtn: el("applyRuntimeBtn"),
   statusBadge: el("statusBadge"),
+  topFlash: el("topFlash"),
   sessionList: el("sessionList"),
   newSessionBtn: el("newSessionBtn"),
   feed: el("feed"),
@@ -143,6 +147,7 @@ const ui = {
   boardView: el("boardView"),
   centerPanel: document.querySelector(".center-panel"),
   boardSummary: el("boardSummary"),
+  boardFeatureSelect: el("boardFeatureSelect"),
   boardSearchInput: el("boardSearchInput"),
   boardPhaseFilter: el("boardPhaseFilter"),
   boardStatusFilter: el("boardStatusFilter"),
@@ -309,6 +314,17 @@ function setStatus(text, kind = "") {
   ui.statusBadge.classList.remove("connected", "error");
   if (kind) ui.statusBadge.classList.add(kind);
   ui.statusBadge.textContent = text;
+  if (!ui.topFlash) return;
+  ui.topFlash.classList.remove("connected", "error", "show", "hidden");
+  if (kind) ui.topFlash.classList.add(kind);
+  ui.topFlash.textContent = text;
+  requestAnimationFrame(() => ui.topFlash.classList.add("show"));
+  const durationMs = kind === "error" ? 4200 : 2400;
+  if (setStatus._timer) clearTimeout(setStatus._timer);
+  setStatus._timer = setTimeout(() => {
+    ui.topFlash.classList.remove("show");
+    setTimeout(() => ui.topFlash?.classList.add("hidden"), 260);
+  }, durationMs);
 }
 
 function textFromParts(parts = []) {
@@ -654,6 +670,19 @@ async function saveTicketEdits() {
 function renderBoard() {
   if (ui.boardView?.classList.contains("hidden")) return;
   const plan = currentBoardPlan();
+  const featureList = state.board.featureListBySession[state.currentSession] || [];
+  const selectedFeatureId = state.board.selectedFeatureIdBySession[state.currentSession] || "";
+  if (ui.boardFeatureSelect) {
+    const options = ['<option value="">Active feature</option>']
+      .concat(featureList.map((feature) => {
+        const featureId = String(feature.feature_id || "");
+        const status = String(feature.status || "").trim();
+        const suffix = status ? ` (${status})` : "";
+        return `<option value="${featureId}">${feature.feature_name || featureId}${suffix}</option>`;
+      }));
+    ui.boardFeatureSelect.innerHTML = options.join("");
+    ui.boardFeatureSelect.value = selectedFeatureId;
+  }
   if (!plan) {
     ui.boardSummary.textContent = "No active feature.";
     ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan available for this session.</div>';
@@ -854,7 +883,22 @@ async function refreshBoardData({ force = false } = {}) {
   try {
     const statePayload = await fetchJson("/api/state", {}, 3000);
     const featureState = statePayload?.feature_state || state.runtime?.feature_state || {};
-    const directory = String(featureState?.directory || "").trim();
+    const featuresPayload = await fetchJson("/api/features", {}, 3000);
+    const featureList = featuresPayload?.features || [];
+    state.board.featureListBySession[sessionName] = featureList;
+    const selectedFeatureId = String(
+      state.board.selectedFeatureIdBySession[sessionName]
+      || featureState?.feature_id
+      || ""
+    ).trim();
+    let directory = String(featureState?.directory || "").trim();
+    if (selectedFeatureId) {
+      const featureRecord = featureList.find((feature) => String(feature.feature_id || "") === selectedFeatureId);
+      if (featureRecord) {
+        directory = String(featureRecord.directory || "").trim() || directory;
+        state.board.selectedFeatureIdBySession[sessionName] = selectedFeatureId;
+      }
+    }
     if (!directory) {
       state.board.planBySession[sessionName] = null;
       setBoardError("");
@@ -1167,6 +1211,7 @@ async function refreshRuntime() {
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
     ui.yoloToggle.checked = !!runtime.variables?.yolo;
+    if (ui.agentModeSelect) ui.agentModeSelect.value = String(runtime.variables?.agent_mode || "default");
     if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = !!runtime.agentic;
     if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = !!runtime.thinking;
     const model = runtime.model || "";
@@ -1341,6 +1386,13 @@ async function applyRuntime() {
   const thinking = ui.thinkingToggleSettings?.checked ?? ui.thinkingToggle.checked;
   await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: ui.modelInput.value, agentic, thinking }) });
   await refreshRuntime();
+}
+
+async function setAgentMode(mode) {
+  const variables = { ...(state.runtime?.variables || {}), agent_mode: String(mode || "default") };
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ variables }) });
+  state.runtime = state.runtime || {};
+  state.runtime.variables = variables;
 }
 
 async function saveSettings() {
@@ -1644,7 +1696,13 @@ function wireEvents() {
   ui.agenticToggle.addEventListener("change", () => { if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = ui.agenticToggle.checked; });
   ui.thinkingToggle.addEventListener("change", () => { if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked; });
   ui.yoloToggle.addEventListener("change", () => {
-    fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ variables: { yolo: !!ui.yoloToggle.checked } }) })
+    const variables = { ...(state.runtime?.variables || {}), yolo: !!ui.yoloToggle.checked };
+    fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ variables }) })
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.agentModeSelect?.addEventListener("change", () => {
+    setAgentMode(ui.agentModeSelect.value)
+      .then(() => setStatus(`Mode set to ${ui.agentModeSelect.value}.`, "connected"))
       .catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
   ui.approvalApproveBtn.addEventListener("click", () => resolveApproval("y").catch((err) => setStatus(`Error: ${err.message}`, "error")));
@@ -1806,6 +1864,10 @@ ${marker}` : marker;
   ui.boardBlockedOnly?.addEventListener("change", () => {
     boardFilters().blockedOnly = !!ui.boardBlockedOnly.checked;
     renderBoard();
+  });
+  ui.boardFeatureSelect?.addEventListener("change", async () => {
+    state.board.selectedFeatureIdBySession[state.currentSession] = String(ui.boardFeatureSelect.value || "").trim();
+    await refreshBoardData({ force: true });
   });
 }
 

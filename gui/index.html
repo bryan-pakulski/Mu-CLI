@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <div id="topFlash" class="top-flash hidden" role="status" aria-live="polite"></div>
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">μCLI</div>
@@ -63,6 +64,15 @@
                 <label><input id="agenticToggle" type="checkbox" /> Agentic</label>
                 <label><input id="thinkingToggle" type="checkbox" /> Thinking</label>
                 <label><input id="yoloToggle" type="checkbox" /> YOLO mode</label>
+                <label class="field-inline">
+                  <span>Mode</span>
+                  <select id="agentModeSelect">
+                    <option value="default">Default</option>
+                    <option value="research">Research</option>
+                    <option value="feature">Feature</option>
+                    <option value="debug">Debug</option>
+                  </select>
+                </label>
                 <button id="memoryOption" type="button" class="menu-item">Memory</button>
                 <button id="clearChatOption" type="button" class="menu-item">Clear conversation</button>
               </div>
@@ -77,6 +87,9 @@
               <span id="boardSummary" class="board-summary">No active feature.</span>
             </div>
             <div class="board-controls">
+              <select id="boardFeatureSelect">
+                <option value="">Active feature</option>
+              </select>
               <input id="boardSearchInput" type="text" placeholder="Search tasks..." />
               <select id="boardPhaseFilter">
                 <option value="">All phases</option>

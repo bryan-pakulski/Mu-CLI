@@ -76,6 +76,7 @@ const state = {
     pollTimer: null,
     stream: null,
     refreshQueued: false,
+    refreshInFlight: false,
     phaseOpenBySession: {},
     drag: null,
   },
@@ -967,10 +968,12 @@ async function refreshBoardData({ force = false } = {}) {
   const sessionName = state.currentSession;
   if (!sessionName) return;
   if (!force && state.currentView !== "board") return;
+  if (state.board.refreshInFlight) return;
+  state.board.refreshInFlight = true;
   try {
-    const statePayload = await fetchJson("/api/state", {}, 3000);
+    const statePayload = await fetchJson("/api/state", {}, 8000);
     const featureState = statePayload?.feature_state || state.runtime?.feature_state || {};
-    const featuresPayload = await fetchJson("/api/features", {}, 3000);
+    const featuresPayload = await fetchJson("/api/features", {}, 8000);
     const featureList = featuresPayload?.features || [];
     state.board.featureListBySession[sessionName] = featureList;
     const selectedFeatureId = String(
@@ -993,7 +996,7 @@ async function refreshBoardData({ force = false } = {}) {
       renderBoard();
       return;
     }
-    const planPayload = await fetchJson(`/api/feature-plan?directory=${encodeURIComponent(directory)}`, {}, 4000);
+    const planPayload = await fetchJson(`/api/feature-plan?directory=${encodeURIComponent(directory)}`, {}, 10000);
     state.board.planBySession[sessionName] = planPayload?.feature_plan || null;
     const selected = state.board.selectedTaskIdBySession[sessionName];
     if (!selected && (planPayload?.feature_plan?.phases || []).length) {
@@ -1001,7 +1004,15 @@ async function refreshBoardData({ force = false } = {}) {
     }
     setBoardError("");
   } catch (err) {
-    setBoardError(`Board refresh failed: ${err.message}`);
+    const msg = String(err?.message || "");
+    if (/Request timed out/i.test(msg)) {
+      // Keep existing board state while model is busy; avoid noisy timeout errors.
+      setBoardError("");
+      return;
+    }
+    setBoardError(`Board refresh failed: ${msg}`);
+  } finally {
+    state.board.refreshInFlight = false;
   }
   renderBoard();
 }

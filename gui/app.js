@@ -58,6 +58,7 @@ const state = {
   activityBySession: {},
   taskBySession: {},
   errorSignatureBySession: {},
+  runErrorBySession: {},
   memoryBySession: {},
   lastMemoryToolBySession: {},
   pendingApprovals: [],
@@ -609,6 +610,13 @@ function appendChatErrorEntry(sessionName, message, detail = "") {
   state.errorSignatureBySession[sessionName] = signature;
   state.loadedMessages.push({ role: "assistant", text });
   if (state.currentSession === sessionName) renderFeed(true);
+}
+
+function rememberRunError(sessionName, message, detail = "") {
+  state.runErrorBySession[sessionName] = {
+    message: String(message || "Unknown error"),
+    detail: String(detail || ""),
+  };
 }
 
 function formatSince(ts) {
@@ -1717,12 +1725,22 @@ function startTaskEventStream(taskId, sessionName) {
       );
     }
     if (evt.event === "task.error") {
+      rememberRunError(
+        sessionName,
+        "The model run failed before producing a final response.",
+        String(evt.payload?.error || "")
+      );
       appendChatErrorEntry(
         sessionName,
         "The model run failed before producing a final response.",
         String(evt.payload?.error || "")
       );
     } else if (evt.event === "trace.error") {
+      rememberRunError(
+        sessionName,
+        "A runtime/provider error occurred during execution.",
+        String(evt.payload?.message || "")
+      );
       appendChatErrorEntry(
         sessionName,
         "A runtime/provider error occurred during execution.",
@@ -1882,7 +1900,6 @@ async function executeSend(sessionAtSend, text) {
   ui.messageInput.style.height = "auto";
   startTaskTicker(sessionAtSend);
   updateComposerState();
-  let surfacedErrorMessage = "";
   try {
     const start = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend, async: true }) });
     const taskId = start.task?.task_id;
@@ -1901,7 +1918,7 @@ async function executeSend(sessionAtSend, text) {
     }
     pushActivity(sessionAtSend, "Final response received", "");
   } catch (err) {
-    surfacedErrorMessage = `⚠️ Request failed: ${err?.message || "Unknown error"}`;
+    rememberRunError(sessionAtSend, "The request failed.", String(err?.message || "Unknown error"));
     appendChatErrorEntry(sessionAtSend, "The request failed.", String(err?.message || "Unknown error"));
     pushActivity(sessionAtSend, "Request failed", String(err?.message || "Unknown error"));
     throw err;
@@ -1916,13 +1933,15 @@ async function executeSend(sessionAtSend, text) {
     }
     if (state.currentSession === sessionAtSend) {
       await refreshHistory(true);
-      if (surfacedErrorMessage) {
-        appendChatErrorEntry(sessionAtSend, surfacedErrorMessage, "");
+      const runError = state.runErrorBySession[sessionAtSend];
+      if (runError) {
+        appendChatErrorEntry(sessionAtSend, runError.message, runError.detail);
       }
       renderFeed(true);
       await refreshWorkspace();
       renderActivityPanel();
     }
+    delete state.runErrorBySession[sessionAtSend];
     processQueuedSends().catch((err) => setStatus(`Error: ${err.message}`, "error"));
   }
 }

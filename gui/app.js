@@ -94,7 +94,6 @@ const ui = {
   closeFolderModalBtn: el("closeFolderModalBtn"),
   memoryModal: el("memoryModal"),
   memorySearchInput: el("memorySearchInput"),
-  memoryRuntimeList: el("memoryRuntimeList"),
   memoryBufferList: el("memoryBufferList"),
   scratchpadBufferList: el("scratchpadBufferList"),
   memoryActivityList: el("memoryActivityList"),
@@ -778,64 +777,15 @@ function pushMemoryEvent(sessionName, title, body = "") {
 }
 
 async function refreshMemoryRuntime(sessionName = state.currentSession) {
-  try {
-    const payload = await fetchJson("/api/state");
-    const variables = payload.state?.variables || payload.variables || {};
-    const filtered = Object.fromEntries(
-      Object.entries(variables).filter(([k]) => /(memory|scratchpad|collat|compact)/i.test(k)),
-    );
-    sessionMemory(sessionName).runtime = filtered;
-    if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
-  } catch {
-    return;
-  }
-}
-
-function toolResultText(payload = {}) {
-  const candidates = [
-    payload.result,
-    payload.output,
-    payload.visible_result,
-    payload.tool_result,
-    payload.message,
-    payload.data,
-  ];
-  for (const c of candidates) {
-    if (typeof c === "string") return c;
-    if (c && typeof c === "object") {
-      if (typeof c.result === "string") return c.result;
-      if (typeof c.output === "string") return c.output;
-      if (typeof c.message === "string") return c.message;
-    }
-  }
-  return JSON.stringify(payload || {}, null, 2);
-}
-
-function parseMemoryRows(raw) {
-  const rows = String(raw || "").split("\n").map((x) => x.trim()).filter(Boolean);
-  return rows.map((line) => {
-    const match = line.match(/^#(\d+)\s+tags=(\[[^\]]*\])\s+source=([^:]+)\s+::\s+([\s\S]+)$/);
-    if (!match) return { id: "", tags: [], source: "", content: line };
-    let tags = [];
-    try { tags = JSON.parse(match[2]); } catch { tags = []; }
-    return {
-      id: match[1],
-      tags,
-      source: match[3],
-      content: match[4],
-    };
-  });
+  return sessionMemory(sessionName).runtime;
 }
 
 async function refreshMemoryBuffers(sessionName = state.currentSession) {
   try {
-    const [memoryRes, scratchRes] = await Promise.all([
-      fetchJson("/api/tool", { method: "POST", body: JSON.stringify({ tool_name: "list_memory", tool_args: { limit: 50 }, structured: false }) }),
-      fetchJson("/api/tool", { method: "POST", body: JSON.stringify({ tool_name: "list_scratchpad", tool_args: { limit: 50 }, structured: false }) }),
-    ]);
+    const payload = await fetchJson("/api/memory-buffers", {}, 3000);
     const mem = sessionMemory(sessionName);
-    mem.buffer = parseMemoryRows(toolResultText(memoryRes));
-    mem.scratchpad = parseMemoryRows(toolResultText(scratchRes));
+    mem.buffer = Array.isArray(payload.memory_entries) ? payload.memory_entries : [];
+    mem.scratchpad = Array.isArray(payload.scratchpad_entries) ? payload.scratchpad_entries : [];
     if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
   } catch {
     return;
@@ -852,19 +802,24 @@ function renderMemoryModal() {
       return hay.includes(query);
     });
   };
-  const runtimeEntries = Object.entries(mem.runtime || {});
-  ui.memoryRuntimeList.innerHTML = runtimeEntries.length
-    ? runtimeEntries.map(([k, v]) => `<article class="memory-item"><div class="memory-item-title">${k}</div><div class="memory-item-body">${String(v)}</div></article>`).join("")
-    : '<div class="activity-empty">No runtime memory variables available.</div>';
-
   const memoryEntries = filtered(mem.buffer || []);
+  const renderEntry = (e) => {
+    const preview = String(e.content || "").slice(0, 200);
+    const full = String(e.content || "");
+    const hasMore = full.length > preview.length;
+    return `<article class="memory-item">
+      <div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div>
+      <div class="memory-item-body">${preview || ""}${hasMore ? "…" : ""}</div>
+      ${hasMore ? `<details><summary>View full context</summary><div class="memory-item-body">${full}</div></details>` : ""}
+    </article>`;
+  };
   ui.memoryBufferList.innerHTML = memoryEntries.length
-    ? memoryEntries.map((e) => `<article class="memory-item"><div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div><div class="memory-item-body">${e.content || ""}</div></article>`).join("")
+    ? memoryEntries.map(renderEntry).join("")
     : '<div class="activity-empty">No memory entries found.</div>';
 
   const scratchEntries = filtered(mem.scratchpad || []);
   ui.scratchpadBufferList.innerHTML = scratchEntries.length
-    ? scratchEntries.map((e) => `<article class="memory-item"><div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div><div class="memory-item-body">${e.content || ""}</div></article>`).join("")
+    ? scratchEntries.map(renderEntry).join("")
     : '<div class="activity-empty">No scratchpad entries found.</div>';
 
   ui.memoryActivityList.innerHTML = mem.activity.length

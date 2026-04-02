@@ -1448,6 +1448,17 @@ def build_staged_files_payload(session) -> dict:
     }
 
 
+def build_memory_buffers_payload(session) -> dict:
+    return {
+        "memory_entries": [
+            entry.to_dict() for entry in session.session_manager.task_memory.list_entries(limit=100)
+        ],
+        "scratchpad_entries": [
+            entry.to_dict() for entry in session.session_manager.turn_scratchpad.list_entries(limit=100)
+        ],
+    }
+
+
 def publish_server_event(state: dict, event_name: str, payload: dict):
     state["event_hub"].publish(event_name, payload, task_id=payload.get("task_id"))
 
@@ -1735,6 +1746,12 @@ def serve(session, host: str, port: int, command_handler):
                 if parsed.path == "/api/staged-files":
                     self._send_json(
                         200, {"ok": True, **build_staged_files_payload(session)}
+                    )
+                    return
+                if parsed.path == "/api/memory-buffers":
+                    self._send_json(
+                        200,
+                        {"ok": True, **build_memory_buffers_payload(session)},
                     )
                     return
 

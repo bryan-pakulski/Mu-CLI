@@ -12,6 +12,7 @@ from core.server import (
     TaskManager,
     build_runtime_payload,
     build_sessions_payload,
+    build_memory_buffers_payload,
     build_state_payload,
     build_workspace_payload,
     execute_server_tool,
@@ -563,6 +564,27 @@ def test_build_state_payload_includes_workspace_and_tools(tmp_path):
     assert read_file_tool["execution_kind"] == "read"
     assert read_file_tool["result_mode"] == "structured+collated"
     assert read_file_tool["server_policy"] == "allowed"
+
+
+def test_build_memory_buffers_payload_exposes_saved_entries():
+    session = build_test_session()
+    session.session_manager.task_memory.save(
+        "Remember phase 2 handoff details.",
+        tags=["feature", "handoff"],
+        source="test",
+    )
+    session.session_manager.turn_scratchpad.save(
+        "Temporary blocker note.",
+        tags=["blocker"],
+        source="test",
+    )
+
+    payload = build_memory_buffers_payload(session)
+
+    assert payload["memory_entries"]
+    assert payload["memory_entries"][0]["content"]
+    assert payload["scratchpad_entries"]
+    assert payload["scratchpad_entries"][0]["content"]
 
 
 def test_runtime_and_sessions_payloads_reflect_state_changes(tmp_path):

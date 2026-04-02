@@ -1,4 +1,5 @@
 import json
+import os
 import queue
 import threading
 import time
@@ -26,6 +27,33 @@ from core.feature_mode import (
     summarize_feature_plan,
     update_feature_plan_metadata,
 )
+
+
+def pick_workspace_folder() -> tuple[str, str | None]:
+    """Open a native folder chooser and return (path, error)."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        return "", "Folder browser is unavailable in this Python environment."
+
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.update()
+        selected = filedialog.askdirectory(
+            title="Select workspace folder",
+            mustexist=True,
+            initialdir=os.path.expanduser("~"),
+        )
+        root.destroy()
+    except Exception as exc:
+        return "", f"Unable to open folder browser: {exc}"
+
+    path = str(selected or "").strip()
+    if not path:
+        return "", None
+    return os.path.abspath(os.path.expanduser(path)), None
 
 
 class HeadlessUI:
@@ -2040,6 +2068,21 @@ def serve(session, host: str, port: int, command_handler):
                             build_workspace_payload(session),
                         )
                         self._send_json(200, result)
+                        return
+
+                    if parsed.path == "/api/workspaces/browse":
+                        path, error = pick_workspace_folder()
+                        if error:
+                            self._send_json(500, {"ok": False, "error": error})
+                            return
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "path": path,
+                                "selected": bool(path),
+                            },
+                        )
                         return
 
                     if parsed.path == "/api/workspaces/remove":

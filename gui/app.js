@@ -65,6 +65,7 @@ const ui = {
   workspaceFolders: el("workspaceFolders"),
   folderModal: el("folderModal"),
   folderPathInput: el("folderPathInput"),
+  browseFolderBtn: el("browseFolderBtn"),
   attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
   closeFolderModalBtn: el("closeFolderModalBtn"),
   memoryModal: el("memoryModal"),
@@ -1134,9 +1135,29 @@ ${marker}` : marker;
   const openFolderModal = () => {
     ui.folderPathInput.value = "";
     ui.folderModal.classList.remove("hidden");
+    ui.folderPathInput.focus();
   };
 
   ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
+  ui.browseFolderBtn.addEventListener("click", async () => {
+    ui.browseFolderBtn.disabled = true;
+    const previousText = ui.browseFolderBtn.textContent;
+    ui.browseFolderBtn.textContent = "Browsing…";
+    try {
+      const data = await fetchJson("/api/workspaces/browse", { method: "POST", body: JSON.stringify({}) }, 20000);
+      if (data?.path) {
+        ui.folderPathInput.value = data.path;
+        ui.folderPathInput.focus();
+      } else {
+        setStatus("No folder selected.", "error");
+      }
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, "error");
+    } finally {
+      ui.browseFolderBtn.disabled = false;
+      ui.browseFolderBtn.textContent = previousText;
+    }
+  });
   ui.attachFolderConfirmBtn.addEventListener("click", async () => {
     const path = ui.folderPathInput.value.trim();
     if (!path) return;

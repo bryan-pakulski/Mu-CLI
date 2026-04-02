@@ -218,7 +218,19 @@ async function fetchJson(path, options = {}, timeoutMs = 8000) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let resp;
   try {
-    resp = await fetch(api(path), { headers: { "Content-Type": "application/json" }, ...options, signal: controller.signal });
+    const method = (options.method || "GET").toUpperCase();
+    const headers = { ...(options.headers || {}) };
+    if (options.body && !headers["Content-Type"] && method !== "GET") {
+      headers["Content-Type"] = "application/json";
+    }
+    try {
+      resp = await fetch(api(path), { ...options, method, headers, signal: controller.signal });
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s.`);
+      }
+      throw err;
+    }
   } finally {
     clearTimeout(timeout);
   }

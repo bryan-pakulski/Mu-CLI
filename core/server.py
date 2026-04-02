@@ -1374,13 +1374,20 @@ def serve(session, host: str, port: int, command_handler):
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnected before response was written.")
 
         def _not_found(self):
             self._send_json(404, {"ok": False, "error": "Endpoint not found."})
 
         def do_OPTIONS(self):
-            self._send_json(204, {})
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.end_headers()
 
         def do_GET(self):
             parsed = urlparse(self.path)

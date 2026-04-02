@@ -20,8 +20,10 @@ from core.session import Session, SessionManager
 from core.workspace import FolderContext
 from core.feature_mode import create_feature_plan, update_feature_plan_metadata
 from mucli import (
-    handle_command,
     build_feature_markdown,
+    handle_command,
+    refresh_feature_record,
+    _feature_confirm_deny_edit_loop,
     get_feature_prompt_context,
     run_auto_update,
 )
@@ -340,6 +342,106 @@ def test_features_alias_routes_to_feature_command(tmp_path, monkeypatch):
 
     assert result["ok"] is True
     assert result["data"]["feature"]["feature_id"] == feature_id
+
+
+def test_feature_cli_phase_five_command_surface(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    session = build_test_session()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    handle_command(session, f"/folder {workspace}", allow_prompt=False)
+
+    help_result = handle_command(session, "/feature help", allow_prompt=False)
+    assert help_result["ok"] is True
+    assert "/feature create plan <name>" in help_result["data"]["usage"]
+
+    plan = handle_command(session, "/feature create plan CLI Loop", allow_prompt=False)
+    assert plan["ok"] is True
+
+    phase = handle_command(
+        session,
+        "/feature create phase Build CLI Surface | Add command loop",
+        allow_prompt=False,
+    )
+    assert phase["ok"] is True
+
+    task = handle_command(
+        session,
+        "/feature create task 1 | Add command parser | Build parser | Help shown;Invalid guidance shown",
+        allow_prompt=False,
+    )
+    assert task["ok"] is True
+
+    moved = handle_command(session, "/feature move 1 in_progress", allow_prompt=False)
+    assert moved["ok"] is True
+
+    blocked = handle_command(session, "/feature block 1 waiting_for_input", allow_prompt=False)
+    assert blocked["ok"] is True
+
+    unblocked = handle_command(session, "/feature move 1 in_progress", allow_prompt=False)
+    assert unblocked["ok"] is True
+
+    completed = handle_command(session, "/feature move 1 completed", allow_prompt=False)
+    assert completed["ok"] is True
+
+    reviewed_auto = handle_command(session, "/feature review auto", allow_prompt=False)
+    assert reviewed_auto["ok"] is True
+
+    reviewed = handle_command(
+        session, "/feature review 1 concise_summary", allow_prompt=False
+    )
+    assert reviewed["ok"] is True
+
+    show_reviews = handle_command(session, "/feature show reviews", allow_prompt=False)
+    assert show_reviews["ok"] is True
+    assert show_reviews["data"]["review_count"] >= 1
+
+    monitor = handle_command(session, "/feature monitor 0.5", allow_prompt=False)
+    assert monitor["ok"] is True
+    assert monitor["data"]["refresh_seconds"] == 0.5
+    assert monitor["data"]["iterations"] == 1
+
+    archived = handle_command(session, "/feature archive 1", allow_prompt=False)
+    assert archived["ok"] is True
+    assert archived["data"]["status"] == "archived"
+
+    feature = refresh_feature_record(session, None)
+    plan_data = (feature or {}).get("feature_plan", {})
+    event_kinds = [
+        item.get("kind")
+        for item in plan_data.get("event_log", [])
+        if isinstance(item, dict)
+    ]
+    assert "cli_prompt_selected" in event_kinds
+
+
+def test_feature_unknown_command_returns_corrective_guidance():
+    session = build_test_session()
+
+    unknown = handle_command(session, "/feature wut", allow_prompt=False)
+
+    assert unknown["ok"] is False
+    assert "/feature help" in unknown["message"]
+
+
+def test_feature_confirm_deny_edit_loop_supports_edit(monkeypatch):
+    session = build_test_session()
+    choices = iter(["edit", "confirm"])
+    monkeypatch.setattr(
+        "mucli._feature_three_option_prompt",
+        lambda *args, **kwargs: next(choices),
+    )
+    monkeypatch.setattr("mucli.Prompt.ask", lambda *args, **kwargs: "Updated Title")
+
+    result = _feature_confirm_deny_edit_loop(
+        session,
+        label="task title",
+        value="Initial Title",
+        allow_prompt=True,
+    )
+
+    assert result["decision"] == "confirm"
+    assert result["value"] == "Updated Title"
 
 
 def test_feature_exit_clears_only_active_feature_state(tmp_path, monkeypatch):
@@ -700,6 +802,7 @@ class DummyFeatureLoopProvider:
                             "task_id": 1,
                             "status": "completed",
                             "notes": "Checklist validated and complete.",
+                            "verified_exit_criteria": ["Confirm phase completion"],
                             "directory": self.directory,
                         },
                     )
@@ -794,6 +897,7 @@ def test_feature_loop_runs_until_review_completed(tmp_path):
     assert completed["result"]["mode"] == "feature"
     assert completed["result"]["feature_plan"]["review_status"] == "completed"
     assert completed["result"]["feature_plan"]["phases"][0]["status"] == "completed"
+    assert "transition_events" in completed["result"]["cycles"][0]
 
 
 @dataclass
@@ -848,6 +952,7 @@ class DummyBlockingFeatureProvider:
                             "task_id": 1,
                             "status": "completed",
                             "notes": "Completed after unblock.",
+                            "verified_exit_criteria": ["Confirm phase completion"],
                             "directory": self.directory,
                         },
                     )
@@ -942,6 +1047,7 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     assert blocked["blocker"]["summary"] == "Need a product choice"
     assert blocked["result"]["status"] == "awaiting_input"
     assert blocked["result"]["cycles"]
+    assert blocked["result"]["feature_plan"]["phases"][0]["status"] == "blocked"
 
     resumed = task_manager.resume_feature_task(
         task["task_id"],
@@ -958,6 +1064,12 @@ def test_feature_loop_can_pause_on_blocker_and_resume(tmp_path):
     assert completed["status"] == "completed"
     assert completed["result"]["feature_plan"]["review_status"] == "completed"
     assert completed["result"]["feature_plan"]["phases"][0]["status"] == "completed"
+    all_events = [
+        evt
+        for cycle in completed["result"]["cycles"]
+        for evt in cycle.get("transition_events", [])
+    ]
+    assert all_events
     assert len(completed["result"]["cycles"]) >= 2
 
 

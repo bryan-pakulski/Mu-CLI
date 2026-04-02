@@ -895,6 +895,17 @@ class Session:
         structured_result,
     ):
         if tool_name in {
+            "create_feature",
+            "create_phases",
+            "create_task",
+            "get_execution_state",
+            "block_task",
+            "resume_task",
+            "review_completed_tasks",
+            "review_all_completed_tasks",
+            "propose_task_diff",
+            "decide_task_diff",
+            "archive_task",
             "create_feature_task",
             "get_tasks",
             "get_current_task",
@@ -1220,11 +1231,14 @@ class Session:
 
     def _build_feature_mode_prompt(self, text: str) -> str:
         base_instruction = (
-            "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature_task to create canonical session-managed feature metadata. "
+            "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature to create canonical session-managed feature metadata, then create_phases, then create_task for each planned ticket. "
+            "Legacy fallback: create_feature_task is allowed only when a single-call bootstrap is explicitly requested. "
             "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
             "After approval, call get_current_task/get_tasks at the start of every implementation turn, work on only the next incomplete task, and keep task state synchronized via tool calls only. "
+            "Use get_execution_state to identify the next pending phase/task, use block_task when work cannot continue without user input, and use resume_task after the user provides unblock context. "
             "Use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively to read or change task status. "
             "Every task must define explicit EXIT CRITERIA, and you may set update_task_status(..., status='completed') only after all exit criteria for that task are demonstrably met and verified in the current codebase/tests. "
+            "In review mode, use review_all_completed_tasks first, then review_completed_tasks with categorized issues (bug/risk/enhancement), propose_task_diff for proposed fixes, decide_task_diff for user approvals/denials, and archive_task once tasks become archive-ready. "
             "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
             "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
             "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
@@ -1352,6 +1366,17 @@ class Session:
                 "preview": self._clip_preview(raw_text, 260),
             }
         elif tool_name in {
+            "create_feature",
+            "create_phases",
+            "create_task",
+            "get_execution_state",
+            "block_task",
+            "resume_task",
+            "review_completed_tasks",
+            "review_all_completed_tasks",
+            "propose_task_diff",
+            "decide_task_diff",
+            "archive_task",
             "create_feature_task",
             "update_feature_task",
             "approve_feature_task",
@@ -1634,10 +1659,12 @@ class Session:
             base_system_prompt += (
                 "\n\nFEATURE MODE SYSTEM PROMPT\n"
                 "You are in Feature Plan Engine mode. "
-                "Use the feature-task engine for this request. First call create_feature_task to create canonical feature metadata. "
+                "Use the staged feature-task engine for this request. Start with create_feature, then create_phases, then create_task for each ticket. "
                 "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
                 "Every task must include explicit EXIT CRITERIA and tasks can be marked completed only after all exit criteria are verified. "
                 "Step through one task at a time until completion; never work multiple tasks simultaneously. "
+                "Use get_execution_state to choose the next actionable phase/task, use block_task if external input is required, and resume_task when user unblock context arrives. "
+                "Use review_all_completed_tasks/review_completed_tasks/propose_task_diff/decide_task_diff/archive_task for review-and-archive flow after implementation completes. "
                 "gather read-only context first, use save_scratchpad for temporary phase notes, call flush before acting on collected context, and call raise_blocker when blocked on user input. "
                 "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
                 "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows."

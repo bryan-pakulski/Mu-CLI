@@ -9,8 +9,19 @@ from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
 from core.feature_mode import (
+    create_feature_shell,
+    create_feature_phases,
+    create_feature_task,
+    create_task_review_record,
+    review_all_completed_tasks as create_reviews_for_completed_tasks,
+    create_diff_proposal,
+    decide_diff_proposal,
+    archive_task as archive_feature_task,
+    feature_execution_snapshot,
     create_feature_plan,
     load_feature_plan,
+    save_feature_plan,
+    transition_task_status,
     update_task_status,
     update_task_content,
     refresh_and_persist_feature_plan,
@@ -556,6 +567,189 @@ TOOLS = [
         requires_approval=False,
     ),
     ToolDefinition(
+        name="create_feature",
+        description="Creates (or upserts) a feature shell from a confirmed design plan. Stage 1 of feature mode planning.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_name": {"type": "string"},
+                "feature_request": {"type": "string"},
+                "feature_id": {"type": "string"},
+                "design_plan": {"type": "string"},
+            },
+            "required": ["feature_name", "feature_request"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="create_phases",
+        description="Creates or replaces phases/epics for an active feature. Stage 2 of feature mode planning.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "replace_existing": {"type": "boolean", "default": True},
+                "phases": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "integer"},
+                            "title": {"type": "string"},
+                            "goal": {"type": "string"},
+                            "order": {"type": "integer"},
+                            "status": {"type": "string"},
+                        },
+                        "required": ["title", "goal"],
+                    },
+                },
+            },
+            "required": ["phases"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="create_task",
+        description="Creates a single task/ticket for an active feature phase. Stage 3 of feature mode planning.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "phase_id": {"type": "integer"},
+                "title": {"type": "string"},
+                "overview": {"type": "string"},
+                "design": {"type": "array", "items": {"type": "string"}},
+                "exit_criteria": {"type": "array", "items": {"type": "string"}},
+                "notes": {"type": "string"},
+            },
+            "required": ["title", "exit_criteria"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="get_execution_state",
+        description="Returns the phase/task execution cursor, including blocked tasks and next actionable work item.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="block_task",
+        description="Moves a task to blocked with an explicit reason and optional user input request.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+                "reason": {"type": "string"},
+                "requested_input": {"type": "string"},
+            },
+            "required": ["task_id", "reason"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="resume_task",
+        description="Moves a blocked task back to in_progress after required user input has been provided.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+                "notes": {"type": "string"},
+            },
+            "required": ["task_id"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="review_completed_tasks",
+        description="Creates structured review records for completed tasks with categorized issues (bug/risk/enhancement).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+                "summary": {"type": "string"},
+                "limitations": {"type": "array", "items": {"type": "string"}},
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "category": {
+                                "type": "string",
+                                "enum": ["bug", "risk", "enhancement"],
+                            },
+                            "details": {"type": "string"},
+                        },
+                        "required": ["title", "category"],
+                    },
+                },
+            },
+            "required": ["task_id", "summary"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="review_all_completed_tasks",
+        description="Auto-creates baseline review records for every completed task that does not yet have one.",
+        parameters={
+            "type": "object",
+            "properties": {"feature_id": {"type": "string"}},
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="propose_task_diff",
+        description="Creates a diff proposal for a review issue, requiring later user decision.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "review_id": {"type": "string"},
+                "issue_id": {"type": "string"},
+                "diff": {"type": "string"},
+            },
+            "required": ["review_id", "issue_id", "diff"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="decide_task_diff",
+        description="Stores user decision (approved/denied) for a proposed task diff.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+                "decision": {"type": "string", "enum": ["approved", "denied"]},
+                "reason": {"type": "string"},
+            },
+            "required": ["proposal_id", "decision"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="archive_task",
+        description="Archives an archive-ready task after review and diff decisions are complete.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+            },
+            "required": ["task_id"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
         name="create_feature_task",
         description="Creates a structured feature implementation plan consisting of one or more tasks. Each task must include explicit exit_criteria. Stores metadata internally.",
         parameters={
@@ -654,9 +848,21 @@ TOOLS = [
                 "task_id": {"type": "integer"},
                 "status": {
                     "type": "string",
-                    "enum": ["not_started", "in_progress", "completed"],
+                    "enum": [
+                        "pending",
+                        "not_started",
+                        "in_progress",
+                        "blocked",
+                        "completed",
+                        "archived",
+                    ],
                 },
                 "notes": {"type": "string"},
+                "verified_exit_criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Required when marking a task completed. Must include every task exit criterion.",
+                },
                 "directory": {"type": "string"},
             },
             "required": ["task_id", "status"],
@@ -893,6 +1099,50 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "preview_policy": "none",
         "result_mode": "raw",
         "server_policy": "session_only",
+    },
+    "create_feature": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "create_phases": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "create_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "get_execution_state": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "block_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "resume_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "review_completed_tasks": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "review_all_completed_tasks": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "propose_task_diff": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "decide_task_diff": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "archive_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
     },
     "create_feature_task": {
         "execution_kind": "mutate",
@@ -1941,6 +2191,413 @@ def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
+def _resolve_feature_state(session, requested_feature_id: str | None = None):
+    feature_state = None
+    if requested_feature_id:
+        feature_state = session.session_manager.get_feature(requested_feature_id)
+    if not feature_state:
+        feature_state = session.session_manager.get_feature_state()
+    return feature_state
+
+
+def _handle_create_feature(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_name = str(args.get("feature_name", "")).strip()
+    feature_request = str(args.get("feature_request", "")).strip()
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    design_plan = str(args.get("design_plan", "")).strip()
+
+    if not feature_name:
+        return "Error: feature_name is required."
+    if not feature_request:
+        return "Error: feature_request is required."
+
+    metadata_path = session.session_manager.get_feature_metadata_path(
+        feature_id or re.sub(r"[^a-zA-Z0-9]+", "_", feature_name.lower()).strip("_")
+    )
+    plan = create_feature_shell(
+        feature_name=feature_name,
+        feature_request=feature_request,
+        folder_context=context.folder_context,
+        feature_id=feature_id,
+        metadata_path=metadata_path,
+    )
+    if design_plan:
+        plan.review_notes = design_plan
+        plan = update_feature_plan_metadata(
+            path_or_session_id=plan.metadata_path,
+            review_notes=design_plan,
+            metadata_path=plan.metadata_path,
+        )
+
+    summary = summarize_feature_plan(plan)
+    feature_record = {
+        "type": "feature",
+        "status": "draft",
+        "feature_id": plan.feature_id,
+        "feature_name": plan.feature_name,
+        "directory": plan.directory,
+        "metadata_path": plan.metadata_path,
+        "feature_plan": summary,
+        "blocker": None,
+        "updated_at": time.time(),
+    }
+    session.session_manager.upsert_feature(feature_record)
+    session.session_manager.activate_feature(plan.feature_id)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "feature_id": plan.feature_id,
+            "metadata_path": plan.metadata_path,
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_create_phases(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    phases = args.get("phases", [])
+    if not isinstance(phases, list) or not phases:
+        return "Error: phases array is required."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session. Call create_feature first."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+
+    plan = create_feature_phases(
+        metadata_path,
+        phases,
+        replace_existing=bool(args.get("replace_existing", True)),
+        actor="agent",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "feature_id": plan.feature_id,
+            "phase_count": len(plan.phases_meta),
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_create_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session. Call create_feature first."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    title = str(args.get("title", "")).strip()
+    exit_criteria = args.get("exit_criteria", [])
+    if not title:
+        return "Error: title is required."
+    if not isinstance(exit_criteria, list) or not exit_criteria:
+        return "Error: exit_criteria must be a non-empty array."
+    task_data = {
+        "phase_id": args.get("phase_id"),
+        "title": title,
+        "objectives": [str(args.get("overview", "")).strip()] if args.get("overview") else [],
+        "action_points": [str(item).strip() for item in args.get("design", [])],
+        "exit_criteria": [str(item).strip() for item in exit_criteria],
+        "notes": str(args.get("notes", "") or ""),
+    }
+    plan, task = create_feature_task(metadata_path, task_data, actor="agent")
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "feature_id": plan.feature_id,
+            "task_id": task.id,
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_get_execution_state(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan = load_feature_plan(metadata_path)
+    snapshot = feature_execution_snapshot(plan)
+    return json.dumps({"ok": True, "execution": snapshot}, indent=2, sort_keys=True)
+
+
+def _handle_block_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    task_id = args.get("task_id")
+    reason = str(args.get("reason", "")).strip()
+    if task_id is None:
+        return "Error: task_id is required."
+    if not reason:
+        return "Error: reason is required."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan = load_feature_plan(metadata_path)
+    transition_task_status(
+        plan,
+        task_id=int(task_id),
+        to_status="blocked",
+        notes=str(args.get("requested_input", "") or ""),
+        blocked_reason=reason,
+        actor="agent",
+    )
+    plan = save_feature_plan("", plan)
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "task_id": int(task_id),
+            "status": "blocked",
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_resume_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    task_id = args.get("task_id")
+    if task_id is None:
+        return "Error: task_id is required."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan = load_feature_plan(metadata_path)
+    transition_task_status(
+        plan,
+        task_id=int(task_id),
+        to_status="in_progress",
+        notes=str(args.get("notes", "") or ""),
+        actor="agent",
+    )
+    plan = save_feature_plan("", plan)
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "task_id": int(task_id),
+            "status": "in_progress",
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_review_completed_tasks(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, review = create_task_review_record(
+        metadata_path,
+        task_id=int(args.get("task_id")),
+        summary=str(args.get("summary", "")),
+        limitations=args.get("limitations", []),
+        issues=args.get("issues", []),
+        actor="agent",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "review": asdict(review),
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_review_all_completed_tasks(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, created = create_reviews_for_completed_tasks(metadata_path, actor="agent")
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "created_review_count": len(created),
+            "reviews": [asdict(item) for item in created],
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_propose_task_diff(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, proposal = create_diff_proposal(
+        metadata_path,
+        review_id=str(args.get("review_id", "")),
+        issue_id=str(args.get("issue_id", "")),
+        diff=str(args.get("diff", "")),
+        actor="agent",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {"ok": True, "proposal": asdict(proposal), "plan": summary},
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_decide_task_diff(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, proposal = decide_diff_proposal(
+        metadata_path,
+        proposal_id=str(args.get("proposal_id", "")),
+        decision=str(args.get("decision", "")),
+        reason=str(args.get("reason", "")),
+        actor="user",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {"ok": True, "proposal": asdict(proposal), "plan": summary},
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_archive_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan = archive_feature_task(metadata_path, task_id=int(args.get("task_id")), actor="user")
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "task_id": int(args.get("task_id")),
+            "status": "archived",
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
 def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> str:
     """Creates a structured feature implementation plan."""
     session = context.session
@@ -2219,13 +2876,21 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     task_id = args.get("task_id")
     status = args.get("status")
     notes = args.get("notes")
+    verified_exit_criteria = args.get("verified_exit_criteria", [])
 
     if task_id is None:
         return "Error: task_id is required."
     if not status:
         return "Error: status is required."
 
-    valid_statuses = ["not_started", "in_progress", "completed"]
+    valid_statuses = [
+        "pending",
+        "not_started",
+        "in_progress",
+        "blocked",
+        "completed",
+        "archived",
+    ]
     if status not in valid_statuses:
         return f"Error: status must be one of {valid_statuses}."
 
@@ -2247,6 +2912,25 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
         metadata_path = os.path.join(directory, "feature_plan.json")
     if not metadata_path or not os.path.exists(metadata_path):
         return "Error: Feature metadata not found."
+
+    if status == "completed":
+        if not isinstance(verified_exit_criteria, list):
+            return "Error: verified_exit_criteria must be an array when status='completed'."
+        plan_snapshot = load_feature_plan(metadata_path)
+        target_task = next(
+            (item for item in plan_snapshot.tasks if item.id == int(task_id)),
+            None,
+        )
+        if target_task is None:
+            return f"Error: Task {task_id} not found."
+        expected = [str(item).strip() for item in target_task.exit_criteria if str(item).strip()]
+        provided = {str(item).strip() for item in verified_exit_criteria if str(item).strip()}
+        missing = [criterion for criterion in expected if criterion not in provided]
+        if missing:
+            return (
+                "Error: Cannot mark task completed until all exit criteria are verified. "
+                f"Missing: {missing}"
+            )
 
     plan = update_task_status(metadata_path, task_id, status, notes)
     summary = summarize_feature_plan(plan)
@@ -2365,6 +3049,17 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "url_grounding": _legacy_handler(_handle_url_grounding),
     "read_document": _legacy_handler(_handle_read_document),
     "git_branch": _legacy_handler(_handle_git_branch),
+    "create_feature": _handle_create_feature,
+    "create_phases": _handle_create_phases,
+    "create_task": _handle_create_task,
+    "get_execution_state": _handle_get_execution_state,
+    "block_task": _handle_block_task,
+    "resume_task": _handle_resume_task,
+    "review_completed_tasks": _handle_review_completed_tasks,
+    "review_all_completed_tasks": _handle_review_all_completed_tasks,
+    "propose_task_diff": _handle_propose_task_diff,
+    "decide_task_diff": _handle_decide_task_diff,
+    "archive_task": _handle_archive_task,
     "create_feature_task": _handle_create_feature_task,
     "update_feature_task": _handle_update_feature_task,
     "approve_feature_task": _handle_approve_feature_task,
@@ -2402,6 +3097,36 @@ def execute_tool(
     for key in path_keys:
         if key in args and (not args[key] or str(args[key]).strip() == ""):
             return _path_arg_error(key)
+
+    if tool_name == "apply_diff" and session is not None:
+        feature_state = (
+            session.session_manager.get_feature_state()
+            if hasattr(session, "session_manager")
+            else None
+        ) or {}
+        feature_plan = feature_state.get("feature_plan", {}) if isinstance(feature_state, dict) else {}
+        in_review_mode = bool(feature_plan.get("tasks_completed")) and (
+            str(feature_plan.get("review_status", "")).strip().lower() != "completed"
+        )
+        if in_review_mode:
+            proposal_id = str(args.get("proposal_id", "") or "").strip()
+            if not proposal_id:
+                return (
+                    "Error: apply_diff in review mode requires proposal_id for an approved diff proposal."
+                )
+            metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+            if not metadata_path or not os.path.exists(metadata_path):
+                return "Error: Feature metadata not found for review-mode apply_diff."
+            plan = load_feature_plan(metadata_path)
+            proposal = next(
+                (item for item in plan.diff_proposals if item.id == proposal_id),
+                None,
+            )
+            if proposal is None or proposal.status != "approved":
+                return (
+                    "Error: apply_diff blocked in review mode. "
+                    "proposal_id must reference an approved diff proposal."
+                )
 
     handler = TOOL_HANDLERS.get(descriptor.handler_key)
     if not handler:

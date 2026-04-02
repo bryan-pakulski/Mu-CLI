@@ -19,6 +19,7 @@ class _FeatureSessionManagerStub:
         self.active_feature_id = None
         self.saved = False
         self.record = None
+        self.feature_state = None
 
     def get_feature(self, feature_id):
         return self.feature
@@ -34,6 +35,12 @@ class _FeatureSessionManagerStub:
 
     def save_history(self):
         self.saved = True
+
+    def get_feature_state(self):
+        return self.feature_state or self.record
+
+    def set_feature_state(self, state, folder_context=None):
+        self.feature_state = state
 
 
 class _SessionStub:
@@ -149,3 +156,245 @@ def test_execute_tool_converts_handler_exception_to_error(tmp_path, monkeypatch)
     monkeypatch.setitem(TOOL_HANDLERS, "read_file", _boom)
     result = execute_tool("read_file", {"filename": "x.txt"}, ctx)
     assert "Tool 'read_file' failed with RuntimeError: boom" in result
+
+
+def test_create_feature_create_phases_create_task_staged_flow(tmp_path):
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+    session = _SessionStub(str(tmp_path / "feature_plan.json"))
+
+    create_result = execute_tool(
+        "create_feature",
+        {
+            "feature_name": "Staged Feature",
+            "feature_request": "Plan feature in staged tools",
+            "feature_id": "staged_feature",
+            "design_plan": "Initial design",
+        },
+        ctx,
+        session=session,
+    )
+    create_payload = json.loads(create_result)
+    assert create_payload["ok"] is True
+    assert create_payload["feature_id"] == "staged_feature"
+
+    phases_result = execute_tool(
+        "create_phases",
+        {
+            "feature_id": "staged_feature",
+            "phases": [
+                {"id": 1, "title": "Phase 1", "goal": "Ship planning API", "order": 1}
+            ],
+        },
+        ctx,
+        session=session,
+    )
+    phases_payload = json.loads(phases_result)
+    assert phases_payload["ok"] is True
+    assert phases_payload["phase_count"] == 1
+
+    task_result = execute_tool(
+        "create_task",
+        {
+            "feature_id": "staged_feature",
+            "phase_id": 1,
+            "title": "Create stage-one planner",
+            "overview": "Build stage one dialogue loop",
+            "design": ["Handle ambiguity options", "Persist review notes"],
+            "exit_criteria": ["Tool payload is persisted"],
+        },
+        ctx,
+        session=session,
+    )
+    task_payload = json.loads(task_result)
+    assert task_payload["ok"] is True
+    assert task_payload["task_id"] == 1
+
+    execution_result = execute_tool(
+        "get_execution_state",
+        {"feature_id": "staged_feature"},
+        ctx,
+        session=session,
+    )
+    execution_payload = json.loads(execution_result)
+    assert execution_payload["ok"] is True
+    assert execution_payload["execution"]["next_phase"]["id"] == 1
+    assert execution_payload["execution"]["next_task"]["id"] == 1
+
+    blocked_result = execute_tool(
+        "block_task",
+        {
+            "feature_id": "staged_feature",
+            "task_id": 1,
+            "reason": "Need API key",
+            "requested_input": "Provide test API key",
+        },
+        ctx,
+        session=session,
+    )
+    blocked_payload = json.loads(blocked_result)
+    assert blocked_payload["ok"] is True
+    assert blocked_payload["status"] == "blocked"
+
+    resumed_result = execute_tool(
+        "resume_task",
+        {
+            "feature_id": "staged_feature",
+            "task_id": 1,
+            "notes": "User provided the missing API key",
+        },
+        ctx,
+        session=session,
+    )
+    resumed_payload = json.loads(resumed_result)
+    assert resumed_payload["ok"] is True
+    assert resumed_payload["status"] == "in_progress"
+
+    completed_result = execute_tool(
+        "update_task_status",
+        {
+            "task_id": 1,
+            "status": "completed",
+            "verified_exit_criteria": ["Tool payload is persisted"],
+        },
+        ctx,
+        session=session,
+    )
+    completed_payload = json.loads(completed_result)
+    assert completed_payload["ok"] is True
+
+    review_all_result = execute_tool(
+        "review_all_completed_tasks",
+        {},
+        ctx,
+        session=session,
+    )
+    review_all_payload = json.loads(review_all_result)
+    assert review_all_payload["ok"] is True
+    assert review_all_payload["created_review_count"] >= 1
+
+    review_result = execute_tool(
+        "review_completed_tasks",
+        {
+            "task_id": 1,
+            "summary": "Task delivered with one follow-up risk.",
+            "limitations": ["No retry fallback"],
+            "issues": [
+                {"id": "risk-1", "title": "Retry fallback missing", "category": "risk"}
+            ],
+        },
+        ctx,
+        session=session,
+    )
+    review_payload = json.loads(review_result)
+    assert review_payload["ok"] is True
+    review_id = review_payload["review"]["id"]
+
+    proposal_result = execute_tool(
+        "propose_task_diff",
+        {
+            "review_id": review_id,
+            "issue_id": "risk-1",
+            "diff": "--- a/demo.py\n+++ b/demo.py\n@@\n+retry = True\n",
+        },
+        ctx,
+        session=session,
+    )
+    proposal_payload = json.loads(proposal_result)
+    assert proposal_payload["ok"] is True
+    proposal_id = proposal_payload["proposal"]["id"]
+
+    decision_result = execute_tool(
+        "decide_task_diff",
+        {
+            "proposal_id": proposal_id,
+            "decision": "approved",
+            "reason": "Looks good.",
+        },
+        ctx,
+        session=session,
+    )
+    decision_payload = json.loads(decision_result)
+    assert decision_payload["ok"] is True
+    assert decision_payload["proposal"]["status"] == "approved"
+
+    archive_result = execute_tool(
+        "archive_task",
+        {"task_id": 1},
+        ctx,
+        session=session,
+    )
+    archive_payload = json.loads(archive_result)
+    assert archive_payload["ok"] is True
+    assert archive_payload["status"] == "archived"
+
+
+def test_update_task_status_requires_verified_exit_criteria_for_completion(tmp_path):
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+    session = _SessionStub(str(tmp_path / "feature_plan.json"))
+    tool_ctx = ToolExecutionContext(folder_context=ctx, session=session)
+    _handle_create_feature_task(
+        {
+            "feature_name": "Verification",
+            "feature_request": "Ensure completion checks",
+            "tasks": [
+                {
+                    "title": "Task A",
+                    "objectives": ["Goal A"],
+                    "action_points": ["Action A"],
+                    "exit_criteria": ["Criterion A"],
+                }
+            ],
+        },
+        tool_ctx,
+    )
+
+    result = execute_tool(
+        "update_task_status",
+        {"task_id": 1, "status": "completed"},
+        ctx,
+        session=session,
+    )
+
+    assert "Cannot mark task completed" in result
+
+
+def test_apply_diff_requires_approved_proposal_in_review_mode(tmp_path):
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+    session = _SessionStub(str(tmp_path / "feature_plan.json"))
+    tool_ctx = ToolExecutionContext(folder_context=ctx, session=session)
+    _handle_create_feature_task(
+        {
+            "feature_name": "Review Gate",
+            "feature_request": "Check apply_diff guard",
+            "tasks": [
+                {
+                    "title": "Task A",
+                    "objectives": ["Goal A"],
+                    "action_points": ["Action A"],
+                    "exit_criteria": ["Criterion A"],
+                }
+            ],
+        },
+        tool_ctx,
+    )
+    execute_tool(
+        "update_task_status",
+        {
+            "task_id": 1,
+            "status": "completed",
+            "verified_exit_criteria": ["Criterion A"],
+        },
+        ctx,
+        session=session,
+    )
+
+    blocked = execute_tool(
+        "apply_diff",
+        {"filename": str(tmp_path / "demo.txt"), "diff": "@@ -1 +1 @@\n-a\n+b\n"},
+        ctx,
+        session=session,
+    )
+    assert "requires proposal_id" in blocked

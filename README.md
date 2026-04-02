@@ -71,7 +71,7 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/folder <path>` | `/dir` | Monitor a folder for context |
 | `/file <path>` | `/f` | Attach a specific file as context |
 | `/mode <mode>` | | Change strategy: `default`, `debug`, `feature`, `research`, `git` |
-| `/feature <cmd>` | `/features` | Manage feature flows (`list`, `new`, `load`, `status`, `phases`, `exit`) |
+| `/feature <cmd>` | `/features` | Manage feature flows (`list`, `new`, `load`, `status`, `phases`, `exit`, `create`, `show`, `move`, `block`, `review`, `archive`, `monitor`, `help`) |
 | `/yolo` | | Toggle YOLO mode (no tool approvals) |
 | `/tool <cmd>` | `/tools` | Manage tools: `enable`, `disable`, `list` |
 | `/list` | `/ls` | List saved conversations |
@@ -123,6 +123,20 @@ Notes:
 
 For a higher-level assessment of whether the current server stack is ready for GUI work, see `documentation/server_architecture_review.md`.
 For the phased feature workflow and plan file format, see `documentation/feature_plan_engine.md`.
+
+### Feature CLI loop quickstart
+
+```bash
+/mode feature
+/feature create plan "My Feature"
+/feature create phase "Build Core" | "Implement core workflow"
+/feature create task 1 | "Add API" | "Create endpoint and validation" | "Endpoint returns 200;Tests pass"
+/feature show execution
+/feature move 1 in_progress
+/feature block 1 "Need product decision"
+/feature review auto
+/feature monitor 1
+```
 
 - `GET /health` — basic health check.
 - `GET /api/state` — current session state, active model, variables, workspaces, and tool metadata.

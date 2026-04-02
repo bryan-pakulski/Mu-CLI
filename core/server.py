@@ -23,8 +23,13 @@ from utils.config import validate_and_cast, AGENTIC_SYSTEM_BASE, AGENTIC_MODES
 from core.feature_mode import (
     build_phase_execution_prompt,
     build_review_prompt,
+    feature_execution_snapshot,
+    next_actionable_task,
+    next_pending_phase,
     refresh_and_persist_feature_plan,
+    save_feature_plan,
     summarize_feature_plan,
+    transition_task_status,
     update_feature_plan_metadata,
 )
 
@@ -532,6 +537,82 @@ class TaskManager:
             "error": error,
         }
 
+    def _build_cycle_transition_events(
+        self,
+        previous_summary: dict | None,
+        current_summary: dict,
+    ) -> list[dict]:
+        if not previous_summary:
+            bootstrap_events: list[dict] = []
+            curr_exec = current_summary.get("execution", {}) or {}
+            curr_phase = curr_exec.get("next_phase") or {}
+            curr_task = curr_exec.get("next_task") or {}
+            if curr_phase.get("id") is not None:
+                bootstrap_events.append(
+                    {"type": "phase_started", "phase_id": curr_phase.get("id")}
+                )
+            if curr_task.get("id") is not None:
+                bootstrap_events.append(
+                    {"type": "task_started", "task_id": curr_task.get("id")}
+                )
+            return bootstrap_events
+
+        def _phase_lookup(summary: dict, phase_id: int | None) -> dict | None:
+            if phase_id is None:
+                return None
+            for phase in summary.get("phases_meta", []):
+                if int(phase.get("id", -1)) == int(phase_id):
+                    return phase
+            return None
+
+        events: list[dict] = []
+        prev_exec = previous_summary.get("execution", {}) or {}
+        curr_exec = current_summary.get("execution", {}) or {}
+
+        prev_task = prev_exec.get("next_task") or {}
+        curr_task = curr_exec.get("next_task") or {}
+        prev_task_id = prev_task.get("id")
+        curr_task_id = curr_task.get("id")
+        if prev_task_id != curr_task_id:
+            if prev_task_id is not None:
+                events.append({"type": "task_cursor_moved", "from_task_id": prev_task_id})
+            if curr_task_id is not None:
+                events.append({"type": "task_started", "task_id": curr_task_id})
+
+        prev_phase = prev_exec.get("next_phase") or {}
+        curr_phase = curr_exec.get("next_phase") or {}
+        prev_phase_id = prev_phase.get("id")
+        curr_phase_id = curr_phase.get("id")
+        if prev_phase_id != curr_phase_id:
+            prev_phase_state = _phase_lookup(current_summary, prev_phase_id)
+            if prev_phase_id is not None and prev_phase_state:
+                events.append(
+                    {
+                        "type": "phase_cursor_moved",
+                        "from_phase_id": prev_phase_id,
+                        "from_phase_status": prev_phase_state.get("status"),
+                    }
+                )
+            if curr_phase_id is not None:
+                events.append({"type": "phase_started", "phase_id": curr_phase_id})
+
+        prev_blocked = {
+            int(item.get("id"))
+            for item in (prev_exec.get("blocked_tasks") or [])
+            if item.get("id") is not None
+        }
+        curr_blocked = {
+            int(item.get("id"))
+            for item in (curr_exec.get("blocked_tasks") or [])
+            if item.get("id") is not None
+        }
+        for task_id in sorted(curr_blocked - prev_blocked):
+            events.append({"type": "task_blocked", "task_id": task_id})
+        for task_id in sorted(prev_blocked - curr_blocked):
+            events.append({"type": "task_resumed", "task_id": task_id})
+
+        return events
+
     def _launch_feature_task_thread(
         self,
         *,
@@ -572,6 +653,7 @@ class TaskManager:
 
                 active_previous_signature = previous_signature
                 active_resume_input = resume_input
+                previous_summary = None
                 for cycle_index in range(start_cycle, max_cycles + 1):
                     self._persist_feature_state(
                         self._build_persisted_feature_state(
@@ -614,12 +696,40 @@ class TaskManager:
                             )
                             return
 
-                        phase = plan.next_incomplete_phase()
+                        if active_resume_input:
+                            execution_state = feature_execution_snapshot(plan)
+                            blocked_tasks = execution_state.get("blocked_tasks", [])
+                            if blocked_tasks:
+                                blocked_task_id = int(blocked_tasks[0].get("id"))
+                                try:
+                                    transition_task_status(
+                                        plan,
+                                        task_id=blocked_task_id,
+                                        to_status="in_progress",
+                                        notes=str(active_resume_input),
+                                        actor="user",
+                                    )
+                                    plan = save_feature_plan(
+                                        self.session.session_manager.current_session_name,
+                                        plan,
+                                    )
+                                except ValueError:
+                                    # keep loop moving even if transition is not possible
+                                    pass
+
+                        phase = next_pending_phase(plan)
+                        task = (
+                            None
+                            if phase is None
+                            else next_actionable_task(plan, phase.id)
+                        )
+                        if task is None and phase is not None:
+                            task = plan.next_incomplete_task()
                         prompt_type = "review" if phase is None else "implementation"
                         prompt = (
                             build_review_prompt(plan)
                             if phase is None
-                            else build_phase_execution_prompt(plan, phase)
+                            else build_phase_execution_prompt(plan, task)
                         )
                         if active_resume_input:
                             prompt = f"{prompt}\n\n{self._build_feature_resume_prompt(active_resume_input)}"
@@ -641,14 +751,21 @@ class TaskManager:
                         )
                         updated_summary = summarize_feature_plan(updated_plan)
                         signature = json.dumps(updated_summary, sort_keys=True)
+                        transition_events = self._build_cycle_transition_events(
+                            previous_summary,
+                            updated_summary,
+                        )
                         cycle_payload = {
                             "cycle": cycle_index,
                             "prompt_type": prompt_type,
-                            "phase_number": None if phase is None else phase.number,
+                            "phase_number": None if phase is None else phase.id,
+                            "task_id": None if task is None else task.id,
+                            "transition_events": transition_events,
                             "result": result,
                             "feature_plan": updated_summary,
                         }
                         cycles.append(cycle_payload)
+                        previous_summary = updated_summary
 
                         if result.get("status") == "interrupted":
                             interrupt_blocker = {
@@ -697,6 +814,24 @@ class TaskManager:
 
                         blocker = self._extract_feature_blocker(result)
                         if blocker:
+                            if task is not None:
+                                try:
+                                    transition_task_status(
+                                        updated_plan,
+                                        task_id=task.id,
+                                        to_status="blocked",
+                                        notes=str(blocker.get("requested_input", "") or ""),
+                                        blocked_reason=str(blocker.get("summary", "") or "Blocked"),
+                                        actor="agent",
+                                    )
+                                    updated_plan = save_feature_plan(
+                                        self.session.session_manager.current_session_name,
+                                        updated_plan,
+                                    )
+                                    updated_summary = summarize_feature_plan(updated_plan)
+                                    signature = json.dumps(updated_summary, sort_keys=True)
+                                except ValueError:
+                                    pass
                             blocker_payload = {
                                 **blocker,
                                 "history_length": len(
@@ -956,13 +1091,40 @@ class TaskManager:
             )
 
         payload = task.get("payload", {})
+        directory = str(payload.get("directory", "") or "")
+        metadata_path = self._feature_metadata_path(directory)
+        if metadata_path and os.path.exists(metadata_path):
+            plan = refresh_and_persist_feature_plan(
+                directory,
+                metadata_path=metadata_path,
+            )
+            blocked_tasks = (
+                feature_execution_snapshot(plan).get("blocked_tasks", []) or []
+            )
+            if blocked_tasks:
+                blocked_task_id = int(blocked_tasks[0].get("id"))
+                try:
+                    transition_task_status(
+                        plan,
+                        task_id=blocked_task_id,
+                        to_status="in_progress",
+                        notes=str(user_input),
+                        actor="user",
+                    )
+                    save_feature_plan(
+                        self.session.session_manager.current_session_name,
+                        plan,
+                    )
+                except ValueError:
+                    pass
+
         partial_result = task.get("result", {}) or {}
         cycles = list(partial_result.get("cycles", []))
         self.clear_waiting_for_input(task_id)
         self._persist_feature_state(
             self._build_persisted_feature_state(
                 task_id=task_id,
-                directory=str(payload.get("directory", "") or ""),
+                directory=directory,
                 max_cycles=int(payload.get("max_cycles", 12) or 12),
                 next_cycle=int(
                     payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)
@@ -974,7 +1136,7 @@ class TaskManager:
         )
         self._launch_feature_task_thread(
             task_id=task_id,
-            directory=str(payload.get("directory", "") or ""),
+            directory=directory,
             approval_manager=approval_manager,
             max_cycles=int(payload.get("max_cycles", 12) or 12),
             start_cycle=int(

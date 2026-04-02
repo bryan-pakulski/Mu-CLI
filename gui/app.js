@@ -152,8 +152,6 @@ const ui = {
   boardFeatureSelect: el("boardFeatureSelect"),
   boardSearchInput: el("boardSearchInput"),
   boardPhaseFilter: el("boardPhaseFilter"),
-  boardStatusFilter: el("boardStatusFilter"),
-  boardBlockedOnly: el("boardBlockedOnly"),
   boardRefreshBtn: el("boardRefreshBtn"),
   boardLanes: el("boardLanes"),
   boardError: el("boardError"),
@@ -240,6 +238,29 @@ function sessionMemory(sessionName = state.currentSession) {
   return state.memoryBySession[sessionName];
 }
 
+function hexToHsl(hexColor) {
+  const hex = String(hexColor || "").replace("#", "").trim();
+  if (![3, 6].includes(hex.length)) return null;
+  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+  }
+  h = Math.round(h * 60);
+  if (h < 0) h += 360;
+  const l = (max + min) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  return { h, s: s * 100, l: l * 100 };
+}
+
 function applyThemeFromStorage() {
   const mode = localStorage.getItem(THEME_MODE_KEY) || "dark";
   const legacyAccent = localStorage.getItem("mucli_theme_accent");
@@ -247,6 +268,17 @@ function applyThemeFromStorage() {
   const accent = localStorage.getItem(THEME_ACCENT_KEY) || accentMap[legacyAccent] || "#8b5cf6";
   document.documentElement.dataset.mode = mode;
   document.documentElement.style.setProperty("--accent", accent);
+  const hsl = hexToHsl(accent);
+  if (hsl) {
+    const lanePending = `hsl(${hsl.h} ${Math.min(100, hsl.s + 10).toFixed(0)}% ${Math.max(46, hsl.l + 6).toFixed(0)}%)`;
+    const laneInProgress = `hsl(${(hsl.h + 58) % 360} 86% 56%)`;
+    const laneBlocked = `hsl(${(hsl.h + 132) % 360} 92% 56%)`;
+    const laneCompleted = `hsl(${(hsl.h + 176) % 360} 78% 52%)`;
+    document.documentElement.style.setProperty("--lane-pending", lanePending);
+    document.documentElement.style.setProperty("--lane-in-progress", laneInProgress);
+    document.documentElement.style.setProperty("--lane-blocked", laneBlocked);
+    document.documentElement.style.setProperty("--lane-completed", laneCompleted);
+  }
   ui.customAccentInput.value = accent;
   ui.themeModeDark?.classList.toggle("active", mode === "dark");
   ui.themeModeLight?.classList.toggle("active", mode === "light");
@@ -327,6 +359,20 @@ function setStatus(text, kind = "") {
     ui.topFlash.classList.remove("show");
     setTimeout(() => ui.topFlash?.classList.add("hidden"), 260);
   }, durationMs);
+}
+
+function showModal(modalEl) {
+  if (!modalEl) return;
+  modalEl.classList.remove("closing", "hidden");
+}
+
+function hideModal(modalEl) {
+  if (!modalEl || modalEl.classList.contains("hidden")) return;
+  modalEl.classList.add("closing");
+  setTimeout(() => {
+    modalEl.classList.add("hidden");
+    modalEl.classList.remove("closing");
+  }, 180);
 }
 
 function renderFeatureSelectors(sessionName = state.currentSession) {
@@ -546,8 +592,6 @@ function boardFilters(sessionName = state.currentSession) {
     state.board.filterBySession[sessionName] = {
       search: "",
       phase: "",
-      status: "",
-      blockedOnly: false,
     };
   }
   return state.board.filterBySession[sessionName];
@@ -623,8 +667,6 @@ function filteredBoardTasks(plan, filters) {
   const all = Array.isArray(plan?.phases) ? plan.phases : [];
   return all.filter((task) => {
     if (filters.phase && String(task.phase_id || "") !== String(filters.phase)) return false;
-    if (filters.status && laneForStatus(task.status) !== filters.status) return false;
-    if (filters.blockedOnly && laneForStatus(task.status) !== "blocked") return false;
     if (!filters.search) return true;
     const hay = `${task.title || ""} ${(task.overview || "")} ${(task.notes || "")}`.toLowerCase();
     return hay.includes(filters.search.toLowerCase());
@@ -661,7 +703,7 @@ function openTicketModal(taskId) {
   ui.ticketEvents.innerHTML = events.length
     ? events.map((evt) => `<div class="settings-row"><span>${evt.kind || evt.type || "event"}</span><span>${new Date((evt.created_at || Date.now() / 1000) * 1000).toLocaleTimeString()}</span></div>`).join("")
     : '<div class="activity-empty">No task events.</div>';
-  ui.ticketModal.classList.remove("hidden");
+  showModal(ui.ticketModal);
 }
 
 async function saveTicketEdits() {
@@ -685,7 +727,7 @@ async function saveTicketEdits() {
     if (toolResult?.ok === false) throw new Error(toolResult?.error || "Save failed.");
     setBoardError("");
     await refreshBoardData({ force: true });
-    ui.ticketModal.classList.add("hidden");
+    hideModal(ui.ticketModal);
   } catch (err) {
     setBoardError(`Could not save ticket edits: ${err.message}`);
   }
@@ -705,8 +747,6 @@ function renderBoard() {
   const phasesMeta = Array.isArray(plan.phases_meta) ? plan.phases_meta : [];
   ui.boardPhaseFilter.innerHTML = `<option value="">All phases</option>${phasesMeta.map((p) => `<option value="${p.id}">${p.title || `Phase ${p.id}`}</option>`).join("")}`;
   ui.boardPhaseFilter.value = filters.phase || "";
-  ui.boardStatusFilter.value = filters.status || "";
-  ui.boardBlockedOnly.checked = !!filters.blockedOnly;
   ui.boardSearchInput.value = filters.search || "";
 
   const tasks = filteredBoardTasks(plan, filters);
@@ -1030,7 +1070,7 @@ function renderMemoryModal() {
 }
 
 function openMemoryModal() {
-  ui.memoryModal.classList.remove("hidden");
+  showModal(ui.memoryModal);
   ui.memorySearchInput.value = sessionMemory(state.currentSession).query || "";
   renderMemoryModal();
   refreshMemoryRuntime();
@@ -1043,7 +1083,7 @@ function openMemoryModal() {
 }
 
 function closeMemoryModal() {
-  ui.memoryModal.classList.add("hidden");
+  hideModal(ui.memoryModal);
   if (state.memoryPollTimer) {
     clearInterval(state.memoryPollTimer);
     state.memoryPollTimer = null;
@@ -1442,7 +1482,7 @@ async function saveSettings() {
   localStorage.setItem(THEME_MODE_KEY, document.documentElement.dataset.mode || "dark");
   localStorage.setItem(THEME_ACCENT_KEY, ui.customAccentInput.value || "#8b5cf6");
   applyThemeFromStorage();
-  ui.settingsModal.classList.add("hidden");
+  hideModal(ui.settingsModal);
   await refreshRuntime();
 }
 
@@ -1785,7 +1825,7 @@ function wireEvents() {
   });
   ui.attachFolderOption.addEventListener("click", () => {
     ui.attachMenu.classList.add("hidden");
-    ui.folderModal.classList.remove("hidden");
+    showModal(ui.folderModal);
   });
   ui.attachCloseOption.addEventListener("click", () => ui.attachMenu.classList.add("hidden"));
 
@@ -1801,7 +1841,7 @@ ${marker}` : marker;
 
   const openFolderModal = () => {
     ui.folderPathInput.value = "";
-    ui.folderModal.classList.remove("hidden");
+    showModal(ui.folderModal);
     ui.folderPathInput.focus();
   };
 
@@ -1837,7 +1877,7 @@ ${marker}` : marker;
         { method: "POST", body: JSON.stringify({ path }) },
         60000,
       );
-      ui.folderModal.classList.add("hidden");
+      hideModal(ui.folderModal);
       await refreshWorkspace();
       setStatus("Workspace folder attached.", "connected");
     } catch (err) {
@@ -1847,9 +1887,9 @@ ${marker}` : marker;
       ui.attachFolderConfirmBtn.textContent = originalText;
     }
   });
-  ui.closeFolderModalBtn.addEventListener("click", () => ui.folderModal.classList.add("hidden"));
+  ui.closeFolderModalBtn.addEventListener("click", () => hideModal(ui.folderModal));
   ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);
-  ui.ticketCloseBtn?.addEventListener("click", () => ui.ticketModal.classList.add("hidden"));
+  ui.ticketCloseBtn?.addEventListener("click", () => hideModal(ui.ticketModal));
   ui.ticketSaveBtn?.addEventListener("click", () => saveTicketEdits());
   ui.memorySearchInput.addEventListener("input", () => {
     sessionMemory(state.currentSession).query = ui.memorySearchInput.value || "";
@@ -1863,9 +1903,9 @@ ${marker}` : marker;
     if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked;
     await refreshStateVariables();
     populateSettingsPanels();
-    ui.settingsModal.classList.remove("hidden");
+    showModal(ui.settingsModal);
   });
-  ui.closeSettingsBtn.addEventListener("click", () => ui.settingsModal.classList.add("hidden"));
+  ui.closeSettingsBtn.addEventListener("click", () => hideModal(ui.settingsModal));
   ui.saveSettingsBtn.addEventListener("click", () => saveSettings().catch((err) => setStatus(`Error: ${err.message}`, "error")));
 
   ui.settingsTabs.addEventListener("click", (evt) => {
@@ -1901,14 +1941,6 @@ ${marker}` : marker;
   });
   ui.boardPhaseFilter?.addEventListener("change", () => {
     boardFilters().phase = ui.boardPhaseFilter.value || "";
-    renderBoard();
-  });
-  ui.boardStatusFilter?.addEventListener("change", () => {
-    boardFilters().status = ui.boardStatusFilter.value || "";
-    renderBoard();
-  });
-  ui.boardBlockedOnly?.addEventListener("change", () => {
-    boardFilters().blockedOnly = !!ui.boardBlockedOnly.checked;
     renderBoard();
   });
   ui.boardFeatureSelect?.addEventListener("change", async () => {

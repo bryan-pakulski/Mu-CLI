@@ -56,6 +56,7 @@ const state = {
   draftBySession: {},
   activityBySession: {},
   taskBySession: {},
+  errorSignatureBySession: {},
   memoryBySession: {},
   lastMemoryToolBySession: {},
   pendingApprovals: [],
@@ -538,6 +539,15 @@ function pushActivity(sessionName, title, detail = "") {
   if (bucket.length > 120) bucket.splice(0, bucket.length - 120);
   persistActivity();
   if (sessionName === state.currentSession) renderActivityPanel();
+}
+
+function appendChatErrorEntry(sessionName, message, detail = "") {
+  const text = `⚠️ Execution failed\n${message || "Unknown error"}${detail ? `\n\n${detail}` : ""}`;
+  const signature = `${sessionName}:${text}`;
+  if (state.errorSignatureBySession[sessionName] === signature) return;
+  state.errorSignatureBySession[sessionName] = signature;
+  state.loadedMessages.push({ role: "assistant", text });
+  if (state.currentSession === sessionName) renderFeed(true);
 }
 
 function formatSince(ts) {
@@ -1632,6 +1642,19 @@ function startTaskEventStream(taskId, sessionName) {
         String(evt.payload?.preview || evt.payload?.result || "").slice(0, 600),
       );
     }
+    if (evt.event === "task.error") {
+      appendChatErrorEntry(
+        sessionName,
+        "The model run failed before producing a final response.",
+        String(evt.payload?.error || "")
+      );
+    } else if (evt.event === "trace.error") {
+      appendChatErrorEntry(
+        sessionName,
+        "A runtime/provider error occurred during execution.",
+        String(evt.payload?.message || "")
+      );
+    }
     pushActivity(sessionName, mapped.title, mapped.detail);
     const pending = state.pendingBySession[sessionName];
     if (pending) pending.latestActivity = mapped.title;
@@ -1709,6 +1732,7 @@ async function executeSend(sessionAtSend, text) {
     state.serverSession = sessionAtSend;
   }
   if (state.pendingBySession[sessionAtSend]) return;
+  state.errorSignatureBySession[sessionAtSend] = "";
   state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now(), status: "running" };
   state.taskBySession[sessionAtSend] = { status: "running", startedAt: Date.now(), taskId: "" };
   state.draftBySession[sessionAtSend] = "";
@@ -1741,6 +1765,7 @@ async function executeSend(sessionAtSend, text) {
     pushActivity(sessionAtSend, "Final response received", "");
   } catch (err) {
     surfacedErrorMessage = `⚠️ Request failed: ${err?.message || "Unknown error"}`;
+    appendChatErrorEntry(sessionAtSend, "The request failed.", String(err?.message || "Unknown error"));
     pushActivity(sessionAtSend, "Request failed", String(err?.message || "Unknown error"));
     throw err;
   } finally {
@@ -1755,7 +1780,7 @@ async function executeSend(sessionAtSend, text) {
     if (state.currentSession === sessionAtSend) {
       await refreshHistory(true);
       if (surfacedErrorMessage) {
-        state.loadedMessages.push({ role: "assistant", text: surfacedErrorMessage });
+        appendChatErrorEntry(sessionAtSend, surfacedErrorMessage, "");
       }
       renderFeed(true);
       await refreshWorkspace();

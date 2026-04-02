@@ -99,6 +99,21 @@ input,select,textarea{padding:8px 10px}
 .settings-pane .field{margin-bottom:10px;padding:0 4px}
 .settings-pane .field input,
 .settings-pane .field select{margin-top:4px}
+.mode-picker{display:flex;gap:10px;margin-top:6px}
+.mode-chip{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2)}
+.mode-dot{width:14px;height:14px;border-radius:50%;display:inline-block;border:1px solid var(--border)}
+.mode-dot.dark{background:#0f1115}
+.mode-dot.light{background:#f9fafb}
+.mode-chip.active{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent) inset}
+.accent-swatches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:6px}
+.accent-chip{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);font-size:12px}
+.accent-chip.active{border-color:var(--accent);background:color-mix(in oklab, var(--accent) 14%, var(--surface-2))}
+.accent-dot{width:14px;height:14px;border-radius:50%;display:inline-block;background:var(--swatch)}
+.custom-accent-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.custom-accent-row .btn.active{border-color:var(--accent);background:color-mix(in oklab, var(--accent) 14%, var(--surface-2))}
+#customAccentInput{width:38px;height:32px;padding:0;border-radius:8px;overflow:hidden}
+#customAccentInput::-webkit-color-swatch-wrapper{padding:2px}
+#customAccentInput::-webkit-color-swatch{border:none;border-radius:6px}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:10px;border-top:1px solid var(--border)}
 
 .message .text p{margin:.15rem 0 .45rem}

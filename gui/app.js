@@ -2,6 +2,21 @@ const el = (id) => document.getElementById(id);
 const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
 const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
+const THEME_MODE_KEY = "mucli_theme_mode";
+const THEME_ACCENT_KEY = "mucli_theme_accent_value";
+
+const PRESET_ACCENTS = [
+  { name: "Zinc", value: "#71717a" },
+  { name: "Red", value: "#ef4444" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Rose", value: "#f43f5e" },
+  { name: "Green", value: "#22c55e" },
+  { name: "Blue", value: "#3b82f6" },
+  { name: "Yellow", value: "#eab308" },
+  { name: "Violet", value: "#8b5cf6" },
+  { name: "Cyan", value: "#06b6d4" },
+  { name: "Emerald", value: "#10b981" },
+];
 
 const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
@@ -83,8 +98,11 @@ const ui = {
   toolsList: el("toolsList"),
   variablesList: el("variablesList"),
   memoryList: el("memoryList"),
-  themeModeSelect: el("themeModeSelect"),
-  accentSelect: el("accentSelect"),
+  themeModeDark: el("themeModeDark"),
+  themeModeLight: el("themeModeLight"),
+  accentSwatches: el("accentSwatches"),
+  accentCustomBtn: el("accentCustomBtn"),
+  customAccentInput: el("customAccentInput"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -150,12 +168,20 @@ function sessionMemory(sessionName = state.currentSession) {
 }
 
 function applyThemeFromStorage() {
-  const mode = localStorage.getItem("mucli_theme_mode") || "dark";
-  const accent = localStorage.getItem("mucli_theme_accent") || "indigo";
+  const mode = localStorage.getItem(THEME_MODE_KEY) || "dark";
+  const legacyAccent = localStorage.getItem("mucli_theme_accent");
+  const accentMap = { indigo: "#8b5cf6", teal: "#14b8a6", amber: "#f59e0b", rose: "#f43f5e" };
+  const accent = localStorage.getItem(THEME_ACCENT_KEY) || accentMap[legacyAccent] || "#8b5cf6";
   document.documentElement.dataset.mode = mode;
-  document.documentElement.dataset.accent = accent;
-  ui.themeModeSelect.value = mode;
-  ui.accentSelect.value = accent;
+  document.documentElement.style.setProperty("--accent", accent);
+  ui.customAccentInput.value = accent;
+  ui.themeModeDark?.classList.toggle("active", mode === "dark");
+  ui.themeModeLight?.classList.toggle("active", mode === "light");
+  const presetValues = PRESET_ACCENTS.map((item) => item.value.toLowerCase());
+  ui.accentCustomBtn?.classList.toggle("active", !presetValues.includes(accent.toLowerCase()));
+  ui.accentSwatches?.querySelectorAll(".accent-chip").forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.value?.toLowerCase() === accent.toLowerCase());
+  });
 
   const darkCss = document.getElementById("hljsDark");
   const lightCss = document.getElementById("hljsLight");
@@ -163,6 +189,23 @@ function applyThemeFromStorage() {
     const isDark = mode === "dark";
     darkCss.disabled = !isDark;
     lightCss.disabled = isDark;
+  }
+}
+
+function renderAccentSwatches() {
+  if (!ui.accentSwatches) return;
+  ui.accentSwatches.innerHTML = "";
+  for (const accent of PRESET_ACCENTS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "accent-chip";
+    btn.dataset.value = accent.value;
+    btn.innerHTML = `<span class="accent-dot" style="--swatch:${accent.value}"></span>${accent.name}`;
+    btn.addEventListener("click", () => {
+      localStorage.setItem(THEME_ACCENT_KEY, accent.value);
+      applyThemeFromStorage();
+    });
+    ui.accentSwatches.appendChild(btn);
   }
 }
 
@@ -829,8 +872,8 @@ async function saveSettings() {
 
   await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ disabled_tools, variables }) });
 
-  localStorage.setItem("mucli_theme_mode", ui.themeModeSelect.value);
-  localStorage.setItem("mucli_theme_accent", ui.accentSelect.value);
+  localStorage.setItem(THEME_MODE_KEY, document.documentElement.dataset.mode || "dark");
+  localStorage.setItem(THEME_ACCENT_KEY, ui.customAccentInput.value || "#8b5cf6");
   applyThemeFromStorage();
   ui.settingsModal.classList.add("hidden");
   await refreshRuntime();
@@ -1206,17 +1249,23 @@ ${marker}` : marker;
     ui.settingsTabs.querySelectorAll(".settings-tab").forEach((x) => x.classList.toggle("active", x === btn));
     ui.settingsModal.querySelectorAll(".settings-pane").forEach((pane) => pane.classList.toggle("active", pane.dataset.pane === tab));
   });
-  ui.themeModeSelect.addEventListener("change", () => {
-    localStorage.setItem("mucli_theme_mode", ui.themeModeSelect.value);
+  ui.themeModeDark.addEventListener("click", () => {
+    localStorage.setItem(THEME_MODE_KEY, "dark");
     applyThemeFromStorage();
   });
-  ui.accentSelect.addEventListener("change", () => {
-    localStorage.setItem("mucli_theme_accent", ui.accentSelect.value);
+  ui.themeModeLight.addEventListener("click", () => {
+    localStorage.setItem(THEME_MODE_KEY, "light");
+    applyThemeFromStorage();
+  });
+  ui.accentCustomBtn.addEventListener("click", () => ui.customAccentInput.click());
+  ui.customAccentInput.addEventListener("input", () => {
+    localStorage.setItem(THEME_ACCENT_KEY, ui.customAccentInput.value);
     applyThemeFromStorage();
   });
 }
 
 async function bootstrap() {
+  renderAccentSwatches();
   applyThemeFromStorage();
   renderSessions();
   await Promise.allSettled([

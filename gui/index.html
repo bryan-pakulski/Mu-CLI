@@ -109,20 +109,21 @@
             </div>
             <div class="settings-pane" data-pane="theme">
               <h3>Theme</h3>
-              <label class="field">Mode
-                <select id="themeModeSelect">
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                </select>
-              </label>
-              <label class="field">Accent
-                <select id="accentSelect">
-                  <option value="indigo">Indigo</option>
-                  <option value="teal">Teal</option>
-                  <option value="amber">Amber</option>
-                  <option value="rose">Rose</option>
-                </select>
-              </label>
+              <div class="field">
+                <span>Mode</span>
+                <div id="themeModePicker" class="mode-picker">
+                  <button id="themeModeDark" class="mode-chip" type="button" data-mode="dark"><span class="mode-dot dark"></span>Dark</button>
+                  <button id="themeModeLight" class="mode-chip" type="button" data-mode="light"><span class="mode-dot light"></span>Light</button>
+                </div>
+              </div>
+              <div class="field">
+                <span>Accent</span>
+                <div id="accentSwatches" class="accent-swatches"></div>
+                <div class="custom-accent-row">
+                  <button id="accentCustomBtn" class="btn" type="button">Custom</button>
+                  <input id="customAccentInput" type="color" value="#8b5cf6" />
+                </div>
+              </div>
             </div>
 
             <div class="modal-actions">

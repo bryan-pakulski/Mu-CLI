@@ -615,7 +615,7 @@ function populateSettingsPanels() {
 
 async function refreshWorkspace() {
   try {
-    const data = await fetchJson("/api/workspaces");
+    const data = await fetchJson("/api/workspaces", {}, 20000);
     const folders = Array.isArray(data.folders) ? data.folders : [];
     const tracked = Array.isArray(data.tracked_files) ? data.tracked_files.length : 0;
     ui.workspaceFolders.innerHTML = "";
@@ -1161,9 +1161,24 @@ ${marker}` : marker;
   ui.attachFolderConfirmBtn.addEventListener("click", async () => {
     const path = ui.folderPathInput.value.trim();
     if (!path) return;
-    await fetchJson("/api/workspaces/add", { method: "POST", body: JSON.stringify({ path }) });
-    ui.folderModal.classList.add("hidden");
-    await refreshWorkspace();
+    ui.attachFolderConfirmBtn.disabled = true;
+    const originalText = ui.attachFolderConfirmBtn.textContent;
+    ui.attachFolderConfirmBtn.textContent = "Attaching…";
+    try {
+      await fetchJson(
+        "/api/workspaces/add",
+        { method: "POST", body: JSON.stringify({ path }) },
+        60000,
+      );
+      ui.folderModal.classList.add("hidden");
+      await refreshWorkspace();
+      setStatus("Workspace folder attached.", "connected");
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, "error");
+    } finally {
+      ui.attachFolderConfirmBtn.disabled = false;
+      ui.attachFolderConfirmBtn.textContent = originalText;
+    }
   });
   ui.closeFolderModalBtn.addEventListener("click", () => ui.folderModal.classList.add("hidden"));
   ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);

@@ -1,488 +1,714 @@
 const el = (id) => document.getElementById(id);
+const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
+const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
+const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
+const THEME_MODE_KEY = "mucli_theme_mode";
+const THEME_ACCENT_KEY = "mucli_theme_accent_value";
+
+const PRESET_ACCENTS = [
+  { name: "Zinc", value: "#71717a" },
+  { name: "Red", value: "#ef4444" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Rose", value: "#f43f5e" },
+  { name: "Green", value: "#22c55e" },
+  { name: "Blue", value: "#3b82f6" },
+  { name: "Yellow", value: "#eab308" },
+  { name: "Violet", value: "#8b5cf6" },
+  { name: "Cyan", value: "#06b6d4" },
+  { name: "Emerald", value: "#10b981" },
+];
 
 const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
-  events: [],
-  eventSource: null,
-  tools: [],
-  runtime: null,
-  sessions: [],
   currentSession: "",
-  sessionStatus: {},
+  sessions: [],
+  serverSession: "",
+  runtime: null,
+  tools: [],
+  allVariables: {},
+  loadedMessages: [],
+  visibleCount: 24,
   pendingBySession: {},
-  currentConversation: [],
-  approvalsBySession: {},
-  workspace: { folders: [], tracked_files: [] },
-  serverActiveSession: "",
-  modelsByProvider: {},
+  sendQueue: [],
+  draftBySession: {},
+  activityBySession: {},
+  taskBySession: {},
+  memoryBySession: {},
+  lastMemoryToolBySession: {},
+  pendingApprovals: [],
+  taskPollTimersBySession: {},
+  memoryPollTimer: null,
+  approvalPollTimer: null,
+  eventSourceBySession: {},
 };
-try {
-  const persistedEvents = JSON.parse(localStorage.getItem("mucli_gui_events") || "[]");
-  if (Array.isArray(persistedEvents)) state.events = persistedEvents.slice(0, 300);
-} catch {
-  state.events = [];
-}
-
-const VARIABLE_DEFS = [
-  { key: "yolo", label: "YOLO mode", type: "bool", group: "variables", description: "Auto-approve tool actions without prompting." },
-  { key: "strict_mode", label: "Strict approvals", type: "bool", group: "variables", description: "Request approval for more tool operations." },
-  { key: "agent_mode", label: "Agent mode", type: "select", options: ["default", "debug", "feature", "research"], group: "variables", description: "Controls system behavior and prompting strategy." },
-  { key: "memory_enabled", label: "Memory enabled", type: "bool", group: "memory", description: "Enables persistent memory summarization in long loops." },
-  { key: "compact_history", label: "Compact history", type: "bool", group: "memory", description: "Reduces tool metadata in saved history to save tokens." },
-  { key: "collation_enabled", label: "Collation enabled", type: "bool", group: "memory", description: "Batches read-heavy tool outputs into delayed context flushes." },
-  { key: "max_iterations", label: "Max iterations", type: "number", group: "memory", description: "Upper bound for agentic tool-call loop iterations." },
-  { key: "make_timeout", label: "Make timeout", type: "number", group: "memory", description: "Timeout (seconds) for long-running run_agent_task commands." },
-  { key: "make_max_output", label: "Make max output", type: "number", group: "memory", description: "Maximum output characters returned from run_agent_task." },
-  { key: "ollama_host", label: "Ollama host", type: "text", group: "memory", description: "Base URL for Ollama provider endpoint." },
-];
 
 const ui = {
   apiBaseInput: el("apiBaseInput"),
-  messageInput: el("messageInput"),
-  sendBtn: el("sendBtn"),
-  refreshBtn: el("refreshBtn"),
-  clearLogBtn: el("clearLogBtn"),
-  eventStream: el("eventStream"),
-  chatStream: el("chatStream"),
-  stateBadge: el("stateBadge"),
-  runtimeSummary: el("runtimeSummary"),
-  statsSummary: el("statsSummary"),
   modelInput: el("modelInput"),
   agenticToggle: el("agenticToggle"),
   thinkingToggle: el("thinkingToggle"),
+  yoloToggle: el("yoloToggle"),
+  agenticToggleSettings: el("agenticToggleSettings"),
+  thinkingToggleSettings: el("thinkingToggleSettings"),
   applyRuntimeBtn: el("applyRuntimeBtn"),
-  collapseBtn: el("collapseBtn"),
-  expandBtn: el("expandBtn"),
-  configPanel: el("configPanel"),
-  appShell: document.querySelector(".app-shell"),
-  openSettingsBtn: el("openSettingsBtn"),
+  statusBadge: el("statusBadge"),
+  sessionList: el("sessionList"),
+  newSessionBtn: el("newSessionBtn"),
+  feed: el("feed"),
+  approvalBar: el("approvalBar"),
+  approvalText: el("approvalText"),
+  approvalApproveBtn: el("approvalApproveBtn"),
+  approvalRejectBtn: el("approvalRejectBtn"),
+  approvalExplainBtn: el("approvalExplainBtn"),
+  activityList: el("activityList"),
+  activitySummary: el("activitySummary"),
+  composer: el("composer"),
+  messageInput: el("messageInput"),
+  sendBtn: el("sendBtn"),
+  menuBtn: el("menuBtn"),
+  chatMenu: el("chatMenu"),
+  memoryOption: el("memoryOption"),
+  clearChatOption: el("clearChatOption"),
+  fileBtn: el("fileBtn"),
+  fileInput: el("fileInput"),
+  attachMenu: el("attachMenu"),
+  attachFileOption: el("attachFileOption"),
+  attachFolderOption: el("attachFolderOption"),
+  attachCloseOption: el("attachCloseOption"),
+  workspaceStatus: el("workspaceStatus"),
+  workspaceAddTrigger: el("workspaceAddTrigger"),
+  workspaceFolders: el("workspaceFolders"),
+  folderModal: el("folderModal"),
+  folderPathInput: el("folderPathInput"),
+  browseFolderBtn: el("browseFolderBtn"),
+  attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
+  closeFolderModalBtn: el("closeFolderModalBtn"),
+  memoryModal: el("memoryModal"),
+  memorySearchInput: el("memorySearchInput"),
+  memoryRuntimeList: el("memoryRuntimeList"),
+  memoryBufferList: el("memoryBufferList"),
+  scratchpadBufferList: el("scratchpadBufferList"),
+  memoryActivityList: el("memoryActivityList"),
+  closeMemoryModalBtn: el("closeMemoryModalBtn"),
+  settingsBtn: el("settingsBtn"),
+  settingsModal: el("settingsModal"),
   closeSettingsBtn: el("closeSettingsBtn"),
   saveSettingsBtn: el("saveSettingsBtn"),
-  settingsModal: el("settingsModal"),
   settingsTabs: el("settingsTabs"),
   toolsList: el("toolsList"),
   variablesList: el("variablesList"),
   memoryList: el("memoryList"),
-  systemPromptInput: el("systemPromptInput"),
-  agenticBasePromptInput: el("agenticBasePromptInput"),
-  agenticModeDefaultInput: el("agenticModeDefaultInput"),
-  agenticModeDebugInput: el("agenticModeDebugInput"),
-  agenticModeFeatureInput: el("agenticModeFeatureInput"),
-  agenticModeResearchInput: el("agenticModeResearchInput"),
-  settingsModelInput: el("settingsModelInput"),
-  themeModeSelect: el("themeModeSelect"),
-  accentSelect: el("accentSelect"),
-  sessionTabs: el("sessionTabs"),
-  newSessionBtn: el("newSessionBtn"),
-  newSessionModal: el("newSessionModal"),
-  closeNewSessionBtn: el("closeNewSessionBtn"),
-  createSessionConfirmBtn: el("createSessionConfirmBtn"),
-  newSessionNameInput: el("newSessionNameInput"),
-  newSessionProviderSelect: el("newSessionProviderSelect"),
-  newSessionModelInput: el("newSessionModelInput"),
-  toggleMetaBtn: el("toggleMetaBtn"),
-  metaPanel: el("metaPanel"),
-  chooseWorkspaceBtn: el("chooseWorkspaceBtn"),
-  chatWrap: el("chatWrap"),
-  approvalOverlay: el("approvalOverlay"),
-  approvalSummary: el("approvalSummary"),
-  approvalReasonInput: el("approvalReasonInput"),
-  approveBtn: el("approveBtn"),
-  rejectBtn: el("rejectBtn"),
-  explainBtn: el("explainBtn"),
-  workspaceTree: el("workspaceTree"),
-  workspaceAddInput: el("workspaceAddInput"),
-  workspaceAddBtn: el("workspaceAddBtn"),
-  workspaceFoldersList: el("workspaceFoldersList"),
+  themeModeDark: el("themeModeDark"),
+  themeModeLight: el("themeModeLight"),
+  accentSwatches: el("accentSwatches"),
+  accentCustomBtn: el("accentCustomBtn"),
+  customAccentInput: el("customAccentInput"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
+try {
+  const cached = JSON.parse(localStorage.getItem(SESSIONS_STORAGE_KEY) || "{}");
+  if (Array.isArray(cached.sessions)) state.sessions = cached.sessions;
+  if (cached.currentSession) state.currentSession = cached.currentSession;
+} catch {
+  // ignore session cache parse errors
+}
+try {
+  const drafts = JSON.parse(localStorage.getItem(DRAFTS_STORAGE_KEY) || "{}");
+  if (drafts && typeof drafts === "object") state.draftBySession = drafts;
+} catch {
+  state.draftBySession = {};
+}
+
+function loadPersistedActivity() {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const cleaned = {};
+    for (const [sessionName, items] of Object.entries(parsed)) {
+      if (!Array.isArray(items)) continue;
+      cleaned[sessionName] = items
+        .filter((x) => x && typeof x.title === "string")
+        .slice(-120)
+        .map((x) => ({
+          title: String(x.title || ""),
+          detail: String(x.detail || ""),
+          at: Number(x.at || Date.now()),
+        }));
+    }
+    return cleaned;
+  } catch {
+    return {};
+  }
+}
+
+function persistActivity() {
+  try {
+    localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(state.activityBySession || {}));
+  } catch {
+    return;
+  }
+}
+
+state.activityBySession = loadPersistedActivity();
+
+function persistDrafts() {
+  try {
+    localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(state.draftBySession || {}));
+  } catch {
+    return;
+  }
+}
+
+function sessionMemory(sessionName = state.currentSession) {
+  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], query: "" };
+  return state.memoryBySession[sessionName];
+}
+
+function applyThemeFromStorage() {
+  const mode = localStorage.getItem(THEME_MODE_KEY) || "dark";
+  const legacyAccent = localStorage.getItem("mucli_theme_accent");
+  const accentMap = { indigo: "#8b5cf6", teal: "#14b8a6", amber: "#f59e0b", rose: "#f43f5e" };
+  const accent = localStorage.getItem(THEME_ACCENT_KEY) || accentMap[legacyAccent] || "#8b5cf6";
+  document.documentElement.dataset.mode = mode;
+  document.documentElement.style.setProperty("--accent", accent);
+  ui.customAccentInput.value = accent;
+  ui.themeModeDark?.classList.toggle("active", mode === "dark");
+  ui.themeModeLight?.classList.toggle("active", mode === "light");
+  const presetValues = PRESET_ACCENTS.map((item) => item.value.toLowerCase());
+  ui.accentCustomBtn?.classList.toggle("active", !presetValues.includes(accent.toLowerCase()));
+  ui.accentSwatches?.querySelectorAll(".accent-chip").forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.value?.toLowerCase() === accent.toLowerCase());
+  });
+
+  const darkCss = document.getElementById("hljsDark");
+  const lightCss = document.getElementById("hljsLight");
+  if (darkCss && lightCss) {
+    const isDark = mode === "dark";
+    darkCss.disabled = !isDark;
+    lightCss.disabled = isDark;
+  }
+}
+
+function renderAccentSwatches() {
+  if (!ui.accentSwatches) return;
+  ui.accentSwatches.innerHTML = "";
+  for (const accent of PRESET_ACCENTS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "accent-chip";
+    btn.dataset.value = accent.value;
+    btn.innerHTML = `<span class="accent-dot" style="--swatch:${accent.value}"></span>${accent.name}`;
+    btn.addEventListener("click", () => {
+      localStorage.setItem(THEME_ACCENT_KEY, accent.value);
+      applyThemeFromStorage();
+    });
+    ui.accentSwatches.appendChild(btn);
+  }
+}
 
 function api(path) {
   return `${state.apiBase}${path}`;
 }
 
-function clip(text, max = 1800) {
-  const value = typeof text === "string" ? text : JSON.stringify(text, null, 2);
-  return value.length > max ? `${value.slice(0, max)}\n…(truncated)` : value;
-}
-
-function pushEvent(kind, payload) {
-  state.events.unshift({ ts: new Date().toLocaleTimeString(), kind, payload: clip(payload) });
-  state.events = state.events.slice(0, 300);
-  localStorage.setItem("mucli_gui_events", JSON.stringify(state.events));
-  renderEvents();
-}
-
-function renderEvents() {
-  ui.eventStream.innerHTML = "";
-  for (const event of state.events) {
-    const card = document.createElement("div");
-    card.className = "event-card";
-    const tag = inferMetaTag(event.kind);
-    card.innerHTML = `
-      <details class="meta-entry">
-        <summary>${event.ts} · ${event.kind}<span class="meta-tag">${tag}</span></summary>
-        <div class="event-body"></div>
-      </details>
-    `;
-    card.querySelector(".event-body").textContent = event.payload;
-    ui.eventStream.appendChild(card);
-  }
-}
-
-function inferMetaTag(kind) {
-  const lower = (kind || "").toLowerCase();
-  if (lower.includes("tool")) return "tool";
-  if (lower.includes("error")) return "error";
-  if (lower.includes("debug")) return "debug";
-  if (lower.includes("info")) return "info";
-  if (lower.includes("session")) return "session";
-  return "event";
-}
-
-function renderConversation(history) {
-  if (history) {
-    state.currentConversation = history;
-  }
-  ui.chatStream.innerHTML = "";
-  for (const message of state.currentConversation || []) {
-    if (!["user", "assistant"].includes(message.role)) continue;
-    const textParts = (message.parts || [])
-      .filter((part) => part.type === "text")
-      .map((part) => part.text || "")
-      .filter(Boolean);
-    if (!textParts.length) continue;
-
-    const card = document.createElement("div");
-    card.className = "event-card";
-    card.innerHTML = `<div class="event-head"><span>${message.role}</span><button class="ghost-btn copy-entry-btn" title="Copy full message">Copy</button></div><div class="event-body markdown-body"></div>`;
-    const fullText = textParts.join("\n\n");
-    renderMarkdown(card.querySelector(".event-body"), fullText);
-    const copyEntryBtn = card.querySelector(".copy-entry-btn");
-    copyEntryBtn.addEventListener("click", async () => copyText(fullText, copyEntryBtn));
-    ui.chatStream.appendChild(card);
-  }
-
-  const pending = state.pendingBySession[state.currentSession];
-  if (pending) {
-    const userCard = document.createElement("div");
-    userCard.className = "event-card pending";
-    userCard.innerHTML = `<div class="event-head"><span>user</span><button class="ghost-btn copy-entry-btn" title="Copy full message">Copy</button></div><div class="event-body markdown-body"></div>`;
-    renderMarkdown(userCard.querySelector(".event-body"), pending.userText);
-    const pendingCopyBtn = userCard.querySelector(".copy-entry-btn");
-    pendingCopyBtn.addEventListener("click", async () => copyText(pending.userText, pendingCopyBtn));
-    ui.chatStream.appendChild(userCard);
-
-    const agentCard = document.createElement("div");
-    agentCard.className = "event-card pending";
-    agentCard.innerHTML = `<div class="event-head">assistant</div><div class="event-body"><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span></div>`;
-    ui.chatStream.appendChild(agentCard);
-  }
-  ui.chatStream.scrollTop = ui.chatStream.scrollHeight;
-  renderApprovalOverlay();
-}
-
-function flashCopied(buttonEl, ok = true) {
-  if (!buttonEl) return;
-  const original = buttonEl.dataset.originalLabel || buttonEl.textContent || "Copy";
-  if (!buttonEl.dataset.originalLabel) buttonEl.dataset.originalLabel = original;
-  buttonEl.classList.remove("copied", "copy-failed");
-  void buttonEl.offsetWidth;
-  buttonEl.classList.add(ok ? "copied" : "copy-failed");
-  buttonEl.textContent = ok ? "✓ Copied" : "Copy failed";
-  setTimeout(() => {
-    buttonEl.classList.remove("copied", "copy-failed");
-    buttonEl.textContent = original;
-  }, 1200);
-}
-
-async function copyText(text, sourceButton = null) {
+async function fetchJson(path, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let resp;
   try {
-    await navigator.clipboard.writeText(text || "");
-    flashCopied(sourceButton, true);
-    pushEvent("copy.success", "Copied to clipboard.");
-  } catch (err) {
-    flashCopied(sourceButton, false);
-    pushEvent("copy.error", String(err));
-  }
-}
-
-function renderMarkdown(container, text) {
-  const source = String(text || "");
-  const rendered = window.marked ? window.marked.parse(source, { gfm: true, breaks: true }) : source;
-  const sanitized = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
-  container.innerHTML = sanitized;
-  container.querySelectorAll("pre code").forEach((block) => {
-    if (window.hljs) window.hljs.highlightElement(block);
-    const pre = block.closest("pre");
-    if (!pre || pre.querySelector(".copy-code-btn")) return;
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "ghost-btn copy-code-btn";
-    copyBtn.textContent = "Copy code";
-    copyBtn.addEventListener("click", async () => copyText(block.textContent || "", copyBtn));
-    pre.appendChild(copyBtn);
-  });
-}
-
-function renderApprovalOverlay() {
-  const approval = state.approvalsBySession[state.currentSession];
-  if (!approval) {
-    ui.chatWrap.classList.remove("needs-approval");
-    ui.approvalOverlay.classList.add("hidden");
-    return;
-  }
-  ui.chatWrap.classList.add("needs-approval");
-  ui.approvalOverlay.classList.remove("hidden");
-  ui.approvalSummary.textContent = [
-    `Tool: ${approval.tool_name || "unknown"}`,
-    `Prompt: ${approval.prompt_text || ""}`,
-    `Args: ${JSON.stringify(approval.display_args || approval.tool_args || {}, null, 2)}`,
-  ].join("\n\n");
-}
-
-async function refreshHistory(sessionName = state.currentSession) {
-  try {
-    if (!sessionName) return;
-    const payload = await fetchJson(`/api/history?limit=120&session_name=${encodeURIComponent(sessionName)}`);
-    if (sessionName === state.currentSession) {
-      renderConversation(payload.history || []);
+    const method = (options.method || "GET").toUpperCase();
+    const headers = { ...(options.headers || {}) };
+    if (options.body && !headers["Content-Type"] && method !== "GET") {
+      headers["Content-Type"] = "application/json";
     }
-  } catch (err) {
-    pushEvent("history.error", String(err));
+    try {
+      resp = await fetch(api(path), { ...options, method, headers, signal: controller.signal });
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s.`);
+      }
+      throw err;
+    }
+  } finally {
+    clearTimeout(timeout);
   }
-}
-
-async function fetchJson(path, options = {}) {
-  const resp = await fetch(api(path), { headers: { "Content-Type": "application/json" }, ...options });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
   return data;
 }
 
-function setConnected(connected, text = "Connected") {
-  ui.stateBadge.classList.remove("connected", "error");
-  ui.stateBadge.classList.add(connected ? "connected" : "error");
-  ui.stateBadge.textContent = text;
+function setStatus(text, kind = "") {
+  ui.statusBadge.classList.remove("connected", "error");
+  if (kind) ui.statusBadge.classList.add(kind);
+  ui.statusBadge.textContent = text;
+}
+
+function textFromParts(parts = []) {
+  return parts.filter((p) => p?.type === "text").map((p) => p.text || "").filter(Boolean).join("\n\n");
+}
+
+function stripLeakedDirectiveText(text) {
+  const raw = String(text || "");
+  const trimmed = raw.trimStart();
+  if (!/^(FEATURE MODE DIRECTIVE:|SYSTEM PROMPT:)/i.test(trimmed)) return raw;
+  const cut = raw.search(/\n{2,}/);
+  if (cut < 0) return "";
+  return raw.slice(cut).trim();
+}
+
+function normalizedMessages(history = []) {
+  return history
+    .filter((m) => ["user", "assistant"].includes(m.role))
+    .map((m) => ({ role: m.role, text: stripLeakedDirectiveText(textFromParts(m.parts || [])) }))
+    .filter((m) => m.text);
+}
+
+
+function groupTools(tools = []) {
+  const groups = { "Workspace & Files": [], "Execution": [], "Git": [], "System": [], "Other": [] };
+  for (const tool of tools) {
+    const name = String(tool.name || "");
+    if (/(workspace|file|dir|chunk|search)/i.test(name)) groups["Workspace & Files"].push(tool);
+    else if (/(run_|batch|agent_task|task)/i.test(name)) groups["Execution"].push(tool);
+    else if (/git/i.test(name)) groups["Git"].push(tool);
+    else if (/(time|status|tool|variable|model|provider)/i.test(name)) groups["System"].push(tool);
+    else groups["Other"].push(tool);
+  }
+  return Object.entries(groups).filter(([, items]) => items.length);
+}
+
+function parseVariableValue(raw, typeHint = "") {
+  const type = String(typeHint || "").toLowerCase();
+  if (type === "bool" || type === "boolean") return raw === "true";
+  if (type === "int" || type === "number") return Number(raw);
+  if (raw === "true" || raw === "false") return raw === "true";
+  if (!Number.isNaN(Number(raw)) && raw !== "") return Number(raw);
+  return raw;
+}
+
+function normalizeNestedCodeFences(text) {
+  const lines = String(text || "").split("\n");
+  const fenceIndices = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*```+/.test(lines[i])) fenceIndices.push(i);
+  }
+  if (fenceIndices.length < 3) return String(text || "");
+
+  let i = 0;
+  while (i < lines.length) {
+    const openMatch = lines[i].match(/^(\s*)(`{3,})(.*)$/);
+    if (!openMatch) {
+      i += 1;
+      continue;
+    }
+    const openLen = openMatch[2].length;
+    const closeCandidates = [];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (new RegExp(`^\\s*\`{${openLen},}\\s*$`).test(lines[j])) closeCandidates.push(j);
+    }
+    if (!closeCandidates.length) break;
+    const close = closeCandidates[closeCandidates.length - 1];
+    if (closeCandidates.length > 1) {
+      lines[i] = `${openMatch[1]}${"`".repeat(openLen + 1)}${openMatch[3] || ""}`;
+      lines[close] = lines[close].replace(new RegExp(`\`{${openLen},}`), "`".repeat(openLen + 1));
+    }
+    i = close + 1;
+  }
+  return lines.join("\n");
+}
+
+function renderMarkdown(container, text) {
+  const normalizedText = normalizeNestedCodeFences(text);
+  const rendered = window.marked ? window.marked.parse(normalizedText, { gfm: true, breaks: true }) : normalizedText;
+  container.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
+  container.querySelectorAll("pre code").forEach((block) => {
+    window.hljs?.highlightElement(block);
+    const pre = block.closest("pre");
+    if (!pre || pre.querySelector(".copy-code-btn")) return;
+    const btn = document.createElement("button");
+    btn.className = "copy-code-btn";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", () => copyText(block.textContent || "", btn));
+    pre.appendChild(btn);
+  });
+}
+
+
+async function copyText(value, button) {
+  try {
+    await navigator.clipboard.writeText(value || "");
+    if (button) {
+      button.classList.add("copied");
+      const original = button.textContent;
+      button.textContent = "✓";
+      setTimeout(() => {
+        button.classList.remove("copied");
+        button.textContent = original;
+      }, 900);
+    }
+  } catch {
+    if (button) {
+      button.classList.add("copy-fail");
+      setTimeout(() => button.classList.remove("copy-fail"), 900);
+    }
+  }
+}
+
+function sessionActivity(sessionName = state.currentSession) {
+  if (!state.activityBySession[sessionName]) state.activityBySession[sessionName] = [];
+  return state.activityBySession[sessionName];
+}
+
+function pushActivity(sessionName, title, detail = "") {
+  const bucket = sessionActivity(sessionName);
+  bucket.push({ title, detail, at: Date.now() });
+  if (bucket.length > 120) bucket.splice(0, bucket.length - 120);
+  persistActivity();
+  if (sessionName === state.currentSession) renderActivityPanel();
+}
+
+function formatSince(ts) {
+  const secs = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m ${rem}s`;
+}
+
+function renderActivityPanel() {
+  const sessionName = state.currentSession;
+  const items = sessionActivity(sessionName);
+  const taskMeta = state.taskBySession[sessionName];
+  ui.activityList.innerHTML = "";
+  if (!items.length) {
+    ui.activityList.innerHTML = '<div class="activity-empty">No recent activity yet.</div>';
+  } else {
+    for (const item of items.slice(-50).reverse()) {
+      const card = document.createElement("article");
+      card.className = "activity-item";
+      card.innerHTML = `
+        <div class="activity-title">${item.title}</div>
+        ${item.detail ? `<div class="activity-detail">${item.detail}</div>` : ""}
+        <div class="activity-time">${new Date(item.at).toLocaleTimeString()}</div>
+      `;
+      ui.activityList.appendChild(card);
+    }
+  }
+
+  if (!taskMeta) {
+    ui.activitySummary.textContent = "Idle";
+  } else if (taskMeta.status === "running") {
+    ui.activitySummary.textContent = `Thinking • ${formatSince(taskMeta.startedAt)}`;
+  } else if (taskMeta.status === "awaiting_approval") {
+    ui.activitySummary.textContent = "Awaiting approval";
+  } else if (taskMeta.status === "awaiting_input") {
+    ui.activitySummary.textContent = "Awaiting input";
+  } else if (taskMeta.status === "error") {
+    ui.activitySummary.textContent = "Error";
+  } else {
+    ui.activitySummary.textContent = "Done";
+  }
+}
+
+async function refreshApprovals() {
+  try {
+    const data = await fetchJson("/api/approvals", {}, 2500);
+    state.pendingApprovals = data.pending_approvals || [];
+  } catch {
+    state.pendingApprovals = [];
+  }
+  renderApprovalBar();
+}
+
+function renderApprovalBar() {
+  const next = state.pendingApprovals[0];
+  if (!next) {
+    ui.approvalBar.classList.add("hidden");
+    return;
+  }
+  ui.approvalBar.classList.remove("hidden");
+  const tool = next.tool_name || "tool";
+  const count = state.pendingApprovals.length;
+  ui.approvalText.textContent = `${tool} requires approval${count > 1 ? ` (${count} pending)` : ""}`;
+}
+
+async function resolveApproval(decision) {
+  const next = state.pendingApprovals[0];
+  if (!next?.approval_id) return;
+  let reason = undefined;
+  if (decision === "e") reason = prompt("Explain request to the model (optional):") || "";
+  await fetchJson("/api/approvals/resolve", {
+    method: "POST",
+    body: JSON.stringify({ approval_id: next.approval_id, decision, reason }),
+  });
+  await refreshApprovals();
+}
+
+function memoryToolName(name = "") {
+  return /^(save_memory|search_memory|list_memory|save_scratchpad|search_scratchpad|list_scratchpad|clear_scratchpad)$/i.test(String(name || ""));
+}
+
+function pushMemoryEvent(sessionName, title, body = "") {
+  const mem = sessionMemory(sessionName);
+  mem.activity.push({ title, body, at: Date.now() });
+  if (mem.activity.length > 80) mem.activity.splice(0, mem.activity.length - 80);
+  if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) {
+    renderMemoryModal();
+  }
+}
+
+async function refreshMemoryRuntime(sessionName = state.currentSession) {
+  try {
+    const payload = await fetchJson("/api/state");
+    const variables = payload.state?.variables || payload.variables || {};
+    const filtered = Object.fromEntries(
+      Object.entries(variables).filter(([k]) => /(memory|scratchpad|collat|compact)/i.test(k)),
+    );
+    sessionMemory(sessionName).runtime = filtered;
+    if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
+  } catch {
+    return;
+  }
+}
+
+function toolResultText(payload = {}) {
+  const candidates = [
+    payload.result,
+    payload.output,
+    payload.visible_result,
+    payload.tool_result,
+    payload.message,
+    payload.data,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string") return c;
+    if (c && typeof c === "object") {
+      if (typeof c.result === "string") return c.result;
+      if (typeof c.output === "string") return c.output;
+      if (typeof c.message === "string") return c.message;
+    }
+  }
+  return JSON.stringify(payload || {}, null, 2);
+}
+
+function parseMemoryRows(raw) {
+  const rows = String(raw || "").split("\n").map((x) => x.trim()).filter(Boolean);
+  return rows.map((line) => {
+    const match = line.match(/^#(\d+)\s+tags=(\[[^\]]*\])\s+source=([^:]+)\s+::\s+([\s\S]+)$/);
+    if (!match) return { id: "", tags: [], source: "", content: line };
+    let tags = [];
+    try { tags = JSON.parse(match[2]); } catch { tags = []; }
+    return {
+      id: match[1],
+      tags,
+      source: match[3],
+      content: match[4],
+    };
+  });
+}
+
+async function refreshMemoryBuffers(sessionName = state.currentSession) {
+  try {
+    const [memoryRes, scratchRes] = await Promise.all([
+      fetchJson("/api/tool", { method: "POST", body: JSON.stringify({ tool_name: "list_memory", tool_args: { limit: 50 }, structured: false }) }),
+      fetchJson("/api/tool", { method: "POST", body: JSON.stringify({ tool_name: "list_scratchpad", tool_args: { limit: 50 }, structured: false }) }),
+    ]);
+    const mem = sessionMemory(sessionName);
+    mem.buffer = parseMemoryRows(toolResultText(memoryRes));
+    mem.scratchpad = parseMemoryRows(toolResultText(scratchRes));
+    if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
+  } catch {
+    return;
+  }
+}
+
+function renderMemoryModal() {
+  const mem = sessionMemory(state.currentSession);
+  const query = String(mem.query || "").trim().toLowerCase();
+  const filtered = (items) => {
+    if (!query) return items;
+    return items.filter((item) => {
+      const hay = `${item.id} ${(item.tags || []).join(" ")} ${item.source} ${item.content}`.toLowerCase();
+      return hay.includes(query);
+    });
+  };
+  const runtimeEntries = Object.entries(mem.runtime || {});
+  ui.memoryRuntimeList.innerHTML = runtimeEntries.length
+    ? runtimeEntries.map(([k, v]) => `<article class="memory-item"><div class="memory-item-title">${k}</div><div class="memory-item-body">${String(v)}</div></article>`).join("")
+    : '<div class="activity-empty">No runtime memory variables available.</div>';
+
+  const memoryEntries = filtered(mem.buffer || []);
+  ui.memoryBufferList.innerHTML = memoryEntries.length
+    ? memoryEntries.map((e) => `<article class="memory-item"><div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div><div class="memory-item-body">${e.content || ""}</div></article>`).join("")
+    : '<div class="activity-empty">No memory entries found.</div>';
+
+  const scratchEntries = filtered(mem.scratchpad || []);
+  ui.scratchpadBufferList.innerHTML = scratchEntries.length
+    ? scratchEntries.map((e) => `<article class="memory-item"><div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div><div class="memory-item-body">${e.content || ""}</div></article>`).join("")
+    : '<div class="activity-empty">No scratchpad entries found.</div>';
+
+  ui.memoryActivityList.innerHTML = mem.activity.length
+    ? mem.activity.slice(-60).reverse().map((e) => `<article class="memory-item"><div class="memory-item-title">${e.title} · ${new Date(e.at).toLocaleTimeString()}</div><div class="memory-item-body">${e.body || ""}</div></article>`).join("")
+    : '<div class="activity-empty">No memory tool activity yet.</div>';
+}
+
+function openMemoryModal() {
+  ui.memoryModal.classList.remove("hidden");
+  ui.memorySearchInput.value = sessionMemory(state.currentSession).query || "";
+  renderMemoryModal();
+  refreshMemoryRuntime();
+  refreshMemoryBuffers();
+  if (state.memoryPollTimer) clearInterval(state.memoryPollTimer);
+  state.memoryPollTimer = setInterval(() => {
+    refreshMemoryRuntime();
+    refreshMemoryBuffers();
+  }, 2500);
+}
+
+function closeMemoryModal() {
+  ui.memoryModal.classList.add("hidden");
+  if (state.memoryPollTimer) {
+    clearInterval(state.memoryPollTimer);
+    state.memoryPollTimer = null;
+  }
+}
+
+function renderFeed(resetToBottom = false) {
+  const prevHeight = ui.feed.scrollHeight;
+  const prevTop = ui.feed.scrollTop;
+  const start = Math.max(0, state.loadedMessages.length - state.visibleCount);
+  ui.feed.innerHTML = "";
+  for (const item of state.loadedMessages.slice(start)) {
+    const card = document.createElement("article");
+    card.className = "message";
+    card.innerHTML = `<span class="role">${item.role}</span><span class="text"></span>`;
+    renderMarkdown(card.querySelector(".text"), item.text);
+    if (item.role === "assistant") {
+      const footer = document.createElement("div");
+      footer.className = "message-footer";
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "copy-msg-btn";
+      copyBtn.textContent = "⧉";
+      copyBtn.title = "Copy response";
+      copyBtn.addEventListener("click", () => copyText(item.text, copyBtn));
+      footer.appendChild(copyBtn);
+      card.appendChild(footer);
+    }
+    ui.feed.appendChild(card);
+  }
+
+  const pending = state.pendingBySession[state.currentSession];
+  if (pending) {
+    const userCard = document.createElement("article");
+    userCard.className = "message pending";
+    userCard.innerHTML = `<span class="role">user</span><span class="text"></span>`;
+    renderMarkdown(userCard.querySelector(".text"), pending.userText);
+    ui.feed.appendChild(userCard);
+
+    const aiCard = document.createElement("article");
+    aiCard.className = "message pending";
+    const latestActivity = pending.latestActivity || "Thinking through response";
+    const runtimeMeta = pending.startedAt ? `Running for ${formatSince(pending.startedAt)}` : "Running";
+    aiCard.innerHTML = `
+      <span class="role">assistant</span>
+      <span class="text">
+        <span class="thinking-status"><span class="thinking-pulse"></span>${latestActivity}</span>
+        <div class="thinking-meta">${runtimeMeta}</div>
+      </span>
+    `;
+    ui.feed.appendChild(aiCard);
+  }
+  if (resetToBottom) return void (ui.feed.scrollTop = ui.feed.scrollHeight);
+  const grew = ui.feed.scrollHeight - prevHeight;
+  if (prevTop < 60 && grew > 0) ui.feed.scrollTop = prevTop + grew;
+}
+
+function renderSettingsList(target, items, mode = "checkbox") {
+  target.innerHTML = "";
+  for (const item of items) {
+    const row = document.createElement("label");
+    row.className = "settings-row";
+    if (mode === "text") {
+      if (item.kind === "bool") {
+        row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" data-kind="bool" ${item.value ? "checked" : ""} />`;
+      } else {
+        row.innerHTML = `<span>${item.label}</span><input data-key="${item.key}" data-kind="${item.kind || "text"}" value="${String(item.value ?? "")}" />`;
+      }
+    } else {
+      row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" ${item.enabled ? "checked" : ""} />`;
+    }
+    target.appendChild(row);
+  }
+}
+
+function renderGroupedTools() {
+  ui.toolsList.innerHTML = "";
+  for (const [groupName, items] of groupTools(state.tools)) {
+    const group = document.createElement("section");
+    group.className = "settings-group";
+    group.innerHTML = `<h4>${groupName}</h4><div class="settings-list"></div>`;
+    const list = group.querySelector(".settings-list");
+    renderSettingsList(list, items.map((t) => ({ key: t.name, label: t.name, enabled: !t.disabled })), "checkbox");
+    ui.toolsList.appendChild(group);
+  }
+}
+
+function populateSettingsPanels() {
+  renderGroupedTools();
+
+  const vars = state.allVariables || state.runtime?.variables || {};
+  const entries = Object.entries(vars);
+  const memoryEntries = entries.filter(([k]) => /(memory|compact|collation|timeout|max_)/i.test(k));
+  const generalEntries = entries.filter(([k]) => !/(memory|compact|collation|timeout|max_)/i.test(k));
+
+  const toItem = ([key, value]) => ({ key, label: key, value, kind: typeof value === "boolean" ? "bool" : typeof value === "number" ? "number" : "text" });
+  renderSettingsList(ui.variablesList, generalEntries.map(toItem), "text");
+  renderSettingsList(ui.memoryList, memoryEntries.map(toItem), "text");
+}
+
+async function refreshWorkspace() {
+  try {
+    const data = await fetchJson("/api/workspaces", {}, 20000);
+    const folders = Array.isArray(data.folders) ? data.folders : [];
+    const tracked = Array.isArray(data.tracked_files) ? data.tracked_files.length : 0;
+    ui.workspaceFolders.innerHTML = "";
+    for (const folder of folders) {
+      const row = document.createElement("div");
+      row.className = "workspace-folder";
+      row.innerHTML = `<span title="${folder}">${folder}</span><button class="workspace-remove" title="Remove">−</button>`;
+      row.querySelector(".workspace-remove").addEventListener("click", async () => {
+        await fetchJson("/api/workspaces/remove", { method: "POST", body: JSON.stringify({ path: folder }) });
+        await refreshWorkspace();
+      });
+      ui.workspaceFolders.appendChild(row);
+    }
+
+    ui.workspaceStatus.textContent = folders.length
+      ? `${folders.length} folder${folders.length === 1 ? "" : "s"} • ${tracked} tracked file${tracked === 1 ? "" : "s"}`
+      : "No workspace attached";
+  } catch {
+    ui.workspaceStatus.textContent = "Workspace unavailable";
+  }
 }
 
 async function refreshRuntime() {
   try {
     const runtime = await fetchJson("/api/runtime");
     state.runtime = runtime;
-    state.serverActiveSession = runtime.session_name || "";
-    if (!state.currentSession) state.currentSession = state.serverActiveSession;
-    await refreshModels(runtime.provider);
-    setModelSelectOptions(ui.modelInput, state.modelsByProvider[runtime.provider] || [], runtime.model || "");
-    setModelSelectOptions(ui.settingsModelInput, state.modelsByProvider[runtime.provider] || [], runtime.model || "");
+    state.serverSession = runtime.session_name || state.serverSession;
+    if (!state.currentSession) state.currentSession = runtime.session_name || "";
     ui.agenticToggle.checked = !!runtime.agentic;
     ui.thinkingToggle.checked = !!runtime.thinking;
-    ui.systemPromptInput.value = runtime.system_instruction || "";
-    ui.agenticBasePromptInput.value = runtime.agentic_system_base || "";
-    ui.agenticModeDefaultInput.value = runtime.agentic_mode_prompts?.default || "";
-    ui.agenticModeDebugInput.value = runtime.agentic_mode_prompts?.debug || "";
-    ui.agenticModeFeatureInput.value = runtime.agentic_mode_prompts?.feature || "";
-    ui.agenticModeResearchInput.value = runtime.agentic_mode_prompts?.research || "";
-
-    ui.runtimeSummary.textContent = [
-      `session: ${runtime.session_name}`,
-      `provider: ${runtime.provider}`,
-      `model: ${runtime.model}`,
-      `agentic: ${runtime.agentic}`,
-      `thinking: ${runtime.thinking}`,
-      `disabled_tools: ${(runtime.disabled_tools || []).length}`,
-    ].join("\n");
-    setConnected(true, "Connected");
+    ui.yoloToggle.checked = !!runtime.variables?.yolo;
+    if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = !!runtime.agentic;
+    if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = !!runtime.thinking;
+    const model = runtime.model || "";
+    ui.modelInput.innerHTML = `<option value="${model}">${model || "(default)"}</option>`;
+    setStatus("Connected", "connected");
   } catch (err) {
-    setConnected(false, `Error: ${err.message}`);
-    pushEvent("runtime.error", String(err));
-  }
-}
-
-function setModelSelectOptions(selectEl, models, selectedValue = "") {
-  const options = Array.isArray(models) ? models.filter(Boolean) : [];
-  const current = String(selectedValue || "").trim();
-  const uniq = [...new Set(options)];
-  if (current && !uniq.includes(current)) uniq.unshift(current);
-  if (!uniq.length) uniq.push(current || "");
-
-  selectEl.innerHTML = "";
-  for (const model of uniq) {
-    const opt = document.createElement("option");
-    opt.value = model;
-    opt.textContent = model || "(provider default)";
-    if (model === current) opt.selected = true;
-    selectEl.appendChild(opt);
-  }
-}
-
-async function refreshModels(providerName = state.runtime?.provider || "openai") {
-  const provider = String(providerName || "").trim();
-  if (!provider) return;
-  try {
-    const data = await fetchJson(`/api/models?provider=${encodeURIComponent(provider)}`);
-    state.modelsByProvider[provider] = data.models || [];
-    if (data.error) {
-      pushEvent("models.warning", `${provider}: ${data.error}`);
-    }
-  } catch (err) {
-    pushEvent("models.error", String(err));
-    if (!state.modelsByProvider[provider]) state.modelsByProvider[provider] = [];
-  }
-}
-
-async function refreshStats() {
-  try {
-    const statePayload = await fetchJson("/api/state");
-    const token = statePayload.state?.token_counts || {};
-    const historyLength = statePayload.state?.history_length ?? 0;
-    const disabledTools = (statePayload.state?.disabled_tools || []).length;
-    const memoryInfo = performance?.memory
-      ? `${(performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)}MB / ${(performance.memory.totalJSHeapSize / 1024 / 1024).toFixed(1)}MB`
-      : "n/a";
-    ui.statsSummary.textContent = [
-      `history_length: ${historyLength}`,
-      `tokens_total: ${token.total ?? 0}`,
-      `tokens_in/out: ${token.input ?? 0} / ${token.output ?? 0}`,
-      `est_cost_total: ${token.total_cost ?? 0}`,
-      `disabled_tools: ${disabledTools}`,
-      `browser_memory: ${memoryInfo}`,
-    ].join("\n");
-  } catch (err) {
-    ui.statsSummary.textContent = `stats error: ${String(err)}`;
-  }
-}
-
-async function refreshSessions() {
-  try {
-    const data = await fetchJson("/api/sessions");
-    state.sessions = data.sessions || [];
-    const candidate = state.currentSession || data.current_session_name || "";
-    state.currentSession = state.sessions.includes(candidate) ? candidate : (data.current_session_name || state.sessions[0] || "");
-    for (const name of state.sessions) {
-      if (!state.sessionStatus[name]) state.sessionStatus[name] = "idle";
-    }
-    renderSessionTabs();
-  } catch (err) {
-    pushEvent("sessions.error", String(err));
-  }
-}
-
-function normalizePath(value) {
-  return String(value || "").replace(/\\/g, "/").replace(/\/+$/, "");
-}
-
-function buildWorkspaceTree(folders, trackedFiles) {
-  const root = {};
-  const normalizedFolders = folders.map(normalizePath);
-  for (const filePath of trackedFiles || []) {
-    const normalizedFile = normalizePath(filePath);
-    const baseFolder = normalizedFolders.find((folder) => normalizedFile.startsWith(`${folder}/`) || normalizedFile === folder);
-    if (!baseFolder) continue;
-    const relPath = normalizedFile.slice(baseFolder.length + 1);
-    if (!relPath) continue;
-    const segments = relPath.split("/").filter(Boolean);
-    let cursor = root[baseFolder] || (root[baseFolder] = { __files: [], __dirs: {} });
-    for (let i = 0; i < segments.length; i += 1) {
-      const seg = segments[i];
-      const isLeaf = i === segments.length - 1;
-      if (isLeaf) {
-        cursor.__files.push(seg);
-      } else {
-        cursor.__dirs[seg] = cursor.__dirs[seg] || { __files: [], __dirs: {} };
-        cursor = cursor.__dirs[seg];
-      }
-    }
-  }
-  return root;
-}
-
-function renderTreeNode(container, name, node) {
-  const details = document.createElement("details");
-  details.open = true;
-  const summary = document.createElement("summary");
-  summary.textContent = `📁 ${name}`;
-  details.appendChild(summary);
-  const dirNames = Object.keys(node.__dirs || {}).sort((a, b) => a.localeCompare(b));
-  for (const dir of dirNames) {
-    renderTreeNode(details, dir, node.__dirs[dir]);
-  }
-  const files = [...(node.__files || [])].sort((a, b) => a.localeCompare(b));
-  for (const file of files) {
-    const row = document.createElement("div");
-    row.className = "tree-file";
-    row.textContent = `📄 ${file}`;
-    details.appendChild(row);
-  }
-  container.appendChild(details);
-}
-
-function renderWorkspace() {
-  const folders = state.workspace.folders || [];
-  const tracked = state.workspace.tracked_files || [];
-  ui.workspaceTree.innerHTML = "";
-  ui.workspaceFoldersList.innerHTML = "";
-
-  if (!folders.length) {
-    ui.workspaceTree.textContent = "No folders attached.";
-    return;
-  }
-
-  const tree = buildWorkspaceTree(folders, tracked);
-  for (const folder of folders) {
-    const folderNode = tree[normalizePath(folder)] || { __files: [], __dirs: {} };
-    renderTreeNode(ui.workspaceTree, folder.split("/").filter(Boolean).pop() || folder, folderNode);
-
-    const row = document.createElement("div");
-    row.className = "workspace-folder-row";
-    const label = document.createElement("div");
-    label.className = "desc";
-    label.textContent = folder;
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "ghost-btn workspace-remove-btn";
-    removeBtn.textContent = "− Remove";
-    removeBtn.addEventListener("click", async () => {
-      await removeWorkspaceFolder(folder);
-    });
-    row.appendChild(label);
-    row.appendChild(removeBtn);
-    ui.workspaceFoldersList.appendChild(row);
-  }
-}
-
-async function refreshWorkspace() {
-  try {
-    const data = await fetchJson("/api/workspaces");
-    state.workspace = {
-      folders: data.folders || [],
-      tracked_files: data.tracked_files || [],
-    };
-    renderWorkspace();
-  } catch (err) {
-    pushEvent("workspace.error", String(err));
-  }
-}
-
-async function addWorkspaceFolder(path) {
-  const value = String(path || "").trim();
-  if (!value) return;
-  try {
-    await fetchJson("/api/workspaces/add", { method: "POST", body: JSON.stringify({ path: value }) });
-    ui.workspaceAddInput.value = "";
-    pushEvent("workspace.added", value);
-    await refreshWorkspace();
-  } catch (err) {
-    pushEvent("workspace.add_error", String(err));
-  }
-}
-
-async function removeWorkspaceFolder(path) {
-  try {
-    await fetchJson("/api/workspaces/remove", { method: "POST", body: JSON.stringify({ path }) });
-    pushEvent("workspace.removed", path);
-    await refreshWorkspace();
-  } catch (err) {
-    pushEvent("workspace.remove_error", String(err));
+    setStatus(`Error: ${err.message}`, "error");
   }
 }
 
@@ -490,603 +716,590 @@ async function refreshTools() {
   try {
     const data = await fetchJson("/api/tools");
     state.tools = data.tools || [];
-  } catch (err) {
-    pushEvent("tools.error", String(err));
+  } catch {
+    state.tools = [];
   }
 }
 
-function connectSSE() {
-  if (state.eventSource) state.eventSource.close();
-  state.eventSource = new EventSource(api("/api/events"));
-  state.eventSource.onmessage = (evt) => {
-    try {
-      const payload = JSON.parse(evt.data);
-      pushEvent(payload.event || "event", payload.payload || payload);
-    } catch {
-      pushEvent("event", evt.data);
-    }
-  };
-  state.eventSource.onerror = () => setConnected(false, "SSE disconnected");
-}
-
-function renderSettingField(def, values) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "setting-item";
-  const left = document.createElement("div");
-  left.innerHTML = `<div class="label">${def.label}</div><div class="desc">${def.description || def.key}</div>`;
-  wrapper.title = `${def.key}: ${def.description || ""}`;
-  wrapper.appendChild(left);
-
-  const value = values[def.key];
-  let input;
-  if (def.type === "bool") {
-    input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = !!value;
-  } else if (def.type === "number") {
-    input = document.createElement("input");
-    input.type = "number";
-    input.value = Number(value ?? 0);
-  } else if (def.type === "select") {
-    input = document.createElement("select");
-    for (const option of def.options || []) {
-      const opt = document.createElement("option");
-      opt.value = option;
-      opt.textContent = option;
-      if ((value ?? "") === option) opt.selected = true;
-      input.appendChild(opt);
-    }
-  } else {
-    input = document.createElement("input");
-    input.type = "text";
-    input.value = value ?? "";
-  }
-  input.dataset.varKey = def.key;
-  wrapper.appendChild(input);
-  return wrapper;
-}
-
-function renderToolsSettings() {
-  const disabled = new Set(state.runtime?.disabled_tools || []);
-  ui.toolsList.innerHTML = "";
-
-  const grouped = new Map();
-  const bucketForTool = (tool) => {
-    if (tool.name.startsWith("git_")) return "GIT";
-    if (tool.name.includes("url") || tool.name.includes("document")) return "Internet / External";
-    if (tool.execution_kind === "read") return "Read";
-    if (tool.execution_kind === "mutate") return "Write / Mutate";
-    if (tool.execution_kind === "memory") return "Memory";
-    if (tool.execution_kind === "control") return "Control";
-    return "Other";
-  };
-
-  for (const tool of state.tools) {
-    const bucket = bucketForTool(tool);
-    if (!grouped.has(bucket)) grouped.set(bucket, []);
-    grouped.get(bucket).push(tool);
-  }
-
-  const groupsContainer = document.createElement("div");
-  groupsContainer.className = "tool-groups";
-  for (const [groupName, tools] of grouped.entries()) {
-    const group = document.createElement("details");
-    group.className = "tool-group";
-    group.open = true;
-    group.innerHTML = `<summary>${groupName} (${tools.length})</summary>`;
-
-    const body = document.createElement("div");
-    body.className = "tool-group-body";
-    for (const tool of tools) {
-      const item = document.createElement("div");
-      item.className = "setting-item";
-      item.innerHTML = `<div><div class="label">${tool.name}</div><div class="desc">${tool.description || `${tool.execution_kind} · ${tool.server_policy}`}</div></div>`;
-      item.title = `${tool.name}: ${tool.description || `${tool.execution_kind} · ${tool.server_policy}`}`;
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = !disabled.has(tool.name);
-      checkbox.dataset.toolName = tool.name;
-      item.appendChild(checkbox);
-      body.appendChild(item);
-    }
-    group.appendChild(body);
-    groupsContainer.appendChild(group);
-  }
-  ui.toolsList.appendChild(groupsContainer);
-}
-
-function renderVariableSections() {
-  const vars = state.runtime?.variables || {};
-  ui.variablesList.innerHTML = "";
-  ui.memoryList.innerHTML = "";
-  for (const def of VARIABLE_DEFS) {
-    const field = renderSettingField(def, vars);
-    if (def.group === "memory") ui.memoryList.appendChild(field);
-    else ui.variablesList.appendChild(field);
+async function refreshStateVariables() {
+  try {
+    const data = await fetchJson("/api/state");
+    state.allVariables = data.variables || state.runtime?.variables || {};
+  } catch {
+    state.allVariables = state.runtime?.variables || {};
   }
 }
 
-function openModal() {
-  ui.settingsModal.classList.remove("hidden");
-  requestAnimationFrame(() => ui.settingsModal.classList.add("show"));
+async function refreshSessions() {
+  try {
+    const data = await fetchJson("/api/sessions", {}, 2500);
+    state.sessions = data.sessions || state.sessions || [];
+    if (!state.currentSession) state.currentSession = data.current || state.sessions[0] || "";
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
+  } catch {
+    if (!state.currentSession) state.currentSession = state.sessions[0] || "";
+  }
+  renderSessions();
 }
 
-function closeModal() {
-  ui.settingsModal.classList.remove("show");
-  setTimeout(() => ui.settingsModal.classList.add("hidden"), 180);
-}
+function renderSessions() {
+  ui.sessionList.innerHTML = "";
+  for (const name of state.sessions) {
+    const item = document.createElement("div");
+    const isPending = !!state.pendingBySession[name];
+    item.className = `session-item ${name === state.currentSession ? "active" : ""} ${isPending ? "pending" : ""}`;
+    item.innerHTML = `
+      <div class="session-row">
+        <button class="session-title">${isPending ? '<span class="session-pending-dot"></span>' : ""}${name}</button>
+        <button class="session-menu-btn" title="Session options">⋯</button>
+      </div>
+      <div class="session-popup hidden">
+        <input class="session-rename-input" value="${name}" />
+        <div class="session-popup-actions">
+          <button class="btn" data-action="apply-rename">Rename</button>
+          <button class="btn" data-action="delete">Delete</button>
+          <button class="btn" data-action="close">Close</button>
+        </div>
+      </div>
+    `;
 
-function openSimpleModal(modalEl) {
-  modalEl.classList.remove("hidden");
-  requestAnimationFrame(() => modalEl.classList.add("show"));
-}
-
-function closeSimpleModal(modalEl) {
-  modalEl.classList.remove("show");
-  setTimeout(() => modalEl.classList.add("hidden"), 180);
-}
-
-function renderSessionTabs() {
-  ui.sessionTabs.innerHTML = "";
-  for (const sessionName of state.sessions) {
-    const wrapper = document.createElement("div");
-    wrapper.className = `session-tab ${sessionName === state.currentSession ? "active" : ""}`;
-
-    const loadBtn = document.createElement("button");
-    loadBtn.className = "name";
-    const status = state.sessionStatus[sessionName] || "idle";
-    loadBtn.innerHTML = `<span class="status-light ${status}"></span>${sessionName}`;
-    loadBtn.title = sessionName;
-    loadBtn.addEventListener("click", () => loadSession(sessionName));
-
-    const menuBtn = document.createElement("button");
-    menuBtn.className = "menu-btn";
-    menuBtn.textContent = "⋯";
-    menuBtn.title = "Session actions";
-    const dropdown = document.createElement("div");
-    dropdown.className = "session-menu";
-
-    const editRow = document.createElement("div");
-    editRow.className = "session-menu-row";
-    editRow.innerHTML = "<span>Edit Name</span>";
-    const renameInput = document.createElement("input");
-    renameInput.type = "text";
-    renameInput.className = "session-rename-input";
-    renameInput.value = sessionName;
-    renameInput.addEventListener("keydown", async (evt) => {
-      if (evt.key === "Enter") {
-        await renameSession(sessionName, renameInput.value.trim());
-        dropdown.classList.remove("open");
-      }
-    });
-    renameInput.addEventListener("blur", async () => {
-      if (renameInput.value.trim() && renameInput.value.trim() !== sessionName) {
-        await renameSession(sessionName, renameInput.value.trim());
-      }
-    });
-    editRow.appendChild(renameInput);
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "session-delete-btn";
-    deleteBtn.innerHTML = "🗑 Delete";
-    deleteBtn.addEventListener("click", async () => {
-      await deleteSession(sessionName);
-      dropdown.classList.remove("open");
-    });
-
-    dropdown.appendChild(editRow);
-    dropdown.appendChild(deleteBtn);
-    menuBtn.addEventListener("click", (evt) => {
-      evt.preventDefault();
+    item.querySelector(".session-title").addEventListener("click", () => loadSession(name));
+    const popup = item.querySelector(".session-popup");
+    item.querySelector(".session-menu-btn").addEventListener("click", (evt) => {
       evt.stopPropagation();
-      document.querySelectorAll(".session-menu.open").forEach((m) => m.classList.remove("open"));
-      dropdown.classList.toggle("open");
+      ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
+      ui.sessionList.querySelectorAll(".session-item").forEach((i) => i.classList.remove("menu-open"));
+      popup.classList.toggle("hidden");
+      item.classList.toggle("menu-open", !popup.classList.contains("hidden"));
     });
-    dropdown.addEventListener("click", (evt) => evt.stopPropagation());
 
-    wrapper.appendChild(loadBtn);
-    wrapper.appendChild(menuBtn);
-    wrapper.appendChild(dropdown);
-    ui.sessionTabs.appendChild(wrapper);
+    item.querySelector('[data-action="apply-rename"]').addEventListener("click", async () => {
+      const newName = item.querySelector(".session-rename-input").value.trim();
+      if (!newName || newName === name) return;
+      await renameSession(name, newName);
+    });
+
+    item.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+      await deleteSession(name);
+    });
+
+    item.querySelector('[data-action="close"]').addEventListener("click", () => { popup.classList.add("hidden"); item.classList.remove("menu-open"); });
+    ui.sessionList.appendChild(item);
   }
+  renderActivityPanel();
+}
+
+async function refreshHistory(resetToBottom = true) {
+  const path = state.currentSession
+    ? `/api/history?limit=300&session_name=${encodeURIComponent(state.currentSession)}`
+    : "/api/history?limit=300";
+  const payload = await fetchJson(path, {}, 3000);
+  if (!state.currentSession && payload.session_name) {
+    state.currentSession = payload.session_name;
+    if (!state.sessions.includes(payload.session_name)) state.sessions.unshift(payload.session_name);
+    renderSessions();
+  }
+  state.loadedMessages = normalizedMessages(payload.history || []);
+  state.visibleCount = Math.min(24, state.loadedMessages.length || 24);
+  renderFeed(resetToBottom);
+  renderActivityPanel();
 }
 
 async function loadSession(name) {
-  state.currentSession = name;
-  renderSessionTabs();
-  await refreshHistory(name);
-  renderApprovalOverlay();
-  if (name === state.serverActiveSession) return;
-  try {
-    await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
-    state.serverActiveSession = name;
-    pushEvent("session.loaded", name);
-    await refreshRuntime();
-    await refreshSessions();
-    await refreshHistory(name);
-    await refreshWorkspace();
-    renderApprovalOverlay();
-  } catch (err) {
-    pushEvent("session.load_error", String(err));
+  if (Object.keys(state.pendingBySession).length > 0) {
+    state.currentSession = name;
+    renderSessions();
+    await refreshHistory(true);
+    ui.messageInput.value = state.draftBySession[state.currentSession] || "";
+    ui.messageInput.style.height = "auto";
+    ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+    renderActivityPanel();
+    return;
   }
+  await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name }) });
+  state.serverSession = name;
+  state.currentSession = name;
+  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
+  await refreshSessions();
+  await refreshRuntime();
+  await refreshHistory(true);
+  await refreshWorkspace();
+  ui.messageInput.value = state.draftBySession[state.currentSession] || "";
+  ui.messageInput.style.height = "auto";
+  ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+}
+
+async function createSession() {
+  const name = prompt("New session name:");
+  if (!name) return;
+  await fetchJson("/api/sessions/new", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+  state.serverSession = name.trim();
+  state.currentSession = name.trim();
+  await refreshSessions();
+  await loadSession(state.currentSession);
+}
+
+async function renameSession(currentName, newName) {
+  await fetchJson("/api/sessions/rename", { method: "POST", body: JSON.stringify({ name: currentName, new_name: newName.trim() }) });
+  if (state.serverSession === currentName) state.serverSession = newName.trim();
+  if (state.activityBySession[currentName] && currentName !== newName.trim()) {
+    state.activityBySession[newName.trim()] = state.activityBySession[currentName];
+    delete state.activityBySession[currentName];
+    persistActivity();
+  }
+  if (state.currentSession === currentName) state.currentSession = newName.trim();
+  await refreshSessions();
+  await refreshHistory(false);
 }
 
 async function deleteSession(name) {
-  try {
-    await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
-    pushEvent("session.deleted", name);
-    await refreshRuntime();
-    await refreshSessions();
-  } catch (err) {
-    pushEvent("session.delete_error", String(err));
+  await fetchJson("/api/sessions/delete", { method: "POST", body: JSON.stringify({ name }) });
+  if (state.serverSession === name) state.serverSession = "";
+  if (state.activityBySession[name]) {
+    delete state.activityBySession[name];
+    persistActivity();
   }
-}
-
-async function renameSession(name, newName) {
-  if (!newName || newName === name) return;
-  try {
-    await fetchJson("/api/sessions/rename", {
-      method: "POST",
-      body: JSON.stringify({ old_name: name, new_name: newName }),
-    });
-    pushEvent("session.renamed", `${name} → ${newName}`);
-    await refreshRuntime();
-    await refreshSessions();
-  } catch (err) {
-    pushEvent("session.rename_error", String(err));
-  }
-}
-
-function applyTheme() {
-  const mode = localStorage.getItem("mucli_gui_theme_mode") || "dark";
-  const accent = localStorage.getItem("mucli_gui_accent") || "orange";
-  document.documentElement.setAttribute("data-theme", mode);
-  document.documentElement.setAttribute("data-accent", accent);
-  ui.themeModeSelect.value = mode;
-  ui.accentSelect.value = accent;
-}
-
-async function sendMessage() {
-  const text = ui.messageInput.value.trim();
-  if (!text) return;
-  const sessionName = state.currentSession;
-  ui.messageInput.value = "";
-  pushEvent("message.out", text);
-  if (state.currentSession && state.currentSession !== state.serverActiveSession) {
-    await loadSession(state.currentSession);
-    if (state.currentSession !== state.serverActiveSession) {
-      pushEvent("message.error", "Could not activate selected session. Message not sent.");
-      return;
-    }
-  }
-  state.pendingBySession[sessionName] = { userText: text };
-  state.sessionStatus[sessionName] = "thinking";
-  renderSessionTabs();
-  renderConversation();
-  try {
-    const result = await fetchJson("/api/message", {
-      method: "POST",
-      body: JSON.stringify({ text, async: true }),
-    });
-    const taskId = result?.task?.task_id;
-    if (!taskId) {
-      delete state.pendingBySession[sessionName];
-      state.sessionStatus[sessionName] = "idle";
-      await refreshHistory();
-      renderSessionTabs();
-      renderConversation();
-      return;
-    }
-    await monitorMessageTask(taskId, sessionName);
-  } catch (err) {
-    pushEvent("message.error", String(err));
-    delete state.pendingBySession[sessionName];
-    state.sessionStatus[sessionName] = "error";
-    renderSessionTabs();
-    renderConversation();
-  }
-}
-
-async function monitorMessageTask(taskId, sessionName) {
-  for (let i = 0; i < 240; i += 1) {
-    const taskPayload = await fetchJson(`/api/tasks/${taskId}`);
-    const task = taskPayload.task || {};
-    if (task.status === "awaiting_approval") {
-      state.sessionStatus[sessionName] = "approval";
-      if (task.approval_id) {
-        try {
-          const approvalPayload = await fetchJson(`/api/approvals/${task.approval_id}`);
-          state.approvalsBySession[sessionName] = approvalPayload.approval;
-        } catch (err) {
-          pushEvent("approval.fetch_error", String(err));
-        }
-      }
-      renderSessionTabs();
-      renderApprovalOverlay();
-    } else if (task.status === "running" || task.status === "pending") {
-      state.sessionStatus[sessionName] = "thinking";
-      delete state.approvalsBySession[sessionName];
-      renderSessionTabs();
-      renderApprovalOverlay();
-    } else if (task.status === "completed") {
-      delete state.pendingBySession[sessionName];
-      delete state.approvalsBySession[sessionName];
-      state.sessionStatus[sessionName] = "idle";
-      if (state.currentSession === sessionName) {
-        await refreshHistory();
-      }
-      renderSessionTabs();
-      renderConversation();
-      return;
-    } else if (task.status === "error") {
-      delete state.pendingBySession[sessionName];
-      delete state.approvalsBySession[sessionName];
-      state.sessionStatus[sessionName] = "error";
-      renderSessionTabs();
-      renderConversation();
-      pushEvent("message.error", task.error || "Task failed");
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 900));
-  }
-  state.sessionStatus[sessionName] = "error";
-  renderSessionTabs();
+  if (state.currentSession === name) state.currentSession = "";
+  await refreshSessions();
+  await refreshRuntime();
+  await refreshHistory(false);
 }
 
 async function applyRuntime() {
-  try {
-    const res = await fetchJson("/api/runtime", {
-      method: "POST",
-      body: JSON.stringify({ model: ui.modelInput.value.trim(), agentic: ui.agenticToggle.checked, thinking: ui.thinkingToggle.checked }),
-    });
-    pushEvent("runtime.updated", res);
-    await refreshRuntime();
-  } catch (err) {
-    pushEvent("runtime.update_error", String(err));
-  }
+  const agentic = ui.agenticToggleSettings?.checked ?? ui.agenticToggle.checked;
+  const thinking = ui.thinkingToggleSettings?.checked ?? ui.thinkingToggle.checked;
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: ui.modelInput.value, agentic, thinking }) });
+  await refreshRuntime();
 }
 
 async function saveSettings() {
-  const disabled_tools = [];
-  ui.toolsList.querySelectorAll("input[data-tool-name]").forEach((input) => {
-    if (!input.checked) disabled_tools.push(input.dataset.toolName);
+  const disabled_tools = [...ui.toolsList.querySelectorAll('input[type="checkbox"]')].filter((x) => !x.checked).map((x) => x.dataset.key);
+  const variables = {};
+  [...ui.variablesList.querySelectorAll("input[data-key]"), ...ui.memoryList.querySelectorAll("input[data-key]")].forEach((x) => {
+    const raw = x.type === "checkbox" ? String(x.checked) : x.value;
+    variables[x.dataset.key] = parseVariableValue(raw, x.dataset.kind);
   });
 
-  const variables = { ...(state.runtime?.variables || {}) };
-  [...ui.variablesList.querySelectorAll("[data-var-key]"), ...ui.memoryList.querySelectorAll("[data-var-key]")].forEach((input) => {
-    const key = input.dataset.varKey;
-    if (!key) return;
-    if (input.type === "checkbox") variables[key] = input.checked;
-    else if (input.type === "number") variables[key] = Number(input.value || 0);
-    else variables[key] = input.value;
-  });
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ disabled_tools, variables }) });
 
-  localStorage.setItem("mucli_gui_theme_mode", ui.themeModeSelect.value);
-  localStorage.setItem("mucli_gui_accent", ui.accentSelect.value);
-  applyTheme();
+  localStorage.setItem(THEME_MODE_KEY, document.documentElement.dataset.mode || "dark");
+  localStorage.setItem(THEME_ACCENT_KEY, ui.customAccentInput.value || "#8b5cf6");
+  applyThemeFromStorage();
+  ui.settingsModal.classList.add("hidden");
+  await refreshRuntime();
+}
 
-  try {
-    const res = await fetchJson("/api/runtime", {
-      method: "POST",
-      body: JSON.stringify({
-        disabled_tools,
-        variables,
-        model: ui.settingsModelInput.value.trim(),
-        system_instruction: ui.systemPromptInput.value,
-        agentic_system_base: ui.agenticBasePromptInput.value,
-        agentic_mode_prompts: {
-          default: ui.agenticModeDefaultInput.value,
-          debug: ui.agenticModeDebugInput.value,
-          feature: ui.agenticModeFeatureInput.value,
-          research: ui.agenticModeResearchInput.value,
-        },
-      }),
-    });
-    pushEvent("settings.saved", res);
-    closeModal();
-    await refreshRuntime();
-    await refreshTools();
-  } catch (err) {
-    pushEvent("settings.save_error", String(err));
+async function clearConversationContext() {
+  await fetchJson("/api/command", { method: "POST", body: JSON.stringify({ command: "/clear" }) });
+  state.loadedMessages = [];
+  delete state.pendingBySession[state.currentSession];
+  state.taskBySession[state.currentSession] = { status: "completed", startedAt: Date.now(), taskId: "" };
+  pushActivity(state.currentSession, "Conversation cleared", "Cleared chat history for the current session.");
+  await refreshHistory(true);
+}
+
+function closeEventStream(sessionName) {
+  const src = state.eventSourceBySession[sessionName];
+  if (src) {
+    src.close();
+    delete state.eventSourceBySession[sessionName];
   }
 }
 
-async function runCommand(command) {
-  try {
-    const res = await fetchJson("/api/command", { method: "POST", body: JSON.stringify({ command }) });
-    pushEvent(`command ${command}`, res);
-    await refreshRuntime();
-  } catch (err) {
-    pushEvent("command.error", String(err));
+function mapEventToActivity(evt) {
+  const payload = evt.payload || {};
+  if (evt.event === "trace.tool") {
+    return {
+      title: `Using tool: ${payload.tool_name || "unknown"}`,
+      detail: payload.visible_result ? String(payload.visible_result).slice(0, 220) : "",
+    };
   }
+  if (evt.event === "trace.tool_result") return { title: "Tool result", detail: payload.preview || "" };
+  if (evt.event === "trace.info") return { title: "Info", detail: payload.message || "" };
+  if (evt.event === "trace.error") return { title: "Error", detail: payload.message || "" };
+  if (evt.event === "trace.message") return { title: `Model message (${payload.role || "assistant"})`, detail: String(payload.content || "").slice(0, 220) };
+  if (evt.event === "task.awaiting_approval") return { title: "Awaiting approval", detail: "A tool call needs approval before continuing." };
+  if (evt.event === "task.awaiting_input") return { title: "Awaiting input", detail: payload.blocker?.reason || "Task requires more input." };
+  if (evt.event === "task.running") return { title: "Task running", detail: "" };
+  if (evt.event === "task.completed") return { title: "Task complete", detail: "" };
+  if (evt.event === "task.error") return { title: "Task error", detail: payload.error || "" };
+  return null;
 }
 
-async function resolveApproval(decision) {
-  const approval = state.approvalsBySession[state.currentSession];
-  if (!approval) return;
-  try {
-    await fetchJson("/api/approvals/resolve", {
-      method: "POST",
-      body: JSON.stringify({
-        approval_id: approval.approval_id,
-        decision,
-        reason: ui.approvalReasonInput.value.trim() || undefined,
-      }),
-    });
-    pushEvent("approval.resolved", { decision, approval_id: approval.approval_id });
-    delete state.approvalsBySession[state.currentSession];
-    renderApprovalOverlay();
-  } catch (err) {
-    pushEvent("approval.resolve_error", String(err));
-  }
-}
-
-function setupTabSwitching() {
-  ui.settingsTabs.querySelectorAll(".settings-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      const name = tab.dataset.tab;
-      ui.settingsTabs.querySelectorAll(".settings-tab").forEach((t) => t.classList.remove("active"));
-      document.querySelectorAll(".settings-pane").forEach((pane) => pane.classList.remove("active"));
-      tab.classList.add("active");
-      document.querySelector(`.settings-pane[data-pane="${name}"]`)?.classList.add("active");
-    });
-  });
-}
-
-function setupHandlers() {
-  ui.sendBtn.addEventListener("click", sendMessage);
-  ui.refreshBtn.addEventListener("click", async () => {
-    await refreshRuntime();
-    await refreshTools();
-    await refreshStats();
-  });
-  ui.clearLogBtn.addEventListener("click", () => {
-    state.events = [];
-    localStorage.removeItem("mucli_gui_events");
-    renderEvents();
-  });
-  ui.toggleMetaBtn.addEventListener("click", () => {
-    ui.metaPanel.classList.toggle("collapsed");
-    const collapsed = ui.metaPanel.classList.contains("collapsed");
-    ui.toggleMetaBtn.textContent = collapsed ? "Metadata ▶" : "Metadata ◀";
-  });
-  ui.applyRuntimeBtn.addEventListener("click", applyRuntime);
-
-  ui.apiBaseInput.addEventListener("change", async () => {
-    state.apiBase = ui.apiBaseInput.value.trim().replace(/\/$/, "");
-    localStorage.setItem("mucli_gui_api_base", state.apiBase);
-    connectSSE();
-    await refreshRuntime();
-    await refreshTools();
-    await refreshModels(state.runtime?.provider);
-  });
-
-  document.querySelectorAll(".cmd-btn").forEach((btn) => btn.addEventListener("click", () => runCommand(btn.dataset.cmd)));
-  ui.chooseWorkspaceBtn.addEventListener("click", async () => {
-    const path = window.prompt("Workspace folder path");
-    if (!path) return;
-    await addWorkspaceFolder(path);
-  });
-  ui.approveBtn.addEventListener("click", () => resolveApproval("approve"));
-  ui.rejectBtn.addEventListener("click", () => resolveApproval("reject"));
-  ui.explainBtn.addEventListener("click", () => resolveApproval("explain"));
-
-  ui.openSettingsBtn.addEventListener("click", async () => {
-    openModal();
-    await refreshRuntime();
-    await refreshTools();
-    await refreshModels(state.runtime?.provider);
-    await refreshWorkspace();
-    renderToolsSettings();
-    renderVariableSections();
-  });
-  ui.closeSettingsBtn.addEventListener("click", closeModal);
-  ui.settingsModal.addEventListener("click", (evt) => {
-    if (evt.target === ui.settingsModal) closeModal();
-  });
-  document.addEventListener("keydown", (evt) => {
-    if (evt.key === "Escape") {
-      closeModal();
-      closeSimpleModal(ui.newSessionModal);
-      document.querySelectorAll(".session-menu.open").forEach((m) => m.classList.remove("open"));
-    }
-    if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") sendMessage();
-  });
-  ui.saveSettingsBtn.addEventListener("click", saveSettings);
-  ui.workspaceAddBtn.addEventListener("click", async () => addWorkspaceFolder(ui.workspaceAddInput.value));
-  ui.workspaceAddInput.addEventListener("keydown", async (evt) => {
-    if (evt.key === "Enter") {
-      evt.preventDefault();
-      await addWorkspaceFolder(ui.workspaceAddInput.value);
-    }
-  });
-
-  ui.themeModeSelect.addEventListener("change", () => {
-    localStorage.setItem("mucli_gui_theme_mode", ui.themeModeSelect.value);
-    applyTheme();
-  });
-  ui.accentSelect.addEventListener("change", () => {
-    localStorage.setItem("mucli_gui_accent", ui.accentSelect.value);
-    applyTheme();
-  });
-
-  ui.collapseBtn.addEventListener("click", () => {
-    ui.configPanel.classList.add("collapsed");
-    ui.appShell.classList.add("panel-collapsed");
-    ui.expandBtn.classList.remove("hidden");
-  });
-  ui.expandBtn.addEventListener("click", () => {
-    ui.configPanel.classList.remove("collapsed");
-    ui.appShell.classList.remove("panel-collapsed");
-    ui.expandBtn.classList.add("hidden");
-  });
-
-  ui.newSessionBtn.addEventListener("click", () => openSimpleModal(ui.newSessionModal));
-  ui.newSessionBtn.addEventListener("click", async () => {
-    const provider = ui.newSessionProviderSelect.value || state.runtime?.provider || "openai";
-    await refreshModels(provider);
-    setModelSelectOptions(ui.newSessionModelInput, state.modelsByProvider[provider] || [], "");
-  });
-  ui.newSessionProviderSelect.addEventListener("change", async () => {
-    const provider = ui.newSessionProviderSelect.value || state.runtime?.provider || "openai";
-    await refreshModels(provider);
-    setModelSelectOptions(ui.newSessionModelInput, state.modelsByProvider[provider] || [], "");
-  });
-  ui.closeNewSessionBtn.addEventListener("click", () => closeSimpleModal(ui.newSessionModal));
-  ui.newSessionModal.addEventListener("click", (evt) => {
-    if (evt.target === ui.newSessionModal) closeSimpleModal(ui.newSessionModal);
-  });
-  ui.createSessionConfirmBtn.addEventListener("click", async () => {
-    const name = ui.newSessionNameInput.value.trim();
-    const provider = ui.newSessionProviderSelect.value.trim();
-    const model = ui.newSessionModelInput.value.trim();
-
+function startTaskEventStream(taskId, sessionName) {
+  closeEventStream(sessionName);
+  const es = new EventSource(api(`/api/events?task_id=${encodeURIComponent(taskId)}`));
+  state.eventSourceBySession[sessionName] = es;
+  const handleEvent = (raw) => {
+    if (!raw?.data) return;
+    let evt;
     try {
-      await fetchJson("/api/sessions/new", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      });
-      if (provider) {
-        await fetchJson("/api/command", {
-          method: "POST",
-          body: JSON.stringify({ command: `/provider ${provider}` }),
-        });
-      }
-      if (model) {
-        await fetchJson("/api/runtime", {
-          method: "POST",
-          body: JSON.stringify({ model }),
-        });
-      }
-      closeSimpleModal(ui.newSessionModal);
-      pushEvent("session.created", { name: name || "(auto)", provider, model });
-      await refreshRuntime();
-      await refreshSessions();
-      await refreshHistory();
-    } catch (err) {
-      pushEvent("session.create_error", String(err));
+      evt = JSON.parse(raw.data);
+    } catch {
+      return;
+    }
+    const mapped = mapEventToActivity(evt);
+    if (!mapped) return;
+    if (state.taskBySession[sessionName]) {
+      if (evt.event === "task.completed") state.taskBySession[sessionName].status = "completed";
+      if (evt.event === "task.error") state.taskBySession[sessionName].status = "error";
+      if (evt.event === "task.awaiting_approval") state.taskBySession[sessionName].status = "awaiting_approval";
+      if (evt.event === "task.awaiting_input") state.taskBySession[sessionName].status = "awaiting_input";
+      if (evt.event === "task.running") state.taskBySession[sessionName].status = "running";
+    }
+    if (evt.event === "trace.tool" && memoryToolName(evt.payload?.tool_name)) {
+      const toolName = String(evt.payload?.tool_name || "");
+      state.lastMemoryToolBySession[sessionName] = toolName;
+      pushMemoryEvent(sessionName, `Tool: ${toolName}`, JSON.stringify(evt.payload?.tool_args || {}, null, 2));
+      refreshMemoryRuntime(sessionName);
+      refreshMemoryBuffers(sessionName);
+    }
+    if (evt.event === "trace.tool_result" && state.lastMemoryToolBySession[sessionName]) {
+      pushMemoryEvent(
+        sessionName,
+        `Result: ${state.lastMemoryToolBySession[sessionName]}`,
+        String(evt.payload?.preview || evt.payload?.result || "").slice(0, 600),
+      );
+    }
+    pushActivity(sessionName, mapped.title, mapped.detail);
+    const pending = state.pendingBySession[sessionName];
+    if (pending) pending.latestActivity = mapped.title;
+    renderFeed(false);
+  };
+  [
+    "stream.open",
+    "task.created",
+    "task.running",
+    "task.awaiting_approval",
+    "task.awaiting_input",
+    "task.completed",
+    "task.error",
+    "trace.tool",
+    "trace.tool_result",
+    "trace.message",
+    "trace.info",
+    "trace.error",
+  ].forEach((name) => es.addEventListener(name, handleEvent));
+  es.onerror = () => {
+    pushActivity(sessionName, "Activity stream disconnected", "Waiting for task status updates.");
+    closeEventStream(sessionName);
+  };
+}
+
+function startTaskTicker(sessionName) {
+  if (state.taskPollTimersBySession[sessionName]) clearInterval(state.taskPollTimersBySession[sessionName]);
+  state.taskPollTimersBySession[sessionName] = setInterval(() => {
+    if (!state.pendingBySession[sessionName]) return;
+    if (sessionName === state.currentSession) {
+      renderFeed(false);
+      renderActivityPanel();
+    }
+  }, 1000);
+}
+
+function stopTaskTicker(sessionName) {
+  if (state.taskPollTimersBySession[sessionName]) {
+    clearInterval(state.taskPollTimersBySession[sessionName]);
+    delete state.taskPollTimersBySession[sessionName];
+  }
+}
+
+async function waitForTaskDone(taskId, sessionName) {
+  while (true) {
+    const payload = await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}`);
+    const task = payload.task || {};
+    const status = task.status || "pending";
+    state.taskBySession[sessionName].status = status;
+    renderActivityPanel();
+    if (status === "completed" || status === "error") return task;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+}
+
+function runningPendingSessions() {
+  return Object.entries(state.pendingBySession).filter(([, p]) => (p?.status || "running") !== "queued").map(([name]) => name);
+}
+
+async function processQueuedSends() {
+  if (runningPendingSessions().length) return;
+  const next = state.sendQueue.shift();
+  if (!next) return;
+  if (state.pendingBySession[next.sessionName]?.status === "queued") {
+    delete state.pendingBySession[next.sessionName];
+    renderSessions();
+  }
+  await executeSend(next.sessionName, next.text);
+}
+
+async function executeSend(sessionAtSend, text) {
+  if (state.serverSession !== sessionAtSend) {
+    await fetchJson("/api/sessions/load", { method: "POST", body: JSON.stringify({ name: sessionAtSend }) });
+    state.serverSession = sessionAtSend;
+  }
+  if (state.pendingBySession[sessionAtSend]) return;
+  state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now(), status: "running" };
+  state.taskBySession[sessionAtSend] = { status: "running", startedAt: Date.now(), taskId: "" };
+  state.draftBySession[sessionAtSend] = "";
+  persistDrafts();
+  pushActivity(sessionAtSend, "Message sent", text.slice(0, 220));
+  renderSessions();
+  if (state.currentSession === sessionAtSend) renderFeed(true);
+
+  ui.messageInput.value = "";
+  ui.messageInput.style.height = "auto";
+  startTaskTicker(sessionAtSend);
+  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+  try {
+    const start = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend, async: true }) });
+    const taskId = start.task?.task_id;
+    if (!taskId) throw new Error("Task ID missing from async response.");
+    state.taskBySession[sessionAtSend].taskId = taskId;
+    state.pendingBySession[sessionAtSend].latestActivity = "Thinking";
+    pushActivity(sessionAtSend, "Task started", `Task ID: ${taskId}`);
+    startTaskEventStream(taskId, sessionAtSend);
+    const finalTask = await waitForTaskDone(taskId, sessionAtSend);
+    if (finalTask.status === "error") {
+      throw new Error(finalTask.error || "Task failed.");
+    }
+    pushActivity(sessionAtSend, "Final response received", "");
+  } finally {
+    closeEventStream(sessionAtSend);
+    stopTaskTicker(sessionAtSend);
+    delete state.pendingBySession[sessionAtSend];
+    renderSessions();
+    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+    if (state.taskBySession[sessionAtSend]?.status === "running") {
+      state.taskBySession[sessionAtSend].status = "completed";
+    }
+    if (state.currentSession === sessionAtSend) {
+      await refreshHistory(true);
+      await refreshWorkspace();
+      renderActivityPanel();
+    }
+    processQueuedSends().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  }
+}
+
+async function sendMessage(evt) {
+  evt?.preventDefault();
+  const text = ui.messageInput.value.trim();
+  if (!text) return;
+  const sessionAtSend = state.currentSession;
+  if (state.pendingBySession[sessionAtSend]) return;
+
+  const running = runningPendingSessions();
+  if (running.length) {
+    state.sendQueue.push({ sessionName: sessionAtSend, text });
+    state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: `Queued behind ${running[0]}`, startedAt: Date.now(), status: "queued" };
+    state.draftBySession[sessionAtSend] = "";
+    persistDrafts();
+    pushActivity(sessionAtSend, "Message queued", `Queued while ${running[0]} is running.`);
+    renderSessions();
+    if (state.currentSession === sessionAtSend) renderFeed(true);
+    ui.messageInput.value = "";
+    ui.messageInput.style.height = "auto";
+    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+    return;
+  }
+  await executeSend(sessionAtSend, text);
+}
+
+function wireEvents() {
+  ui.apiBaseInput.addEventListener("change", async () => {
+    state.apiBase = ui.apiBaseInput.value.trim() || state.apiBase;
+    localStorage.setItem("mucli_gui_api_base", state.apiBase);
+    await bootstrap();
+  });
+  ui.applyRuntimeBtn.addEventListener("click", () => applyRuntime().catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.newSessionBtn.addEventListener("click", () => createSession().catch((err) => setStatus(`Error: ${err.message}`, "error")));
+
+  ui.feed.addEventListener("scroll", () => {
+    if (ui.feed.scrollTop < 40 && state.visibleCount < state.loadedMessages.length) {
+      state.visibleCount = Math.min(state.loadedMessages.length, state.visibleCount + 16);
+      renderFeed(false);
     }
   });
+
+  ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
+  ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
+  ui.memoryOption.addEventListener("click", () => {
+    ui.chatMenu.classList.add("hidden");
+    openMemoryModal();
+  });
+  ui.clearChatOption.addEventListener("click", () => {
+    ui.chatMenu.classList.add("hidden");
+    clearConversationContext().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.agenticToggle.addEventListener("change", () => { if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = ui.agenticToggle.checked; });
+  ui.thinkingToggle.addEventListener("change", () => { if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked; });
+  ui.yoloToggle.addEventListener("change", () => {
+    fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ variables: { yolo: !!ui.yoloToggle.checked } }) })
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.approvalApproveBtn.addEventListener("click", () => resolveApproval("y").catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.approvalRejectBtn.addEventListener("click", () => resolveApproval("n").catch((err) => setStatus(`Error: ${err.message}`, "error")));
+  ui.approvalExplainBtn.addEventListener("click", () => resolveApproval("e").catch((err) => setStatus(`Error: ${err.message}`, "error")));
   document.addEventListener("click", () => {
-    document.querySelectorAll(".session-menu.open").forEach((m) => m.classList.remove("open"));
+    ui.chatMenu.classList.add("hidden");
+    ui.attachMenu.classList.add("hidden");
+    ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
+    ui.sessionList.querySelectorAll(".session-item").forEach((i) => i.classList.remove("menu-open"));
+  });
+
+  const autoResizeInput = () => {
+    ui.messageInput.style.height = "auto";
+    ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+  };
+  ui.messageInput.addEventListener("input", () => {
+    autoResizeInput();
+    if (!state.currentSession) return;
+    state.draftBySession[state.currentSession] = ui.messageInput.value;
+    persistDrafts();
+  });
+  autoResizeInput();
+
+  ui.fileBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    ui.chatMenu.classList.add("hidden");
+    ui.attachMenu.classList.toggle("hidden");
+  });
+  ui.attachMenu.addEventListener("click", (evt) => evt.stopPropagation());
+  ui.attachFileOption.addEventListener("click", () => {
+    ui.attachMenu.classList.add("hidden");
+    ui.fileInput.click();
+  });
+  ui.attachFolderOption.addEventListener("click", () => {
+    ui.attachMenu.classList.add("hidden");
+    ui.folderModal.classList.remove("hidden");
+  });
+  ui.attachCloseOption.addEventListener("click", () => ui.attachMenu.classList.add("hidden"));
+
+  ui.fileInput.addEventListener("change", () => {
+    const file = ui.fileInput.files?.[0];
+    if (!file) return;
+    const marker = `[attached file: ${file.name}]`;
+    ui.messageInput.value = ui.messageInput.value.trim() ? `${ui.messageInput.value.trim()}
+${marker}` : marker;
+    autoResizeInput();
+  });
+
+
+  const openFolderModal = () => {
+    ui.folderPathInput.value = "";
+    ui.folderModal.classList.remove("hidden");
+    ui.folderPathInput.focus();
+  };
+
+  ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
+  ui.browseFolderBtn.addEventListener("click", async () => {
+    ui.browseFolderBtn.disabled = true;
+    const previousText = ui.browseFolderBtn.textContent;
+    ui.browseFolderBtn.textContent = "Browsing…";
+    try {
+      const data = await fetchJson("/api/workspaces/browse", { method: "POST", body: JSON.stringify({}) }, 20000);
+      if (data?.path) {
+        ui.folderPathInput.value = data.path;
+        ui.folderPathInput.focus();
+      } else {
+        setStatus("No folder selected.", "error");
+      }
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, "error");
+    } finally {
+      ui.browseFolderBtn.disabled = false;
+      ui.browseFolderBtn.textContent = previousText;
+    }
+  });
+  ui.attachFolderConfirmBtn.addEventListener("click", async () => {
+    const path = ui.folderPathInput.value.trim();
+    if (!path) return;
+    ui.attachFolderConfirmBtn.disabled = true;
+    const originalText = ui.attachFolderConfirmBtn.textContent;
+    ui.attachFolderConfirmBtn.textContent = "Attaching…";
+    try {
+      await fetchJson(
+        "/api/workspaces/add",
+        { method: "POST", body: JSON.stringify({ path }) },
+        60000,
+      );
+      ui.folderModal.classList.add("hidden");
+      await refreshWorkspace();
+      setStatus("Workspace folder attached.", "connected");
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, "error");
+    } finally {
+      ui.attachFolderConfirmBtn.disabled = false;
+      ui.attachFolderConfirmBtn.textContent = originalText;
+    }
+  });
+  ui.closeFolderModalBtn.addEventListener("click", () => ui.folderModal.classList.add("hidden"));
+  ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);
+  ui.memorySearchInput.addEventListener("input", () => {
+    sessionMemory(state.currentSession).query = ui.memorySearchInput.value || "";
+    renderMemoryModal();
+  });
+
+  ui.settingsBtn.addEventListener("click", async () => {
+    await refreshTools();
+    await refreshRuntime();
+    if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = ui.agenticToggle.checked;
+    if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = ui.thinkingToggle.checked;
+    await refreshStateVariables();
+    populateSettingsPanels();
+    ui.settingsModal.classList.remove("hidden");
+  });
+  ui.closeSettingsBtn.addEventListener("click", () => ui.settingsModal.classList.add("hidden"));
+  ui.saveSettingsBtn.addEventListener("click", () => saveSettings().catch((err) => setStatus(`Error: ${err.message}`, "error")));
+
+  ui.settingsTabs.addEventListener("click", (evt) => {
+    const btn = evt.target.closest(".settings-tab");
+    if (!btn) return;
+    const tab = btn.dataset.tab;
+    ui.settingsTabs.querySelectorAll(".settings-tab").forEach((x) => x.classList.toggle("active", x === btn));
+    ui.settingsModal.querySelectorAll(".settings-pane").forEach((pane) => pane.classList.toggle("active", pane.dataset.pane === tab));
+  });
+  ui.themeModeDark.addEventListener("click", () => {
+    localStorage.setItem(THEME_MODE_KEY, "dark");
+    applyThemeFromStorage();
+  });
+  ui.themeModeLight.addEventListener("click", () => {
+    localStorage.setItem(THEME_MODE_KEY, "light");
+    applyThemeFromStorage();
+  });
+  ui.accentCustomBtn.addEventListener("click", () => ui.customAccentInput.click());
+  ui.customAccentInput.addEventListener("input", () => {
+    localStorage.setItem(THEME_ACCENT_KEY, ui.customAccentInput.value);
+    applyThemeFromStorage();
   });
 }
 
-setupHandlers();
-setupTabSwitching();
-applyTheme();
-renderEvents();
-connectSSE();
-refreshRuntime();
-refreshTools();
-refreshSessions();
-refreshHistory();
-refreshStats();
-refreshWorkspace();
-setInterval(() => {
-  refreshRuntime();
-  refreshTools();
-  refreshSessions();
-  refreshStats();
-  refreshWorkspace();
-}, 12000);
+async function bootstrap() {
+  renderAccentSwatches();
+  applyThemeFromStorage();
+  renderSessions();
+  await Promise.allSettled([
+    refreshRuntime(),
+    refreshTools(),
+    refreshStateVariables(),
+    refreshSessions(),
+  ]);
+  await Promise.allSettled([
+    refreshHistory(true),
+    refreshWorkspace(),
+    refreshMemoryRuntime(),
+    refreshMemoryBuffers(),
+    refreshApprovals(),
+  ]);
+  if (state.approvalPollTimer) clearInterval(state.approvalPollTimer);
+  state.approvalPollTimer = setInterval(() => refreshApprovals(), 2000);
+  ui.messageInput.value = state.draftBySession[state.currentSession] || "";
+  ui.messageInput.style.height = "auto";
+  ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
+  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+}
+
+wireEvents();
+bootstrap().catch((err) => setStatus(`Error: ${err.message}`, "error"));

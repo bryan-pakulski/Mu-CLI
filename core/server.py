@@ -2327,6 +2327,30 @@ def serve(session, host: str, port: int, command_handler):
                         self._send_json(200, result)
                         return
 
+                    if parsed.path == "/api/features/activate":
+                        feature_id = str(payload.get("feature_id", "") or "").strip()
+                        if not feature_id:
+                            self._send_json(
+                                400,
+                                {"ok": False, "error": "Field 'feature_id' is required."},
+                            )
+                            return
+                        feature = session.session_manager.activate_feature(feature_id)
+                        if not feature:
+                            self._send_json(
+                                404,
+                                {
+                                    "ok": False,
+                                    "error": f"Feature '{feature_id}' not found.",
+                                },
+                            )
+                            return
+                        self._send_json(
+                            200,
+                            {"ok": True, "feature": feature, **build_runtime_payload(session)},
+                        )
+                        return
+
                     if parsed.path == "/api/workspaces/browse":
                         path, error = pick_workspace_folder()
                         if error:

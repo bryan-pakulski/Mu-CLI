@@ -86,6 +86,8 @@ const ui = {
   thinkingToggle: el("thinkingToggle"),
   yoloToggle: el("yoloToggle"),
   agentModeSelect: el("agentModeSelect"),
+  chatFeatureWrap: el("chatFeatureWrap"),
+  chatFeatureSelect: el("chatFeatureSelect"),
   agenticToggleSettings: el("agenticToggleSettings"),
   thinkingToggleSettings: el("thinkingToggleSettings"),
   applyRuntimeBtn: el("applyRuntimeBtn"),
@@ -325,6 +327,28 @@ function setStatus(text, kind = "") {
     ui.topFlash.classList.remove("show");
     setTimeout(() => ui.topFlash?.classList.add("hidden"), 260);
   }, durationMs);
+}
+
+function renderFeatureSelectors(sessionName = state.currentSession) {
+  const list = state.board.featureListBySession[sessionName] || [];
+  const selectedId = String(state.board.selectedFeatureIdBySession[sessionName] || "").trim();
+  const options = ['<option value="">Active feature</option>']
+    .concat(list.map((feature) => {
+      const id = String(feature.feature_id || "");
+      const status = String(feature.status || "").trim();
+      return `<option value="${id}">${feature.feature_name || id}${status ? ` (${status})` : ""}</option>`;
+    }))
+    .join("");
+  if (ui.boardFeatureSelect) {
+    ui.boardFeatureSelect.innerHTML = options;
+    ui.boardFeatureSelect.value = selectedId;
+  }
+  if (ui.chatFeatureSelect) {
+    ui.chatFeatureSelect.innerHTML = options;
+    ui.chatFeatureSelect.value = selectedId;
+  }
+  const featureModeEnabled = String(ui.agentModeSelect?.value || "default") === "feature";
+  ui.chatFeatureWrap?.classList.toggle("hidden", !featureModeEnabled);
 }
 
 function textFromParts(parts = []) {
@@ -670,19 +694,7 @@ async function saveTicketEdits() {
 function renderBoard() {
   if (ui.boardView?.classList.contains("hidden")) return;
   const plan = currentBoardPlan();
-  const featureList = state.board.featureListBySession[state.currentSession] || [];
-  const selectedFeatureId = state.board.selectedFeatureIdBySession[state.currentSession] || "";
-  if (ui.boardFeatureSelect) {
-    const options = ['<option value="">Active feature</option>']
-      .concat(featureList.map((feature) => {
-        const featureId = String(feature.feature_id || "");
-        const status = String(feature.status || "").trim();
-        const suffix = status ? ` (${status})` : "";
-        return `<option value="${featureId}">${feature.feature_name || featureId}${suffix}</option>`;
-      }));
-    ui.boardFeatureSelect.innerHTML = options.join("");
-    ui.boardFeatureSelect.value = selectedFeatureId;
-  }
+  renderFeatureSelectors(state.currentSession);
   if (!plan) {
     ui.boardSummary.textContent = "No active feature.";
     ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan available for this session.</div>';
@@ -899,6 +911,7 @@ async function refreshBoardData({ force = false } = {}) {
         state.board.selectedFeatureIdBySession[sessionName] = selectedFeatureId;
       }
     }
+    renderFeatureSelectors(sessionName);
     if (!directory) {
       state.board.planBySession[sessionName] = null;
       setBoardError("");
@@ -1212,6 +1225,9 @@ async function refreshRuntime() {
     ui.thinkingToggle.checked = !!runtime.thinking;
     ui.yoloToggle.checked = !!runtime.variables?.yolo;
     if (ui.agentModeSelect) ui.agentModeSelect.value = String(runtime.variables?.agent_mode || "default");
+    if (String(ui.agentModeSelect?.value || "default") !== "feature") {
+      ui.chatFeatureWrap?.classList.add("hidden");
+    }
     if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = !!runtime.agentic;
     if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = !!runtime.thinking;
     const model = runtime.model || "";
@@ -1393,6 +1409,24 @@ async function setAgentMode(mode) {
   await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ variables }) });
   state.runtime = state.runtime || {};
   state.runtime.variables = variables;
+  renderFeatureSelectors(state.currentSession);
+}
+
+async function activateFeature(featureId) {
+  const resolved = String(featureId || "").trim();
+  if (!resolved) {
+    state.board.selectedFeatureIdBySession[state.currentSession] = "";
+    renderFeatureSelectors(state.currentSession);
+    return;
+  }
+  await fetchJson("/api/features/activate", {
+    method: "POST",
+    body: JSON.stringify({ feature_id: resolved }),
+  });
+  state.board.selectedFeatureIdBySession[state.currentSession] = resolved;
+  await refreshRuntime();
+  await refreshBoardData({ force: true });
+  setStatus("Active feature updated.", "connected");
 }
 
 async function saveSettings() {
@@ -1575,6 +1609,7 @@ async function executeSend(sessionAtSend, text) {
   ui.messageInput.style.height = "auto";
   startTaskTicker(sessionAtSend);
   updateComposerState();
+  let surfacedErrorMessage = "";
   try {
     const start = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend, async: true }) });
     const taskId = start.task?.task_id;
@@ -1592,6 +1627,10 @@ async function executeSend(sessionAtSend, text) {
       throw new Error(finalTask.error || "Task failed.");
     }
     pushActivity(sessionAtSend, "Final response received", "");
+  } catch (err) {
+    surfacedErrorMessage = `⚠️ Request failed: ${err?.message || "Unknown error"}`;
+    pushActivity(sessionAtSend, "Request failed", String(err?.message || "Unknown error"));
+    throw err;
   } finally {
     closeEventStream(sessionAtSend);
     stopTaskTicker(sessionAtSend);
@@ -1603,6 +1642,10 @@ async function executeSend(sessionAtSend, text) {
     }
     if (state.currentSession === sessionAtSend) {
       await refreshHistory(true);
+      if (surfacedErrorMessage) {
+        state.loadedMessages.push({ role: "assistant", text: surfacedErrorMessage });
+      }
+      renderFeed(true);
       await refreshWorkspace();
       renderActivityPanel();
     }
@@ -1704,6 +1747,9 @@ function wireEvents() {
     setAgentMode(ui.agentModeSelect.value)
       .then(() => setStatus(`Mode set to ${ui.agentModeSelect.value}.`, "connected"))
       .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.chatFeatureSelect?.addEventListener("change", () => {
+    activateFeature(ui.chatFeatureSelect.value).catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
   ui.approvalApproveBtn.addEventListener("click", () => resolveApproval("y").catch((err) => setStatus(`Error: ${err.message}`, "error")));
   ui.approvalRejectBtn.addEventListener("click", () => resolveApproval("n").catch((err) => setStatus(`Error: ${err.message}`, "error")));
@@ -1866,8 +1912,7 @@ ${marker}` : marker;
     renderBoard();
   });
   ui.boardFeatureSelect?.addEventListener("change", async () => {
-    state.board.selectedFeatureIdBySession[state.currentSession] = String(ui.boardFeatureSelect.value || "").trim();
-    await refreshBoardData({ force: true });
+    await activateFeature(ui.boardFeatureSelect.value);
   });
 }
 

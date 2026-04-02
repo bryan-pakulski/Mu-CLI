@@ -126,10 +126,10 @@
           <section class="settings-main">
             <div class="settings-pane active" data-pane="runtime">
               <h3>Runtime</h3>
-              <label class="field">API Base <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" /></label>
-              <label class="field">Model <select id="modelInput"></select></label>
-              <label class="field"><input id="agenticToggleSettings" type="checkbox" /> Agentic</label>
-              <label class="field"><input id="thinkingToggleSettings" type="checkbox" /> Thinking</label>
+              <label class="field" title="HTTP server base URL for the Mu-CLI API.">API Base <input id="apiBaseInput" type="text" value="http://127.0.0.1:8765" /></label>
+              <label class="field" title="Current model used for chat generation.">Model <select id="modelInput"></select></label>
+              <label class="field" title="Enable multi-step autonomous tool orchestration."><input id="agenticToggleSettings" type="checkbox" /> Agentic</label>
+              <label class="field" title="Enable deeper reasoning mode for supported providers."><input id="thinkingToggleSettings" type="checkbox" /> Thinking</label>
               <button id="applyRuntimeBtn" class="btn btn-primary">Apply Runtime</button>
             </div>
 

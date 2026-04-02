@@ -18,6 +18,27 @@ const PRESET_ACCENTS = [
   { name: "Cyan", value: "#06b6d4" },
   { name: "Emerald", value: "#10b981" },
 ];
+const VARIABLE_HELP = {
+  agent_mode: "Selects assistant operating strategy (default/debug/feature/research).",
+  ollama_host: "Base URL for Ollama provider requests.",
+  strict_mode: "When enabled, tool usage is treated more conservatively.",
+  max_iterations: "Maximum internal loop/tool iterations per request.",
+  compact_history: "Compacts prior history to reduce token usage.",
+  yolo: "Bypass approvals (high risk).",
+  make_timeout: "Timeout (seconds) for long-running execution tools.",
+  make_max_output: "Maximum captured output length from execution tools.",
+  collation_enabled: "Enable read-result collation before flush.",
+  collation_flush_command: "Command alias used to flush collated context.",
+  memory_enabled: "Enable durable cross-turn task memory.",
+  memory_max_entries: "Maximum retained memory entries.",
+  memory_summary_limit: "How many memory items are summarized in prompts.",
+  scratchpad_enabled: "Enable temporary per-turn scratchpad notes.",
+  scratchpad_max_entries: "Maximum retained scratchpad entries.",
+  tool_context_window: "Recent tool result window to keep in context.",
+  context_token_limit: "Hard token budget for assembled context.",
+  context_trim_threshold: "Fraction of budget at which trimming starts.",
+  structured_tool_results: "Prefer structured tool outputs over raw blobs.",
+};
 
 const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
@@ -50,6 +71,7 @@ const state = {
     pollTimer: null,
     stream: null,
     refreshQueued: false,
+    phaseOpenBySession: {},
   },
 };
 
@@ -621,9 +643,10 @@ function renderBoard() {
     ["completed", "Completed"],
   ];
   ui.boardLanes.innerHTML = "";
+  const phaseOpenMap = state.board.phaseOpenBySession[state.currentSession] || {};
   for (const [laneId, laneLabel] of laneOrder) {
     const laneEl = document.createElement("section");
-    laneEl.className = "board-lane";
+    laneEl.className = `board-lane lane-${laneId}`;
     laneEl.innerHTML = `<div class="board-lane-head"><span>${laneLabel}</span><span class="board-lane-count">${lanes[laneId].length}</span></div><div class="board-lane-body"></div>`;
     const laneBody = laneEl.querySelector(".board-lane-body");
     const byPhase = new Map();
@@ -639,7 +662,14 @@ function renderBoard() {
         const phaseMeta = phasesMeta.find((p) => String(p.id) === phaseId);
         const wrap = document.createElement("details");
         wrap.className = "phase-group";
-        wrap.open = true;
+        const phaseKey = `${laneId}:${phaseId}`;
+        wrap.open = phaseOpenMap[phaseKey] !== false;
+        wrap.addEventListener("toggle", () => {
+          if (!state.board.phaseOpenBySession[state.currentSession]) {
+            state.board.phaseOpenBySession[state.currentSession] = {};
+          }
+          state.board.phaseOpenBySession[state.currentSession][phaseKey] = wrap.open;
+        });
         wrap.innerHTML = `<summary><span>${phaseMeta?.title || "Unassigned"}</span><span>${items.length}</span></summary><div class="phase-group-cards"></div>`;
         const cardWrap = wrap.querySelector(".phase-group-cards");
         for (const task of items) {
@@ -937,14 +967,16 @@ function renderSettingsList(target, items, mode = "checkbox") {
   for (const item of items) {
     const row = document.createElement("label");
     row.className = "settings-row";
+    const help = item.description ? `<span class="settings-hint" title="${item.description}">ⓘ</span>` : "";
+    if (item.description) row.title = item.description;
     if (mode === "text") {
       if (item.kind === "bool") {
-        row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" data-kind="bool" ${item.value ? "checked" : ""} />`;
+        row.innerHTML = `<span>${item.label} ${help}</span><input type="checkbox" data-key="${item.key}" data-kind="bool" ${item.value ? "checked" : ""} />`;
       } else {
-        row.innerHTML = `<span>${item.label}</span><input data-key="${item.key}" data-kind="${item.kind || "text"}" value="${String(item.value ?? "")}" />`;
+        row.innerHTML = `<span>${item.label} ${help}</span><input data-key="${item.key}" data-kind="${item.kind || "text"}" value="${String(item.value ?? "")}" />`;
       }
     } else {
-      row.innerHTML = `<span>${item.label}</span><input type="checkbox" data-key="${item.key}" ${item.enabled ? "checked" : ""} />`;
+      row.innerHTML = `<span>${item.label} ${help}</span><input type="checkbox" data-key="${item.key}" ${item.enabled ? "checked" : ""} />`;
     }
     target.appendChild(row);
   }
@@ -957,7 +989,16 @@ function renderGroupedTools() {
     group.className = "settings-group";
     group.innerHTML = `<h4>${groupName}</h4><div class="settings-list"></div>`;
     const list = group.querySelector(".settings-list");
-    renderSettingsList(list, items.map((t) => ({ key: t.name, label: t.name, enabled: !t.disabled })), "checkbox");
+    renderSettingsList(
+      list,
+      items.map((t) => ({
+        key: t.name,
+        label: t.name,
+        enabled: !t.disabled,
+        description: t.description || "",
+      })),
+      "checkbox",
+    );
     ui.toolsList.appendChild(group);
   }
 }
@@ -970,7 +1011,13 @@ function populateSettingsPanels() {
   const memoryEntries = entries.filter(([k]) => /(memory|compact|collation|timeout|max_)/i.test(k));
   const generalEntries = entries.filter(([k]) => !/(memory|compact|collation|timeout|max_)/i.test(k));
 
-  const toItem = ([key, value]) => ({ key, label: key, value, kind: typeof value === "boolean" ? "bool" : typeof value === "number" ? "number" : "text" });
+  const toItem = ([key, value]) => ({
+    key,
+    label: key,
+    value,
+    kind: typeof value === "boolean" ? "bool" : typeof value === "number" ? "number" : "text",
+    description: VARIABLE_HELP[key] || "",
+  });
   renderSettingsList(ui.variablesList, generalEntries.map(toItem), "text");
   renderSettingsList(ui.memoryList, memoryEntries.map(toItem), "text");
 }

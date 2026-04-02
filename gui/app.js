@@ -474,11 +474,28 @@ function stripLeakedDirectiveText(text) {
   return raw.slice(cut).trim();
 }
 
+function canonicalMessageText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
 function normalizedMessages(history = []) {
-  return history
+  const normalized = history
     .filter((m) => ["user", "assistant"].includes(m.role))
     .map((m) => ({ role: m.role, text: stripLeakedDirectiveText(textFromParts(m.parts || [])) }))
     .filter((m) => m.text);
+  const deduped = [];
+  for (const msg of normalized) {
+    const prev = deduped[deduped.length - 1];
+    if (
+      prev
+      && prev.role === msg.role
+      && canonicalMessageText(prev.text) === canonicalMessageText(msg.text)
+    ) {
+      continue;
+    }
+    deduped.push(msg);
+  }
+  return deduped;
 }
 
 
@@ -1220,8 +1237,8 @@ function renderFeed(resetToBottom = false) {
     const lastLoaded = state.loadedMessages[state.loadedMessages.length - 1];
     const isDuplicateUserEcho =
       lastLoaded?.role === "user"
-      && String(lastLoaded.text || "").trim() === String(pending.userText || "").trim();
-    if (!isDuplicateUserEcho) {
+      && canonicalMessageText(lastLoaded.text) === canonicalMessageText(pending.userText);
+    if (!isDuplicateUserEcho && canonicalMessageText(pending.userText)) {
       const userCard = document.createElement("article");
       userCard.className = "message pending";
       userCard.innerHTML = `<span class="role">user</span><span class="text"></span>`;

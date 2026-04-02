@@ -56,6 +56,7 @@ const state = {
   sendQueue: [],
   draftBySession: {},
   activityBySession: {},
+  activityTagFilterBySession: {},
   taskBySession: {},
   errorSignatureBySession: {},
   runErrorBySession: {},
@@ -108,6 +109,7 @@ const ui = {
   approvalExplainBtn: el("approvalExplainBtn"),
   activityList: el("activityList"),
   activitySummary: el("activitySummary"),
+  activityFilters: el("activityFilters"),
   composer: el("composer"),
   messageInput: el("messageInput"),
   sendBtn: el("sendBtn"),
@@ -595,9 +597,25 @@ function sessionActivity(sessionName = state.currentSession) {
   return state.activityBySession[sessionName];
 }
 
-function pushActivity(sessionName, title, detail = "") {
+function normalizeActivityTag(rawTag = "") {
+  const value = String(rawTag || "").trim().toLowerCase();
+  return value || "general";
+}
+
+function inferActivityTag(title = "", detail = "") {
+  const haystack = `${title}\n${detail}`.toLowerCase();
+  if (/\berror\b|failed|exception|cancelled/.test(haystack)) return "error";
+  if (/\btool\b/.test(haystack)) return "tool";
+  if (/queued|queue/.test(haystack)) return "queue";
+  if (/approval|awaiting input|task/.test(haystack)) return "task";
+  if (/memory|scratchpad/.test(haystack)) return "memory";
+  if (/workspace|session|feature|board/.test(haystack)) return "system";
+  return "general";
+}
+
+function pushActivity(sessionName, title, detail = "", tag = "") {
   const bucket = sessionActivity(sessionName);
-  bucket.push({ title, detail, at: Date.now() });
+  bucket.push({ title, detail, at: Date.now(), tag: normalizeActivityTag(tag || inferActivityTag(title, detail)) });
   if (bucket.length > 120) bucket.splice(0, bucket.length - 120);
   persistActivity();
   if (sessionName === state.currentSession) renderActivityPanel();
@@ -627,19 +645,66 @@ function formatSince(ts) {
   return `${mins}m ${rem}s`;
 }
 
+function activityTagClass(tag) {
+  const normalized = normalizeActivityTag(tag);
+  return ["error", "tool", "task", "queue", "memory", "system", "general"].includes(normalized) ? normalized : "general";
+}
+
+function ensureActivityFilter(sessionName, tags = []) {
+  if (!state.activityTagFilterBySession[sessionName]) state.activityTagFilterBySession[sessionName] = {};
+  const filter = state.activityTagFilterBySession[sessionName];
+  for (const tag of tags) {
+    const normalized = normalizeActivityTag(tag);
+    if (!(normalized in filter)) filter[normalized] = true;
+  }
+  return filter;
+}
+
+function renderActivityFilters(sessionName, tags = []) {
+  if (!ui.activityFilters) return;
+  const uniqueTags = [...new Set(tags.map((tag) => normalizeActivityTag(tag)))];
+  const filter = ensureActivityFilter(sessionName, uniqueTags);
+  ui.activityFilters.innerHTML = "";
+  for (const tag of uniqueTags) {
+    const btn = document.createElement("button");
+    const enabled = !!filter[tag];
+    btn.type = "button";
+    btn.className = `activity-filter-chip tag-${activityTagClass(tag)} ${enabled ? "active" : ""}`;
+    btn.textContent = tag;
+    btn.title = enabled ? `Hide ${tag} events` : `Show ${tag} events`;
+    btn.addEventListener("click", () => {
+      filter[tag] = !filter[tag];
+      renderActivityPanel();
+    });
+    ui.activityFilters.appendChild(btn);
+  }
+}
+
 function renderActivityPanel() {
   const sessionName = state.currentSession;
   const items = sessionActivity(sessionName);
+  const knownTags = ["error", "task", "tool", "queue", "memory", "system", "general"];
+  const allTags = items.map((item) => normalizeActivityTag(item.tag || inferActivityTag(item.title, item.detail)));
+  renderActivityFilters(sessionName, [...knownTags, ...allTags]);
+  const filter = ensureActivityFilter(sessionName, [...knownTags, ...allTags]);
+  const filteredItems = items.filter((item) => {
+    const tag = normalizeActivityTag(item.tag || inferActivityTag(item.title, item.detail));
+    return filter[tag] !== false;
+  });
   const taskMeta = state.taskBySession[sessionName];
   ui.activityList.innerHTML = "";
-  if (!items.length) {
+  if (!filteredItems.length) {
     ui.activityList.innerHTML = '<div class="activity-empty">No recent activity yet.</div>';
   } else {
-    for (const item of items.slice(-50).reverse()) {
+    for (const item of filteredItems.slice(-50).reverse()) {
+      const tag = normalizeActivityTag(item.tag || inferActivityTag(item.title, item.detail));
       const card = document.createElement("article");
-      card.className = "activity-item";
+      card.className = `activity-item tag-${activityTagClass(tag)}`;
       card.innerHTML = `
-        <div class="activity-title">${item.title}</div>
+        <div class="activity-top">
+          <span class="activity-tag tag-${activityTagClass(tag)}">${tag}</span>
+          <div class="activity-title">${item.title}</div>
+        </div>
         ${item.detail ? `<div class="activity-detail">${item.detail}</div>` : ""}
         <div class="activity-time">${new Date(item.at).toLocaleTimeString()}</div>
       `;
@@ -1673,18 +1738,19 @@ function mapEventToActivity(evt) {
     return {
       title: `Using tool: ${payload.tool_name || "unknown"}`,
       detail: payload.visible_result ? String(payload.visible_result).slice(0, 220) : "",
+      tag: "tool",
     };
   }
-  if (evt.event === "trace.tool_result") return { title: "Tool result", detail: payload.preview || "" };
-  if (evt.event === "trace.info") return { title: "Info", detail: payload.message || "" };
-  if (evt.event === "trace.error") return { title: "Error", detail: payload.message || "" };
-  if (evt.event === "trace.message") return { title: `Model message (${payload.role || "assistant"})`, detail: String(payload.content || "").slice(0, 220) };
-  if (evt.event === "task.awaiting_approval") return { title: "Awaiting approval", detail: "A tool call needs approval before continuing." };
-  if (evt.event === "task.awaiting_input") return { title: "Awaiting input", detail: payload.blocker?.reason || "Task requires more input." };
-  if (evt.event === "task.running") return { title: "Task running", detail: "" };
-  if (evt.event === "task.completed") return { title: "Task complete", detail: "" };
-  if (evt.event === "task.cancelled") return { title: "Task cancelled", detail: "Stopped by user." };
-  if (evt.event === "task.error") return { title: "Task error", detail: payload.error || "" };
+  if (evt.event === "trace.tool_result") return { title: "Tool result", detail: payload.preview || "", tag: "tool" };
+  if (evt.event === "trace.info") return { title: "Info", detail: payload.message || "", tag: "system" };
+  if (evt.event === "trace.error") return { title: "Error", detail: payload.message || "", tag: "error" };
+  if (evt.event === "trace.message") return { title: `Model message (${payload.role || "assistant"})`, detail: String(payload.content || "").slice(0, 220), tag: "general" };
+  if (evt.event === "task.awaiting_approval") return { title: "Awaiting approval", detail: "A tool call needs approval before continuing.", tag: "task" };
+  if (evt.event === "task.awaiting_input") return { title: "Awaiting input", detail: payload.blocker?.reason || "Task requires more input.", tag: "task" };
+  if (evt.event === "task.running") return { title: "Task running", detail: "", tag: "task" };
+  if (evt.event === "task.completed") return { title: "Task complete", detail: "", tag: "task" };
+  if (evt.event === "task.cancelled") return { title: "Task cancelled", detail: "Stopped by user.", tag: "error" };
+  if (evt.event === "task.error") return { title: "Task error", detail: payload.error || "", tag: "error" };
   return null;
 }
 
@@ -1747,7 +1813,7 @@ function startTaskEventStream(taskId, sessionName) {
         String(evt.payload?.message || "")
       );
     }
-    pushActivity(sessionName, mapped.title, mapped.detail);
+    pushActivity(sessionName, mapped.title, mapped.detail, mapped.tag);
     const pending = state.pendingBySession[sessionName];
     if (pending) pending.latestActivity = mapped.title;
     renderFeed(false);

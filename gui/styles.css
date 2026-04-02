@@ -65,6 +65,8 @@ input,select,textarea{padding:8px 10px}
 
 .main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0;overflow:hidden}
 .center-panel{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;border-right:1px solid var(--border);position:relative}
+.center-panel[data-view="chat"] #boardView{display:none!important}
+.center-panel[data-view="board"] #chatView{display:none!important}
 .view-tabs{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface)}
 .view-tab{padding:6px 12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
 .view-tab.active{background:color-mix(in oklab, var(--accent) 16%, var(--surface-2));border-color:var(--accent)}
@@ -223,11 +225,14 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
 .phase-group-cards{display:grid;gap:6px;padding:0 6px 6px}
 .task-card{border:0;border-radius:8px;padding:7px;background:color-mix(in oklab, var(--surface-2) 92%, transparent);display:grid;gap:5px}
 .task-card.active{box-shadow:0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent)}
+.task-card{cursor:pointer;transition:transform .22s cubic-bezier(.22,.8,.24,1),box-shadow .22s ease,opacity .18s ease}
+.task-card:hover{transform:translateY(-1px)}
+.task-card.dragging{opacity:.55;transform:scale(.98)}
 .task-title{font-size:13px;font-weight:600}
 .task-meta{font-size:11px;color:var(--muted)}
-.task-actions{display:flex;gap:6px}
-.task-actions select{flex:1}
-.task-open-btn{padding:4px 8px;font-size:12px}
+.board-lane{transition:box-shadow .2s ease,border-color .2s ease,background-color .2s ease}
+.board-lane.drop-allowed{border-color:color-mix(in oklab, var(--accent) 45%, var(--border));box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--accent) 18%, transparent)}
+.board-lane.drop-active{background:color-mix(in oklab, var(--accent) 9%, var(--surface));box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent)}
 
 .lane-pending .board-lane-head{background:color-mix(in oklab, var(--accent) 10%, var(--surface-2));color:var(--text)}
 .lane-in_progress .board-lane-head{background:color-mix(in oklab, #06b6d4 20%, var(--surface-2));color:var(--text)}

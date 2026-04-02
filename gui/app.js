@@ -72,6 +72,7 @@ const state = {
     stream: null,
     refreshQueued: false,
     phaseOpenBySession: {},
+    drag: null,
   },
 };
 
@@ -139,6 +140,7 @@ const ui = {
   boardViewBtn: el("boardViewBtn"),
   chatView: el("chatView"),
   boardView: el("boardView"),
+  centerPanel: document.querySelector(".center-panel"),
   boardSummary: el("boardSummary"),
   boardSearchInput: el("boardSearchInput"),
   boardPhaseFilter: el("boardPhaseFilter"),
@@ -515,10 +517,15 @@ function setViewMode(mode, sessionName = state.currentSession) {
   state.board.modeBySession[sessionName] = mode;
   persistBoardModes();
   const boardActive = mode === "board";
+  if (ui.centerPanel) {
+    ui.centerPanel.dataset.view = boardActive ? "board" : "chat";
+  }
   ui.chatViewBtn?.classList.toggle("active", !boardActive);
   ui.boardViewBtn?.classList.toggle("active", boardActive);
   ui.chatView?.classList.toggle("hidden", boardActive);
   ui.boardView?.classList.toggle("hidden", !boardActive);
+  if (ui.chatView) ui.chatView.style.display = boardActive ? "none" : "";
+  if (ui.boardView) ui.boardView.style.display = boardActive ? "" : "none";
   if (boardActive) renderBoard();
 }
 
@@ -678,6 +685,7 @@ function renderBoard() {
   for (const [laneId, laneLabel] of laneOrder) {
     const laneEl = document.createElement("section");
     laneEl.className = `board-lane lane-${laneId}`;
+    laneEl.dataset.laneId = laneId;
     laneEl.innerHTML = `<div class="board-lane-head"><span>${laneLabel}</span><span class="board-lane-count">${lanes[laneId].length}</span></div><div class="board-lane-body"></div>`;
     const laneBody = laneEl.querySelector(".board-lane-body");
     const byPhase = new Map();
@@ -707,33 +715,91 @@ function renderBoard() {
           const card = document.createElement("article");
           const selected = Number(state.board.selectedTaskIdBySession[state.currentSession]) === Number(task.id);
           card.className = `task-card${selected ? " active" : ""}`;
-          const options = allowedTransitions(task.status)
-            .filter((target) => laneForStatus(target) !== laneForStatus(task.status))
-            .map((target) => `<option value="${target}">${target}</option>`)
-            .join("");
+          card.draggable = true;
+          card.dataset.taskId = String(task.id);
+          card.dataset.currentLane = laneForStatus(task.status);
           card.innerHTML = `
             <div class="task-title">${task.title || `Task ${task.id}`}</div>
-            <div class="task-meta">#${task.id} · ${task.status || "unknown"}</div>
-            <div class="task-actions">
-              <button class="btn task-open-btn" data-action="open">Details</button>
-              <select data-action="target"><option value="">Move…</option>${options}</select>
-              <button class="btn task-open-btn" data-action="move">Apply</button>
-            </div>
+            <div class="task-meta">#${task.id} · ${task.status || "unknown"} · Drag to move</div>
           `;
-          card.querySelector('[data-action="open"]').addEventListener("click", () => {
+
+          let dragged = false;
+          let startX = 0;
+          let startY = 0;
+          card.addEventListener("pointerdown", (evt) => {
+            dragged = false;
+            startX = evt.clientX;
+            startY = evt.clientY;
+          });
+          card.addEventListener("pointermove", (evt) => {
+            if (Math.abs(evt.clientX - startX) + Math.abs(evt.clientY - startY) > 6) {
+              dragged = true;
+            }
+          });
+          card.addEventListener("click", () => {
+            if (dragged) return;
             state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
             openTicketModal(task.id);
           });
-          card.querySelector('[data-action="move"]').addEventListener("click", () => {
-            const target = card.querySelector('[data-action="target"]').value;
-            if (!target) return setBoardError("Pick a valid status transition first.");
-            moveBoardTask(task.id, target);
+
+          card.addEventListener("dragstart", (evt) => {
+            const allowed = allowedTransitions(task.status)
+              .map((target) => laneForStatus(target))
+              .filter((lane) => lane && lane !== laneForStatus(task.status));
+            state.board.drag = {
+              taskId: Number(task.id),
+              allowedLanes: new Set(allowed),
+            };
+            card.classList.add("dragging");
+            laneBody.classList.add("drag-origin");
+            evt.dataTransfer.effectAllowed = "move";
+            evt.dataTransfer.setData("text/plain", String(task.id));
+            for (const laneNode of ui.boardLanes.querySelectorAll(".board-lane")) {
+              if (state.board.drag.allowedLanes.has(laneNode.dataset.laneId)) {
+                laneNode.classList.add("drop-allowed");
+              }
+            }
+          });
+          card.addEventListener("dragend", () => {
+            card.classList.remove("dragging");
+            for (const laneNode of ui.boardLanes.querySelectorAll(".board-lane")) {
+              laneNode.classList.remove("drop-allowed", "drop-active");
+            }
+            laneBody.classList.remove("drag-origin");
+            state.board.drag = null;
           });
           cardWrap.appendChild(card);
         }
         laneBody.appendChild(wrap);
       }
     }
+
+    laneBody.addEventListener("dragover", (evt) => {
+      const dragState = state.board.drag;
+      if (!dragState || !dragState.allowedLanes?.has(laneId)) return;
+      evt.preventDefault();
+      evt.dataTransfer.dropEffect = "move";
+      laneEl.classList.add("drop-active");
+    });
+    laneBody.addEventListener("dragleave", () => {
+      laneEl.classList.remove("drop-active");
+    });
+    laneBody.addEventListener("drop", async (evt) => {
+      const dragState = state.board.drag;
+      laneEl.classList.remove("drop-active");
+      if (!dragState || !dragState.allowedLanes?.has(laneId)) return;
+      evt.preventDefault();
+      const targetByLane = {
+        pending: "pending",
+        in_progress: "in_progress",
+        blocked: "blocked",
+        completed: "completed",
+      };
+      const targetStatus = targetByLane[laneId];
+      if (!targetStatus) return;
+      await moveBoardTask(dragState.taskId, targetStatus);
+    });
+
     ui.boardLanes.appendChild(laneEl);
   }
 }

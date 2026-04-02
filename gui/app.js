@@ -63,6 +63,7 @@ const state = {
   taskPollTimersBySession: {},
   memoryPollTimer: null,
   approvalPollTimer: null,
+  serverTaskPollTimer: null,
   eventSourceBySession: {},
   thinkingPlaceholderTimer: null,
   board: {
@@ -1422,6 +1423,7 @@ async function loadSession(name) {
   if (Object.keys(state.pendingBySession).length > 0) {
     state.currentSession = name;
     renderSessions();
+    await refreshServerTaskState(name);
     await refreshHistory(true);
     ui.messageInput.value = state.draftBySession[state.currentSession] || "";
     ui.messageInput.style.height = "auto";
@@ -1438,6 +1440,7 @@ async function loadSession(name) {
   localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
   await refreshSessions();
   await refreshRuntime();
+  await refreshServerTaskState(name);
   await refreshHistory(true);
   await refreshWorkspace();
   ui.messageInput.value = state.draftBySession[state.currentSession] || "";
@@ -1713,6 +1716,52 @@ async function waitForTaskDone(taskId, sessionName) {
 
 function runningPendingSessions() {
   return Object.entries(state.pendingBySession).filter(([, p]) => (p?.status || "running") !== "queued").map(([name]) => name);
+}
+
+function isTerminalTaskStatus(status) {
+  return ["completed", "error", "cancelled"].includes(String(status || "").toLowerCase());
+}
+
+async function refreshServerTaskState(sessionName = state.currentSession) {
+  if (!sessionName) return;
+  try {
+    const payload = await fetchJson("/api/tasks", {}, 2500);
+    const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+    const active = tasks
+      .filter((task) => !isTerminalTaskStatus(task.status))
+      .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0))[0];
+    if (!active) {
+      const existing = state.pendingBySession[sessionName];
+      if (existing && existing.status !== "queued") {
+        delete state.pendingBySession[sessionName];
+        renderSessions();
+        updateComposerState();
+        if (state.currentSession === sessionName) renderFeed(false);
+      }
+      return;
+    }
+
+    const status = String(active.status || "running");
+    const pretty = status.replaceAll("_", " ");
+    state.taskBySession[sessionName] = {
+      ...(state.taskBySession[sessionName] || {}),
+      taskId: String(active.task_id || ""),
+      status,
+      startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
+    };
+    state.pendingBySession[sessionName] = {
+      ...(state.pendingBySession[sessionName] || {}),
+      userText: state.pendingBySession[sessionName]?.userText || "",
+      latestActivity: pretty.charAt(0).toUpperCase() + pretty.slice(1),
+      startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
+      status: "running",
+    };
+    renderSessions();
+    updateComposerState();
+    if (state.currentSession === sessionName) renderFeed(false);
+  } catch {
+    return;
+  }
 }
 
 async function processQueuedSends() {
@@ -2071,12 +2120,17 @@ async function bootstrap() {
     refreshMemoryBuffers(),
     refreshApprovals(),
     refreshBoardData({ force: true }),
+    refreshServerTaskState(),
   ]);
   startBoardEventStream();
   if (state.board.pollTimer) clearInterval(state.board.pollTimer);
   state.board.pollTimer = setInterval(() => {
     if (state.currentView === "board") refreshBoardData();
   }, 3000);
+  if (state.serverTaskPollTimer) clearInterval(state.serverTaskPollTimer);
+  state.serverTaskPollTimer = setInterval(() => {
+    refreshServerTaskState();
+  }, 2000);
   setViewMode(boardMode(), state.currentSession);
   if (state.approvalPollTimer) clearInterval(state.approvalPollTimer);
   state.approvalPollTimer = setInterval(() => refreshApprovals(), 2000);

@@ -97,9 +97,6 @@
           </header>
           <div id="boardError" class="board-error hidden"></div>
           <div id="boardLanes" class="board-lanes"></div>
-          <aside id="boardDetailPanel" class="board-detail">
-            <div class="board-detail-empty">Select a task card to view details.</div>
-          </aside>
         </section>
         </section>
         <aside class="activity-panel">
@@ -202,6 +199,35 @@
         <div id="memoryActivityList" class="memory-list"></div>
         <div class="modal-actions">
           <button id="closeMemoryModalBtn" class="btn" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="ticketModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-card ticket-modal-card">
+        <div class="ticket-layout">
+          <section class="ticket-main">
+            <div class="ticket-head">
+              <h3 id="ticketTitle">Task</h3>
+              <span id="ticketStatusPill" class="ticket-pill">status</span>
+            </div>
+            <label class="field">Summary <input id="ticketTitleInput" type="text" /></label>
+            <label class="field">Overview <textarea id="ticketOverviewInput" rows="3"></textarea></label>
+            <label class="field">Objectives (one per line) <textarea id="ticketObjectivesInput" rows="4"></textarea></label>
+            <label class="field">Action points (one per line) <textarea id="ticketActionsInput" rows="4"></textarea></label>
+            <label class="field">Exit criteria (one per line) <textarea id="ticketExitInput" rows="4"></textarea></label>
+            <label class="field">Notes <textarea id="ticketNotesInput" rows="3"></textarea></label>
+            <div class="modal-actions">
+              <button id="ticketSaveBtn" class="btn btn-primary" type="button">Save</button>
+              <button id="ticketCloseBtn" class="btn" type="button">Close</button>
+            </div>
+          </section>
+          <aside class="ticket-side">
+            <h4>Details</h4>
+            <div id="ticketMeta" class="settings-list"></div>
+            <h4>Recent Events</h4>
+            <div id="ticketEvents" class="settings-list"></div>
+          </aside>
         </div>
       </div>
     </div>

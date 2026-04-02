@@ -146,8 +146,20 @@ const ui = {
   boardBlockedOnly: el("boardBlockedOnly"),
   boardRefreshBtn: el("boardRefreshBtn"),
   boardLanes: el("boardLanes"),
-  boardDetailPanel: el("boardDetailPanel"),
   boardError: el("boardError"),
+  ticketModal: el("ticketModal"),
+  ticketTitle: el("ticketTitle"),
+  ticketStatusPill: el("ticketStatusPill"),
+  ticketTitleInput: el("ticketTitleInput"),
+  ticketOverviewInput: el("ticketOverviewInput"),
+  ticketObjectivesInput: el("ticketObjectivesInput"),
+  ticketActionsInput: el("ticketActionsInput"),
+  ticketExitInput: el("ticketExitInput"),
+  ticketNotesInput: el("ticketNotesInput"),
+  ticketMeta: el("ticketMeta"),
+  ticketEvents: el("ticketEvents"),
+  ticketSaveBtn: el("ticketSaveBtn"),
+  ticketCloseBtn: el("ticketCloseBtn"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -571,44 +583,64 @@ function filteredBoardTasks(plan, filters) {
   });
 }
 
-function renderBoardDetail(plan, taskId) {
+function openTicketModal(taskId) {
+  const plan = currentBoardPlan();
   const task = findTaskById(plan, taskId);
-  if (!task) {
-    ui.boardDetailPanel.innerHTML = '<div class="board-detail-empty">Select a task card to view details.</div>';
-    return;
-  }
+  if (!task) return;
   const phase = findPhaseForTask(plan, task);
-  const events = (plan.event_log || []).filter((evt) => Number(evt.entity_id) === Number(task.id)).slice(-15).reverse();
-  const list = (items) => (items?.length ? `<ul class="detail-list">${items.map((x) => `<li>${x}</li>`).join("")}</ul>` : "<div class='activity-empty'>None</div>");
-  ui.boardDetailPanel.innerHTML = `
-    <h3>Task ${task.id}: ${task.title || ""}</h3>
-    <div class="detail-grid">
-      <div><strong>Status:</strong> ${task.status || "unknown"}</div>
-      <div><strong>Phase:</strong> ${phase?.title || `#${task.phase_id || "-"}`}</div>
-      <div><strong>Overview:</strong> ${task.overview || task.notes || "n/a"}</div>
-      <div><strong>Objectives:</strong> ${(task.objectives || []).join("; ") || "n/a"}</div>
-      <div><strong>Action points:</strong> ${(task.action_points || []).join("; ") || "n/a"}</div>
-    </div>
-    <div class="detail-section"><strong>Exit criteria</strong>${list(task.exit_criteria || [])}</div>
-    <div class="detail-section"><strong>Original payload</strong><pre>${JSON.stringify(task, null, 2)}</pre></div>
-    <div class="detail-section"><strong>Event log (latest)</strong>${events.length ? `<ul class="detail-list">${events.map((evt) => `<li>${evt.kind || evt.type || "event"} · ${new Date((evt.created_at || Date.now()/1000) * 1000).toLocaleTimeString()}</li>`).join("")}</ul>` : "<div class='activity-empty'>No task events.</div>"}</div>
-    <div class="detail-nav">
-      <button class="btn" data-nav="prev">Previous</button>
-      <button class="btn" data-nav="next">Next</button>
-    </div>
+  const events = (plan.event_log || []).filter((evt) => Number(evt.entity_id) === Number(task.id)).slice(-12).reverse();
+  const editable = ["pending", "not_started"].includes(String(task.status || "").toLowerCase());
+
+  state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
+  ui.ticketTitle.textContent = `Task ${task.id}: ${task.title || ""}`;
+  ui.ticketStatusPill.textContent = task.status || "unknown";
+  ui.ticketTitleInput.value = task.title || "";
+  ui.ticketOverviewInput.value = task.overview || task.notes || "";
+  ui.ticketObjectivesInput.value = (task.objectives || []).join("\n");
+  ui.ticketActionsInput.value = (task.action_points || []).join("\n");
+  ui.ticketExitInput.value = (task.exit_criteria || []).join("\n");
+  ui.ticketNotesInput.value = task.notes || "";
+  [ui.ticketTitleInput, ui.ticketOverviewInput, ui.ticketObjectivesInput, ui.ticketActionsInput, ui.ticketExitInput, ui.ticketNotesInput]
+    .forEach((el) => { el.disabled = !editable; });
+  ui.ticketSaveBtn.disabled = !editable;
+
+  ui.ticketMeta.innerHTML = `
+    <div class="settings-row"><span>Status</span><span>${task.status || "unknown"}</span></div>
+    <div class="settings-row"><span>Phase</span><span>${phase?.title || `#${task.phase_id || "-"}`}</span></div>
+    <div class="settings-row"><span>Task ID</span><span>${task.id}</span></div>
+    <div class="settings-row"><span>Editable</span><span>${editable ? "Yes" : "No (only pending)"}</span></div>
   `;
-  ui.boardDetailPanel.querySelectorAll("[data-nav]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const items = (plan.phases || []).map((t) => Number(t.id));
-      const idx = items.findIndex((id) => id === Number(task.id));
-      if (idx < 0) return;
-      const dir = btn.dataset.nav === "next" ? 1 : -1;
-      const next = items[idx + dir];
-      if (!next) return;
-      state.board.selectedTaskIdBySession[state.currentSession] = next;
-      renderBoard();
-    });
-  });
+  ui.ticketEvents.innerHTML = events.length
+    ? events.map((evt) => `<div class="settings-row"><span>${evt.kind || evt.type || "event"}</span><span>${new Date((evt.created_at || Date.now() / 1000) * 1000).toLocaleTimeString()}</span></div>`).join("")
+    : '<div class="activity-empty">No task events.</div>';
+  ui.ticketModal.classList.remove("hidden");
+}
+
+async function saveTicketEdits() {
+  const taskId = Number(state.board.selectedTaskIdBySession[state.currentSession] || 0);
+  if (!taskId) return;
+  const payload = {
+    tool_name: "update_feature_task",
+    tool_args: {
+      task_id: taskId,
+      title: ui.ticketTitleInput.value.trim(),
+      objectives: ui.ticketObjectivesInput.value.split("\n").map((x) => x.trim()).filter(Boolean),
+      action_points: ui.ticketActionsInput.value.split("\n").map((x) => x.trim()).filter(Boolean),
+      exit_criteria: ui.ticketExitInput.value.split("\n").map((x) => x.trim()).filter(Boolean),
+      notes: ui.ticketNotesInput.value.trim(),
+    },
+    structured: true,
+  };
+  try {
+    const result = await fetchJson("/api/tool", { method: "POST", body: JSON.stringify(payload) }, 6000);
+    const toolResult = result?.result || result;
+    if (toolResult?.ok === false) throw new Error(toolResult?.error || "Save failed.");
+    setBoardError("");
+    await refreshBoardData({ force: true });
+    ui.ticketModal.classList.add("hidden");
+  } catch (err) {
+    setBoardError(`Could not save ticket edits: ${err.message}`);
+  }
 }
 
 function renderBoard() {
@@ -617,7 +649,6 @@ function renderBoard() {
   if (!plan) {
     ui.boardSummary.textContent = "No active feature.";
     ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan available for this session.</div>';
-    ui.boardDetailPanel.innerHTML = '<div class="board-detail-empty">Select a task card to view details.</div>';
     return;
   }
   const filters = boardFilters();
@@ -691,7 +722,7 @@ function renderBoard() {
           `;
           card.querySelector('[data-action="open"]').addEventListener("click", () => {
             state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
-            renderBoard();
+            openTicketModal(task.id);
           });
           card.querySelector('[data-action="move"]').addEventListener("click", () => {
             const target = card.querySelector('[data-action="target"]').value;
@@ -705,7 +736,6 @@ function renderBoard() {
     }
     ui.boardLanes.appendChild(laneEl);
   }
-  renderBoardDetail(plan, state.board.selectedTaskIdBySession[state.currentSession]);
 }
 
 function relevantBoardEvent(evt) {
@@ -1627,6 +1657,8 @@ ${marker}` : marker;
   });
   ui.closeFolderModalBtn.addEventListener("click", () => ui.folderModal.classList.add("hidden"));
   ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);
+  ui.ticketCloseBtn?.addEventListener("click", () => ui.ticketModal.classList.add("hidden"));
+  ui.ticketSaveBtn?.addEventListener("click", () => saveTicketEdits());
   ui.memorySearchInput.addEventListener("input", () => {
     sessionMemory(state.currentSession).query = ui.memorySearchInput.value || "";
     renderMemoryModal();

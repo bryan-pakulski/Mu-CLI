@@ -2,6 +2,7 @@ const el = (id) => document.getElementById(id);
 const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
 const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
+const PENDING_STORAGE_KEY = "mucli_gui_pending_v1";
 const BOARD_MODE_STORAGE_KEY = "mucli_gui_board_modes_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
@@ -190,6 +191,15 @@ try {
 } catch {
   state.draftBySession = {};
 }
+{
+  const restored = loadPersistedPendingState();
+  if (restored.pending && typeof restored.pending === "object") {
+    state.pendingBySession = restored.pending;
+  }
+  if (restored.tasks && typeof restored.tasks === "object") {
+    state.taskBySession = restored.tasks;
+  }
+}
 try {
   const boardModes = JSON.parse(localStorage.getItem(BOARD_MODE_STORAGE_KEY) || "{}");
   if (boardModes && typeof boardModes === "object") state.board.modeBySession = boardModes;
@@ -224,6 +234,38 @@ function loadPersistedActivity() {
 function persistActivity() {
   try {
     localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(state.activityBySession || {}));
+  } catch {
+    return;
+  }
+}
+
+function loadPersistedPendingState() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENDING_STORAGE_KEY) || "{}");
+    const pendingRaw = raw.pending && typeof raw.pending === "object" ? raw.pending : {};
+    const pending = {};
+    const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+    for (const [sessionName, entry] of Object.entries(pendingRaw)) {
+      const startedAt = Number(entry?.startedAt || 0);
+      if (startedAt && startedAt < cutoff) continue;
+      pending[sessionName] = entry;
+    }
+    const tasks = raw.tasks && typeof raw.tasks === "object" ? raw.tasks : {};
+    return { pending, tasks };
+  } catch {
+    return { pending: {}, tasks: {} };
+  }
+}
+
+function persistPendingState() {
+  try {
+    localStorage.setItem(
+      PENDING_STORAGE_KEY,
+      JSON.stringify({
+        pending: state.pendingBySession || {},
+        tasks: state.taskBySession || {},
+      })
+    );
   } catch {
     return;
   }
@@ -1411,6 +1453,7 @@ function renderSessions() {
     item.querySelector('[data-action="close"]').addEventListener("click", () => { popup.classList.add("hidden"); item.classList.remove("menu-open"); });
     ui.sessionList.appendChild(item);
   }
+  persistPendingState();
   renderActivityPanel();
 }
 

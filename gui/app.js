@@ -892,11 +892,17 @@ function renderFeed(resetToBottom = false) {
 
   const pending = state.pendingBySession[state.currentSession];
   if (pending) {
-    const userCard = document.createElement("article");
-    userCard.className = "message pending";
-    userCard.innerHTML = `<span class="role">user</span><span class="text"></span>`;
-    renderMarkdown(userCard.querySelector(".text"), pending.userText);
-    ui.feed.appendChild(userCard);
+    const lastLoaded = state.loadedMessages[state.loadedMessages.length - 1];
+    const isDuplicateUserEcho =
+      lastLoaded?.role === "user"
+      && String(lastLoaded.text || "").trim() === String(pending.userText || "").trim();
+    if (!isDuplicateUserEcho) {
+      const userCard = document.createElement("article");
+      userCard.className = "message pending";
+      userCard.innerHTML = `<span class="role">user</span><span class="text"></span>`;
+      renderMarkdown(userCard.querySelector(".text"), pending.userText);
+      ui.feed.appendChild(userCard);
+    }
 
     const aiCard = document.createElement("article");
     aiCard.className = "message pending";
@@ -914,6 +920,16 @@ function renderFeed(resetToBottom = false) {
   if (resetToBottom) return void (ui.feed.scrollTop = ui.feed.scrollHeight);
   const grew = ui.feed.scrollHeight - prevHeight;
   if (prevTop < 60 && grew > 0) ui.feed.scrollTop = prevTop + grew;
+}
+
+function updateComposerState() {
+  const pending = !!state.pendingBySession[state.currentSession];
+  ui.messageInput.disabled = pending;
+  ui.messageInput.placeholder = pending ? "Model is thinking…" : "Type a message...";
+  ui.sendBtn.disabled = false;
+  ui.sendBtn.classList.toggle("stop-btn", pending);
+  ui.sendBtn.textContent = pending ? "■" : "➤";
+  ui.sendBtn.title = pending ? "Stop current run" : "Send message";
 }
 
 function renderSettingsList(target, items, mode = "checkbox") {
@@ -1104,7 +1120,7 @@ async function loadSession(name) {
     ui.messageInput.value = state.draftBySession[state.currentSession] || "";
     ui.messageInput.style.height = "auto";
     ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
-    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+    updateComposerState();
     renderActivityPanel();
     setViewMode(boardMode(name), name);
     await refreshBoardData({ force: true });
@@ -1121,7 +1137,7 @@ async function loadSession(name) {
   ui.messageInput.value = state.draftBySession[state.currentSession] || "";
   ui.messageInput.style.height = "auto";
   ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
-  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+  updateComposerState();
   setViewMode(boardMode(name), name);
   await refreshBoardData({ force: true });
 }
@@ -1345,7 +1361,7 @@ async function executeSend(sessionAtSend, text) {
   ui.messageInput.value = "";
   ui.messageInput.style.height = "auto";
   startTaskTicker(sessionAtSend);
-  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+  updateComposerState();
   try {
     const start = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend, async: true }) });
     const taskId = start.task?.task_id;
@@ -1364,7 +1380,7 @@ async function executeSend(sessionAtSend, text) {
     stopTaskTicker(sessionAtSend);
     delete state.pendingBySession[sessionAtSend];
     renderSessions();
-    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+    updateComposerState();
     if (state.taskBySession[sessionAtSend]?.status === "running") {
       state.taskBySession[sessionAtSend].status = "completed";
     }
@@ -1382,7 +1398,10 @@ async function sendMessage(evt) {
   const text = ui.messageInput.value.trim();
   if (!text) return;
   const sessionAtSend = state.currentSession;
-  if (state.pendingBySession[sessionAtSend]) return;
+  if (state.pendingBySession[sessionAtSend]) {
+    await stopCurrentRun();
+    return;
+  }
 
   const running = runningPendingSessions();
   if (running.length) {
@@ -1395,10 +1414,39 @@ async function sendMessage(evt) {
     if (state.currentSession === sessionAtSend) renderFeed(true);
     ui.messageInput.value = "";
     ui.messageInput.style.height = "auto";
-    ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+    updateComposerState();
     return;
   }
   await executeSend(sessionAtSend, text);
+}
+
+async function stopCurrentRun() {
+  const sessionName = state.currentSession;
+  const pending = state.pendingBySession[sessionName];
+  if (!pending) return;
+  const taskId = state.taskBySession[sessionName]?.taskId;
+  if (taskId) {
+    try {
+      await fetchJson("/api/tasks/cancel", {
+        method: "POST",
+        body: JSON.stringify({ task_id: taskId }),
+      });
+    } catch {
+      // best effort; UI still clears pending state
+    }
+  }
+  closeEventStream(sessionName);
+  stopTaskTicker(sessionName);
+  delete state.pendingBySession[sessionName];
+  state.taskBySession[sessionName] = {
+    ...(state.taskBySession[sessionName] || {}),
+    status: "cancelled",
+  };
+  pushActivity(sessionName, "Run stopped", taskId ? `Stopped task ${taskId}` : "Stopped current run.");
+  renderSessions();
+  renderFeed(false);
+  renderActivityPanel();
+  updateComposerState();
 }
 
 function wireEvents() {
@@ -1623,7 +1671,7 @@ async function bootstrap() {
   ui.messageInput.value = state.draftBySession[state.currentSession] || "";
   ui.messageInput.style.height = "auto";
   ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;
-  ui.sendBtn.disabled = !!state.pendingBySession[state.currentSession];
+  updateComposerState();
 }
 
 wireEvents();

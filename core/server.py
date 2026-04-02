@@ -346,6 +346,7 @@ class TaskManager:
             "updated_at": feature_state.get("updated_at", time.time()),
             "approval_id": None,
             "blocker": feature_state.get("blocker"),
+            "cancel_requested": False,
         }
         with self.lock:
             self.tasks[task_id] = task
@@ -365,6 +366,7 @@ class TaskManager:
                 "updated_at": time.time(),
                 "approval_id": None,
                 "blocker": None,
+                "cancel_requested": False,
             }
         if self.event_hub:
             self.event_hub.publish(
@@ -440,6 +442,9 @@ class TaskManager:
             )
 
     def complete_task(self, task_id: str, result: dict):
+        current = self.get_task(task_id) or {}
+        if current.get("cancel_requested"):
+            return
         self.update_task(task_id, status="completed", result=result, approval_id=None)
         if self.event_hub:
             self.event_hub.publish(
@@ -449,6 +454,9 @@ class TaskManager:
             )
 
     def fail_task(self, task_id: str, error: str):
+        current = self.get_task(task_id) or {}
+        if current.get("cancel_requested"):
+            return
         self.update_task(task_id, status="error", error=error, approval_id=None)
         if self.event_hub:
             self.event_hub.publish(
@@ -470,6 +478,27 @@ class TaskManager:
         ):
             return dict(self._restore_feature_task(persisted_state))
         return None
+
+    def cancel_task(self, task_id: str) -> dict | None:
+        task = self.get_task(task_id)
+        if not task:
+            return None
+        self.update_task(
+            task_id,
+            status="cancelled",
+            cancel_requested=True,
+            blocker=None,
+            approval_id=None,
+            result={"ok": False, "cancelled": True, "task_id": task_id},
+        )
+        cancelled = self.get_task(task_id)
+        if self.event_hub:
+            self.event_hub.publish(
+                "task.cancelled",
+                {"task": cancelled},
+                task_id=task_id,
+            )
+        return cancelled
 
     def list_tasks(self) -> list[dict]:
         with self.lock:
@@ -1799,6 +1828,21 @@ def serve(session, host: str, port: int, command_handler):
                     self._send_json(404, {"ok": False, "error": str(exc)})
                     return
                 self._send_json(200, {"ok": True, "approval": approval})
+                return
+
+            if parsed.path == "/api/tasks/cancel":
+                task_id = str(payload.get("task_id", "") or "").strip()
+                if not task_id:
+                    self._send_json(
+                        400,
+                        {"ok": False, "error": "Field 'task_id' is required."},
+                    )
+                    return
+                task = state["task_manager"].cancel_task(task_id)
+                if not task:
+                    self._send_json(404, {"ok": False, "error": "Task not found."})
+                    return
+                self._send_json(200, {"ok": True, "task": task})
                 return
 
             if parsed.path == "/api/message":

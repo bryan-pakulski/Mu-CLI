@@ -587,6 +587,21 @@ def test_build_memory_buffers_payload_exposes_saved_entries():
     assert payload["scratchpad_entries"][0]["content"]
 
 
+def test_task_manager_cancel_task_marks_cancelled_and_blocks_completion():
+    session = build_test_session()
+    manager = TaskManager(session, Lock(), event_hub=EventHub())
+    task_id = manager.create_task("message", {"text": "hello"})
+    manager.set_running(task_id)
+
+    cancelled = manager.cancel_task(task_id)
+    manager.complete_task(task_id, {"ok": True})
+    latest = manager.get_task(task_id)
+
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+    assert latest["status"] == "cancelled"
+
+
 def test_runtime_and_sessions_payloads_reflect_state_changes(tmp_path):
     session = build_test_session()
     session.thinking = True

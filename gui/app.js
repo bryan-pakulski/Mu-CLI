@@ -22,6 +22,7 @@ const PRESET_ACCENTS = [
 const state = {
   apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
   currentSession: "",
+  currentView: "chat",
   sessions: [],
   serverSession: "",
   runtime: null,
@@ -476,6 +477,7 @@ function boardFilters(sessionName = state.currentSession) {
 }
 
 function setViewMode(mode, sessionName = state.currentSession) {
+  state.currentView = mode;
   state.board.modeBySession[sessionName] = mode;
   persistBoardModes();
   const boardActive = mode === "board";
@@ -588,7 +590,7 @@ function renderBoardDetail(plan, taskId) {
 }
 
 function renderBoard() {
-  if (boardMode() !== "board") return;
+  if (ui.boardView?.classList.contains("hidden")) return;
   const plan = currentBoardPlan();
   if (!plan) {
     ui.boardSummary.textContent = "No active feature.";
@@ -721,7 +723,7 @@ function startBoardEventStream() {
 async function refreshBoardData({ force = false } = {}) {
   const sessionName = state.currentSession;
   if (!sessionName) return;
-  if (!force && boardMode(sessionName) !== "board") return;
+  if (!force && state.currentView !== "board") return;
   try {
     const statePayload = await fetchJson("/api/state", {}, 3000);
     const featureState = statePayload?.feature_state || state.runtime?.feature_state || {};
@@ -1613,7 +1615,7 @@ async function bootstrap() {
   startBoardEventStream();
   if (state.board.pollTimer) clearInterval(state.board.pollTimer);
   state.board.pollTimer = setInterval(() => {
-    if (boardMode() === "board") refreshBoardData();
+    if (state.currentView === "board") refreshBoardData();
   }, 3000);
   setViewMode(boardMode(), state.currentSession);
   if (state.approvalPollTimer) clearInterval(state.approvalPollTimer);

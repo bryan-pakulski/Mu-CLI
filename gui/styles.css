@@ -27,14 +27,14 @@
 body{margin:0;min-height:100vh;font-family:Manrope,Inter,sans-serif;background:var(--bg);color:var(--text)}
 
 .app-shell{height:100vh;display:grid;grid-template-columns:280px 1fr;min-height:0}
-.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:visible}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:visible;position:relative;z-index:30}
 .brand{font-size:30px;font-weight:700;letter-spacing:-.02em}
 .sidebar h2{margin:10px 0 6px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .section-head{display:flex;justify-content:space-between;align-items:center}
 
 .session-list{display:flex;flex-direction:column;gap:2px;max-height:34vh;overflow-y:auto;overflow-x:visible}
-.session-item{position:relative;padding:2px 4px;border-radius:8px}
-.session-item:hover{background:var(--surface-2)}
+.session-item{position:relative;padding:2px 4px;border-radius:8px;transition:box-shadow .15s ease,border-color .15s ease}
+.session-item:hover{box-shadow:0 0 0 1px color-mix(in oklab, var(--accent) 28%, transparent),0 2px 10px color-mix(in oklab, var(--accent) 16%, transparent)}
 .session-item.active{background:var(--surface-3)}
 .session-item.pending{border:1px solid color-mix(in oklab, var(--accent) 48%, transparent)}
 .session-row{display:flex;align-items:center;gap:4px}
@@ -42,7 +42,7 @@ body{margin:0;min-height:100vh;font-family:Manrope,Inter,sans-serif;background:v
 .session-title{flex:1;border:0;background:transparent;color:var(--text);text-align:left;padding:6px 4px;font-size:14px}
 .session-menu-btn{width:22px;height:22px;padding:0;opacity:0;pointer-events:none;transition:opacity .12s;border:0;background:transparent;color:var(--muted)}
 .session-item:hover .session-menu-btn,.session-item.menu-open .session-menu-btn,.session-item:focus-within .session-menu-btn{opacity:1;pointer-events:auto}
-.session-popup{position:absolute;right:6px;top:30px;width:180px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.35);padding:8px;z-index:5;display:grid;gap:6px}
+.session-popup{position:absolute;right:6px;top:30px;width:180px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.35);padding:8px;z-index:5000;display:grid;gap:6px}
 .session-popup-actions{display:grid;gap:4px}
 .session-popup-actions .btn{text-align:left;padding:6px 8px;border-radius:8px}
 
@@ -139,7 +139,7 @@ input,select,textarea{padding:8px 10px}
 .memory-item-body{font-size:13px;white-space:pre-wrap;word-break:break-word}
 
 .composer textarea{background:var(--surface-2);border:0;outline:none;resize:none;max-height:180px;min-height:28px;padding:6px 4px;color:var(--text);line-height:1.4;}
-.composer textarea:disabled{opacity:.8;cursor:not-allowed;animation:thinkingPulse 1.2s infinite}
+.composer textarea:disabled{opacity:.8;cursor:not-allowed}
 .menu-item{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:var(--text);padding:8px 10px;border-radius:10px;text-align:left;}
 .menu-item:hover{background:var(--surface-3);}
 

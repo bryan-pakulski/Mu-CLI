@@ -63,6 +63,7 @@ const state = {
   memoryPollTimer: null,
   approvalPollTimer: null,
   eventSourceBySession: {},
+  thinkingPlaceholderTimer: null,
   board: {
     modeBySession: {},
     planBySession: {},
@@ -1051,7 +1052,21 @@ function renderFeed(resetToBottom = false) {
 function updateComposerState() {
   const pending = !!state.pendingBySession[state.currentSession];
   ui.messageInput.disabled = pending;
-  ui.messageInput.placeholder = pending ? "Model is thinking…" : "Type a message...";
+  if (state.thinkingPlaceholderTimer) {
+    clearInterval(state.thinkingPlaceholderTimer);
+    state.thinkingPlaceholderTimer = null;
+  }
+  if (pending) {
+    const frames = ["Model is thinking.", "Model is thinking..", "Model is thinking..."];
+    let index = 0;
+    ui.messageInput.placeholder = frames[index];
+    state.thinkingPlaceholderTimer = setInterval(() => {
+      index = (index + 1) % frames.length;
+      ui.messageInput.placeholder = frames[index];
+    }, 420);
+  } else {
+    ui.messageInput.placeholder = "Type a message...";
+  }
   ui.sendBtn.disabled = false;
   ui.sendBtn.classList.toggle("stop-btn", pending);
   ui.sendBtn.textContent = pending ? "■" : "➤";
@@ -1378,6 +1393,7 @@ function mapEventToActivity(evt) {
   if (evt.event === "task.awaiting_input") return { title: "Awaiting input", detail: payload.blocker?.reason || "Task requires more input." };
   if (evt.event === "task.running") return { title: "Task running", detail: "" };
   if (evt.event === "task.completed") return { title: "Task complete", detail: "" };
+  if (evt.event === "task.cancelled") return { title: "Task cancelled", detail: "Stopped by user." };
   if (evt.event === "task.error") return { title: "Task error", detail: payload.error || "" };
   return null;
 }
@@ -1398,6 +1414,7 @@ function startTaskEventStream(taskId, sessionName) {
     if (!mapped) return;
     if (state.taskBySession[sessionName]) {
       if (evt.event === "task.completed") state.taskBySession[sessionName].status = "completed";
+      if (evt.event === "task.cancelled") state.taskBySession[sessionName].status = "cancelled";
       if (evt.event === "task.error") state.taskBySession[sessionName].status = "error";
       if (evt.event === "task.awaiting_approval") state.taskBySession[sessionName].status = "awaiting_approval";
       if (evt.event === "task.awaiting_input") state.taskBySession[sessionName].status = "awaiting_input";
@@ -1429,6 +1446,7 @@ function startTaskEventStream(taskId, sessionName) {
     "task.awaiting_approval",
     "task.awaiting_input",
     "task.completed",
+    "task.cancelled",
     "task.error",
     "trace.tool",
     "trace.tool_result",
@@ -1467,7 +1485,7 @@ async function waitForTaskDone(taskId, sessionName) {
     const status = task.status || "pending";
     state.taskBySession[sessionName].status = status;
     renderActivityPanel();
-    if (status === "completed" || status === "error") return task;
+    if (status === "completed" || status === "error" || status === "cancelled") return task;
     await new Promise((resolve) => setTimeout(resolve, 800));
   }
 }
@@ -1514,6 +1532,10 @@ async function executeSend(sessionAtSend, text) {
     pushActivity(sessionAtSend, "Task started", `Task ID: ${taskId}`);
     startTaskEventStream(taskId, sessionAtSend);
     const finalTask = await waitForTaskDone(taskId, sessionAtSend);
+    if (finalTask.status === "cancelled") {
+      pushActivity(sessionAtSend, "Run cancelled", `Task ${taskId} was cancelled.`);
+      return;
+    }
     if (finalTask.status === "error") {
       throw new Error(finalTask.error || "Task failed.");
     }

@@ -1,4 +1,5 @@
 import json
+import os
 import queue
 import threading
 import time
@@ -26,6 +27,33 @@ from core.feature_mode import (
     summarize_feature_plan,
     update_feature_plan_metadata,
 )
+
+
+def pick_workspace_folder() -> tuple[str, str | None]:
+    """Open a native folder chooser and return (path, error)."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        return "", "Folder browser is unavailable in this Python environment."
+
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.update()
+        selected = filedialog.askdirectory(
+            title="Select workspace folder",
+            mustexist=True,
+            initialdir=os.path.expanduser("~"),
+        )
+        root.destroy()
+    except Exception as exc:
+        return "", f"Unable to open folder browser: {exc}"
+
+    path = str(selected or "").strip()
+    if not path:
+        return "", None
+    return os.path.abspath(os.path.expanduser(path)), None
 
 
 class HeadlessUI:
@@ -1346,13 +1374,20 @@ def serve(session, host: str, port: int, command_handler):
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnected before response was written.")
 
         def _not_found(self):
             self._send_json(404, {"ok": False, "error": "Endpoint not found."})
 
         def do_OPTIONS(self):
-            self._send_json(204, {})
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.end_headers()
 
         def do_GET(self):
             parsed = urlparse(self.path)
@@ -2040,6 +2075,21 @@ def serve(session, host: str, port: int, command_handler):
                             build_workspace_payload(session),
                         )
                         self._send_json(200, result)
+                        return
+
+                    if parsed.path == "/api/workspaces/browse":
+                        path, error = pick_workspace_folder()
+                        if error:
+                            self._send_json(500, {"ok": False, "error": error})
+                            return
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "path": path,
+                                "selected": bool(path),
+                            },
+                        )
                         return
 
                     if parsed.path == "/api/workspaces/remove":

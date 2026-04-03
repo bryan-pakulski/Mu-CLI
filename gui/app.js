@@ -155,9 +155,13 @@ const ui = {
   boardViewBtn: el("boardViewBtn"),
   chatView: el("chatView"),
   boardView: el("boardView"),
+  chatBoardSwitch: el("chatBoardSwitch"),
   centerPanel: document.querySelector(".center-panel"),
   boardSummary: el("boardSummary"),
-  boardFeatureSelect: el("boardFeatureSelect"),
+  boardFeatureCard: el("boardFeatureCard"),
+  boardFeatureMenu: el("boardFeatureMenu"),
+  boardFeatureActionsBtn: el("boardFeatureActionsBtn"),
+  boardFeatureActionsMenu: el("boardFeatureActionsMenu"),
   boardFeatureArchiveBtn: el("boardFeatureArchiveBtn"),
   boardFeatureDeleteBtn: el("boardFeatureDeleteBtn"),
   boardFeatureUnloadBtn: el("boardFeatureUnloadBtn"),
@@ -438,9 +442,34 @@ function renderFeatureSelectors(sessionName = state.currentSession) {
       return `<option value="${id}">${feature.feature_name || id}${status ? ` (${status})` : ""}</option>`;
     }))
     .join("");
-  if (ui.boardFeatureSelect) {
-    ui.boardFeatureSelect.innerHTML = options;
-    ui.boardFeatureSelect.value = selectedId;
+  if (ui.boardFeatureCard) {
+    const record = selectedFeatureRecord(sessionName);
+    const title = record?.feature_name || record?.feature_id || "Active feature";
+    const status = String(record?.status || "").trim();
+    ui.boardFeatureCard.textContent = status ? `${title} (${status})` : title;
+  }
+  if (ui.boardFeatureMenu) {
+    ui.boardFeatureMenu.innerHTML = "";
+    if (!list.length) {
+      const empty = document.createElement("div");
+      empty.className = "board-feature-option active";
+      empty.textContent = "No features available";
+      ui.boardFeatureMenu.appendChild(empty);
+    }
+    for (const feature of list) {
+      const id = String(feature.feature_id || "");
+      const status = String(feature.status || "").trim();
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `board-feature-option ${id === selectedId ? "active" : ""}`;
+      btn.textContent = `${feature.feature_name || id}${status ? ` (${status})` : ""}`;
+      btn.addEventListener("click", async (evt) => {
+        evt.stopPropagation();
+        ui.boardFeatureMenu?.classList.add("hidden");
+        await activateFeature(id);
+      });
+      ui.boardFeatureMenu.appendChild(btn);
+    }
   }
   if (ui.chatFeatureSelect) {
     ui.chatFeatureSelect.innerHTML = options;
@@ -451,6 +480,7 @@ function renderFeatureSelectors(sessionName = state.currentSession) {
   const record = selectedFeatureRecord(sessionName);
   if (ui.boardFeatureArchiveBtn) ui.boardFeatureArchiveBtn.disabled = !record || String(record.status || "").toLowerCase() === "archived";
   if (ui.boardFeatureDeleteBtn) ui.boardFeatureDeleteBtn.disabled = !record;
+  if (ui.boardFeatureActionsBtn) ui.boardFeatureActionsBtn.disabled = !record;
 }
 
 function selectedFeatureRecord(sessionName = state.currentSession) {
@@ -789,6 +819,9 @@ function setViewMode(mode, sessionName = state.currentSession) {
   ui.boardViewBtn?.classList.toggle("active", boardActive);
   ui.chatView?.classList.toggle("hidden", boardActive);
   ui.boardView?.classList.toggle("hidden", !boardActive);
+  if (ui.chatBoardSwitch) ui.chatBoardSwitch.checked = boardActive;
+  ui.boardFeatureMenu?.classList.add("hidden");
+  ui.boardFeatureActionsMenu?.classList.add("hidden");
   if (ui.chatView) ui.chatView.style.display = boardActive ? "none" : "";
   if (ui.boardView) ui.boardView.style.display = boardActive ? "" : "none";
   if (boardActive) renderBoard();
@@ -2144,6 +2177,8 @@ function wireEvents() {
   document.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
     ui.attachMenu.classList.add("hidden");
+    ui.boardFeatureMenu?.classList.add("hidden");
+    ui.boardFeatureActionsMenu?.classList.add("hidden");
     if (state.openSessionMenu) {
       state.openSessionMenu = "";
       renderSessions();
@@ -2283,6 +2318,14 @@ ${marker}` : marker;
     setViewMode("board");
     await refreshBoardData({ force: true });
   });
+  ui.chatBoardSwitch?.addEventListener("change", async () => {
+    if (ui.chatBoardSwitch.checked) {
+      setViewMode("board");
+      await refreshBoardData({ force: true });
+      return;
+    }
+    setViewMode("chat");
+  });
   ui.boardRefreshBtn?.addEventListener("click", () => refreshBoardData({ force: true }));
   ui.boardSearchInput?.addEventListener("input", () => {
     boardFilters().search = ui.boardSearchInput.value || "";
@@ -2292,16 +2335,32 @@ ${marker}` : marker;
     boardFilters().phase = ui.boardPhaseFilter.value || "";
     renderBoard();
   });
-  ui.boardFeatureSelect?.addEventListener("change", async () => {
-    await activateFeature(ui.boardFeatureSelect.value);
+  ui.boardFeatureCard?.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    ui.boardFeatureActionsMenu?.classList.add("hidden");
+    ui.boardFeatureMenu?.classList.toggle("hidden");
+  });
+  ui.boardFeatureActionsBtn?.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    ui.boardFeatureMenu?.classList.add("hidden");
+    ui.boardFeatureActionsMenu?.classList.toggle("hidden");
+  });
+  ui.boardFeatureMenu?.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+  });
+  ui.boardFeatureActionsMenu?.addEventListener("click", (evt) => {
+    evt.stopPropagation();
   });
   ui.boardFeatureArchiveBtn?.addEventListener("click", () => {
+    ui.boardFeatureActionsMenu?.classList.add("hidden");
     archiveSelectedFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
   ui.boardFeatureDeleteBtn?.addEventListener("click", () => {
+    ui.boardFeatureActionsMenu?.classList.add("hidden");
     deleteSelectedFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
   ui.boardFeatureUnloadBtn?.addEventListener("click", () => {
+    ui.boardFeatureActionsMenu?.classList.add("hidden");
     unloadFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
 }

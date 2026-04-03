@@ -37,6 +37,14 @@
             <button id="boardViewBtn" class="view-tab" type="button">Board</button>
             <button id="settingsBtn" class="settings-btn" title="Settings">⚙</button>
           </div>
+          <div class="view-toggle-wrap">
+            <span class="view-toggle-label">Chat</span>
+            <label class="view-toggle-switch" title="Toggle between chat and board">
+              <input id="chatBoardSwitch" type="checkbox" />
+              <span class="view-toggle-slider"></span>
+            </label>
+            <span class="view-toggle-label">Board</span>
+          </div>
 
         <section id="chatView" class="feed-wrap">
           <div id="approvalBar" class="approval-bar hidden">
@@ -93,12 +101,18 @@
               <span id="boardSummary" class="board-summary">No active feature.</span>
             </div>
             <div class="board-controls">
-              <select id="boardFeatureSelect">
-                <option value="">Active feature</option>
-              </select>
-              <button id="boardFeatureArchiveBtn" class="btn board-icon-btn" type="button" title="Archive feature">🗄</button>
-              <button id="boardFeatureDeleteBtn" class="btn board-icon-btn" type="button" title="Delete feature">🗑</button>
-              <button id="boardFeatureUnloadBtn" class="btn board-icon-btn" type="button" title="Unload active feature">⏏</button>
+              <div class="board-feature-picker">
+                <button id="boardFeatureCard" class="board-feature-card" type="button" title="Choose active feature">Active feature</button>
+                <div id="boardFeatureMenu" class="board-feature-menu hidden"></div>
+              </div>
+              <div class="board-feature-actions-wrap">
+                <button id="boardFeatureActionsBtn" class="btn board-icon-btn" type="button" title="Feature actions">⋯</button>
+                <div id="boardFeatureActionsMenu" class="board-feature-actions hidden">
+                  <button id="boardFeatureArchiveBtn" class="btn" type="button">Archive feature</button>
+                  <button id="boardFeatureDeleteBtn" class="btn" type="button">Delete feature</button>
+                  <button id="boardFeatureUnloadBtn" class="btn" type="button">Unload feature</button>
+                </div>
+              </div>
               <input id="boardSearchInput" type="text" placeholder="Search tasks..." />
               <select id="boardPhaseFilter">
                 <option value="">All phases</option>

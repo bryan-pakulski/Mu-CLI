@@ -156,6 +156,8 @@ const ui = {
   chatView: el("chatView"),
   boardView: el("boardView"),
   chatBoardSwitch: el("chatBoardSwitch"),
+  chatToggleLabel: el("chatToggleLabel"),
+  boardToggleLabel: el("boardToggleLabel"),
   centerPanel: document.querySelector(".center-panel"),
   boardSummary: el("boardSummary"),
   boardFeatureCard: el("boardFeatureCard"),
@@ -842,6 +844,8 @@ function setViewMode(mode, sessionName = state.currentSession) {
   ui.chatView?.classList.toggle("hidden", boardActive);
   ui.boardView?.classList.toggle("hidden", !boardActive);
   if (ui.chatBoardSwitch) ui.chatBoardSwitch.checked = boardActive;
+  ui.chatToggleLabel?.classList.toggle("active", !boardActive);
+  ui.boardToggleLabel?.classList.toggle("active", boardActive);
   ui.boardFeatureMenu?.classList.add("hidden");
   ui.boardFeatureActionsMenu?.classList.add("hidden");
   if (ui.chatView) ui.chatView.style.display = boardActive ? "none" : "";

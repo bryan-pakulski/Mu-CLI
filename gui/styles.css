@@ -116,23 +116,21 @@ select option:hover{
   border:1px solid var(--border);
   background:color-mix(in oklab, var(--surface) 92%, transparent);
 }
-.view-toggle-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.view-toggle-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;transition:color .12s ease,opacity .12s ease}
+.view-toggle-label.active{color:var(--text);opacity:1}
 .view-toggle-switch{position:relative;width:44px;height:24px;display:inline-block}
 .view-toggle-switch input{opacity:0;width:0;height:0;position:absolute}
 .view-toggle-slider{
   position:absolute;inset:0;border-radius:999px;
   border:1px solid var(--border);
-  background:var(--surface-2);
-  transition:background .15s ease,border-color .15s ease;
+  background:color-mix(in oklab,var(--surface-2) 95%, transparent);
+  transition:border-color .15s ease;
 }
 .view-toggle-slider::before{
   content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:999px;
   background:var(--text);transition:transform .18s ease;
 }
-.view-toggle-switch input:checked + .view-toggle-slider{
-  background:color-mix(in oklab,var(--accent) 35%,var(--surface-2));
-  border-color:color-mix(in oklab,var(--accent) 60%,var(--border));
-}
+.view-toggle-switch input:checked + .view-toggle-slider{border-color:color-mix(in oklab,var(--accent) 40%,var(--border))}
 .view-toggle-switch input:checked + .view-toggle-slider::before{transform:translateX(20px)}
 .feed-wrap,.board-view{grid-row:1;grid-column:1;position:relative;height:100%;min-height:0}
 .feed-wrap{position:relative}

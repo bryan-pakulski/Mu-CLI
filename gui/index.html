@@ -109,6 +109,7 @@
                   <button id="boardFeatureUnloadBtn" class="btn" type="button">Unload feature</button>
                 </div>
               </div>
+              <button id="boardRunBtn" class="btn board-run-btn" type="button">▶ Play</button>
               <input id="boardSearchInput" type="text" placeholder="Search tasks..." />
               <select id="boardPhaseFilter">
                 <option value="">All phases</option>
@@ -256,14 +257,14 @@
 
     <div id="createFeatureModal" class="modal hidden" role="dialog" aria-modal="true">
       <div class="folder-modal-card">
-        <h3>Create feature (stub)</h3>
-        <p class="muted">Template modal only. Feature creation wiring will be added in a follow-up update.</p>
-        <div class="field">
-          <label for="createFeatureNameInput">Feature name</label>
-          <input id="createFeatureNameInput" type="text" placeholder="New feature name" />
-        </div>
+        <h3>Manual feature builder</h3>
+        <p class="muted">Create a draft, refine epics/tasks, then confirm to auto-approve and create the feature.</p>
+        <div class="field"><label for="createFeatureNameInput">Feature name</label><input id="createFeatureNameInput" type="text" placeholder="New feature name" /></div>
+        <div id="featureEpicList" class="feature-epic-list"></div>
+        <button id="addEpicBtn" class="btn" type="button">+ Add epic</button>
         <div class="modal-actions">
-          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Create (stub)</button>
+          <button id="saveFeatureDraftBtn" class="btn" type="button">Save draft</button>
+          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Confirm feature</button>
           <button id="createFeatureCancelBtn" class="btn" type="button">Cancel</button>
         </div>
       </div>

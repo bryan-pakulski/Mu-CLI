@@ -76,6 +76,7 @@ const state = {
     featureListBySession: {},
     selectedFeatureIdBySession: {},
     selectedTaskIdBySession: {},
+    featureDraftBySession: {},
     filterBySession: {},
     pollTimer: null,
     stream: null,
@@ -164,6 +165,7 @@ const ui = {
   boardFeatureMenu: el("boardFeatureMenu"),
   boardFeatureActionsBtn: el("boardFeatureActionsBtn"),
   boardFeatureActionsMenu: el("boardFeatureActionsMenu"),
+  boardRunBtn: el("boardRunBtn"),
   boardFeatureArchiveBtn: el("boardFeatureArchiveBtn"),
   boardFeatureDeleteBtn: el("boardFeatureDeleteBtn"),
   boardFeatureUnloadBtn: el("boardFeatureUnloadBtn"),
@@ -187,6 +189,9 @@ const ui = {
   ticketCloseBtn: el("ticketCloseBtn"),
   createFeatureModal: el("createFeatureModal"),
   createFeatureNameInput: el("createFeatureNameInput"),
+  featureEpicList: el("featureEpicList"),
+  addEpicBtn: el("addEpicBtn"),
+  saveFeatureDraftBtn: el("saveFeatureDraftBtn"),
   createFeatureCancelBtn: el("createFeatureCancelBtn"),
   createFeatureStubBtn: el("createFeatureStubBtn"),
 };
@@ -468,7 +473,8 @@ function renderFeatureSelectors(sessionName = state.currentSession) {
       createBtn.addEventListener("click", (evt) => {
         evt.stopPropagation();
         ui.boardFeatureMenu?.classList.add("hidden");
-        if (ui.createFeatureNameInput) ui.createFeatureNameInput.value = "";
+        currentFeatureDraft(sessionName);
+        renderFeatureDraftEditor(sessionName);
         showModal(ui.createFeatureModal);
       });
       ui.boardFeatureMenu.appendChild(createBtn);
@@ -498,6 +504,7 @@ function renderFeatureSelectors(sessionName = state.currentSession) {
   if (ui.boardFeatureArchiveBtn) ui.boardFeatureArchiveBtn.disabled = !record || String(record.status || "").toLowerCase() === "archived";
   if (ui.boardFeatureDeleteBtn) ui.boardFeatureDeleteBtn.disabled = !record;
   if (ui.boardFeatureActionsBtn) ui.boardFeatureActionsBtn.disabled = !record;
+  if (ui.boardRunBtn) ui.boardRunBtn.disabled = !record && !state.pendingBySession[sessionName];
 }
 
 function selectedFeatureRecord(sessionName = state.currentSession) {
@@ -510,6 +517,125 @@ function selectedFeatureRecord(sessionName = state.currentSession) {
 function selectedFeatureArchived(sessionName = state.currentSession) {
   const record = selectedFeatureRecord(sessionName);
   return String(record?.status || "").toLowerCase() === "archived";
+}
+
+function slugifyFeatureId(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48) || `feature_${Date.now()}`;
+}
+
+function currentFeatureDraft(sessionName = state.currentSession) {
+  if (!state.board.featureDraftBySession[sessionName]) {
+    state.board.featureDraftBySession[sessionName] = {
+      name: "",
+      epics: [{ title: "Epic 1", tasks: [""] }],
+      status: "draft",
+    };
+  }
+  return state.board.featureDraftBySession[sessionName];
+}
+
+function renderFeatureDraftEditor(sessionName = state.currentSession) {
+  if (!ui.featureEpicList) return;
+  const draft = currentFeatureDraft(sessionName);
+  ui.createFeatureNameInput.value = draft.name || "";
+  ui.featureEpicList.innerHTML = "";
+  draft.epics.forEach((epic, epicIdx) => {
+    const card = document.createElement("section");
+    card.className = "feature-epic-card";
+    card.innerHTML = `
+      <div class="feature-epic-head">
+        <input class="feature-epic-title" value="${epic.title || ""}" placeholder="Epic title" />
+        <button class="btn feature-epic-delete" type="button">−</button>
+      </div>
+      <div class="feature-task-list"></div>
+      <button class="btn feature-task-add" type="button">+ Add task</button>
+    `;
+    const titleInput = card.querySelector(".feature-epic-title");
+    titleInput.addEventListener("input", () => {
+      draft.epics[epicIdx].title = titleInput.value;
+    });
+    card.querySelector(".feature-epic-delete").addEventListener("click", () => {
+      draft.epics.splice(epicIdx, 1);
+      if (!draft.epics.length) draft.epics.push({ title: "Epic 1", tasks: [""] });
+      renderFeatureDraftEditor(sessionName);
+    });
+    const list = card.querySelector(".feature-task-list");
+    (epic.tasks || []).forEach((taskTitle, taskIdx) => {
+      const row = document.createElement("div");
+      row.className = "feature-task-row";
+      row.innerHTML = `
+        <input class="feature-task-input" value="${taskTitle || ""}" placeholder="Task title" />
+        <button class="btn feature-task-delete" type="button">−</button>
+      `;
+      const input = row.querySelector(".feature-task-input");
+      input.addEventListener("input", () => {
+        draft.epics[epicIdx].tasks[taskIdx] = input.value;
+      });
+      row.querySelector(".feature-task-delete").addEventListener("click", () => {
+        draft.epics[epicIdx].tasks.splice(taskIdx, 1);
+        if (!draft.epics[epicIdx].tasks.length) draft.epics[epicIdx].tasks.push("");
+        renderFeatureDraftEditor(sessionName);
+      });
+      list.appendChild(row);
+    });
+    card.querySelector(".feature-task-add").addEventListener("click", () => {
+      draft.epics[epicIdx].tasks.push("");
+      renderFeatureDraftEditor(sessionName);
+    });
+    ui.featureEpicList.appendChild(card);
+  });
+}
+
+async function confirmFeatureDraft(sessionName = state.currentSession) {
+  const draft = currentFeatureDraft(sessionName);
+  draft.name = String(ui.createFeatureNameInput?.value || "").trim();
+  if (!draft.name) throw new Error("Feature name is required.");
+  const featureId = slugifyFeatureId(draft.name);
+  await fetchJson("/api/tool", {
+    method: "POST",
+    body: JSON.stringify({
+      tool_name: "create_feature",
+      tool_args: {
+        feature_name: draft.name,
+        feature_id: featureId,
+        feature_request: draft.name,
+        design_plan: "Manual draft created in board UI",
+      },
+    }),
+  });
+  const phases = draft.epics
+    .map((epic, index) => ({ id: index + 1, title: String(epic.title || `Epic ${index + 1}`).trim(), goal: "", order: index + 1 }))
+    .filter((phase) => phase.title);
+  if (phases.length) {
+    await fetchJson("/api/tool", {
+      method: "POST",
+      body: JSON.stringify({
+        tool_name: "create_phases",
+        tool_args: { feature_id: featureId, phases },
+      }),
+    });
+  }
+  for (const [idx, epic] of draft.epics.entries()) {
+    for (const taskTitle of epic.tasks || []) {
+      const cleanTitle = String(taskTitle || "").trim();
+      if (!cleanTitle) continue;
+      await fetchJson("/api/tool", {
+        method: "POST",
+        body: JSON.stringify({
+          tool_name: "create_task",
+          tool_args: { feature_id: featureId, phase_id: idx + 1, title: cleanTitle, overview: "", design: [], exit_criteria: [] },
+        }),
+      });
+    }
+  }
+  draft.status = "approved";
+  await activateFeature(featureId);
+  await refreshBoardData({ force: true });
+  setStatus(`Feature "${draft.name}" created and approved.`, "connected");
 }
 
 function textFromParts(parts = []) {
@@ -978,11 +1104,18 @@ async function saveTicketEdits() {
 
 function renderBoard() {
   if (ui.boardView?.classList.contains("hidden")) return;
+  const runPending = !!state.pendingBySession[state.currentSession];
+  if (ui.boardRunBtn) {
+    ui.boardRunBtn.textContent = runPending ? "■ Stop" : "▶ Play";
+    ui.boardRunBtn.classList.toggle("running", runPending);
+    ui.boardRunBtn.title = runPending ? "Stop active feature run" : "Start feature run";
+  }
   const plan = currentBoardPlan();
   renderFeatureSelectors(state.currentSession);
   const featureIsArchived = selectedFeatureArchived(state.currentSession);
   if (!plan) {
-    ui.boardSummary.textContent = "No active feature.";
+    const draft = state.board.featureDraftBySession[state.currentSession];
+    ui.boardSummary.textContent = draft?.name ? `Draft: ${draft.name}` : "No active feature.";
     ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan available for this session.</div>';
     return;
   }
@@ -2302,11 +2435,23 @@ ${marker}` : marker;
   ui.ticketCloseBtn?.addEventListener("click", () => hideModal(ui.ticketModal));
   ui.ticketSaveBtn?.addEventListener("click", () => saveTicketEdits());
   ui.createFeatureCancelBtn?.addEventListener("click", () => hideModal(ui.createFeatureModal));
-  ui.createFeatureStubBtn?.addEventListener("click", () => {
-    const raw = ui.createFeatureNameInput?.value || "";
-    const proposed = raw.trim();
+  ui.addEpicBtn?.addEventListener("click", () => {
+    const draft = currentFeatureDraft(state.currentSession);
+    draft.epics.push({ title: `Epic ${draft.epics.length + 1}`, tasks: [""] });
+    renderFeatureDraftEditor(state.currentSession);
+  });
+  ui.saveFeatureDraftBtn?.addEventListener("click", () => {
+    const draft = currentFeatureDraft(state.currentSession);
+    draft.name = String(ui.createFeatureNameInput?.value || "").trim();
+    draft.status = "draft";
     hideModal(ui.createFeatureModal);
-    setStatus(proposed ? `Create feature (stub): ${proposed}` : "Create feature (stub) opened.", "warning");
+    renderBoard();
+    setStatus("Feature draft saved.", "warning");
+  });
+  ui.createFeatureStubBtn?.addEventListener("click", () => {
+    confirmFeatureDraft(state.currentSession)
+      .then(() => hideModal(ui.createFeatureModal))
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
   ui.memorySearchInput.addEventListener("input", () => {
     sessionMemory(state.currentSession).query = ui.memorySearchInput.value || "";
@@ -2395,6 +2540,20 @@ ${marker}` : marker;
   ui.boardFeatureUnloadBtn?.addEventListener("click", () => {
     ui.boardFeatureActionsMenu?.classList.add("hidden");
     unloadFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.boardRunBtn?.addEventListener("click", async () => {
+    if (state.pendingBySession[state.currentSession]) {
+      await stopCurrentRun();
+      renderBoard();
+      return;
+    }
+    const feature = selectedFeatureRecord(state.currentSession);
+    if (!feature?.feature_id) return setStatus("No active feature to run.", "warning");
+    await executeSend(
+      state.currentSession,
+      `Start working on active feature "${feature.feature_name || feature.feature_id}" and continue with the next actionable task.`
+    );
+    renderBoard();
   });
 }
 

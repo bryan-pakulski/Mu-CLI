@@ -183,6 +183,10 @@ const ui = {
   ticketEvents: el("ticketEvents"),
   ticketSaveBtn: el("ticketSaveBtn"),
   ticketCloseBtn: el("ticketCloseBtn"),
+  createFeatureModal: el("createFeatureModal"),
+  createFeatureNameInput: el("createFeatureNameInput"),
+  createFeatureCancelBtn: el("createFeatureCancelBtn"),
+  createFeatureStubBtn: el("createFeatureStubBtn"),
 };
 
 ui.apiBaseInput.value = state.apiBase;
@@ -444,7 +448,7 @@ function renderFeatureSelectors(sessionName = state.currentSession) {
     .join("");
   if (ui.boardFeatureCard) {
     const record = selectedFeatureRecord(sessionName);
-    const title = record?.feature_name || record?.feature_id || "Active feature";
+    const title = record?.feature_name || record?.feature_id || (list.length ? "Load feature" : "Load feature");
     const status = String(record?.status || "").trim();
     ui.boardFeatureCard.textContent = status ? `${title} (${status})` : title;
   }
@@ -455,6 +459,17 @@ function renderFeatureSelectors(sessionName = state.currentSession) {
       empty.className = "board-feature-option active";
       empty.textContent = "No features available";
       ui.boardFeatureMenu.appendChild(empty);
+      const createBtn = document.createElement("button");
+      createBtn.type = "button";
+      createBtn.className = "board-feature-option";
+      createBtn.textContent = "Create feature";
+      createBtn.addEventListener("click", (evt) => {
+        evt.stopPropagation();
+        ui.boardFeatureMenu?.classList.add("hidden");
+        if (ui.createFeatureNameInput) ui.createFeatureNameInput.value = "";
+        showModal(ui.createFeatureModal);
+      });
+      ui.boardFeatureMenu.appendChild(createBtn);
     }
     for (const feature of list) {
       const id = String(feature.feature_id || "");
@@ -808,6 +823,13 @@ function boardFilters(sessionName = state.currentSession) {
 }
 
 function setViewMode(mode, sessionName = state.currentSession) {
+  if (ui.centerPanel) {
+    ui.centerPanel.classList.remove("view-switching");
+    void ui.centerPanel.offsetWidth;
+    ui.centerPanel.classList.add("view-switching");
+    if (setViewMode._fadeTimer) clearTimeout(setViewMode._fadeTimer);
+    setViewMode._fadeTimer = setTimeout(() => ui.centerPanel?.classList.remove("view-switching"), 240);
+  }
   state.currentView = mode;
   state.board.modeBySession[sessionName] = mode;
   persistBoardModes();
@@ -986,7 +1008,7 @@ function renderBoard() {
     const laneEl = document.createElement("section");
     laneEl.className = `board-lane lane-${laneId}`;
     laneEl.dataset.laneId = laneId;
-    laneEl.innerHTML = `<div class="board-lane-head"><span>${laneLabel}</span><span class="board-lane-count">${lanes[laneId].length}</span></div><div class="board-lane-body"></div>`;
+    laneEl.innerHTML = `<div class="board-lane-head"><span>${laneLabel}${featureIsArchived ? ' <span class="lane-lock" title="Feature archived">🔒</span>' : ""}</span><span class="board-lane-count">${lanes[laneId].length}</span></div><div class="board-lane-body"></div>`;
     const laneBody = laneEl.querySelector(".board-lane-body");
     const byPhase = new Map();
     for (const task of lanes[laneId]) {
@@ -2275,6 +2297,13 @@ ${marker}` : marker;
   ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);
   ui.ticketCloseBtn?.addEventListener("click", () => hideModal(ui.ticketModal));
   ui.ticketSaveBtn?.addEventListener("click", () => saveTicketEdits());
+  ui.createFeatureCancelBtn?.addEventListener("click", () => hideModal(ui.createFeatureModal));
+  ui.createFeatureStubBtn?.addEventListener("click", () => {
+    const raw = ui.createFeatureNameInput?.value || "";
+    const proposed = raw.trim();
+    hideModal(ui.createFeatureModal);
+    setStatus(proposed ? `Create feature (stub): ${proposed}` : "Create feature (stub) opened.", "warning");
+  });
   ui.memorySearchInput.addEventListener("input", () => {
     sessionMemory(state.currentSession).query = ui.memorySearchInput.value || "";
     renderMemoryModal();

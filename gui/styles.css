@@ -101,6 +101,14 @@ select option:hover{
 .center-panel{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;border-right:1px solid var(--border);position:relative}
 .center-panel[data-view="chat"] #boardView{display:none!important}
 .center-panel[data-view="board"] #chatView{display:none!important}
+.center-panel.view-switching .feed-wrap,
+.center-panel.view-switching .board-view{
+  animation:viewCrossFade .24s ease;
+}
+@keyframes viewCrossFade{
+  0%{opacity:.2;transform:translateY(4px)}
+  100%{opacity:1;transform:translateY(0)}
+}
 .view-toggle-wrap{
   position:absolute;left:14px;bottom:18px;z-index:8;
   display:flex;align-items:center;gap:8px;
@@ -385,6 +393,7 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
 .board-lanes{display:grid;grid-template-columns:repeat(4,minmax(220px,1fr));gap:10px;min-height:0;overflow:auto;padding-right:4px}
 .board-lane{border:1px solid color-mix(in oklab, var(--border) 70%, transparent);border-radius:12px;background:color-mix(in oklab, var(--surface) 85%, transparent);display:grid;grid-template-rows:auto minmax(0,1fr);min-height:360px;overflow:hidden}
 .board-lane-head{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.lane-lock{font-size:12px;margin-left:4px;vertical-align:middle}
 .board-lane-count{font-size:11px;color:var(--muted)}
 .board-lane-body{padding:6px;display:flex;flex-direction:column;gap:6px;overflow:auto}
 .board-empty{font-size:12px;color:var(--muted);padding:6px}

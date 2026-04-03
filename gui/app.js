@@ -481,10 +481,26 @@ function canonicalMessageText(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeMessageTimestamp(rawTs) {
+  const n = Number(rawTs);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n > 10_000_000_000 ? n : n * 1000;
+}
+
+function formatMessageTime(rawTs) {
+  const ts = normalizeMessageTimestamp(rawTs);
+  if (!ts) return "";
+  return new Date(ts).toLocaleTimeString();
+}
+
 function normalizedMessages(history = []) {
   const normalized = history
     .filter((m) => ["user", "assistant"].includes(m.role))
-    .map((m) => ({ role: m.role, text: stripLeakedDirectiveText(textFromParts(m.parts || [])) }))
+    .map((m) => ({
+      role: m.role,
+      text: stripLeakedDirectiveText(textFromParts(m.parts || [])),
+      at: normalizeMessageTimestamp(m.timestamp ?? m.created_at ?? m.at),
+    }))
     .filter((m) => m.text);
   const deduped = [];
   for (const msg of normalized) {
@@ -626,7 +642,7 @@ function appendChatErrorEntry(sessionName, message, detail = "") {
   const signature = `${sessionName}:${text}`;
   if (state.errorSignatureBySession[sessionName] === signature) return;
   state.errorSignatureBySession[sessionName] = signature;
-  state.loadedMessages.push({ role: "assistant", text });
+  state.loadedMessages.push({ role: "assistant", text, at: Date.now() });
   if (state.currentSession === sessionName) renderFeed(true);
 }
 
@@ -670,7 +686,7 @@ function renderActivityFilters(sessionName, tags = []) {
     const enabled = !!filter[tag];
     btn.type = "button";
     btn.className = `activity-filter-chip tag-${activityTagClass(tag)} ${enabled ? "active" : ""}`;
-    btn.textContent = tag;
+    btn.textContent = `${enabled ? "☑" : "☐"} ${tag}`;
     btn.title = enabled ? `Hide ${tag} events` : `Show ${tag} events`;
     btn.addEventListener("click", () => {
       filter[tag] = !filter[tag];
@@ -1289,7 +1305,8 @@ function renderFeed(resetToBottom = false) {
   for (const item of state.loadedMessages.slice(start)) {
     const card = document.createElement("article");
     card.className = "message";
-    card.innerHTML = `<span class="role">${item.role}</span><span class="text"></span>`;
+    const roleTime = formatMessageTime(item.at);
+    card.innerHTML = `<div class="message-meta"><span class="role">${item.role}</span>${roleTime ? `<span class="message-time">${roleTime}</span>` : ""}</div><span class="text"></span>`;
     renderMarkdown(card.querySelector(".text"), item.text);
     if (item.role === "assistant") {
       const footer = document.createElement("div");
@@ -1314,7 +1331,8 @@ function renderFeed(resetToBottom = false) {
     if (!isDuplicateUserEcho && canonicalMessageText(pending.userText)) {
       const userCard = document.createElement("article");
       userCard.className = "message pending";
-      userCard.innerHTML = `<span class="role">user</span><span class="text"></span>`;
+      const pendingAt = formatMessageTime(pending.startedAt);
+      userCard.innerHTML = `<div class="message-meta"><span class="role">user</span>${pendingAt ? `<span class="message-time">${pendingAt}</span>` : ""}</div><span class="text"></span>`;
       renderMarkdown(userCard.querySelector(".text"), pending.userText);
       ui.feed.appendChild(userCard);
     }
@@ -1323,8 +1341,9 @@ function renderFeed(resetToBottom = false) {
     aiCard.className = "message pending";
     const latestActivity = pending.latestActivity || "Thinking through response";
     const runtimeMeta = pending.startedAt ? `Running for ${formatSince(pending.startedAt)}` : "Running";
+    const pendingAt = formatMessageTime(pending.startedAt);
     aiCard.innerHTML = `
-      <span class="role">assistant</span>
+      <div class="message-meta"><span class="role">assistant</span>${pendingAt ? `<span class="message-time">${pendingAt}</span>` : ""}</div>
       <span class="text">
         <span class="thinking-status"><span class="thinking-pulse"></span>${latestActivity}</span>
         <div class="thinking-meta">${runtimeMeta}</div>

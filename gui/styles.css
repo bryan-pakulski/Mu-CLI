@@ -91,8 +91,21 @@ input,select,textarea{padding:8px 10px}
 .approval-actions{display:flex;gap:6px}
 .feed{position:absolute;inset:0 0 74px 0;overflow:auto;padding:20px 16px;display:flex;flex-direction:column;gap:12px;align-items:center;z-index:1}
 .message{width:min(920px,92%)}
-.message .role{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:8px}
+.message-meta{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.message .role{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.message-time{font-size:11px;color:var(--muted)}
 .message .text{display:inline;line-height:1.56}
+.message-footer{display:flex;justify-content:flex-end;margin-top:6px;opacity:0;pointer-events:none;transition:opacity .12s ease}
+.message:hover .message-footer,.message:focus-within .message-footer{opacity:1;pointer-events:auto}
+.copy-msg-btn{
+  border:1px solid var(--border);
+  background:var(--surface-2);
+  color:var(--muted);
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:11px;
+}
+.copy-msg-btn:hover{color:var(--text);border-color:color-mix(in oklab, var(--accent) 55%, var(--border))}
 
 .composer{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;width:min(820px,calc(100% - 28px));padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:26px;z-index:5;isolation:isolate}
 .composer-row{position:relative;display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:end;padding:0}
@@ -221,7 +234,8 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
   font-size:11px;
   text-transform:capitalize;
 }
-.activity-filter-chip.active{color:var(--text);border-color:color-mix(in oklab, var(--accent) 46%, var(--border))}
+.activity-filter-chip.active{color:var(--text);border-color:color-mix(in oklab, var(--accent) 46%, var(--border));opacity:1}
+.activity-filter-chip:not(.active){opacity:.45;filter:saturate(.75)}
 .activity-list{overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding-right:2px;min-height:0}
 .activity-item{border-left:2px solid var(--border);padding:0 0 0 10px}
 .activity-top{display:flex;align-items:center;gap:8px}

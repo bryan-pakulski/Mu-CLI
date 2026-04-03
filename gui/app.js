@@ -55,6 +55,7 @@ const state = {
   pendingBySession: {},
   sendQueue: [],
   draftBySession: {},
+  openSessionMenu: "",
   activityBySession: {},
   activityTagFilterBySession: {},
   taskBySession: {},
@@ -1523,43 +1524,51 @@ function renderSessions() {
   for (const name of state.sessions) {
     const item = document.createElement("div");
     const isPending = !!state.pendingBySession[name];
+    const isMenuOpen = state.openSessionMenu === name;
     item.className = `session-item ${name === state.currentSession ? "active" : ""} ${isPending ? "pending" : ""}`;
     item.innerHTML = `
       <div class="session-row">
         <button class="session-title">${isPending ? '<span class="session-pending-dot"></span>' : ""}${name}</button>
         <button class="session-menu-btn" title="Session options">⋯</button>
       </div>
-      <div class="session-popup hidden">
-        <input class="session-rename-input" value="${name}" />
+      <div class="session-popup ${isMenuOpen ? "" : "hidden"}">
         <div class="session-popup-actions">
-          <button class="btn" data-action="apply-rename">Rename</button>
+          <button class="btn" data-action="rename">Rename</button>
           <button class="btn" data-action="delete">Delete</button>
           <button class="btn" data-action="close">Close</button>
         </div>
       </div>
     `;
+    item.classList.toggle("menu-open", isMenuOpen);
 
-    item.querySelector(".session-title").addEventListener("click", () => loadSession(name));
+    item.querySelector(".session-title").addEventListener("click", () => {
+      state.openSessionMenu = "";
+      loadSession(name);
+    });
     const popup = item.querySelector(".session-popup");
     item.querySelector(".session-menu-btn").addEventListener("click", (evt) => {
       evt.stopPropagation();
-      ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
-      ui.sessionList.querySelectorAll(".session-item").forEach((i) => i.classList.remove("menu-open"));
-      popup.classList.toggle("hidden");
-      item.classList.toggle("menu-open", !popup.classList.contains("hidden"));
+      state.openSessionMenu = state.openSessionMenu === name ? "" : name;
+      renderSessions();
     });
 
-    item.querySelector('[data-action="apply-rename"]').addEventListener("click", async () => {
-      const newName = item.querySelector(".session-rename-input").value.trim();
+    item.querySelector('[data-action="rename"]').addEventListener("click", async () => {
+      const newName = prompt("Rename session:", name)?.trim() || "";
       if (!newName || newName === name) return;
+      state.openSessionMenu = "";
       await renameSession(name, newName);
     });
 
     item.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+      state.openSessionMenu = "";
       await deleteSession(name);
     });
 
-    item.querySelector('[data-action="close"]').addEventListener("click", () => { popup.classList.add("hidden"); item.classList.remove("menu-open"); });
+    item.querySelector('[data-action="close"]').addEventListener("click", () => {
+      state.openSessionMenu = "";
+      popup.classList.add("hidden");
+      item.classList.remove("menu-open");
+    });
     ui.sessionList.appendChild(item);
   }
   persistPendingState();
@@ -2135,8 +2144,10 @@ function wireEvents() {
   document.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
     ui.attachMenu.classList.add("hidden");
-    ui.sessionList.querySelectorAll(".session-popup").forEach((p) => p.classList.add("hidden"));
-    ui.sessionList.querySelectorAll(".session-item").forEach((i) => i.classList.remove("menu-open"));
+    if (state.openSessionMenu) {
+      state.openSessionMenu = "";
+      renderSessions();
+    }
   });
 
   const autoResizeInput = () => {

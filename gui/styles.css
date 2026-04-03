@@ -98,14 +98,11 @@ select option:hover{
 .workspace-status,.status-badge{font-size:12px;color:var(--muted)}
 
 .main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0;overflow:hidden}
-.center-panel{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;border-right:1px solid var(--border);position:relative}
+.center-panel{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;border-right:1px solid var(--border);position:relative}
 .center-panel[data-view="chat"] #boardView{display:none!important}
 .center-panel[data-view="board"] #chatView{display:none!important}
-.view-tabs{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface);align-items:center}
-.view-tab{padding:6px 12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
-.view-tab.active{background:color-mix(in oklab, var(--accent) 16%, var(--surface-2));border-color:var(--accent)}
 .view-toggle-wrap{
-  position:absolute;left:14px;bottom:92px;z-index:7;
+  position:absolute;left:14px;bottom:18px;z-index:8;
   display:flex;align-items:center;gap:8px;
   padding:6px 10px;border-radius:999px;
   border:1px solid var(--border);
@@ -129,10 +126,11 @@ select option:hover{
   border-color:color-mix(in oklab,var(--accent) 60%,var(--border));
 }
 .view-toggle-switch input:checked + .view-toggle-slider::before{transform:translateX(20px)}
-.feed-wrap,.board-view{grid-row:2;grid-column:1;position:relative;height:100%;min-height:0}
+.feed-wrap,.board-view{grid-row:1;grid-column:1;position:relative;height:100%;min-height:0}
 .feed-wrap{position:relative}
 .feed-wrap::before{content:"";position:absolute;top:0;left:0;right:0;height:72px;pointer-events:none;z-index:2;background:linear-gradient(to bottom, var(--bg), color-mix(in oklab, var(--bg) 0%, transparent));}
-.settings-btn{margin-left:auto;z-index:4;width:32px;height:32px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)}
+.settings-btn{z-index:8;width:32px;height:32px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);color:var(--text)}
+.settings-floating{position:absolute;right:14px;bottom:18px}
 .approval-bar{position:absolute;top:10px;left:12px;right:56px;z-index:4;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:color-mix(in oklab, var(--surface) 88%, var(--accent) 12%);font-size:12px}
 .approval-actions{display:flex;gap:6px}
 .feed{position:absolute;inset:0 0 74px 0;overflow:auto;padding:20px 16px;display:flex;flex-direction:column;gap:12px;align-items:center;z-index:1}
@@ -368,6 +366,7 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
   box-shadow:0 16px 36px rgba(0,0,0,.35);
   max-height:260px;overflow:auto;
 }
+.board-feature-menu.hidden{display:none!important}
 .board-feature-option{border:0;background:transparent;text-align:left;padding:7px 8px;border-radius:8px}
 .board-feature-option:hover,.board-feature-option.active{background:color-mix(in oklab,var(--surface-2) 86%, transparent)}
 .board-feature-actions-wrap{position:relative}
@@ -378,6 +377,7 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
   border-radius:12px;background:color-mix(in oklab,var(--surface) 96%, #000 4%);
   box-shadow:0 16px 36px rgba(0,0,0,.35);
 }
+.board-feature-actions.hidden{display:none!important}
 .board-feature-actions .btn{background:transparent;border:0;text-align:left;padding:8px 10px;border-radius:8px}
 .board-feature-actions .btn:hover{background:color-mix(in oklab,var(--surface-2) 86%, transparent)}
 .board-icon-btn{width:34px;min-width:34px;height:34px;border-radius:999px;padding:0;display:grid;place-items:center;font-size:16px}

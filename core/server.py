@@ -1590,15 +1590,19 @@ def serve(session, host: str, port: int, command_handler):
 
         def _send_json(self, status_code: int, payload: dict):
             body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
-            self.send_response(status_code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.end_headers()
             try:
+                self.send_response(status_code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.end_headers()
                 self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnected before response was written.")
+            except Exception:
+                raise  # Re-raise other unexpected errors
             except (BrokenPipeError, ConnectionResetError):
                 logger.debug("Client disconnected before response was written.")
 

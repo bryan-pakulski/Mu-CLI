@@ -215,13 +215,50 @@ In FEATURE mode, once all tasks are complete you must perform a review pass and 
 11. Only finish after calling `approve_feature_task` to set `review_status` to `completed`, or after clearly documenting why the workflow is blocked.""",
     "research": """WORKFLOW (Research & Exploration):
 1. The user wants to understand how something works without necessarily changing things.
-2. You have access to online tooling and research knowledge bases, use them to explore any relevent information.
+2. You have access to online tooling and research knowledge bases, use them to explore any relevant information.
 3. If asked to research within a codebase, search for the relevant components.
 4. Traverse the codebase by reading files and following function calls/imports.
 5. Provide a detailed, comprehensive summary of your findings.
-6. Include citations and references to support your findings.
-7. Any online resources should be cited and referenced in your summary.
-""",
+
+RESEARCH TOOLS:
+- web_search: Search the web using DuckDuckGo or Google Custom Search API. Returns results with title, URL, snippet, and relevance score.
+- arxiv_search: Search arXiv for academic papers. Returns paper metadata including title, authors, abstract, arXiv ID, and PDF link.
+- reddit_search: Search Reddit for discussions. Returns posts with title, URL, score, and comments.
+- stackoverflow_search: Search Stack Overflow for programming Q&A. Returns questions with answers and code snippets.
+- hackernews_search: Search Hacker News via Algolia HN API. Returns stories with title, URL, points, and comments.
+- url_grounding: Access a URL to gather additional context. Supports JavaScript-heavy websites.
+- read_document: Read and parse documents like PDFs to gather additional context.
+- doi_resolve: Resolve a DOI to get publication metadata including title, authors, and abstract.
+
+CITATION REQUIREMENTS:
+1. ALL sources must be registered with the CitationManager before using them in your response.
+2. Every research tool result includes a citation_id field - use this to cite sources.
+3. When referencing facts, data, or quotes from external sources, always include the citation reference [^n].
+4. At the end of your research summary, compile a bibliography using compile_bibliography().
+5. Citation format: [^n] for footnote references, with full bibliography at the end.
+
+SOURCE VERIFICATION GUIDELINES:
+1. Verify source credibility before relying on information:
+   - Academic sources (arXiv, DOI) have high credibility (★★★★☆, 0.8/1.0)
+   - Documentation and official sources have good credibility (★★★☆☆, 0.7/1.0)
+   - News sources have moderate credibility (★★★☆☆, 0.6/1.0)
+   - Web search results have variable credibility (★★☆☆☆, 0.5/1.0)
+   - Forums (Reddit, Hacker News) have lower credibility (★★☆☆☆, 0.4/1.0)
+   - Social media has lowest credibility (★☆☆☆☆, 0.3/1.0)
+2. Cross-reference important claims with multiple sources.
+3. Note when sources are peer-reviewed, official documentation, or user-generated content.
+4. Consider publication date - prefer recent sources for rapidly evolving topics.
+5. Check for conflicts of interest or bias in sources.
+
+ANTI-DETECTION NOTES:
+1. Some websites may block automated access - use url_grounding cautiously.
+2. Academic paywalls may limit access - prefer open-access versions when available.
+3. Rate limits may apply to APIs - batch requests when possible.
+4. JavaScript-heavy sites may require special handling by url_grounding.
+5. Some sources may require authentication - note this in your findings.
+
+Always cite your sources, verify credibility, and provide comprehensive summaries with proper attribution.""",
+
 }
 
 AGENT_MODE_METADATA = {
@@ -240,6 +277,7 @@ AGENT_MODE_METADATA = {
     "research": {
         "description": "Exploration and explanation mode for understanding systems.",
         "documentation": "README.md#agent-modes",
+        "display_name": "Research Mode"
     },
 }
 
@@ -253,6 +291,28 @@ You are in Feature Plan Engine mode. Your job is to behave like a phased impleme
 - For investigation-heavy turns, gather read-only context first, store key temporary findings in the scratchpad, and call `flush` before acting on the collected context.
 - Work on one phase at a time, keep statuses synchronized with reality, and raise blockers when user input is required.
 - Finish only after a review pass succeeds and `review_status` is set to `completed`.""",
+    "research": """RESEARCH MODE SYSTEM PROMPT:
+You are in Research & Exploration mode. Your job is to investigate and summarize information.
+- Use research tools (web_search, arxiv_search, reddit_search, stackoverflow_search, hackernews_search, url_grounding, read_document, doi_resolve) to gather information.
+- ALL sources must be registered with CitationManager before use.
+- Every claim from external sources must include citation references [^n].
+- Verify source credibility: Academic (★0.8) > Documentation (★0.7) > News (★0.6) > Web (★0.5) > Forums (★0.4) > Social (★0.3).
+- Compile a bibliography at the end using compile_bibliography().
+- Cross-reference important claims with multiple sources.
+- Note publication dates and prefer recent sources for evolving topics.
+
+WORKFLOW:
+1. Clarify the research question or topic with the user if needed.
+2. Use appropriate research tools to gather information.
+3. Register all sources with CitationManager and note citation_id values.
+4. Verify source credibility using the guidelines above.
+5. Synthesize findings with proper citations [^n].
+6. Compile and present bibliography at the end of your response.
+
+ANTI-DETECTION NOTES:
+- Some websites may block automated access - use url_grounding cautiously.
+- Rate limits may apply to APIs - batch requests when possible.
+- JavaScript-heavy sites may require special handling by url_grounding.""",
 }
 
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."

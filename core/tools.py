@@ -5,9 +5,11 @@ import datetime
 import difflib
 import re
 from dataclasses import dataclass, asdict, field
+from urllib.parse import quote
 from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
+from utils.citation_manager import register_source, SourceType
 from core.feature_mode import (
     create_feature_shell,
     create_feature_phases,
@@ -29,6 +31,34 @@ from core.feature_mode import (
     update_feature_plan_metadata,
     _workspace_root,
 )
+
+
+def _register_source_and_get_citation(
+    title: str,
+    url: str,
+    source_type: SourceType,
+    authors: list[str] | None = None,
+    date: str | None = None,
+) -> str:
+    """
+    Register a source with the citation manager and return a citation ID.
+    
+    Args:
+        title: The title of the source
+        url: The URL of the source
+        source_type: The type of source (SourceType enum)
+        authors: Optional list of authors
+        date: Optional publication date
+    
+    Returns:
+        A citation ID in the format [^n]
+    """
+    try:
+        citation_id = register_source(title=title, url=url, source_type=source_type, authors=authors, date=date)
+        return citation_id
+    except Exception as e:
+        logger.warning(f"Failed to register source: {e}")
+        return ""
 
 
 @dataclass(frozen=True)
@@ -420,6 +450,152 @@ TOOLS = [
                 }
             },
             "required": ["url"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="web_search",
+        description="Search the web using DuckDuckGo or Google Custom Search API. Returns search results with title, URL, snippet, and relevance score. Use this for research to find relevant information on the internet.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string.",
+                },
+                "engine": {
+                    "type": "string",
+                    "description": "The search engine to use. Options: 'duckduckgo' (default) or 'google'.",
+                    "default": "duckduckgo",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="arxiv_search",
+        description="Search arXiv for academic papers. Returns paper metadata including title, authors, abstract, arXiv ID, and PDF link. Use this for academic research to find scientific papers.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query for papers.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional arXiv category filter (e.g., 'cs.AI', 'physics', 'math.CO').",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+                "date_range": {
+                    "type": "string",
+                    "description": "Optional date range filter (e.g., '2023-01-01 TO 2024-01-01').",
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="doi_resolve",
+        description="Resolves a DOI (Digital Object Identifier) to retrieve publication metadata and access information. Use this to get detailed information about a specific academic paper from its DOI.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "doi": {
+                    "type": "string",
+                    "description": "The DOI to resolve (e.g., '10.1000/xyz123' or full URL 'https://doi.org/10.1000/xyz123').",
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output format - 'full' (complete metadata) or 'citation' (formatted citation). Default is 'full'.",
+                    "default": "full",
+                },
+            },
+            "required": ["doi"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="reddit_search",
+        description="Searches Reddit for relevant discussions and posts. Use this for finding community opinions, discussions, and user-generated content on various topics.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string to find relevant Reddit posts.",
+                },
+                "subreddit": {
+                    "type": "string",
+                    "description": "Optional subreddit to limit the search to (e.g., 'programming', 'MachineLearning').",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="stackoverflow_search",
+        description="Searches Stack Overflow for relevant questions and answers using the Stack Exchange API. Use this for finding programming solutions, debugging help, and technical discussions.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string to find relevant Stack Overflow questions.",
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "Optional tag to filter results (e.g., 'python', 'javascript').",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="hackernews_search",
+        description="Searches Hacker News for relevant stories and discussions using the Algolia HN API. Use this for finding tech news, startup discussions, and community insights from the Hacker News community.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string to find relevant Hacker News stories.",
+                },
+                "sort": {
+                    "type": "string",
+                    "description": "Sort order: 'relevance' (default) or 'date' for chronological order.",
+                    "enum": ["relevance", "date"],
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
         },
         requires_approval=False,
     ),
@@ -904,7 +1080,6 @@ TOOLS = [
         requires_approval=False,
     ),
 ]
-
 _COLLATED_TOOL_NAMES = {
     "get_workspace_details",
     "read_file",
@@ -917,6 +1092,12 @@ _COLLATED_TOOL_NAMES = {
     "git_diff",
     "git_branch",
     "url_grounding",
+    "web_search",
+    "arxiv_search",
+    "doi_resolve",
+    "reddit_search",
+    "stackoverflow_search",
+    "hackernews_search",
     "read_document",
     "get_tasks",
     "get_current_task",
@@ -1046,6 +1227,14 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "summary_builder": "git_preview",
     },
     "url_grounding": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "web_search": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "arxiv_search": {
         "execution_kind": "read",
         "preview_policy": "none",
     },
@@ -1828,7 +2017,10 @@ def url_grounding(url: str, folder_context) -> str:
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = "\n".join(chunk for chunk in chunks if chunk)
 
-            return text
+            # Register source and generate citation
+            citation_id = register_source(url=url, title=url, source_type=SourceType.WEB)
+            return f"{text}\n\n---\nCitation: [^{citation_id}]"
+        
     except (ImportError, Exception):
         # Fallback to a simpler method if playwright is not installed or fails
         try:
@@ -1847,9 +2039,658 @@ def url_grounding(url: str, folder_context) -> str:
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = "\n".join(chunk for chunk in chunks if chunk)
 
-            return f"(Note: Playwright not installed or failed, JS-heavy content might be missing)\n\n{text}"
+            # Register source and generate citation
+            citation_id = register_source(url=url, title=url, source_type=SourceType.WEB)
+            return f"(Note: Playwright not installed or failed, JS-heavy content might be missing)\n\n{text}\n\n---\nCitation: [^{citation_id}]"
         except Exception as e:
             return f"Error accessing URL: {e}"
+
+
+def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, folder_context=None) -> str:
+    """Search the web using DuckDuckGo or Google Custom Search API.
+    
+    Args:
+        query: The search query string
+        engine: Search engine to use - 'duckduckgo' (default) or 'google'
+        num_results: Maximum number of results to return (default 10, max 50)
+        folder_context: Workspace folder context (unused but required for tool signature)
+    
+    Returns:
+        JSON string with search results including title, URL, snippet, and relevance score
+    """
+    import json
+    import random
+    import re
+    
+    # Anti-detection user agents
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ]
+    
+    # Cap results
+    num_results = min(max(1, num_results), 50)
+    
+    if not query or not query.strip():
+        return json.dumps({"error": "Query cannot be empty", "results": []})
+    
+    query = query.strip()
+    
+    def get_spoofed_headers():
+        """Generate headers that mimic a real browser."""
+        return {
+            "User-Agent": random.choice(USER_AGENTS),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
+        }
+    
+    def parse_search_results(html_content, engine_type):
+        """Parse HTML content to extract search results."""
+        from bs4 import BeautifulSoup
+        
+        soup = BeautifulSoup(html_content, "html.parser")
+        results = []
+        
+        if engine_type == "duckduckgo":
+            # DuckDuckGo result containers
+            for result in soup.select('[data-testid="result"]')[:num_results]:
+                title_elem = result.select_one('h2')
+                link_elem = result.select_one('a[href]')
+                snippet_elem = result.select_one('[data-testid="result-snippet"]') or result.select_one('p')
+                
+                if title_elem and link_elem:
+                    title = title_elem.get_text(strip=True)
+                    url = link_elem.get('href', '')
+                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                    
+                    results.append({
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet,
+                        "relevance_score": 1.0 - (len(results) * 0.05)  # Decrease score by rank
+                    })
+            
+            # Alternative DuckDuckGo selectors
+            if not results:
+                for result in soup.select('.result')[:num_results]:
+                    title_elem = result.select_one('.result__title') or result.select_one('a')
+                    link_elem = result.select_one('a.result__a') or result.select_one('a[href]')
+                    snippet_elem = result.select_one('.result__snippet')
+                    
+                    if title_elem and link_elem:
+                        title = title_elem.get_text(strip=True)
+                        url = link_elem.get('href', '')
+                        # Clean DuckDuckGo redirect URLs
+                        if 'uddg=' in url:
+                            from urllib.parse import urlparse, parse_qs, quote
+                            parsed = urlparse(url)
+                            params = parse_qs(parsed.query)
+                            url = params.get('uddg', [url])[0]
+                        snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                        
+                        results.append({
+                            "title": title,
+                            "url": url,
+                            "snippet": snippet,
+                            "relevance_score": 1.0 - (len(results) * 0.05)
+                        })
+        
+        return results
+    
+    # Perform the search
+    try:
+        import httpx
+        
+        if engine.lower() == "google":
+            # Google Custom Search API (requires API key setup)
+            api_key = os.environ.get("GOOGLE_SEARCH_API_KEY")
+            search_engine_id = os.environ.get("GOOGLE_SEARCH_ENGINE_ID")
+            
+            if not api_key or not search_engine_id:
+                return json.dumps({
+                    "error": "Google Custom Search requires GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID environment variables",
+                    "results": []
+                })
+            
+            url = f"https://www.googleapis.com/customsearch/v1?key={api_key}&cx={search_engine_id}&q={query}&num={num_results}"
+            response = httpx.get(url, headers=get_spoofed_headers(), timeout=30.0)
+            response.raise_for_status()
+            
+            data = response.json()
+            results = []
+            for i, item in enumerate(data.get("items", [])):
+                results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("link", ""),
+                    "snippet": item.get("snippet", ""),
+                    "relevance_score": 1.0 - (i * 0.05),
+                    "citation_id": register_source(
+                        title=item.get("title", ""),
+                        url=item.get("link", ""),
+                        source_type="web",
+                        authors=None,
+                        published_date=None
+                    )
+                })
+            
+            return json.dumps({"query": query, "engine": "google", "results": results}, indent=2)
+        
+        else:  # DuckDuckGo (default)
+            search_url = f"https://html.duckduckgo.com/html/?q={query}"
+            response = httpx.get(search_url, headers=get_spoofed_headers(), timeout=30.0, follow_redirects=True)
+            response.raise_for_status()
+            
+            results = parse_search_results(response.text, "duckduckgo")
+            
+            if not results:
+                # Fallback: try Playwright for JS-heavy pages
+                try:
+                    from playwright.sync_api import sync_playwright
+                    with sync_playwright() as p:
+                        browser = p.chromium.launch(headless=True)
+                        page = browser.new_page()
+                        page.goto(f"https://duckduckgo.com/?q={query}", wait_until="networkidle")
+                        content = page.content()
+                        browser.close()
+                        results = parse_search_results(content, "duckduckgo")
+                except Exception:
+                    pass  # Fall through to return whatever we have
+            
+            # Register citations for DuckDuckGo results
+            for result in results:
+                result["citation_id"] = register_source(
+                    title=result.get("title", ""),
+                    url=result.get("url", ""),
+                    source_type="web"
+                )
+            
+            return json.dumps({"query": query, "engine": "duckduckgo", "results": results}, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for web search. Install with: pip install httpx", "results": []})
+    except Exception as e:
+        logger.error(f"web_search: Error searching for '{query}': {e}")
+        return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
+
+
+def arxiv_search(query: str, folder_context=None, max_results: int = 10, category: str = "") -> str:
+    """Search arXiv for academic papers.
+    
+    Args:
+        query: The search query string
+        max_results: Maximum number of results to return (default 10, max 50)
+        folder_context: Workspace folder context (unused but required for tool signature)
+    
+    Args:
+        category: Optional arXiv category filter (e.g., 'cs.AI', 'physics', 'math.CO')
+    Returns:
+        JSON string with search results including title, authors, abstract, arXiv ID, PDF link
+    """
+    import json
+    import urllib.parse
+    import xml.etree.ElementTree as ET
+    
+    # Handle None for max_results
+    if max_results is None:
+        max_results = 10
+    # Cap results
+    max_results = min(max(1, max_results), 50)
+    
+    if not query or not query.strip():
+        return json.dumps({"engine": "arxiv", "error": "Query cannot be empty", "results": []})
+    
+    query = query.strip()
+    
+    try:
+        import httpx
+        
+        # arXiv API endpoint
+        base_url = "http://export.arxiv.org/api/query"
+        
+        # Build the query
+        params = {
+            "search_query": f"all:{query}",
+            "start": 0,
+            "max_results": max_results,
+            "sortBy": "relevance",
+            "sortOrder": "descending"
+        }
+        
+        # Make the request
+        from utils.anti_detection import get_spoofed_headers
+        headers = get_spoofed_headers()
+        
+        response = httpx.get(base_url, params=params, headers=headers, timeout=30.0, follow_redirects=True)
+        response.raise_for_status()
+        
+        # Parse XML response
+        root = ET.fromstring(response.content)
+        
+        # Define namespaces
+        namespaces = {
+            'atom': 'http://www.w3.org/2005/Atom',
+            'arxiv': 'http://arxiv.org/schemas/atom'
+        }
+        
+        results = []
+        for i, entry in enumerate(root.findall('atom:entry', namespaces)):
+            title_elem = entry.find('atom:title', namespaces)
+            summary_elem = entry.find('atom:summary', namespaces)
+            published_elem = entry.find('atom:published', namespaces)
+            link_elem = entry.find('atom:id', namespaces)
+            
+            # Get authors
+            authors = []
+            for author in entry.findall('atom:author', namespaces):
+                name_elem = author.find('atom:name', namespaces)
+                if name_elem is not None:
+                    authors.append(name_elem.text)
+            
+            # Get categories
+            categories = []
+            for category in entry.findall('atom:category', namespaces):
+                term = category.get('term')
+                if term:
+                    categories.append(term)
+            
+            # Get PDF link
+            pdf_link = None
+            for link in entry.findall('atom:link', namespaces):
+                if link.get('type') == 'application/pdf':
+                    pdf_link = link.get('href')
+                elif link.get('title') == 'pdf':
+                    pdf_link = link.get('href')
+            
+            # Fallback PDF link construction
+            arxiv_id = link_elem.text.split('/abs/')[-1] if link_elem is not None and link_elem.text else None
+            if not pdf_link and arxiv_id:
+                pdf_link = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+            
+            results.append({
+                "title": title_elem.text.strip() if title_elem is not None else "",
+                "authors": authors,
+                "abstract": summary_elem.text.strip()[:500] + "..." if summary_elem is not None and summary_elem.text else "",
+                "arxiv_id": arxiv_id,
+                "categories": categories,
+                "url": link_elem.text if link_elem is not None else "",
+                "pdf_link": pdf_link,
+                "published": published_elem.text if published_elem is not None else "",
+                "relevance_score": 1.0 - (i * 0.05)
+            })
+        
+        # Register citations and add citation_id
+        results_with_citations = []
+        for result in results:
+            citation_id = register_source(
+                url=result.get("url", ""),
+                title=result.get("title", ""),
+                source_type=SourceType.ARXIV,
+                authors=result.get("authors", []),
+                date=result.get("published", "")
+            )
+            result["citation_id"] = citation_id
+            results_with_citations.append(result)
+        
+        return json.dumps({"query": query, "engine": "arxiv", "results": results_with_citations}, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for arXiv search. Install with: pip install httpx", "results": []})
+    except Exception as e:
+        logger.error(f"arxiv_search: Error searching for '{query}': {e}")
+        return json.dumps({"engine": "arxiv", "error": f"arXiv search failed: {str(e)}", "results": []})
+
+
+def doi_resolve(doi: str, format: str = "full", folder_context=None) -> str:
+    """Resolve a DOI to get metadata about the publication.
+    
+    Args:
+        doi: The DOI string to resolve (e.g., "10.1000/xyz123")
+        format: Output format - 'full' (complete metadata) or 'citation' (formatted citation). Default is 'full'.
+        folder_context: Workspace folder context (unused but required for tool signature)
+    
+    Returns:
+        JSON string with publication metadata including title, authors, journal, year, etc.
+    """
+    import json
+    import re
+    
+    if not doi or not doi.strip():
+        return json.dumps({"error": "DOI cannot be empty", "results": []})
+    
+    doi = doi.strip()
+    
+    # Clean up DOI - remove 'doi:' prefix if present, and URL prefixes
+    doi = re.sub(r'^doi:\s*', '', doi, flags=re.IGNORECASE)
+    doi = re.sub(r'^https?://(dx\.)?doi\.org/', '', doi)
+    
+    # Validate DOI format
+    if not re.match(r'^10\.\d{4,}/[^\s]+$', doi):
+        return json.dumps({"error": f"Invalid DOI format: {doi}. Expected format: 10.XXXX/...", "doi": doi})
+    
+    try:
+        import httpx
+        
+        # Use CrossRef API for DOI resolution
+        url = f"https://api.crossref.org/works/{doi}"
+        
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "Mu-CLI Research Tool (mailto:contact@example.com)"
+        }
+        
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(url, headers=headers, follow_redirects=True)
+            response.raise_for_status()
+            
+            data = response.json()
+            message = data.get("message", {})
+            
+            # Extract relevant metadata
+            result = {
+                "doi": message.get("DOI", doi),
+                "title": message.get("title", [""])[0] if message.get("title") else "",
+                "authors": [
+                    f"{a.get('given', '')} {a.get('family', '')}".strip()
+                    for a in message.get("author", [])
+                ],
+                "journal": message.get("container-title", [""])[0] if message.get("container-title") else "",
+                "year": message.get("published-print", {}).get("date-parts", [[None]])[0][0] or
+                        message.get("published-online", {}).get("date-parts", [[None]])[0][0] or
+                        message.get("created", {}).get("date-parts", [[None]])[0][0],
+                "publisher": message.get("publisher", ""),
+                "type": message.get("type", ""),
+                "url": message.get("URL", f"https://doi.org/{doi}"),
+                "abstract": message.get("abstract", ""),
+                "is_open_access": False,  # CrossRef doesn't provide OA status directly
+            }
+            
+            # Handle citation format output
+            if format == "citation" or format == "apa":
+                # APA format
+                authors_str = ", ".join(result["authors"][:-1]) + (" & " + result["authors"][-1] if len(result["authors"]) > 1 else result["authors"][0] if result["authors"] else "")
+                return json.dumps({
+                    "citation": f'{authors_str} ({result["year"]}). {result["title"]}. {result["journal"]}, {result["doi"]}.',
+                    "doi": result["doi"],
+                    "format": "apa"
+                }, indent=2)
+            elif format == "mla":
+                # MLA format
+                author = result["authors"][0] if result["authors"] else ""
+                last_first = author.split()[-1] + ", " + " ".join(author.split()[:-1]) if author else ""
+                return json.dumps({
+                    "citation": f'{last_first}. "{result["title"]}." {result["journal"]}, {result["year"]}, {result["doi"]}.',
+                    "doi": result["doi"],
+                    "format": "mla"
+                }, indent=2)
+            elif format == "chicago":
+                # Chicago format
+                authors_str = ", ".join(result["authors"][:-1]) + (" and " + result["authors"][-1] if len(result["authors"]) > 1 else result["authors"][0] if result["authors"] else "")
+                return json.dumps({
+                    "citation": f'{authors_str}. "{result["title"]}." {result["journal"]} ({result["year"]}): {result["doi"]}.',
+                    "doi": result["doi"],
+                    "format": "chicago"
+                }, indent=2)
+            elif format == "bibtex":
+                # BibTeX format
+                first_author = result["authors"][0].split() if result["authors"] else ["Unknown"]
+                cite_key = f'{first_author[-1].lower()}{result["year"] or "nodate"}'
+                authors_bibtex = " and ".join(result["authors"])
+                bibtex = f'''@article{{{cite_key},
+  author = {{{authors_bibtex}}},
+  title = {{{result["title"]}}},
+  journal = {{{result["journal"]}}},
+  year = {{{result["year"] or "n.d."}}},
+  doi = {{{result["doi"]}}}
+}}'''
+                return json.dumps({
+                    "citation": bibtex,
+                    "doi": result["doi"],
+                    "format": "bibtex"
+                }, indent=2)
+            
+            return json.dumps(result, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for DOI resolution. Install with: pip install httpx", "doi": doi})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"DOI not found: {doi}", "status_code": e.response.status_code, "doi": doi})
+    except Exception as e:
+        logger.error(f"doi_resolve: Error resolving DOI '{doi}': {e}")
+        return json.dumps({"error": f"DOI resolution failed: {str(e)}", "doi": doi})
+
+
+def reddit_search(query: str, subreddit: str = None, sort: str = "relevance", limit: int = 10, folder_context=None) -> str:
+    """Searches Reddit for posts and comments using Reddit's JSON API with anti-detection measures."""
+    if not _check_bounds(query, folder_context):
+        logger.warning(f"reddit_search: Access denied for query: {query}")
+        return json.dumps({"error": "Access denied"})
+
+    if limit is None:
+        limit = 10
+
+    # Use old.reddit.com JSON API (no auth required)
+    base_url = "https://old.reddit.com"
+    
+    # Build search URL
+    if subreddit:
+        search_url = f"{base_url}/r/{subreddit}/search.json?q={quote(query)}&restrict_sr=on&sort={sort}&limit={limit}"
+    else:
+        search_url = f"{base_url}/search.json?q={quote(query)}&sort={sort}&limit={limit}"
+    
+    try:
+        import httpx
+        
+        # Anti-detection headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json,text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate",
+            "Connection": "keep-alive",
+        }
+        
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(search_url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        results = []
+        for child in data.get("data", {}).get("children", []):
+            post = child.get("data", {})
+            citation_id = register_source(url=f"https://reddit.com{post.get('permalink', '')}", title=post.get("title", ""), source_type=SourceType.SOCIAL)
+            results.append({
+                "title": post.get("title", ""),
+                "author": post.get("author", "[deleted]"),
+                "subreddit": post.get("subreddit", ""),
+                "score": post.get("score", 0),
+                "upvote_ratio": post.get("upvote_ratio", 0),
+                "num_comments": post.get("num_comments", 0),
+                "url": f"https://reddit.com{post.get('permalink', '')}",
+                "created_utc": post.get("created_utc", 0),
+                "selftext": post.get("selftext", "")[:500] if post.get("selftext") else "",
+                "citation_id": citation_id,
+                "link_flair_text": post.get("link_flair_text"),
+                "is_video": post.get("is_video", False),
+            })
+        
+        return json.dumps({
+            "query": query,
+            "subreddit": subreddit,
+            "sort": sort,
+            "count": len(results),
+            "results": results
+        }, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for Reddit search. Install with: pip install httpx", "query": query})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"Reddit search failed: HTTP {e.response.status_code}", "query": query})
+    except Exception as e:
+        logger.error(f"reddit_search: Error searching Reddit for '{query}': {e}")
+        return json.dumps({"error": f"Reddit search failed: {str(e)}", "query": query})
+
+
+def stackoverflow_search(query: str, tags: list = None, sort: str = "relevance", limit: int = 10, folder_context=None) -> str:
+    """Searches Stack Overflow for questions using the Stack Exchange API with tag filtering support."""
+    if not _check_bounds(query, folder_context):
+        logger.warning(f"stackoverflow_search: Access denied for query: {query}")
+        return json.dumps({"error": "Access denied"})
+
+    if limit is None:
+        limit = 10
+
+    # Stack Exchange API endpoint
+    base_url = "https://api.stackexchange.com/2.3/search/advanced"
+    
+    # Build API parameters
+    params = {
+        "order": "desc",
+        "sort": sort,
+        "q": query,
+        "site": "stackoverflow",
+        "pagesize": limit,
+        "filter": "withbody",  # Include question body
+    }
+    
+    # Add tag filtering if specified
+    if tags:
+        params["tagged"] = ";".join(tags)
+    
+    try:
+        import httpx
+        
+        # Anti-detection headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+        }
+        
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(base_url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        results = []
+        for item in data.get("items", []):
+            citation_id = register_source(url=item.get("link", ""), title=item.get("title", ""), source_type=SourceType.FORUM)
+            result = {
+                "title": item.get("title", ""),
+                "question_id": item.get("question_id"),
+                "link": item.get("link", ""),
+                "score": item.get("score", 0),
+                "answer_count": item.get("answer_count", 0),
+                "is_answered": item.get("is_answered", False),
+                "view_count": item.get("view_count", 0),
+                "tags": item.get("tags", []),
+                "citation_id": citation_id,
+                "body": item.get("body", "")[:500] if item.get("body") else "",
+                "creation_date": item.get("creation_date", 0),
+                "last_activity_date": item.get("last_activity_date", 0),
+                "owner": {
+                    "display_name": item.get("owner", {}).get("display_name", ""),
+                    "reputation": item.get("owner", {}).get("reputation", 0),
+                }
+            }
+            results.append(result)
+        
+        return json.dumps({
+            "query": query,
+            "tags": tags,
+            "sort": sort,
+            "count": len(results),
+            "has_more": data.get("has_more", False),
+            "results": results
+        }, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for Stack Overflow search. Install with: pip install httpx", "query": query})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"Stack Overflow search failed: HTTP {e.response.status_code}", "query": query})
+    except Exception as e:
+        logger.error(f"stackoverflow_search: Error searching Stack Overflow for '{query}': {e}")
+        return json.dumps({"error": f"Stack Overflow search failed: {str(e)}", "query": query})
+
+
+def hackernews_search(query: str, sort: str = "relevance", num_results: int = 10, folder_context=None) -> str:
+    """Searches Hacker News for relevant stories and discussions using the Algolia HN API."""
+    if not query or not query.strip():
+        return json.dumps({"error": "Query is required for Hacker News search", "query": query})
+    
+    query = query.strip()
+    num_results = min(max(1, num_results), 50)  # Clamp between 1-50
+    
+    # Validate sort parameter
+    if sort not in ["relevance", "date"]:
+        sort = "relevance"
+    
+    try:
+        import httpx
+        
+        # Algolia HN API endpoint
+        # API supports 'search' for stories and 'search_by_date' for chronological
+        base_url = "https://hn.algolia.com/api/v1"
+        endpoint = "search" if sort == "relevance" else "search_by_date"
+        url = f"{base_url}/{endpoint}"
+        
+        params = {
+            "query": query,
+            "hitsPerPage": num_results,
+            "tags": "story",  # Focus on stories (not comments or polls)
+        }
+        
+        headers = {
+            "User-Agent": "Mu-CLI Research Tool",
+            "Accept": "application/json",
+        }
+        
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        results = []
+        for hit in data.get("hits", []):
+            citation_id = register_source(url=hit.get("url", ""), title=hit.get("title", ""), source_type=SourceType.NEWS)
+            result = {
+                "title": hit.get("title", ""),
+                "url": hit.get("url", ""),
+                "author": hit.get("author", ""),
+                "points": hit.get("points", 0),
+                "num_comments": hit.get("num_comments", 0),
+                "objectID": hit.get("objectID", ""),
+                "created_at": hit.get("created_at", ""),
+                "story_text": hit.get("story_text", "")[:500] if hit.get("story_text") else "",
+                "citation_id": citation_id,
+            }
+            results.append(result)
+        
+        return json.dumps({
+            "query": query,
+            "sort": sort,
+            "count": len(results),
+            "results": results
+        }, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for Hacker News search. Install with: pip install httpx", "query": query})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"Hacker News search failed: HTTP {e.response.status_code}", "query": query})
+    except Exception as e:
+        logger.error(f"hackernews_search: Error searching Hacker News for '{query}': {e}")
+        return json.dumps({"error": f"Hacker News search failed: {str(e)}", "query": query})
 
 
 def read_document(filename: str, folder_context) -> str:
@@ -2168,6 +3009,32 @@ def _handle_git_pull(args, folder_context, ui, variables) -> str:
 
 def _handle_url_grounding(args, folder_context, ui, variables) -> str:
     return url_grounding(args.get("url", ""), folder_context)
+
+
+
+def _handle_web_search(args, folder_context, ui, variables) -> str:
+    return web_search(args.get("query", ""), args.get("engine", "duckduckgo"), args.get("num_results", 10), folder_context)
+
+
+
+def _handle_arxiv_search(args, folder_context, ui, variables) -> str:
+    return arxiv_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("category", ""))
+
+
+def _handle_doi_resolve(args, folder_context, ui, variables) -> str:
+    return doi_resolve(args.get("doi", ""), args.get("format", "json"), folder_context)
+
+
+def _handle_reddit_search(args, folder_context, ui, variables) -> str:
+    return reddit_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("subreddit", ""))
+
+
+def _handle_stackoverflow_search(args, folder_context, ui, variables) -> str:
+    return stackoverflow_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("tags", []))
+
+
+def _handle_hackernews_search(args, folder_context, ui, variables) -> str:
+    return hackernews_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("sort", "relevance"))
 
 
 def _handle_read_document(args, folder_context, ui, variables) -> str:
@@ -3121,7 +3988,13 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "git_pull": _legacy_handler(_handle_git_pull),
     "url_grounding": _legacy_handler(_handle_url_grounding),
     "read_document": _legacy_handler(_handle_read_document),
+    "web_search": _legacy_handler(_handle_web_search),
+    "arxiv_search": _legacy_handler(_handle_arxiv_search),
+    "doi_resolve": _legacy_handler(_handle_doi_resolve),
     "git_branch": _legacy_handler(_handle_git_branch),
+    "reddit_search": _legacy_handler(_handle_reddit_search),
+    "stackoverflow_search": _legacy_handler(_handle_stackoverflow_search),
+    "hackernews_search": _legacy_handler(_handle_hackernews_search),
     "create_feature": _handle_create_feature,
     "create_phases": _handle_create_phases,
     "create_task": _handle_create_task,

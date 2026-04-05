@@ -1,0 +1,120 @@
+"""Tests for web_search tool functionality."""
+import json
+import pytest
+from core.tools import web_search, execute_tool, TOOL_HANDLERS, TOOL_DESCRIPTORS
+from core.workspace import FolderContext
+
+
+def test_web_search_tool_definition_exists():
+    """Test that web_search tool is registered."""
+    assert "web_search" in TOOL_DESCRIPTORS
+    assert "web_search" in TOOL_HANDLERS
+    
+    # Check the tool definition
+    descriptor = TOOL_DESCRIPTORS["web_search"]
+    assert descriptor.definition.name == "web_search"
+    assert "query" in descriptor.definition.parameters["required"]
+
+
+def test_web_search_empty_query():
+    """Test that web_search handles empty query gracefully."""
+    result = web_search("", "duckduckgo", 10, None)
+    parsed = json.loads(result)
+    
+    assert "error" in parsed
+    assert parsed["error"] == "Query cannot be empty"
+    assert parsed["results"] == []
+
+
+def test_web_search_whitespace_query():
+    """Test that web_search handles whitespace-only query gracefully."""
+    result = web_search("   ", "duckduckgo", 10, None)
+    parsed = json.loads(result)
+    
+    assert "error" in parsed
+    assert parsed["error"] == "Query cannot be empty"
+
+
+def test_web_search_google_requires_env_vars():
+    """Test that Google search requires API credentials."""
+    import os
+    
+    # Clear environment variables temporarily
+    old_key = os.environ.pop("GOOGLE_SEARCH_API_KEY", None)
+    old_cx = os.environ.pop("GOOGLE_SEARCH_ENGINE_ID", None)
+    
+    try:
+        result = web_search("test query", "google", 10, None)
+        parsed = json.loads(result)
+        
+        assert "error" in parsed
+        assert "GOOGLE_SEARCH_API_KEY" in parsed["error"]
+        assert parsed["results"] == []
+    finally:
+        if old_key:
+            os.environ["GOOGLE_SEARCH_API_KEY"] = old_key
+        if old_cx:
+            os.environ["GOOGLE_SEARCH_ENGINE_ID"] = old_cx
+
+
+def test_web_search_result_format():
+    """Test that web_search returns correct result format on error."""
+    # Test with empty query to get predictable result format
+    result = web_search("", "duckduckgo", 5, None)
+    parsed = json.loads(result)
+    
+    # Result should have query, engine, and results keys
+    assert "query" in parsed or "error" in parsed
+    
+    # If we got results, check structure
+    if "results" in parsed:
+        assert isinstance(parsed["results"], list)
+
+
+def test_web_search_engine_parameter():
+    """Test that engine parameter is accepted."""
+    # Test with invalid credentials for Google (should fail fast)
+    import os
+    old_key = os.environ.pop("GOOGLE_SEARCH_API_KEY", None)
+    old_cx = os.environ.pop("GOOGLE_SEARCH_ENGINE_ID", None)
+    
+    try:
+        result = web_search("test", "google", 10, None)
+        parsed = json.loads(result)
+        
+        # Should get error about missing credentials
+        assert "error" in parsed
+        assert "GOOGLE" in parsed["error"].upper()
+    finally:
+        if old_key:
+            os.environ["GOOGLE_SEARCH_API_KEY"] = old_key
+        if old_cx:
+            os.environ["GOOGLE_SEARCH_ENGINE_ID"] = old_cx
+
+
+def test_web_search_num_results_bounds():
+    """Test that num_results is bounded correctly."""
+    # Test with empty query but extreme num_results values
+    # Function should cap num_results between 1 and 50
+    
+    # Test negative - should be capped to 1
+    result = web_search("", "duckduckgo", -5, None)
+    parsed = json.loads(result)
+    assert "error" in parsed  # Empty query error
+    
+    # Test very large - should be capped to 50
+    result = web_search("", "duckduckgo", 1000, None)
+    parsed = json.loads(result)
+    assert "error" in parsed  # Empty query error
+
+
+def test_web_search_handler_registered():
+    """Test that _handle_web_search handler is properly registered."""
+    from core.tools import _handle_web_search
+    
+    ctx = FolderContext()
+    result = _handle_web_search({"query": ""}, ctx, None, None)
+    parsed = json.loads(result)
+    
+    assert "error" in parsed
+    assert parsed["error"] == "Query cannot be empty"

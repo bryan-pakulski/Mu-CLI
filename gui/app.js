@@ -2108,7 +2108,7 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
 
     const activeBySession = new Map();
     for (const task of activeTasks) {
-      const taskSession = String(task?.payload?.session_name || task?.session_name || "").trim() || state.currentSession;
+      const taskSession = String(task?.payload?.session_name || task?.session_name || "").trim();
       if (!taskSession || activeBySession.has(taskSession)) continue;
       activeBySession.set(taskSession, task);
     }

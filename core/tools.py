@@ -2059,17 +2059,6 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
         JSON string with search results including title, URL, snippet, and relevance score
     """
     import json
-    import random
-    import re
-    
-    # Anti-detection user agents
-    USER_AGENTS = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    ]
     
     # Cap results
     num_results = min(max(1, num_results), 50)
@@ -2079,93 +2068,58 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
     
     query = query.strip()
     
-    def get_spoofed_headers():
-        """Generate headers that mimic a real browser."""
-        return {
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate, br",
-            "DNT": "1",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Cache-Control": "max-age=0",
-        }
+    if engine.lower() == "duckduckgo":
+        # Use duckduckgo-search package for reliable DuckDuckGo access
+        try:
+            from ddgs import DDGS
     
-    def parse_search_results(html_content, engine_type):
-        """Parse HTML content to extract search results."""
-        from bs4 import BeautifulSoup
-        
-        soup = BeautifulSoup(html_content, "html.parser")
-        results = []
-        
-        if engine_type == "duckduckgo":
-            # DuckDuckGo result containers
-            for result in soup.select('[data-testid="result"]')[:num_results]:
-                title_elem = result.select_one('h2')
-                link_elem = result.select_one('a[href]')
-                snippet_elem = result.select_one('[data-testid="result-snippet"]') or result.select_one('p')
-                
-                if title_elem and link_elem:
-                    title = title_elem.get_text(strip=True)
-                    url = link_elem.get('href', '')
-                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
-                    
+            results = []
+            with DDGS() as ddg:
+                for i, r in enumerate(ddg.text(query, max_results=num_results)):
                     results.append({
-                        "title": title,
-                        "url": url,
-                        "snippet": snippet,
-                        "relevance_score": 1.0 - (len(results) * 0.05)  # Decrease score by rank
+                        "title": r.get("title", ""),
+                        "url": r.get("href", ""),
+                        "snippet": r.get("body", ""),
+                        "relevance_score": 1.0 - (i * 0.05),
+                        "citation_id": register_source(
+                            title=r.get("title", ""),
+                            url=r.get("href", ""),
+                            source_type="web"
+                        )
                     })
             
-            # Alternative DuckDuckGo selectors
-            if not results:
-                for result in soup.select('.result')[:num_results]:
-                    title_elem = result.select_one('.result__title') or result.select_one('a')
-                    link_elem = result.select_one('a.result__a') or result.select_one('a[href]')
-                    snippet_elem = result.select_one('.result__snippet')
-                    
-                    if title_elem and link_elem:
-                        title = title_elem.get_text(strip=True)
-                        url = link_elem.get('href', '')
-                        # Clean DuckDuckGo redirect URLs
-                        if 'uddg=' in url:
-                            from urllib.parse import urlparse, parse_qs, quote
-                            parsed = urlparse(url)
-                            params = parse_qs(parsed.query)
-                            url = params.get('uddg', [url])[0]
-                        snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
-                        
-                        results.append({
-                            "title": title,
-                            "url": url,
-                            "snippet": snippet,
-                            "relevance_score": 1.0 - (len(results) * 0.05)
-                        })
-        
-        return results
+            urls_used = [r.get("url", "") for r in results if r.get("url")]
+            return json.dumps({
+                "query": query, "engine": "duckduckgo",
+                "num_results": len(results),
+                "urls_used": urls_used,
+                "results": results
+            }, indent=2)
+            
+        except ImportError:
+            return json.dumps({
+                "error": "duckduckgo-search package required. Install with: pip install duckduckgo-search",
+                "results": []
+            })
+        except Exception as e:
+            logger.error(f"web_search: Error searching DuckDuckGo for '{query}': {e}")
+            return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
     
-    # Perform the search
-    try:
-        import httpx
+    elif engine.lower() == "google":
+        # Google Custom Search API (requires API key setup)
+        api_key = os.environ.get("GOOGLE_SEARCH_API_KEY")
+        search_engine_id = os.environ.get("GOOGLE_SEARCH_ENGINE_ID")
         
-        if engine.lower() == "google":
-            # Google Custom Search API (requires API key setup)
-            api_key = os.environ.get("GOOGLE_SEARCH_API_KEY")
-            search_engine_id = os.environ.get("GOOGLE_SEARCH_ENGINE_ID")
-            
-            if not api_key or not search_engine_id:
-                return json.dumps({
-                    "error": "Google Custom Search requires GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID environment variables",
-                    "results": []
-                })
-            
+        if not api_key or not search_engine_id:
+            return json.dumps({
+                "error": "Google Custom Search requires GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID environment variables",
+                "results": []
+            })
+        
+        try:
+            import httpx
             url = f"https://www.googleapis.com/customsearch/v1?key={api_key}&cx={search_engine_id}&q={query}&num={num_results}"
-            response = httpx.get(url, headers=get_spoofed_headers(), timeout=30.0)
+            response = httpx.get(url, timeout=30.0)
             response.raise_for_status()
             
             data = response.json()
@@ -2179,50 +2133,25 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
                     "citation_id": register_source(
                         title=item.get("title", ""),
                         url=item.get("link", ""),
-                        source_type="web",
-                        authors=None,
-                        published_date=None
+                        source_type="web"
                     )
                 })
             
-            return json.dumps({"query": query, "engine": "google", "results": results}, indent=2)
-        
-        else:  # DuckDuckGo (default)
-            search_url = f"https://html.duckduckgo.com/html/?q={query}"
-            response = httpx.get(search_url, headers=get_spoofed_headers(), timeout=30.0, follow_redirects=True)
-            response.raise_for_status()
-            
-            results = parse_search_results(response.text, "duckduckgo")
-            
-            if not results:
-                # Fallback: try Playwright for JS-heavy pages
-                try:
-                    from playwright.sync_api import sync_playwright
-                    with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
-                        page = browser.new_page()
-                        page.goto(f"https://duckduckgo.com/?q={query}", wait_until="networkidle")
-                        content = page.content()
-                        browser.close()
-                        results = parse_search_results(content, "duckduckgo")
-                except Exception:
-                    pass  # Fall through to return whatever we have
-            
-            # Register citations for DuckDuckGo results
-            for result in results:
-                result["citation_id"] = register_source(
-                    title=result.get("title", ""),
-                    url=result.get("url", ""),
-                    source_type="web"
-                )
-            
-            return json.dumps({"query": query, "engine": "duckduckgo", "results": results}, indent=2)
+            urls_used = [r.get("url", "") for r in results if r.get("url")]
+            return json.dumps({
+                "query": query, "engine": "google",
+                "num_results": len(results),
+                "urls_used": urls_used,
+                "results": results
+            }, indent=2)
+        except ImportError:
+            return json.dumps({"error": "httpx package required for Google search", "results": []})
+        except Exception as e:
+            logger.error(f"web_search: Error searching Google for '{query}': {e}")
+            return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
     
-    except ImportError:
-        return json.dumps({"error": "httpx package required for web search. Install with: pip install httpx", "results": []})
-    except Exception as e:
-        logger.error(f"web_search: Error searching for '{query}': {e}")
-        return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
+    else:
+        return json.dumps({"error": f"Unknown search engine: {engine}. Use 'duckduckgo' or 'google'", "results": []})
 
 
 def arxiv_search(query: str, folder_context=None, max_results: int = 10, category: str = "") -> str:
@@ -2343,7 +2272,9 @@ def arxiv_search(query: str, folder_context=None, max_results: int = 10, categor
             result["citation_id"] = citation_id
             results_with_citations.append(result)
         
-        return json.dumps({"query": query, "engine": "arxiv", "results": results_with_citations}, indent=2)
+        urls_used = [r.get("pdf_url", "") or r.get("arxiv_url", "") for r in results_with_citations if r.get("pdf_url") or r.get("arxiv_url")]
+        return json.dumps({"query": query, "engine": "arxiv", "num_results": len(results_with_citations),
+                           "urls_used": urls_used, "results": results_with_citations}, indent=2)
     
     except ImportError:
         return json.dumps({"error": "httpx package required for arXiv search. Install with: pip install httpx", "results": []})
@@ -2525,11 +2456,18 @@ def reddit_search(query: str, subreddit: str = None, sort: str = "relevance", li
                 "is_video": post.get("is_video", False),
             })
         
+        urls_used = [r.get("url", "") for r in results if r.get("url")]
+        num_results = len(results)
+        
         return json.dumps({
             "query": query,
             "subreddit": subreddit,
             "sort": sort,
             "count": len(results),
+            "num_results": num_results,
+            "urls_used": urls_used,
+            "total_results": len(results),
+            "urls_used": urls_used,
             "results": results
         }, indent=2)
     
@@ -2606,11 +2544,15 @@ def stackoverflow_search(query: str, tags: list = None, sort: str = "relevance",
             }
             results.append(result)
         
+        urls_used = [r.get("link", "") for r in results if r.get("link")]
+        
         return json.dumps({
             "query": query,
             "tags": tags,
             "sort": sort,
             "count": len(results),
+            "total_results": len(results),
+            "urls_used": urls_used,
             "has_more": data.get("has_more", False),
             "results": results
         }, indent=2)
@@ -2677,10 +2619,14 @@ def hackernews_search(query: str, sort: str = "relevance", num_results: int = 10
             }
             results.append(result)
         
+        urls_used = [r.get("url", "") for r in results if r.get("url")]
+        
         return json.dumps({
             "query": query,
             "sort": sort,
             "count": len(results),
+            "total_results": len(results),
+            "urls_used": urls_used,
             "results": results
         }, indent=2)
     

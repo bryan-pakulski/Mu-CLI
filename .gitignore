@@ -6,7 +6,3 @@ __pycache__/
 *.orig
 *.rej
 
-# Eval artifacts (generated)
-evals/artifacts/*.json
-evals/artifacts/*.md
-evals/artifacts/task_logs/

@@ -189,6 +189,8 @@ Exit criteria:
   - Read-only sessions/chat rendering is active in `?ui=van`.
   - Added read-only activity and feature snapshots (tasks, approvals, features).
   - SSE-triggered refresh updates snapshots on task/approval events.
+  - Introduced explicit empty-state copy and counters for sessions/chat/features/tasks.
+  - Updated preview layout to dedicated sessions / main / activity columns for clearer parity mapping.
 
 Deliverables:
 

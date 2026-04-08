@@ -27,6 +27,8 @@ function renderSessionItems(store, api) {
 export function SessionList(store, api) {
   return section({ class: "van-panel" },
     h2("Sessions"),
+    div({ class: "van-subtle" }, () => `Count: ${store.sessions.val.length}`),
     ul(() => renderSessionItems(store, api)),
+    div({ class: "van-empty-note" }, () => (store.sessions.val.length ? "" : "No sessions found from /api/sessions.")),
   );
 }

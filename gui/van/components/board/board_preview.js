@@ -18,6 +18,8 @@ export function BoardPreview(store) {
 
   return section({ class: "van-panel van-board" },
     h2("Feature Snapshot"),
+    div({ class: "van-subtle" }, () => `Features: ${store.features.val.length}`),
     div({ class: "van-feature-list" }, () => renderFeatures()),
+    div({ class: "van-empty-note" }, () => (store.features.val.length ? "" : "No features returned from /api/features.")),
   );
 }

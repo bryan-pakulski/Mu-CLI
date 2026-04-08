@@ -268,10 +268,12 @@ button, .session-title, .workspace-empty, .menu-item, .settings-tab {
 .van-meta{display:flex;gap:8px;flex-wrap:wrap}
 .van-meta code{padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface)}
 .van-event{color:var(--muted);margin:0}
-.van-layout{display:grid;grid-template-columns:280px 1fr;gap:12px;min-height:72vh}
+.van-layout{display:grid;grid-template-columns:280px minmax(0,1fr) 320px;gap:12px;min-height:72vh;align-items:start}
 .van-main-col{display:grid;grid-template-rows:minmax(0,1fr) auto;gap:12px;min-height:0}
 .van-panel{border:1px solid var(--border);background:var(--surface);border-radius:12px;padding:12px;display:grid;gap:8px;min-height:0}
 .van-panel h2{margin:0}
+.van-subtle{font-size:11px;color:var(--muted)}
+.van-empty-note{font-size:11px;color:var(--muted);font-style:italic}
 .van-feed{display:grid;gap:8px;overflow:auto;padding-right:6px}
 .van-chat{min-height:0}
 .van-message{border:1px solid var(--border);border-radius:10px;padding:8px}

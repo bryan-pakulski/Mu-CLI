@@ -32,9 +32,15 @@ export function ActivityPanel(store) {
   return section({ class: "van-panel van-activity" },
     h2("Activity Snapshot"),
     div({ class: "van-activity-status" }, () => `Approvals: ${store.approvals.val.length} · Tasks: ${store.tasks.val.length}`),
+    div({ class: "van-subtle" }, () => {
+      const model = store.runtime.val?.model || "unknown";
+      return `Runtime model: ${model}`;
+    }),
     h3("Recent tasks"),
     div({ class: "van-activity-list" }, () => renderTasks()),
+    div({ class: "van-empty-note" }, () => (store.tasks.val.length ? "" : "No tasks returned from /api/tasks.")),
     h3("Pending approvals"),
     div({ class: "van-activity-list" }, () => renderApprovals()),
+    div({ class: "van-empty-note" }, () => (store.approvals.val.length ? "" : "No pending approvals.")),
   );
 }

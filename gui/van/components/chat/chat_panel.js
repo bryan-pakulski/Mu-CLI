@@ -14,7 +14,9 @@ function renderMessages(store) {
 export function ChatPanel(store) {
   return section({ class: "van-panel van-chat" },
     h2("Chat (Read-Only Preview)"),
+    div({ class: "van-subtle" }, () => `Messages: ${store.history.val.length}`),
     div({ class: "van-feed" }, () => renderMessages(store)),
+    div({ class: "van-empty-note" }, () => (store.history.val.length ? "" : "No messages in selected session yet.")),
     textarea({ disabled: true, rows: 4, placeholder: "Composer migration starts in Phase 3." }),
   );
 }

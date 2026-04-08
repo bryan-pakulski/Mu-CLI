@@ -82,15 +82,15 @@ The markdown phase files remain the day-to-day execution surface, while the JSON
 
 ## Engine Lifecycle
 
-### 1. Planning
+### 1. Planning (staged tools)
 
-The agent should call `create_feature_plan` when operating in feature mode.
+The agent should use the staged planning tools when operating in feature mode:
 
-That tool creates:
+1. `create_feature` (Stage 1: plan shell + requirements),
+2. `create_phases` (Stage 2: epics/phases),
+3. `create_task` (Stage 3: tickets with exit criteria).
 
-- the `documentation/feature_req_<id>/` directory,
-- `feature_plan.json`,
-- all `phase_N.md` files.
+Legacy compatibility still exists for `create_feature_task`, but staged calls are the default contract.
 
 After plan creation, the agent should stop and ask the user for approval.
 
@@ -142,23 +142,47 @@ If review succeeds, the model should set `review_status` to `completed` and summ
 
 ## Tools
 
-The engine currently exposes three tools:
+The engine now exposes staged planning, execution, review, and archive tools:
 
-### `create_feature_plan`
+### Planning
 
-Creates the plan directory, manifest, and phase markdown files.
+- `create_feature`
+- `create_phases`
+- `create_task`
 
-### `get_feature_plan`
+### Execution
 
-Loads the plan, re-parses the markdown files, and returns a summarized machine-readable status object.
+- `get_execution_state`
+- `update_task_status`
+- `block_task`
+- `resume_task`
+- `raise_blocker`
 
-### `update_feature_plan`
+### Review & Archive
 
-Updates plan metadata such as:
+- `review_all_completed_tasks`
+- `review_completed_tasks`
+- `propose_task_diff`
+- `decide_task_diff`
+- `archive_task`
 
-- `approved`
-- `review_status`
-- `review_notes`
+`approve_feature_task` / metadata updates still control final review completion status.
+
+## CLI (Phase 5 command loop)
+
+Feature mode now includes a command surface that maps directly to workflow steps:
+
+- `/feature create plan <name>`
+- `/feature create phase <title> | <goal>`
+- `/feature create task <phase_id> | <title> | <overview> | <exit1;exit2>`
+- `/feature show <board|execution|reviews>`
+- `/feature move <task_id> <status>`
+- `/feature block <task_id> <reason>`
+- `/feature review auto`
+- `/feature review <task_id> <summary>`
+- `/feature archive <task_id>`
+- `/feature monitor [refresh_seconds]`
+- `/feature help`
 
 ## Server Endpoints
 

@@ -23,8 +23,13 @@ from utils.config import validate_and_cast, AGENTIC_SYSTEM_BASE, AGENTIC_MODES
 from core.feature_mode import (
     build_phase_execution_prompt,
     build_review_prompt,
+    feature_execution_snapshot,
+    next_actionable_task,
+    next_pending_phase,
     refresh_and_persist_feature_plan,
+    save_feature_plan,
     summarize_feature_plan,
+    transition_task_status,
     update_feature_plan_metadata,
 )
 
@@ -341,6 +346,7 @@ class TaskManager:
             "updated_at": feature_state.get("updated_at", time.time()),
             "approval_id": None,
             "blocker": feature_state.get("blocker"),
+            "cancel_requested": False,
         }
         with self.lock:
             self.tasks[task_id] = task
@@ -360,6 +366,7 @@ class TaskManager:
                 "updated_at": time.time(),
                 "approval_id": None,
                 "blocker": None,
+                "cancel_requested": False,
             }
         if self.event_hub:
             self.event_hub.publish(
@@ -435,6 +442,9 @@ class TaskManager:
             )
 
     def complete_task(self, task_id: str, result: dict):
+        current = self.get_task(task_id) or {}
+        if current.get("cancel_requested"):
+            return
         self.update_task(task_id, status="completed", result=result, approval_id=None)
         if self.event_hub:
             self.event_hub.publish(
@@ -444,6 +454,9 @@ class TaskManager:
             )
 
     def fail_task(self, task_id: str, error: str):
+        current = self.get_task(task_id) or {}
+        if current.get("cancel_requested"):
+            return
         self.update_task(task_id, status="error", error=error, approval_id=None)
         if self.event_hub:
             self.event_hub.publish(
@@ -465,6 +478,27 @@ class TaskManager:
         ):
             return dict(self._restore_feature_task(persisted_state))
         return None
+
+    def cancel_task(self, task_id: str) -> dict | None:
+        task = self.get_task(task_id)
+        if not task:
+            return None
+        self.update_task(
+            task_id,
+            status="cancelled",
+            cancel_requested=True,
+            blocker=None,
+            approval_id=None,
+            result={"ok": False, "cancelled": True, "task_id": task_id},
+        )
+        cancelled = self.get_task(task_id)
+        if self.event_hub:
+            self.event_hub.publish(
+                "task.cancelled",
+                {"task": cancelled},
+                task_id=task_id,
+            )
+        return cancelled
 
     def list_tasks(self) -> list[dict]:
         with self.lock:
@@ -532,6 +566,82 @@ class TaskManager:
             "error": error,
         }
 
+    def _build_cycle_transition_events(
+        self,
+        previous_summary: dict | None,
+        current_summary: dict,
+    ) -> list[dict]:
+        if not previous_summary:
+            bootstrap_events: list[dict] = []
+            curr_exec = current_summary.get("execution", {}) or {}
+            curr_phase = curr_exec.get("next_phase") or {}
+            curr_task = curr_exec.get("next_task") or {}
+            if curr_phase.get("id") is not None:
+                bootstrap_events.append(
+                    {"type": "phase_started", "phase_id": curr_phase.get("id")}
+                )
+            if curr_task.get("id") is not None:
+                bootstrap_events.append(
+                    {"type": "task_started", "task_id": curr_task.get("id")}
+                )
+            return bootstrap_events
+
+        def _phase_lookup(summary: dict, phase_id: int | None) -> dict | None:
+            if phase_id is None:
+                return None
+            for phase in summary.get("phases_meta", []):
+                if int(phase.get("id", -1)) == int(phase_id):
+                    return phase
+            return None
+
+        events: list[dict] = []
+        prev_exec = previous_summary.get("execution", {}) or {}
+        curr_exec = current_summary.get("execution", {}) or {}
+
+        prev_task = prev_exec.get("next_task") or {}
+        curr_task = curr_exec.get("next_task") or {}
+        prev_task_id = prev_task.get("id")
+        curr_task_id = curr_task.get("id")
+        if prev_task_id != curr_task_id:
+            if prev_task_id is not None:
+                events.append({"type": "task_cursor_moved", "from_task_id": prev_task_id})
+            if curr_task_id is not None:
+                events.append({"type": "task_started", "task_id": curr_task_id})
+
+        prev_phase = prev_exec.get("next_phase") or {}
+        curr_phase = curr_exec.get("next_phase") or {}
+        prev_phase_id = prev_phase.get("id")
+        curr_phase_id = curr_phase.get("id")
+        if prev_phase_id != curr_phase_id:
+            prev_phase_state = _phase_lookup(current_summary, prev_phase_id)
+            if prev_phase_id is not None and prev_phase_state:
+                events.append(
+                    {
+                        "type": "phase_cursor_moved",
+                        "from_phase_id": prev_phase_id,
+                        "from_phase_status": prev_phase_state.get("status"),
+                    }
+                )
+            if curr_phase_id is not None:
+                events.append({"type": "phase_started", "phase_id": curr_phase_id})
+
+        prev_blocked = {
+            int(item.get("id"))
+            for item in (prev_exec.get("blocked_tasks") or [])
+            if item.get("id") is not None
+        }
+        curr_blocked = {
+            int(item.get("id"))
+            for item in (curr_exec.get("blocked_tasks") or [])
+            if item.get("id") is not None
+        }
+        for task_id in sorted(curr_blocked - prev_blocked):
+            events.append({"type": "task_blocked", "task_id": task_id})
+        for task_id in sorted(prev_blocked - curr_blocked):
+            events.append({"type": "task_resumed", "task_id": task_id})
+
+        return events
+
     def _launch_feature_task_thread(
         self,
         *,
@@ -572,6 +682,7 @@ class TaskManager:
 
                 active_previous_signature = previous_signature
                 active_resume_input = resume_input
+                previous_summary = None
                 for cycle_index in range(start_cycle, max_cycles + 1):
                     self._persist_feature_state(
                         self._build_persisted_feature_state(
@@ -614,12 +725,40 @@ class TaskManager:
                             )
                             return
 
-                        phase = plan.next_incomplete_phase()
+                        if active_resume_input:
+                            execution_state = feature_execution_snapshot(plan)
+                            blocked_tasks = execution_state.get("blocked_tasks", [])
+                            if blocked_tasks:
+                                blocked_task_id = int(blocked_tasks[0].get("id"))
+                                try:
+                                    transition_task_status(
+                                        plan,
+                                        task_id=blocked_task_id,
+                                        to_status="in_progress",
+                                        notes=str(active_resume_input),
+                                        actor="user",
+                                    )
+                                    plan = save_feature_plan(
+                                        self.session.session_manager.current_session_name,
+                                        plan,
+                                    )
+                                except ValueError:
+                                    # keep loop moving even if transition is not possible
+                                    pass
+
+                        phase = next_pending_phase(plan)
+                        task = (
+                            None
+                            if phase is None
+                            else next_actionable_task(plan, phase.id)
+                        )
+                        if task is None and phase is not None:
+                            task = plan.next_incomplete_task()
                         prompt_type = "review" if phase is None else "implementation"
                         prompt = (
                             build_review_prompt(plan)
                             if phase is None
-                            else build_phase_execution_prompt(plan, phase)
+                            else build_phase_execution_prompt(plan, task)
                         )
                         if active_resume_input:
                             prompt = f"{prompt}\n\n{self._build_feature_resume_prompt(active_resume_input)}"
@@ -641,14 +780,21 @@ class TaskManager:
                         )
                         updated_summary = summarize_feature_plan(updated_plan)
                         signature = json.dumps(updated_summary, sort_keys=True)
+                        transition_events = self._build_cycle_transition_events(
+                            previous_summary,
+                            updated_summary,
+                        )
                         cycle_payload = {
                             "cycle": cycle_index,
                             "prompt_type": prompt_type,
-                            "phase_number": None if phase is None else phase.number,
+                            "phase_number": None if phase is None else phase.id,
+                            "task_id": None if task is None else task.id,
+                            "transition_events": transition_events,
                             "result": result,
                             "feature_plan": updated_summary,
                         }
                         cycles.append(cycle_payload)
+                        previous_summary = updated_summary
 
                         if result.get("status") == "interrupted":
                             interrupt_blocker = {
@@ -697,6 +843,24 @@ class TaskManager:
 
                         blocker = self._extract_feature_blocker(result)
                         if blocker:
+                            if task is not None:
+                                try:
+                                    transition_task_status(
+                                        updated_plan,
+                                        task_id=task.id,
+                                        to_status="blocked",
+                                        notes=str(blocker.get("requested_input", "") or ""),
+                                        blocked_reason=str(blocker.get("summary", "") or "Blocked"),
+                                        actor="agent",
+                                    )
+                                    updated_plan = save_feature_plan(
+                                        self.session.session_manager.current_session_name,
+                                        updated_plan,
+                                    )
+                                    updated_summary = summarize_feature_plan(updated_plan)
+                                    signature = json.dumps(updated_summary, sort_keys=True)
+                                except ValueError:
+                                    pass
                             blocker_payload = {
                                 **blocker,
                                 "history_length": len(
@@ -956,13 +1120,40 @@ class TaskManager:
             )
 
         payload = task.get("payload", {})
+        directory = str(payload.get("directory", "") or "")
+        metadata_path = self._feature_metadata_path(directory)
+        if metadata_path and os.path.exists(metadata_path):
+            plan = refresh_and_persist_feature_plan(
+                directory,
+                metadata_path=metadata_path,
+            )
+            blocked_tasks = (
+                feature_execution_snapshot(plan).get("blocked_tasks", []) or []
+            )
+            if blocked_tasks:
+                blocked_task_id = int(blocked_tasks[0].get("id"))
+                try:
+                    transition_task_status(
+                        plan,
+                        task_id=blocked_task_id,
+                        to_status="in_progress",
+                        notes=str(user_input),
+                        actor="user",
+                    )
+                    save_feature_plan(
+                        self.session.session_manager.current_session_name,
+                        plan,
+                    )
+                except ValueError:
+                    pass
+
         partial_result = task.get("result", {}) or {}
         cycles = list(partial_result.get("cycles", []))
         self.clear_waiting_for_input(task_id)
         self._persist_feature_state(
             self._build_persisted_feature_state(
                 task_id=task_id,
-                directory=str(payload.get("directory", "") or ""),
+                directory=directory,
                 max_cycles=int(payload.get("max_cycles", 12) or 12),
                 next_cycle=int(
                     payload.get("next_cycle", len(cycles) + 1) or (len(cycles) + 1)
@@ -974,7 +1165,7 @@ class TaskManager:
         )
         self._launch_feature_task_thread(
             task_id=task_id,
-            directory=str(payload.get("directory", "") or ""),
+            directory=directory,
             approval_manager=approval_manager,
             max_cycles=int(payload.get("max_cycles", 12) or 12),
             start_cycle=int(
@@ -1279,10 +1470,42 @@ def build_feature_plan_payload(session, directory: str) -> dict:
     return summarize_feature_plan(plan)
 
 
+def build_features_payload(session) -> dict:
+    records: list[dict] = []
+    for feature in session.session_manager.list_features():
+        if not isinstance(feature, dict):
+            continue
+        records.append(
+            {
+                "feature_id": str(feature.get("feature_id", "") or "").strip(),
+                "feature_name": str(
+                    feature.get("feature_name")
+                    or feature.get("feature_id")
+                    or "feature"
+                ).strip(),
+                "status": str(feature.get("status", "") or "").strip(),
+                "directory": str(feature.get("directory", "") or "").strip(),
+                "updated_at": feature.get("updated_at"),
+            }
+        )
+    return {"features": records}
+
+
 def build_staged_files_payload(session) -> dict:
     return {
         "staged_files": list(session.staged_files),
         "staged_file_count": len(session.staged_files),
+    }
+
+
+def build_memory_buffers_payload(session) -> dict:
+    return {
+        "memory_entries": [
+            entry.to_dict() for entry in session.session_manager.task_memory.list_entries(limit=100)
+        ],
+        "scratchpad_entries": [
+            entry.to_dict() for entry in session.session_manager.turn_scratchpad.list_entries(limit=100)
+        ],
     }
 
 
@@ -1367,15 +1590,19 @@ def serve(session, host: str, port: int, command_handler):
 
         def _send_json(self, status_code: int, payload: dict):
             body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
-            self.send_response(status_code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.end_headers()
             try:
+                self.send_response(status_code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.end_headers()
                 self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnected before response was written.")
+            except Exception:
+                raise  # Re-raise other unexpected errors
             except (BrokenPipeError, ConnectionResetError):
                 logger.debug("Client disconnected before response was written.")
 
@@ -1570,9 +1797,21 @@ def serve(session, host: str, port: int, command_handler):
                             404, {"ok": False, "error": "Feature plan not found."}
                         )
                     return
+                if parsed.path == "/api/features":
+                    self._send_json(
+                        200,
+                        {"ok": True, **build_features_payload(session)},
+                    )
+                    return
                 if parsed.path == "/api/staged-files":
                     self._send_json(
                         200, {"ok": True, **build_staged_files_payload(session)}
+                    )
+                    return
+                if parsed.path == "/api/memory-buffers":
+                    self._send_json(
+                        200,
+                        {"ok": True, **build_memory_buffers_payload(session)},
                     )
                     return
 
@@ -1620,6 +1859,21 @@ def serve(session, host: str, port: int, command_handler):
                     self._send_json(404, {"ok": False, "error": str(exc)})
                     return
                 self._send_json(200, {"ok": True, "approval": approval})
+                return
+
+            if parsed.path == "/api/tasks/cancel":
+                task_id = str(payload.get("task_id", "") or "").strip()
+                if not task_id:
+                    self._send_json(
+                        400,
+                        {"ok": False, "error": "Field 'task_id' is required."},
+                    )
+                    return
+                task = state["task_manager"].cancel_task(task_id)
+                if not task:
+                    self._send_json(404, {"ok": False, "error": "Task not found."})
+                    return
+                self._send_json(200, {"ok": True, "task": task})
                 return
 
             if parsed.path == "/api/message":
@@ -2075,6 +2329,96 @@ def serve(session, host: str, port: int, command_handler):
                             build_workspace_payload(session),
                         )
                         self._send_json(200, result)
+                        return
+
+                    if parsed.path == "/api/features/activate":
+                        feature_id = str(payload.get("feature_id", "") or "").strip()
+                        if not feature_id:
+                            self._send_json(
+                                400,
+                                {"ok": False, "error": "Field 'feature_id' is required."},
+                            )
+                            return
+                        feature = session.session_manager.activate_feature(feature_id)
+                        if not feature:
+                            self._send_json(
+                                404,
+                                {
+                                    "ok": False,
+                                    "error": f"Feature '{feature_id}' not found.",
+                                },
+                            )
+                            return
+                        self._send_json(
+                            200,
+                            {"ok": True, "feature": feature, **build_runtime_payload(session)},
+                        )
+                        return
+
+                    if parsed.path == "/api/features/archive":
+                        feature_id = str(payload.get("feature_id", "") or "").strip()
+                        if not feature_id:
+                            self._send_json(
+                                400,
+                                {"ok": False, "error": "Field 'feature_id' is required."},
+                            )
+                            return
+                        feature = session.session_manager.get_feature(feature_id)
+                        if not feature:
+                            self._send_json(
+                                404,
+                                {
+                                    "ok": False,
+                                    "error": f"Feature '{feature_id}' not found.",
+                                },
+                            )
+                            return
+                        feature["status"] = "archived"
+                        record = session.session_manager.upsert_feature(feature) or feature
+                        active = session.session_manager.get_feature_state() or {}
+                        if str(active.get("feature_id", "")).strip() == str(feature_id):
+                            active["status"] = "archived"
+                            session.session_manager.set_feature_state(active)
+                        self._send_json(
+                            200,
+                            {"ok": True, "feature": record, **build_runtime_payload(session)},
+                        )
+                        return
+
+                    if parsed.path == "/api/features/delete":
+                        feature_id = str(payload.get("feature_id", "") or "").strip()
+                        if not feature_id:
+                            self._send_json(
+                                400,
+                                {"ok": False, "error": "Field 'feature_id' is required."},
+                            )
+                            return
+                        deleted = session.session_manager.delete_feature(feature_id)
+                        if not deleted:
+                            self._send_json(
+                                404,
+                                {
+                                    "ok": False,
+                                    "error": f"Feature '{feature_id}' not found.",
+                                },
+                            )
+                            return
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "deleted_feature_id": feature_id,
+                                **build_runtime_payload(session),
+                            },
+                        )
+                        return
+
+                    if parsed.path == "/api/features/unload":
+                        session.session_manager.clear_feature_state()
+                        self._send_json(
+                            200,
+                            {"ok": True, **build_runtime_payload(session)},
+                        )
                         return
 
                     if parsed.path == "/api/workspaces/browse":

@@ -5,12 +5,25 @@ import datetime
 import difflib
 import re
 from dataclasses import dataclass, asdict, field
+from urllib.parse import quote
 from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
+from utils.citation_manager import register_source, SourceType
 from core.feature_mode import (
+    create_feature_shell,
+    create_feature_phases,
+    create_feature_task,
+    create_task_review_record,
+    review_all_completed_tasks as create_reviews_for_completed_tasks,
+    create_diff_proposal,
+    decide_diff_proposal,
+    archive_task as archive_feature_task,
+    feature_execution_snapshot,
     create_feature_plan,
     load_feature_plan,
+    save_feature_plan,
+    transition_task_status,
     update_task_status,
     update_task_content,
     refresh_and_persist_feature_plan,
@@ -18,6 +31,34 @@ from core.feature_mode import (
     update_feature_plan_metadata,
     _workspace_root,
 )
+
+
+def _register_source_and_get_citation(
+    title: str,
+    url: str,
+    source_type: SourceType,
+    authors: list[str] | None = None,
+    date: str | None = None,
+) -> str:
+    """
+    Register a source with the citation manager and return a citation ID.
+    
+    Args:
+        title: The title of the source
+        url: The URL of the source
+        source_type: The type of source (SourceType enum)
+        authors: Optional list of authors
+        date: Optional publication date
+    
+    Returns:
+        A citation ID in the format [^n]
+    """
+    try:
+        citation_id = register_source(title=title, url=url, source_type=source_type, authors=authors, date=date)
+        return citation_id
+    except Exception as e:
+        logger.warning(f"Failed to register source: {e}")
+        return ""
 
 
 @dataclass(frozen=True)
@@ -178,17 +219,51 @@ TOOLS = [
     ),
     ToolDefinition(
         name="apply_diff",
-        description="Applies a unified diff to a file. This is preferred over write_file for incremental changes.",
+        description="Applies a unified diff to a file. This is a FALLBACK method. Use search_and_replace_file as the PRIMARY method for targeted code changes. Use apply_diff only for complex multi-file changes.",
         parameters={
             "type": "object",
             "properties": {
-                "filename": {"type": "string", "description": "Path to the file."},
+                "filename": {"type": "string", "description": "Path to the file to modify."},
                 "diff": {
                     "type": "string",
                     "description": "The unified diff content to apply. MUST follow standard unified diff format: --- filename, +++ filename, @@ -L,C +L,C @@ headers, and +/-/space line markers.",
                 },
             },
             "required": ["filename", "diff"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="search_and_replace_file",
+        description="Search and replace text in a file using exact string matching. This is the PRIMARY method for targeted code modifications. Use apply_diff (unified diff) only as a fallback for complex multi-file changes.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "Path to the file."},
+                "search": {
+                    "type": "string",
+                    "description": "The exact text to search for in the file. Must match exactly including whitespace.",
+                },
+                "replace": {
+                    "type": "string",
+                    "description": "The text to replace the search match with.",
+                },
+                "expected_count": {
+                    "type": "integer",
+                    "description": "Optional expected number of matches. If provided and count differs, operation fails (safety check for disambiguation).",
+                },
+                "normalize_whitespace": {
+                    "type": "boolean",
+                    "description": "If True, normalize whitespace in search pattern (collapse multiple spaces, trim leading/trailing).",
+                    "default": False,
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If True, return preview of changes without modifying the file.",
+                    "default": False,
+                },
+            },
+            "required": ["filename", "search", "replace"],
         },
         requires_approval=True,
     ),
@@ -413,6 +488,152 @@ TOOLS = [
         requires_approval=False,
     ),
     ToolDefinition(
+        name="web_search",
+        description="Search the web using DuckDuckGo or Google Custom Search API. Returns search results with title, URL, snippet, and relevance score. Use this for research to find relevant information on the internet.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string.",
+                },
+                "engine": {
+                    "type": "string",
+                    "description": "The search engine to use. Options: 'duckduckgo' (default) or 'google'.",
+                    "default": "duckduckgo",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="arxiv_search",
+        description="Search arXiv for academic papers. Returns paper metadata including title, authors, abstract, arXiv ID, and PDF link. Use this for academic research to find scientific papers.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query for papers.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional arXiv category filter (e.g., 'cs.AI', 'physics', 'math.CO').",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+                "date_range": {
+                    "type": "string",
+                    "description": "Optional date range filter (e.g., '2023-01-01 TO 2024-01-01').",
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="doi_resolve",
+        description="Resolves a DOI (Digital Object Identifier) to retrieve publication metadata and access information. Use this to get detailed information about a specific academic paper from its DOI.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "doi": {
+                    "type": "string",
+                    "description": "The DOI to resolve (e.g., '10.1000/xyz123' or full URL 'https://doi.org/10.1000/xyz123').",
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output format - 'full' (complete metadata) or 'citation' (formatted citation). Default is 'full'.",
+                    "default": "full",
+                },
+            },
+            "required": ["doi"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="reddit_search",
+        description="Searches Reddit for relevant discussions and posts. Use this for finding community opinions, discussions, and user-generated content on various topics.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string to find relevant Reddit posts.",
+                },
+                "subreddit": {
+                    "type": "string",
+                    "description": "Optional subreddit to limit the search to (e.g., 'programming', 'MachineLearning').",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="stackoverflow_search",
+        description="Searches Stack Overflow for relevant questions and answers using the Stack Exchange API. Use this for finding programming solutions, debugging help, and technical discussions.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string to find relevant Stack Overflow questions.",
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "Optional tag to filter results (e.g., 'python', 'javascript').",
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="hackernews_search",
+        description="Searches Hacker News for relevant stories and discussions using the Algolia HN API. Use this for finding tech news, startup discussions, and community insights from the Hacker News community.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string to find relevant Hacker News stories.",
+                },
+                "sort": {
+                    "type": "string",
+                    "description": "Sort order: 'relevance' (default) or 'date' for chronological order.",
+                    "enum": ["relevance", "date"],
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10, max 50).",
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
         name="read_document",
         description="Reads and parses documents like PDFs to gather additional context.",
         parameters={
@@ -556,6 +777,189 @@ TOOLS = [
         requires_approval=False,
     ),
     ToolDefinition(
+        name="create_feature",
+        description="Creates (or upserts) a feature shell from a confirmed design plan. Stage 1 of feature mode planning.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_name": {"type": "string"},
+                "feature_request": {"type": "string"},
+                "feature_id": {"type": "string"},
+                "design_plan": {"type": "string"},
+            },
+            "required": ["feature_name", "feature_request"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="create_phases",
+        description="Creates or replaces phases/epics for an active feature. Stage 2 of feature mode planning.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "replace_existing": {"type": "boolean", "default": True},
+                "phases": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "integer"},
+                            "title": {"type": "string"},
+                            "goal": {"type": "string"},
+                            "order": {"type": "integer"},
+                            "status": {"type": "string"},
+                        },
+                        "required": ["title", "goal"],
+                    },
+                },
+            },
+            "required": ["phases"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="create_task",
+        description="Creates a single task/ticket for an active feature phase. Stage 3 of feature mode planning.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "phase_id": {"type": "integer"},
+                "title": {"type": "string"},
+                "overview": {"type": "string"},
+                "design": {"type": "array", "items": {"type": "string"}},
+                "exit_criteria": {"type": "array", "items": {"type": "string"}},
+                "notes": {"type": "string"},
+            },
+            "required": ["title", "exit_criteria"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="get_execution_state",
+        description="Returns the phase/task execution cursor, including blocked tasks and next actionable work item.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+            },
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="block_task",
+        description="Moves a task to blocked with an explicit reason and optional user input request.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+                "reason": {"type": "string"},
+                "requested_input": {"type": "string"},
+            },
+            "required": ["task_id", "reason"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="resume_task",
+        description="Moves a blocked task back to in_progress after required user input has been provided.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+                "notes": {"type": "string"},
+            },
+            "required": ["task_id"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="review_completed_tasks",
+        description="Creates structured review records for completed tasks with categorized issues (bug/risk/enhancement).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+                "summary": {"type": "string"},
+                "limitations": {"type": "array", "items": {"type": "string"}},
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "category": {
+                                "type": "string",
+                                "enum": ["bug", "risk", "enhancement"],
+                            },
+                            "details": {"type": "string"},
+                        },
+                        "required": ["title", "category"],
+                    },
+                },
+            },
+            "required": ["task_id", "summary"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="review_all_completed_tasks",
+        description="Auto-creates baseline review records for every completed task that does not yet have one.",
+        parameters={
+            "type": "object",
+            "properties": {"feature_id": {"type": "string"}},
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="propose_task_diff",
+        description="Creates a diff proposal for a review issue, requiring later user decision.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "review_id": {"type": "string"},
+                "issue_id": {"type": "string"},
+                "diff": {"type": "string"},
+            },
+            "required": ["review_id", "issue_id", "diff"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="decide_task_diff",
+        description="Stores user decision (approved/denied) for a proposed task diff.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+                "decision": {"type": "string", "enum": ["approved", "denied"]},
+                "reason": {"type": "string"},
+            },
+            "required": ["proposal_id", "decision"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="archive_task",
+        description="Archives an archive-ready task after review and diff decisions are complete.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "feature_id": {"type": "string"},
+                "task_id": {"type": "integer"},
+            },
+            "required": ["task_id"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
         name="create_feature_task",
         description="Creates a structured feature implementation plan consisting of one or more tasks. Each task must include explicit exit_criteria. Stores metadata internally.",
         parameters={
@@ -654,9 +1058,21 @@ TOOLS = [
                 "task_id": {"type": "integer"},
                 "status": {
                     "type": "string",
-                    "enum": ["not_started", "in_progress", "completed"],
+                    "enum": [
+                        "pending",
+                        "not_started",
+                        "in_progress",
+                        "blocked",
+                        "completed",
+                        "archived",
+                    ],
                 },
                 "notes": {"type": "string"},
+                "verified_exit_criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Required when marking a task completed. Must include every task exit criterion.",
+                },
                 "directory": {"type": "string"},
             },
             "required": ["task_id", "status"],
@@ -698,7 +1114,6 @@ TOOLS = [
         requires_approval=False,
     ),
 ]
-
 _COLLATED_TOOL_NAMES = {
     "get_workspace_details",
     "read_file",
@@ -711,6 +1126,12 @@ _COLLATED_TOOL_NAMES = {
     "git_diff",
     "git_branch",
     "url_grounding",
+    "web_search",
+    "arxiv_search",
+    "doi_resolve",
+    "reddit_search",
+    "stackoverflow_search",
+    "hackernews_search",
     "read_document",
     "get_tasks",
     "get_current_task",
@@ -843,6 +1264,14 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "execution_kind": "read",
         "preview_policy": "none",
     },
+    "web_search": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "arxiv_search": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
     "read_document": {
         "execution_kind": "read",
         "preview_policy": "none",
@@ -893,6 +1322,50 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "preview_policy": "none",
         "result_mode": "raw",
         "server_policy": "session_only",
+    },
+    "create_feature": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "create_phases": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "create_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "get_execution_state": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "block_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "resume_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "review_completed_tasks": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "review_all_completed_tasks": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "propose_task_diff": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "decide_task_diff": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "archive_task": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
     },
     "create_feature_task": {
         "execution_kind": "mutate",
@@ -1316,6 +1789,213 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
         return f"Error applying diff: {e}"
 
 
+def search_and_replace_file(
+    filename: str,
+    search: str,
+    replace: str,
+    expected_count: int = None,
+    normalize_whitespace: bool = False,
+    dry_run: bool = False,
+    folder_context=None
+) -> str:
+    """Search and replace text in a file using exact string matching.
+    
+    This is the PRIMARY method for making targeted code changes. Use apply_diff
+    (unified diff) only as a fallback for complex multi-file changes.
+    
+    Args:
+        filename: Path to the file to modify
+        search: The exact text to search for (must match exactly)
+        replace: The text to replace the search string with
+        expected_count: Optional expected number of matches. If provided and count
+                       differs, the operation fails (safety check for disambiguation)
+        normalize_whitespace: If True, normalize whitespace in search pattern
+                             (collapse multiple spaces, trim leading/trailing)
+        dry_run: If True, return preview of changes without modifying the file
+        folder_context: Workspace folder context for path validation
+    
+    Returns:
+        JSON string with results including:
+        - success: bool
+        - matches_found: int
+        - match_locations: list of {line, column, context}
+        - modified: bool (whether file was actually modified)
+        - preview: str (unified diff preview of changes)
+        - error: str (if error occurred)
+    """
+    import json
+    
+    # Validate path
+    if not _check_bounds(filename, folder_context):
+        logger.warning(f"search_and_replace_file: Access denied or path ignored: {filename}")
+        return json.dumps({"success": False, "error": f"Access denied or path ignored. '{filename}'"})
+    
+    # Validate search string
+    if not search:
+        return json.dumps({"success": False, "error": "Search string cannot be empty"})
+    
+    # Check file exists
+    if not os.path.exists(filename):
+        return json.dumps({"success": False, "error": f"File '{filename}' does not exist"})
+    
+    # Check if binary file
+    try:
+        with open(filename, "rb") as f:
+            chunk = f.read(8192)
+            if b'\x00' in chunk:
+                return json.dumps({"success": False, "error": f"File '{filename}' appears to be binary. Search and replace not supported."})
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Error reading file: {str(e)}"})
+    
+    # Read file content
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        return json.dumps({"success": False, "error": f"File '{filename}' is not UTF-8 encoded"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Error reading file: {str(e)}"})
+    
+    # Normalize whitespace if requested
+    search_pattern = search
+    if normalize_whitespace:
+        import re
+        # Collapse multiple whitespace to single space and trim
+        search_pattern = re.sub(r'\s+', ' ', search).strip()
+        # Also normalize in content for matching
+        normalized_content = re.sub(r'\s+', ' ', content)
+    else:
+        normalized_content = content
+    
+    # Find all matches with locations
+    matches = []
+    lines = content.split('\n')
+    
+    # Build line start positions for column calculation
+    line_starts = [0]
+    for line in lines:
+        line_starts.append(line_starts[-1] + len(line) + 1)  # +1 for newline
+    
+    # Find all occurrences
+    search_content = normalized_content if normalize_whitespace else content
+    start_pos = 0
+    while True:
+        pos = search_content.find(search_pattern, start_pos)
+        if pos == -1:
+            break
+        
+        # Find line number and column
+        line_num = 1
+        for i, start in enumerate(line_starts):
+            if start > pos:
+                line_num = i
+                break
+            line_num = i + 1
+        
+        # Calculate column (1-indexed)
+        if line_num == 1:
+            column = pos + 1
+        else:
+            column = pos - line_starts[line_num - 2] + 1
+        
+        # Get context (2-3 lines around the match for disambiguation)
+        if 1 <= line_num <= len(lines):
+            context_parts = []
+            # Add 1 line before if available
+            if line_num > 1:
+                before_line = lines[line_num - 2].strip()
+                if len(before_line) > 80:
+                    before_line = before_line[:77] + "..."
+                context_parts.append(f"  {before_line}")
+            # Add the match line
+            match_line = lines[line_num - 1].strip()
+            if len(match_line) > 80:
+                match_line = match_line[:77] + "..."
+            context_parts.append(f"> {match_line}")
+            # Add 1 line after if available
+            if line_num < len(lines):
+                after_line = lines[line_num].strip()
+                if len(after_line) > 80:
+                    after_line = after_line[:77] + "..."
+                context_parts.append(f"  {after_line}")
+            context_line = "\n".join(context_parts)
+        else:
+            context_line = ""
+        
+        matches.append({
+            "line": line_num,
+            "column": column,
+            "context": context_line
+        })
+        start_pos = pos + 1
+    
+    # Check match count
+    if len(matches) == 0:
+        return json.dumps({
+            "success": False,
+            "matches_found": 0,
+            "error": f"No matches found for search string. Make sure the search string matches exactly, including whitespace.",
+            "search_length": len(search)
+        })
+    
+    # Validate expected count
+    if expected_count is not None and len(matches) != expected_count:
+        return json.dumps({
+            "success": False,
+            "matches_found": len(matches),
+            "expected_count": expected_count,
+            "match_locations": matches,
+            "error": f"Expected {expected_count} matches but found {len(matches)}. Use expected_count to disambiguate or provide more specific search string."
+        })
+    
+    # Perform replacement
+    if normalize_whitespace:
+        # For normalized matching, we need to be more careful
+        import re
+        # Use regex to handle whitespace normalization in replacement
+        normalized_search = re.sub(r'\s+', ' ', search).strip()
+        new_content = re.sub(re.escape(normalized_search), replace, normalized_content, count=0 if expected_count is None else expected_count)
+    else:
+        new_content = content.replace(search, replace)
+    
+    # Generate preview (unified diff style)
+    import difflib
+    diff = difflib.unified_diff(
+        content.splitlines(keepends=True),
+        new_content.splitlines(keepends=True),
+        fromfile=f"a/{filename}",
+        tofile=f"b/{filename}",
+        lineterm=""
+    )
+    preview = "".join(diff)
+    
+    # If dry_run, return preview without modifying
+    if dry_run:
+        return json.dumps({
+            "success": True,
+            "matches_found": len(matches),
+            "match_locations": matches,
+            "modified": False,
+            "preview": preview,
+            "dry_run": True
+        })
+    
+    # Write file
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        return json.dumps({
+            "success": True,
+            "matches_found": len(matches),
+            "match_locations": matches,
+            "modified": True,
+            "preview": preview
+        })
+    except Exception as e:
+        logger.error(f"search_and_replace_file: Error writing {filename}: {e}")
+        return json.dumps({"success": False, "error": f"Error writing file: {str(e)}"})
+
+
 def list_agent_tasks(folder_context) -> str:
     """Lists tasks from Makefile.agents with their descriptions."""
     if not folder_context or not folder_context.folders:
@@ -1578,7 +2258,10 @@ def url_grounding(url: str, folder_context) -> str:
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = "\n".join(chunk for chunk in chunks if chunk)
 
-            return text
+            # Register source and generate citation
+            citation_id = register_source(url=url, title=url, source_type=SourceType.WEB)
+            return f"{text}\n\n---\nCitation: [^{citation_id}]"
+        
     except (ImportError, Exception):
         # Fallback to a simpler method if playwright is not installed or fails
         try:
@@ -1597,9 +2280,604 @@ def url_grounding(url: str, folder_context) -> str:
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = "\n".join(chunk for chunk in chunks if chunk)
 
-            return f"(Note: Playwright not installed or failed, JS-heavy content might be missing)\n\n{text}"
+            # Register source and generate citation
+            citation_id = register_source(url=url, title=url, source_type=SourceType.WEB)
+            return f"(Note: Playwright not installed or failed, JS-heavy content might be missing)\n\n{text}\n\n---\nCitation: [^{citation_id}]"
         except Exception as e:
             return f"Error accessing URL: {e}"
+
+
+def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, folder_context=None) -> str:
+    """Search the web using DuckDuckGo or Google Custom Search API.
+    
+    Args:
+        query: The search query string
+        engine: Search engine to use - 'duckduckgo' (default) or 'google'
+        num_results: Maximum number of results to return (default 10, max 50)
+        folder_context: Workspace folder context (unused but required for tool signature)
+    
+    Returns:
+        JSON string with search results including title, URL, snippet, and relevance score
+    """
+    import json
+    
+    # Cap results
+    num_results = min(max(1, num_results), 50)
+    
+    if not query or not query.strip():
+        return json.dumps({"error": "Query cannot be empty", "results": []})
+    
+    query = query.strip()
+    
+    if engine.lower() == "duckduckgo":
+        # Use duckduckgo-search package for reliable DuckDuckGo access
+        try:
+            from ddgs import DDGS
+    
+            results = []
+            with DDGS() as ddg:
+                for i, r in enumerate(ddg.text(query, max_results=num_results)):
+                    results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("href", ""),
+                        "snippet": r.get("body", ""),
+                        "relevance_score": 1.0 - (i * 0.05),
+                        "citation_id": register_source(
+                            title=r.get("title", ""),
+                            url=r.get("href", ""),
+                            source_type="web"
+                        )
+                    })
+            
+            urls_used = [r.get("url", "") for r in results if r.get("url")]
+            return json.dumps({
+                "query": query, "engine": "duckduckgo",
+                "num_results": len(results),
+                "urls_used": urls_used,
+                "results": results
+            }, indent=2)
+            
+        except ImportError:
+            return json.dumps({
+                "error": "duckduckgo-search package required. Install with: pip install duckduckgo-search",
+                "results": []
+            })
+        except Exception as e:
+            logger.error(f"web_search: Error searching DuckDuckGo for '{query}': {e}")
+            return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
+    
+    elif engine.lower() == "google":
+        # Google Custom Search API (requires API key setup)
+        api_key = os.environ.get("GOOGLE_SEARCH_API_KEY")
+        search_engine_id = os.environ.get("GOOGLE_SEARCH_ENGINE_ID")
+        
+        if not api_key or not search_engine_id:
+            return json.dumps({
+                "error": "Google Custom Search requires GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID environment variables",
+                "results": []
+            })
+        
+        try:
+            import httpx
+            url = f"https://www.googleapis.com/customsearch/v1?key={api_key}&cx={search_engine_id}&q={query}&num={num_results}"
+            response = httpx.get(url, timeout=30.0)
+            response.raise_for_status()
+            
+            data = response.json()
+            results = []
+            for i, item in enumerate(data.get("items", [])):
+                results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("link", ""),
+                    "snippet": item.get("snippet", ""),
+                    "relevance_score": 1.0 - (i * 0.05),
+                    "citation_id": register_source(
+                        title=item.get("title", ""),
+                        url=item.get("link", ""),
+                        source_type="web"
+                    )
+                })
+            
+            urls_used = [r.get("url", "") for r in results if r.get("url")]
+            return json.dumps({
+                "query": query, "engine": "google",
+                "num_results": len(results),
+                "urls_used": urls_used,
+                "results": results
+            }, indent=2)
+        except ImportError:
+            return json.dumps({"error": "httpx package required for Google search", "results": []})
+        except Exception as e:
+            logger.error(f"web_search: Error searching Google for '{query}': {e}")
+            return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
+    
+    else:
+        return json.dumps({"error": f"Unknown search engine: {engine}. Use 'duckduckgo' or 'google'", "results": []})
+
+
+def arxiv_search(query: str, folder_context=None, max_results: int = 10, category: str = "") -> str:
+    """Search arXiv for academic papers.
+    
+    Args:
+        query: The search query string
+        max_results: Maximum number of results to return (default 10, max 50)
+        folder_context: Workspace folder context (unused but required for tool signature)
+    
+    Args:
+        category: Optional arXiv category filter (e.g., 'cs.AI', 'physics', 'math.CO')
+    Returns:
+        JSON string with search results including title, authors, abstract, arXiv ID, PDF link
+    """
+    import json
+    import urllib.parse
+    import xml.etree.ElementTree as ET
+    
+    # Handle None for max_results
+    if max_results is None:
+        max_results = 10
+    # Cap results
+    max_results = min(max(1, max_results), 50)
+    
+    if not query or not query.strip():
+        return json.dumps({"engine": "arxiv", "error": "Query cannot be empty", "results": []})
+    
+    query = query.strip()
+    
+    try:
+        import httpx
+        
+        # arXiv API endpoint
+        base_url = "http://export.arxiv.org/api/query"
+        
+        # Build the query
+        params = {
+            "search_query": f"all:{query}",
+            "start": 0,
+            "max_results": max_results,
+            "sortBy": "relevance",
+            "sortOrder": "descending"
+        }
+        
+        # Make the request
+        from utils.anti_detection import get_spoofed_headers
+        headers = get_spoofed_headers()
+        
+        response = httpx.get(base_url, params=params, headers=headers, timeout=30.0, follow_redirects=True)
+        response.raise_for_status()
+        
+        # Parse XML response
+        root = ET.fromstring(response.content)
+        
+        # Define namespaces
+        namespaces = {
+            'atom': 'http://www.w3.org/2005/Atom',
+            'arxiv': 'http://arxiv.org/schemas/atom'
+        }
+        
+        results = []
+        for i, entry in enumerate(root.findall('atom:entry', namespaces)):
+            title_elem = entry.find('atom:title', namespaces)
+            summary_elem = entry.find('atom:summary', namespaces)
+            published_elem = entry.find('atom:published', namespaces)
+            link_elem = entry.find('atom:id', namespaces)
+            
+            # Get authors
+            authors = []
+            for author in entry.findall('atom:author', namespaces):
+                name_elem = author.find('atom:name', namespaces)
+                if name_elem is not None:
+                    authors.append(name_elem.text)
+            
+            # Get categories
+            categories = []
+            for category in entry.findall('atom:category', namespaces):
+                term = category.get('term')
+                if term:
+                    categories.append(term)
+            
+            # Get PDF link
+            pdf_link = None
+            for link in entry.findall('atom:link', namespaces):
+                if link.get('type') == 'application/pdf':
+                    pdf_link = link.get('href')
+                elif link.get('title') == 'pdf':
+                    pdf_link = link.get('href')
+            
+            # Fallback PDF link construction
+            arxiv_id = link_elem.text.split('/abs/')[-1] if link_elem is not None and link_elem.text else None
+            if not pdf_link and arxiv_id:
+                pdf_link = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+            
+            results.append({
+                "title": title_elem.text.strip() if title_elem is not None else "",
+                "authors": authors,
+                "abstract": summary_elem.text.strip()[:500] + "..." if summary_elem is not None and summary_elem.text else "",
+                "arxiv_id": arxiv_id,
+                "categories": categories,
+                "url": link_elem.text if link_elem is not None else "",
+                "pdf_link": pdf_link,
+                "published": published_elem.text if published_elem is not None else "",
+                "relevance_score": 1.0 - (i * 0.05)
+            })
+        
+        # Register citations and add citation_id
+        results_with_citations = []
+        for result in results:
+            citation_id = register_source(
+                url=result.get("url", ""),
+                title=result.get("title", ""),
+                source_type=SourceType.ARXIV,
+                authors=result.get("authors", []),
+                date=result.get("published", "")
+            )
+            result["citation_id"] = citation_id
+            results_with_citations.append(result)
+        
+        urls_used = [r.get("pdf_url", "") or r.get("arxiv_url", "") for r in results_with_citations if r.get("pdf_url") or r.get("arxiv_url")]
+        return json.dumps({"query": query, "engine": "arxiv", "num_results": len(results_with_citations),
+                           "urls_used": urls_used, "results": results_with_citations}, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for arXiv search. Install with: pip install httpx", "results": []})
+    except Exception as e:
+        logger.error(f"arxiv_search: Error searching for '{query}': {e}")
+        return json.dumps({"engine": "arxiv", "error": f"arXiv search failed: {str(e)}", "results": []})
+
+
+def doi_resolve(doi: str, format: str = "full", folder_context=None) -> str:
+    """Resolve a DOI to get metadata about the publication.
+    
+    Args:
+        doi: The DOI string to resolve (e.g., "10.1000/xyz123")
+        format: Output format - 'full' (complete metadata) or 'citation' (formatted citation). Default is 'full'.
+        folder_context: Workspace folder context (unused but required for tool signature)
+    
+    Returns:
+        JSON string with publication metadata including title, authors, journal, year, etc.
+    """
+    import json
+    import re
+    
+    if not doi or not doi.strip():
+        return json.dumps({"error": "DOI cannot be empty", "results": []})
+    
+    doi = doi.strip()
+    
+    # Clean up DOI - remove 'doi:' prefix if present, and URL prefixes
+    doi = re.sub(r'^doi:\s*', '', doi, flags=re.IGNORECASE)
+    doi = re.sub(r'^https?://(dx\.)?doi\.org/', '', doi)
+    
+    # Validate DOI format
+    if not re.match(r'^10\.\d{4,}/[^\s]+$', doi):
+        return json.dumps({"error": f"Invalid DOI format: {doi}. Expected format: 10.XXXX/...", "doi": doi})
+    
+    try:
+        import httpx
+        
+        # Use CrossRef API for DOI resolution
+        url = f"https://api.crossref.org/works/{doi}"
+        
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "Mu-CLI Research Tool (mailto:contact@example.com)"
+        }
+        
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(url, headers=headers, follow_redirects=True)
+            response.raise_for_status()
+            
+            data = response.json()
+            message = data.get("message", {})
+            
+            # Extract relevant metadata
+            result = {
+                "doi": message.get("DOI", doi),
+                "title": message.get("title", [""])[0] if message.get("title") else "",
+                "authors": [
+                    f"{a.get('given', '')} {a.get('family', '')}".strip()
+                    for a in message.get("author", [])
+                ],
+                "journal": message.get("container-title", [""])[0] if message.get("container-title") else "",
+                "year": message.get("published-print", {}).get("date-parts", [[None]])[0][0] or
+                        message.get("published-online", {}).get("date-parts", [[None]])[0][0] or
+                        message.get("created", {}).get("date-parts", [[None]])[0][0],
+                "publisher": message.get("publisher", ""),
+                "type": message.get("type", ""),
+                "url": message.get("URL", f"https://doi.org/{doi}"),
+                "abstract": message.get("abstract", ""),
+                "is_open_access": False,  # CrossRef doesn't provide OA status directly
+            }
+            
+            # Handle citation format output
+            if format == "citation" or format == "apa":
+                # APA format
+                authors_str = ", ".join(result["authors"][:-1]) + (" & " + result["authors"][-1] if len(result["authors"]) > 1 else result["authors"][0] if result["authors"] else "")
+                return json.dumps({
+                    "citation": f'{authors_str} ({result["year"]}). {result["title"]}. {result["journal"]}, {result["doi"]}.',
+                    "doi": result["doi"],
+                    "format": "apa"
+                }, indent=2)
+            elif format == "mla":
+                # MLA format
+                author = result["authors"][0] if result["authors"] else ""
+                last_first = author.split()[-1] + ", " + " ".join(author.split()[:-1]) if author else ""
+                return json.dumps({
+                    "citation": f'{last_first}. "{result["title"]}." {result["journal"]}, {result["year"]}, {result["doi"]}.',
+                    "doi": result["doi"],
+                    "format": "mla"
+                }, indent=2)
+            elif format == "chicago":
+                # Chicago format
+                authors_str = ", ".join(result["authors"][:-1]) + (" and " + result["authors"][-1] if len(result["authors"]) > 1 else result["authors"][0] if result["authors"] else "")
+                return json.dumps({
+                    "citation": f'{authors_str}. "{result["title"]}." {result["journal"]} ({result["year"]}): {result["doi"]}.',
+                    "doi": result["doi"],
+                    "format": "chicago"
+                }, indent=2)
+            elif format == "bibtex":
+                # BibTeX format
+                first_author = result["authors"][0].split() if result["authors"] else ["Unknown"]
+                cite_key = f'{first_author[-1].lower()}{result["year"] or "nodate"}'
+                authors_bibtex = " and ".join(result["authors"])
+                bibtex = f'''@article{{{cite_key},
+  author = {{{authors_bibtex}}},
+  title = {{{result["title"]}}},
+  journal = {{{result["journal"]}}},
+  year = {{{result["year"] or "n.d."}}},
+  doi = {{{result["doi"]}}}
+}}'''
+                return json.dumps({
+                    "citation": bibtex,
+                    "doi": result["doi"],
+                    "format": "bibtex"
+                }, indent=2)
+            
+            return json.dumps(result, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for DOI resolution. Install with: pip install httpx", "doi": doi})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"DOI not found: {doi}", "status_code": e.response.status_code, "doi": doi})
+    except Exception as e:
+        logger.error(f"doi_resolve: Error resolving DOI '{doi}': {e}")
+        return json.dumps({"error": f"DOI resolution failed: {str(e)}", "doi": doi})
+
+
+def reddit_search(query: str, subreddit: str = None, sort: str = "relevance", limit: int = 10, folder_context=None) -> str:
+    """Searches Reddit for posts and comments using Reddit's JSON API with anti-detection measures."""
+    if not _check_bounds(query, folder_context):
+        logger.warning(f"reddit_search: Access denied for query: {query}")
+        return json.dumps({"error": "Access denied"})
+
+    if limit is None:
+        limit = 10
+
+    # Use old.reddit.com JSON API (no auth required)
+    base_url = "https://old.reddit.com"
+    
+    # Build search URL
+    if subreddit:
+        search_url = f"{base_url}/r/{subreddit}/search.json?q={quote(query)}&restrict_sr=on&sort={sort}&limit={limit}"
+    else:
+        search_url = f"{base_url}/search.json?q={quote(query)}&sort={sort}&limit={limit}"
+    
+    try:
+        import httpx
+        
+        # Anti-detection headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json,text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate",
+            "Connection": "keep-alive",
+        }
+        
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(search_url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        results = []
+        for child in data.get("data", {}).get("children", []):
+            post = child.get("data", {})
+            citation_id = register_source(url=f"https://reddit.com{post.get('permalink', '')}", title=post.get("title", ""), source_type=SourceType.SOCIAL)
+            results.append({
+                "title": post.get("title", ""),
+                "author": post.get("author", "[deleted]"),
+                "subreddit": post.get("subreddit", ""),
+                "score": post.get("score", 0),
+                "upvote_ratio": post.get("upvote_ratio", 0),
+                "num_comments": post.get("num_comments", 0),
+                "url": f"https://reddit.com{post.get('permalink', '')}",
+                "created_utc": post.get("created_utc", 0),
+                "selftext": post.get("selftext", "")[:500] if post.get("selftext") else "",
+                "citation_id": citation_id,
+                "link_flair_text": post.get("link_flair_text"),
+                "is_video": post.get("is_video", False),
+            })
+        
+        urls_used = [r.get("url", "") for r in results if r.get("url")]
+        num_results = len(results)
+        
+        return json.dumps({
+            "query": query,
+            "subreddit": subreddit,
+            "sort": sort,
+            "count": len(results),
+            "num_results": num_results,
+            "urls_used": urls_used,
+            "total_results": len(results),
+            "urls_used": urls_used,
+            "results": results
+        }, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for Reddit search. Install with: pip install httpx", "query": query})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"Reddit search failed: HTTP {e.response.status_code}", "query": query})
+    except Exception as e:
+        logger.error(f"reddit_search: Error searching Reddit for '{query}': {e}")
+        return json.dumps({"error": f"Reddit search failed: {str(e)}", "query": query})
+
+
+def stackoverflow_search(query: str, tags: list = None, sort: str = "relevance", limit: int = 10, folder_context=None) -> str:
+    """Searches Stack Overflow for questions using the Stack Exchange API with tag filtering support."""
+    if not _check_bounds(query, folder_context):
+        logger.warning(f"stackoverflow_search: Access denied for query: {query}")
+        return json.dumps({"error": "Access denied"})
+
+    if limit is None:
+        limit = 10
+
+    # Stack Exchange API endpoint
+    base_url = "https://api.stackexchange.com/2.3/search/advanced"
+    
+    # Build API parameters
+    params = {
+        "order": "desc",
+        "sort": sort,
+        "q": query,
+        "site": "stackoverflow",
+        "pagesize": limit,
+        "filter": "withbody",  # Include question body
+    }
+    
+    # Add tag filtering if specified
+    if tags:
+        params["tagged"] = ";".join(tags)
+    
+    try:
+        import httpx
+        
+        # Anti-detection headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+        }
+        
+        with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+            response = client.get(base_url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        results = []
+        for item in data.get("items", []):
+            citation_id = register_source(url=item.get("link", ""), title=item.get("title", ""), source_type=SourceType.FORUM)
+            result = {
+                "title": item.get("title", ""),
+                "question_id": item.get("question_id"),
+                "link": item.get("link", ""),
+                "score": item.get("score", 0),
+                "answer_count": item.get("answer_count", 0),
+                "is_answered": item.get("is_answered", False),
+                "view_count": item.get("view_count", 0),
+                "tags": item.get("tags", []),
+                "citation_id": citation_id,
+                "body": item.get("body", "")[:500] if item.get("body") else "",
+                "creation_date": item.get("creation_date", 0),
+                "last_activity_date": item.get("last_activity_date", 0),
+                "owner": {
+                    "display_name": item.get("owner", {}).get("display_name", ""),
+                    "reputation": item.get("owner", {}).get("reputation", 0),
+                }
+            }
+            results.append(result)
+        
+        urls_used = [r.get("link", "") for r in results if r.get("link")]
+        
+        return json.dumps({
+            "query": query,
+            "tags": tags,
+            "sort": sort,
+            "count": len(results),
+            "total_results": len(results),
+            "urls_used": urls_used,
+            "has_more": data.get("has_more", False),
+            "results": results
+        }, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for Stack Overflow search. Install with: pip install httpx", "query": query})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"Stack Overflow search failed: HTTP {e.response.status_code}", "query": query})
+    except Exception as e:
+        logger.error(f"stackoverflow_search: Error searching Stack Overflow for '{query}': {e}")
+        return json.dumps({"error": f"Stack Overflow search failed: {str(e)}", "query": query})
+
+
+def hackernews_search(query: str, sort: str = "relevance", num_results: int = 10, folder_context=None) -> str:
+    """Searches Hacker News for relevant stories and discussions using the Algolia HN API."""
+    if not query or not query.strip():
+        return json.dumps({"error": "Query is required for Hacker News search", "query": query})
+    
+    query = query.strip()
+    num_results = min(max(1, num_results), 50)  # Clamp between 1-50
+    
+    # Validate sort parameter
+    if sort not in ["relevance", "date"]:
+        sort = "relevance"
+    
+    try:
+        import httpx
+        
+        # Algolia HN API endpoint
+        # API supports 'search' for stories and 'search_by_date' for chronological
+        base_url = "https://hn.algolia.com/api/v1"
+        endpoint = "search" if sort == "relevance" else "search_by_date"
+        url = f"{base_url}/{endpoint}"
+        
+        params = {
+            "query": query,
+            "hitsPerPage": num_results,
+            "tags": "story",  # Focus on stories (not comments or polls)
+        }
+        
+        headers = {
+            "User-Agent": "Mu-CLI Research Tool",
+            "Accept": "application/json",
+        }
+        
+        with httpx.Client(timeout=15.0) as client:
+            response = client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        
+        results = []
+        for hit in data.get("hits", []):
+            citation_id = register_source(url=hit.get("url", ""), title=hit.get("title", ""), source_type=SourceType.NEWS)
+            result = {
+                "title": hit.get("title", ""),
+                "url": hit.get("url", ""),
+                "author": hit.get("author", ""),
+                "points": hit.get("points", 0),
+                "num_comments": hit.get("num_comments", 0),
+                "objectID": hit.get("objectID", ""),
+                "created_at": hit.get("created_at", ""),
+                "story_text": hit.get("story_text", "")[:500] if hit.get("story_text") else "",
+                "citation_id": citation_id,
+            }
+            results.append(result)
+        
+        urls_used = [r.get("url", "") for r in results if r.get("url")]
+        
+        return json.dumps({
+            "query": query,
+            "sort": sort,
+            "count": len(results),
+            "total_results": len(results),
+            "urls_used": urls_used,
+            "results": results
+        }, indent=2)
+    
+    except ImportError:
+        return json.dumps({"error": "httpx package required for Hacker News search. Install with: pip install httpx", "query": query})
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"Hacker News search failed: HTTP {e.response.status_code}", "query": query})
+    except Exception as e:
+        logger.error(f"hackernews_search: Error searching Hacker News for '{query}': {e}")
+        return json.dumps({"error": f"Hacker News search failed: {str(e)}", "query": query})
 
 
 def read_document(filename: str, folder_context) -> str:
@@ -1871,6 +3149,15 @@ def _handle_apply_diff(args, folder_context, ui, variables) -> str:
     return apply_diff(args.get("filename", ""), args.get("diff", ""), folder_context)
 
 
+def _handle_search_and_replace_file(args, folder_context, ui, variables) -> str:
+    return search_and_replace_file(
+        args.get("filename", ""), args.get("search", ""), args.get("replace", ""),
+        args.get("expected_count"), args.get("normalize_whitespace", False),
+        args.get("dry_run", False),
+        folder_context
+    )
+
+
 def _handle_git_status(args, folder_context, ui, variables) -> str:
     return git_status(folder_context)
 
@@ -1920,6 +3207,32 @@ def _handle_url_grounding(args, folder_context, ui, variables) -> str:
     return url_grounding(args.get("url", ""), folder_context)
 
 
+
+def _handle_web_search(args, folder_context, ui, variables) -> str:
+    return web_search(args.get("query", ""), args.get("engine", "duckduckgo"), args.get("num_results", 10), folder_context)
+
+
+
+def _handle_arxiv_search(args, folder_context, ui, variables) -> str:
+    return arxiv_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("category", ""))
+
+
+def _handle_doi_resolve(args, folder_context, ui, variables) -> str:
+    return doi_resolve(args.get("doi", ""), args.get("format", "json"), folder_context)
+
+
+def _handle_reddit_search(args, folder_context, ui, variables) -> str:
+    return reddit_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("subreddit", ""))
+
+
+def _handle_stackoverflow_search(args, folder_context, ui, variables) -> str:
+    return stackoverflow_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("tags", []))
+
+
+def _handle_hackernews_search(args, folder_context, ui, variables) -> str:
+    return hackernews_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("sort", "relevance"))
+
+
 def _handle_read_document(args, folder_context, ui, variables) -> str:
     return read_document(args.get("filename", ""), folder_context)
 
@@ -1939,6 +3252,480 @@ def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
         ],
     }
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _resolve_feature_state(session, requested_feature_id: str | None = None):
+    feature_state = None
+    if requested_feature_id:
+        feature_state = session.session_manager.get_feature(requested_feature_id)
+    if not feature_state:
+        feature_state = session.session_manager.get_feature_state()
+    if not isinstance(feature_state, dict):
+        return feature_state
+
+    feature_id = str(feature_state.get("feature_id", "") or "").strip()
+    directory = str(feature_state.get("directory", "") or "").strip()
+    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+
+    candidates = [metadata_path]
+    if feature_id and hasattr(session.session_manager, "get_feature_metadata_path"):
+        try:
+            candidates.append(
+                str(session.session_manager.get_feature_metadata_path(feature_id) or "").strip()
+            )
+        except TypeError:
+            pass
+    if directory and hasattr(session.session_manager, "get_feature_metadata_index"):
+        metadata_index = session.session_manager.get_feature_metadata_index() or {}
+        if isinstance(metadata_index, dict):
+            candidates.append(str(metadata_index.get(directory, "") or "").strip())
+    if directory:
+        candidates.append(os.path.join(directory, "feature_plan.json"))
+
+    resolved = next((path for path in candidates if path and os.path.exists(path)), "")
+    if resolved and resolved != metadata_path:
+        feature_state["metadata_path"] = resolved
+        if feature_id:
+            session.session_manager.upsert_feature(feature_state)
+        if session.session_manager.get_feature_state():
+            session.session_manager.set_feature_state(feature_state)
+        session.session_manager.save_history()
+    return feature_state
+
+
+def _resolve_feature_metadata_path(
+    session,
+    context: ToolExecutionContext,
+    *,
+    feature_id: str | None = None,
+    directory: str | None = None,
+) -> str:
+    feature_state = _resolve_feature_state(session, feature_id)
+    candidates: list[str] = []
+    if isinstance(feature_state, dict):
+        candidates.append(str(feature_state.get("metadata_path", "") or "").strip())
+        if not directory:
+            directory = str(feature_state.get("directory", "") or "").strip()
+    if feature_id and hasattr(session.session_manager, "get_feature_metadata_path"):
+        try:
+            candidates.append(
+                str(session.session_manager.get_feature_metadata_path(feature_id) or "").strip()
+            )
+        except TypeError:
+            pass
+    if directory and hasattr(session.session_manager, "get_feature_metadata_index"):
+        metadata_index = session.session_manager.get_feature_metadata_index() or {}
+        if isinstance(metadata_index, dict):
+            candidates.append(str(metadata_index.get(directory, "") or "").strip())
+    if directory:
+        candidates.append(os.path.join(directory, "feature_plan.json"))
+    folder_index = getattr(context.folder_context, "feature_metadata_index", {}) or {}
+    if directory and isinstance(folder_index, dict):
+        candidates.append(str(folder_index.get(directory, "") or "").strip())
+    return next((path for path in candidates if path and os.path.exists(path)), "")
+
+
+def _handle_create_feature(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_name = str(args.get("feature_name", "")).strip()
+    feature_request = str(args.get("feature_request", "")).strip()
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    design_plan = str(args.get("design_plan", "")).strip()
+
+    if not feature_name:
+        return "Error: feature_name is required."
+    if not feature_request:
+        return "Error: feature_request is required."
+
+    metadata_path = session.session_manager.get_feature_metadata_path(
+        feature_id or re.sub(r"[^a-zA-Z0-9]+", "_", feature_name.lower()).strip("_")
+    )
+    plan = create_feature_shell(
+        feature_name=feature_name,
+        feature_request=feature_request,
+        folder_context=context.folder_context,
+        feature_id=feature_id,
+        metadata_path=metadata_path,
+    )
+    if design_plan:
+        plan.review_notes = design_plan
+        plan = update_feature_plan_metadata(
+            path_or_session_id=plan.metadata_path,
+            review_notes=design_plan,
+            metadata_path=plan.metadata_path,
+        )
+
+    summary = summarize_feature_plan(plan)
+    feature_record = {
+        "type": "feature",
+        "status": "draft",
+        "feature_id": plan.feature_id,
+        "feature_name": plan.feature_name,
+        "directory": plan.directory,
+        "metadata_path": plan.metadata_path,
+        "feature_plan": summary,
+        "blocker": None,
+        "updated_at": time.time(),
+    }
+    session.session_manager.upsert_feature(feature_record)
+    session.session_manager.activate_feature(plan.feature_id)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "feature_id": plan.feature_id,
+            "metadata_path": plan.metadata_path,
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_create_phases(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    phases = args.get("phases", [])
+    if not isinstance(phases, list) or not phases:
+        return "Error: phases array is required."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session. Call create_feature first."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+
+    plan = create_feature_phases(
+        metadata_path,
+        phases,
+        replace_existing=bool(args.get("replace_existing", True)),
+        actor="agent",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "feature_id": plan.feature_id,
+            "phase_count": len(plan.phases_meta),
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_create_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session. Call create_feature first."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    title = str(args.get("title", "")).strip()
+    exit_criteria = args.get("exit_criteria", [])
+    if not title:
+        return "Error: title is required."
+    if not isinstance(exit_criteria, list) or not exit_criteria:
+        return "Error: exit_criteria must be a non-empty array."
+    task_data = {
+        "phase_id": args.get("phase_id"),
+        "title": title,
+        "objectives": [str(args.get("overview", "")).strip()] if args.get("overview") else [],
+        "action_points": [str(item).strip() for item in args.get("design", [])],
+        "exit_criteria": [str(item).strip() for item in exit_criteria],
+        "notes": str(args.get("notes", "") or ""),
+    }
+    plan, task = create_feature_task(metadata_path, task_data, actor="agent")
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "feature_id": plan.feature_id,
+            "task_id": task.id,
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_get_execution_state(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=feature_id,
+        directory=str(feature_state.get("directory", "") or "").strip(),
+    )
+    if not metadata_path:
+        return "Error: Feature metadata not found."
+    plan = load_feature_plan(metadata_path)
+    snapshot = feature_execution_snapshot(plan)
+    return json.dumps({"ok": True, "execution": snapshot}, indent=2, sort_keys=True)
+
+
+def _handle_block_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    task_id = args.get("task_id")
+    reason = str(args.get("reason", "")).strip()
+    if task_id is None:
+        return "Error: task_id is required."
+    if not reason:
+        return "Error: reason is required."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan = load_feature_plan(metadata_path)
+    transition_task_status(
+        plan,
+        task_id=int(task_id),
+        to_status="blocked",
+        notes=str(args.get("requested_input", "") or ""),
+        blocked_reason=reason,
+        actor="agent",
+    )
+    plan = save_feature_plan("", plan)
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "task_id": int(task_id),
+            "status": "blocked",
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_resume_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    task_id = args.get("task_id")
+    if task_id is None:
+        return "Error: task_id is required."
+    feature_id = str(args.get("feature_id", "")).strip() or None
+    feature_state = _resolve_feature_state(session, feature_id)
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan = load_feature_plan(metadata_path)
+    transition_task_status(
+        plan,
+        task_id=int(task_id),
+        to_status="in_progress",
+        notes=str(args.get("notes", "") or ""),
+        actor="agent",
+    )
+    plan = save_feature_plan("", plan)
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "task_id": int(task_id),
+            "status": "in_progress",
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_review_completed_tasks(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, review = create_task_review_record(
+        metadata_path,
+        task_id=int(args.get("task_id")),
+        summary=str(args.get("summary", "")),
+        limitations=args.get("limitations", []),
+        issues=args.get("issues", []),
+        actor="agent",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "review": asdict(review),
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_review_all_completed_tasks(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, created = create_reviews_for_completed_tasks(metadata_path, actor="agent")
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "created_review_count": len(created),
+            "reviews": [asdict(item) for item in created],
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_propose_task_diff(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, proposal = create_diff_proposal(
+        metadata_path,
+        review_id=str(args.get("review_id", "")),
+        issue_id=str(args.get("issue_id", "")),
+        diff=str(args.get("diff", "")),
+        actor="agent",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {"ok": True, "proposal": asdict(proposal), "plan": summary},
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_decide_task_diff(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan, proposal = decide_diff_proposal(
+        metadata_path,
+        proposal_id=str(args.get("proposal_id", "")),
+        decision=str(args.get("decision", "")),
+        reason=str(args.get("reason", "")),
+        actor="user",
+    )
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {"ok": True, "proposal": asdict(proposal), "plan": summary},
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _handle_archive_task(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if not session:
+        return "Error: This tool requires an active session context."
+    feature_state = _resolve_feature_state(
+        session, str(args.get("feature_id", "")).strip() or None
+    )
+    if not feature_state:
+        return "Error: No active feature in session."
+    metadata_path = feature_state.get("metadata_path", "")
+    if not metadata_path or not os.path.exists(metadata_path):
+        return "Error: Feature metadata not found."
+    plan = archive_feature_task(metadata_path, task_id=int(args.get("task_id")), actor="user")
+    summary = summarize_feature_plan(plan)
+    feature_state["feature_plan"] = summary
+    feature_state["updated_at"] = time.time()
+    session.session_manager.upsert_feature(feature_state)
+    session.session_manager.save_history()
+    return json.dumps(
+        {
+            "ok": True,
+            "task_id": int(args.get("task_id")),
+            "status": "archived",
+            "plan": summary,
+        },
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> str:
@@ -2146,14 +3933,19 @@ def _handle_get_current_task(args: dict, context: ToolExecutionContext) -> str:
     if not session:
         return "Error: This tool requires an active session context."
 
-    feature_state = session.session_manager.get_feature_state()
+    feature_state = _resolve_feature_state(session)
     if not feature_state:
         return json.dumps(
             {"error": "No active feature in session.", "task": None}, indent=2
         )
 
-    metadata_path = feature_state.get("metadata_path", "")
-    if not metadata_path or not os.path.exists(metadata_path):
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=str(feature_state.get("feature_id", "") or "").strip() or None,
+        directory=str(feature_state.get("directory", "") or "").strip(),
+    )
+    if not metadata_path:
         return json.dumps(
             {"error": "Feature metadata not found.", "task": None}, indent=2
         )
@@ -2184,14 +3976,19 @@ def _handle_get_tasks(args: dict, context: ToolExecutionContext) -> str:
     if not session:
         return "Error: This tool requires an active session context."
 
-    feature_state = session.session_manager.get_feature_state()
+    feature_state = _resolve_feature_state(session)
     if not feature_state:
         return json.dumps(
             {"error": "No active feature in session.", "tasks": []}, indent=2
         )
 
-    metadata_path = feature_state.get("metadata_path", "")
-    if not metadata_path or not os.path.exists(metadata_path):
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=str(feature_state.get("feature_id", "") or "").strip() or None,
+        directory=str(feature_state.get("directory", "") or "").strip(),
+    )
+    if not metadata_path:
         return json.dumps(
             {"error": "Feature metadata not found.", "tasks": []}, indent=2
         )
@@ -2219,34 +4016,57 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     task_id = args.get("task_id")
     status = args.get("status")
     notes = args.get("notes")
+    verified_exit_criteria = args.get("verified_exit_criteria", [])
 
     if task_id is None:
         return "Error: task_id is required."
     if not status:
         return "Error: status is required."
 
-    valid_statuses = ["not_started", "in_progress", "completed"]
+    valid_statuses = [
+        "pending",
+        "not_started",
+        "in_progress",
+        "blocked",
+        "completed",
+        "archived",
+    ]
     if status not in valid_statuses:
         return f"Error: status must be one of {valid_statuses}."
 
-    feature_state = session.session_manager.get_feature_state() or {}
+    feature_state = _resolve_feature_state(session) or {}
     directory = str(
         args.get("directory")
         or feature_state.get("directory", "")
         or ""
     ).strip()
-    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+    metadata_path = _resolve_feature_metadata_path(
+        session,
+        context,
+        feature_id=str(feature_state.get("feature_id", "") or "").strip() or None,
+        directory=directory,
+    )
     if not metadata_path:
-        metadata_path = str(
-            getattr(context.folder_context, "feature_metadata_index", {}).get(
-                directory, ""
-            )
-            or ""
-        ).strip()
-    if not metadata_path and directory:
-        metadata_path = os.path.join(directory, "feature_plan.json")
-    if not metadata_path or not os.path.exists(metadata_path):
         return "Error: Feature metadata not found."
+
+    if status == "completed":
+        if not isinstance(verified_exit_criteria, list):
+            return "Error: verified_exit_criteria must be an array when status='completed'."
+        plan_snapshot = load_feature_plan(metadata_path)
+        target_task = next(
+            (item for item in plan_snapshot.tasks if item.id == int(task_id)),
+            None,
+        )
+        if target_task is None:
+            return f"Error: Task {task_id} not found."
+        expected = [str(item).strip() for item in target_task.exit_criteria if str(item).strip()]
+        provided = {str(item).strip() for item in verified_exit_criteria if str(item).strip()}
+        missing = [criterion for criterion in expected if criterion not in provided]
+        if missing:
+            return (
+                "Error: Cannot mark task completed until all exit criteria are verified. "
+                f"Missing: {missing}"
+            )
 
     plan = update_task_status(metadata_path, task_id, status, notes)
     summary = summarize_feature_plan(plan)
@@ -2364,7 +4184,24 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "git_pull": _legacy_handler(_handle_git_pull),
     "url_grounding": _legacy_handler(_handle_url_grounding),
     "read_document": _legacy_handler(_handle_read_document),
+    "web_search": _legacy_handler(_handle_web_search),
+    "arxiv_search": _legacy_handler(_handle_arxiv_search),
+    "doi_resolve": _legacy_handler(_handle_doi_resolve),
     "git_branch": _legacy_handler(_handle_git_branch),
+    "reddit_search": _legacy_handler(_handle_reddit_search),
+    "stackoverflow_search": _legacy_handler(_handle_stackoverflow_search),
+    "hackernews_search": _legacy_handler(_handle_hackernews_search),
+    "create_feature": _handle_create_feature,
+    "create_phases": _handle_create_phases,
+    "create_task": _handle_create_task,
+    "get_execution_state": _handle_get_execution_state,
+    "block_task": _handle_block_task,
+    "resume_task": _handle_resume_task,
+    "review_completed_tasks": _handle_review_completed_tasks,
+    "review_all_completed_tasks": _handle_review_all_completed_tasks,
+    "propose_task_diff": _handle_propose_task_diff,
+    "decide_task_diff": _handle_decide_task_diff,
+    "archive_task": _handle_archive_task,
     "create_feature_task": _handle_create_feature_task,
     "update_feature_task": _handle_update_feature_task,
     "approve_feature_task": _handle_approve_feature_task,
@@ -2373,6 +4210,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "update_task_status": _handle_update_task_status,
     "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
+    "search_and_replace_file": _legacy_handler(_handle_search_and_replace_file),
 }
 
 
@@ -2402,6 +4240,36 @@ def execute_tool(
     for key in path_keys:
         if key in args and (not args[key] or str(args[key]).strip() == ""):
             return _path_arg_error(key)
+
+    if tool_name == "apply_diff" and session is not None:
+        feature_state = (
+            session.session_manager.get_feature_state()
+            if hasattr(session, "session_manager")
+            else None
+        ) or {}
+        feature_plan = feature_state.get("feature_plan", {}) if isinstance(feature_state, dict) else {}
+        in_review_mode = bool(feature_plan.get("tasks_completed")) and (
+            str(feature_plan.get("review_status", "")).strip().lower() != "completed"
+        )
+        if in_review_mode:
+            proposal_id = str(args.get("proposal_id", "") or "").strip()
+            if not proposal_id:
+                return (
+                    "Error: apply_diff in review mode requires proposal_id for an approved diff proposal."
+                )
+            metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+            if not metadata_path or not os.path.exists(metadata_path):
+                return "Error: Feature metadata not found for review-mode apply_diff."
+            plan = load_feature_plan(metadata_path)
+            proposal = next(
+                (item for item in plan.diff_proposals if item.id == proposal_id),
+                None,
+            )
+            if proposal is None or proposal.status != "approved":
+                return (
+                    "Error: apply_diff blocked in review mode. "
+                    "proposal_id must reference an approved diff proposal."
+                )
 
     handler = TOOL_HANDLERS.get(descriptor.handler_key)
     if not handler:

@@ -27,7 +27,13 @@ from utils.logger import logger
 from providers.openai import OpenAIProvider
 from core.server import HeadlessUI, serve
 from core.session import SessionManager, Session
-from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
+from core.feature_mode import (
+    load_feature_plan,
+    refresh_and_persist_feature_plan,
+    save_feature_plan,
+    summarize_feature_plan,
+)
+from core.tools import execute_tool
 from ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
 
@@ -294,6 +300,124 @@ def build_feature_markdown(feature, *, include_phases=True):
     return "\n".join(lines).strip()
 
 
+def _feature_three_option_prompt(question, options, *, allow_prompt):
+    choices = options[:3]
+    if len(choices) != 3:
+        raise ValueError("feature prompt requires exactly three options")
+    if not allow_prompt:
+        return choices[0][0]
+    console.print(f"[bold cyan]{question}[/bold cyan]")
+    for idx, (_, label) in enumerate(choices, start=1):
+        console.print(f"  {idx}. {label}")
+    selected = IntPrompt.ask("Select option", choices=[1, 2, 3], default=1)
+    return choices[selected - 1][0]
+
+
+def _log_feature_cli_event(session, *, kind, payload):
+    feature_state = session.session_manager.get_feature_state()
+    if not isinstance(feature_state, dict):
+        return
+    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+    if not metadata_path or not os.path.exists(metadata_path):
+        return
+    try:
+        plan = load_feature_plan(metadata_path)
+    except (FileNotFoundError, OSError, ValueError):
+        return
+    plan.add_event(
+        kind=kind,
+        entity="cli",
+        entity_id=str(feature_state.get("feature_id", "unknown") or "unknown"),
+        payload=payload,
+        actor="cli",
+    )
+    save_feature_plan("", plan)
+    refresh_feature_record(session, None)
+
+
+def _feature_prompt_with_logging(
+    session,
+    *,
+    question,
+    options,
+    allow_prompt,
+    prompt_id,
+    context=None,
+):
+    selected = _feature_three_option_prompt(question, options, allow_prompt=allow_prompt)
+    _log_feature_cli_event(
+        session,
+        kind="cli_prompt_selected",
+        payload={
+            "prompt_id": prompt_id,
+            "question": question,
+            "selected": selected,
+            "options": [option[0] for option in options[:3]],
+            "context": context or {},
+        },
+    )
+    return selected
+
+
+def _feature_confirm_deny_edit_loop(
+    session,
+    *,
+    label,
+    value,
+    allow_prompt,
+    context=None,
+):
+    current_value = str(value or "").strip()
+    while True:
+        choice = _feature_prompt_with_logging(
+            session,
+            question=f"Confirm {label}: {current_value}",
+            options=[
+                ("confirm", "Confirm (Recommended): proceed"),
+                ("edit", "Edit: change and re-confirm"),
+                ("deny", "Deny: cancel command"),
+            ],
+            allow_prompt=allow_prompt,
+            prompt_id=f"confirm_{label}",
+            context={"label": label, **(context or {})},
+        )
+        if choice == "confirm":
+            return {"decision": "confirm", "value": current_value}
+        if choice == "deny":
+            return {"decision": "deny", "value": current_value}
+        current_value = Prompt.ask(f"Edit {label}", default=current_value).strip()
+
+
+def _monitor_compact_line(snapshot):
+    execution = snapshot.get("execution", {}) if isinstance(snapshot, dict) else {}
+    next_phase = (execution.get("next_phase") or {}) if isinstance(execution, dict) else {}
+    next_task = (execution.get("next_task") or {}) if isinstance(execution, dict) else {}
+    blocked = execution.get("blocked_tasks", []) if isinstance(execution, dict) else []
+    blockers = ", ".join(str(item.get("title", "")).strip() for item in blocked if isinstance(item, dict) and str(item.get("title", "")).strip())
+    completion = "done" if execution.get("all_phases_completed") else "in_progress"
+    return (
+        f"phase={next_phase.get('title') or '-'} | "
+        f"task={next_task.get('title') or '-'} | "
+        f"blockers={len(blocked)}{f' ({blockers})' if blockers else ''} | "
+        f"completion={completion}"
+    )
+
+
+def _execute_feature_tool(session, tool_name, args):
+    raw = execute_tool(
+        tool_name,
+        args,
+        session.folder_context,
+        session.ui,
+        session.variables,
+        session=session,
+    )
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"ok": False, "error": raw}
+
+
 def build_stats_snapshot(session):
     stats = {
         "history_turns": len(session.session_manager.history),
@@ -364,7 +488,7 @@ def print_help():
         "Change the agentic strategy (default, debug, feature, research)",
     )
     table.add_row(
-        "/feature <list|new|load|delete|status|phases|exit>",
+        "/feature <list|new|load|delete|status|phases|exit|create|show|move|block|review|archive|monitor>",
         "/features",
         "Manage per-session feature plans and switch the active feature",
     )
@@ -1500,6 +1624,288 @@ def handle_command(session, user_input, allow_prompt=True):
                 data={"deleted_feature": deleted},
             )
 
+        if feature_cmd == "help":
+            usage = (
+                "Feature workflow commands:\n"
+                "- /feature create plan <name>\n"
+                "- /feature create phase <title> | <goal>\n"
+                "- /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>\n"
+                "- /feature show <board|execution|reviews>\n"
+                "- /feature move <task_id> <status>\n"
+                "- /feature block <task_id> <reason>\n"
+                "- /feature review auto\n"
+                "- /feature review <task_id> <summary>\n"
+                "- /feature archive <task_id>\n"
+                "- /feature monitor [refresh_seconds] [iterations|continuous]\n"
+                "\nExamples:\n"
+                "- /feature create plan Checkout Cleanup\n"
+                "- /feature create phase API Hardening | Reduce flaky retries\n"
+                "- /feature create task 1 | Validate headers | Add strict parsing | Unit tests;Docs updated\n"
+                "- /feature move 1 in_progress\n"
+                "- /feature block 1 waiting_for_user_input\n"
+                "- /feature show board\n"
+                "- /feature monitor 1.0 10\n"
+            )
+            if allow_prompt:
+                console.print(Panel(usage, title="Feature Command Help", border_style="cyan"))
+            return serialize_command_result(session, cmd, message="Rendered feature help.", data={"usage": usage})
+
+        if feature_cmd == "create":
+            create_parts = feature_arg.split(" ", 1) if feature_arg else []
+            if len(create_parts) < 2:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /feature create <plan|phase|task> <args>",
+                )
+            create_kind = create_parts[0].lower().strip()
+            create_payload = create_parts[1].strip()
+            if create_kind == "plan":
+                mode_choice = _feature_prompt_with_logging(
+                    session,
+                    question="Select planning style",
+                    options=[
+                        ("balanced", "Balanced (Recommended): detail + speed"),
+                        ("fast", "Fast: minimal planning, rapid execution"),
+                        ("thorough", "Thorough: deep planning before coding"),
+                    ],
+                    prompt_id="plan_style",
+                    allow_prompt=allow_prompt,
+                    context={"feature_name": create_payload},
+                )
+                confirm_result = _feature_confirm_deny_edit_loop(
+                    session,
+                    label="plan request",
+                    value=create_payload,
+                    allow_prompt=allow_prompt,
+                    context={"kind": "plan_create"},
+                )
+                if confirm_result["decision"] == "deny":
+                    return serialize_command_result(
+                        session,
+                        cmd,
+                        ok=False,
+                        message="Plan creation cancelled. Re-run with a revised name.",
+                    )
+                response = _execute_feature_tool(
+                    session,
+                    "create_feature",
+                    {
+                        "feature_name": confirm_result["value"],
+                        "feature_request": confirm_result["value"],
+                        "design_plan": f"cli_planning_style={mode_choice}",
+                    },
+                )
+                ok = bool(response.get("ok"))
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=ok,
+                    message="Created feature plan shell." if ok else str(response.get("error", response)),
+                    data=response,
+                )
+            if create_kind == "phase":
+                phase_parts = [part.strip() for part in create_payload.split("|", 1)]
+                if len(phase_parts) != 2:
+                    return serialize_command_result(
+                        session, cmd, ok=False, message="Usage: /feature create phase <title> | <goal>"
+                    )
+                confirm_result = _feature_confirm_deny_edit_loop(
+                    session,
+                    label="phase title",
+                    value=phase_parts[0],
+                    allow_prompt=allow_prompt,
+                    context={"kind": "phase_create"},
+                )
+                if confirm_result["decision"] == "deny":
+                    return serialize_command_result(
+                        session,
+                        cmd,
+                        ok=False,
+                        message="Phase creation cancelled. Re-run with updated title/goal.",
+                    )
+                feature_state = session.session_manager.get_feature_state() or {}
+                plan = (feature_state.get("feature_plan") if isinstance(feature_state, dict) else {}) or {}
+                existing = list(plan.get("phases_meta", []))
+                next_id = len(existing) + 1
+                existing.append({"id": next_id, "title": confirm_result["value"], "goal": phase_parts[1], "order": next_id})
+                response = _execute_feature_tool(
+                    session,
+                    "create_phases",
+                    {"phases": existing, "replace_existing": True},
+                )
+                ok = bool(response.get("ok"))
+                return serialize_command_result(session, cmd, ok=ok, message="Phase created." if ok else str(response.get("error", response)), data=response)
+            if create_kind == "task":
+                task_parts = [part.strip() for part in create_payload.split("|")]
+                if len(task_parts) != 4:
+                    return serialize_command_result(
+                        session,
+                        cmd,
+                        ok=False,
+                        message="Usage: /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>",
+                    )
+                exit_criteria = [item.strip() for item in task_parts[3].split(";") if item.strip()]
+                confirm_result = _feature_confirm_deny_edit_loop(
+                    session,
+                    label="task title",
+                    value=task_parts[1],
+                    allow_prompt=allow_prompt,
+                    context={"kind": "task_create", "phase_id": task_parts[0]},
+                )
+                if confirm_result["decision"] == "deny":
+                    return serialize_command_result(
+                        session,
+                        cmd,
+                        ok=False,
+                        message="Task creation cancelled. Re-run with an updated task payload.",
+                    )
+                response = _execute_feature_tool(
+                    session,
+                    "create_task",
+                    {
+                        "phase_id": int(task_parts[0]),
+                        "title": confirm_result["value"],
+                        "overview": task_parts[2],
+                        "exit_criteria": exit_criteria,
+                    },
+                )
+                ok = bool(response.get("ok"))
+                return serialize_command_result(session, cmd, ok=ok, message="Task created." if ok else str(response.get("error", response)), data=response)
+            return serialize_command_result(session, cmd, ok=False, message="Unknown create target. Use plan|phase|task.")
+
+        if feature_cmd == "show":
+            view = (feature_arg or "board").strip().lower()
+            feature = refresh_feature_record(session, None)
+            if not isinstance(feature, dict):
+                return serialize_command_result(session, cmd, ok=False, message="No feature selected.")
+            plan = feature.get("feature_plan", {}) if isinstance(feature.get("feature_plan"), dict) else {}
+            if view == "execution":
+                payload = _execute_feature_tool(session, "get_execution_state", {})
+                return serialize_command_result(session, cmd, message="Rendered execution view.", data=payload)
+            if view == "reviews":
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    message="Rendered review summaries.",
+                    data={"review_summaries": plan.get("review_summaries", []), "review_count": plan.get("review_count", 0)},
+                )
+            if view == "board":
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    message="Rendered board snapshot.",
+                    data={"active_tasks": plan.get("active_tasks", []), "execution": plan.get("execution", {})},
+                )
+            return serialize_command_result(session, cmd, ok=False, message="Unknown show target. Use board|execution|reviews.")
+
+        if feature_cmd == "move":
+            parts = feature_arg.split(" ", 1)
+            if len(parts) != 2:
+                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature move <task_id> <status>")
+            task_id = int(parts[0])
+            status = parts[1].strip()
+            args = {"task_id": task_id, "status": status}
+            if status == "completed":
+                feature = refresh_feature_record(session, None) or {}
+                plan = feature.get("feature_plan", {}) if isinstance(feature, dict) else {}
+                criteria = []
+                for task in plan.get("phases", []):
+                    if int(task.get("id", -1)) == task_id:
+                        criteria = list(task.get("exit_criteria", []))
+                        break
+                args["verified_exit_criteria"] = criteria
+            response = _execute_feature_tool(session, "update_task_status", args)
+            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Task moved." if response.get("ok") else str(response.get("error", response)), data=response)
+
+        if feature_cmd == "block":
+            parts = feature_arg.split(" ", 1)
+            if len(parts) != 2:
+                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature block <task_id> <reason>")
+            response = _execute_feature_tool(
+                session,
+                "block_task",
+                {"task_id": int(parts[0]), "reason": parts[1]},
+            )
+            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Task blocked." if response.get("ok") else str(response.get("error", response)), data=response)
+
+        if feature_cmd == "review":
+            if (feature_arg or "").strip().lower() == "auto":
+                response = _execute_feature_tool(session, "review_all_completed_tasks", {})
+                return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Auto-review completed tasks." if response.get("ok") else str(response.get("error", response)), data=response)
+            parts = feature_arg.split(" ", 1)
+            if len(parts) != 2:
+                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature review <task_id> <summary> OR /feature review auto")
+            response = _execute_feature_tool(
+                session,
+                "review_completed_tasks",
+                {"task_id": int(parts[0]), "summary": parts[1], "issues": []},
+            )
+            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Review recorded." if response.get("ok") else str(response.get("error", response)), data=response)
+
+        if feature_cmd == "archive":
+            if not feature_arg:
+                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature archive <task_id>")
+            response = _execute_feature_tool(
+                session,
+                "archive_task",
+                {"task_id": int(feature_arg)},
+            )
+            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Task archived." if response.get("ok") else str(response.get("error", response)), data=response)
+
+        if feature_cmd == "monitor":
+            refresh_seconds = 2.0
+            if feature_arg:
+                try:
+                    refresh_seconds = max(0.5, float(feature_arg))
+                except ValueError:
+                    pieces = feature_arg.split()
+                    try:
+                        refresh_seconds = max(0.5, float(pieces[0]))
+                    except (ValueError, IndexError):
+                        return serialize_command_result(session, cmd, ok=False, message="Usage: /feature monitor [refresh_seconds] [iterations|continuous]")
+                    mode_arg = pieces[1].strip().lower() if len(pieces) > 1 else ""
+                else:
+                    mode_arg = ""
+            else:
+                mode_arg = ""
+            snapshots = []
+            if not allow_prompt:
+                iterations = 1
+            elif mode_arg == "continuous":
+                iterations = None
+            elif mode_arg:
+                try:
+                    iterations = max(1, int(mode_arg))
+                except ValueError:
+                    return serialize_command_result(session, cmd, ok=False, message="Usage: /feature monitor [refresh_seconds] [iterations|continuous]")
+            else:
+                iterations = 5
+            last_line = None
+            tick = 0
+            try:
+                while iterations is None or tick < iterations:
+                    payload = _execute_feature_tool(session, "get_execution_state", {})
+                    snapshots.append(payload)
+                    if allow_prompt:
+                        line = _monitor_compact_line(payload)
+                        if line != last_line:
+                            console.print(f"[cyan]{line}[/cyan]")
+                            last_line = line
+                    tick += 1
+                    if allow_prompt and (iterations is None or tick < iterations):
+                        time.sleep(refresh_seconds)
+            except KeyboardInterrupt:
+                if allow_prompt:
+                    console.print("[yellow]Monitor stopped by user.[/yellow]")
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Rendered feature monitor.",
+                data={"snapshots": snapshots, "refresh_seconds": refresh_seconds, "mode": mode_arg or "fixed", "iterations": iterations if iterations is not None else "continuous"},
+            )
+
         if feature_cmd in {"status", "phases"}:
             feature = refresh_feature_record(session, feature_arg or None)
             if not isinstance(feature, dict):
@@ -1529,7 +1935,7 @@ def handle_command(session, user_input, allow_prompt=True):
             session,
             cmd,
             ok=False,
-            message=f"Unknown feature command: {feature_cmd}",
+            message=f"Unknown feature command: {feature_cmd}. Use '/feature help' for workflow-aligned guidance.",
         )
 
     if cmd in ["/tool", "/tools"]:

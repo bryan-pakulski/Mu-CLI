@@ -2,6 +2,8 @@ import json
 
 from evals.harness import (
     DEFAULT_CORPUS_PATH,
+    EvalTask,
+    execute_tasks,
     evaluate_slos,
     load_swebench_task_corpus,
     load_task_corpus,
@@ -25,6 +27,7 @@ def test_eval_harness_generates_artifacts(tmp_path):
     payload = run(
         seed=1337,
         corpus_path=DEFAULT_CORPUS_PATH,
+        execution_mode="simulate",
         output_path=output,
         trend_path=trend,
         digest_path=digest,
@@ -79,3 +82,38 @@ def test_swebench_corpus_loader_supports_jsonl(tmp_path):
     assert len(tasks) == 2
     assert tasks[0].id.startswith("swebench:")
     assert tasks[1].category == "refactor"
+
+
+def test_execute_tasks_runs_real_commands(tmp_path):
+    tasks = [
+        EvalTask(
+            id="pass",
+            category="bugfix",
+            prompt="pass",
+            expected_tools=[],
+            unsafe_tools=[],
+            baseline_success_rate=1.0,
+            baseline_tokens=0,
+            verification_command="python -c \"import sys; sys.exit(0)\"",
+            working_dir=str(tmp_path),
+            expected_exit_code=0,
+        ),
+        EvalTask(
+            id="fail",
+            category="bugfix",
+            prompt="fail",
+            expected_tools=[],
+            unsafe_tools=[],
+            baseline_success_rate=1.0,
+            baseline_tokens=0,
+            verification_command="python -c \"import sys; sys.exit(1)\"",
+            working_dir=str(tmp_path),
+            expected_exit_code=0,
+        ),
+    ]
+    records = execute_tasks(tasks, seed=1)
+    by_id = {r.task_id: r for r in records}
+    assert by_id["pass"].success is True
+    assert by_id["pass"].command_exit_code == 0
+    assert by_id["fail"].success is False
+    assert by_id["fail"].command_exit_code == 1

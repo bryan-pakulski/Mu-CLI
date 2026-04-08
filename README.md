@@ -278,7 +278,7 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 MuCLI includes a deterministic local benchmark harness in `evals/` for regression tracking without model API tokens.
 
 - Corpus categories: bugfix, refactor, retrieval-heavy, safety-sensitive (`evals/corpus/tasks.json`).
-- Supports both deterministic replay and real command execution (`make eval` runs execute mode; `make eval-simulate` runs replay mode).
+- Runs real command execution in local fixtures/repositories via `make eval`.
 - Metrics: fix-rate, token usage, tool success/failure, unsafe action rate.
 - SLO checks are embedded in each artifact (`fix_rate_min`, `token_usage_avg_max`, `unsafe_action_rate_max`).
 - Digest + trend outputs are generated locally (`evals/artifacts/eval_digest_latest.md`, `evals/artifacts/trend_report.md`).

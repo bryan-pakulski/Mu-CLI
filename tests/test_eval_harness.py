@@ -7,17 +7,9 @@ from evals.harness import (
     evaluate_slos,
     load_swebench_task_corpus,
     load_task_corpus,
-    replay_tasks_deterministically,
     run,
     summarize,
 )
-
-
-def test_eval_harness_is_deterministic():
-    tasks = load_task_corpus(DEFAULT_CORPUS_PATH)
-    first = replay_tasks_deterministically(tasks, seed=2026)
-    second = replay_tasks_deterministically(tasks, seed=2026)
-    assert first == second
 
 
 def test_eval_harness_generates_artifacts(tmp_path):
@@ -27,7 +19,6 @@ def test_eval_harness_generates_artifacts(tmp_path):
     payload = run(
         seed=1337,
         corpus_path=DEFAULT_CORPUS_PATH,
-        execution_mode="simulate",
         output_path=output,
         trend_path=trend,
         digest_path=digest,
@@ -45,8 +36,20 @@ def test_eval_harness_generates_artifacts(tmp_path):
 
 
 def test_eval_harness_slo_evaluation_shape():
-    tasks = load_task_corpus(DEFAULT_CORPUS_PATH)
-    records = replay_tasks_deterministically(tasks, seed=11)
+    tasks = [
+        EvalTask(
+            id="shape",
+            category="bugfix",
+            prompt="shape",
+            expected_tools=[],
+            unsafe_tools=[],
+            baseline_success_rate=1.0,
+            baseline_tokens=0,
+            verification_command="python -c \"import sys; sys.exit(0)\"",
+            expected_exit_code=0,
+        )
+    ]
+    records = execute_tasks(tasks, seed=11)
     summary = summarize(records, tasks, seed=11)
     status = evaluate_slos(summary)
     assert set(status.keys()) == {"fix_rate", "token_usage", "unsafe_action_rate"}

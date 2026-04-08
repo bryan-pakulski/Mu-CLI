@@ -1,9 +1,6 @@
 # MuCLI Eval Harness
 
-This directory provides a benchmark harness with two modes:
-
-- `simulate`: deterministic replay from baselines (no command execution).
-- `execute`: **real command/test execution** for each task's `verification_command`.
+This directory provides a benchmark harness with **real command/test execution** for each task's `verification_command`.
 
 ## Task corpus
 
@@ -26,16 +23,9 @@ Equivalent CLI:
 python -m evals.harness \
   --seed 1337 \
   --corpus evals/corpus/tasks.json \
-  --execution-mode execute \
   --output evals/artifacts/eval_run_latest.json \
   --trend evals/artifacts/trend_report.md \
   --digest evals/artifacts/eval_digest_latest.md
-```
-
-## Simulated replay mode
-
-```bash
-make eval-simulate
 ```
 
 ## SWE-bench compatibility (execution-capable adapter)

@@ -120,42 +120,6 @@ def load_tasks(
     return load_task_corpus(path)
 
 
-def replay_tasks_deterministically(tasks: List[EvalTask], seed: int = DEFAULT_SEED) -> List[EvalRecord]:
-    """Deterministic offline replay for smoke checks."""
-    rng = random.Random(seed)
-    ordered = list(tasks)
-    rng.shuffle(ordered)
-
-    records: List[EvalRecord] = []
-    for task in ordered:
-        success = rng.random() <= task.baseline_success_rate
-        token_jitter = rng.randint(-120, 120)
-        tokens_used = max(50, task.baseline_tokens + token_jitter)
-
-        tools_used: List[str] = []
-        if task.expected_tools:
-            selected_count = min(len(task.expected_tools), max(1, rng.randint(1, 2)))
-            tools_used.extend(task.expected_tools[:selected_count])
-
-        unsafe_action = False
-        if task.unsafe_tools and rng.random() < 0.08:
-            unsafe_action = True
-            tools_used.append(task.unsafe_tools[0])
-
-        records.append(
-            EvalRecord(
-                task_id=task.id,
-                category=task.category,
-                success=success,
-                tokens_used=tokens_used,
-                tools_used=tools_used,
-                unsafe_action=unsafe_action,
-            )
-        )
-
-    return records
-
-
 def execute_tasks(tasks: List[EvalTask], seed: int = DEFAULT_SEED) -> List[EvalRecord]:
     """Run real verification commands and score by process exit codes."""
     rng = random.Random(seed)
@@ -260,7 +224,7 @@ def evaluate_slos(summary: EvalSummary) -> Dict[str, bool]:
     }
 
 
-def generate_run_digest(summary: Dict[str, Any], slo_results: Dict[str, bool], corpus_label: str, mode: str) -> str:
+def generate_run_digest(summary: Dict[str, Any], slo_results: Dict[str, bool], corpus_label: str) -> str:
     def mark(ok: bool) -> str:
         return "✅" if ok else "❌"
 
@@ -270,7 +234,6 @@ def generate_run_digest(summary: Dict[str, Any], slo_results: Dict[str, bool], c
             "",
             f"- **Run ID (UTC):** `{summary['run_id']}`",
             f"- **Corpus:** `{corpus_label}`",
-            f"- **Mode:** `{mode}`",
             f"- **Tasks:** `{summary['total_tasks']}`",
             f"- **Seed:** `{summary['seed']}`",
             "",
@@ -325,7 +288,6 @@ def run(
     digest_path: Path,
     corpus_format: str = "auto",
     swebench_limit: int = 100,
-    execution_mode: str = "simulate",
     swebench_root: Optional[Path] = None,
 ) -> Dict[str, Any]:
     tasks = load_tasks(
@@ -334,18 +296,13 @@ def run(
         swebench_limit=swebench_limit,
         swebench_root=swebench_root,
     )
-    if execution_mode == "execute":
-        records = execute_tasks(tasks, seed=seed)
-    else:
-        records = replay_tasks_deterministically(tasks, seed=seed)
-
+    records = execute_tasks(tasks, seed=seed)
     summary = summarize(records, tasks, seed=seed)
     slo_results = evaluate_slos(summary)
 
     output_payload = {
         "summary": asdict(summary),
         "slo_results": slo_results,
-        "execution_mode": execution_mode,
         "records": [asdict(record) for record in records],
         "task_corpus": [asdict(task) for task in tasks],
     }
@@ -357,20 +314,19 @@ def run(
 
     digest_path.parent.mkdir(parents=True, exist_ok=True)
     digest_path.write_text(
-        generate_run_digest(output_payload["summary"], slo_results, corpus_label=str(corpus_path), mode=execution_mode),
+        generate_run_digest(output_payload["summary"], slo_results, corpus_label=str(corpus_path)),
         encoding="utf-8",
     )
     return output_payload
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run MuCLI benchmark replay or command execution.")
+    parser = argparse.ArgumentParser(description="Run MuCLI benchmark command execution.")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS_PATH)
     parser.add_argument("--corpus-format", choices=["auto", "mucli", "swebench-lite"], default="auto")
     parser.add_argument("--swebench-limit", type=int, default=100)
     parser.add_argument("--swebench-root", type=Path, default=None)
-    parser.add_argument("--execution-mode", choices=["simulate", "execute"], default="simulate")
     parser.add_argument("--output", type=Path, default=Path("evals/artifacts/eval_run_latest.json"))
     parser.add_argument("--trend", type=Path, default=Path("evals/artifacts/trend_report.md"))
     parser.add_argument("--digest", type=Path, default=Path("evals/artifacts/eval_digest_latest.md"))
@@ -381,7 +337,6 @@ def main() -> int:
         corpus_path=args.corpus,
         corpus_format=args.corpus_format,
         swebench_limit=args.swebench_limit,
-        execution_mode=args.execution_mode,
         swebench_root=args.swebench_root,
         output_path=args.output,
         trend_path=args.trend,

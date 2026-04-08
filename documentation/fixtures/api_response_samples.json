@@ -1,0 +1,22 @@
+{
+  "state": {
+    "ok": true,
+    "state": {
+      "session_name": "MuCLI",
+      "available_tools": [],
+      "variables": {}
+    }
+  },
+  "sessions": {
+    "ok": true,
+    "sessions": ["MuCLI", "session-2026-04-08"],
+    "current": "MuCLI"
+  },
+  "history": {
+    "ok": true,
+    "history": [
+      {"role": "user", "content": "Hello"},
+      {"role": "assistant", "content": "Hi!"}
+    ]
+  }
+}

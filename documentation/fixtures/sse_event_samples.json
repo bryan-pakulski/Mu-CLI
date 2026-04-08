@@ -1,0 +1,49 @@
+{
+  "events": [
+    {
+      "id": "evt_stream_open",
+      "event": "stream.open",
+      "task_id": null,
+      "timestamp": 1770000000.0,
+      "payload": {"task_id": null}
+    },
+    {
+      "id": "evt_task_updated",
+      "event": "task.updated",
+      "task_id": "task_123",
+      "timestamp": 1770000001.0,
+      "payload": {
+        "task": {
+          "task_id": "task_123",
+          "status": "running",
+          "kind": "message"
+        }
+      }
+    },
+    {
+      "id": "evt_task_completed",
+      "event": "task.completed",
+      "task_id": "task_123",
+      "timestamp": 1770000002.0,
+      "payload": {
+        "task": {
+          "task_id": "task_123",
+          "status": "completed",
+          "kind": "message"
+        }
+      }
+    },
+    {
+      "id": "evt_approval_pending",
+      "event": "approval.pending",
+      "task_id": "task_approval",
+      "timestamp": 1770000003.0,
+      "payload": {
+        "approval": {
+          "approval_id": "appr_1",
+          "task_id": "task_approval"
+        }
+      }
+    }
+  ]
+}

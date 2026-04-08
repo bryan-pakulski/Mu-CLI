@@ -132,15 +132,15 @@ Progress indicators:
 
 Current phase tracking:
 
-- `[~]` Phase 0 — Baseline hardening
-- `[~]` Phase 1 — Infrastructure scaffold
+- `[x]` Phase 0 — Baseline hardening
+- `[x]` Phase 1 — Infrastructure scaffold
 - `[~]` Phase 2 — Reactive read-only shell
 - `[]` Phase 3 — Chat + SSE cutover
 - `[]` Phase 4 — Board + feature workflows
 - `[]` Phase 5 — Settings/workspace/memory migration
 - `[]` Phase 6 — Legacy removal and cleanup
 
-## [~] Phase 0 — Baseline hardening (now)
+## [x] Phase 0 — Baseline hardening (now)
 
 - Freeze legacy behavior with regression checklists.
 - Add telemetry hooks for critical flows (send message, task complete/error, approval resolve, board refresh).
@@ -151,6 +151,10 @@ Deliverables:
 - Parity checklist doc
 - Event contract fixtures
 - Manual smoke script
+- Captured artifacts:
+  - `documentation/van_phase0_baseline_checklist.md`
+  - `documentation/fixtures/sse_event_samples.json`
+  - `documentation/fixtures/api_response_samples.json`
 
 Exit criteria:
 
@@ -158,7 +162,7 @@ Exit criteria:
 - Critical user journeys documented with pass/fail checkpoints.
 - SSE/API fixtures captured for current production behavior.
 
-## [~] Phase 1 — Infrastructure scaffold
+## [x] Phase 1 — Infrastructure scaffold
 
 - Add VanJS runtime + module loader.
 - Implement `store.js`, `api.js`, `sse.js` skeletons.

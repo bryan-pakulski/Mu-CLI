@@ -219,17 +219,51 @@ TOOLS = [
     ),
     ToolDefinition(
         name="apply_diff",
-        description="Applies a unified diff to a file. This is preferred over write_file for incremental changes.",
+        description="Applies a unified diff to a file. This is a FALLBACK method. Use search_and_replace_file as the PRIMARY method for targeted code changes. Use apply_diff only for complex multi-file changes.",
         parameters={
             "type": "object",
             "properties": {
-                "filename": {"type": "string", "description": "Path to the file."},
+                "filename": {"type": "string", "description": "Path to the file to modify."},
                 "diff": {
                     "type": "string",
                     "description": "The unified diff content to apply. MUST follow standard unified diff format: --- filename, +++ filename, @@ -L,C +L,C @@ headers, and +/-/space line markers.",
                 },
             },
             "required": ["filename", "diff"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="search_and_replace_file",
+        description="Search and replace text in a file using exact string matching. This is the PRIMARY method for targeted code modifications. Use apply_diff (unified diff) only as a fallback for complex multi-file changes.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "Path to the file."},
+                "search": {
+                    "type": "string",
+                    "description": "The exact text to search for in the file. Must match exactly including whitespace.",
+                },
+                "replace": {
+                    "type": "string",
+                    "description": "The text to replace the search match with.",
+                },
+                "expected_count": {
+                    "type": "integer",
+                    "description": "Optional expected number of matches. If provided and count differs, operation fails (safety check for disambiguation).",
+                },
+                "normalize_whitespace": {
+                    "type": "boolean",
+                    "description": "If True, normalize whitespace in search pattern (collapse multiple spaces, trim leading/trailing).",
+                    "default": False,
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If True, return preview of changes without modifying the file.",
+                    "default": False,
+                },
+            },
+            "required": ["filename", "search", "replace"],
         },
         requires_approval=True,
     ),
@@ -1755,6 +1789,213 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
         return f"Error applying diff: {e}"
 
 
+def search_and_replace_file(
+    filename: str,
+    search: str,
+    replace: str,
+    expected_count: int = None,
+    normalize_whitespace: bool = False,
+    dry_run: bool = False,
+    folder_context=None
+) -> str:
+    """Search and replace text in a file using exact string matching.
+    
+    This is the PRIMARY method for making targeted code changes. Use apply_diff
+    (unified diff) only as a fallback for complex multi-file changes.
+    
+    Args:
+        filename: Path to the file to modify
+        search: The exact text to search for (must match exactly)
+        replace: The text to replace the search string with
+        expected_count: Optional expected number of matches. If provided and count
+                       differs, the operation fails (safety check for disambiguation)
+        normalize_whitespace: If True, normalize whitespace in search pattern
+                             (collapse multiple spaces, trim leading/trailing)
+        dry_run: If True, return preview of changes without modifying the file
+        folder_context: Workspace folder context for path validation
+    
+    Returns:
+        JSON string with results including:
+        - success: bool
+        - matches_found: int
+        - match_locations: list of {line, column, context}
+        - modified: bool (whether file was actually modified)
+        - preview: str (unified diff preview of changes)
+        - error: str (if error occurred)
+    """
+    import json
+    
+    # Validate path
+    if not _check_bounds(filename, folder_context):
+        logger.warning(f"search_and_replace_file: Access denied or path ignored: {filename}")
+        return json.dumps({"success": False, "error": f"Access denied or path ignored. '{filename}'"})
+    
+    # Validate search string
+    if not search:
+        return json.dumps({"success": False, "error": "Search string cannot be empty"})
+    
+    # Check file exists
+    if not os.path.exists(filename):
+        return json.dumps({"success": False, "error": f"File '{filename}' does not exist"})
+    
+    # Check if binary file
+    try:
+        with open(filename, "rb") as f:
+            chunk = f.read(8192)
+            if b'\x00' in chunk:
+                return json.dumps({"success": False, "error": f"File '{filename}' appears to be binary. Search and replace not supported."})
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Error reading file: {str(e)}"})
+    
+    # Read file content
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        return json.dumps({"success": False, "error": f"File '{filename}' is not UTF-8 encoded"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Error reading file: {str(e)}"})
+    
+    # Normalize whitespace if requested
+    search_pattern = search
+    if normalize_whitespace:
+        import re
+        # Collapse multiple whitespace to single space and trim
+        search_pattern = re.sub(r'\s+', ' ', search).strip()
+        # Also normalize in content for matching
+        normalized_content = re.sub(r'\s+', ' ', content)
+    else:
+        normalized_content = content
+    
+    # Find all matches with locations
+    matches = []
+    lines = content.split('\n')
+    
+    # Build line start positions for column calculation
+    line_starts = [0]
+    for line in lines:
+        line_starts.append(line_starts[-1] + len(line) + 1)  # +1 for newline
+    
+    # Find all occurrences
+    search_content = normalized_content if normalize_whitespace else content
+    start_pos = 0
+    while True:
+        pos = search_content.find(search_pattern, start_pos)
+        if pos == -1:
+            break
+        
+        # Find line number and column
+        line_num = 1
+        for i, start in enumerate(line_starts):
+            if start > pos:
+                line_num = i
+                break
+            line_num = i + 1
+        
+        # Calculate column (1-indexed)
+        if line_num == 1:
+            column = pos + 1
+        else:
+            column = pos - line_starts[line_num - 2] + 1
+        
+        # Get context (2-3 lines around the match for disambiguation)
+        if 1 <= line_num <= len(lines):
+            context_parts = []
+            # Add 1 line before if available
+            if line_num > 1:
+                before_line = lines[line_num - 2].strip()
+                if len(before_line) > 80:
+                    before_line = before_line[:77] + "..."
+                context_parts.append(f"  {before_line}")
+            # Add the match line
+            match_line = lines[line_num - 1].strip()
+            if len(match_line) > 80:
+                match_line = match_line[:77] + "..."
+            context_parts.append(f"> {match_line}")
+            # Add 1 line after if available
+            if line_num < len(lines):
+                after_line = lines[line_num].strip()
+                if len(after_line) > 80:
+                    after_line = after_line[:77] + "..."
+                context_parts.append(f"  {after_line}")
+            context_line = "\n".join(context_parts)
+        else:
+            context_line = ""
+        
+        matches.append({
+            "line": line_num,
+            "column": column,
+            "context": context_line
+        })
+        start_pos = pos + 1
+    
+    # Check match count
+    if len(matches) == 0:
+        return json.dumps({
+            "success": False,
+            "matches_found": 0,
+            "error": f"No matches found for search string. Make sure the search string matches exactly, including whitespace.",
+            "search_length": len(search)
+        })
+    
+    # Validate expected count
+    if expected_count is not None and len(matches) != expected_count:
+        return json.dumps({
+            "success": False,
+            "matches_found": len(matches),
+            "expected_count": expected_count,
+            "match_locations": matches,
+            "error": f"Expected {expected_count} matches but found {len(matches)}. Use expected_count to disambiguate or provide more specific search string."
+        })
+    
+    # Perform replacement
+    if normalize_whitespace:
+        # For normalized matching, we need to be more careful
+        import re
+        # Use regex to handle whitespace normalization in replacement
+        normalized_search = re.sub(r'\s+', ' ', search).strip()
+        new_content = re.sub(re.escape(normalized_search), replace, normalized_content, count=0 if expected_count is None else expected_count)
+    else:
+        new_content = content.replace(search, replace)
+    
+    # Generate preview (unified diff style)
+    import difflib
+    diff = difflib.unified_diff(
+        content.splitlines(keepends=True),
+        new_content.splitlines(keepends=True),
+        fromfile=f"a/{filename}",
+        tofile=f"b/{filename}",
+        lineterm=""
+    )
+    preview = "".join(diff)
+    
+    # If dry_run, return preview without modifying
+    if dry_run:
+        return json.dumps({
+            "success": True,
+            "matches_found": len(matches),
+            "match_locations": matches,
+            "modified": False,
+            "preview": preview,
+            "dry_run": True
+        })
+    
+    # Write file
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        return json.dumps({
+            "success": True,
+            "matches_found": len(matches),
+            "match_locations": matches,
+            "modified": True,
+            "preview": preview
+        })
+    except Exception as e:
+        logger.error(f"search_and_replace_file: Error writing {filename}: {e}")
+        return json.dumps({"success": False, "error": f"Error writing file: {str(e)}"})
+
+
 def list_agent_tasks(folder_context) -> str:
     """Lists tasks from Makefile.agents with their descriptions."""
     if not folder_context or not folder_context.folders:
@@ -2908,6 +3149,15 @@ def _handle_apply_diff(args, folder_context, ui, variables) -> str:
     return apply_diff(args.get("filename", ""), args.get("diff", ""), folder_context)
 
 
+def _handle_search_and_replace_file(args, folder_context, ui, variables) -> str:
+    return search_and_replace_file(
+        args.get("filename", ""), args.get("search", ""), args.get("replace", ""),
+        args.get("expected_count"), args.get("normalize_whitespace", False),
+        args.get("dry_run", False),
+        folder_context
+    )
+
+
 def _handle_git_status(args, folder_context, ui, variables) -> str:
     return git_status(folder_context)
 
@@ -3960,6 +4210,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "update_task_status": _handle_update_task_status,
     "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
+    "search_and_replace_file": _legacy_handler(_handle_search_and_replace_file),
 }
 
 

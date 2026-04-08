@@ -159,19 +159,25 @@ GENERAL RULES:
    - Additions must start with `+`.
    - DO NOT use markers like `*** Begin Patch` or `@@` without line numbers.
    - If you are unsure of the line numbers, use `read_file` first to get the content and count lines, or use `write_file` to overwrite the whole file if the change is extensive.
-5. Use batching for multiple related tool calls to reduce token usage.
-6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, `git_status`, etc.) results are automatically stored in a collation buffer.
+5. PREFER search_and_replace_file for targeted code modifications. Use apply_diff only for complex multi-file changes or when search-replace is insufficient.
+   BEST PRACTICES:
+   - Include 3-5 lines of context in your search string to ensure uniqueness
+   - Start with the function/class definition when replacing entire functions
+   - For multiple matches, use expected_count or provide more context
+   - Use dry_run=True to preview changes before applying
+6. Use batching for multiple related tool calls to reduce token usage.
+7. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, `git_status`, etc.) results are automatically stored in a collation buffer.
    You will only receive a status update when you call them.
    When you are ready to receive all the gathered data, you MUST call the `flush` tool.
    This saves context and makes your processing more efficient.
    Gather everything you think you'll need first in a "context collection" stage, then flush once to process it all.
    Collect at MOST 3 turns of context before flushing and performing a significant action against the knowledge collected.
    Be loop aware, do not repeatedly ask for the same information.
-7. YOU MUST use the scratchpad tools for temporary observations, goals and short term plans, refer often to the scratchpad to confirm you are on the right track.
-8. YOU MUST use the task memory tools for durable facts, decisions, and verified findings
+8. YOU MUST use the scratchpad tools for temporary observations, goals and short term plans, refer often to the scratchpad to confirm you are on the right track.
+9. YOU MUST use the task memory tools for durable facts, decisions, and verified findings
    Keep memories concise and high-value.
    Retrieve memorory before conducting any significant actions or repeating tool work.
-9. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
+10. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
 """
 
 AGENTIC_MODES = {

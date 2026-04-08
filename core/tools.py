@@ -2027,6 +2027,8 @@ def search_and_replace_file(
     )
     preview = "".join(diff)
     
+    diff_output = f"DIFF:\n{preview}" if preview else "DIFF:\n(no changes)"
+
     # If dry_run, return preview without modifying
     if dry_run:
         return json.dumps({
@@ -2035,6 +2037,7 @@ def search_and_replace_file(
             "match_locations": matches,
             "modified": False,
             "preview": preview,
+            "diff": diff_output,
             "dry_run": True
         })
     
@@ -2047,7 +2050,8 @@ def search_and_replace_file(
             "matches_found": len(matches),
             "match_locations": matches,
             "modified": True,
-            "preview": preview
+            "preview": preview,
+            "diff": diff_output
         })
     except Exception as e:
         logger.error(f"search_and_replace_file: Error writing {filename}: {e}")

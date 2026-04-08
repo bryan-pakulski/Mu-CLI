@@ -466,8 +466,11 @@ class TestSearchAndReplaceDryRun:
         payload = json.loads(result)
         assert "preview" in payload
         assert payload["preview"] != ""
+        assert "diff" in payload
+        assert payload["diff"].startswith("DIFF:\n")
         # Preview should show the change
         assert "goodbye" in payload["preview"]
+        assert "goodbye" in payload["diff"]
 
     def test_dry_run_reports_matches(self, tmp_path):
         """Test that dry_run reports match count without modifying."""

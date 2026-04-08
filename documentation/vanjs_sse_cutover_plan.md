@@ -124,7 +124,23 @@ Acceptance for each row:
 
 ## 5) Cutover strategy (phased)
 
-## Phase 0 — Baseline hardening (now)
+Progress indicators:
+
+- `[]` - not started
+- `[~]` - in progress
+- `[x]` - completed
+
+Current phase tracking:
+
+- `[~]` Phase 0 — Baseline hardening
+- `[~]` Phase 1 — Infrastructure scaffold
+- `[~]` Phase 2 — Reactive read-only shell
+- `[]` Phase 3 — Chat + SSE cutover
+- `[]` Phase 4 — Board + feature workflows
+- `[]` Phase 5 — Settings/workspace/memory migration
+- `[]` Phase 6 — Legacy removal and cleanup
+
+## [~] Phase 0 — Baseline hardening (now)
 
 - Freeze legacy behavior with regression checklists.
 - Add telemetry hooks for critical flows (send message, task complete/error, approval resolve, board refresh).
@@ -136,7 +152,13 @@ Deliverables:
 - Event contract fixtures
 - Manual smoke script
 
-## Phase 1 — Infrastructure scaffold
+Exit criteria:
+
+- Baseline parity checklist created and reviewed with owners.
+- Critical user journeys documented with pass/fail checkpoints.
+- SSE/API fixtures captured for current production behavior.
+
+## [~] Phase 1 — Infrastructure scaffold
 
 - Add VanJS runtime + module loader.
 - Implement `store.js`, `api.js`, `sse.js` skeletons.
@@ -148,7 +170,13 @@ Deliverables:
 - Side-by-side bootstrap support
 - No user-visible behavioral changes by default
 
-## Phase 2 — Reactive read-only shell
+Exit criteria:
+
+- Feature-flagged bootstrap path merged and verified.
+- VanJS runtime loads locally with no CDN runtime dependency.
+- Legacy default path remains stable (no regressions in smoke checks).
+
+## [~] Phase 2 — Reactive read-only shell
 
 - Render read-only VanJS shell from API snapshots (sessions/history/runtime).
 - Keep legacy UI active for write actions.
@@ -159,7 +187,13 @@ Deliverables:
 - VanJS shell with parity snapshots
 - Screenshot diff baseline
 
-## Phase 3 — Chat + SSE cutover
+Exit criteria:
+
+- Read-only VanJS shell renders sessions/history/runtime status from live API.
+- SSE connection status and latest events are visible in Van shell.
+- Visual review confirms no regressions on legacy default path.
+
+## [] Phase 3 — Chat + SSE cutover
 
 - Move chat composer, feed, task status, and approvals to VanJS.
 - Route send/cancel and task event handling through VanJS store.
@@ -170,7 +204,13 @@ Deliverables:
 - Stable chat path in VanJS
 - SSE reconnect and error recovery validated
 
-## Phase 4 — Board + feature workflows
+Exit criteria:
+
+- Message compose/send/cancel works in Van path with parity behavior.
+- Task lifecycle states (`started`, `updated`, `completed`, `error`) render correctly.
+- Approval flows (approve/reject/explain) complete successfully in Van path.
+
+## [] Phase 4 — Board + feature workflows
 
 - Migrate feature board controls, filters, lanes, and ticket modal to VanJS.
 - Preserve drag/drop semantics and task update reactions.
@@ -179,7 +219,13 @@ Deliverables:
 
 - Board parity complete
 
-## Phase 5 — Settings/workspace/memory migration
+Exit criteria:
+
+- Board columns, filters, task cards, and ticket modal reach parity.
+- Feature actions (activate/archive/delete/unload) behave identically to legacy.
+- Board updates correctly from SSE and manual refresh paths.
+
+## [] Phase 5 — Settings/workspace/memory migration
 
 - Migrate remaining modal-heavy and config-heavy surfaces.
 - Ensure theme/accent behavior fully preserved.
@@ -188,7 +234,13 @@ Deliverables:
 
 - Full parity on all core domains
 
-## Phase 6 — Legacy removal and cleanup
+Exit criteria:
+
+- Settings tabs (runtime/tools/variables/memory/theme) function with parity.
+- Workspace attach/remove/browser flows match legacy behavior.
+- Memory inspector and context-layer presentation reach parity.
+
+## [] Phase 6 — Legacy removal and cleanup
 
 - Remove legacy imperative render paths once parity tests pass.
 - Retain compatibility adapter for one release window, then remove.
@@ -197,6 +249,12 @@ Deliverables:
 
 - Simplified codebase
 - Updated architecture docs
+
+Exit criteria:
+
+- Legacy imperative rendering path removed or archived behind explicit fallback.
+- Van path is default for all users with no P1/P2 regressions in release window.
+- Documentation and runbooks updated to the final architecture.
 
 ---
 

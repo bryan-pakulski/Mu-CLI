@@ -2,17 +2,7 @@ import van from "../vendor/van-1.6.0.min.js";
 import { createStore } from "./state/store.js";
 import { createApiClient } from "./services/api.js";
 import { createSseClient } from "./services/sse.js";
-
-const { button, code, div, h1, h2, header, input, li, main, p, section, textarea, ul } = van.tags;
-
-function renderMessage(message) {
-  const role = String(message?.role || "assistant");
-  const content = String(message?.content || message?.text || "");
-  return div({ class: `van-message ${role === "user" ? "user" : "assistant"}` },
-    div({ class: "van-message-role" }, role),
-    div({ class: "van-message-content" }, content || "…"),
-  );
-}
+import { AppShell } from "./components/app_shell.js";
 
 export async function bootVanUi() {
   const store = createStore();
@@ -51,41 +41,12 @@ export async function bootVanUi() {
     },
   });
 
-  const app = main({ class: "van-shell" },
-    header({ class: "van-top" },
-      h1("Mu-CLI · VanJS Preview"),
-      p("Feature-flagged preview. Use ?ui=van to test incremental migration."),
-      div({ class: "van-row" },
-        input({ value: store.apiBase, oninput: (e) => { store.apiBase.val = e.target.value; } }),
-        button({ onclick: () => refresh().catch((e) => { store.status.val = e.message; }) }, "Refresh"),
-      ),
-      div({ class: "van-meta" },
-        code(() => `status=${store.status.val}`),
-        code(() => `session=${store.currentSession.val || "none"}`),
-        code(() => `sse=${store.connected.val ? "connected" : "disconnected"}`),
-      ),
-      p({ class: "van-event" }, () => `Latest event: ${store.latestEvent.val}`),
-    ),
-    div({ class: "van-layout" },
-      section({ class: "van-panel" },
-        h2("Sessions"),
-        ul(() => store.sessions.val.map((name) => li(
-          button({
-            class: () => (name === store.currentSession.val ? "van-active" : ""),
-            onclick: async () => {
-              store.currentSession.val = name;
-              const history = await api.history(name);
-              store.history.val = history?.history || [];
-            },
-          }, name),
-        ))),
-      ),
-      section({ class: "van-panel van-chat" },
-        h2("Chat (Read-Only Preview)"),
-        div({ class: "van-feed" }, () => store.history.val.map(renderMessage)),
-        textarea({ disabled: true, rows: 4, placeholder: "Composer migration starts in Phase 3." }),
-      ),
-    ),
+  const app = AppShell(
+    store,
+    api,
+    () => refresh().catch((e) => {
+      store.status.val = e.message;
+    }),
   );
 
   document.body.innerHTML = "";

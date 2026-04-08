@@ -629,10 +629,46 @@ class SessionManager:
         for _ in range(max(1, int(max_passes or 1))):
             if self.estimate_runtime_history_tokens() <= token_budget:
                 break
-            if not self.roll_history_summary(keep_recent=keep_recent):
-                break
-            changed = True
+            if self.roll_history_summary(keep_recent=keep_recent):
+                changed = True
+                continue
+            if self._degrade_oldest_runtime_payload():
+                changed = True
+                continue
+            break
         return changed
+
+    def _degrade_oldest_runtime_payload(self, max_chars: int = 4000) -> bool:
+        """Fallback budget guard: clip oldest large unsummarized payloads."""
+        if self.summary_anchor > len(self.history):
+            self.summary_anchor = 0
+        for message in self.history[self.summary_anchor :]:
+            parts = message.get("parts", []) or []
+            for part in parts:
+                p_type = part.get("type")
+                if p_type == "text":
+                    value = str(part.get("text", "") or "")
+                    if len(value) > max_chars:
+                        part["text"] = (
+                            value[:max_chars].rstrip()
+                            + f"\n[truncated_to_{max_chars}_chars_for_context_budget]"
+                        )
+                        return True
+                elif p_type == "tool_result":
+                    raw = part.get("tool_result", "")
+                    serialized = (
+                        json.dumps(raw, default=str)
+                        if not isinstance(raw, str)
+                        else raw
+                    )
+                    if len(serialized) > max_chars:
+                        clipped = (
+                            serialized[:max_chars].rstrip()
+                            + f"\n[truncated_to_{max_chars}_chars_for_context_budget]"
+                        )
+                        part["tool_result"] = clipped
+                        return True
+        return False
 
     def view_history(self):
         if not self.history:

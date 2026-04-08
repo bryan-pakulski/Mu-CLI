@@ -173,6 +173,21 @@ def test_roll_history_summary_to_token_budget_summarizes_when_over_budget():
     assert "Summarized conversation" in sm.conversation_summary
 
 
+def test_roll_history_summary_to_token_budget_clips_large_payload_when_stuck():
+    sm = SessionManager()
+    Session(DummyProvider("dummy"), False, "system instruction", sm)
+    sm.summary_anchor = 0
+    sm.history = [
+        {"role": "assistant", "parts": [{"type": "tool_result", "tool_name": "tool", "tool_result": "A" * 20000}]}
+    ]
+
+    changed = sm.roll_history_summary_to_token_budget(200, keep_recent=1, max_passes=4)
+
+    assert changed is True
+    payload = sm.history[0]["parts"][0]["tool_result"]
+    assert "truncated_to_4000_chars_for_context_budget" in payload
+
+
 def test_clip_conversation_summary_marks_truncation_boundary():
     sm = SessionManager()
     sm.conversation_summary = "header\n" + ("x" * 5000)

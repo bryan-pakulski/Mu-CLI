@@ -2486,6 +2486,12 @@ ${marker}` : marker;
   ui.closeSettingsBtn.addEventListener("click", () => hideModal(ui.settingsModal));
   ui.saveSettingsBtn.addEventListener("click", () => saveSettings().catch((err) => setStatus(`Error: ${err.message}`, "error")));
 
+  [ui.folderModal, ui.memoryModal, ui.ticketModal, ui.createFeatureModal, ui.settingsModal].forEach((modalEl) => {
+    modalEl?.addEventListener("click", (evt) => {
+      if (evt.target === modalEl) hideModal(modalEl);
+    });
+  });
+
   ui.settingsTabs.addEventListener("click", (evt) => {
     const btn = evt.target.closest(".settings-tab");
     if (!btn) return;

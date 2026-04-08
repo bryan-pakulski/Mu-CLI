@@ -16,6 +16,7 @@ from core.server import (
     build_state_payload,
     build_workspace_payload,
     execute_server_tool,
+    list_workspace_directories,
 )
 from core.session import Session, SessionManager
 from core.workspace import FolderContext
@@ -145,6 +146,18 @@ def test_memory_buffers_payload_includes_context_layers():
     assert "context_layers" in payload
     assert isinstance(payload["context_layers"], list)
     assert any(layer.get("layer") == "L2" for layer in payload["context_layers"])
+
+
+def test_list_workspace_directories_returns_subdirs(tmp_path):
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "beta").mkdir()
+    (tmp_path / "file.txt").write_text("x")
+
+    listing, error = list_workspace_directories(str(tmp_path))
+
+    assert error is None
+    names = [item["name"] for item in listing["entries"]]
+    assert names == ["alpha", "beta"]
 
 
 def test_mode_command_without_args_lists_available_modes():

@@ -131,6 +131,9 @@ const ui = {
   folderModal: el("folderModal"),
   folderPathInput: el("folderPathInput"),
   browseFolderBtn: el("browseFolderBtn"),
+  folderUpBtn: el("folderUpBtn"),
+  folderBrowserPath: el("folderBrowserPath"),
+  folderBrowserList: el("folderBrowserList"),
   attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
   closeFolderModalBtn: el("closeFolderModalBtn"),
   memoryModal: el("memoryModal"),
@@ -1506,6 +1509,41 @@ function closeMemoryModal() {
   }
 }
 
+async function refreshFolderNavigator(path = "") {
+  try {
+    const payload = await fetchJson(
+      "/api/workspaces/list-dir",
+      { method: "POST", body: JSON.stringify({ path }) },
+      15000,
+    );
+    const current = payload.current_path || path || "";
+    ui.folderBrowserPath.textContent = current;
+    ui.folderUpBtn.dataset.path = payload.parent_path || "";
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    ui.folderBrowserList.innerHTML = entries.length
+      ? entries
+          .map(
+            (entry) =>
+              `<article class="memory-item folder-entry" data-path="${entry.path}"><div class="memory-item-title">Directory</div><div class="memory-item-body">${entry.name}</div></article>`,
+          )
+          .join("")
+      : '<div class="activity-empty">No subdirectories.</div>';
+    ui.folderBrowserList.querySelectorAll(".folder-entry").forEach((el) => {
+      el.addEventListener("click", () => {
+        const nextPath = el.getAttribute("data-path") || "";
+        if (!nextPath) return;
+        ui.folderPathInput.value = nextPath;
+        refreshFolderNavigator(nextPath);
+      });
+    });
+  } catch (err) {
+    ui.folderBrowserPath.textContent = "Navigator unavailable";
+    ui.folderBrowserList.innerHTML = `<div class="activity-empty">${escapeHtml(
+      err.message || "Unable to browse directories.",
+    )}</div>`;
+  }
+}
+
 function renderFeed(resetToBottom = false) {
   const prevHeight = ui.feed.scrollHeight;
   const prevTop = ui.feed.scrollTop;
@@ -2402,27 +2440,18 @@ ${marker}` : marker;
     ui.folderPathInput.value = "";
     showModal(ui.folderModal);
     ui.folderPathInput.focus();
+    refreshFolderNavigator("");
   };
 
   ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
   ui.browseFolderBtn.addEventListener("click", async () => {
-    ui.browseFolderBtn.disabled = true;
-    const previousText = ui.browseFolderBtn.textContent;
-    ui.browseFolderBtn.textContent = "Browsing…";
-    try {
-      const data = await fetchJson("/api/workspaces/browse", { method: "POST", body: JSON.stringify({}) }, 20000);
-      if (data?.path) {
-        ui.folderPathInput.value = data.path;
-        ui.folderPathInput.focus();
-      } else {
-        setStatus("No folder selected.", "error");
-      }
-    } catch (err) {
-      setStatus(`Error: ${err.message}`, "error");
-    } finally {
-      ui.browseFolderBtn.disabled = false;
-      ui.browseFolderBtn.textContent = previousText;
-    }
+    refreshFolderNavigator(ui.folderPathInput.value.trim());
+  });
+  ui.folderUpBtn?.addEventListener("click", () => {
+    const parentPath = ui.folderUpBtn.dataset.path || "";
+    if (!parentPath) return;
+    ui.folderPathInput.value = parentPath;
+    refreshFolderNavigator(parentPath);
   });
   ui.attachFolderConfirmBtn.addEventListener("click", async () => {
     const path = ui.folderPathInput.value.trim();

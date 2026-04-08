@@ -281,7 +281,7 @@ MuCLI includes a deterministic local benchmark harness in `evals/` for regressio
 - Runs real model + command execution via `make eval EVAL_PROVIDER=<provider> EVAL_MODEL=<model> EVAL_AGENT_MODE=feature`, with per-task temporary sessions/workspace attachment.
 - Metrics: fix-rate, token usage, tool success/failure, unsafe action rate.
 - SLO checks are embedded in each artifact (`fix_rate_min`, `token_usage_avg_max`, `unsafe_action_rate_max`).
-- Digest + trend outputs are generated locally, including a per-task results table with model response previews (`evals/artifacts/eval_digest_latest.md`, `evals/artifacts/trend_report.md`).
+- Digest + trend outputs are generated locally, including a per-task table with response previews and task log file links (`evals/artifacts/eval_digest_latest.md`, `evals/artifacts/trend_report.md`, `evals/artifacts/task_logs/`).
 - Includes a SWE-bench JSONL adapter with optional local repo execution via `--swebench-root` (`--corpus-format swebench-lite`).
 
 See `evals/README.md` for full usage details.

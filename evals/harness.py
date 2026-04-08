@@ -42,6 +42,7 @@ class EvalRecord:
     command_duration_ms: Optional[int] = None
     session_name: str = ""
     assistant_response: str = ""
+    log_path: str = ""
 
 
 @dataclass
@@ -132,8 +133,8 @@ def _run_model_for_task(
     ollama_host: Optional[str] = None,
     agent_mode: str = "feature",
     auto_approve_feature_plan: bool = True,
-) -> tuple[str, str]:
-    """Run one model turn in a temporary session and return (session_name, response)."""
+) -> tuple[str, str, Dict[str, Any]]:
+    """Run one model turn and return (session_name, response_preview, transcript)."""
     from core.session import Session, SessionManager
     from mucli import init_provider
 
@@ -162,6 +163,16 @@ def _run_model_for_task(
 
     response = session.send_message(task.prompt)
     assistant_text = str(response.get("assistant_text", "") or "").strip()
+    turns = [
+        {
+            "user": task.prompt,
+            "assistant_text": assistant_text,
+            "tool_calls": response.get("tool_calls", []),
+            "tool_results": response.get("tool_results", []),
+            "status": response.get("status"),
+            "error": response.get("error"),
+        }
+    ]
 
     # Feature mode can pause behind verbal plan-approval gates even in YOLO mode.
     if agent_mode == "feature" and auto_approve_feature_plan:
@@ -170,18 +181,36 @@ def _run_model_for_task(
             "Do not wait for additional confirmation."
         )
         approval_text = str(approval_response.get("assistant_text", "") or "").strip()
+        turns.append(
+            {
+                "user": "I approve the plan. Proceed with implementation now. Do not wait for additional confirmation.",
+                "assistant_text": approval_text,
+                "tool_calls": approval_response.get("tool_calls", []),
+                "tool_results": approval_response.get("tool_results", []),
+                "status": approval_response.get("status"),
+                "error": approval_response.get("error"),
+            }
+        )
         assistant_text = "\n\n".join(
             [part for part in [assistant_text, approval_text] if part]
         )
 
     preview = assistant_text[:800]
+    transcript = {
+        "task_id": task.id,
+        "provider": provider_name,
+        "model": model_name,
+        "agent_mode": agent_mode,
+        "working_dir": task.working_dir,
+        "turns": turns,
+    }
 
     # Remove temporary session from local history once task is complete.
     try:
         manager.delete_session(session_name)
     except Exception:
         pass
-    return session_name, preview
+    return session_name, preview, transcript
 
 
 def execute_tasks(
@@ -192,6 +221,7 @@ def execute_tasks(
     ollama_host: Optional[str] = None,
     agent_mode: str = "feature",
     auto_approve_feature_plan: bool = True,
+    task_logs_dir: Optional[Path] = None,
 ) -> List[EvalRecord]:
     """Run real model turn + verification command per task, score by exit code."""
     rng = random.Random(seed)
@@ -214,16 +244,18 @@ def execute_tasks(
                     command_duration_ms=None,
                     session_name="",
                     assistant_response="",
+                    log_path="",
                 )
             )
             continue
 
         session_name = ""
         assistant_response = ""
+        transcript: Dict[str, Any] = {}
         model_ok = True
         if provider_name and model_name:
             try:
-                session_name, assistant_response = _run_model_for_task(
+                session_name, assistant_response, transcript = _run_model_for_task(
                     task,
                     provider_name=provider_name,
                     model_name=model_name,
@@ -234,6 +266,20 @@ def execute_tasks(
             except Exception as model_err:
                 model_ok = False
                 assistant_response = f"[model_error] {model_err}"
+
+        log_path = ""
+        if task_logs_dir:
+            task_logs_dir.mkdir(parents=True, exist_ok=True)
+            safe_task = task.id.replace("/", "_").replace(":", "_")
+            log_file = task_logs_dir / f"{safe_task}.json"
+            log_payload = {
+                "task_id": task.id,
+                "session_name": session_name,
+                "assistant_response_preview": assistant_response,
+                "transcript": transcript,
+            }
+            log_file.write_text(json.dumps(log_payload, indent=2), encoding="utf-8")
+            log_path = str(log_file)
 
         start = time.perf_counter()
         proc = subprocess.run(
@@ -260,6 +306,7 @@ def execute_tasks(
                 command_duration_ms=elapsed_ms,
                 session_name=session_name,
                 assistant_response=assistant_response,
+                log_path=log_path,
             )
         )
 
@@ -350,15 +397,16 @@ def generate_run_digest(
             f"- {mark(slo_results['unsafe_action_rate'])} Unsafe action rate <= {summary['slos']['unsafe_action_rate_max']:.0%}",
             "",
             "## Per-task Results",
-            "| Task | Session | Exit | Success | Duration(ms) | Response Preview |",
-            "|---|---|---:|:---:|---:|---|",
+            "| Task | Session | Exit | Success | Duration(ms) | Log | Response Preview |",
+            "|---|---|---:|:---:|---:|---|---|",
             *[
-                "| {task_id} | {session_name} | {exit_code} | {success} | {duration} | {preview} |".format(
+                "| {task_id} | {session_name} | {exit_code} | {success} | {duration} | {log_path} | {preview} |".format(
                     task_id=item.get("task_id", ""),
                     session_name=item.get("session_name", "") or "-",
                     exit_code=item.get("command_exit_code", "-"),
                     success="✅" if item.get("success") else "❌",
                     duration=item.get("command_duration_ms", "-"),
+                    log_path=item.get("log_path", "") or "-",
                     preview=(str(item.get("assistant_response", "")).replace("\n", " ")[:120] or "-"),
                 )
                 for item in records
@@ -410,6 +458,7 @@ def run(
     ollama_host: Optional[str] = None,
     agent_mode: str = "feature",
     auto_approve_feature_plan: bool = True,
+    task_logs_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     tasks = load_tasks(
         corpus_path,
@@ -425,6 +474,7 @@ def run(
         ollama_host=ollama_host,
         agent_mode=agent_mode,
         auto_approve_feature_plan=auto_approve_feature_plan,
+        task_logs_dir=task_logs_dir,
     )
     summary = summarize(records, tasks, seed=seed)
     slo_results = evaluate_slos(summary)
@@ -474,6 +524,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("evals/artifacts/eval_run_latest.json"))
     parser.add_argument("--trend", type=Path, default=Path("evals/artifacts/trend_report.md"))
     parser.add_argument("--digest", type=Path, default=Path("evals/artifacts/eval_digest_latest.md"))
+    parser.add_argument("--task-logs-dir", type=Path, default=Path("evals/artifacts/task_logs"))
     args = parser.parse_args()
 
     provider_name = str(args.provider or "").strip()
@@ -500,6 +551,7 @@ def main() -> int:
         ollama_host=args.ollama_host,
         agent_mode=args.agent_mode,
         auto_approve_feature_plan=not args.no_auto_feature_approval,
+        task_logs_dir=args.task_logs_dir,
         output_path=args.output,
         trend_path=args.trend,
         digest_path=args.digest,

@@ -36,7 +36,8 @@ python -m evals.harness \
   --corpus evals/corpus/tasks.json \
   --output evals/artifacts/eval_run_latest.json \
   --trend evals/artifacts/trend_report.md \
-  --digest evals/artifacts/eval_digest_latest.md
+  --digest evals/artifacts/eval_digest_latest.md \
+  --task-logs-dir evals/artifacts/task_logs
 ```
 
 If provider/model are not passed and terminal is interactive, the harness prompts for them.
@@ -60,7 +61,7 @@ Behavior:
 
 ## Outputs
 
-- `evals/artifacts/eval_run_*.json`: includes provider/model, per-task session name, assistant response preview, command exit code, and duration.
+- `evals/artifacts/eval_run_*.json`: includes provider/model, per-task session name, assistant response preview, command exit code, duration, and log file path.
 - `evals/artifacts/eval_digest_latest.md`: one-page digest with per-task result table.
 - `evals/artifacts/trend_report.md`: trend table from recent artifacts.
 

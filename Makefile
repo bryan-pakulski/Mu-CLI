@@ -24,7 +24,8 @@ eval:
 	  --agent-mode "$${EVAL_AGENT_MODE:-feature}" \
 	  --output evals/artifacts/eval_run_latest.json \
 	  --trend evals/artifacts/trend_report.md \
-	  --digest evals/artifacts/eval_digest_latest.md
+	  --digest evals/artifacts/eval_digest_latest.md \
+	  --task-logs-dir evals/artifacts/task_logs
 
 # Usage: make eval-swebench SWEBENCH_PATH=/path/to/swebench_lite.jsonl SWEBENCH_LIMIT=100 EVAL_PROVIDER=openai EVAL_MODEL=gpt-4o-mini
 eval-swebench:
@@ -48,7 +49,8 @@ eval-swebench:
 	  --agent-mode "$${EVAL_AGENT_MODE:-feature}" \
 	  --output evals/artifacts/eval_run_swebench.json \
 	  --trend evals/artifacts/trend_report.md \
-	  --digest evals/artifacts/eval_digest_swebench.md
+	  --digest evals/artifacts/eval_digest_swebench.md \
+	  --task-logs-dir evals/artifacts/task_logs
 
 run:
 	./mucli

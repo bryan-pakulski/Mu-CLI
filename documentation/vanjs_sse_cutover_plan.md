@@ -185,6 +185,10 @@ Exit criteria:
 - Render read-only VanJS shell from API snapshots (sessions/history/runtime).
 - Keep legacy UI active for write actions.
 - Verify visual parity in static states.
+- Current progress:
+  - Read-only sessions/chat rendering is active in `?ui=van`.
+  - Added read-only activity and feature snapshots (tasks, approvals, features).
+  - SSE-triggered refresh updates snapshots on task/approval events.
 
 Deliverables:
 

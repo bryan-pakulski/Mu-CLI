@@ -10,12 +10,23 @@ export async function bootVanUi() {
 
   async function refresh() {
     store.status.val = "Loading";
-    const [sessionsPayload, statePayload] = await Promise.all([api.sessions(), api.state()]);
+    const [sessionsPayload, statePayload, runtimePayload, tasksPayload, approvalsPayload, featuresPayload] = await Promise.all([
+      api.sessions(),
+      api.state(),
+      api.runtime(),
+      api.tasks(),
+      api.approvals(),
+      api.features(),
+    ]);
     store.sessions.val = sessionsPayload?.sessions || [];
     store.currentSession.val = store.currentSession.val || sessionsPayload?.current || store.sessions.val[0] || "";
     if (!store.currentSession.val) {
       store.currentSession.val = statePayload?.state?.session_name || "";
     }
+    store.runtime.val = runtimePayload || null;
+    store.tasks.val = tasksPayload?.tasks || [];
+    store.approvals.val = approvalsPayload?.pending_approvals || [];
+    store.features.val = featuresPayload?.features || [];
     const historyPayload = await api.history(store.currentSession.val || "");
     store.history.val = historyPayload?.history || [];
     store.status.val = "Ready";
@@ -33,7 +44,7 @@ export async function bootVanUi() {
     },
     onEvent: ({ event, data }) => {
       store.latestEvent.val = `${event}: ${String(data || "").slice(0, 100)}`;
-      if (event === "task.updated" || event === "task.completed") {
+      if (event === "task.updated" || event === "task.completed" || event === "approval.pending" || event === "approval.resolved") {
         refresh().catch((error) => {
           store.status.val = `Refresh failed: ${error.message}`;
         });

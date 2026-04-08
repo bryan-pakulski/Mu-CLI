@@ -1,49 +1,63 @@
 # MuCLI Eval Harness
 
-This directory provides a benchmark harness with **real command/test execution** for each task's `verification_command`.
+This harness runs **real model execution + real verification commands** for every eval task.
+
+Each task run now has:
+1. a dedicated temporary session,
+2. a model response,
+3. a verification command (`pytest`/etc.) with exit-code scoring,
+4. per-task visibility in the digest table.
 
 ## Task corpus
 
-`evals/corpus/tasks.json` now includes real verification commands over local fixture repos.
-Each task supports:
+`evals/corpus/tasks.json` includes:
 
+- `prompt`
 - `verification_command`
 - `working_dir`
 - `expected_exit_code`
 
-## Run locally (real execution)
+## Run locally
 
 ```bash
-make eval
+make eval EVAL_PROVIDER=openai EVAL_MODEL=gpt-4o-mini
 ```
+
+(For Ollama: add `OLLAMA_HOST=http://localhost:11434` if needed.)
 
 Equivalent CLI:
 
 ```bash
 python -m evals.harness \
-  --seed 1337 \
+  --provider openai \
+  --model gpt-4o-mini \
   --corpus evals/corpus/tasks.json \
   --output evals/artifacts/eval_run_latest.json \
   --trend evals/artifacts/trend_report.md \
   --digest evals/artifacts/eval_digest_latest.md
 ```
 
-## SWE-bench compatibility (execution-capable adapter)
+If provider/model are not passed and terminal is interactive, the harness prompts for them.
 
-Use local SWE-bench JSONL and optionally map repo checkouts under `SWEBENCH_ROOT`:
+## SWE-bench compatibility
 
 ```bash
-make eval-swebench SWEBENCH_PATH=/path/to/swebench_lite.jsonl SWEBENCH_ROOT=/path/to/repos SWEBENCH_LIMIT=100
+make eval-swebench \
+  SWEBENCH_PATH=/path/to/swebench_lite.jsonl \
+  SWEBENCH_ROOT=/path/to/repos \
+  SWEBENCH_LIMIT=100 \
+  EVAL_PROVIDER=openai \
+  EVAL_MODEL=gpt-4o-mini
 ```
 
 Behavior:
-- If a mapped repo directory exists (`<SWEBENCH_ROOT>/<repo with / replaced by __>`), harness runs `python -m pytest -q` there.
-- If no mapped repo exists, task remains in corpus but has no verification command and is marked unsuccessful in execute mode.
+- If `<SWEBENCH_ROOT>/<repo with / replaced by __>` exists, harness runs `python -m pytest -q` there.
+- If mapped repo is missing, task is marked unsuccessful in execute mode.
 
 ## Outputs
 
-- `evals/artifacts/eval_run_*.json`: summary, SLO status, per-task records including command exit code/duration in execute mode.
-- `evals/artifacts/eval_digest_latest.md`: one-page run digest.
+- `evals/artifacts/eval_run_*.json`: includes provider/model, per-task session name, assistant response preview, command exit code, and duration.
+- `evals/artifacts/eval_digest_latest.md`: one-page digest with per-task result table.
 - `evals/artifacts/trend_report.md`: trend table from recent artifacts.
 
 ## Local-only behavior

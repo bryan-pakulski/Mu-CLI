@@ -33,6 +33,7 @@ def test_eval_harness_generates_artifacts(tmp_path):
     assert "unsafe_action_rate" in on_disk["summary"]
     assert isinstance(payload["slo_results"], dict)
     assert "MuCLI Eval Run Digest" in digest.read_text(encoding="utf-8")
+    assert "| Task | Session | Exit | Success | Duration(ms) | Response Preview |" in digest.read_text(encoding="utf-8")
 
 
 def test_eval_harness_slo_evaluation_shape():

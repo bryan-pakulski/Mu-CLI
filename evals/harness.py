@@ -2,7 +2,9 @@ import argparse
 import json
 import random
 import subprocess
+import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +40,8 @@ class EvalRecord:
     verification_command: str = ""
     command_exit_code: Optional[int] = None
     command_duration_ms: Optional[int] = None
+    session_name: str = ""
+    assistant_response: str = ""
 
 
 @dataclass
@@ -120,8 +124,59 @@ def load_tasks(
     return load_task_corpus(path)
 
 
-def execute_tasks(tasks: List[EvalTask], seed: int = DEFAULT_SEED) -> List[EvalRecord]:
-    """Run real verification commands and score by process exit codes."""
+def _run_model_for_task(
+    task: EvalTask,
+    *,
+    provider_name: str,
+    model_name: str,
+    ollama_host: Optional[str] = None,
+) -> tuple[str, str]:
+    """Run one model turn in a temporary session and return (session_name, response)."""
+    from core.session import Session, SessionManager
+    from mucli import init_provider
+
+    provider = init_provider(provider_name, model_name, ollama_host=ollama_host)
+    if provider is None:
+        raise ValueError(f"Unknown provider: {provider_name}")
+
+    session_name = f"eval_{task.id.replace(':', '_')}_{uuid.uuid4().hex[:8]}"
+    manager = SessionManager()
+    manager.new_session(session_name, provider_name=provider_name, model_name=model_name)
+    manager.variables["max_iterations"] = 8
+    manager.variables["yolo"] = True
+
+    session = Session(
+        provider=provider,
+        thinking=False,
+        system_instruction="You are running in evaluation mode. Be concise and complete the task.",
+        session_manager=manager,
+        ui=None,
+        debug=False,
+    )
+
+    if task.working_dir:
+        session.folder_context.add_folder(task.working_dir)
+
+    response = session.send_message(task.prompt)
+    assistant_text = str(response.get("assistant_text", "") or "").strip()
+    preview = assistant_text[:800]
+
+    # Remove temporary session from local history once task is complete.
+    try:
+        manager.delete_session(session_name)
+    except Exception:
+        pass
+    return session_name, preview
+
+
+def execute_tasks(
+    tasks: List[EvalTask],
+    seed: int = DEFAULT_SEED,
+    provider_name: Optional[str] = None,
+    model_name: Optional[str] = None,
+    ollama_host: Optional[str] = None,
+) -> List[EvalRecord]:
+    """Run real model turn + verification command per task, score by exit code."""
     rng = random.Random(seed)
     ordered = list(tasks)
     rng.shuffle(ordered)
@@ -140,9 +195,26 @@ def execute_tasks(tasks: List[EvalTask], seed: int = DEFAULT_SEED) -> List[EvalR
                     verification_command="",
                     command_exit_code=None,
                     command_duration_ms=None,
+                    session_name="",
+                    assistant_response="",
                 )
             )
             continue
+
+        session_name = ""
+        assistant_response = ""
+        model_ok = True
+        if provider_name and model_name:
+            try:
+                session_name, assistant_response = _run_model_for_task(
+                    task,
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    ollama_host=ollama_host,
+                )
+            except Exception as model_err:
+                model_ok = False
+                assistant_response = f"[model_error] {model_err}"
 
         start = time.perf_counter()
         proc = subprocess.run(
@@ -154,7 +226,7 @@ def execute_tasks(tasks: List[EvalTask], seed: int = DEFAULT_SEED) -> List[EvalR
             timeout=300,
         )
         elapsed_ms = int((time.perf_counter() - start) * 1000)
-        success = proc.returncode == task.expected_exit_code
+        success = (proc.returncode == task.expected_exit_code) and model_ok
 
         records.append(
             EvalRecord(
@@ -167,6 +239,8 @@ def execute_tasks(tasks: List[EvalTask], seed: int = DEFAULT_SEED) -> List[EvalR
                 verification_command=task.verification_command,
                 command_exit_code=proc.returncode,
                 command_duration_ms=elapsed_ms,
+                session_name=session_name,
+                assistant_response=assistant_response,
             )
         )
 
@@ -224,7 +298,14 @@ def evaluate_slos(summary: EvalSummary) -> Dict[str, bool]:
     }
 
 
-def generate_run_digest(summary: Dict[str, Any], slo_results: Dict[str, bool], corpus_label: str) -> str:
+def generate_run_digest(
+    summary: Dict[str, Any],
+    slo_results: Dict[str, bool],
+    corpus_label: str,
+    records: List[Dict[str, Any]],
+    provider_name: str,
+    model_name: str,
+) -> str:
     def mark(ok: bool) -> str:
         return "✅" if ok else "❌"
 
@@ -234,6 +315,7 @@ def generate_run_digest(summary: Dict[str, Any], slo_results: Dict[str, bool], c
             "",
             f"- **Run ID (UTC):** `{summary['run_id']}`",
             f"- **Corpus:** `{corpus_label}`",
+            f"- **Provider/Model:** `{provider_name}/{model_name}`",
             f"- **Tasks:** `{summary['total_tasks']}`",
             f"- **Seed:** `{summary['seed']}`",
             "",
@@ -247,6 +329,21 @@ def generate_run_digest(summary: Dict[str, Any], slo_results: Dict[str, bool], c
             f"- {mark(slo_results['fix_rate'])} Fix rate >= {summary['slos']['fix_rate_min']:.0%}",
             f"- {mark(slo_results['token_usage'])} Avg tokens <= {summary['slos']['token_usage_avg_max']}",
             f"- {mark(slo_results['unsafe_action_rate'])} Unsafe action rate <= {summary['slos']['unsafe_action_rate_max']:.0%}",
+            "",
+            "## Per-task Results",
+            "| Task | Session | Exit | Success | Duration(ms) | Response Preview |",
+            "|---|---|---:|:---:|---:|---|",
+            *[
+                "| {task_id} | {session_name} | {exit_code} | {success} | {duration} | {preview} |".format(
+                    task_id=item.get("task_id", ""),
+                    session_name=item.get("session_name", "") or "-",
+                    exit_code=item.get("command_exit_code", "-"),
+                    success="✅" if item.get("success") else "❌",
+                    duration=item.get("command_duration_ms", "-"),
+                    preview=(str(item.get("assistant_response", "")).replace("\n", " ")[:120] or "-"),
+                )
+                for item in records
+            ],
         ]
     )
 
@@ -289,6 +386,9 @@ def run(
     corpus_format: str = "auto",
     swebench_limit: int = 100,
     swebench_root: Optional[Path] = None,
+    provider_name: Optional[str] = None,
+    model_name: Optional[str] = None,
+    ollama_host: Optional[str] = None,
 ) -> Dict[str, Any]:
     tasks = load_tasks(
         corpus_path,
@@ -296,13 +396,21 @@ def run(
         swebench_limit=swebench_limit,
         swebench_root=swebench_root,
     )
-    records = execute_tasks(tasks, seed=seed)
+    records = execute_tasks(
+        tasks,
+        seed=seed,
+        provider_name=provider_name,
+        model_name=model_name,
+        ollama_host=ollama_host,
+    )
     summary = summarize(records, tasks, seed=seed)
     slo_results = evaluate_slos(summary)
 
     output_payload = {
         "summary": asdict(summary),
         "slo_results": slo_results,
+        "provider": provider_name,
+        "model": model_name,
         "records": [asdict(record) for record in records],
         "task_corpus": [asdict(task) for task in tasks],
     }
@@ -314,7 +422,14 @@ def run(
 
     digest_path.parent.mkdir(parents=True, exist_ok=True)
     digest_path.write_text(
-        generate_run_digest(output_payload["summary"], slo_results, corpus_label=str(corpus_path)),
+        generate_run_digest(
+            output_payload["summary"],
+            slo_results,
+            corpus_label=str(corpus_path),
+            records=output_payload["records"],
+            provider_name=str(provider_name or ""),
+            model_name=str(model_name or ""),
+        ),
         encoding="utf-8",
     )
     return output_payload
@@ -327,10 +442,26 @@ def main() -> int:
     parser.add_argument("--corpus-format", choices=["auto", "mucli", "swebench-lite"], default="auto")
     parser.add_argument("--swebench-limit", type=int, default=100)
     parser.add_argument("--swebench-root", type=Path, default=None)
+    parser.add_argument("--provider", type=str, default="")
+    parser.add_argument("--model", type=str, default="")
+    parser.add_argument("--ollama-host", type=str, default=None)
     parser.add_argument("--output", type=Path, default=Path("evals/artifacts/eval_run_latest.json"))
     parser.add_argument("--trend", type=Path, default=Path("evals/artifacts/trend_report.md"))
     parser.add_argument("--digest", type=Path, default=Path("evals/artifacts/eval_digest_latest.md"))
     args = parser.parse_args()
+
+    provider_name = str(args.provider or "").strip()
+    model_name = str(args.model or "").strip()
+    if not provider_name:
+        if sys.stdin.isatty():
+            provider_name = input("Eval provider (openai/gemini/ollama): ").strip()
+        else:
+            raise SystemExit("--provider is required in non-interactive mode.")
+    if not model_name:
+        if sys.stdin.isatty():
+            model_name = input("Eval model name: ").strip()
+        else:
+            raise SystemExit("--model is required in non-interactive mode.")
 
     payload = run(
         seed=args.seed,
@@ -338,6 +469,9 @@ def main() -> int:
         corpus_format=args.corpus_format,
         swebench_limit=args.swebench_limit,
         swebench_root=args.swebench_root,
+        provider_name=provider_name,
+        model_name=model_name,
+        ollama_host=args.ollama_host,
         output_path=args.output,
         trend_path=args.trend,
         digest_path=args.digest,

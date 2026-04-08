@@ -130,6 +130,8 @@ def _run_model_for_task(
     provider_name: str,
     model_name: str,
     ollama_host: Optional[str] = None,
+    agent_mode: str = "feature",
+    auto_approve_feature_plan: bool = True,
 ) -> tuple[str, str]:
     """Run one model turn in a temporary session and return (session_name, response)."""
     from core.session import Session, SessionManager
@@ -144,6 +146,7 @@ def _run_model_for_task(
     manager.new_session(session_name, provider_name=provider_name, model_name=model_name)
     manager.variables["max_iterations"] = 8
     manager.variables["yolo"] = True
+    manager.variables["agent_mode"] = agent_mode
 
     session = Session(
         provider=provider,
@@ -159,6 +162,18 @@ def _run_model_for_task(
 
     response = session.send_message(task.prompt)
     assistant_text = str(response.get("assistant_text", "") or "").strip()
+
+    # Feature mode can pause behind verbal plan-approval gates even in YOLO mode.
+    if agent_mode == "feature" and auto_approve_feature_plan:
+        approval_response = session.send_message(
+            "I approve the plan. Proceed with implementation now. "
+            "Do not wait for additional confirmation."
+        )
+        approval_text = str(approval_response.get("assistant_text", "") or "").strip()
+        assistant_text = "\n\n".join(
+            [part for part in [assistant_text, approval_text] if part]
+        )
+
     preview = assistant_text[:800]
 
     # Remove temporary session from local history once task is complete.
@@ -175,6 +190,8 @@ def execute_tasks(
     provider_name: Optional[str] = None,
     model_name: Optional[str] = None,
     ollama_host: Optional[str] = None,
+    agent_mode: str = "feature",
+    auto_approve_feature_plan: bool = True,
 ) -> List[EvalRecord]:
     """Run real model turn + verification command per task, score by exit code."""
     rng = random.Random(seed)
@@ -211,6 +228,8 @@ def execute_tasks(
                     provider_name=provider_name,
                     model_name=model_name,
                     ollama_host=ollama_host,
+                    agent_mode=agent_mode,
+                    auto_approve_feature_plan=auto_approve_feature_plan,
                 )
             except Exception as model_err:
                 model_ok = False
@@ -389,6 +408,8 @@ def run(
     provider_name: Optional[str] = None,
     model_name: Optional[str] = None,
     ollama_host: Optional[str] = None,
+    agent_mode: str = "feature",
+    auto_approve_feature_plan: bool = True,
 ) -> Dict[str, Any]:
     tasks = load_tasks(
         corpus_path,
@@ -402,6 +423,8 @@ def run(
         provider_name=provider_name,
         model_name=model_name,
         ollama_host=ollama_host,
+        agent_mode=agent_mode,
+        auto_approve_feature_plan=auto_approve_feature_plan,
     )
     summary = summarize(records, tasks, seed=seed)
     slo_results = evaluate_slos(summary)
@@ -411,6 +434,7 @@ def run(
         "slo_results": slo_results,
         "provider": provider_name,
         "model": model_name,
+        "agent_mode": agent_mode,
         "records": [asdict(record) for record in records],
         "task_corpus": [asdict(task) for task in tasks],
     }
@@ -445,6 +469,8 @@ def main() -> int:
     parser.add_argument("--provider", type=str, default="")
     parser.add_argument("--model", type=str, default="")
     parser.add_argument("--ollama-host", type=str, default=None)
+    parser.add_argument("--agent-mode", type=str, default="feature")
+    parser.add_argument("--no-auto-feature-approval", action="store_true")
     parser.add_argument("--output", type=Path, default=Path("evals/artifacts/eval_run_latest.json"))
     parser.add_argument("--trend", type=Path, default=Path("evals/artifacts/trend_report.md"))
     parser.add_argument("--digest", type=Path, default=Path("evals/artifacts/eval_digest_latest.md"))
@@ -472,6 +498,8 @@ def main() -> int:
         provider_name=provider_name,
         model_name=model_name,
         ollama_host=args.ollama_host,
+        agent_mode=args.agent_mode,
+        auto_approve_feature_plan=not args.no_auto_feature_approval,
         output_path=args.output,
         trend_path=args.trend,
         digest_path=args.digest,

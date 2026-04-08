@@ -115,7 +115,7 @@ def test_execute_tasks_runs_real_commands(tmp_path):
             expected_exit_code=0,
         ),
     ]
-    records = execute_tasks(tasks, seed=1)
+    records = execute_tasks(tasks, seed=1, agent_mode="feature", auto_approve_feature_plan=True)
     by_id = {r.task_id: r for r in records}
     assert by_id["pass"].success is True
     assert by_id["pass"].command_exit_code == 0

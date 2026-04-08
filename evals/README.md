@@ -1,12 +1,14 @@
 # MuCLI Eval Harness
 
-This harness runs **real model execution + real verification commands** for every eval task.
+This harness runs **real model execution + real verification commands** for every eval task, using MuCLI sessions with attached workspaces.
 
 Each task run now has:
-1. a dedicated temporary session,
-2. a model response,
-3. a verification command (`pytest`/etc.) with exit-code scoring,
-4. per-task visibility in the digest table.
+1. a dedicated temporary session with provider/model,
+2. workspace attachment to the task's eval folder,
+3. model prompting to complete the task,
+4. optional feature-mode auto-approval follow-up prompt,
+5. verification command (`pytest`/etc.) with exit-code scoring,
+6. per-task visibility in the digest table.
 
 ## Task corpus
 
@@ -20,7 +22,7 @@ Each task run now has:
 ## Run locally
 
 ```bash
-make eval EVAL_PROVIDER=openai EVAL_MODEL=gpt-4o-mini
+make eval EVAL_PROVIDER=openai EVAL_MODEL=gpt-4o-mini EVAL_AGENT_MODE=feature
 ```
 
 (For Ollama: add `OLLAMA_HOST=http://localhost:11434` if needed.)
@@ -38,6 +40,8 @@ python -m evals.harness \
 ```
 
 If provider/model are not passed and terminal is interactive, the harness prompts for them.
+
+By default eval uses `agent_mode=feature` and sends an automatic second message approving the plan so feature-mode gating does not stall task execution. Disable this with `--no-auto-feature-approval`.
 
 ## SWE-bench compatibility
 

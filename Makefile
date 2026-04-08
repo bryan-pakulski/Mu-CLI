@@ -21,6 +21,7 @@ eval:
 	  --provider "$(EVAL_PROVIDER)" \
 	  --model "$(EVAL_MODEL)" \
 	  --ollama-host "$${OLLAMA_HOST:-}" \
+	  --agent-mode "$${EVAL_AGENT_MODE:-feature}" \
 	  --output evals/artifacts/eval_run_latest.json \
 	  --trend evals/artifacts/trend_report.md \
 	  --digest evals/artifacts/eval_digest_latest.md
@@ -44,6 +45,7 @@ eval-swebench:
 	  --provider "$(EVAL_PROVIDER)" \
 	  --model "$(EVAL_MODEL)" \
 	  --ollama-host "$${OLLAMA_HOST:-}" \
+	  --agent-mode "$${EVAL_AGENT_MODE:-feature}" \
 	  --output evals/artifacts/eval_run_swebench.json \
 	  --trend evals/artifacts/trend_report.md \
 	  --digest evals/artifacts/eval_digest_swebench.md

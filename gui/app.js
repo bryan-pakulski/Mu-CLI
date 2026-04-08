@@ -137,6 +137,7 @@ const ui = {
   memorySearchInput: el("memorySearchInput"),
   memoryBufferList: el("memoryBufferList"),
   scratchpadBufferList: el("scratchpadBufferList"),
+  memoryLayersList: el("memoryLayersList"),
   memoryActivityList: el("memoryActivityList"),
   closeMemoryModalBtn: el("closeMemoryModalBtn"),
   settingsBtn: el("settingsBtn"),
@@ -301,7 +302,7 @@ function persistDrafts() {
 }
 
 function sessionMemory(sessionName = state.currentSession) {
-  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], query: "" };
+  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], layers: [], query: "" };
   return state.memoryBySession[sessionName];
 }
 
@@ -1415,6 +1416,7 @@ async function refreshMemoryBuffers(sessionName = state.currentSession) {
     const mem = sessionMemory(sessionName);
     mem.buffer = Array.isArray(payload.memory_entries) ? payload.memory_entries : [];
     mem.scratchpad = Array.isArray(payload.scratchpad_entries) ? payload.scratchpad_entries : [];
+    mem.layers = Array.isArray(payload.context_layers) ? payload.context_layers : [];
     if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
   } catch {
     return;
@@ -1453,6 +1455,20 @@ function renderMemoryModal() {
   ui.scratchpadBufferList.innerHTML = scratchEntries.length
     ? scratchEntries.map((entry) => renderEntry(entry, "scratchpad")).join("")
     : '<div class="activity-empty">No scratchpad entries found.</div>';
+
+  const layers = Array.isArray(mem.layers) ? mem.layers : [];
+  ui.memoryLayersList.innerHTML = layers.length
+    ? layers.map((layer) => {
+      const current = Number(layer.current || 0);
+      const maximum = Math.max(1, Number(layer.maximum || 1));
+      const pct = Math.max(0, Math.min(100, Math.round((current / maximum) * 100)));
+      return `<article class="memory-item">
+        <div class="memory-item-title">${layer.layer || ""} · ${layer.name || "Layer"} · ${current}/${maximum} (${pct}%)</div>
+        <div class="memory-item-body">${layer.description || ""}</div>
+        <div class="meter"><div class="meter-fill" style="width:${pct}%"></div></div>
+      </article>`;
+    }).join("")
+    : '<div class="activity-empty">No context layer stats available.</div>';
 
   ui.memoryActivityList.innerHTML = mem.activity.length
     ? mem.activity.slice(-60).reverse().map((e) => `<article class="memory-item"><div class="memory-item-title">${e.title} · ${new Date(e.at).toLocaleTimeString()}</div><div class="memory-item-body">${e.body || ""}</div></article>`).join("")

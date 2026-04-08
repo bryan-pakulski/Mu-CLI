@@ -139,6 +139,14 @@ def test_handle_command_updates_variables_non_interactively():
     assert result["data"]["key"] == "yolo"
 
 
+def test_memory_buffers_payload_includes_context_layers():
+    session = build_test_session()
+    payload = build_memory_buffers_payload(session)
+    assert "context_layers" in payload
+    assert isinstance(payload["context_layers"], list)
+    assert any(layer.get("layer") == "L2" for layer in payload["context_layers"])
+
+
 def test_mode_command_without_args_lists_available_modes():
     session = build_test_session()
 

@@ -229,6 +229,8 @@ select option:hover{
 .memory-item details{margin-top:8px}
 .memory-item summary{cursor:pointer;color:var(--accent);font-size:12px}
 .memory-item-full{max-height:260px;overflow:auto;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.meter{margin-top:8px;height:8px;border-radius:999px;background:color-mix(in oklab, var(--surface) 80%, var(--border));overflow:hidden}
+.meter-fill{height:100%;background:linear-gradient(90deg,var(--accent),color-mix(in oklab,var(--accent) 60%, #ffffff));border-radius:inherit}
 
 .composer textarea{background:var(--surface-2);border:0;outline:none;resize:none;max-height:180px;min-height:28px;padding:6px 4px;color:var(--text);line-height:1.4;}
 .composer textarea:disabled{opacity:.8;cursor:not-allowed}

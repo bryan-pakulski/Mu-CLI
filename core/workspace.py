@@ -159,8 +159,6 @@ class FolderContext:
                         # Check if the directory itself matches (dir patterns end with /)
                         if spec.match_file(rel_path + "/") or spec.match_file(rel_path):
                             return True
-
-                return True
         return False
 
     def remove_folder(self, folder_path):

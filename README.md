@@ -272,6 +272,20 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 - Structured tool result envelopes now track normalized error state, modified files, artifacts, and telemetry so session, server, and future GUI consumers can share the same result contract.
 - **Git Suite**: `git_init`, `git_status`, `git_log`, `git_diff`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_merge_request`.
 
+
+## Evaluation Harness
+
+MuCLI includes a deterministic local benchmark harness in `evals/` for regression tracking without model API tokens.
+
+- Corpus categories: bugfix, refactor, retrieval-heavy, safety-sensitive (`evals/corpus/tasks.json`).
+- Deterministic replay with fixed seed (`python -m evals.harness --seed 1337`) or via `make eval`.
+- Metrics: fix-rate, token usage, tool success/failure, unsafe action rate.
+- SLO checks are embedded in each artifact (`fix_rate_min`, `token_usage_avg_max`, `unsafe_action_rate_max`).
+- Digest + trend outputs are generated locally (`evals/artifacts/eval_digest_latest.md`, `evals/artifacts/trend_report.md`).
+- Includes a SWE-bench JSONL adapter for deterministic replay mode (`--corpus-format swebench-lite`).
+
+See `evals/README.md` for full usage details.
+
 ## Additional Notes
 
 - **Configuration**: Local settings and session history are stored in `~/.mucli_chats/`.

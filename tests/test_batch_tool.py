@@ -1,5 +1,6 @@
 import os
 import pytest
+import json
 from core.approval import build_approval_plan
 from core.tools import (
     execute_tool,
@@ -24,11 +25,13 @@ def test_batch_job_basic(tmp_path):
     ]
 
     result = execute_tool("batch_job", {"commands": commands}, ctx)
-
-    assert "--- Batch Job Results ---" in result
-    assert "Tool: get_current_time" in result
-    assert "Tool: read_file" in result
-    assert "hello batch" in result
+    payload = json.loads(result)
+    assert payload["ok"] is True
+    assert "children" in payload["data"]
+    assert len(payload["data"]["children"]) == 2
+    child_results = [entry["result"] for entry in payload["data"]["children"]]
+    assert all("ok" in child for child in child_results)
+    assert any("hello batch" in child.get("message", "") for child in child_results)
 
 
 def test_batch_job_nested_prevention(tmp_path):
@@ -45,7 +48,11 @@ def test_batch_job_nested_prevention(tmp_path):
     ]
 
     result = execute_tool("batch_job", {"commands": commands}, ctx)
-    assert "nested batch_job not allowed" in result
+    payload = json.loads(result)
+    assert payload["ok"] is False
+    child = payload["data"]["children"][0]["result"]
+    assert child["error_code"] == "unsupported"
+    assert "nested batch_job not allowed" in child["message"]
 
 
 def test_batch_job_modifications(tmp_path):
@@ -92,12 +99,43 @@ def test_batch_job_execution_with_writes(tmp_path):
     ]
 
     result = execute_tool("batch_job", {"commands": commands}, ctx)
-
-    assert "Successfully wrote to" in result
-    assert "initial" in result
+    payload = json.loads(result)
+    assert payload["ok"] is True
+    children = payload["data"]["children"]
+    assert any(
+        "Successfully wrote to" in child["result"]["message"] for child in children
+    )
+    assert any("initial" in child["result"]["message"] for child in children)
 
     with open(file1, "r") as f:
         assert f.read() == "initial"
+
+
+def test_batch_job_partial_success_has_nested_children(tmp_path):
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+    file1 = tmp_path / "ok.txt"
+
+    result = execute_tool(
+        "batch_job",
+        {
+            "commands": [
+                {
+                    "tool_name": "write_file",
+                    "tool_args": {"filename": str(file1), "content": "hello"},
+                },
+                {"tool_name": "missing_tool", "tool_args": {}},
+            ]
+        },
+        ctx,
+    )
+    payload = json.loads(result)
+    assert payload["ok"] is False
+    children = payload["data"]["children"]
+    assert len(children) == 2
+    assert children[0]["result"]["ok"] is True
+    assert children[1]["result"]["ok"] is False
+    assert children[1]["result"]["error_code"] == "not_found"
 
 
 def test_tool_descriptors_expose_execution_metadata():

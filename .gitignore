@@ -5,3 +5,7 @@ __pycache__/
 .mu_cli/
 *.orig
 *.rej
+
+# Eval artifacts (generated)
+evals/artifacts/*.json
+evals/artifacts/*.md

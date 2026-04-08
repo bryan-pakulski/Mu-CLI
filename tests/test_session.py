@@ -125,7 +125,7 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
 
     assert prepared[0]["role"] == "user"
     assert prepared[1]["role"] == "system"
-    assert "Compressed prior tool activity" in prepared[1]["parts"][0]["text"]
+    assert "LAYER 4 — Recent tool activity (compressed for budget)." in prepared[1]["parts"][0]["text"]
     assert len(prepared) == 4
 
 
@@ -173,7 +173,18 @@ def test_roll_history_summary_to_token_budget_summarizes_when_over_budget():
     assert "Summarized conversation" in sm.conversation_summary
 
 
-def test_send_message_injects_rolling_conversation_summary():
+def test_clip_conversation_summary_marks_truncation_boundary():
+    sm = SessionManager()
+    sm.conversation_summary = "header\n" + ("x" * 5000)
+
+    sm._clip_conversation_summary(limit=200)
+
+    assert sm.conversation_summary.startswith(
+        "[conversation_summary_truncated_to_last_200_chars]"
+    )
+
+
+def test_send_message_injects_hierarchical_context_layers():
     class CaptureProvider(LLMProvider):
         def __init__(self):
             super().__init__("dummy")
@@ -220,13 +231,68 @@ def test_send_message_injects_rolling_conversation_summary():
 
     session.send_message("turn 4")
 
-    assert (
-        "rolling summary of older conversation history"
-        in provider.last_system_prompt.lower()
-    )
+    assert "Hierarchical runtime context" in provider.last_system_prompt
+    assert "LAYER 2 — Conversation summary:" in provider.last_system_prompt
+    assert "LAYER 5 — Current turn:" in provider.last_system_prompt
     assert "turn 1" in provider.last_system_prompt
     assert sm.summary_anchor == 2
     assert "turn 1" in sm.conversation_summary
+
+
+def test_layered_context_prefers_retrieved_snippets(tmp_path):
+    class CaptureProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.last_system_prompt = ""
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.last_system_prompt = system_prompt or ""
+            return ProviderResponse(
+                text="done",
+                parts=[MessagePart(type="text", text="done")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    (tmp_path / "auth.py").write_text(
+        "def authenticate_user(token):\n    return token == 'ok'\n"
+    )
+    (tmp_path / "billing.py").write_text(
+        "def charge_card(amount):\n    return amount\n"
+    )
+
+    sm = SessionManager(session_name="retrieval-layered")
+    sm.folder_context.add_folder(str(tmp_path))
+    provider = CaptureProvider()
+    session = Session(provider, False, "system instruction", sm)
+    session.variables["retrieval_top_k"] = 2
+    session.send_message("where is authentication token validated?")
+
+    assert "LAYER 4B — Retrieved workspace snippets:" in provider.last_system_prompt
+    assert "auth.py" in provider.last_system_prompt
+
+
+def test_layer_budgets_eviction_policies():
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    session.variables["conversation_summary_char_limit"] = 20
+    session.variables["recent_tool_context_char_limit"] = 40
+    session.variables["retrieval_context_char_limit"] = 30
+    sm.conversation_summary = "0123456789abcdefghijklmnopqrstuvwxyz"
+    session._pending_retrieved_context = "x" * 200
+    layered = session._inject_hierarchical_context("system instruction")
+
+    assert "[budget: 20 chars | eviction: keep newest]" in layered
+    assert "[budget: 40 chars | eviction: drop oldest tool records]" not in layered
+    assert "LAYER 4B — Retrieved workspace snippets:" in layered
+    assert "[budget: 30 chars | eviction: drop lowest-ranked snippets]" in layered
 
 
 def test_prepare_runtime_history_keeps_signed_tool_messages():

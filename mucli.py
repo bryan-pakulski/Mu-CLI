@@ -36,6 +36,7 @@ from core.feature_mode import (
 from core.tools import execute_tool
 from ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
+from utils.runtime_metrics import collect_context_layers
 
 console = Console()
 GITHUB_API_BASE = "https://api.github.com"
@@ -2030,6 +2031,7 @@ def handle_command(session, user_input, allow_prompt=True):
         if subcommand in ["status", "s"]:
             task_stats = build_memory_stats(session.task_memory)
             scratch_stats = build_memory_stats(session.turn_scratchpad)
+            layer_stats = collect_context_layers(session)
             if allow_prompt:
                 table = Table(title="Memory Status", box=box.ROUNDED)
                 table.add_column("Type", style="cyan")
@@ -2081,6 +2083,28 @@ def handle_command(session, user_input, allow_prompt=True):
 
                 print_top_entries("Task Memory", task_stats)
                 print_top_entries("Scratchpad", scratch_stats)
+
+                layer_table = Table(
+                    title="Hierarchical Context Layers",
+                    box=box.SIMPLE,
+                )
+                layer_table.add_column("Layer", style="cyan")
+                layer_table.add_column("Name", style="white")
+                layer_table.add_column("Usage", style="yellow", justify="right")
+                layer_table.add_column("Fill", style="green", justify="right")
+                layer_table.add_column("Description", style="dim")
+                for layer in layer_stats:
+                    current = int(layer.get("current", 0) or 0)
+                    maximum = max(1, int(layer.get("maximum", 1) or 1))
+                    pct = min(100, int(round((current / maximum) * 100)))
+                    layer_table.add_row(
+                        str(layer.get("layer", "")),
+                        str(layer.get("name", "")),
+                        f"{current}/{maximum}",
+                        f"{pct}%",
+                        str(layer.get("description", "")),
+                    )
+                console.print(layer_table)
             return serialize_command_result(
                 session,
                 cmd,
@@ -2089,6 +2113,7 @@ def handle_command(session, user_input, allow_prompt=True):
                     "scratchpad_count": scratch_stats["entries"],
                     "task_memory_stats": task_stats,
                     "scratchpad_stats": scratch_stats,
+                    "context_layers": layer_stats,
                 },
             )
 

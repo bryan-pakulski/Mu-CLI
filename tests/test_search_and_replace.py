@@ -386,6 +386,10 @@ class TestSearchAndReplaceNormalizeWhitespace:
         
         payload = json.loads(result)
         assert payload["success"] is True
+        updated = test_file.read_text()
+        assert "def goodbye():" in updated
+        # Preserve surrounding file formatting rather than normalizing whole file.
+        assert "x   =    1" in updated
 
     def test_normalize_whitespace_disabled_exact_match(self, tmp_path):
         """Test that without normalize_whitespace, matching is exact."""
@@ -462,8 +466,11 @@ class TestSearchAndReplaceDryRun:
         payload = json.loads(result)
         assert "preview" in payload
         assert payload["preview"] != ""
+        assert "diff" in payload
+        assert payload["diff"].startswith("DIFF:\n")
         # Preview should show the change
         assert "goodbye" in payload["preview"]
+        assert "goodbye" in payload["diff"]
 
     def test_dry_run_reports_matches(self, tmp_path):
         """Test that dry_run reports match count without modifying."""

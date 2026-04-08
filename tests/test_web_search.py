@@ -118,3 +118,47 @@ def test_web_search_handler_registered():
     
     assert "error" in parsed
     assert parsed["error"] == "Query cannot be empty"
+
+
+def test_web_search_duckduckgo_html_fallback(monkeypatch):
+    """If DDGS returns nothing, fallback HTML parser should still return results."""
+    import core.tools as tools
+
+    class FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def text(self, query, max_results=10):
+            return []
+
+    class FakeResponse:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    html = """
+    <div class="result">
+      <a class="result__a" href="https://example.com/post">Example title</a>
+      <a class="result__snippet">Example snippet</a>
+    </div>
+    """
+
+    class FakeHttpx:
+        @staticmethod
+        def get(*args, **kwargs):
+            return FakeResponse(html)
+
+    monkeypatch.setattr(tools, "register_source", lambda **kwargs: "cite_1")
+    monkeypatch.setattr("ddgs.DDGS", FakeDDGS)
+    monkeypatch.setattr("httpx.get", FakeHttpx.get)
+
+    result = web_search("example query", "duckduckgo", 5, None)
+    parsed = json.loads(result)
+
+    assert parsed["num_results"] >= 1
+    assert parsed["results"][0]["title"] == "Example title"

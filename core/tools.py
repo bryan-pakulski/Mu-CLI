@@ -4,6 +4,7 @@ import time
 import datetime
 import difflib
 import re
+import bisect
 from dataclasses import dataclass, asdict, field
 from urllib.parse import quote
 from typing import Any, Callable
@@ -31,6 +32,7 @@ from core.feature_mode import (
     update_feature_plan_metadata,
     _workspace_root,
 )
+from core.retrieval import SemanticCodeIndex
 
 
 def _register_source_and_get_citation(
@@ -158,6 +160,30 @@ TOOLS = [
                 }
             },
             "required": ["string"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="retrieve_relevant_context",
+        description="Retrieve semantically relevant code snippets using indexed symbols, lexical overlap, recency, and git-diff weighting.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language or code query describing what context is needed.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of snippets to return.",
+                    "default": 5,
+                },
+                "filters": {
+                    "type": "object",
+                    "description": "Optional retrieval filters (e.g., path_prefix, extensions).",
+                },
+            },
+            "required": ["query"],
         },
         requires_approval=False,
     ),
@@ -1118,6 +1144,7 @@ _COLLATED_TOOL_NAMES = {
     "get_workspace_details",
     "read_file",
     "search_for_string",
+    "retrieve_relevant_context",
     "get_chunk",
     "list_dir",
     "list_agent_tasks",
@@ -1538,6 +1565,35 @@ def search_for_string(search_string: str, folder_context) -> str:
     return "\n".join(results)
 
 
+_RETRIEVAL_INDEX = SemanticCodeIndex()
+
+
+def retrieve_relevant_context(
+    query: str,
+    folder_context,
+    top_k: int = 5,
+    filters: dict | None = None,
+) -> str:
+    """Returns ranked context snippets from the semantic code index."""
+    if not str(query or "").strip():
+        return json.dumps({"error": "query is required"})
+    if not folder_context or not folder_context.folders:
+        return json.dumps({"query": query, "count": 0, "results": []})
+    _RETRIEVAL_INDEX.refresh_incremental(folder_context)
+    payload = _RETRIEVAL_INDEX.retrieve(
+        query,
+        top_k=max(1, int(top_k or 5)),
+        filters=filters or {},
+    )
+    payload["target_latency_ms"] = 2000
+    payload["latency_ok"] = bool(payload.get("latency_ms", 0) < 2000)
+    payload["ok"] = True
+    payload["message"] = (
+        f"Retrieved {payload.get('count', 0)} snippet(s) for query '{query}'."
+    )
+    return json.dumps(payload, indent=2)
+
+
 def get_chunk(filename: str, start_line: int, end_line: int, folder_context) -> str:
     """Returns a string of the file contents between the start and end line numbers."""
     if not _check_bounds(filename, folder_context):
@@ -1856,48 +1912,45 @@ def search_and_replace_file(
     except Exception as e:
         return json.dumps({"success": False, "error": f"Error reading file: {str(e)}"})
     
-    # Normalize whitespace if requested
-    search_pattern = search
-    if normalize_whitespace:
-        import re
-        # Collapse multiple whitespace to single space and trim
-        search_pattern = re.sub(r'\s+', ' ', search).strip()
-        # Also normalize in content for matching
-        normalized_content = re.sub(r'\s+', ' ', content)
-    else:
-        normalized_content = content
-    
     # Find all matches with locations
     matches = []
     lines = content.split('\n')
-    
+
     # Build line start positions for column calculation
     line_starts = [0]
     for line in lines:
         line_starts.append(line_starts[-1] + len(line) + 1)  # +1 for newline
-    
-    # Find all occurrences
-    search_content = normalized_content if normalize_whitespace else content
-    start_pos = 0
-    while True:
-        pos = search_content.find(search_pattern, start_pos)
-        if pos == -1:
-            break
-        
-        # Find line number and column
-        line_num = 1
-        for i, start in enumerate(line_starts):
-            if start > pos:
-                line_num = i
+
+    def _line_col_for_offset(offset: int) -> tuple[int, int]:
+        line_index = bisect.bisect_right(line_starts, offset) - 1
+        line_num = max(1, line_index + 1)
+        column = offset - line_starts[line_index] + 1
+        return line_num, column
+
+    if normalize_whitespace:
+        tokens = [token for token in re.split(r"(\s+)", search) if token != ""]
+        pattern_parts = []
+        for token in tokens:
+            if token.isspace():
+                pattern_parts.append(r"\s+")
+            else:
+                pattern_parts.append(re.escape(token))
+        regex = re.compile("".join(pattern_parts))
+        regex_matches = list(regex.finditer(content))
+        located_matches = [(m.start(), m.end()) for m in regex_matches]
+    else:
+        located_matches = []
+        start_pos = 0
+        while True:
+            pos = content.find(search, start_pos)
+            if pos == -1:
                 break
-            line_num = i + 1
-        
-        # Calculate column (1-indexed)
-        if line_num == 1:
-            column = pos + 1
-        else:
-            column = pos - line_starts[line_num - 2] + 1
-        
+            located_matches.append((pos, pos + len(search)))
+            start_pos = pos + 1
+
+    for start_offset, _ in located_matches:
+        line_num, column = _line_col_for_offset(start_offset)
+
         # Get context (2-3 lines around the match for disambiguation)
         if 1 <= line_num <= len(lines):
             context_parts = []
@@ -1921,14 +1974,13 @@ def search_and_replace_file(
             context_line = "\n".join(context_parts)
         else:
             context_line = ""
-        
+
         matches.append({
             "line": line_num,
             "column": column,
             "context": context_line
         })
-        start_pos = pos + 1
-    
+
     # Check match count
     if len(matches) == 0:
         return json.dumps({
@@ -1950,11 +2002,17 @@ def search_and_replace_file(
     
     # Perform replacement
     if normalize_whitespace:
-        # For normalized matching, we need to be more careful
-        import re
-        # Use regex to handle whitespace normalization in replacement
-        normalized_search = re.sub(r'\s+', ' ', search).strip()
-        new_content = re.sub(re.escape(normalized_search), replace, normalized_content, count=0 if expected_count is None else expected_count)
+        if not located_matches:
+            new_content = content
+        else:
+            rebuilt = []
+            cursor = 0
+            for start_offset, end_offset in located_matches:
+                rebuilt.append(content[cursor:start_offset])
+                rebuilt.append(replace)
+                cursor = end_offset
+            rebuilt.append(content[cursor:])
+            new_content = "".join(rebuilt)
     else:
         new_content = content.replace(search, replace)
     
@@ -1969,6 +2027,8 @@ def search_and_replace_file(
     )
     preview = "".join(diff)
     
+    diff_output = f"DIFF:\n{preview}" if preview else "DIFF:\n(no changes)"
+
     # If dry_run, return preview without modifying
     if dry_run:
         return json.dumps({
@@ -1977,6 +2037,7 @@ def search_and_replace_file(
             "match_locations": matches,
             "modified": False,
             "preview": preview,
+            "diff": diff_output,
             "dry_run": True
         })
     
@@ -1989,7 +2050,8 @@ def search_and_replace_file(
             "matches_found": len(matches),
             "match_locations": matches,
             "modified": True,
-            "preview": preview
+            "preview": preview,
+            "diff": diff_output
         })
     except Exception as e:
         logger.error(f"search_and_replace_file: Error writing {filename}: {e}")
@@ -2313,7 +2375,7 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
         # Use duckduckgo-search package for reliable DuckDuckGo access
         try:
             from ddgs import DDGS
-    
+
             results = []
             with DDGS() as ddg:
                 for i, r in enumerate(ddg.text(query, max_results=num_results)):
@@ -2328,6 +2390,49 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
                             source_type="web"
                         )
                     })
+
+            # Fallback for environments where DDGS returns no results due to
+            # transient upstream throttling/challenges.
+            if not results:
+                try:
+                    import httpx
+                    from bs4 import BeautifulSoup
+
+                    fallback_url = "https://html.duckduckgo.com/html/"
+                    response = httpx.get(
+                        fallback_url,
+                        params={"q": query},
+                        timeout=30.0,
+                        follow_redirects=True,
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    response.raise_for_status()
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    for i, row in enumerate(soup.select(".result")[:num_results]):
+                        link = row.select_one(".result__a")
+                        snippet = row.select_one(".result__snippet")
+                        href = link.get("href", "") if link else ""
+                        title = link.get_text(strip=True) if link else ""
+                        body = snippet.get_text(strip=True) if snippet else ""
+                        if not href and not title:
+                            continue
+                        results.append({
+                            "title": title,
+                            "url": href,
+                            "snippet": body,
+                            "relevance_score": 1.0 - (i * 0.05),
+                            "citation_id": register_source(
+                                title=title,
+                                url=href,
+                                source_type="web"
+                            )
+                        })
+                except Exception as fallback_err:
+                    logger.warning(
+                        "web_search: DuckDuckGo HTML fallback failed for '%s': %s",
+                        query,
+                        fallback_err,
+                    )
             
             urls_used = [r.get("url", "") for r in results if r.get("url")]
             return json.dumps({
@@ -2513,7 +2618,7 @@ def arxiv_search(query: str, folder_context=None, max_results: int = 10, categor
             result["citation_id"] = citation_id
             results_with_citations.append(result)
         
-        urls_used = [r.get("pdf_url", "") or r.get("arxiv_url", "") for r in results_with_citations if r.get("pdf_url") or r.get("arxiv_url")]
+        urls_used = [r.get("pdf_link", "") or r.get("url", "") for r in results_with_citations if r.get("pdf_link") or r.get("url")]
         return json.dumps({"query": query, "engine": "arxiv", "num_results": len(results_with_citations),
                            "urls_used": urls_used, "results": results_with_citations}, indent=2)
     
@@ -3056,6 +3161,108 @@ def infer_tool_error_code(tool_name: str, result: Any) -> str | None:
     return None
 
 
+def _build_tool_envelope(
+    *,
+    tool_name: str,
+    ok: bool,
+    message: str,
+    data: Any = None,
+    error_code: str | None = None,
+    artifacts: list | None = None,
+    telemetry: dict | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": bool(ok),
+        "error_code": error_code,
+        "message": str(message or ""),
+        "data": data if data is not None else {},
+        "artifacts": artifacts or [],
+        "telemetry": {
+            "tool_name": tool_name,
+            **(telemetry or {}),
+        },
+    }
+
+
+def _envelope_from_handler_result(tool_name: str, handler_result: Any) -> dict[str, Any]:
+    def _ensure_envelope_shape(payload: dict[str, Any]) -> dict[str, Any]:
+        out = dict(payload)
+        if "error_code" not in out:
+            out["error_code"] = None if out.get("ok") else infer_tool_error_code(tool_name, out)
+        if "message" not in out:
+            if isinstance(out.get("error"), str):
+                out["message"] = out.get("error", "")
+            elif out.get("ok"):
+                out["message"] = "ok"
+            else:
+                out["message"] = str(out.get("error") or "")
+        if "data" not in out:
+            out["data"] = {}
+        if "artifacts" not in out:
+            out["artifacts"] = []
+        telemetry = out.get("telemetry")
+        out["telemetry"] = telemetry if isinstance(telemetry, dict) else {}
+        out["telemetry"].setdefault("tool_name", tool_name)
+        return out
+
+    if isinstance(handler_result, dict):
+        # Already envelope-compliant payload
+        if {"ok", "error_code", "message", "data", "artifacts", "telemetry"}.issubset(
+            handler_result.keys()
+        ):
+            return handler_result
+        if "ok" in handler_result:
+            return _ensure_envelope_shape(handler_result)
+        error_code = infer_tool_error_code(tool_name, json.dumps(handler_result))
+        return _build_tool_envelope(
+            tool_name=tool_name,
+            ok=error_code is None,
+            error_code=error_code,
+            message=json.dumps(handler_result, sort_keys=True),
+            data=handler_result,
+        )
+
+    raw_text = str(handler_result or "")
+    parsed_data = None
+    if raw_text:
+        try:
+            parsed = json.loads(raw_text)
+            if isinstance(parsed, dict):
+                if {"ok", "error_code", "message", "data", "artifacts", "telemetry"}.issubset(
+                    parsed.keys()
+                ):
+                    return parsed
+                if "ok" in parsed:
+                    return _ensure_envelope_shape(parsed)
+                # Tool-local structured JSON payload.
+                success_value = parsed.get("success")
+                parsed_error = parsed.get("error")
+                if success_value is not None or parsed_error:
+                    ok = bool(success_value) and not parsed_error
+                    error_code = None if ok else infer_tool_error_code(tool_name, parsed_error or raw_text)
+                    envelope = _build_tool_envelope(
+                        tool_name=tool_name,
+                        ok=ok,
+                        error_code=error_code,
+                        message=str(parsed_error or ("success" if ok else raw_text)),
+                        data=parsed,
+                    )
+                    envelope.update(parsed)
+                    return envelope
+            parsed_data = parsed
+        except Exception:
+            parsed_data = None
+
+    error_code = infer_tool_error_code(tool_name, raw_text)
+    return _build_tool_envelope(
+        tool_name=tool_name,
+        ok=error_code is None,
+        error_code=error_code,
+        message=raw_text,
+        data=parsed_data if isinstance(parsed_data, (dict, list)) else {},
+    )
+
+
 def serialize_tool_descriptor(tool_name: str) -> dict | None:
     descriptor = get_tool_descriptor(tool_name)
     if not descriptor:
@@ -3114,6 +3321,15 @@ def _handle_read_file(args, folder_context, ui, variables) -> str:
 
 def _handle_search_for_string(args, folder_context, ui, variables) -> str:
     return search_for_string(args.get("string", ""), folder_context)
+
+
+def _handle_retrieve_relevant_context(args, folder_context, ui, variables) -> str:
+    return retrieve_relevant_context(
+        args.get("query", ""),
+        folder_context,
+        top_k=args.get("top_k", 5),
+        filters=args.get("filters", {}),
+    )
 
 
 def _handle_get_chunk(args, folder_context, ui, variables) -> str:
@@ -3222,15 +3438,35 @@ def _handle_doi_resolve(args, folder_context, ui, variables) -> str:
 
 
 def _handle_reddit_search(args, folder_context, ui, variables) -> str:
-    return reddit_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("subreddit", ""))
+    return reddit_search(
+        args.get("query", ""),
+        subreddit=args.get("subreddit"),
+        sort=args.get("sort", "relevance"),
+        limit=args.get("num_results", args.get("max_results", 10)),
+        folder_context=folder_context,
+    )
 
 
 def _handle_stackoverflow_search(args, folder_context, ui, variables) -> str:
-    return stackoverflow_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("tags", []))
+    tags = args.get("tags")
+    if tags is None and args.get("tag"):
+        tags = [args.get("tag")]
+    return stackoverflow_search(
+        args.get("query", ""),
+        tags=tags,
+        sort=args.get("sort", "relevance"),
+        limit=args.get("num_results", args.get("max_results", 10)),
+        folder_context=folder_context,
+    )
 
 
 def _handle_hackernews_search(args, folder_context, ui, variables) -> str:
-    return hackernews_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("sort", "relevance"))
+    return hackernews_search(
+        args.get("query", ""),
+        sort=args.get("sort", "relevance"),
+        num_results=args.get("num_results", args.get("max_results", 10)),
+        folder_context=folder_context,
+    )
 
 
 def _handle_read_document(args, folder_context, ui, variables) -> str:
@@ -4093,28 +4329,80 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
 def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
     commands = args.get("commands", [])
     if not isinstance(commands, list):
-        return "Error: 'commands' must be a list."
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name="batch_job",
+                ok=False,
+                error_code="invalid_args",
+                message="Error: 'commands' must be a list.",
+                data={"children": []},
+            )
+        )
 
-    results = []
+    children = []
     for i, cmd in enumerate(commands):
         if not isinstance(cmd, dict):
-            results.append(f"Error: Command {i} - invalid command entry.")
+            children.append(
+                {
+                    "index": i,
+                    "tool_name": None,
+                    "result": _build_tool_envelope(
+                        tool_name="batch_job",
+                        ok=False,
+                        error_code="invalid_args",
+                        message=f"Error: Command {i} - invalid command entry.",
+                    ),
+                }
+            )
             continue
 
         name = cmd.get("tool_name")
         t_args = cmd.get("tool_args", {})
 
         if not name:
-            results.append(f"Error: Command {i} - tool_name missing.")
+            children.append(
+                {
+                    "index": i,
+                    "tool_name": None,
+                    "result": _build_tool_envelope(
+                        tool_name="batch_job",
+                        ok=False,
+                        error_code="invalid_args",
+                        message=f"Error: Command {i} - tool_name missing.",
+                    ),
+                }
+            )
             continue
 
         nested_descriptor = get_tool_descriptor(name)
         if not nested_descriptor:
-            results.append(f"Error: Command {i} - unknown tool: {name}")
+            children.append(
+                {
+                    "index": i,
+                    "tool_name": name,
+                    "result": _build_tool_envelope(
+                        tool_name=name,
+                        ok=False,
+                        error_code="not_found",
+                        message=f"Error: Command {i} - unknown tool: {name}",
+                    ),
+                }
+            )
             continue
 
         if nested_descriptor.execution_kind == "composite":
-            results.append(f"Error: Command {i} - nested batch_job not allowed.")
+            children.append(
+                {
+                    "index": i,
+                    "tool_name": name,
+                    "result": _build_tool_envelope(
+                        tool_name=name,
+                        ok=False,
+                        error_code="unsupported",
+                        message=f"Error: Command {i} - nested batch_job not allowed.",
+                    ),
+                }
+            )
             continue
 
         if context.ui:
@@ -4130,12 +4418,27 @@ def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
             context.variables,
             invocation_source=context.invocation_source,
         )
-        results.append(f"Tool: {name}\nResult: {res}")
+        try:
+            child_result = json.loads(res)
+        except Exception:
+            child_result = _envelope_from_handler_result(name, res)
+        children.append({"index": i, "tool_name": name, "result": child_result})
 
-    return (
-        "--- Batch Job Results ---\n"
-        + "\n\n---\n\n".join(results)
-        + "\n------------------------"
+    ok = all(bool(item.get("result", {}).get("ok")) for item in children)
+    message = (
+        f"Batch completed with {len(children)} command(s)."
+        if ok
+        else f"Batch completed with failures in {sum(1 for c in children if not c.get('result', {}).get('ok'))} command(s)."
+    )
+    return json.dumps(
+        _build_tool_envelope(
+            tool_name="batch_job",
+            ok=ok,
+            error_code=None if ok else "execution_failed",
+            message=message,
+            data={"children": children, "count": len(children)},
+        ),
+        indent=2,
     )
 
 
@@ -4165,6 +4468,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     ),
     "read_file": _legacy_handler(_handle_read_file),
     "search_for_string": _legacy_handler(_handle_search_for_string),
+    "retrieve_relevant_context": _legacy_handler(_handle_retrieve_relevant_context),
     "get_chunk": _legacy_handler(_handle_get_chunk),
     "get_current_time": _legacy_handler(_handle_get_current_time),
     "list_dir": _legacy_handler(_handle_list_dir),
@@ -4228,18 +4532,39 @@ def execute_tool(
 
     descriptor = get_tool_descriptor(tool_name)
     if not descriptor:
-        return f"Unknown tool: {tool_name}"
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name=tool_name,
+                ok=False,
+                error_code="not_found",
+                message=f"Unknown tool: {tool_name}",
+            )
+        )
 
     if not isinstance(args, dict):
-        return (
-            f"Error: Tool '{tool_name}' arguments must be an object/dict, "
-            f"got {type(args).__name__}. Please re-issue the tool call with JSON object arguments."
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name=tool_name,
+                ok=False,
+                error_code="invalid_args",
+                message=(
+                    f"Error: Tool '{tool_name}' arguments must be an object/dict, "
+                    f"got {type(args).__name__}. Please re-issue the tool call with JSON object arguments."
+                ),
+            )
         )
 
     path_keys = ["filename", "file", "path"]
     for key in path_keys:
         if key in args and (not args[key] or str(args[key]).strip() == ""):
-            return _path_arg_error(key)
+            return json.dumps(
+                _build_tool_envelope(
+                    tool_name=tool_name,
+                    ok=False,
+                    error_code="invalid_args",
+                    message=_path_arg_error(key),
+                )
+            )
 
     if tool_name == "apply_diff" and session is not None:
         feature_state = (
@@ -4254,26 +4579,52 @@ def execute_tool(
         if in_review_mode:
             proposal_id = str(args.get("proposal_id", "") or "").strip()
             if not proposal_id:
-                return (
-                    "Error: apply_diff in review mode requires proposal_id for an approved diff proposal."
+                return json.dumps(
+                    _build_tool_envelope(
+                        tool_name=tool_name,
+                        ok=False,
+                        error_code="invalid_args",
+                        message="Error: apply_diff in review mode requires proposal_id for an approved diff proposal.",
+                    )
                 )
             metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
             if not metadata_path or not os.path.exists(metadata_path):
-                return "Error: Feature metadata not found for review-mode apply_diff."
+                return json.dumps(
+                    _build_tool_envelope(
+                        tool_name=tool_name,
+                        ok=False,
+                        error_code="not_found",
+                        message="Error: Feature metadata not found for review-mode apply_diff.",
+                    )
+                )
             plan = load_feature_plan(metadata_path)
             proposal = next(
                 (item for item in plan.diff_proposals if item.id == proposal_id),
                 None,
             )
             if proposal is None or proposal.status != "approved":
-                return (
-                    "Error: apply_diff blocked in review mode. "
-                    "proposal_id must reference an approved diff proposal."
+                return json.dumps(
+                    _build_tool_envelope(
+                        tool_name=tool_name,
+                        ok=False,
+                        error_code="access_denied",
+                        message=(
+                            "Error: apply_diff blocked in review mode. "
+                            "proposal_id must reference an approved diff proposal."
+                        ),
+                    )
                 )
 
     handler = TOOL_HANDLERS.get(descriptor.handler_key)
     if not handler:
-        return f"Error: No handler registered for tool '{tool_name}'."
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name=tool_name,
+                ok=False,
+                error_code="not_found",
+                message=f"Error: No handler registered for tool '{tool_name}'.",
+            )
+        )
 
     context = build_tool_context(
         folder_context,
@@ -4283,7 +4634,11 @@ def execute_tool(
         session=session,
     )
     try:
-        return handler(args, context)
+        raw_result = handler(args, context)
+        envelope = _envelope_from_handler_result(tool_name, raw_result)
+        if "execution_source" not in envelope.get("telemetry", {}):
+            envelope.setdefault("telemetry", {})["execution_source"] = invocation_source
+        return json.dumps(envelope, indent=2, sort_keys=True)
     except Exception as exc:
         hint = ""
         if isinstance(exc, AttributeError) and "'str' object has no attribute 'get'" in str(
@@ -4294,7 +4649,16 @@ def execute_tool(
                 "(commonly malformed tool arguments like tasks)."
             )
         logger.error("Tool execution failed for %s: %s", tool_name, exc, exc_info=True)
-        return (
-            f"Error: Tool '{tool_name}' failed with {type(exc).__name__}: {exc}."
-            f"{hint} Please fix arguments and retry."
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name=tool_name,
+                ok=False,
+                error_code="execution_failed",
+                message=(
+                    f"Error: Tool '{tool_name}' failed with {type(exc).__name__}: {exc}."
+                    f"{hint} Please fix arguments and retry."
+                ),
+                telemetry={"execution_source": invocation_source},
+            ),
+            indent=2,
         )

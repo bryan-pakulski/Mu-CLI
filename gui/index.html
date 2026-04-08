@@ -200,8 +200,13 @@
         <p class="muted">Pick a folder from your local machine or enter an existing path.</p>
         <div class="folder-row">
           <input id="folderPathInput" type="text" placeholder="/path/to/folder" />
-          <button id="browseFolderBtn" class="btn" type="button">Browse…</button>
+          <button id="browseFolderBtn" class="btn" type="button">Navigator</button>
         </div>
+        <div class="folder-browser-head">
+          <button id="folderUpBtn" class="btn" type="button">Up</button>
+          <span id="folderBrowserPath" class="muted"></span>
+        </div>
+        <div id="folderBrowserList" class="memory-list"></div>
         <div class="modal-actions">
           <button id="attachFolderConfirmBtn" class="btn btn-primary" type="button">Attach</button>
           <button id="closeFolderModalBtn" class="btn" type="button">Cancel</button>
@@ -218,6 +223,8 @@
         <div id="memoryBufferList" class="memory-list"></div>
         <h4>Scratchpad buffer</h4>
         <div id="scratchpadBufferList" class="memory-list"></div>
+        <h4>Context layers</h4>
+        <div id="memoryLayersList" class="memory-list"></div>
         <h4>Recent memory tool activity</h4>
         <div id="memoryActivityList" class="memory-list"></div>
         <div class="modal-actions">

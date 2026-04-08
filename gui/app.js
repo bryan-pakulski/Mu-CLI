@@ -131,12 +131,16 @@ const ui = {
   folderModal: el("folderModal"),
   folderPathInput: el("folderPathInput"),
   browseFolderBtn: el("browseFolderBtn"),
+  folderUpBtn: el("folderUpBtn"),
+  folderBrowserPath: el("folderBrowserPath"),
+  folderBrowserList: el("folderBrowserList"),
   attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
   closeFolderModalBtn: el("closeFolderModalBtn"),
   memoryModal: el("memoryModal"),
   memorySearchInput: el("memorySearchInput"),
   memoryBufferList: el("memoryBufferList"),
   scratchpadBufferList: el("scratchpadBufferList"),
+  memoryLayersList: el("memoryLayersList"),
   memoryActivityList: el("memoryActivityList"),
   closeMemoryModalBtn: el("closeMemoryModalBtn"),
   settingsBtn: el("settingsBtn"),
@@ -301,7 +305,7 @@ function persistDrafts() {
 }
 
 function sessionMemory(sessionName = state.currentSession) {
-  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], query: "" };
+  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], layers: [], query: "" };
   return state.memoryBySession[sessionName];
 }
 
@@ -1415,6 +1419,7 @@ async function refreshMemoryBuffers(sessionName = state.currentSession) {
     const mem = sessionMemory(sessionName);
     mem.buffer = Array.isArray(payload.memory_entries) ? payload.memory_entries : [];
     mem.scratchpad = Array.isArray(payload.scratchpad_entries) ? payload.scratchpad_entries : [];
+    mem.layers = Array.isArray(payload.context_layers) ? payload.context_layers : [];
     if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
   } catch {
     return;
@@ -1454,6 +1459,20 @@ function renderMemoryModal() {
     ? scratchEntries.map((entry) => renderEntry(entry, "scratchpad")).join("")
     : '<div class="activity-empty">No scratchpad entries found.</div>';
 
+  const layers = Array.isArray(mem.layers) ? mem.layers : [];
+  ui.memoryLayersList.innerHTML = layers.length
+    ? layers.map((layer) => {
+      const current = Number(layer.current || 0);
+      const maximum = Math.max(1, Number(layer.maximum || 1));
+      const pct = Math.max(0, Math.min(100, Math.round((current / maximum) * 100)));
+      return `<article class="memory-item">
+        <div class="memory-item-title">${layer.layer || ""} · ${layer.name || "Layer"} · ${current}/${maximum} (${pct}%)</div>
+        <div class="memory-item-body">${layer.description || ""}</div>
+        <div class="meter"><div class="meter-fill" style="width:${pct}%"></div></div>
+      </article>`;
+    }).join("")
+    : '<div class="activity-empty">No context layer stats available.</div>';
+
   ui.memoryActivityList.innerHTML = mem.activity.length
     ? mem.activity.slice(-60).reverse().map((e) => `<article class="memory-item"><div class="memory-item-title">${e.title} · ${new Date(e.at).toLocaleTimeString()}</div><div class="memory-item-body">${e.body || ""}</div></article>`).join("")
     : '<div class="activity-empty">No memory tool activity yet.</div>';
@@ -1487,6 +1506,41 @@ function closeMemoryModal() {
   if (state.memoryPollTimer) {
     clearInterval(state.memoryPollTimer);
     state.memoryPollTimer = null;
+  }
+}
+
+async function refreshFolderNavigator(path = "") {
+  try {
+    const payload = await fetchJson(
+      "/api/workspaces/list-dir",
+      { method: "POST", body: JSON.stringify({ path }) },
+      15000,
+    );
+    const current = payload.current_path || path || "";
+    ui.folderBrowserPath.textContent = current;
+    ui.folderUpBtn.dataset.path = payload.parent_path || "";
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    ui.folderBrowserList.innerHTML = entries.length
+      ? entries
+          .map(
+            (entry) =>
+              `<article class="memory-item folder-entry" data-path="${entry.path}"><div class="memory-item-title">Directory</div><div class="memory-item-body">${entry.name}</div></article>`,
+          )
+          .join("")
+      : '<div class="activity-empty">No subdirectories.</div>';
+    ui.folderBrowserList.querySelectorAll(".folder-entry").forEach((el) => {
+      el.addEventListener("click", () => {
+        const nextPath = el.getAttribute("data-path") || "";
+        if (!nextPath) return;
+        ui.folderPathInput.value = nextPath;
+        refreshFolderNavigator(nextPath);
+      });
+    });
+  } catch (err) {
+    ui.folderBrowserPath.textContent = "Navigator unavailable";
+    ui.folderBrowserList.innerHTML = `<div class="activity-empty">${escapeHtml(
+      err.message || "Unable to browse directories.",
+    )}</div>`;
   }
 }
 
@@ -2386,27 +2440,18 @@ ${marker}` : marker;
     ui.folderPathInput.value = "";
     showModal(ui.folderModal);
     ui.folderPathInput.focus();
+    refreshFolderNavigator("");
   };
 
   ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
   ui.browseFolderBtn.addEventListener("click", async () => {
-    ui.browseFolderBtn.disabled = true;
-    const previousText = ui.browseFolderBtn.textContent;
-    ui.browseFolderBtn.textContent = "Browsing…";
-    try {
-      const data = await fetchJson("/api/workspaces/browse", { method: "POST", body: JSON.stringify({}) }, 20000);
-      if (data?.path) {
-        ui.folderPathInput.value = data.path;
-        ui.folderPathInput.focus();
-      } else {
-        setStatus("No folder selected.", "error");
-      }
-    } catch (err) {
-      setStatus(`Error: ${err.message}`, "error");
-    } finally {
-      ui.browseFolderBtn.disabled = false;
-      ui.browseFolderBtn.textContent = previousText;
-    }
+    refreshFolderNavigator(ui.folderPathInput.value.trim());
+  });
+  ui.folderUpBtn?.addEventListener("click", () => {
+    const parentPath = ui.folderUpBtn.dataset.path || "";
+    if (!parentPath) return;
+    ui.folderPathInput.value = parentPath;
+    refreshFolderNavigator(parentPath);
   });
   ui.attachFolderConfirmBtn.addEventListener("click", async () => {
     const path = ui.folderPathInput.value.trim();
@@ -2469,6 +2514,12 @@ ${marker}` : marker;
   });
   ui.closeSettingsBtn.addEventListener("click", () => hideModal(ui.settingsModal));
   ui.saveSettingsBtn.addEventListener("click", () => saveSettings().catch((err) => setStatus(`Error: ${err.message}`, "error")));
+
+  [ui.folderModal, ui.memoryModal, ui.ticketModal, ui.createFeatureModal, ui.settingsModal].forEach((modalEl) => {
+    modalEl?.addEventListener("click", (evt) => {
+      if (evt.target === modalEl) hideModal(modalEl);
+    });
+  });
 
   ui.settingsTabs.addEventListener("click", (evt) => {
     const btn = evt.target.closest(".settings-tab");

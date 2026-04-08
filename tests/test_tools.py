@@ -8,6 +8,7 @@ from core.tools import (
     ToolExecutionContext,
     execute_tool,
     TOOL_HANDLERS,
+    TOOLS,
 )
 from core.workspace import FolderContext
 
@@ -46,6 +47,11 @@ class _FeatureSessionManagerStub:
 class _SessionStub:
     def __init__(self, metadata_path: str):
         self.session_manager = _FeatureSessionManagerStub(metadata_path)
+
+
+def _assert_tool_envelope(payload: dict):
+    required = {"ok", "error_code", "message", "data", "artifacts", "telemetry"}
+    assert required.issubset(payload.keys())
 
 
 def test_workspace_boundaries(tmp_path):
@@ -143,7 +149,11 @@ def test_execute_tool_rejects_non_dict_args(tmp_path):
     ctx.add_folder(str(tmp_path))
 
     result = execute_tool("read_file", "not-a-dict", ctx)
-    assert "arguments must be an object/dict" in result
+    payload = json.loads(result)
+    _assert_tool_envelope(payload)
+    assert payload["ok"] is False
+    assert payload["error_code"] == "invalid_args"
+    assert "arguments must be an object/dict" in payload["message"]
 
 
 def test_execute_tool_converts_handler_exception_to_error(tmp_path, monkeypatch):
@@ -155,7 +165,56 @@ def test_execute_tool_converts_handler_exception_to_error(tmp_path, monkeypatch)
 
     monkeypatch.setitem(TOOL_HANDLERS, "read_file", _boom)
     result = execute_tool("read_file", {"filename": "x.txt"}, ctx)
-    assert "Tool 'read_file' failed with RuntimeError: boom" in result
+    payload = json.loads(result)
+    _assert_tool_envelope(payload)
+    assert payload["ok"] is False
+    assert payload["error_code"] == "execution_failed"
+    assert "Tool 'read_file' failed with RuntimeError: boom" in payload["message"]
+
+
+def test_all_tools_return_schema_valid_envelope_on_invalid_args(tmp_path):
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+
+    for tool in TOOLS:
+        raw = execute_tool(tool.name, "bad-args", ctx)
+        payload = json.loads(raw)
+        _assert_tool_envelope(payload)
+        assert payload["ok"] is False
+        assert payload["error_code"] == "invalid_args"
+
+
+def test_error_code_coverage_core_categories(tmp_path, monkeypatch):
+    ctx = FolderContext()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx.add_folder(str(workspace))
+
+    # invalid_args
+    invalid_payload = json.loads(execute_tool("read_file", "bad-args", ctx))
+    assert invalid_payload["error_code"] == "invalid_args"
+
+    # not_found
+    not_found_payload = json.loads(execute_tool("missing_tool", {}, ctx))
+    assert not_found_payload["error_code"] == "not_found"
+
+    # access_denied
+    outside_file = tmp_path / "secret.txt"
+    outside_file.write_text("secret")
+    denied_payload = json.loads(
+        execute_tool("read_file", {"filename": str(outside_file)}, ctx)
+    )
+    assert denied_payload["error_code"] == "access_denied"
+
+    # execution_failed
+    def _boom(args, context):
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(TOOL_HANDLERS, "read_file", _boom)
+    failed_payload = json.loads(
+        execute_tool("read_file", {"filename": str(workspace / "x.txt")}, ctx)
+    )
+    assert failed_payload["error_code"] == "execution_failed"
 
 
 def test_create_feature_create_phases_create_task_staged_flow(tmp_path):

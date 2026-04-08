@@ -137,6 +137,67 @@ def collect_runtime_metrics(session):
     }
 
 
+def collect_context_layers(session):
+    summary_limit = max(
+        1, int(session.variables.get("conversation_summary_char_limit", 8000) or 8000)
+    )
+    tool_limit = max(
+        1, int(session.variables.get("recent_tool_context_char_limit", 12000) or 12000)
+    )
+    retrieval_limit = max(
+        1, int(session.variables.get("retrieval_context_char_limit", 5000) or 5000)
+    )
+    goal_limit = max(
+        1, int(session.variables.get("active_goal_context_char_limit", 4000) or 4000)
+    )
+    summary_text = str(getattr(session.session_manager, "conversation_summary", "") or "")
+    goal_text = str(session._build_active_goal_context() or "")
+    tool_text = str(session._build_recent_tool_context(max_chars=tool_limit) or "")
+    retrieved_text = str(getattr(session, "_pending_retrieved_context", "") or "")
+    current_turn = ""
+    if session.session_manager.history:
+        current_turn = json.dumps(session.session_manager.history[-1], default=str)
+
+    layers = [
+        {
+            "layer": "L2",
+            "name": "Conversation summary",
+            "current": min(len(summary_text), summary_limit),
+            "maximum": summary_limit,
+            "description": "Long-horizon continuity summary.",
+        },
+        {
+            "layer": "L3",
+            "name": "Active goal",
+            "current": min(len(goal_text), goal_limit),
+            "maximum": goal_limit,
+            "description": "Feature/task status + scratchpad snapshot.",
+        },
+        {
+            "layer": "L4",
+            "name": "Recent tool activity",
+            "current": min(len(tool_text), tool_limit),
+            "maximum": tool_limit,
+            "description": "Compressed recent tool calls/results.",
+        },
+        {
+            "layer": "L4B",
+            "name": "Retrieved snippets",
+            "current": min(len(retrieved_text), retrieval_limit),
+            "maximum": retrieval_limit,
+            "description": "Semantic workspace retrieval context.",
+        },
+        {
+            "layer": "L5",
+            "name": "Current turn",
+            "current": len(current_turn),
+            "maximum": max(1, int(session.variables.get("context_token_limit", 256000) or 256000)),
+            "description": "Live request/response turn payload.",
+        },
+    ]
+    return layers
+
+
 def build_inline_meter(label, current, maximum, width=8):
     maximum = _max_int(maximum)
     current = max(0, int(current or 0))

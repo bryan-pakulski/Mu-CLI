@@ -14,6 +14,7 @@ from core.approval import build_approval_prompt, collect_approval_plans, Approva
 from core.collation import CollationBuffer
 from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
 from core.memory import ScratchpadStore, TaskMemoryStore
+from core.retrieval import SemanticCodeIndex
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
 from core.tools import (
@@ -538,7 +539,9 @@ class SessionManager:
         newline_index = clipped.find("\n")
         if newline_index > 0:
             clipped = clipped[newline_index + 1 :]
-        self.conversation_summary = f"...\n{clipped}".strip()
+        self.conversation_summary = (
+            f"[conversation_summary_truncated_to_last_{limit}_chars]\n{clipped}"
+        ).strip()
 
     @staticmethod
     def _estimate_tokens_from_text(text: str) -> int:
@@ -626,10 +629,46 @@ class SessionManager:
         for _ in range(max(1, int(max_passes or 1))):
             if self.estimate_runtime_history_tokens() <= token_budget:
                 break
-            if not self.roll_history_summary(keep_recent=keep_recent):
-                break
-            changed = True
+            if self.roll_history_summary(keep_recent=keep_recent):
+                changed = True
+                continue
+            if self._degrade_oldest_runtime_payload():
+                changed = True
+                continue
+            break
         return changed
+
+    def _degrade_oldest_runtime_payload(self, max_chars: int = 4000) -> bool:
+        """Fallback budget guard: clip oldest large unsummarized payloads."""
+        if self.summary_anchor > len(self.history):
+            self.summary_anchor = 0
+        for message in self.history[self.summary_anchor :]:
+            parts = message.get("parts", []) or []
+            for part in parts:
+                p_type = part.get("type")
+                if p_type == "text":
+                    value = str(part.get("text", "") or "")
+                    if len(value) > max_chars:
+                        part["text"] = (
+                            value[:max_chars].rstrip()
+                            + f"\n[truncated_to_{max_chars}_chars_for_context_budget]"
+                        )
+                        return True
+                elif p_type == "tool_result":
+                    raw = part.get("tool_result", "")
+                    serialized = (
+                        json.dumps(raw, default=str)
+                        if not isinstance(raw, str)
+                        else raw
+                    )
+                    if len(serialized) > max_chars:
+                        clipped = (
+                            serialized[:max_chars].rstrip()
+                            + f"\n[truncated_to_{max_chars}_chars_for_context_budget]"
+                        )
+                        part["tool_result"] = clipped
+                        return True
+        return False
 
     def view_history(self):
         if not self.history:
@@ -723,6 +762,8 @@ class Session:
         self.agentic = True
         self.staged_files = []  # list of dicts
         self.disabled_tools = []  # list of tool names strings
+        self.retrieval_index = SemanticCodeIndex()
+        self._pending_retrieved_context = ""
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -1103,7 +1144,8 @@ class Session:
 
         if summarized_lines:
             summary_text = (
-                "Compressed prior tool activity for this turn to reduce prompt size.\n"
+                "LAYER 4 — Recent tool activity (compressed for budget).\n"
+                "Older tool call/result pairs from this turn were summarized.\n"
                 + "\n".join(summarized_lines)
             )
             compressed_turn.insert(
@@ -1128,6 +1170,144 @@ class Session:
             "A rolling summary of older conversation history is available below. "
             "Use it for long-term continuity before re-reading or re-deriving prior work.\n"
             f"{summary}"
+        )
+
+    def _build_active_goal_context(self) -> str:
+        sections = []
+        feature_state = self.session_manager.get_feature_state()
+        if isinstance(feature_state, dict):
+            feature_id = str(feature_state.get("feature_id", "") or "").strip()
+            status = str(feature_state.get("status", "idle") or "idle")
+            next_task = feature_state.get("next_task")
+            if isinstance(next_task, dict):
+                next_task_text = str(
+                    next_task.get("title")
+                    or next_task.get("task")
+                    or next_task.get("name")
+                    or ""
+                ).strip()
+            else:
+                next_task_text = str(next_task or "").strip()
+            phase = feature_state.get("next_phase")
+            phase_title = (
+                str((phase or {}).get("title", "")).strip()
+                if isinstance(phase, dict)
+                else ""
+            )
+            sections.append(f"- feature_id: {feature_id or 'n/a'}")
+            sections.append(f"- status: {status}")
+            if phase_title:
+                sections.append(f"- active_phase: {phase_title}")
+            if next_task_text:
+                sections.append(f"- next_task: {next_task_text}")
+
+        scratch = self.turn_scratchpad.render_summary(limit=8).strip()
+        if scratch:
+            sections.append("\nScratchpad snapshot:\n" + scratch)
+        return "\n".join(sections).strip()
+
+    def _build_recent_tool_context(self, max_chars: int = 8000) -> str:
+        if max_chars <= 0:
+            return ""
+        recent = []
+        consumed = 0
+        for msg in reversed(self.session_manager.history):
+            if msg.get("role") not in {"assistant", "tool"}:
+                continue
+            for part in reversed(msg.get("parts", [])):
+                if part.get("type") not in {"tool_call", "tool_result"}:
+                    continue
+                line = self._summarize_message_parts({"role": msg.get("role"), "parts": [part]})
+                if not line:
+                    continue
+                entry = line + "\n"
+                if consumed + len(entry) > max_chars and recent:
+                    return "".join(reversed(recent)).strip()
+                recent.append(entry)
+                consumed += len(entry)
+        return "".join(reversed(recent)).strip()
+
+    def _build_retrieved_workspace_context(self, query: str) -> str:
+        if not self.folder_context or not self.folder_context.folders:
+            return ""
+        request = str(query or "").strip()
+        if not request:
+            return ""
+        top_k = max(1, int(self.variables.get("retrieval_top_k", 5) or 5))
+        char_budget = max(
+            1, int(self.variables.get("retrieval_context_char_limit", 5000) or 5000)
+        )
+        self.retrieval_index.refresh_incremental(self.folder_context)
+        payload = self.retrieval_index.retrieve(request, top_k=top_k, filters={})
+        lines = []
+        used = 0
+        for item in payload.get("results", []):
+            snippet = str(item.get("snippet", "") or "").strip()
+            entry = (
+                f"- {item.get('path')} (score={item.get('score')})\n"
+                f"{snippet}\n"
+            )
+            if used + len(entry) > char_budget and lines:
+                break
+            lines.append(entry)
+            used += len(entry)
+        if not lines:
+            return ""
+        return "".join(lines).strip()
+
+    def _inject_hierarchical_context(self, system_prompt: str) -> str:
+        summary_limit = max(
+            0, int(self.variables.get("conversation_summary_char_limit", 8000) or 8000)
+        )
+        summary = str(getattr(self.session_manager, "conversation_summary", "") or "").strip()
+        if summary_limit and len(summary) > summary_limit:
+            summary = summary[-summary_limit:].lstrip()
+
+        goal_context = self._build_active_goal_context()
+        tool_context = self._build_recent_tool_context(
+            max_chars=max(0, int(self.variables.get("recent_tool_context_char_limit", 12000) or 12000))
+        )
+
+        layers = []
+        if summary:
+            layers.append(
+                "LAYER 2 — Conversation summary:\n"
+                f"[budget: {summary_limit} chars | eviction: keep newest]\n{summary}"
+            )
+        if goal_context:
+            layers.append("LAYER 3 — Active task plan / current goal:\n" + goal_context)
+        if tool_context:
+            tool_limit = max(
+                0,
+                int(self.variables.get("recent_tool_context_char_limit", 12000) or 12000),
+            )
+            layers.append(
+                "LAYER 4 — Recent tool activity (latest first):\n"
+                f"[budget: {tool_limit} chars | eviction: drop oldest tool records]\n"
+                + tool_context
+            )
+        retrieved_context = str(getattr(self, "_pending_retrieved_context", "") or "").strip()
+        if retrieved_context:
+            retrieval_limit = max(
+                1,
+                int(self.variables.get("retrieval_context_char_limit", 5000) or 5000),
+            )
+            if len(retrieved_context) > retrieval_limit:
+                retrieved_context = retrieved_context[:retrieval_limit].rstrip()
+            layers.append(
+                "LAYER 4B — Retrieved workspace snippets:\n"
+                f"[budget: {retrieval_limit} chars | eviction: drop lowest-ranked snippets]\n"
+                + retrieved_context
+            )
+        layers.append(
+            "LAYER 5 — Current turn:\nAlways prioritize the live user message and current turn tool results over older context."
+        )
+        if not layers:
+            return system_prompt
+        return (
+            f"{system_prompt}\n\n"
+            "Hierarchical runtime context (layered with independent budgets/eviction):\n"
+            + "\n\n".join(layers)
         )
 
     def _render_tool_result(self, result) -> str:
@@ -1229,6 +1409,19 @@ class Session:
         except (TypeError, json.JSONDecodeError):
             return {"preview": self._clip_preview(raw_result, 260)}
 
+    def _unwrap_tool_envelope(self, raw_result):
+        parsed = self._parse_json_result(raw_result)
+        required = {"ok", "error_code", "message", "data", "artifacts", "telemetry"}
+        if not isinstance(parsed, dict) or not required.issubset(parsed.keys()):
+            return None, raw_result
+        message = parsed.get("message", "")
+        data = parsed.get("data")
+        if isinstance(message, str) and message.strip():
+            return parsed, message
+        if isinstance(data, str):
+            return parsed, data
+        return parsed, raw_result
+
     def _build_feature_mode_prompt(self, text: str) -> str:
         base_instruction = (
             "FEATURE MODE DIRECTIVE: use the feature-task engine for this request. First call create_feature to create canonical session-managed feature metadata, then create_phases, then create_task for each planned ticket. "
@@ -1294,11 +1487,16 @@ class Session:
         *,
         execution_source: str = "session",
     ):
-        raw_text = str(raw_result)
-        error_code = infer_tool_error_code(tool_name, raw_text)
+        envelope, unwrapped_raw = self._unwrap_tool_envelope(raw_result)
+        raw_text = str(unwrapped_raw)
+        error_code = (
+            envelope.get("error_code")
+            if isinstance(envelope, dict)
+            else infer_tool_error_code(tool_name, raw_text)
+        )
         structured = {
             "tool_name": tool_name,
-            "ok": error_code is None,
+            "ok": bool(envelope.get("ok")) if isinstance(envelope, dict) else error_code is None,
             "summary": self._clip_preview(raw_text, 220),
             "args": _shorten_tool_args(tool_args),
             "raw": raw_text,
@@ -1321,6 +1519,8 @@ class Session:
                 "raw_line_count": len(raw_text.splitlines()),
             },
         }
+        if isinstance(envelope, dict):
+            structured["telemetry"]["tool_envelope"] = envelope
 
         if tool_name == "read_file":
             structured["data"] = {
@@ -1610,8 +1810,13 @@ class Session:
             self.ui.render_message("user", text)
 
         workspace_context = ""
+        self._pending_retrieved_context = ""
 
         if self.folder_context.folders:
+            retrieval_query = effective_text or text
+            self._pending_retrieved_context = self._build_retrieved_workspace_context(
+                retrieval_query
+            )
             # Let tools auto discover workspace content as needed
             if self.agentic:
                 active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
@@ -1648,11 +1853,18 @@ class Session:
                     with self.ui.show_status(
                         "Scanning monitored folders for changes..."
                     ):
-                        folder_initial_xml = (
-                            self.folder_context.get_initial_context_xml()
-                        )
-                        folder_diff_xml = self.folder_context.get_context_diff_xml()
-                        workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
+                        if self._pending_retrieved_context:
+                            workspace_context = (
+                                "### RETRIEVAL-FIRST WORKSPACE CONTEXT\n"
+                                "Ranked snippets were selected from semantic index scoring.\n"
+                                f"{self._pending_retrieved_context}"
+                            )
+                        else:
+                            folder_initial_xml = (
+                                self.folder_context.get_initial_context_xml()
+                            )
+                            folder_diff_xml = self.folder_context.get_context_diff_xml()
+                            workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
         if str(self.variables.get("agent_mode", "default")).lower() == "feature":
@@ -1680,7 +1892,7 @@ class Session:
             int(context_limit * trim_threshold),
             keep_recent=4,
         )
-        base_system_prompt = self._inject_conversation_summary(base_system_prompt)
+        base_system_prompt = self._inject_hierarchical_context(base_system_prompt)
 
         recent_history = self._prepare_runtime_history()
         messages = self._build_messages_from_history(recent_history, new_user_message)
@@ -1723,13 +1935,16 @@ class Session:
                     )
                     if memory_summary:
                         dynamic_system_prompt += (
-                            "\n\nPersisted working memory is available below."
+                            "\n\nLAYER 3 — Persisted working memory snapshot:\n"
                             f"{memory_summary}"
                         )
                 if self.variables.get("scratchpad_enabled", True):
                     scratchpad_summary = self.turn_scratchpad.render_summary(limit=8)
                     if scratchpad_summary:
-                        dynamic_system_prompt += f"\n\n{scratchpad_summary}"
+                        dynamic_system_prompt += (
+                            "\n\nLAYER 3 — Turn scratchpad snapshot:\n"
+                            f"{scratchpad_summary}"
+                        )
 
                 if self.ui and hasattr(self.ui, "build_live_status"):
                     status_msg = self.ui.build_live_status(
@@ -2074,7 +2289,10 @@ class Session:
                     # --- End Collation Logic ---
                     if self.variables.get("structured_tool_results", True):
                         if raw_result != source_result:
-                            source_text = str(source_result)
+                            _, unwrapped_source = self._unwrap_tool_envelope(
+                                source_result
+                            )
+                            source_text = str(unwrapped_source)
                             result = self._build_structured_tool_result(
                                 part.tool_name,
                                 part.tool_args,

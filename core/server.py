@@ -20,6 +20,7 @@ from core.tools import (
 from providers.ollama import OllamaProvider
 from utils.logger import logger
 from utils.config import validate_and_cast, AGENTIC_SYSTEM_BASE, AGENTIC_MODES
+from utils.runtime_metrics import collect_context_layers
 from core.feature_mode import (
     build_phase_execution_prompt,
     build_review_prompt,
@@ -59,6 +60,27 @@ def pick_workspace_folder() -> tuple[str, str | None]:
     if not path:
         return "", None
     return os.path.abspath(os.path.expanduser(path)), None
+
+
+def list_workspace_directories(path: str) -> tuple[dict, str | None]:
+    raw = str(path or "").strip() or os.getcwd()
+    current = os.path.abspath(os.path.expanduser(raw))
+    if not os.path.isdir(current):
+        return {}, f"Directory not found: {current}"
+    try:
+        parent = os.path.dirname(current) if os.path.dirname(current) != current else None
+        entries = []
+        for name in sorted(os.listdir(current)):
+            full = os.path.join(current, name)
+            if os.path.isdir(full):
+                entries.append({"name": name, "path": full})
+        return {
+            "current_path": current,
+            "parent_path": parent,
+            "entries": entries,
+        }, None
+    except Exception as exc:
+        return {}, str(exc)
 
 
 class HeadlessUI:
@@ -1506,6 +1528,7 @@ def build_memory_buffers_payload(session) -> dict:
         "scratchpad_entries": [
             entry.to_dict() for entry in session.session_manager.turn_scratchpad.list_entries(limit=100)
         ],
+        "context_layers": collect_context_layers(session),
     }
 
 
@@ -2434,6 +2457,15 @@ def serve(session, host: str, port: int, command_handler):
                                 "selected": bool(path),
                             },
                         )
+                        return
+
+                    if parsed.path == "/api/workspaces/list-dir":
+                        target = str(payload.get("path", "") or "").strip()
+                        listing, error = list_workspace_directories(target)
+                        if error:
+                            self._send_json(400, {"ok": False, "error": error})
+                            return
+                        self._send_json(200, {"ok": True, **listing})
                         return
 
                     if parsed.path == "/api/workspaces/remove":

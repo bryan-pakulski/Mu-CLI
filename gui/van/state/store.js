@@ -1,4 +1,4 @@
-import van from "../vendor/van-1.6.0.min.js";
+import van from "../../vendor/van-1.6.0.min.js";
 
 export function createStore() {
   return {

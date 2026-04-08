@@ -2371,7 +2371,7 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
         # Use duckduckgo-search package for reliable DuckDuckGo access
         try:
             from ddgs import DDGS
-    
+
             results = []
             with DDGS() as ddg:
                 for i, r in enumerate(ddg.text(query, max_results=num_results)):
@@ -2386,6 +2386,49 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
                             source_type="web"
                         )
                     })
+
+            # Fallback for environments where DDGS returns no results due to
+            # transient upstream throttling/challenges.
+            if not results:
+                try:
+                    import httpx
+                    from bs4 import BeautifulSoup
+
+                    fallback_url = "https://html.duckduckgo.com/html/"
+                    response = httpx.get(
+                        fallback_url,
+                        params={"q": query},
+                        timeout=30.0,
+                        follow_redirects=True,
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    response.raise_for_status()
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    for i, row in enumerate(soup.select(".result")[:num_results]):
+                        link = row.select_one(".result__a")
+                        snippet = row.select_one(".result__snippet")
+                        href = link.get("href", "") if link else ""
+                        title = link.get_text(strip=True) if link else ""
+                        body = snippet.get_text(strip=True) if snippet else ""
+                        if not href and not title:
+                            continue
+                        results.append({
+                            "title": title,
+                            "url": href,
+                            "snippet": body,
+                            "relevance_score": 1.0 - (i * 0.05),
+                            "citation_id": register_source(
+                                title=title,
+                                url=href,
+                                source_type="web"
+                            )
+                        })
+                except Exception as fallback_err:
+                    logger.warning(
+                        "web_search: DuckDuckGo HTML fallback failed for '%s': %s",
+                        query,
+                        fallback_err,
+                    )
             
             urls_used = [r.get("url", "") for r in results if r.get("url")]
             return json.dumps({
@@ -2571,7 +2614,7 @@ def arxiv_search(query: str, folder_context=None, max_results: int = 10, categor
             result["citation_id"] = citation_id
             results_with_citations.append(result)
         
-        urls_used = [r.get("pdf_url", "") or r.get("arxiv_url", "") for r in results_with_citations if r.get("pdf_url") or r.get("arxiv_url")]
+        urls_used = [r.get("pdf_link", "") or r.get("url", "") for r in results_with_citations if r.get("pdf_link") or r.get("url")]
         return json.dumps({"query": query, "engine": "arxiv", "num_results": len(results_with_citations),
                            "urls_used": urls_used, "results": results_with_citations}, indent=2)
     
@@ -3391,15 +3434,35 @@ def _handle_doi_resolve(args, folder_context, ui, variables) -> str:
 
 
 def _handle_reddit_search(args, folder_context, ui, variables) -> str:
-    return reddit_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("subreddit", ""))
+    return reddit_search(
+        args.get("query", ""),
+        subreddit=args.get("subreddit"),
+        sort=args.get("sort", "relevance"),
+        limit=args.get("num_results", args.get("max_results", 10)),
+        folder_context=folder_context,
+    )
 
 
 def _handle_stackoverflow_search(args, folder_context, ui, variables) -> str:
-    return stackoverflow_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("tags", []))
+    tags = args.get("tags")
+    if tags is None and args.get("tag"):
+        tags = [args.get("tag")]
+    return stackoverflow_search(
+        args.get("query", ""),
+        tags=tags,
+        sort=args.get("sort", "relevance"),
+        limit=args.get("num_results", args.get("max_results", 10)),
+        folder_context=folder_context,
+    )
 
 
 def _handle_hackernews_search(args, folder_context, ui, variables) -> str:
-    return hackernews_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("sort", "relevance"))
+    return hackernews_search(
+        args.get("query", ""),
+        sort=args.get("sort", "relevance"),
+        num_results=args.get("num_results", args.get("max_results", 10)),
+        folder_context=folder_context,
+    )
 
 
 def _handle_read_document(args, folder_context, ui, variables) -> str:

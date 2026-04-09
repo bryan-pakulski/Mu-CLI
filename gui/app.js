@@ -426,6 +426,17 @@ async function fetchJson(path, options = {}, timeoutMs = 8000) {
   return data;
 }
 
+async function ensureServerSession(sessionName = state.currentSession) {
+  const target = String(sessionName || "").trim();
+  if (!target) return;
+  if (state.serverSession === target) return;
+  await fetchJson("/api/sessions/load", {
+    method: "POST",
+    body: JSON.stringify({ name: target }),
+  }, 12000);
+  state.serverSession = target;
+}
+
 function setStatus(text, kind = "") {
   ui.statusBadge.classList.remove("connected", "error", "warning");
   if (kind) ui.statusBadge.classList.add(kind);
@@ -673,7 +684,8 @@ async function confirmFeatureDraft(sessionName = state.currentSession) {
   draft.acceptance = String(ui.createFeatureAcceptanceInput?.value || "").trim();
   draft.risks = String(ui.createFeatureRisksInput?.value || "").trim();
   if (!draft.name) throw new Error("Feature name is required.");
-  const featureId = slugifyFeatureId(draft.name);
+  await ensureServerSession(sessionName);
+  const requestedFeatureId = slugifyFeatureId(draft.name);
   const featureRequestLines = [
     draft.feature_request || draft.name,
     draft.stakeholders ? `Stakeholders: ${draft.stakeholders}` : "",
@@ -681,18 +693,23 @@ async function confirmFeatureDraft(sessionName = state.currentSession) {
     draft.acceptance ? `Global acceptance criteria: ${draft.acceptance}` : "",
     draft.risks ? `Risks/blockers: ${draft.risks}` : "",
   ].filter(Boolean);
-  await fetchJson("/api/tool", {
+  const createResult = await fetchJson("/api/tool", {
     method: "POST",
     body: JSON.stringify({
       tool_name: "create_feature",
       tool_args: {
         feature_name: draft.name,
-        feature_id: featureId,
+        feature_id: requestedFeatureId,
         feature_request: featureRequestLines.join("\n"),
         design_plan: "Feature pipeline draft created in board UI",
       },
     }),
   });
+  const featureId = String(
+    createResult?.data?.feature_id
+    || createResult?.feature_id
+    || requestedFeatureId
+  ).trim();
   const phases = draft.epics
     .map((epic, index) => ({ id: index + 1, title: String(epic.title || `Epic ${index + 1}`).trim(), goal: String(epic.goal || "").trim(), order: index + 1 }))
     .filter((phase) => phase.title);
@@ -1419,6 +1436,7 @@ async function refreshBoardData({ force = false } = {}) {
   if (state.board.refreshInFlight) return;
   state.board.refreshInFlight = true;
   try {
+    await ensureServerSession(sessionName);
     const statePayload = await fetchJson("/api/state", {}, 8000);
     const featureState = statePayload?.feature_state || state.runtime?.feature_state || {};
     const featuresPayload = await fetchJson("/api/features", {}, 8000);
@@ -2031,6 +2049,7 @@ async function activateFeature(featureId) {
     renderFeatureSelectors(state.currentSession);
     return;
   }
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/activate", {
     method: "POST",
     body: JSON.stringify({ feature_id: resolved }),
@@ -2044,6 +2063,7 @@ async function activateFeature(featureId) {
 async function archiveSelectedFeature() {
   const record = selectedFeatureRecord();
   if (!record?.feature_id) return setStatus("No feature selected.", "warning");
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/archive", {
     method: "POST",
     body: JSON.stringify({ feature_id: record.feature_id }),
@@ -2055,6 +2075,7 @@ async function archiveSelectedFeature() {
 async function deleteSelectedFeature() {
   const record = selectedFeatureRecord();
   if (!record?.feature_id) return setStatus("No feature selected.", "warning");
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/delete", {
     method: "POST",
     body: JSON.stringify({ feature_id: record.feature_id }),
@@ -2065,6 +2086,7 @@ async function deleteSelectedFeature() {
 }
 
 async function unloadFeature() {
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/unload", {
     method: "POST",
     body: JSON.stringify({}),
@@ -2105,6 +2127,7 @@ function renderFeatureManagerModal() {
 }
 
 async function openFeatureManagerModal() {
+  await ensureServerSession(state.currentSession);
   await refreshBoardData({ force: true });
   renderFeatureManagerModal();
   showModal(ui.featureManagerModal);

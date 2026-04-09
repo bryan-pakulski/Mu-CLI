@@ -5,6 +5,7 @@ const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
 const PENDING_STORAGE_KEY = "mucli_gui_pending_v1";
 const BOARD_MODE_STORAGE_KEY = "mucli_gui_board_modes_v1";
 const BOARD_STATE_STORAGE_KEY = "mucli_gui_board_state_v1";
+const STREAM_SUBSCRIPTIONS_STORAGE_KEY = "mucli_gui_stream_subscriptions_v1";
 const LOOP_STORAGE_KEY = "mucli_gui_loop_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
@@ -71,6 +72,9 @@ const state = {
   approvalPollTimer: null,
   serverTaskPollTimer: null,
   eventSourceBySession: {},
+  eventSourceMetaBySession: {},
+  streamReconnectTimersBySession: {},
+  streamTaskIdBySession: {},
   thinkingPlaceholderTimer: null,
   board: {
     modeBySession: {},
@@ -82,6 +86,7 @@ const state = {
     filterBySession: {},
     pollTimer: null,
     stream: null,
+    streamReconnectTimer: null,
     refreshQueued: false,
     refreshInFlight: false,
     phaseOpenBySession: {},
@@ -269,6 +274,18 @@ try {
 } catch {
   state.loopBySession = {};
 }
+try {
+  const streamSubscriptions = JSON.parse(localStorage.getItem(STREAM_SUBSCRIPTIONS_STORAGE_KEY) || "{}");
+  if (streamSubscriptions && typeof streamSubscriptions === "object") {
+    state.streamTaskIdBySession = Object.fromEntries(
+      Object.entries(streamSubscriptions)
+        .map(([sessionName, taskId]) => [String(sessionName || "").trim(), String(taskId || "").trim()])
+        .filter(([sessionName, taskId]) => sessionName && taskId)
+    );
+  }
+} catch {
+  state.streamTaskIdBySession = {};
+}
 
 function loadPersistedActivity() {
   try {
@@ -305,6 +322,14 @@ function persistActivity() {
 function persistLoopState() {
   try {
     localStorage.setItem(LOOP_STORAGE_KEY, JSON.stringify(state.loopBySession || {}));
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function persistStreamSubscriptions() {
+  try {
+    localStorage.setItem(STREAM_SUBSCRIPTIONS_STORAGE_KEY, JSON.stringify(state.streamTaskIdBySession || {}));
   } catch {
     // ignore localStorage errors
   }
@@ -1576,6 +1601,10 @@ function scheduleBoardRefresh() {
 
 function startBoardEventStream() {
   if (state.board.stream) return;
+  if (state.board.streamReconnectTimer) {
+    clearTimeout(state.board.streamReconnectTimer);
+    state.board.streamReconnectTimer = null;
+  }
   const es = new EventSource(api("/api/events"));
   state.board.stream = es;
   const handle = (raw) => {
@@ -1593,7 +1622,11 @@ function startBoardEventStream() {
       state.board.stream.close();
       state.board.stream = null;
     }
-    setTimeout(startBoardEventStream, 1500);
+    if (state.board.streamReconnectTimer) return;
+    state.board.streamReconnectTimer = setTimeout(() => {
+      state.board.streamReconnectTimer = null;
+      startBoardEventStream();
+    }, 1500);
   };
 }
 
@@ -2333,11 +2366,41 @@ async function clearConversationContext() {
   await refreshHistory(true);
 }
 
-function closeEventStream(sessionName) {
+function clearTaskStreamReconnectTimer(sessionName) {
+  const timer = state.streamReconnectTimersBySession[sessionName];
+  if (timer) {
+    clearTimeout(timer);
+    delete state.streamReconnectTimersBySession[sessionName];
+  }
+}
+
+function scheduleTaskStreamReconnect(sessionName, taskId) {
+  if (!sessionName || !taskId || state.streamReconnectTimersBySession[sessionName]) return;
+  const prevAttempts = Number(state.eventSourceMetaBySession[sessionName]?.attempts || 0);
+  const nextAttempts = prevAttempts + 1;
+  const delayMs = Math.min(12000, 1200 * (2 ** Math.min(nextAttempts - 1, 4)));
+  state.eventSourceMetaBySession[sessionName] = { taskId, attempts: nextAttempts, lastDisconnectAt: Date.now() };
+  state.streamReconnectTimersBySession[sessionName] = setTimeout(() => {
+    delete state.streamReconnectTimersBySession[sessionName];
+    const currentTaskId = String(state.taskBySession[sessionName]?.taskId || "");
+    const persistedTaskId = String(state.streamTaskIdBySession[sessionName] || "");
+    const reconnectTaskId = currentTaskId || persistedTaskId || String(taskId || "");
+    if (!reconnectTaskId) return;
+    startTaskEventStream(reconnectTaskId, sessionName);
+  }, delayMs);
+}
+
+function closeEventStream(sessionName, { clearPersisted = false } = {}) {
   const src = state.eventSourceBySession[sessionName];
   if (src) {
     src.close();
     delete state.eventSourceBySession[sessionName];
+  }
+  clearTaskStreamReconnectTimer(sessionName);
+  if (clearPersisted) {
+    delete state.streamTaskIdBySession[sessionName];
+    delete state.eventSourceMetaBySession[sessionName];
+    persistStreamSubscriptions();
   }
 }
 
@@ -2364,9 +2427,12 @@ function mapEventToActivity(evt) {
 }
 
 function startTaskEventStream(taskId, sessionName) {
-  closeEventStream(sessionName);
+  closeEventStream(sessionName, { clearPersisted: true });
   const es = new EventSource(api(`/api/events?task_id=${encodeURIComponent(taskId)}`));
   state.eventSourceBySession[sessionName] = es;
+  state.eventSourceMetaBySession[sessionName] = { taskId: String(taskId || ""), attempts: 0, connectedAt: Date.now() };
+  state.streamTaskIdBySession[sessionName] = String(taskId || "");
+  persistStreamSubscriptions();
   const handleEvent = (raw) => {
     if (!raw?.data) return;
     let evt;
@@ -2423,6 +2489,12 @@ function startTaskEventStream(taskId, sessionName) {
       );
     }
     pushActivity(sessionName, mapped.title, mapped.detail, mapped.tag);
+    state.eventSourceMetaBySession[sessionName] = {
+      ...(state.eventSourceMetaBySession[sessionName] || {}),
+      taskId: String(taskId || ""),
+      attempts: 0,
+      lastEventAt: Date.now(),
+    };
     const pending = state.pendingBySession[sessionName];
     if (pending) pending.latestActivity = mapped.title;
     renderFeed(false);
@@ -2445,6 +2517,7 @@ function startTaskEventStream(taskId, sessionName) {
   es.onerror = () => {
     pushActivity(sessionName, "Activity stream disconnected", "Waiting for task status updates.");
     closeEventStream(sessionName);
+    scheduleTaskStreamReconnect(sessionName, String(taskId || ""));
   };
 }
 
@@ -2513,6 +2586,12 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
             state.taskBySession[session].status = "completed";
           }
         }
+        if (state.eventSourceBySession[session]) closeEventStream(session, { clearPersisted: true });
+        else if (state.streamTaskIdBySession[session]) {
+          delete state.streamTaskIdBySession[session];
+          delete state.eventSourceMetaBySession[session];
+          persistStreamSubscriptions();
+        }
         continue;
       }
 
@@ -2532,7 +2611,8 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
         status: "running",
       };
-      if (activeTaskId && !state.eventSourceBySession[session]) {
+      const connectedTaskId = String(state.eventSourceMetaBySession[session]?.taskId || "");
+      if (activeTaskId && (!state.eventSourceBySession[session] || (connectedTaskId && connectedTaskId !== activeTaskId))) {
         startTaskEventStream(activeTaskId, session);
       }
       const loop = loopState(session);
@@ -2552,6 +2632,23 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
   } catch {
     return;
   }
+}
+
+function reconnectPersistedStreams() {
+  for (const [sessionName, taskId] of Object.entries(state.streamTaskIdBySession || {})) {
+    const cleanSession = String(sessionName || "").trim();
+    const cleanTaskId = String(taskId || "").trim();
+    if (!cleanSession || !cleanTaskId) continue;
+    const status = String(state.taskBySession[cleanSession]?.status || "").toLowerCase();
+    if (isTerminalTaskStatus(status)) {
+      delete state.streamTaskIdBySession[cleanSession];
+      continue;
+    }
+    if (!state.eventSourceBySession[cleanSession]) {
+      startTaskEventStream(cleanTaskId, cleanSession);
+    }
+  }
+  persistStreamSubscriptions();
 }
 
 async function processQueuedSends() {
@@ -2607,7 +2704,7 @@ async function executeSend(sessionAtSend, text) {
     pushActivity(sessionAtSend, "Request failed", String(err?.message || "Unknown error"));
     throw err;
   } finally {
-    closeEventStream(sessionAtSend);
+    closeEventStream(sessionAtSend, { clearPersisted: true });
     stopTaskTicker(sessionAtSend);
     delete state.pendingBySession[sessionAtSend];
     renderSessions();
@@ -3050,6 +3147,17 @@ ${marker}` : marker;
     );
     renderBoard();
   });
+  window.addEventListener("online", () => {
+    startBoardEventStream();
+    reconnectPersistedStreams();
+    refreshServerTaskState().catch(() => {});
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    startBoardEventStream();
+    reconnectPersistedStreams();
+    refreshServerTaskState().catch(() => {});
+  });
 }
 
 async function bootstrap() {
@@ -3071,6 +3179,7 @@ async function bootstrap() {
     refreshBoardData({ force: true }),
     refreshServerTaskState(),
   ]);
+  reconnectPersistedStreams();
   for (const [sessionName, loop] of Object.entries(state.loopBySession || {})) {
     if (!loop?.running) continue;
     if (state.pendingBySession[sessionName]) continue;

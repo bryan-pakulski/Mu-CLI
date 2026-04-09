@@ -135,7 +135,7 @@ Current phase tracking:
 - `[x]` Phase 0 — Baseline hardening
 - `[x]` Phase 1 — Infrastructure scaffold
 - `[~]` Phase 2 — Reactive read-only shell
-- `[]` Phase 3 — Chat + SSE cutover
+- `[~]` Phase 3 — Chat + SSE cutover
 - `[]` Phase 4 — Board + feature workflows
 - `[]` Phase 5 — Settings/workspace/memory migration
 - `[]` Phase 6 — Legacy removal and cleanup
@@ -211,11 +211,15 @@ Remaining to finish Phase 2:
 - [x] Complete a documented parity walk-through for all read-only surfaces (chat/session/board/activity/settings snapshots).
 - [x] Add automated screenshot-diff execution in CI.
 
-## [] Phase 3 — Chat + SSE cutover
+## [~] Phase 3 — Chat + SSE cutover
 
 - Move chat composer, feed, task status, and approvals to VanJS.
 - Route send/cancel and task event handling through VanJS store.
 - Keep board/settings/workspace/memory on legacy implementation.
+- Current progress:
+  - Van chat composer is now enabled in preview path.
+  - Async message submit (`/api/message` with `async=true`) is wired.
+  - Task cancellation and approval resolve actions are wired from Van UI.
 
 Deliverables:
 

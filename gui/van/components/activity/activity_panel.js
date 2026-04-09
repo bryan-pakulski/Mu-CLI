@@ -1,8 +1,8 @@
 import van from "../../../vendor/van-1.6.0.min.js";
 
-const { div, h2, h3, section } = van.tags;
+const { button, div, h2, h3, section } = van.tags;
 
-export function ActivityPanel(store) {
+export function ActivityPanel(store, actions) {
   const renderTasks = () => {
     const fragment = document.createDocumentFragment();
     for (const task of store.tasks.val.slice(0, 8)) {
@@ -23,6 +23,10 @@ export function ActivityPanel(store) {
         div({ class: "van-activity-item" },
           div({ class: "van-activity-title" }, approval.tool_name || "approval"),
           div({ class: "van-activity-meta" }, `task: ${String(approval.task_id || "n/a").slice(0, 16)}`),
+          div({ class: "van-approval-actions" },
+            button({ onclick: () => actions?.resolveApproval?.(approval.approval_id, "approve") }, "Approve"),
+            button({ onclick: () => actions?.resolveApproval?.(approval.approval_id, "reject") }, "Reject"),
+          ),
         ),
       );
     }

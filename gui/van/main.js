@@ -69,6 +69,37 @@ export async function bootVanUi() {
     await refreshFeaturePlan();
   }
 
+  async function sendMessage() {
+    const text = String(store.draftMessage?.val || "").trim();
+    if (!text) return;
+    if (store.sending?.val) return;
+
+    store.sending.val = true;
+    store.taskStatus.val = "submitting";
+    store.history.val = [...store.history.val, { role: "user", content: text }];
+    store.draftMessage.val = "";
+
+    const payload = await api.sendMessage(text, store.currentSession.val || "");
+    const taskId = String(payload?.task?.task_id || "");
+    store.activeTaskId.val = taskId;
+    store.taskStatus.val = taskId ? "running" : "submitted";
+    await refresh();
+  }
+
+  async function cancelActiveTask() {
+    const taskId = String(store.activeTaskId?.val || "");
+    if (!taskId) return;
+    await api.cancelTask(taskId);
+    store.taskStatus.val = "cancelled";
+    store.sending.val = false;
+    await refresh();
+  }
+
+  async function resolveApproval(approvalId, decision) {
+    await api.resolveApproval(approvalId, decision);
+    await refresh();
+  }
+
   async function refresh() {
     store.status.val = "Loading";
     const [sessionsPayload, statePayload, runtimePayload, tasksPayload, approvalsPayload, featuresPayload, workspacePayload, stagedPayload] = await Promise.all([
@@ -113,6 +144,19 @@ export async function bootVanUi() {
     },
     onEvent: ({ event, data }) => {
       store.latestEvent.val = `${event}: ${String(data || "").slice(0, 100)}`;
+      try {
+        const parsed = JSON.parse(String(data || "{}"));
+        const task = parsed?.payload?.task;
+        if (task?.task_id && String(task.task_id) === String(store.activeTaskId.val || "")) {
+          store.taskStatus.val = String(task.status || "running");
+          if (task.status === "completed" || task.status === "error" || task.status === "cancelled") {
+            store.sending.val = false;
+            if (task.status !== "running") store.activeTaskId.val = "";
+          }
+        }
+      } catch {
+        // ignore parsing errors for keep-alive/non-json messages
+      }
       if (event === "task.updated" || event === "task.completed" || event === "approval.pending" || event === "approval.resolved") {
         refresh().catch((error) => {
           store.status.val = `Refresh failed: ${error.message}`;
@@ -125,6 +169,7 @@ export async function bootVanUi() {
       store,
       api,
       selectFeature,
+      { sendMessage, cancelActiveTask, resolveApproval },
       () => refresh().catch((e) => {
         store.status.val = e.message;
       }),

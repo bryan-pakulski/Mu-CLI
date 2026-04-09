@@ -7,16 +7,16 @@ import { ActivityPanel } from "./activity/activity_panel.js";
 
 const { div, main } = van.tags;
 
-export function AppShell(store, api, onSelectFeature, onRefresh) {
+export function AppShell(store, api, onSelectFeature, actions, onRefresh) {
   return main({ class: "van-shell" },
     StatusHeader(store, onRefresh),
     div({ class: "van-layout" },
       SessionList(store, api),
       div({ class: "van-main-col" },
-        ChatPanel(store),
+        ChatPanel(store, actions),
         BoardPreview(store, onSelectFeature),
       ),
-      ActivityPanel(store),
+      ActivityPanel(store, actions),
     ),
   );
 }

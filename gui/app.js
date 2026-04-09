@@ -4,6 +4,7 @@ const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
 const PENDING_STORAGE_KEY = "mucli_gui_pending_v1";
 const BOARD_MODE_STORAGE_KEY = "mucli_gui_board_modes_v1";
+const BOARD_STATE_STORAGE_KEY = "mucli_gui_board_state_v1";
 const LOOP_STORAGE_KEY = "mucli_gui_loop_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
@@ -251,6 +252,18 @@ try {
   state.board.modeBySession = {};
 }
 try {
+  const boardState = JSON.parse(localStorage.getItem(BOARD_STATE_STORAGE_KEY) || "{}");
+  if (boardState && typeof boardState === "object") {
+    state.board.selectedFeatureIdBySession = boardState.selectedFeatureIdBySession || {};
+    state.board.selectedTaskIdBySession = boardState.selectedTaskIdBySession || {};
+    state.board.featureDraftBySession = boardState.featureDraftBySession || {};
+    state.board.filterBySession = boardState.filterBySession || {};
+    state.board.phaseOpenBySession = boardState.phaseOpenBySession || {};
+  }
+} catch {
+  // ignore persisted board state parse errors
+}
+try {
   const loopState = JSON.parse(localStorage.getItem(LOOP_STORAGE_KEY) || "{}");
   if (loopState && typeof loopState === "object") state.loopBySession = loopState;
 } catch {
@@ -292,6 +305,23 @@ function persistActivity() {
 function persistLoopState() {
   try {
     localStorage.setItem(LOOP_STORAGE_KEY, JSON.stringify(state.loopBySession || {}));
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function persistBoardState() {
+  try {
+    localStorage.setItem(
+      BOARD_STATE_STORAGE_KEY,
+      JSON.stringify({
+        selectedFeatureIdBySession: state.board.selectedFeatureIdBySession || {},
+        selectedTaskIdBySession: state.board.selectedTaskIdBySession || {},
+        featureDraftBySession: state.board.featureDraftBySession || {},
+        filterBySession: state.board.filterBySession || {},
+        phaseOpenBySession: state.board.phaseOpenBySession || {},
+      })
+    );
   } catch {
     // ignore localStorage errors
   }
@@ -639,15 +669,18 @@ function renderFeatureDraftEditor(sessionName = state.currentSession) {
     const goalInput = card.querySelector(".feature-epic-goal");
     titleInput.addEventListener("input", () => {
       draft.epics[epicIdx].title = titleInput.value;
+      persistBoardState();
     });
     goalInput.addEventListener("input", () => {
       draft.epics[epicIdx].goal = goalInput.value;
+      persistBoardState();
     });
     card.querySelector(".feature-epic-delete").addEventListener("click", () => {
       draft.epics.splice(epicIdx, 1);
       if (!draft.epics.length) {
         draft.epics.push({ title: "Epic 1", goal: "", tasks: [{ title: "", objectives: [], action_points: [], exit_criteria: [] }] });
       }
+      persistBoardState();
       renderFeatureDraftEditor(sessionName);
     });
     const list = card.querySelector(".feature-task-list");
@@ -672,27 +705,33 @@ function renderFeatureDraftEditor(sessionName = state.currentSession) {
       const input = row.querySelector(".feature-task-input");
       input.addEventListener("input", () => {
         draft.epics[epicIdx].tasks[taskIdx].title = input.value;
+        persistBoardState();
       });
       row.querySelector(".feature-task-objectives").addEventListener("input", (evt) => {
         draft.epics[epicIdx].tasks[taskIdx].objectives = String(evt.target.value || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        persistBoardState();
       });
       row.querySelector(".feature-task-actions").addEventListener("input", (evt) => {
         draft.epics[epicIdx].tasks[taskIdx].action_points = String(evt.target.value || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        persistBoardState();
       });
       row.querySelector(".feature-task-exit").addEventListener("input", (evt) => {
         draft.epics[epicIdx].tasks[taskIdx].exit_criteria = String(evt.target.value || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        persistBoardState();
       });
       row.querySelector(".feature-task-delete").addEventListener("click", () => {
         draft.epics[epicIdx].tasks.splice(taskIdx, 1);
         if (!draft.epics[epicIdx].tasks.length) {
           draft.epics[epicIdx].tasks.push({ title: "", objectives: [], action_points: [], exit_criteria: [] });
         }
+        persistBoardState();
         renderFeatureDraftEditor(sessionName);
       });
       list.appendChild(row);
     });
     card.querySelector(".feature-task-add").addEventListener("click", () => {
       draft.epics[epicIdx].tasks.push({ title: "", objectives: [], action_points: [], exit_criteria: [] });
+      persistBoardState();
       renderFeatureDraftEditor(sessionName);
     });
     ui.featureEpicList.appendChild(card);
@@ -707,6 +746,7 @@ async function confirmFeatureDraft(sessionName = state.currentSession) {
   draft.constraints = String(ui.createFeatureConstraintsInput?.value || "").trim();
   draft.acceptance = String(ui.createFeatureAcceptanceInput?.value || "").trim();
   draft.risks = String(ui.createFeatureRisksInput?.value || "").trim();
+  persistBoardState();
   if (!draft.name) throw new Error("Feature name is required.");
   await ensureServerSession(sessionName);
   const requestedFeatureId = slugifyFeatureId(draft.name);
@@ -767,6 +807,7 @@ async function confirmFeatureDraft(sessionName = state.currentSession) {
     }
   }
   draft.status = "approved";
+  persistBoardState();
   await activateFeature(featureId);
   await refreshBoardData({ force: true });
   setStatus(`Feature "${draft.name}" created and approved.`, "connected");
@@ -1285,6 +1326,7 @@ function openTicketModal(taskId) {
   const editable = !selectedFeatureArchived() && ["pending", "not_started"].includes(String(task.status || "").toLowerCase());
 
   state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
+  persistBoardState();
   ui.ticketTitle.textContent = `Task ${task.id}: ${task.title || ""}`;
   ui.ticketStatusPill.textContent = task.status || "unknown";
   ui.ticketTitleInput.value = task.title || "";
@@ -1401,6 +1443,7 @@ function renderBoard() {
             state.board.phaseOpenBySession[state.currentSession] = {};
           }
           state.board.phaseOpenBySession[state.currentSession][phaseKey] = wrap.open;
+          persistBoardState();
         });
         wrap.innerHTML = `<summary><span>${phaseMeta?.title || "Unassigned"}</span><span>${items.length}</span></summary><div class="phase-group-cards"></div>`;
         const cardWrap = wrap.querySelector(".phase-group-cards");
@@ -1446,6 +1489,7 @@ function renderBoard() {
           card.addEventListener("click", () => {
             if (dragged) return;
             state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
+            persistBoardState();
             openTicketModal(task.id);
           });
 
@@ -1577,6 +1621,7 @@ async function refreshBoardData({ force = false } = {}) {
       if (featureRecord) {
         directory = String(featureRecord.directory || "").trim() || directory;
         state.board.selectedFeatureIdBySession[sessionName] = selectedFeatureId;
+        persistBoardState();
       }
     }
     renderFeatureSelectors(sessionName);
@@ -1591,6 +1636,7 @@ async function refreshBoardData({ force = false } = {}) {
     const selected = state.board.selectedTaskIdBySession[sessionName];
     if (!selected && (planPayload?.feature_plan?.phases || []).length) {
       state.board.selectedTaskIdBySession[sessionName] = Number(planPayload.feature_plan.phases[0].id);
+      persistBoardState();
     }
     setBoardError("");
   } catch (err) {
@@ -2170,6 +2216,7 @@ async function activateFeature(featureId) {
   const resolved = String(featureId || "").trim();
   if (!resolved) {
     state.board.selectedFeatureIdBySession[state.currentSession] = "";
+    persistBoardState();
     renderFeatureSelectors(state.currentSession);
     return;
   }
@@ -2179,6 +2226,7 @@ async function activateFeature(featureId) {
     body: JSON.stringify({ feature_id: resolved }),
   });
   state.board.selectedFeatureIdBySession[state.currentSession] = resolved;
+  persistBoardState();
   await refreshRuntime();
   await refreshBoardData({ force: true });
   setStatus("Active feature updated.", "connected");
@@ -2205,6 +2253,7 @@ async function deleteSelectedFeature() {
     body: JSON.stringify({ feature_id: record.feature_id }),
   });
   state.board.selectedFeatureIdBySession[state.currentSession] = "";
+  persistBoardState();
   await refreshBoardData({ force: true });
   setStatus("Feature deleted.", "warning");
 }
@@ -2217,6 +2266,7 @@ async function unloadFeature() {
   });
   state.board.selectedFeatureIdBySession[state.currentSession] = "";
   state.board.planBySession[state.currentSession] = null;
+  persistBoardState();
   renderFeatureSelectors(state.currentSession);
   renderBoard();
   setStatus("Feature unloaded.", "warning");
@@ -2781,6 +2831,7 @@ ${marker}` : marker;
       goal: "",
       tasks: [{ title: "", objectives: [], action_points: [], exit_criteria: [] }],
     });
+    persistBoardState();
     renderFeatureDraftEditor(state.currentSession);
   });
   ui.saveFeatureDraftBtn?.addEventListener("click", () => {
@@ -2792,6 +2843,7 @@ ${marker}` : marker;
     draft.acceptance = String(ui.createFeatureAcceptanceInput?.value || "").trim();
     draft.risks = String(ui.createFeatureRisksInput?.value || "").trim();
     draft.status = "draft";
+    persistBoardState();
     hideModal(ui.createFeatureModal);
     renderBoard();
     setStatus("Feature draft saved.", "warning");
@@ -2901,10 +2953,12 @@ ${marker}` : marker;
   ui.boardRefreshBtn?.addEventListener("click", () => refreshBoardData({ force: true }));
   ui.boardSearchInput?.addEventListener("input", () => {
     boardFilters().search = ui.boardSearchInput.value || "";
+    persistBoardState();
     renderBoard();
   });
   ui.boardPhaseFilter?.addEventListener("change", () => {
     boardFilters().phase = ui.boardPhaseFilter.value || "";
+    persistBoardState();
     renderBoard();
   });
   ui.boardFeatureCard?.addEventListener("click", (evt) => {
@@ -2952,10 +3006,12 @@ ${marker}` : marker;
       load: () => activateFeature(featureId),
       archive: () => {
         state.board.selectedFeatureIdBySession[state.currentSession] = featureId;
+        persistBoardState();
         return archiveSelectedFeature();
       },
       delete: () => {
         state.board.selectedFeatureIdBySession[state.currentSession] = featureId;
+        persistBoardState();
         return deleteSelectedFeature();
       },
       unload: () => unloadFeature(),

@@ -1509,6 +1509,24 @@ async function refreshMemoryBuffers(sessionName = state.currentSession) {
   }
 }
 
+function escapeHtml(text = "") {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function linkifyText(text = "") {
+  const escaped = escapeHtml(text);
+  const linked = escaped.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
+  );
+  return linked.replace(/\n/g, "<br/>");
+}
+
 function renderMemoryModal() {
   const mem = sessionMemory(state.currentSession);
   const expanded = mem.expanded || {};
@@ -1529,8 +1547,8 @@ function renderMemoryModal() {
     const isOpen = !!expanded[entryKey];
     return `<article class="memory-item">
       <div class="memory-item-title">#${e.id || "?"} ${(e.tags || []).length ? `· tags: ${(e.tags || []).join(", ")}` : ""}${e.source ? ` · source: ${e.source}` : ""}</div>
-      <div class="memory-item-body">${preview || ""}${hasMore ? "…" : ""}</div>
-      ${hasMore ? `<details data-memory-key="${entryKey}" ${isOpen ? "open" : ""}><summary>View full context</summary><div class="memory-item-body memory-item-full">${full}</div></details>` : ""}
+      <div class="memory-item-body">${linkifyText(preview || "")}${hasMore ? "…" : ""}</div>
+      ${hasMore ? `<details data-memory-key="${entryKey}" ${isOpen ? "open" : ""}><summary>View full context</summary><div class="memory-item-body memory-item-full">${linkifyText(full)}</div></details>` : ""}
     </article>`;
   };
   ui.memoryBufferList.innerHTML = memoryEntries.length
@@ -1581,8 +1599,8 @@ function renderMemoryModal() {
         <div class="meter"><div class="meter-fill" style="width:${pct}%"></div></div>
         <details data-layer-key="${layerId}" ${open ? "open" : ""}>
           <summary>View layer content</summary>
-          <div class="memory-item-body">${preview || "(empty)"}</div>
-          <div class="memory-item-body memory-item-full">${content || "(empty)"}</div>
+          <div class="memory-item-body">${linkifyText(preview || "(empty)")}</div>
+          <div class="memory-item-body memory-item-full">${linkifyText(content || "(empty)")}</div>
         </details>
       </article>`;
     }).join("")

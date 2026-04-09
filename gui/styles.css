@@ -235,6 +235,7 @@ select option:hover{
 .memory-item{border:1px solid color-mix(in oklab, var(--border) 88%, transparent);border-radius:10px;padding:10px;background:color-mix(in oklab, var(--surface-2) 92%, transparent)}
 .memory-item-title{font-size:11px;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
 .memory-item-body{font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.45;margin-top:6px}
+.memory-item-body a{color:var(--accent);text-decoration:underline;word-break:break-all}
 .memory-item details{margin-top:8px}
 .memory-item summary{cursor:pointer;color:var(--accent);font-size:12px}
 .memory-item-full{max-height:260px;overflow:auto;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}

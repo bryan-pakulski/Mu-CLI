@@ -3,9 +3,7 @@ import van from "../../../vendor/van-1.6.0.min.js";
 const { button, div, h2, li, section, ul } = van.tags;
 
 function renderSessionItems(store, api) {
-  const fragment = document.createDocumentFragment();
-  for (const name of store.sessions.val) {
-    fragment.appendChild(
+  return store.sessions.val.map((name) =>
       li(
         button(
           {
@@ -19,16 +17,21 @@ function renderSessionItems(store, api) {
           name,
         ),
       ),
-    );
-  }
-  return fragment;
+  );
 }
 
 export function SessionList(store, api) {
+  const listRoot = ul();
+  van.derive(() => {
+    listRoot.replaceChildren(
+      ...renderSessionItems(store, api),
+    );
+  });
+
   return section({ class: "van-panel" },
     h2("Sessions"),
     div({ class: "van-subtle" }, () => `Count: ${store.sessions.val.length}`),
-    ul(() => renderSessionItems(store, api)),
+    listRoot,
     div({ class: "van-empty-note" }, () => (store.sessions.val.length ? "" : "No sessions found from /api/sessions.")),
   );
 }

@@ -204,6 +204,12 @@ Exit criteria:
 - SSE connection status and latest events are visible in Van shell.
 - Visual review confirms no regressions on legacy default path.
 
+Remaining to finish Phase 2:
+
+- Validate that read-only lists always render correctly after async refreshes (sessions/messages/features/tasks).
+- Add screenshot-diff baseline artifacts for `?ui=van` vs legacy static states.
+- Complete a documented parity walk-through for all read-only surfaces (chat/session/board/activity/settings snapshots).
+
 ## [] Phase 3 — Chat + SSE cutover
 
 - Move chat composer, feed, task status, and approvals to VanJS.

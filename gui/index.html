@@ -263,16 +263,58 @@
     </div>
 
     <div id="createFeatureModal" class="modal hidden" role="dialog" aria-modal="true">
-      <div class="folder-modal-card">
-        <h3>Manual feature builder</h3>
-        <p class="muted">Create a draft, refine epics/tasks, then confirm to auto-approve and create the feature.</p>
-        <div class="field"><label for="createFeatureNameInput">Feature name</label><input id="createFeatureNameInput" type="text" placeholder="New feature name" /></div>
-        <div id="featureEpicList" class="feature-epic-list"></div>
-        <button id="addEpicBtn" class="btn" type="button">+ Add epic</button>
+      <div class="modal-card feature-designer-modal">
+        <div class="feature-designer-head">
+          <div>
+            <h3>Visual Feature Planning Canvas</h3>
+            <p class="muted">Design feature flow while pending approval/manual creation.</p>
+          </div>
+          <div class="feature-stage-toggle">
+            <button id="saveFeatureDraftBtn" class="btn" type="button">Save Draft</button>
+            <label class="stage-publish-switch">
+              <input id="publishFeatureToggle" type="checkbox" />
+              <span>Publish</span>
+            </label>
+          </div>
+        </div>
+        <div class="feature-designer-layout">
+          <section class="feature-flow-panel">
+            <div class="field">
+              <label for="createFeatureNameInput">Feature name</label>
+              <input id="createFeatureNameInput" type="text" placeholder="New feature name" />
+            </div>
+            <div id="featureFlowCanvas" class="feature-flow-canvas"></div>
+          </section>
+          <aside class="feature-detail-panel">
+            <h4>Details & Edit</h4>
+            <div id="featureNodeMeta" class="muted"></div>
+            <label class="field">Title <input id="featureNodeTitleInput" type="text" /></label>
+            <label class="field">Description <textarea id="featureNodeDescriptionInput" rows="3"></textarea></label>
+            <label class="field">Status
+              <select id="featureNodeStatusInput">
+                <option value="draft">Draft</option>
+                <option value="pending">Pending</option>
+                <option value="in_progress">In Progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="completed">Completed</option>
+              </select>
+            </label>
+            <label class="field">Assignee <input id="featureNodeAssigneeInput" type="text" placeholder="Unassigned" /></label>
+            <label class="field">Estimated Effort <input id="featureNodeEffortInput" type="text" placeholder="e.g. 8 pts" /></label>
+            <div class="modal-actions">
+              <button id="updateFeatureNodeBtn" class="btn btn-primary" type="button">Update Node</button>
+              <button id="deleteFeatureNodeBtn" class="btn" type="button">Delete Node</button>
+            </div>
+            <h4>Quick Add</h4>
+            <div class="feature-quick-add">
+              <button id="addEpicBtn" class="btn" type="button">+ Epic</button>
+              <button id="addTaskBtn" class="btn" type="button">+ Task</button>
+            </div>
+          </aside>
+        </div>
         <div class="modal-actions">
-          <button id="saveFeatureDraftBtn" class="btn" type="button">Save draft</button>
-          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Confirm feature</button>
-          <button id="createFeatureCancelBtn" class="btn" type="button">Cancel</button>
+          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Create Feature</button>
+          <button id="createFeatureCancelBtn" class="btn" type="button">Close</button>
         </div>
       </div>
     </div>

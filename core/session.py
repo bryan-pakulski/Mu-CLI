@@ -4,6 +4,7 @@ import json
 import time
 import glob
 import re
+import random
 import shutil
 import traceback
 from copy import deepcopy
@@ -316,7 +317,7 @@ class SessionManager:
         directory: str,
         feature_request: str = "",
     ) -> dict:
-        feature_id = _slugify_feature_id(feature_name)
+        feature_id = self.allocate_feature_id(feature_name)
         metadata_path = self.get_feature_metadata_path(feature_id)
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
         record = {
@@ -353,6 +354,17 @@ class SessionManager:
         self.feature_state = deepcopy(record)
         self.save_history()
         return deepcopy(record)
+
+    def allocate_feature_id(self, requested_id: str) -> str:
+        base = _slugify_feature_id(requested_id)
+        if base not in self.feature_registry:
+            return base
+        suffix = 2
+        while True:
+            candidate = f"{base}_{suffix}"
+            if candidate not in self.feature_registry:
+                return candidate
+            suffix += 1
 
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
         self.feature_state = deepcopy(state) if isinstance(state, dict) else None
@@ -1431,6 +1443,7 @@ class Session:
             "Use get_execution_state to identify the next pending phase/task, use block_task when work cannot continue without user input, and use resume_task after the user provides unblock context. "
             "Use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively to read or change task status. "
             "Every task must define explicit EXIT CRITERIA, and you may set update_task_status(..., status='completed') only after all exit criteria for that task are demonstrably met and verified in the current codebase/tests. "
+            "As each criterion is satisfied, call update_task_status with cumulative verified_exit_criteria so progress is visible in the task UI. "
             "In review mode, use review_all_completed_tasks first, then review_completed_tasks with categorized issues (bug/risk/enhancement), propose_task_diff for proposed fixes, decide_task_diff for user approvals/denials, and archive_task once tasks become archive-ready. "
             "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
             "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
@@ -1686,6 +1699,60 @@ class Session:
             )
         return False
 
+    @staticmethod
+    def _is_transient_provider_error(error: Exception) -> bool:
+        message = str(error or "").lower()
+        transient_markers = (
+            "timeout",
+            "timed out",
+            "temporarily unavailable",
+            "temporary failure",
+            "rate limit",
+            "429",
+            "502",
+            "503",
+            "504",
+            "connection reset",
+            "connection aborted",
+            "network",
+            "econnreset",
+            "service unavailable",
+            "try again",
+        )
+        return any(marker in message for marker in transient_markers)
+
+    def _provider_generate_with_retry(
+        self,
+        *,
+        messages,
+        system_prompt,
+        thinking,
+        tools,
+    ):
+        retries = max(0, int(self.variables.get("provider_max_retries", 2) or 2))
+        base_delay = float(self.variables.get("provider_retry_base_delay", 0.4) or 0.4)
+        max_delay = float(self.variables.get("provider_retry_max_delay", 3.0) or 3.0)
+        attempt = 0
+        while True:
+            try:
+                return self.provider.generate(
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    thinking=thinking,
+                    tools=tools,
+                )
+            except Exception as exc:
+                if attempt >= retries or not self._is_transient_provider_error(exc):
+                    raise
+                attempt += 1
+                delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+                delay += random.uniform(0, min(0.2, delay * 0.25))
+                if self.ui:
+                    self.ui.show_info(
+                        f"Transient provider error detected; retrying ({attempt}/{retries}) in {delay:.2f}s."
+                    )
+                time.sleep(delay)
+
     def _request_tool_approval(
         self,
         *,
@@ -1874,6 +1941,7 @@ class Session:
                 "Use the staged feature-task engine for this request. Start with create_feature, then create_phases, then create_task for each ticket. "
                 "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
                 "Every task must include explicit EXIT CRITERIA and tasks can be marked completed only after all exit criteria are verified. "
+                "Continuously update verified_exit_criteria via update_task_status as each criterion is met so progress remains explicit. "
                 "Step through one task at a time until completion; never work multiple tasks simultaneously. "
                 "Use get_execution_state to choose the next actionable phase/task, use block_task if external input is required, and resume_task when user unblock context arrives. "
                 "Use review_all_completed_tasks/review_completed_tasks/propose_task_diff/decide_task_diff/archive_task for review-and-archive flow after implementation completes. "
@@ -1960,26 +2028,22 @@ class Session:
                     )
                 if self.ui:
                     with self.ui.show_status(status_msg):
-                        response = self.provider.generate(
+                        response = self._provider_generate_with_retry(
                             messages=messages,
                             system_prompt=dynamic_system_prompt,
                             thinking=self.thinking,
-                            tools=(
-                                active_tools
-                                if (self.folder_context.folders and self.agentic)
-                                else None
-                            ),
+                            tools=active_tools
+                            if (self.folder_context.folders and self.agentic)
+                            else None,
                         )
                 else:
-                    response = self.provider.generate(
+                    response = self._provider_generate_with_retry(
                         messages=messages,
                         system_prompt=dynamic_system_prompt,
                         thinking=self.thinking,
-                        tools=(
-                            active_tools
-                            if (self.folder_context.folders and self.agentic)
-                            else None
-                        ),
+                        tools=active_tools
+                        if (self.folder_context.folders and self.agentic)
+                        else None,
                     )
 
                 logger.debug(

@@ -1077,7 +1077,7 @@ TOOLS = [
     ),
     ToolDefinition(
         name="update_task_status",
-        description="Updates the status of a specific task. Set status='completed' only after all exit_criteria for the task are verified.",
+        description="Updates the status of a specific task. Provide verified_exit_criteria incrementally as criteria are met; set status='completed' only after all task exit_criteria are verified.",
         parameters={
             "type": "object",
             "properties": {
@@ -1097,7 +1097,7 @@ TOOLS = [
                 "verified_exit_criteria": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Required when marking a task completed. Must include every task exit criterion.",
+                    "description": "Exit criteria already verified for this task. Update incrementally as work progresses; must include every task exit criterion before completion.",
                 },
                 "directory": {"type": "string"},
             },
@@ -3575,9 +3575,11 @@ def _handle_create_feature(args: dict, context: ToolExecutionContext) -> str:
     if not feature_request:
         return "Error: feature_request is required."
 
-    metadata_path = session.session_manager.get_feature_metadata_path(
-        feature_id or re.sub(r"[^a-zA-Z0-9]+", "_", feature_name.lower()).strip("_")
-    )
+    requested_feature_id = feature_id or re.sub(
+        r"[^a-zA-Z0-9]+", "_", feature_name.lower()
+    ).strip("_")
+    feature_id = session.session_manager.allocate_feature_id(requested_feature_id)
+    metadata_path = session.session_manager.get_feature_metadata_path(feature_id)
     plan = create_feature_shell(
         feature_name=feature_name,
         feature_request=feature_request,
@@ -4019,9 +4021,10 @@ def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> st
     else:
         # Create new feature
         directory = _workspace_root(context.folder_context)
-        feature_id = feature_id or re.sub(
+        requested_feature_id = feature_id or re.sub(
             r"[^a-zA-Z0-9]+", "_", feature_name.lower()
         ).strip("_")
+        feature_id = session.session_manager.allocate_feature_id(requested_feature_id)
         metadata_path = session.session_manager.get_feature_metadata_path(feature_id)
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
 
@@ -4285,9 +4288,10 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     if not metadata_path:
         return "Error: Feature metadata not found."
 
+    if verified_exit_criteria is not None and not isinstance(verified_exit_criteria, list):
+        return "Error: verified_exit_criteria must be an array when provided."
+
     if status == "completed":
-        if not isinstance(verified_exit_criteria, list):
-            return "Error: verified_exit_criteria must be an array when status='completed'."
         plan_snapshot = load_feature_plan(metadata_path)
         target_task = next(
             (item for item in plan_snapshot.tasks if item.id == int(task_id)),
@@ -4296,15 +4300,46 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
         if target_task is None:
             return f"Error: Task {task_id} not found."
         expected = [str(item).strip() for item in target_task.exit_criteria if str(item).strip()]
-        provided = {str(item).strip() for item in verified_exit_criteria if str(item).strip()}
-        missing = [criterion for criterion in expected if criterion not in provided]
+        already_verified = {
+            str(item).strip()
+            for item in getattr(target_task, "verified_exit_criteria", []) or []
+            if str(item).strip()
+        }
+        provided = {
+            str(item).strip() for item in (verified_exit_criteria or []) if str(item).strip()
+        }
+        effective_verified = already_verified | provided
+        missing = [criterion for criterion in expected if criterion not in effective_verified]
         if missing:
             return (
                 "Error: Cannot mark task completed until all exit criteria are verified. "
                 f"Missing: {missing}"
             )
+    else:
+        plan_snapshot = load_feature_plan(metadata_path)
+        target_task = next(
+            (item for item in plan_snapshot.tasks if item.id == int(task_id)),
+            None,
+        )
+        if target_task is None:
+            return f"Error: Task {task_id} not found."
+        already_verified = {
+            str(item).strip()
+            for item in getattr(target_task, "verified_exit_criteria", []) or []
+            if str(item).strip()
+        }
+        provided = {
+            str(item).strip() for item in (verified_exit_criteria or []) if str(item).strip()
+        }
+        effective_verified = already_verified | provided
 
-    plan = update_task_status(metadata_path, task_id, status, notes)
+    plan = update_task_status(
+        metadata_path,
+        task_id,
+        status,
+        notes,
+        verified_exit_criteria=sorted(effective_verified),
+    )
     summary = summarize_feature_plan(plan)
 
     # Update session state

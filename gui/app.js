@@ -173,6 +173,11 @@ const ui = {
   boardFeatureArchiveBtn: el("boardFeatureArchiveBtn"),
   boardFeatureDeleteBtn: el("boardFeatureDeleteBtn"),
   boardFeatureUnloadBtn: el("boardFeatureUnloadBtn"),
+  featureManagerBtn: el("featureManagerBtn"),
+  featureManagerModal: el("featureManagerModal"),
+  featureManagerList: el("featureManagerList"),
+  featureManagerCreateBtn: el("featureManagerCreateBtn"),
+  featureManagerCloseBtn: el("featureManagerCloseBtn"),
   boardSearchInput: el("boardSearchInput"),
   boardPhaseFilter: el("boardPhaseFilter"),
   boardRefreshBtn: el("boardRefreshBtn"),
@@ -1175,6 +1180,16 @@ function renderBoard() {
         wrap.innerHTML = `<summary><span>${phaseMeta?.title || "Unassigned"}</span><span>${items.length}</span></summary><div class="phase-group-cards"></div>`;
         const cardWrap = wrap.querySelector(".phase-group-cards");
         for (const task of items) {
+          const exitCriteria = Array.isArray(task.exit_criteria) ? task.exit_criteria.filter(Boolean) : [];
+          const verifiedCriteria = new Set(
+            Array.isArray(task.verified_exit_criteria) ? task.verified_exit_criteria.filter(Boolean) : []
+          );
+          const verifiedCount = exitCriteria.reduce((total, criterion) => (
+            verifiedCriteria.has(String(criterion || "").trim()) ? total + 1 : total
+          ), 0);
+          const completionPct = exitCriteria.length ? Math.round((verifiedCount / exitCriteria.length) * 100) : (
+            laneForStatus(task.status) === "completed" ? 100 : 0
+          );
           const card = document.createElement("article");
           const selected = Number(state.board.selectedTaskIdBySession[state.currentSession]) === Number(task.id);
           card.className = `task-card${selected ? " active" : ""}`;
@@ -1184,6 +1199,10 @@ function renderBoard() {
           card.innerHTML = `
             <div class="task-title">${task.title || `Task ${task.id}`}</div>
             <div class="task-meta">#${task.id} · ${task.status || "unknown"} · Drag to move</div>
+            <div class="task-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${completionPct}" title="${verifiedCount}/${exitCriteria.length || 0} exit criteria verified">
+              <div class="task-progress-fill" style="width:${completionPct}%"></div>
+            </div>
+            <div class="task-progress-meta">${verifiedCount}/${exitCriteria.length || 0} exit criteria met</div>
           `;
 
           let dragged = false;
@@ -1415,7 +1434,8 @@ async function refreshMemoryRuntime(sessionName = state.currentSession) {
 
 async function refreshMemoryBuffers(sessionName = state.currentSession) {
   try {
-    const payload = await fetchJson("/api/memory-buffers", {}, 3000);
+    const targetSession = encodeURIComponent(sessionName || state.currentSession || "");
+    const payload = await fetchJson(`/api/memory-buffers?session_name=${targetSession}`, {}, 3000);
     const mem = sessionMemory(sessionName);
     mem.buffer = Array.isArray(payload.memory_entries) ? payload.memory_entries : [];
     mem.scratchpad = Array.isArray(payload.scratchpad_entries) ? payload.scratchpad_entries : [];
@@ -1972,6 +1992,40 @@ async function unloadFeature() {
   setStatus("Feature unloaded.", "warning");
 }
 
+function renderFeatureManagerModal() {
+  const sessionName = state.currentSession;
+  const features = featureList(sessionName);
+  const activeFeatureId = selectedFeatureId(sessionName);
+  if (!ui.featureManagerList) return;
+  if (!features.length) {
+    ui.featureManagerList.innerHTML = '<div class="activity-empty">No features available.</div>';
+    return;
+  }
+  ui.featureManagerList.innerHTML = features.map((feature) => {
+    const id = feature.feature_id || "";
+    const name = feature.feature_name || id || "feature";
+    const isActive = !!id && id === activeFeatureId;
+    return `<article class="settings-list-item">
+      <div>
+        <div class="memory-item-title">${isActive ? "ACTIVE · " : ""}${id}</div>
+        <div class="memory-item-body">${name} · ${feature.status || "draft"}</div>
+      </div>
+      <div class="settings-list-actions">
+        <button class="btn" data-fm-action="load" data-feature-id="${id}">Load</button>
+        <button class="btn" data-fm-action="archive" data-feature-id="${id}">Archive</button>
+        <button class="btn" data-fm-action="delete" data-feature-id="${id}">Delete</button>
+        ${isActive ? '<button class="btn" data-fm-action="unload" data-feature-id="">Unload</button>' : ""}
+      </div>
+    </article>`;
+  }).join("");
+}
+
+async function openFeatureManagerModal() {
+  await refreshBoardData({ force: true });
+  renderFeatureManagerModal();
+  showModal(ui.featureManagerModal);
+}
+
 async function saveSettings() {
   const disabled_tools = [...ui.toolsList.querySelectorAll('input[type="checkbox"]')].filter((x) => !x.checked).map((x) => x.dataset.key);
   const variables = {};
@@ -2515,7 +2569,7 @@ ${marker}` : marker;
   ui.closeSettingsBtn.addEventListener("click", () => hideModal(ui.settingsModal));
   ui.saveSettingsBtn.addEventListener("click", () => saveSettings().catch((err) => setStatus(`Error: ${err.message}`, "error")));
 
-  [ui.folderModal, ui.memoryModal, ui.ticketModal, ui.createFeatureModal, ui.settingsModal].forEach((modalEl) => {
+  [ui.folderModal, ui.memoryModal, ui.ticketModal, ui.createFeatureModal, ui.settingsModal, ui.featureManagerModal].forEach((modalEl) => {
     modalEl?.addEventListener("click", (evt) => {
       if (evt.target === modalEl) hideModal(modalEl);
     });
@@ -2591,6 +2645,40 @@ ${marker}` : marker;
   ui.boardFeatureUnloadBtn?.addEventListener("click", () => {
     ui.boardFeatureActionsMenu?.classList.add("hidden");
     unloadFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.featureManagerBtn?.addEventListener("click", () => {
+    openFeatureManagerModal().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.featureManagerCloseBtn?.addEventListener("click", () => hideModal(ui.featureManagerModal));
+  ui.featureManagerCreateBtn?.addEventListener("click", () => {
+    hideModal(ui.featureManagerModal);
+    showModal(ui.createFeatureModal);
+  });
+  ui.featureManagerList?.addEventListener("click", (evt) => {
+    const btn = evt.target.closest("button[data-fm-action]");
+    if (!btn) return;
+    const action = btn.getAttribute("data-fm-action");
+    const featureId = btn.getAttribute("data-feature-id") || "";
+    const handlers = {
+      load: () => activateFeature(featureId),
+      archive: () => {
+        state.board.selectedFeatureIdBySession[state.currentSession] = featureId;
+        return archiveSelectedFeature();
+      },
+      delete: () => {
+        state.board.selectedFeatureIdBySession[state.currentSession] = featureId;
+        return deleteSelectedFeature();
+      },
+      unload: () => unloadFeature(),
+    };
+    const fn = handlers[action];
+    if (!fn) return;
+    fn()
+      .then(async () => {
+        await refreshBoardData({ force: true });
+        renderFeatureManagerModal();
+      })
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
   ui.boardRunBtn?.addEventListener("click", async () => {
     if (state.pendingBySession[state.currentSession]) {

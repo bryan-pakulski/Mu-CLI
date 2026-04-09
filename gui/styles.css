@@ -188,6 +188,23 @@ select option:hover{
 .settings-pane{display:none;overflow:auto;min-height:0;padding:6px 10px 10px 2px}
 .settings-pane.active{display:block}
 .settings-list{display:grid;gap:6px;padding-right:6px}
+.settings-list-item{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px;
+  align-items:center;
+  padding:8px;
+  border:1px solid color-mix(in oklab, var(--border) 86%, transparent);
+  border-radius:10px;
+  background:color-mix(in oklab, var(--surface-2) 90%, transparent);
+}
+.settings-list-actions{display:flex;gap:6px;flex-wrap:wrap}
+.settings-list-actions .btn{
+  height:30px;
+  border-radius:999px;
+  padding:0 10px;
+  font-size:12px;
+}
 .settings-pane h3{margin:0 0 14px}
 .settings-group{padding:10px 0 4px;margin-bottom:8px}
 .settings-group h4{margin:0 0 8px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
@@ -417,6 +434,18 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
 .task-card.dragging{opacity:.55;transform:scale(.98)}
 .task-title{font-size:13px;font-weight:600}
 .task-meta{font-size:11px;color:var(--muted)}
+.task-progress{
+  height:8px;
+  border-radius:999px;
+  background:color-mix(in oklab, var(--surface) 85%, var(--border));
+  overflow:hidden;
+}
+.task-progress-fill{
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,var(--accent),color-mix(in oklab, var(--accent) 65%, #fff));
+}
+.task-progress-meta{font-size:11px;color:var(--muted)}
 .board-lane{transition:box-shadow .2s ease,border-color .2s ease,background-color .2s ease}
 .board-lane.drop-allowed{border-color:color-mix(in oklab, var(--accent) 45%, var(--border));box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--accent) 18%, transparent)}
 .board-lane.drop-active{background:color-mix(in oklab, var(--accent) 9%, var(--surface));box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent)}

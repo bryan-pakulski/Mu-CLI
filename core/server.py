@@ -1520,15 +1520,96 @@ def build_staged_files_payload(session) -> dict:
     }
 
 
-def build_memory_buffers_payload(session) -> dict:
+def _build_context_layers_from_snapshot(snapshot: dict) -> list[dict]:
+    variables = snapshot.get("variables", {}) if isinstance(snapshot, dict) else {}
+    history = snapshot.get("history", []) if isinstance(snapshot, dict) else []
+    summary = str(snapshot.get("conversation_summary", "") or "")
+    memory_entries = (
+        ((snapshot.get("task_memory") or {}).get("entries", []))
+        if isinstance(snapshot, dict)
+        else []
+    )
+    scratch_entries = (
+        ((snapshot.get("turn_scratchpad") or {}).get("entries", []))
+        if isinstance(snapshot, dict)
+        else []
+    )
+    summary_limit = max(1, int(variables.get("conversation_summary_char_limit", 8000) or 8000))
+    goal_limit = max(1, int(variables.get("active_goal_context_char_limit", 4000) or 4000))
+    tool_limit = max(1, int(variables.get("recent_tool_context_char_limit", 12000) or 12000))
+    retrieval_limit = max(1, int(variables.get("retrieval_context_char_limit", 5000) or 5000))
+    context_limit = max(1, int(variables.get("context_token_limit", 256000) or 256000))
+    current_turn = json.dumps(history[-1], default=str) if history else ""
+    return [
+        {
+            "layer": "L2",
+            "name": "Conversation summary",
+            "current": min(len(summary), summary_limit),
+            "maximum": summary_limit,
+            "description": "Long-horizon continuity summary.",
+        },
+        {
+            "layer": "L3",
+            "name": "Active goal",
+            "current": min(len(memory_entries) + len(scratch_entries), goal_limit),
+            "maximum": goal_limit,
+            "description": "Feature/task status + scratchpad snapshot.",
+        },
+        {
+            "layer": "L4",
+            "name": "Recent tool activity",
+            "current": 0,
+            "maximum": tool_limit,
+            "description": "Compressed recent tool calls/results.",
+        },
+        {
+            "layer": "L4B",
+            "name": "Retrieved snippets",
+            "current": 0,
+            "maximum": retrieval_limit,
+            "description": "Semantic workspace retrieval context.",
+        },
+        {
+            "layer": "L5",
+            "name": "Current turn",
+            "current": len(current_turn),
+            "maximum": context_limit,
+            "description": "Live request/response turn payload.",
+        },
+    ]
+
+
+def build_memory_buffers_payload(session, session_name: str | None = None) -> dict:
+    requested = str(session_name or "").strip()
+    current = str(session.session_manager.current_session_name or "").strip()
+    if not requested or requested == current:
+        requested = current
+        return {
+            "session_name": requested,
+            "memory_entries": [
+                entry.to_dict() for entry in session.session_manager.task_memory.list_entries(limit=100)
+            ],
+            "scratchpad_entries": [
+                entry.to_dict() for entry in session.session_manager.turn_scratchpad.list_entries(limit=100)
+            ],
+            "context_layers": collect_context_layers(session),
+        }
+
+    snapshot = session.session_manager.read_session_data(requested)
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
     return {
-        "memory_entries": [
-            entry.to_dict() for entry in session.session_manager.task_memory.list_entries(limit=100)
-        ],
-        "scratchpad_entries": [
-            entry.to_dict() for entry in session.session_manager.turn_scratchpad.list_entries(limit=100)
-        ],
-        "context_layers": collect_context_layers(session),
+        "session_name": requested,
+        "memory_entries": list(
+            ((snapshot.get("task_memory") or {}).get("entries", []))
+            if isinstance(snapshot.get("task_memory"), dict)
+            else []
+        )[:100],
+        "scratchpad_entries": list(
+            ((snapshot.get("turn_scratchpad") or {}).get("entries", []))
+            if isinstance(snapshot.get("turn_scratchpad"), dict)
+            else []
+        )[:100],
+        "context_layers": _build_context_layers_from_snapshot(snapshot),
     }
 
 
@@ -1832,9 +1913,17 @@ def serve(session, host: str, port: int, command_handler):
                     )
                     return
                 if parsed.path == "/api/memory-buffers":
+                    requested_session_name = str(
+                        query.get("session_name", [""])[0] or ""
+                    ).strip()
                     self._send_json(
                         200,
-                        {"ok": True, **build_memory_buffers_payload(session)},
+                        {
+                            "ok": True,
+                            **build_memory_buffers_payload(
+                                session, session_name=requested_session_name
+                            ),
+                        },
                     )
                     return
 

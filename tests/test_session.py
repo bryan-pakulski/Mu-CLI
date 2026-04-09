@@ -412,6 +412,79 @@ def test_session_sync_runtime_state_rebinds_memory_stores():
     assert session.turn_scratchpad is not original_scratchpad
 
 
+def test_allocate_feature_id_avoids_collisions():
+    sm = SessionManager()
+    sm.upsert_feature({"feature_id": "foo", "feature_name": "Foo"})
+    sm.upsert_feature({"feature_id": "foo_2", "feature_name": "Foo 2"})
+
+    allocated = sm.allocate_feature_id("foo")
+
+    assert allocated == "foo_3"
+
+
+def test_provider_generate_with_retry_retries_transient_errors():
+    class FlakyProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.calls = 0
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            if self.calls < 3:
+                raise RuntimeError("503 Service Unavailable")
+            return ProviderResponse(
+                text="done",
+                parts=[MessagePart(type="text", text="done")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager()
+    session = Session(FlakyProvider(), False, "system instruction", sm)
+    session.variables["provider_max_retries"] = 2
+    session.variables["provider_retry_base_delay"] = 0
+    session.variables["provider_retry_max_delay"] = 0
+
+    result = session.send_message("hello")
+
+    assert result["ok"] is True
+    assert session.provider.calls == 3
+
+
+def test_provider_generate_with_retry_does_not_retry_non_transient_errors():
+    class HardFailProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.calls = 0
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            raise RuntimeError("invalid api key")
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager()
+    session = Session(HardFailProvider(), False, "system instruction", sm)
+    session.variables["provider_max_retries"] = 4
+
+    result = session.send_message("hello")
+
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert session.provider.calls == 1
+
+
 def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
     sample = tmp_path / "sample.txt"
     sample.write_text("important line\n" * 50)

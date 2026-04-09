@@ -53,6 +53,7 @@ class FeatureTask:
     objectives: list[str] = field(default_factory=list)
     action_points: list[str] = field(default_factory=list)
     exit_criteria: list[str] = field(default_factory=list)
+    verified_exit_criteria: list[str] = field(default_factory=list)
     status: str = STATUS_NOT_STARTED
     notes: str = ""
     blocked_reason: str = ""
@@ -231,6 +232,7 @@ def transition_task_status(
     to_status: str,
     notes: str | None = None,
     blocked_reason: str | None = None,
+    verified_exit_criteria: list[str] | None = None,
     actor: str = "system",
 ) -> FeatureTask:
     target_status = normalize_task_status(to_status)
@@ -247,6 +249,12 @@ def transition_task_status(
             task.notes = notes
         if blocked_reason is not None:
             task.blocked_reason = blocked_reason
+        if verified_exit_criteria is not None:
+            task.verified_exit_criteria = [
+                str(item).strip()
+                for item in verified_exit_criteria
+                if str(item).strip()
+            ]
         plan.add_event(
             kind="status_transition",
             entity="task",
@@ -700,9 +708,16 @@ def update_task_status(
     task_id: int,
     status: str,
     notes: str | None = None,
+    verified_exit_criteria: list[str] | None = None,
 ) -> FeaturePlan:
     plan = load_feature_plan(metadata_path)
-    transition_task_status(plan, task_id=task_id, to_status=status, notes=notes)
+    transition_task_status(
+        plan,
+        task_id=task_id,
+        to_status=status,
+        notes=notes,
+        verified_exit_criteria=verified_exit_criteria,
+    )
     return save_feature_plan("", plan)
 
 

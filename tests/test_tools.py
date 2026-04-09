@@ -28,6 +28,9 @@ class _FeatureSessionManagerStub:
     def get_feature_metadata_path(self, feature_id):
         return self._metadata_path
 
+    def allocate_feature_id(self, requested_id):
+        return requested_id
+
     def upsert_feature(self, feature_record):
         self.record = feature_record
 
@@ -417,6 +420,53 @@ def test_update_task_status_requires_verified_exit_criteria_for_completion(tmp_p
     )
 
     assert "Cannot mark task completed" in result
+
+
+def test_update_task_status_persists_incremental_verified_exit_criteria(tmp_path):
+    ctx = FolderContext()
+    ctx.add_folder(str(tmp_path))
+    metadata_path = str(tmp_path / "feature_plan.json")
+    session = _SessionStub(metadata_path)
+    tool_ctx = ToolExecutionContext(folder_context=ctx, session=session)
+    _handle_create_feature_task(
+        {
+            "feature_name": "Progress",
+            "feature_request": "Track exit criteria progress",
+            "tasks": [
+                {
+                    "title": "Task A",
+                    "objectives": ["Goal A"],
+                    "action_points": ["Action A"],
+                    "exit_criteria": ["Criterion A", "Criterion B"],
+                }
+            ],
+        },
+        tool_ctx,
+    )
+
+    first = execute_tool(
+        "update_task_status",
+        {"task_id": 1, "status": "in_progress", "verified_exit_criteria": ["Criterion A"]},
+        ctx,
+        session=session,
+    )
+    first_payload = json.loads(first)
+    assert first_payload["ok"] is True
+    assert first_payload["plan"]["phases"][0]["verified_exit_criteria"] == ["Criterion A"]
+
+    second = execute_tool(
+        "update_task_status",
+        {"task_id": 1, "status": "completed", "verified_exit_criteria": ["Criterion B"]},
+        ctx,
+        session=session,
+    )
+    second_payload = json.loads(second)
+    assert second_payload["ok"] is True
+    assert second_payload["status"] == "completed"
+    assert sorted(second_payload["plan"]["phases"][0]["verified_exit_criteria"]) == [
+        "Criterion A",
+        "Criterion B",
+    ]
 
 
 def test_update_task_status_recovers_missing_feature_metadata_path(tmp_path):

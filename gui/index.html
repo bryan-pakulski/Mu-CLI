@@ -109,6 +109,7 @@
                   <button id="boardFeatureUnloadBtn" class="btn" type="button">Unload feature</button>
                 </div>
               </div>
+              <button id="featureManagerBtn" class="btn" type="button">Manage features</button>
               <button id="boardRunBtn" class="btn board-run-btn" type="button">▶ Play</button>
               <input id="boardSearchInput" type="text" placeholder="Search tasks..." />
               <select id="boardPhaseFilter">
@@ -273,6 +274,18 @@
           <button id="saveFeatureDraftBtn" class="btn" type="button">Save draft</button>
           <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Confirm feature</button>
           <button id="createFeatureCancelBtn" class="btn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="featureManagerModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="folder-modal-card memory-modal-card">
+        <h3>Feature manager</h3>
+        <p class="muted">Load, unload, archive, delete, or create features for this session.</p>
+        <div id="featureManagerList" class="settings-list"></div>
+        <div class="modal-actions">
+          <button id="featureManagerCreateBtn" class="btn btn-primary" type="button">Create feature</button>
+          <button id="featureManagerCloseBtn" class="btn" type="button">Close</button>
         </div>
       </div>
     </div>

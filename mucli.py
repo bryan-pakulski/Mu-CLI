@@ -36,7 +36,11 @@ from core.feature_mode import (
 from core.tools import execute_tool
 from ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
-from utils.runtime_metrics import collect_context_layers, feature_elapsed_thinking_seconds
+from utils.runtime_metrics import (
+    collect_context_layers,
+    collect_context_layer_contents,
+    feature_elapsed_thinking_seconds,
+)
 
 console = Console()
 GITHUB_API_BASE = "https://api.github.com"
@@ -505,7 +509,7 @@ def print_help():
         "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
     )
     table.add_row(
-        "/memory <status|list|clear>", "", "Manage memory (e.g. clear scratch|task|all)"
+        "/memory <status|list|layers|clear>", "", "Manage memory (e.g. inspect context layers or clear scratch|task|all)"
     )
     table.add_row("/help", "", "Show this help menu")
     table.add_row("/list", "/ls", "List saved conversations")
@@ -2111,6 +2115,7 @@ def handle_command(session, user_input, allow_prompt=True):
             task_stats = build_memory_stats(session.task_memory)
             scratch_stats = build_memory_stats(session.turn_scratchpad)
             layer_stats = collect_context_layers(session)
+            layer_contents = collect_context_layer_contents(session)
             if allow_prompt:
                 table = Table(title="Memory Status", box=box.ROUNDED)
                 table.add_column("Type", style="cyan")
@@ -2193,6 +2198,7 @@ def handle_command(session, user_input, allow_prompt=True):
                     "task_memory_stats": task_stats,
                     "scratchpad_stats": scratch_stats,
                     "context_layers": layer_stats,
+                    "context_layer_contents": layer_contents,
                 },
             )
 
@@ -2244,6 +2250,47 @@ def handle_command(session, user_input, allow_prompt=True):
                         if target in ["all", "scratchpad"]
                         else []
                     ),
+                },
+            )
+
+        if subcommand in ["layers", "layer"]:
+            layer_stats = collect_context_layers(session)
+            layer_contents = collect_context_layer_contents(session)
+            requested_layer = parts[2].strip().upper() if len(parts) > 2 else ""
+            layer_rows = [
+                layer for layer in layer_stats
+                if not requested_layer or str(layer.get("layer", "")).upper() == requested_layer
+            ]
+            if not layer_rows:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /memory layers [L1|L2|L3|L4|L4B|L5]",
+                    data={"available_layers": [str(layer.get("layer", "")) for layer in layer_stats]},
+                )
+            if allow_prompt:
+                for layer in layer_rows:
+                    layer_id = str(layer.get("layer", ""))
+                    current = int(layer.get("current", 0) or 0)
+                    maximum = max(1, int(layer.get("maximum", 1) or 1))
+                    body = str(layer_contents.get(layer_id, "") or "").strip() or "(empty)"
+                    console.print(
+                        Panel(
+                            body,
+                            title=f"{layer_id} · {layer.get('name', '')} ({current}/{maximum})",
+                            border_style="cyan",
+                        )
+                    )
+            return serialize_command_result(
+                session,
+                cmd,
+                data={
+                    "context_layers": layer_rows,
+                    "context_layer_contents": {
+                        str(layer.get("layer", "")): layer_contents.get(str(layer.get("layer", "")), "")
+                        for layer in layer_rows
+                    },
                 },
             )
 

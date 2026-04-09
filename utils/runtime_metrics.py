@@ -221,6 +221,33 @@ def collect_context_layers(session):
     return layers
 
 
+def collect_context_layer_contents(session) -> dict[str, str]:
+    summary_text = str(getattr(session.session_manager, "conversation_summary", "") or "")
+    system_text = str(getattr(session, "system_instruction", "") or "")
+    goal_text = str(session._build_active_goal_context() or "")
+    tool_limit = max(
+        1, int(session.variables.get("recent_tool_context_char_limit", 12000) or 12000)
+    )
+    tool_text = str(session._build_recent_tool_context(max_chars=tool_limit) or "")
+    retrieval_limit = max(
+        1, int(session.variables.get("retrieval_context_char_limit", 5000) or 5000)
+    )
+    retrieved_text = str(getattr(session, "_pending_retrieved_context", "") or "")
+    if len(retrieved_text) > retrieval_limit:
+        retrieved_text = retrieved_text[:retrieval_limit].rstrip()
+    current_turn = ""
+    if session.session_manager.history:
+        current_turn = json.dumps(session.session_manager.history[-1], default=str, indent=2)
+    return {
+        "L1": system_text,
+        "L2": summary_text,
+        "L3": goal_text,
+        "L4": tool_text,
+        "L4B": retrieved_text,
+        "L5": current_turn,
+    }
+
+
 def build_inline_meter(label, current, maximum, width=8):
     maximum = _max_int(maximum)
     current = max(0, int(current or 0))

@@ -20,7 +20,7 @@ from core.tools import (
 from providers.ollama import OllamaProvider
 from utils.logger import logger
 from utils.config import validate_and_cast, AGENTIC_SYSTEM_BASE, AGENTIC_MODES
-from utils.runtime_metrics import collect_context_layers
+from utils.runtime_metrics import collect_context_layers, collect_context_layer_contents
 from core.feature_mode import (
     build_phase_execution_prompt,
     build_review_prompt,
@@ -1530,6 +1530,7 @@ def build_memory_buffers_payload(session) -> dict:
             entry.to_dict() for entry in session.session_manager.turn_scratchpad.list_entries(limit=100)
         ],
         "context_layers": collect_context_layers(session),
+        "context_layer_contents": collect_context_layer_contents(session),
     }
 
 

@@ -306,7 +306,18 @@ function persistDrafts() {
 }
 
 function sessionMemory(sessionName = state.currentSession) {
-  if (!state.memoryBySession[sessionName]) state.memoryBySession[sessionName] = { runtime: {}, activity: [], buffer: [], scratchpad: [], layers: [], query: "" };
+  if (!state.memoryBySession[sessionName]) {
+    state.memoryBySession[sessionName] = {
+      runtime: {},
+      activity: [],
+      buffer: [],
+      scratchpad: [],
+      layers: [],
+      layerContents: {},
+      layerExpanded: {},
+      query: "",
+    };
+  }
   return state.memoryBySession[sessionName];
 }
 
@@ -1488,6 +1499,9 @@ async function refreshMemoryBuffers(sessionName = state.currentSession) {
     mem.buffer = Array.isArray(payload.memory_entries) ? payload.memory_entries : [];
     mem.scratchpad = Array.isArray(payload.scratchpad_entries) ? payload.scratchpad_entries : [];
     mem.layers = Array.isArray(payload.context_layers) ? payload.context_layers : [];
+    mem.layerContents = payload.context_layer_contents && typeof payload.context_layer_contents === "object"
+      ? payload.context_layer_contents
+      : {};
     if (!ui.memoryModal.classList.contains("hidden") && sessionName === state.currentSession) renderMemoryModal();
   } catch {
     return;
@@ -1533,10 +1547,19 @@ function renderMemoryModal() {
       const current = Number(layer.current || 0);
       const maximum = Math.max(1, Number(layer.maximum || 1));
       const pct = Math.max(0, Math.min(100, Math.round((current / maximum) * 100)));
+      const layerId = String(layer.layer || "");
+      const content = String((mem.layerContents || {})[layerId] || "");
+      const preview = content.length > 220 ? `${content.slice(0, 220)}…` : content;
+      const open = !!(mem.layerExpanded || {})[layerId];
       return `<article class="memory-item">
         <div class="memory-item-title">${layer.layer || ""} · ${layer.name || "Layer"} · ${current}/${maximum} (${pct}%)</div>
         <div class="memory-item-body">${layer.description || ""}</div>
         <div class="meter"><div class="meter-fill" style="width:${pct}%"></div></div>
+        <details data-layer-key="${layerId}" ${open ? "open" : ""}>
+          <summary>View layer content</summary>
+          <div class="memory-item-body">${preview || "(empty)"}</div>
+          <div class="memory-item-body memory-item-full">${content || "(empty)"}</div>
+        </details>
       </article>`;
     }).join("")
     : '<div class="activity-empty">No context layer stats available.</div>';
@@ -1552,6 +1575,14 @@ function renderMemoryModal() {
         mem.expanded = mem.expanded || {};
         mem.expanded[key] = detailsEl.open;
       });
+    });
+  });
+  ui.memoryLayersList?.querySelectorAll("details[data-layer-key]").forEach((detailsEl) => {
+    detailsEl.addEventListener("toggle", () => {
+      const key = detailsEl.getAttribute("data-layer-key");
+      if (!key) return;
+      mem.layerExpanded = mem.layerExpanded || {};
+      mem.layerExpanded[key] = detailsEl.open;
     });
   });
 }

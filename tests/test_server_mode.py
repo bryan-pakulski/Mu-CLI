@@ -144,8 +144,10 @@ def test_memory_buffers_payload_includes_context_layers():
     session = build_test_session()
     payload = build_memory_buffers_payload(session)
     assert "context_layers" in payload
+    assert "context_layer_contents" in payload
     assert isinstance(payload["context_layers"], list)
-    assert any(layer.get("layer") == "L2" for layer in payload["context_layers"])
+    assert any(layer.get("layer") == "L1" for layer in payload["context_layers"])
+    assert isinstance(payload["context_layer_contents"], dict)
 
 
 def test_list_workspace_directories_returns_subdirs(tmp_path):

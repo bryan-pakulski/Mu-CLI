@@ -10,7 +10,11 @@ from core.feature_mode import (
 )
 from core.session import Session, SessionManager
 from providers.base import LLMProvider, MessagePart, ProviderResponse
-from utils.runtime_metrics import collect_context_layers, feature_elapsed_thinking_seconds
+from utils.runtime_metrics import (
+    collect_context_layer_contents,
+    collect_context_layers,
+    feature_elapsed_thinking_seconds,
+)
 
 
 class DummyProvider(LLMProvider):
@@ -884,6 +888,14 @@ def test_context_layers_include_l1_system_directives():
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     layers = collect_context_layers(session)
     assert any(layer.get("layer") == "L1" for layer in layers)
+
+
+def test_context_layer_contents_include_expected_keys():
+    sm = SessionManager(session_name="layer-content")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    contents = collect_context_layer_contents(session)
+    for key in ["L1", "L2", "L3", "L4", "L4B", "L5"]:
+        assert key in contents
 
 
 def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):

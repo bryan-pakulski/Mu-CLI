@@ -2319,6 +2319,9 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
       if (!active) {
         const existing = state.pendingBySession[session];
         if (existing && existing.status !== "queued") {
+          if (existing.source === "live_sync") {
+            continue;
+          }
           const startedAt = Number(existing.startedAt || 0);
           const taskId = String(state.taskBySession[session]?.taskId || "").trim();
           const bootGraceMs = 15_000;

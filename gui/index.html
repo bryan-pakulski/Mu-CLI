@@ -39,6 +39,7 @@
               <span class="view-toggle-slider"></span>
             </label>
             <span id="boardToggleLabel" class="view-toggle-label">Board</span>
+            <button id="loopViewBtn" class="btn board-icon-btn" type="button" title="Loop mode">∞</button>
           </div>
           <button id="settingsBtn" class="settings-btn settings-floating" title="Settings">⚙</button>
 
@@ -75,6 +76,7 @@
                     <option value="research">Research</option>
                     <option value="feature">Feature</option>
                     <option value="debug">Debug</option>
+                    <option value="loop">Loop</option>
                   </select>
                 </label>
                 <label id="chatFeatureWrap" class="field-inline hidden">
@@ -120,6 +122,25 @@
           </header>
           <div id="boardError" class="board-error hidden"></div>
           <div id="boardLanes" class="board-lanes"></div>
+        </section>
+        <section id="loopView" class="board-view hidden">
+          <header class="board-head">
+            <div class="board-title-wrap">
+              <h2>Loop Mode</h2>
+              <span id="loopSummary" class="board-summary">Define a long-horizon goal and start the loop.</span>
+            </div>
+            <div class="board-controls">
+              <button id="loopStartBtn" class="btn btn-primary" type="button">Start loop</button>
+              <button id="loopStopBtn" class="btn" type="button">Stop</button>
+              <button id="loopResumeBtn" class="btn" type="button">Resume</button>
+            </div>
+          </header>
+          <div class="field">
+            <label for="loopGoalInput">Locked goal</label>
+            <textarea id="loopGoalInput" rows="3" placeholder="Build a linux desktop environment... optimize kernels..."></textarea>
+          </div>
+          <h4>Timeline</h4>
+          <div id="loopTimelineList" class="memory-list"></div>
         </section>
         </section>
         <aside class="activity-panel">

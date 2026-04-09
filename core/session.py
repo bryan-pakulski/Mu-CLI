@@ -1934,7 +1934,8 @@ class Session:
                             workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
-        if str(self.variables.get("agent_mode", "default")).lower() == "feature":
+        active_mode = str(self.variables.get("agent_mode", "default")).lower()
+        if active_mode == "feature":
             base_system_prompt += (
                 "\n\nFEATURE MODE SYSTEM PROMPT\n"
                 "You are in Feature Plan Engine mode. "
@@ -1949,6 +1950,18 @@ class Session:
                 "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
                 "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows."
             )
+        elif active_mode == "loop":
+            loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
+            base_system_prompt += (
+                "\n\nLOOP MODE SYSTEM PROMPT\n"
+                "You are executing a long-horizon autonomous loop. "
+                "Work continuously in increments (plan -> execute -> verify -> continue) until stopped by the user. "
+                "Create and maintain your own internal task list as you progress. "
+                "At each increment, provide a concise timeline update: attempted action, outcome, evidence, and next step. "
+                "Use save_memory for durable findings and save_scratchpad for short-lived planning."
+            )
+            if loop_goal:
+                base_system_prompt += f"\nLocked loop goal: {loop_goal}"
         if workspace_context:
             base_system_prompt += f"\n\n{workspace_context}"
         context_limit = max(
@@ -2083,7 +2096,7 @@ class Session:
                                 "thought_signature": part.thought_signature,
                             }
                         )
-                        if self.ui:
+                        if self.ui and active_mode != "loop":
                             self.ui.show_info(
                                 f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                             )
@@ -2328,8 +2341,8 @@ class Session:
                                 f"{count} item(s) currently pending. "
                                 "Continue gathering or call 'flush' when ready to receive all context."
                             )
-                            if self.ui:
-                                self.ui.show_info(f"  [Collated: {part.tool_name}]")
+                        if self.ui and active_mode != "loop":
+                            self.ui.show_info(f"  [Collated: {part.tool_name}]")
                         else:
                             # If it's an error, don't collate it, let the model see the error immediately
                             if self.ui:
@@ -2337,7 +2350,7 @@ class Session:
                                     self._render_tool_result(raw_result)
                                 )
                     else:
-                        if self.ui:
+                        if self.ui and active_mode != "loop":
                             self.ui.show_tool_result(
                                 self._render_tool_result(raw_result)
                             )

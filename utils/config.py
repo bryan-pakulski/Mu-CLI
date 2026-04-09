@@ -264,6 +264,21 @@ ANTI-DETECTION NOTES:
 5. Some sources may require authentication - note this in your findings.
 
 Always cite your sources, verify credibility, and provide comprehensive summaries with proper attribution.""",
+    "loop": """WORKFLOW (Long-Horizon Loop):
+You are in LOOP mode for long-running execution.
+1. Treat the user-provided loop goal as locked until the user explicitly changes it.
+2. Work indefinitely in bounded increments: plan -> act -> verify -> reflect -> continue.
+3. Maintain your own evolving task list and priorities while preserving long-horizon direction.
+4. Use tools aggressively, but summarize progress as timeline updates rather than raw tool chatter.
+5. Prefer durable state in memory (`save_memory`/`search_memory`) and short-term reasoning in scratchpad.
+6. At the end of each increment, emit:
+   - what you attempted,
+   - what changed,
+   - what was learned/verified,
+   - next immediate sub-goal.
+7. If blocked on external input/credentials/decisions, call `raise_blocker` with exact ask.
+8. Continue until the user stops the loop.
+""",
 
 }
 
@@ -284,6 +299,11 @@ AGENT_MODE_METADATA = {
         "description": "Exploration and explanation mode for understanding systems.",
         "documentation": "README.md#agent-modes",
         "display_name": "Research Mode"
+    },
+    "loop": {
+        "description": "Long-horizon autonomous loop with ongoing timeline updates.",
+        "documentation": "README.md#agent-modes",
+        "display_name": "Loop Mode",
     },
 }
 
@@ -318,7 +338,14 @@ WORKFLOW:
 ANTI-DETECTION NOTES:
 - Some websites may block automated access - use url_grounding cautiously.
 - Rate limits may apply to APIs - batch requests when possible.
-- JavaScript-heavy sites may require special handling by url_grounding.""",
+""",
+    "loop": """LOOP MODE SYSTEM PROMPT:
+You are in long-horizon LOOP mode.
+- The loop goal is locked and remains the north star until user changes/stops it.
+- Execute in continuous increments and self-manage subtasks.
+- Keep communication timeline-oriented: objective, actions, outcomes, next step.
+- Persist durable facts/decisions in memory; use scratchpad for temporary plans.
+- Continue operating until explicitly stopped by the user.""",
 }
 
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."

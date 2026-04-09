@@ -85,6 +85,7 @@ const state = {
     phaseOpenBySession: {},
     drag: null,
   },
+  loopBySession: {},
 };
 
 const ui = {
@@ -160,6 +161,14 @@ const ui = {
   boardViewBtn: el("boardViewBtn"),
   chatView: el("chatView"),
   boardView: el("boardView"),
+  loopView: el("loopView"),
+  loopViewBtn: el("loopViewBtn"),
+  loopGoalInput: el("loopGoalInput"),
+  loopSummary: el("loopSummary"),
+  loopStartBtn: el("loopStartBtn"),
+  loopStopBtn: el("loopStopBtn"),
+  loopResumeBtn: el("loopResumeBtn"),
+  loopTimelineList: el("loopTimelineList"),
   chatBoardSwitch: el("chatBoardSwitch"),
   chatToggleLabel: el("chatToggleLabel"),
   boardToggleLabel: el("boardToggleLabel"),
@@ -1060,6 +1069,91 @@ function boardFilters(sessionName = state.currentSession) {
   return state.board.filterBySession[sessionName];
 }
 
+function loopState(sessionName = state.currentSession) {
+  if (!state.loopBySession[sessionName]) {
+    state.loopBySession[sessionName] = {
+      goal: "",
+      running: false,
+      inFlight: false,
+      iteration: 0,
+      timeline: [],
+      lastAssistantText: "",
+    };
+  }
+  return state.loopBySession[sessionName];
+}
+
+function pushLoopTimeline(sessionName, title, detail = "", status = "info") {
+  const loop = loopState(sessionName);
+  loop.timeline.push({ title, detail, status, at: Date.now() });
+  if (loop.timeline.length > 300) {
+    loop.timeline.splice(0, loop.timeline.length - 300);
+  }
+  if (state.currentView === "loop" && sessionName === state.currentSession) {
+    renderLoopView();
+  }
+}
+
+function renderLoopView(sessionName = state.currentSession) {
+  const loop = loopState(sessionName);
+  if (ui.loopGoalInput) ui.loopGoalInput.value = loop.goal || "";
+  if (ui.loopGoalInput) ui.loopGoalInput.disabled = loop.running;
+  if (ui.loopSummary) {
+    ui.loopSummary.textContent = loop.running
+      ? `Running · iteration ${loop.iteration}`
+      : (loop.goal ? "Paused. You can resume at any time." : "Define a long-horizon goal and start the loop.");
+  }
+  if (ui.loopStartBtn) ui.loopStartBtn.disabled = loop.running;
+  if (ui.loopStopBtn) ui.loopStopBtn.disabled = !loop.running;
+  if (ui.loopResumeBtn) ui.loopResumeBtn.disabled = loop.running || !loop.goal;
+  if (ui.loopTimelineList) {
+    ui.loopTimelineList.innerHTML = loop.timeline.length
+      ? loop.timeline.slice(-120).reverse().map((item) => (
+        `<article class="memory-item">
+          <div class="memory-item-title">${item.title} · ${new Date(item.at).toLocaleTimeString()}</div>
+          <div class="memory-item-body">${item.detail || ""}</div>
+        </article>`
+      )).join("")
+      : '<div class="activity-empty">No loop timeline yet.</div>';
+  }
+}
+
+function latestAssistantSummary(sessionName = state.currentSession) {
+  const messages = sessionName === state.currentSession ? state.loadedMessages : [];
+  const lastAssistant = [...messages].reverse().find((msg) => msg.role === "assistant");
+  return String(lastAssistant?.text || "").trim();
+}
+
+async function runLoopCycle(sessionName = state.currentSession) {
+  const loop = loopState(sessionName);
+  if (!loop.running || loop.inFlight) return;
+  loop.inFlight = true;
+  const prompt = loop.iteration === 0
+    ? `LOOP GOAL (LOCKED): ${loop.goal}\nStart executing this long-horizon task. Create your own subtasks and keep progressing.`
+    : `Continue progressing the LOCKED loop goal: ${loop.goal}\nProvide a concise timeline update and continue.`;
+  try {
+    await setAgentMode("loop");
+    await executeSend(sessionName, prompt);
+    loop.iteration += 1;
+    const summary = latestAssistantSummary(sessionName);
+    if (summary && summary !== loop.lastAssistantText) {
+      loop.lastAssistantText = summary;
+      pushLoopTimeline(sessionName, `Iteration ${loop.iteration}`, summary.slice(0, 1200));
+    } else {
+      pushLoopTimeline(sessionName, `Iteration ${loop.iteration}`, "Completed step; continuing loop.");
+    }
+  } catch (err) {
+    loop.running = false;
+    pushLoopTimeline(sessionName, "Loop halted", String(err?.message || "Unknown error"), "error");
+  } finally {
+    loop.inFlight = false;
+    renderLoopView(sessionName);
+    if (loop.running) {
+      setTimeout(() => runLoopCycle(sessionName), 500);
+    }
+  }
+}
+
 function setViewMode(mode, sessionName = state.currentSession) {
   if (ui.centerPanel) {
     ui.centerPanel.classList.remove("view-switching");
@@ -1072,21 +1166,26 @@ function setViewMode(mode, sessionName = state.currentSession) {
   state.board.modeBySession[sessionName] = mode;
   persistBoardModes();
   const boardActive = mode === "board";
+  const loopActive = mode === "loop";
   if (ui.centerPanel) {
-    ui.centerPanel.dataset.view = boardActive ? "board" : "chat";
+    ui.centerPanel.dataset.view = boardActive ? "board" : (loopActive ? "loop" : "chat");
   }
-  ui.chatViewBtn?.classList.toggle("active", !boardActive);
+  ui.chatViewBtn?.classList.toggle("active", !boardActive && !loopActive);
   ui.boardViewBtn?.classList.toggle("active", boardActive);
-  ui.chatView?.classList.toggle("hidden", boardActive);
+  ui.loopViewBtn?.classList.toggle("active", loopActive);
+  ui.chatView?.classList.toggle("hidden", boardActive || loopActive);
   ui.boardView?.classList.toggle("hidden", !boardActive);
+  ui.loopView?.classList.toggle("hidden", !loopActive);
   if (ui.chatBoardSwitch) ui.chatBoardSwitch.checked = boardActive;
-  ui.chatToggleLabel?.classList.toggle("active", !boardActive);
+  ui.chatToggleLabel?.classList.toggle("active", !boardActive && !loopActive);
   ui.boardToggleLabel?.classList.toggle("active", boardActive);
   ui.boardFeatureMenu?.classList.add("hidden");
   ui.boardFeatureActionsMenu?.classList.add("hidden");
-  if (ui.chatView) ui.chatView.style.display = boardActive ? "none" : "";
+  if (ui.chatView) ui.chatView.style.display = (boardActive || loopActive) ? "none" : "";
   if (ui.boardView) ui.boardView.style.display = boardActive ? "" : "none";
+  if (ui.loopView) ui.loopView.style.display = loopActive ? "" : "none";
   if (boardActive) renderBoard();
+  if (loopActive) renderLoopView(sessionName);
 }
 
 function allowedTransitions(status) {
@@ -2724,6 +2823,37 @@ ${marker}` : marker;
       return;
     }
     setViewMode("chat");
+  });
+  ui.loopViewBtn?.addEventListener("click", () => {
+    setViewMode("loop");
+    renderLoopView(state.currentSession);
+  });
+  ui.loopStartBtn?.addEventListener("click", async () => {
+    const loop = loopState(state.currentSession);
+    loop.goal = String(ui.loopGoalInput?.value || "").trim();
+    if (!loop.goal) return setStatus("Loop goal is required.", "warning");
+    loop.running = true;
+    loop.iteration = 0;
+    pushLoopTimeline(state.currentSession, "Loop started", loop.goal);
+    renderLoopView(state.currentSession);
+    runLoopCycle(state.currentSession);
+  });
+  ui.loopResumeBtn?.addEventListener("click", () => {
+    const loop = loopState(state.currentSession);
+    if (!loop.goal) return setStatus("Set a loop goal first.", "warning");
+    loop.running = true;
+    pushLoopTimeline(state.currentSession, "Loop resumed", loop.goal);
+    renderLoopView(state.currentSession);
+    runLoopCycle(state.currentSession);
+  });
+  ui.loopStopBtn?.addEventListener("click", async () => {
+    const loop = loopState(state.currentSession);
+    loop.running = false;
+    pushLoopTimeline(state.currentSession, "Loop stopped", "Paused by user.");
+    if (state.pendingBySession[state.currentSession]) {
+      await stopCurrentRun();
+    }
+    renderLoopView(state.currentSession);
   });
   ui.boardRefreshBtn?.addEventListener("click", () => refreshBoardData({ force: true }));
   ui.boardSearchInput?.addEventListener("input", () => {

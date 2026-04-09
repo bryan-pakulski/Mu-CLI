@@ -265,14 +265,20 @@
 
     <div id="createFeatureModal" class="modal hidden" role="dialog" aria-modal="true">
       <div class="folder-modal-card">
-        <h3>Manual feature builder</h3>
-        <p class="muted">Create a draft, refine epics/tasks, then confirm to auto-approve and create the feature.</p>
+        <h3>Feature pipeline builder</h3>
+        <p class="muted">Define scope, requirements, epics, and tasks. Then run the feature pipeline from Play.</p>
+        <div id="featureDraftSummary" class="feature-draft-summary"></div>
         <div class="field"><label for="createFeatureNameInput">Feature name</label><input id="createFeatureNameInput" type="text" placeholder="New feature name" /></div>
+        <div class="field"><label for="createFeatureRequestInput">Business objective</label><textarea id="createFeatureRequestInput" rows="2" placeholder="What business outcome should this feature deliver?"></textarea></div>
+        <div class="field"><label for="createFeatureStakeholdersInput">Stakeholders</label><input id="createFeatureStakeholdersInput" type="text" placeholder="Engineering, Product, Operations..." /></div>
+        <div class="field"><label for="createFeatureConstraintsInput">Constraints</label><textarea id="createFeatureConstraintsInput" rows="2" placeholder="Performance, compliance, deadlines, dependencies..."></textarea></div>
+        <div class="field"><label for="createFeatureAcceptanceInput">Global acceptance criteria</label><textarea id="createFeatureAcceptanceInput" rows="2" placeholder="How do we know this feature is successful?"></textarea></div>
+        <div class="field"><label for="createFeatureRisksInput">Risks / blockers</label><textarea id="createFeatureRisksInput" rows="2" placeholder="Known risks and mitigation notes"></textarea></div>
         <div id="featureEpicList" class="feature-epic-list"></div>
         <button id="addEpicBtn" class="btn" type="button">+ Add epic</button>
         <div class="modal-actions">
           <button id="saveFeatureDraftBtn" class="btn" type="button">Save draft</button>
-          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Confirm feature</button>
+          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Create feature now</button>
           <button id="createFeatureCancelBtn" class="btn" type="button">Cancel</button>
         </div>
       </div>

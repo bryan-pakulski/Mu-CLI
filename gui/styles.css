@@ -461,9 +461,48 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
 .ticket-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .ticket-pill{font-size:11px;padding:4px 8px;border-radius:999px;background:color-mix(in oklab, var(--accent) 18%, var(--surface-2));text-transform:uppercase;letter-spacing:.05em}
 .feature-epic-list{display:grid;gap:8px;margin:10px 0}
-.feature-epic-card{border:1px solid var(--border);border-radius:10px;padding:8px;background:color-mix(in oklab,var(--surface-2) 90%, transparent)}
-.feature-epic-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+.feature-draft-summary{
+  border:1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
+  background:color-mix(in oklab,var(--accent) 7%,var(--surface-2));
+  border-radius:10px;
+  padding:8px 10px;
+  font-size:12px;
+  color:var(--muted);
+}
+.feature-epic-card{
+  border:1px solid color-mix(in oklab, var(--border) 84%, transparent);
+  border-radius:12px;
+  padding:10px;
+  background:color-mix(in oklab,var(--surface-2) 94%, transparent);
+  box-shadow:0 2px 10px rgba(0,0,0,.08);
+}
+.feature-epic-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:6px;align-items:center}
 .feature-epic-title{height:32px}
+.feature-epic-goal{height:32px}
 .feature-task-list{display:grid;gap:6px;margin:8px 0}
 .feature-task-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+.feature-task-row-detailed{
+  border:1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  border-radius:10px;
+  padding:8px;
+  background:color-mix(in oklab, var(--surface) 92%, transparent);
+  display:grid;
+  gap:8px;
+}
+.feature-task-top{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:6px;
+  align-items:center;
+}
+.feature-task-details summary{
+  cursor:pointer;
+  color:var(--muted);
+  font-size:12px;
+}
+.feature-task-details textarea{
+  margin-top:6px;
+  width:100%;
+  font-size:12px;
+}
 .feature-task-input{height:32px}

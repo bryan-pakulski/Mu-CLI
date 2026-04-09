@@ -36,6 +36,7 @@ export function ActivityPanel(store) {
       const model = store.runtime.val?.model || "unknown";
       return `Runtime model: ${model}`;
     }),
+    div({ class: "van-subtle" }, () => `Workspaces: ${store.workspaces.val.length} · Staged files: ${store.stagedFiles.val.length}`),
     h3("Recent tasks"),
     div({ class: "van-activity-list" }, () => renderTasks()),
     div({ class: "van-empty-note" }, () => (store.tasks.val.length ? "" : "No tasks returned from /api/tasks.")),

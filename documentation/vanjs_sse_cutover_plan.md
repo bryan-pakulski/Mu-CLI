@@ -191,6 +191,7 @@ Exit criteria:
   - SSE-triggered refresh updates snapshots on task/approval events.
   - Introduced explicit empty-state copy and counters for sessions/chat/features/tasks.
   - Updated preview layout to dedicated sessions / main / activity columns for clearer parity mapping.
+  - Added read-only feature-plan lane snapshot grouped by task status (pending/in-progress/blocked/completed/archived).
 
 Deliverables:
 

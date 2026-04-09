@@ -11,6 +11,10 @@ export function createStore() {
     tasks: van.state([]),
     approvals: van.state([]),
     features: van.state([]),
+    selectedFeatureId: van.state(""),
+    featurePlan: van.state(null),
+    workspaces: van.state([]),
+    stagedFiles: van.state([]),
     latestEvent: van.state("No events yet"),
     connected: van.state(false),
   };

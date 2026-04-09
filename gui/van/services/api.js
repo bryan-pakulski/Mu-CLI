@@ -23,6 +23,9 @@ export function createApiClient(apiBaseState) {
     tasks: () => fetchJson("/api/tasks"),
     approvals: () => fetchJson("/api/approvals"),
     features: () => fetchJson("/api/features"),
+    workspaces: () => fetchJson("/api/workspaces"),
+    stagedFiles: () => fetchJson("/api/staged-files"),
+    featurePlan: (directory) => fetchJson(`/api/feature-plan?directory=${encodeURIComponent(directory)}`),
     history: (sessionName) => {
       const query = sessionName ? `?limit=150&session_name=${encodeURIComponent(sessionName)}` : "?limit=150";
       return fetchJson(`/api/history${query}`);

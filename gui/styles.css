@@ -100,7 +100,11 @@ select option:hover{
 .main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0;overflow:hidden}
 .center-panel{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;border-right:1px solid var(--border);position:relative}
 .center-panel[data-view="chat"] #boardView{display:none!important}
+.center-panel[data-view="chat"] #loopView{display:none!important}
 .center-panel[data-view="board"] #chatView{display:none!important}
+.center-panel[data-view="board"] #loopView{display:none!important}
+.center-panel[data-view="loop"] #chatView{display:none!important}
+.center-panel[data-view="loop"] #boardView{display:none!important}
 .center-panel.view-switching .feed-wrap,
 .center-panel.view-switching .board-view{
   animation:viewCrossFade .24s ease;

@@ -1186,6 +1186,12 @@ class Session:
 
     def _build_active_goal_context(self) -> str:
         sections = []
+        loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
+        if loop_goal and str(self.variables.get("agent_mode", "default")).lower() == "loop":
+            sections.append(f"- loop_goal: {loop_goal}")
+            sections.append(
+                "- loop_memory_policy: persist durable findings with save_memory and in-flight steps with save_scratchpad."
+            )
         feature_state = self.session_manager.get_feature_state()
         if isinstance(feature_state, dict):
             feature_id = str(feature_state.get("feature_id", "") or "").strip()
@@ -1217,6 +1223,26 @@ class Session:
         if scratch:
             sections.append("\nScratchpad snapshot:\n" + scratch)
         return "\n".join(sections).strip()
+
+    def _ensure_loop_goal_persistence(self) -> None:
+        if str(self.variables.get("agent_mode", "default")).lower() != "loop":
+            return
+        loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
+        if not loop_goal:
+            return
+        existing = self.task_memory.search("loop goal", limit=12)
+        if any(loop_goal in str(entry.content or "") for entry in existing):
+            return
+        self.task_memory.save(
+            f"Locked loop goal: {loop_goal}",
+            tags=["loop", "goal", "locked"],
+            source="loop_mode",
+        )
+        self.turn_scratchpad.save(
+            f"Current loop goal: {loop_goal}",
+            tags=["loop", "goal"],
+            source="loop_mode",
+        )
 
     def _build_recent_tool_context(self, max_chars: int = 8000) -> str:
         if max_chars <= 0:
@@ -1888,6 +1914,8 @@ class Session:
             effective_text = self._build_feature_mode_prompt(text)
         elif text and active_mode == "loop":
             effective_text = self._build_loop_mode_prompt(text)
+        if active_mode == "loop":
+            self._ensure_loop_goal_persistence()
         if effective_text:
             parts.append({"type": "text", "text": effective_text})
 

@@ -25,18 +25,11 @@ export function BoardPreview(store, onSelectFeature) {
     return fragment;
   };
 
-  const renderFeatures = () => {
-    const fragment = document.createDocumentFragment();
-    for (const feature of store.features.val.slice(0, 10)) {
-      fragment.appendChild(
-        div({ class: "van-feature-item" },
-          div({ class: "van-feature-title" }, feature.feature_name || feature.feature_id || "feature"),
-          div({ class: "van-feature-meta" }, `${feature.status || "unknown"} · ${feature.directory || ""}`),
-        ),
-      );
-    }
-    return fragment;
-  };
+  const renderFeatures = () => store.features.val.slice(0, 10).map((feature) =>
+    div({ class: "van-feature-item" },
+      div({ class: "van-feature-title" }, feature.feature_name || feature.feature_id || "feature"),
+      div({ class: "van-feature-meta" }, `${feature.status || "unknown"} · ${feature.directory || ""}`),
+    ));
 
   const renderPlanLanes = () => {
     const plan = store.featurePlan.val || {};
@@ -47,20 +40,26 @@ export function BoardPreview(store, onSelectFeature) {
       if (!grouped.has(status)) grouped.set(status, []);
       grouped.get(status).push(phase);
     }
-    const fragment = document.createDocumentFragment();
-    for (const status of STATUS_ORDER) {
+    return STATUS_ORDER.map((status) => {
       const items = grouped.get(status) || [];
-      const lane = div({ class: "van-lane" },
+      return div({ class: "van-lane" },
         div({ class: "van-lane-head" }, `${status.replaceAll("_", " ")} (${items.length})`),
         div({ class: "van-lane-body" },
           ...items.slice(0, 4).map((item) => div({ class: "van-lane-item" }, item.title || item.id || "task")),
           items.length > 4 ? div({ class: "van-lane-item more" }, `+${items.length - 4} more`) : "",
         ),
       );
-      fragment.appendChild(lane);
-    }
-    return fragment;
+    });
   };
+
+  const featureListRoot = div({ class: "van-feature-list" });
+  van.derive(() => {
+    featureListRoot.replaceChildren(...renderFeatures());
+  });
+  const laneRoot = div({ class: "van-board-lanes" });
+  van.derive(() => {
+    laneRoot.replaceChildren(...renderPlanLanes());
+  });
 
   return section({ class: "van-panel van-board" },
     h2("Feature Snapshot"),
@@ -72,8 +71,8 @@ export function BoardPreview(store, onSelectFeature) {
       option({ value: "" }, "Select feature"),
       () => renderFeatureOptions(),
     ),
-    div({ class: "van-feature-list" }, () => renderFeatures()),
+    featureListRoot,
     div({ class: "van-empty-note" }, () => (store.features.val.length ? "" : "No features returned from /api/features.")),
-    div({ class: "van-board-lanes" }, () => renderPlanLanes()),
+    laneRoot,
   );
 }

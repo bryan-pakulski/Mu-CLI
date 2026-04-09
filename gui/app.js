@@ -4,6 +4,7 @@ const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
 const PENDING_STORAGE_KEY = "mucli_gui_pending_v1";
 const BOARD_MODE_STORAGE_KEY = "mucli_gui_board_modes_v1";
+const LOOP_STORAGE_KEY = "mucli_gui_loop_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
 
@@ -249,6 +250,12 @@ try {
 } catch {
   state.board.modeBySession = {};
 }
+try {
+  const loopState = JSON.parse(localStorage.getItem(LOOP_STORAGE_KEY) || "{}");
+  if (loopState && typeof loopState === "object") state.loopBySession = loopState;
+} catch {
+  state.loopBySession = {};
+}
 
 function loadPersistedActivity() {
   try {
@@ -279,6 +286,14 @@ function persistActivity() {
     localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(state.activityBySession || {}));
   } catch {
     return;
+  }
+}
+
+function persistLoopState() {
+  try {
+    localStorage.setItem(LOOP_STORAGE_KEY, JSON.stringify(state.loopBySession || {}));
+  } catch {
+    // ignore localStorage errors
   }
 }
 
@@ -1080,7 +1095,15 @@ function loopState(sessionName = state.currentSession) {
       lastAssistantText: "",
     };
   }
-  return state.loopBySession[sessionName];
+  const loop = state.loopBySession[sessionName];
+  loop.goal = String(loop.goal || "");
+  loop.running = !!loop.running;
+  loop.inFlight = !!loop.inFlight;
+  loop.iteration = Number.isFinite(Number(loop.iteration)) ? Number(loop.iteration) : 0;
+  loop.timeline = Array.isArray(loop.timeline) ? loop.timeline.slice(-300) : [];
+  loop.lastAssistantText = String(loop.lastAssistantText || "");
+  state.loopBySession[sessionName] = loop;
+  return loop;
 }
 
 function pushLoopTimeline(sessionName, title, detail = "", status = "info") {
@@ -1092,6 +1115,7 @@ function pushLoopTimeline(sessionName, title, detail = "", status = "info") {
   if (state.currentView === "loop" && sessionName === state.currentSession) {
     renderLoopView();
   }
+  persistLoopState();
 }
 
 function renderLoopView(sessionName = state.currentSession) {
@@ -1147,6 +1171,7 @@ async function runLoopCycle(sessionName = state.currentSession) {
     pushLoopTimeline(sessionName, "Loop halted", String(err?.message || "Unknown error"), "error");
   } finally {
     loop.inFlight = false;
+    persistLoopState();
     renderLoopView(sessionName);
     if (loop.running) {
       setTimeout(() => runLoopCycle(sessionName), 500);
@@ -2449,6 +2474,7 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
         status,
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
       };
+      const activeTaskId = String(active.task_id || "");
       state.pendingBySession[session] = {
         ...(state.pendingBySession[session] || {}),
         userText: state.pendingBySession[session]?.userText || "",
@@ -2456,6 +2482,14 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
         status: "running",
       };
+      if (activeTaskId && !state.eventSourceBySession[session]) {
+        startTaskEventStream(activeTaskId, session);
+      }
+      const loop = loopState(session);
+      if (loop.goal && status === "running") {
+        loop.running = true;
+        persistLoopState();
+      }
     }
 
     renderSessions();
@@ -2828,12 +2862,19 @@ ${marker}` : marker;
     setViewMode("loop");
     renderLoopView(state.currentSession);
   });
+  ui.loopGoalInput?.addEventListener("input", () => {
+    const loop = loopState(state.currentSession);
+    if (loop.running) return;
+    loop.goal = String(ui.loopGoalInput?.value || "");
+    persistLoopState();
+  });
   ui.loopStartBtn?.addEventListener("click", async () => {
     const loop = loopState(state.currentSession);
     loop.goal = String(ui.loopGoalInput?.value || "").trim();
     if (!loop.goal) return setStatus("Loop goal is required.", "warning");
     loop.running = true;
     loop.iteration = 0;
+    persistLoopState();
     pushLoopTimeline(state.currentSession, "Loop started", loop.goal);
     renderLoopView(state.currentSession);
     runLoopCycle(state.currentSession);
@@ -2842,6 +2883,7 @@ ${marker}` : marker;
     const loop = loopState(state.currentSession);
     if (!loop.goal) return setStatus("Set a loop goal first.", "warning");
     loop.running = true;
+    persistLoopState();
     pushLoopTimeline(state.currentSession, "Loop resumed", loop.goal);
     renderLoopView(state.currentSession);
     runLoopCycle(state.currentSession);
@@ -2849,6 +2891,7 @@ ${marker}` : marker;
   ui.loopStopBtn?.addEventListener("click", async () => {
     const loop = loopState(state.currentSession);
     loop.running = false;
+    persistLoopState();
     pushLoopTimeline(state.currentSession, "Loop stopped", "Paused by user.");
     if (state.pendingBySession[state.currentSession]) {
       await stopCurrentRun();
@@ -2972,6 +3015,12 @@ async function bootstrap() {
     refreshBoardData({ force: true }),
     refreshServerTaskState(),
   ]);
+  for (const [sessionName, loop] of Object.entries(state.loopBySession || {})) {
+    if (!loop?.running) continue;
+    if (state.pendingBySession[sessionName]) continue;
+    if (sessionName !== state.currentSession) continue;
+    runLoopCycle(sessionName);
+  }
   startBoardEventStream();
   if (state.board.pollTimer) clearInterval(state.board.pollTimer);
   state.board.pollTimer = setInterval(() => {

@@ -8,6 +8,9 @@ export async function bootVanUi() {
   const store = createStore();
   const api = createApiClient(store.apiBase);
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  if (!store.validationStatus) {
+    store.validationStatus = van.state("not run");
+  }
 
   function assertListCounts() {
     const sessionItems = document.querySelectorAll(".van-session-item").length;

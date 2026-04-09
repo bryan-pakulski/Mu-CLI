@@ -1475,6 +1475,7 @@ class Session:
             "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
             "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
             "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
+            "Do not pause after progress reports. Unless blocked or waiting on explicit approval/decision, immediately continue to the next actionable implementation step in the same run without asking the user to 'continue'. "
             "Never move to the next task until the current task's exit criteria are fully satisfied and the task is marked completed via update_task_status. "
             "When all tasks are complete, perform a review pass over the tasks and code changes together. If review fails, move failing tasks back to in_progress and continue implementing. If review succeeds, call approve_feature_task with review_status completed before you report success. "
             "In every turn response, clearly identify: current task, evidence gathered, changes made, verification result, and the immediate next step.\n\n"
@@ -1995,7 +1996,8 @@ class Session:
                 "Use review_all_completed_tasks/review_completed_tasks/propose_task_diff/decide_task_diff/archive_task for review-and-archive flow after implementation completes. "
                 "gather read-only context first, use save_scratchpad for temporary phase notes, call flush before acting on collected context, and call raise_blocker when blocked on user input. "
                 "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
-                "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows."
+                "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows. "
+                "Do not stall on status-only updates: unless blocked or awaiting explicit approval/decision, continue implementation autonomously until all phases and tasks are completed."
             )
         elif active_mode == "loop":
             loop_goal = str(self.variables.get("loop_goal", "") or "").strip()

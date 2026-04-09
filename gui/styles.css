@@ -97,7 +97,8 @@ select option:hover{
 .workspace-folder:hover .workspace-remove{opacity:1;pointer-events:auto}
 .workspace-status,.status-badge{font-size:12px;color:var(--muted)}
 
-.main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0;overflow:hidden}
+.main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0;overflow:hidden;transition:grid-template-columns .28s ease}
+.main-panel.meta-collapsed{grid-template-columns:minmax(0,1fr) 0}
 .center-panel{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;border-right:1px solid var(--border);position:relative}
 .center-panel[data-view="chat"] #boardView{display:none!important}
 .center-panel[data-view="chat"] #loopView{display:none!important}
@@ -317,7 +318,19 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
   100% { box-shadow: 0 0 0 4px transparent; }
 }
 
-.activity-panel{padding:14px 12px;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:10px;background:var(--surface);min-height:0;overflow:hidden}
+.activity-panel{padding:14px 12px;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:10px;background:var(--surface);min-height:0;overflow:hidden;transition:opacity .24s ease,transform .24s ease}
+.main-panel.meta-collapsed .activity-panel{opacity:0;transform:translateX(14px);pointer-events:none}
+.metadata-toggle-btn{
+  position:absolute;right:340px;top:50%;transform:translateY(-50%);
+  width:22px;height:46px;padding:0;border-radius:8px 0 0 8px;
+  background:color-mix(in oklab,var(--surface-2) 90%,transparent);
+  border:1px solid var(--border);border-right:0;color:var(--muted);
+  display:flex;align-items:center;justify-content:center;
+  z-index:12;cursor:pointer;
+  transition:right .28s ease,color .15s ease,background .15s ease,transform .2s ease;
+}
+.metadata-toggle-btn:hover{color:var(--text);background:color-mix(in oklab,var(--surface-3) 90%,transparent)}
+.main-panel.meta-collapsed .metadata-toggle-btn{right:0;border-right:1px solid var(--border);border-radius:8px 0 0 8px}
 .activity-head{display:flex;align-items:center;justify-content:space-between}
 .activity-head h3{margin:0;font-size:15px}
 .activity-summary{font-size:12px;color:var(--muted)}

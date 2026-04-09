@@ -81,6 +81,14 @@
                     <option value="loop">Loop</option>
                   </select>
                 </label>
+                <label class="field-inline">
+                  <span>Provider</span>
+                  <select id="chatProviderSelect"></select>
+                </label>
+                <label class="field-inline">
+                  <span>Model</span>
+                  <select id="chatModelSelect"></select>
+                </label>
                 <label id="chatFeatureWrap" class="field-inline hidden">
                   <span>Feature</span>
                   <select id="chatFeatureSelect">
@@ -152,6 +160,7 @@
           <div id="activityFilters" class="activity-filters"></div>
           <section id="activityList" class="activity-list"></section>
         </aside>
+        <button id="metadataToggleBtn" class="metadata-toggle-btn" type="button" title="Show activity panel" aria-expanded="false">◀</button>
       </main>
     </div>
 

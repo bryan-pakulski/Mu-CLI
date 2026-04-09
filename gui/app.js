@@ -7,6 +7,7 @@ const BOARD_MODE_STORAGE_KEY = "mucli_gui_board_modes_v1";
 const BOARD_STATE_STORAGE_KEY = "mucli_gui_board_state_v1";
 const STREAM_SUBSCRIPTIONS_STORAGE_KEY = "mucli_gui_stream_subscriptions_v1";
 const LOOP_STORAGE_KEY = "mucli_gui_loop_v1";
+const META_PANEL_COLLAPSED_KEY = "mucli_gui_meta_panel_collapsed_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
 
@@ -67,6 +68,8 @@ const state = {
   memoryBySession: {},
   lastMemoryToolBySession: {},
   pendingApprovals: [],
+  modelOptionsByProvider: {},
+  metaPanelCollapsed: true,
   taskPollTimersBySession: {},
   memoryPollTimer: null,
   approvalPollTimer: null,
@@ -102,6 +105,8 @@ const ui = {
   thinkingToggle: el("thinkingToggle"),
   yoloToggle: el("yoloToggle"),
   agentModeSelect: el("agentModeSelect"),
+  chatProviderSelect: el("chatProviderSelect"),
+  chatModelSelect: el("chatModelSelect"),
   chatFeatureWrap: el("chatFeatureWrap"),
   chatFeatureSelect: el("chatFeatureSelect"),
   agenticToggleSettings: el("agenticToggleSettings"),
@@ -183,6 +188,8 @@ const ui = {
   chatToggleLabel: el("chatToggleLabel"),
   boardToggleLabel: el("boardToggleLabel"),
   centerPanel: document.querySelector(".center-panel"),
+  mainPanel: document.querySelector(".main-panel"),
+  metadataToggleBtn: el("metadataToggleBtn"),
   boardSummary: el("boardSummary"),
   boardFeatureCard: el("boardFeatureCard"),
   boardFeatureMenu: el("boardFeatureMenu"),
@@ -289,6 +296,11 @@ try {
 } catch {
   state.streamTaskIdBySession = {};
 }
+try {
+  state.metaPanelCollapsed = localStorage.getItem(META_PANEL_COLLAPSED_KEY) !== "0";
+} catch {
+  state.metaPanelCollapsed = true;
+}
 
 function loadPersistedActivity() {
   try {
@@ -353,6 +365,77 @@ function persistBoardState() {
   } catch {
     // ignore localStorage errors
   }
+}
+
+function applyMetadataPanelState() {
+  ui.mainPanel?.classList.toggle("meta-collapsed", !!state.metaPanelCollapsed);
+  if (ui.metadataToggleBtn) {
+    ui.metadataToggleBtn.textContent = state.metaPanelCollapsed ? "◀" : "▶";
+    ui.metadataToggleBtn.title = state.metaPanelCollapsed ? "Show activity panel" : "Hide activity panel";
+    ui.metadataToggleBtn.setAttribute("aria-expanded", state.metaPanelCollapsed ? "false" : "true");
+  }
+}
+
+function setMetadataPanelCollapsed(collapsed) {
+  state.metaPanelCollapsed = !!collapsed;
+  applyMetadataPanelState();
+  try {
+    localStorage.setItem(META_PANEL_COLLAPSED_KEY, state.metaPanelCollapsed ? "1" : "0");
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function providerOptions(currentProvider = "") {
+  const defaults = ["openai", "ollama", "gemini"];
+  const merged = [...defaults];
+  const current = String(currentProvider || "").trim().toLowerCase();
+  if (current && !merged.includes(current)) merged.unshift(current);
+  return merged;
+}
+
+function renderProviderSelect(currentProvider = "") {
+  if (!ui.chatProviderSelect) return;
+  const normalized = String(currentProvider || "").trim().toLowerCase();
+  const options = providerOptions(normalized)
+    .map((provider) => `<option value="${provider}">${provider}</option>`)
+    .join("");
+  ui.chatProviderSelect.innerHTML = options;
+  ui.chatProviderSelect.value = normalized || providerOptions()[0];
+}
+
+function renderModelSelect(selectEl, models = [], selectedModel = "") {
+  if (!selectEl) return;
+  const cleanModels = Array.isArray(models) ? models.map((m) => String(m || "").trim()).filter(Boolean) : [];
+  if (!cleanModels.length) {
+    const fallback = String(selectedModel || "").trim() || "(default)";
+    selectEl.innerHTML = `<option value="${fallback === "(default)" ? "" : fallback}">${fallback}</option>`;
+    selectEl.value = fallback === "(default)" ? "" : fallback;
+    return;
+  }
+  selectEl.innerHTML = cleanModels.map((m) => `<option value="${m}">${m}</option>`).join("");
+  if (selectedModel && cleanModels.includes(selectedModel)) {
+    selectEl.value = selectedModel;
+  } else {
+    selectEl.value = cleanModels[0];
+  }
+}
+
+async function refreshModelMenus(providerName = "", selectedModel = "") {
+  const provider = String(providerName || state.runtime?.provider || "").trim().toLowerCase();
+  if (!provider) return;
+  let models = state.modelOptionsByProvider[provider] || [];
+  if (!models.length) {
+    try {
+      const payload = await fetchJson(`/api/models?provider=${encodeURIComponent(provider)}`, {}, 7000);
+      models = Array.isArray(payload?.models) ? payload.models : [];
+      state.modelOptionsByProvider[provider] = models;
+    } catch {
+      models = [];
+    }
+  }
+  renderModelSelect(ui.chatModelSelect, models, selectedModel);
+  renderModelSelect(ui.modelInput, models, selectedModel);
 }
 
 function loadPersistedPendingState() {
@@ -2061,8 +2144,10 @@ async function refreshRuntime() {
     }
     if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = !!runtime.agentic;
     if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = !!runtime.thinking;
-    const model = runtime.model || "";
-    ui.modelInput.innerHTML = `<option value="${model}">${model || "(default)"}</option>`;
+    const provider = String(runtime.provider || "").trim().toLowerCase();
+    const model = String(runtime.model || "").trim();
+    renderProviderSelect(provider);
+    await refreshModelMenus(provider, model);
     setStatus("Connected", "connected");
   } catch (err) {
     setStatus(`Error: ${err.message}`, "error");
@@ -2242,7 +2327,19 @@ async function deleteSession(name) {
 async function applyRuntime() {
   const agentic = ui.agenticToggleSettings?.checked ?? ui.agenticToggle.checked;
   const thinking = ui.thinkingToggleSettings?.checked ?? ui.thinkingToggle.checked;
-  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: ui.modelInput.value, agentic, thinking }) });
+  const selectedModel = String(ui.modelInput?.value || ui.chatModelSelect?.value || "").trim();
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: selectedModel, agentic, thinking }) });
+  await refreshRuntime();
+}
+
+async function setProvider(providerName) {
+  const provider = String(providerName || "").trim().toLowerCase();
+  if (!provider) return;
+  await ensureServerSession(state.currentSession);
+  await fetchJson("/api/command", {
+    method: "POST",
+    body: JSON.stringify({ command: `/provider ${provider}` }),
+  });
   await refreshRuntime();
 }
 
@@ -2809,7 +2906,17 @@ function wireEvents() {
   });
 
   ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
-  ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
+  ui.menuBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    const willOpen = ui.chatMenu.classList.contains("hidden");
+    ui.chatMenu.classList.toggle("hidden");
+    if (willOpen) {
+      const provider = String(ui.chatProviderSelect?.value || state.runtime?.provider || "").trim().toLowerCase();
+      const model = String(ui.chatModelSelect?.value || state.runtime?.model || "").trim();
+      renderProviderSelect(provider);
+      refreshModelMenus(provider, model).catch(() => {});
+    }
+  });
   ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
   ui.memoryOption.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
@@ -2830,6 +2937,25 @@ function wireEvents() {
     setAgentMode(ui.agentModeSelect.value)
       .then(() => setStatus(`Mode set to ${ui.agentModeSelect.value}.`, "connected"))
       .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.chatProviderSelect?.addEventListener("change", () => {
+    const provider = String(ui.chatProviderSelect?.value || "").trim().toLowerCase();
+    setProvider(provider)
+      .then(async () => {
+        await refreshModelMenus(provider, "");
+        setStatus(`Provider set to ${provider}.`, "connected");
+      })
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.chatModelSelect?.addEventListener("change", () => {
+    const model = String(ui.chatModelSelect?.value || "").trim();
+    fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model }) })
+      .then(() => refreshRuntime())
+      .then(() => setStatus(`Model set to ${model || "(default)"}.`, "connected"))
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.metadataToggleBtn?.addEventListener("click", () => {
+    setMetadataPanelCollapsed(!state.metaPanelCollapsed);
   });
   ui.chatFeatureSelect?.addEventListener("change", () => {
     activateFeature(ui.chatFeatureSelect.value).catch((err) => setStatus(`Error: ${err.message}`, "error"));
@@ -3181,6 +3307,7 @@ ${marker}` : marker;
 async function bootstrap() {
   renderAccentSwatches();
   applyThemeFromStorage();
+  applyMetadataPanelState();
   renderSessions();
   await Promise.allSettled([
     refreshRuntime(),

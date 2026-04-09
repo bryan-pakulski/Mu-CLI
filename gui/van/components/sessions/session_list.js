@@ -5,6 +5,7 @@ const { button, div, h2, li, section, ul } = van.tags;
 function renderSessionItems(store, api) {
   return store.sessions.val.map((name) =>
       li(
+        { class: "van-session-item" },
         button(
           {
             class: () => (name === store.currentSession.val ? "van-active" : ""),

@@ -9,6 +9,7 @@ export function StatusHeader(store, onRefresh) {
     div({ class: "van-row" },
       input({ value: store.apiBase, oninput: (e) => { store.apiBase.val = e.target.value; } }),
       button({ onclick: onRefresh }, "Refresh"),
+      button({ onclick: () => store.runValidation?.() }, "Validate Lists"),
     ),
     div({ class: "van-meta" },
       code(() => `status=${store.status.val}`),
@@ -16,5 +17,6 @@ export function StatusHeader(store, onRefresh) {
       code(() => `sse=${store.connected.val ? "connected" : "disconnected"}`),
     ),
     p({ class: "van-event" }, () => `Latest event: ${store.latestEvent.val}`),
+    p({ class: "van-event" }, () => `Validation: ${store.validationStatus?.val || "not run"}`),
   );
 }

@@ -7,6 +7,43 @@ import { AppShell } from "./components/app_shell.js";
 export async function bootVanUi() {
   const store = createStore();
   const api = createApiClient(store.apiBase);
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function assertListCounts() {
+    const sessionItems = document.querySelectorAll(".van-session-item").length;
+    const messageItems = document.querySelectorAll(".van-message").length;
+    const featureItems = document.querySelectorAll(".van-feature-item").length;
+    const taskItems = document.querySelectorAll(".van-activity-item").length;
+    const expectedFeatures = Math.min(store.features.val.length, 10);
+    const expectedTasksAndApprovals = Math.min(store.tasks.val.length, 8) + Math.min(store.approvals.val.length, 5);
+
+    const errors = [];
+    if (sessionItems !== store.sessions.val.length) errors.push(`sessions:${sessionItems}/${store.sessions.val.length}`);
+    if (messageItems !== store.history.val.length) errors.push(`messages:${messageItems}/${store.history.val.length}`);
+    if (featureItems !== expectedFeatures) errors.push(`features:${featureItems}/${expectedFeatures}`);
+    if (taskItems !== expectedTasksAndApprovals) errors.push(`activity:${taskItems}/${expectedTasksAndApprovals}`);
+    return errors;
+  }
+
+  async function runValidation(iterations = 5) {
+    store.validationStatus.val = "running";
+    for (let i = 0; i < iterations; i += 1) {
+      await refresh();
+      await delay(25);
+      const errors = assertListCounts();
+      if (errors.length) {
+        store.validationStatus.val = `failed (${errors.join(", ")})`;
+        return;
+      }
+    }
+    store.validationStatus.val = `passed (${iterations} refresh cycles)`;
+  }
+
+  store.runValidation = () => {
+    runValidation().catch((error) => {
+      store.validationStatus.val = `error (${error.message})`;
+    });
+  };
 
   async function refreshFeaturePlan() {
     const selectedId = store.selectedFeatureId.val;

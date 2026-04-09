@@ -36,6 +36,8 @@ from utils.config import (
     validate_and_cast,
 )
 
+FEATURE_ACTIVE_STATUSES = {"running", "review"}
+
 
 def _sanitize_for_log(data):
     """Truncates large data for logging."""
@@ -841,11 +843,11 @@ class Session:
             return "awaiting_approval"
         if feature_plan.get("review_status") == "completed":
             return "completed"
-        if (
+        if feature_plan.get("tasks_completed") or (
             feature_plan.get("phases_completed")
             and feature_plan.get("next_phase") is None
         ):
-            return "review"
+            return "completed"
         return "running"
 
     def _set_feature_state(
@@ -863,9 +865,12 @@ class Session:
             if isinstance(plan_summary, dict)
             else current.get("next_phase")
         )
+        resolved_status = str(
+            status or self._derive_feature_state_status(plan_summary) or "running"
+        ).strip().lower()
         state = {
             "type": "feature",
-            "status": status or self._derive_feature_state_status(plan_summary),
+            "status": resolved_status,
             "feature_id": (
                 plan_summary.get("feature_id")
                 if isinstance(plan_summary, dict)
@@ -909,6 +914,16 @@ class Session:
             )
             if same_feature
             else int(self.session_manager.token_counts.get("total", 0) or 0)
+        )
+        previous_status = str(current.get("status", "") or "").strip().lower()
+        now = time.time()
+        accumulated = float(current.get("thinking_seconds_accumulated", 0.0) or 0.0)
+        previous_started_at = float(current.get("thinking_started_at", 0.0) or 0.0)
+        if previous_status in FEATURE_ACTIVE_STATUSES and previous_started_at > 0:
+            accumulated += max(0.0, now - previous_started_at)
+        state["thinking_seconds_accumulated"] = accumulated
+        state["thinking_started_at"] = (
+            now if resolved_status in FEATURE_ACTIVE_STATUSES else None
         )
         self.session_manager.set_feature_state(state, self.folder_context)
         self.sync_runtime_state()

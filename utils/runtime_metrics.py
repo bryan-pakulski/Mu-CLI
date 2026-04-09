@@ -5,6 +5,19 @@ import time
 
 from utils.config import HISTORY_DIR
 
+FEATURE_ACTIVE_STATUSES = {"running", "review"}
+
+
+def feature_elapsed_thinking_seconds(feature_state: dict | None) -> int:
+    if not isinstance(feature_state, dict):
+        return 0
+    accumulated = float(feature_state.get("thinking_seconds_accumulated", 0.0) or 0.0)
+    status = str(feature_state.get("status", "") or "").strip().lower()
+    started_at = float(feature_state.get("thinking_started_at", 0.0) or 0.0)
+    if status in FEATURE_ACTIVE_STATUSES and started_at > 0:
+        accumulated += max(0.0, time.time() - started_at)
+    return max(0, int(accumulated))
+
 
 def collect_feature_progress(session):
     feature_state = None
@@ -54,8 +67,7 @@ def collect_feature_progress(session):
         completed_tasks = sum(
             1 for task in tasks if str(task.get("status", "")) == "completed"
         )
-        started_at = float(feature_state.get("started_at", 0) or 0)
-        elapsed_seconds = max(0, int(time.time() - started_at)) if started_at else 0
+        elapsed_seconds = feature_elapsed_thinking_seconds(feature_state)
         start_tokens = int(feature_state.get("start_tokens", 0) or 0)
         token_total = int(session.session_manager.token_counts.get("total", 0) or 0)
         token_delta = max(0, token_total - start_tokens)

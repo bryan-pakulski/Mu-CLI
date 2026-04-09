@@ -10,6 +10,7 @@ from core.feature_mode import (
 )
 from core.session import Session, SessionManager
 from providers.base import LLMProvider, MessagePart, ProviderResponse
+from utils.runtime_metrics import feature_elapsed_thinking_seconds
 
 
 class DummyProvider(LLMProvider):
@@ -825,7 +826,7 @@ def test_sync_feature_state_refreshes_after_feature_task_status_change(
     assert feature_state is not None
     assert feature_state["feature_plan"]["phases"][0]["status"] == "completed"
     assert feature_state["feature_plan"]["next_phase"] is None
-    assert feature_state["status"] == "review"
+    assert feature_state["status"] == "completed"
 
 
 def test_summarize_feature_plan_uses_task_status_for_task_counts(tmp_path):
@@ -853,6 +854,29 @@ def test_summarize_feature_plan_uses_task_status_for_task_counts(tmp_path):
         "in_progress": 1,
         "completed": 0,
     }
+
+
+def test_feature_elapsed_time_excludes_waiting_for_input(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    sm = SessionManager(session_name="feature-timer")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+
+    fake_now = {"value": 1000.0}
+    monkeypatch.setattr("core.session.time.time", lambda: fake_now["value"])
+    monkeypatch.setattr("utils.runtime_metrics.time.time", lambda: fake_now["value"])
+
+    session._set_feature_state(feature_plan={"feature_id": "timer", "approved": True}, status="running")
+    fake_now["value"] = 1012.0
+    session._set_feature_state(
+        feature_plan={"feature_id": "timer", "approved": True}, status="awaiting_input"
+    )
+    fake_now["value"] = 1042.0
+    session._set_feature_state(feature_plan={"feature_id": "timer", "approved": True}, status="running")
+    fake_now["value"] = 1047.0
+
+    feature_state = sm.get_feature_state()
+    assert feature_state is not None
+    assert feature_elapsed_thinking_seconds(feature_state) == 17
 
 
 def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):

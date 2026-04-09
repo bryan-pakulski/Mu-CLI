@@ -36,7 +36,7 @@ from core.feature_mode import (
 from core.tools import execute_tool
 from ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
-from utils.runtime_metrics import collect_context_layers
+from utils.runtime_metrics import collect_context_layers, feature_elapsed_thinking_seconds
 
 console = Console()
 GITHUB_API_BASE = "https://api.github.com"
@@ -87,6 +87,34 @@ def _default_feature_directory(session, feature_name):
     )
 
 
+def _feature_state_choices(session, feature: dict | None = None) -> list[str]:
+    defaults = [
+        "draft",
+        "running",
+        "awaiting_approval",
+        "awaiting_input",
+        "review",
+        "completed",
+        "closed",
+        "archived",
+    ]
+    dynamic = []
+    registry = session.session_manager.list_features() or []
+    for item in registry:
+        status = str((item or {}).get("status", "") or "").strip().lower()
+        if status and status not in dynamic:
+            dynamic.append(status)
+    if isinstance(feature, dict):
+        current = str(feature.get("status", "") or "").strip().lower()
+        if current and current not in dynamic:
+            dynamic.append(current)
+    merged = []
+    for candidate in [*defaults, *dynamic]:
+        if candidate and candidate not in merged:
+            merged.append(candidate)
+    return merged
+
+
 def refresh_feature_record(session, feature_id=None):
     record = session.session_manager.get_feature(feature_id)
     if not isinstance(record, dict):
@@ -106,6 +134,8 @@ def refresh_feature_record(session, feature_id=None):
         return record
 
     summary = summarize_feature_plan(plan)
+    current_status = str(record.get("status", "") or "").strip().lower()
+    derived_status = session._derive_feature_state_status(summary)
     updated = {
         **record,
         "feature_id": summary["feature_id"],
@@ -114,7 +144,7 @@ def refresh_feature_record(session, feature_id=None):
         "metadata_path": summary.get("metadata_path"),
         "feature_plan": summary,
         "next_phase": summary.get("next_phase"),
-        "status": session._derive_feature_state_status(summary),
+        "status": current_status if current_status in {"closed", "archived"} else derived_status,
         "updated_at": record.get("updated_at"),
     }
     session.session_manager.upsert_feature(updated)
@@ -225,8 +255,7 @@ def build_feature_markdown(feature, *, include_phases=True):
     tasks = plan.get("phases", [])
     completed = sum(1 for task in tasks if task.get("status") == "completed")
     total = len(tasks)
-    started_at = float(feature.get("started_at", 0) or 0)
-    elapsed = max(0, int(time.time() - started_at)) if started_at else 0
+    elapsed = feature_elapsed_thinking_seconds(feature)
     token_total = int(feature.get("token_total", 0) or 0)
     start_tokens = int(feature.get("start_tokens", 0) or 0)
     token_delta = max(0, token_total - start_tokens)
@@ -489,7 +518,7 @@ def print_help():
         "Change the agentic strategy (default, debug, feature, research)",
     )
     table.add_row(
-        "/feature <list|new|load|delete|status|phases|exit|create|show|move|block|review|archive|monitor>",
+        "/feature <list|new|load|delete|status|phases|state|exit|create|show|move|block|review|archive|monitor>",
         "/features",
         "Manage per-session feature plans and switch the active feature",
     )
@@ -1632,6 +1661,7 @@ def handle_command(session, user_input, allow_prompt=True):
                 "- /feature create phase <title> | <goal>\n"
                 "- /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>\n"
                 "- /feature show <board|execution|reviews>\n"
+                "- /feature state [status]\n"
                 "- /feature move <task_id> <status>\n"
                 "- /feature block <task_id> <reason>\n"
                 "- /feature review auto\n"
@@ -1644,6 +1674,7 @@ def handle_command(session, user_input, allow_prompt=True):
                 "- /feature create task 1 | Validate headers | Add strict parsing | Unit tests;Docs updated\n"
                 "- /feature move 1 in_progress\n"
                 "- /feature block 1 waiting_for_user_input\n"
+                "- /feature state closed\n"
                 "- /feature show board\n"
                 "- /feature monitor 1.0 10\n"
             )
@@ -1800,6 +1831,41 @@ def handle_command(session, user_input, allow_prompt=True):
                     data={"active_tasks": plan.get("active_tasks", []), "execution": plan.get("execution", {})},
                 )
             return serialize_command_result(session, cmd, ok=False, message="Unknown show target. Use board|execution|reviews.")
+
+        if feature_cmd == "state":
+            feature = refresh_feature_record(session, None)
+            if not isinstance(feature, dict):
+                return serialize_command_result(session, cmd, ok=False, message="No feature selected.")
+            choices = _feature_state_choices(session, feature)
+            requested = str(feature_arg or "").strip().lower()
+            if not requested:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    message="Available feature states.",
+                    data={"states": choices, "current": feature.get("status", "unknown")},
+                )
+            if requested not in choices:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message=f"Unknown state '{requested}'.",
+                    data={"states": choices, "current": feature.get("status", "unknown")},
+                )
+            updated = {
+                **feature,
+                "status": requested,
+                "updated_at": time.time(),
+            }
+            session.session_manager.set_feature_state(updated, session.folder_context)
+            session.sync_runtime_state()
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Feature state updated to '{requested}'.",
+                data={"feature": session.session_manager.get_feature_state(), "states": choices},
+            )
 
         if feature_cmd == "move":
             parts = feature_arg.split(" ", 1)

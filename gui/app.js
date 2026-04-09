@@ -61,6 +61,7 @@ const state = {
   taskBySession: {},
   errorSignatureBySession: {},
   runErrorBySession: {},
+  historyCursorBySession: {},
   memoryBySession: {},
   lastMemoryToolBySession: {},
   pendingApprovals: [],
@@ -693,6 +694,89 @@ function normalizedMessages(history = []) {
     deduped.push(msg);
   }
   return deduped;
+}
+
+function latestUserTextFromHistory(history = []) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const msg = history[i];
+    if (msg?.role !== "user") continue;
+    const text = textFromParts(msg.parts || []).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function inferHistoryRunState(history = []) {
+  let lastUserIndex = -1;
+  let lastAssistantTextIndex = -1;
+  let latestToolCall = "";
+  for (let i = 0; i < history.length; i += 1) {
+    const msg = history[i] || {};
+    if (msg.role === "user") lastUserIndex = i;
+    if (msg.role === "assistant") {
+      const parts = Array.isArray(msg.parts) ? msg.parts : [];
+      if (parts.some((p) => p?.type === "text" && String(p.text || "").trim())) {
+        lastAssistantTextIndex = i;
+      }
+      const toolPart = parts.find((p) => p?.type === "tool_call");
+      if (toolPart) latestToolCall = String(toolPart.tool_name || "").trim();
+    }
+    if (msg.role === "tool") latestToolCall = latestToolCall || "tool_result";
+  }
+  const running = lastUserIndex > lastAssistantTextIndex && lastUserIndex >= 0;
+  return { running, latestToolCall };
+}
+
+function syncActivityFromHistory(sessionName, history = []) {
+  const cursor = Number(state.historyCursorBySession[sessionName] || 0);
+  const start = Math.max(0, Math.min(cursor, history.length));
+  for (let i = start; i < history.length; i += 1) {
+    const msg = history[i] || {};
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    if (msg.role === "assistant") {
+      for (const part of parts) {
+        if (part?.type === "tool_call") {
+          const toolName = String(part.tool_name || "tool");
+          pushActivity(sessionName, `Tool: ${toolName}`, JSON.stringify(part.tool_args || {}, null, 2), "tool");
+        }
+      }
+    } else if (msg.role === "tool") {
+      for (const part of parts) {
+        if (part?.type === "tool_result") {
+          const name = String(part.tool_name || "tool");
+          pushActivity(sessionName, `Tool result: ${name}`, String(part.tool_result || "").slice(0, 220), "tool");
+        }
+      }
+    }
+  }
+  state.historyCursorBySession[sessionName] = history.length;
+}
+
+function syncPendingStateFromHistory(sessionName, history = []) {
+  const activeTaskFromApi = !!state.pendingBySession[sessionName];
+  if (activeTaskFromApi) return;
+  const { running, latestToolCall } = inferHistoryRunState(history);
+  if (!running) {
+    if (state.taskBySession[sessionName]?.status === "running") {
+      state.taskBySession[sessionName].status = "completed";
+    }
+    delete state.pendingBySession[sessionName];
+    return;
+  }
+  const userText = latestUserTextFromHistory(history);
+  const startedAt = Date.now();
+  state.pendingBySession[sessionName] = {
+    userText,
+    latestActivity: latestToolCall ? `Tool: ${latestToolCall}` : "Thinking",
+    startedAt: state.pendingBySession[sessionName]?.startedAt || startedAt,
+    status: "running",
+    source: "history",
+  };
+  state.taskBySession[sessionName] = {
+    ...(state.taskBySession[sessionName] || {}),
+    status: "running",
+    startedAt: state.taskBySession[sessionName]?.startedAt || startedAt,
+  };
 }
 
 
@@ -1831,9 +1915,13 @@ async function refreshHistory(resetToBottom = true) {
     if (!state.sessions.includes(payload.session_name)) state.sessions.unshift(payload.session_name);
     renderSessions();
   }
-  state.loadedMessages = normalizedMessages(payload.history || []);
+  const rawHistory = Array.isArray(payload.history) ? payload.history : [];
+  syncActivityFromHistory(state.currentSession, rawHistory);
+  syncPendingStateFromHistory(state.currentSession, rawHistory);
+  state.loadedMessages = normalizedMessages(rawHistory);
   state.visibleCount = Math.min(24, state.loadedMessages.length || 24);
   renderFeed(resetToBottom);
+  renderSessions();
   renderActivityPanel();
 }
 

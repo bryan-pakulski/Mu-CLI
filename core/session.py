@@ -26,6 +26,7 @@ from core.tools import (
 from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.runtime_metrics import build_live_status_line
+from utils.citation_manager import get_citation_manager
 from utils.config import (
     HISTORY_DIR,
     DEFAULT_SESSION_NAME,
@@ -71,6 +72,35 @@ def _safe_feature_path_prefix(path: str) -> str:
 def _slugify_feature_id(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower()).strip("_")
     return slug or "feature"
+
+
+def _append_clickable_citation_links(text: str) -> str:
+    raw = str(text or "")
+    if not raw.strip():
+        return raw
+    if re.search(r"^\[\^\d+\]:", raw, flags=re.MULTILINE):
+        return raw
+
+    citation_ids = sorted({int(match) for match in re.findall(r"\[\^(\d+)\]", raw)})
+    if not citation_ids:
+        return raw
+
+    manager = get_citation_manager()
+    rows = []
+    for citation_id in citation_ids:
+        source = manager.get_source(citation_id)
+        if not source or not str(source.url or "").strip():
+            continue
+        label = str(source.title or source.url).replace("]", "\\]").strip() or source.url
+        rows.append(f"- [^{citation_id}] [{label}]({source.url})")
+
+    if not rows:
+        return raw
+    if re.search(r"^#{2,3}\s+Source URLs\s*$", raw, flags=re.IGNORECASE | re.MULTILINE):
+        return raw
+
+    separator = "\n\n" if raw.rstrip() else ""
+    return f"{raw.rstrip()}{separator}### Source URLs\n" + "\n".join(rows)
 
 
 class SessionManager:
@@ -2047,13 +2077,14 @@ class Session:
 
                 for part in response.parts:
                     if part.type == "text" and part.text:
+                        rendered_text = _append_clickable_citation_links(part.text)
                         has_text = True
                         if self.ui:
                             self.ui.render_message(
-                                "assistant", part.text, self.provider.model_name
+                                "assistant", rendered_text, self.provider.model_name
                             )
-                        logger.debug(f"Assistant text: {part.text[:200]}...")
-                        ai_parts_archive.append({"type": "text", "text": part.text})
+                        logger.debug(f"Assistant text: {rendered_text[:200]}...")
+                        ai_parts_archive.append({"type": "text", "text": rendered_text})
 
                     elif part.type == "image_inline" and part.inline_data:
                         display_image_in_terminal(self.session_manager.current_session_name, part.inline_data, save=True)

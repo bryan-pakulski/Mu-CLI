@@ -8,8 +8,9 @@ from core.feature_mode import (
     summarize_feature_plan,
     update_feature_plan_metadata,
 )
-from core.session import Session, SessionManager
+from core.session import Session, SessionManager, _append_clickable_citation_links
 from providers.base import LLMProvider, MessagePart, ProviderResponse
+from utils.citation_manager import SourceType, register_source, reset_citation_manager
 from utils.runtime_metrics import (
     collect_context_layer_contents,
     collect_context_layers,
@@ -896,6 +897,35 @@ def test_context_layer_contents_include_expected_keys():
     contents = collect_context_layer_contents(session)
     for key in ["L1", "L2", "L3", "L4", "L4B", "L5"]:
         assert key in contents
+
+
+def test_append_clickable_citation_links_adds_markdown_urls():
+    reset_citation_manager()
+    register_source(
+        title="Wanderlog Google Reviews",
+        url="https://wanderlog.com/example",
+        source_type=SourceType.WEB,
+    )
+    text = "📚 Sources\n- Google Reviews via Wanderlog [^1]"
+
+    updated = _append_clickable_citation_links(text)
+
+    assert "### Source URLs" in updated
+    assert "- [^1] [Wanderlog Google Reviews](https://wanderlog.com/example)" in updated
+
+
+def test_append_clickable_citation_links_respects_existing_footnotes():
+    reset_citation_manager()
+    register_source(
+        title="Example",
+        url="https://example.com/source",
+        source_type=SourceType.WEB,
+    )
+    text = "Sources [^1]\n\n[^1]: Example. https://example.com/source"
+
+    updated = _append_clickable_citation_links(text)
+
+    assert updated == text
 
 
 def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):

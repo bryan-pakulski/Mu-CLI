@@ -1413,7 +1413,12 @@ function setViewMode(mode, sessionName = state.currentSession) {
   if (ui.chatView) ui.chatView.style.display = (boardActive || loopActive) ? "none" : "";
   if (ui.boardView) ui.boardView.style.display = boardActive ? "" : "none";
   if (ui.loopView) ui.loopView.style.display = loopActive ? "" : "none";
-  if (boardActive) renderBoard();
+  if (boardActive) {
+    startBoardEventStream();
+    renderBoard();
+  } else {
+    stopBoardEventStream();
+  }
   if (loopActive) renderLoopView(sessionName);
 }
 
@@ -1738,6 +1743,7 @@ function scheduleBoardRefresh() {
 }
 
 function startBoardEventStream() {
+  if (state.currentView !== "board") return;
   if (state.board.stream) return;
   if (state.board.streamReconnectTimer) {
     clearTimeout(state.board.streamReconnectTimer);
@@ -1766,6 +1772,17 @@ function startBoardEventStream() {
       startBoardEventStream();
     }, 1500);
   };
+}
+
+function stopBoardEventStream() {
+  if (state.board.stream) {
+    state.board.stream.close();
+    state.board.stream = null;
+  }
+  if (state.board.streamReconnectTimer) {
+    clearTimeout(state.board.streamReconnectTimer);
+    state.board.streamReconnectTimer = null;
+  }
 }
 
 async function refreshBoardData({ force = false } = {}) {
@@ -3339,13 +3356,13 @@ ${marker}` : marker;
     renderBoard();
   });
   window.addEventListener("online", () => {
-    startBoardEventStream();
+    if (state.currentView === "board") startBoardEventStream();
     reconnectPersistedStreams();
     refreshServerTaskState().catch(() => {});
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
-    startBoardEventStream();
+    if (state.currentView === "board") startBoardEventStream();
     reconnectPersistedStreams();
     refreshServerTaskState().catch(() => {});
   });
@@ -3366,7 +3383,6 @@ async function bootstrap() {
     refreshHistory(true),
     refreshWorkspace(),
     refreshMemoryRuntime(),
-    refreshMemoryBuffers(),
     refreshApprovals(),
     refreshBoardData({ force: true }),
     refreshServerTaskState(),
@@ -3378,7 +3394,6 @@ async function bootstrap() {
     if (sessionName !== state.currentSession) continue;
     runLoopCycle(sessionName);
   }
-  startBoardEventStream();
   if (state.board.pollTimer) clearInterval(state.board.pollTimer);
   state.board.pollTimer = setInterval(() => {
     if (state.currentView === "board") refreshBoardData();

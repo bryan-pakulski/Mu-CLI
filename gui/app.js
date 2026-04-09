@@ -908,7 +908,7 @@ function renderActivityPanel() {
 
   if (!taskMeta) {
     ui.activitySummary.textContent = "Idle";
-  } else if (taskMeta.status === "running") {
+  } else if (taskMeta.status === "running" || taskMeta.status === "starting") {
     ui.activitySummary.textContent = `Thinking • ${formatSince(taskMeta.startedAt)}`;
   } else if (taskMeta.status === "awaiting_approval") {
     ui.activitySummary.textContent = "Awaiting approval";
@@ -2173,6 +2173,11 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
       if (!active) {
         const existing = state.pendingBySession[session];
         if (existing && existing.status !== "queued") {
+          const startedAt = Number(existing.startedAt || 0);
+          const taskId = String(state.taskBySession[session]?.taskId || "").trim();
+          const bootGraceMs = 15_000;
+          const stillBooting = !!existing.awaitingTaskId || (!taskId && startedAt > 0 && (Date.now() - startedAt) < bootGraceMs);
+          if (stillBooting) continue;
           delete state.pendingBySession[session];
           if (state.taskBySession[session]?.status === "running") {
             state.taskBySession[session].status = "completed";
@@ -2192,6 +2197,7 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
       state.pendingBySession[session] = {
         ...(state.pendingBySession[session] || {}),
         userText: state.pendingBySession[session]?.userText || "",
+        awaitingTaskId: false,
         latestActivity: pretty.charAt(0).toUpperCase() + pretty.slice(1),
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
         status: "running",
@@ -2228,8 +2234,14 @@ async function executeSend(sessionAtSend, text) {
   }
   if (state.pendingBySession[sessionAtSend]) return;
   state.errorSignatureBySession[sessionAtSend] = "";
-  state.pendingBySession[sessionAtSend] = { userText: text, latestActivity: "Queued", startedAt: Date.now(), status: "running" };
-  state.taskBySession[sessionAtSend] = { status: "running", startedAt: Date.now(), taskId: "" };
+  state.pendingBySession[sessionAtSend] = {
+    userText: text,
+    latestActivity: "Starting",
+    startedAt: Date.now(),
+    status: "running",
+    awaitingTaskId: true,
+  };
+  state.taskBySession[sessionAtSend] = { status: "starting", startedAt: Date.now(), taskId: "" };
   state.draftBySession[sessionAtSend] = "";
   persistDrafts();
   pushActivity(sessionAtSend, "Message sent", text.slice(0, 220));
@@ -2244,7 +2256,9 @@ async function executeSend(sessionAtSend, text) {
     const start = await fetchJson("/api/message", { method: "POST", body: JSON.stringify({ text, session_name: sessionAtSend, async: true }) });
     const taskId = start.task?.task_id;
     if (!taskId) throw new Error("Task ID missing from async response.");
+    state.pendingBySession[sessionAtSend].awaitingTaskId = false;
     state.taskBySession[sessionAtSend].taskId = taskId;
+    state.taskBySession[sessionAtSend].status = "running";
     state.pendingBySession[sessionAtSend].latestActivity = "Thinking";
     pushActivity(sessionAtSend, "Task started", `Task ID: ${taskId}`);
     startTaskEventStream(taskId, sessionAtSend);

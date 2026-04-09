@@ -767,6 +767,8 @@ function syncPendingStateFromLiveSync(sessionName, history = [], liveSync = {}) 
     startedAt: state.pendingBySession[sessionName]?.startedAt || startedAt,
     status: "running",
     source: "live_sync",
+    liveSyncStatus: status,
+    lastLiveSyncAt: Date.now(),
   };
   state.taskBySession[sessionName] = {
     ...(state.taskBySession[sessionName] || {}),
@@ -2320,6 +2322,17 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
         const existing = state.pendingBySession[session];
         if (existing && existing.status !== "queued") {
           if (existing.source === "live_sync") {
+            const lastLiveSyncAt = Number(existing.lastLiveSyncAt || 0);
+            const liveSyncStaleMs = 30_000;
+            const hasFreshLiveSyncHeartbeat = lastLiveSyncAt > 0 && (Date.now() - lastLiveSyncAt) < liveSyncStaleMs;
+            if (hasFreshLiveSyncHeartbeat) {
+              continue;
+            }
+            delete state.pendingBySession[session];
+            if (state.taskBySession[session]?.status === "running") {
+              state.taskBySession[session].status = "completed";
+            }
+            closeEventStream(session);
             continue;
           }
           const startedAt = Number(existing.startedAt || 0);

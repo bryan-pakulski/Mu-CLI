@@ -751,6 +751,49 @@ def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypat
     assert feature_state["status"] == "awaiting_approval"
 
 
+def test_loop_mode_watchdog_reprompts_when_model_quits_early():
+    class EarlyQuitLoopProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.calls = 0
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            return ProviderResponse(
+                text="Progress update only; stopping here.",
+                parts=[MessagePart(type="text", text="Progress update only; stopping here.")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    provider = EarlyQuitLoopProvider()
+    sm = SessionManager(session_name="loop-watchdog")
+    session = Session(provider, False, "system instruction", sm)
+    session.variables["agent_mode"] = "loop"
+    session.variables["max_iterations"] = 2
+    session.variables["loop_goal"] = "Keep iterating indefinitely until stopped by user."
+
+    result = session.send_message("Start loop mode")
+
+    assert result["status"] == "completed"
+    assert provider.calls == 2
+    assert any(
+        "LOOP WATCHDOG: Continue autonomous loop execution now."
+        in str(part.get("text", ""))
+        for msg in session.session_manager.history
+        if msg.get("role") == "user"
+        for part in (msg.get("parts") or [])
+        if isinstance(part, dict)
+    )
+
+
 def test_get_current_task_sync_does_not_drop_feature_metadata(tmp_path, monkeypatch):
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-state-current-task")

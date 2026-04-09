@@ -2206,6 +2206,31 @@ class Session:
                         )[:-1]
                         continue
 
+                    if active_mode == "loop" and iteration < max_iterations:
+                        logger.info(
+                            "Loop mode watchdog: assistant stopped without tool calls; issuing autonomous continue nudge."
+                        )
+                        watchdog_msg = {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "LOOP WATCHDOG: Continue autonomous loop execution now. "
+                                        "Re-plan the next increment, execute concrete actions with tools, "
+                                        "verify outcomes, and proceed without waiting for user confirmation. "
+                                        "Only pause if blocked, and if blocked call raise_blocker with exact unblock requirements."
+                                    ),
+                                }
+                            ],
+                        }
+                        self.session_manager.history.append(watchdog_msg)
+                        messages = self._build_messages_from_history(
+                            self._prepare_runtime_history(),
+                            {"role": "system", "parts": []},
+                        )[:-1]
+                        continue
+
                     if self.ui:
                         self.ui.show_info(
                             f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}"

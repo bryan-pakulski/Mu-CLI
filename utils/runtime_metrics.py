@@ -3,7 +3,7 @@ import json
 import os
 import time
 
-from utils.config import HISTORY_DIR
+from utils.config import AGENTIC_MODES, AGENTIC_SYSTEM_BASE, HISTORY_DIR
 
 FEATURE_ACTIVE_STATUSES = {"running", "review"}
 
@@ -91,6 +91,32 @@ def _max_int(value, fallback=1):
     return max(1, int(value or fallback))
 
 
+def _build_l1_directives_text(session) -> str:
+    base_text = str(getattr(session, "system_instruction", "") or "")
+    variables = getattr(session, "variables", {}) or {}
+    agent_mode = str(variables.get("agent_mode", "default") or "default").strip().lower()
+    default_mode_instruction = str(
+        AGENTIC_MODES.get(agent_mode, AGENTIC_MODES.get("default", "")) or ""
+    ).strip()
+    mode_instruction = str(
+        variables.get(f"agentic_mode_prompt_{agent_mode}", default_mode_instruction)
+        or default_mode_instruction
+    ).strip()
+    if not mode_instruction:
+        return base_text
+
+    agentic_system_base = str(
+        variables.get("agentic_system_base_override", AGENTIC_SYSTEM_BASE)
+        or AGENTIC_SYSTEM_BASE
+    ).strip()
+    strategy_block = (
+        f"{agentic_system_base}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}".strip()
+    )
+    if strategy_block and strategy_block not in base_text:
+        return f"{base_text}\n\n{strategy_block}".strip()
+    return base_text
+
+
 def collect_runtime_metrics(session):
     hist_len = len(session.session_manager.history)
     anchor = session.session_manager.summary_anchor
@@ -166,7 +192,7 @@ def collect_context_layers(session):
         1, int(session.variables.get("active_goal_context_char_limit", 4000) or 4000)
     )
     summary_text = str(getattr(session.session_manager, "conversation_summary", "") or "")
-    system_text = str(getattr(session, "system_instruction", "") or "")
+    system_text = _build_l1_directives_text(session)
     goal_text = str(session._build_active_goal_context() or "")
     tool_text = str(session._build_recent_tool_context(max_chars=tool_limit) or "")
     retrieved_text = str(getattr(session, "_pending_retrieved_context", "") or "")
@@ -223,7 +249,7 @@ def collect_context_layers(session):
 
 def collect_context_layer_contents(session) -> dict[str, str]:
     summary_text = str(getattr(session.session_manager, "conversation_summary", "") or "")
-    system_text = str(getattr(session, "system_instruction", "") or "")
+    system_text = _build_l1_directives_text(session)
     goal_text = str(session._build_active_goal_context() or "")
     tool_limit = max(
         1, int(session.variables.get("recent_tool_context_char_limit", 12000) or 12000)

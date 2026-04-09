@@ -11,6 +11,7 @@ from core.feature_mode import (
 from core.session import Session, SessionManager, _append_clickable_citation_links
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 from utils.citation_manager import SourceType, register_source, reset_citation_manager
+from utils.config import AGENTIC_MODES
 from utils.runtime_metrics import (
     collect_context_layer_contents,
     collect_context_layers,
@@ -897,6 +898,18 @@ def test_context_layer_contents_include_expected_keys():
     contents = collect_context_layer_contents(session)
     for key in ["L1", "L2", "L3", "L4", "L4B", "L5"]:
         assert key in contents
+
+
+def test_context_layer_contents_l1_includes_mode_directives():
+    sm = SessionManager(session_name="layer-mode-directives")
+    session = Session(DummyProvider("dummy"), False, "base system", sm)
+    session.agentic = True
+    session.variables["agent_mode"] = "research"
+
+    contents = collect_context_layer_contents(session)
+
+    assert "CURRENT STRATEGY MODE: RESEARCH" in contents["L1"]
+    assert AGENTIC_MODES["research"].splitlines()[0] in contents["L1"]
 
 
 def test_append_clickable_citation_links_adds_markdown_urls():

@@ -199,6 +199,17 @@ class SessionManager:
             return data.get("history", [])
         return []
 
+    def get_session_live_sync(self, name: str | None = None) -> dict:
+        requested = str(name or "").strip()
+        if requested and requested != self.current_session_name:
+            data = self.read_session_data(requested)
+            if isinstance(data, dict):
+                raw = (data.get("variables") or {}).get("live_sync", {})
+                return deepcopy(raw) if isinstance(raw, dict) else {}
+            return {}
+        raw = self.variables.get("live_sync", {})
+        return deepcopy(raw) if isinstance(raw, dict) else {}
+
     def save_history(self, folder_context_obj=None):
         logger.debug(f"Saving history for session: {self.current_session_name}")
         filepath = self._get_filepath(self.current_session_name)
@@ -1795,9 +1806,38 @@ class Session:
             "session_totals": dict(self.session_manager.token_counts),
         }
 
+    def _set_live_sync_state(
+        self,
+        *,
+        status: str,
+        activity: str | None = None,
+        tool_name: str | None = None,
+    ) -> None:
+        now = time.time()
+        previous = self.session_manager.variables.get("live_sync", {})
+        if not isinstance(previous, dict):
+            previous = {}
+        started_at = float(previous.get("started_at", 0.0) or 0.0)
+        normalized_status = str(status or "").strip().lower() or "idle"
+        if normalized_status in {"running", "starting"}:
+            if started_at <= 0:
+                started_at = now
+        else:
+            started_at = 0.0
+        self.session_manager.variables["live_sync"] = {
+            "status": normalized_status,
+            "session_name": self.session_manager.current_session_name,
+            "started_at": started_at,
+            "updated_at": now,
+            "latest_activity": str(activity or previous.get("latest_activity", "") or ""),
+            "last_tool_name": str(tool_name or previous.get("last_tool_name", "") or ""),
+        }
+        self.session_manager.save_history(self.folder_context)
+
     def send_message(self, text):
         logger.info(f"Sending message: {text[:100]}...")
         self.sync_runtime_state()
+        self._set_live_sync_state(status="starting", activity="Starting")
         if self.variables.get("scratchpad_enabled", True):
             self.turn_scratchpad.max_entries = max(
                 1,
@@ -2038,6 +2078,11 @@ class Session:
                             self.ui.show_info(
                                 f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                             )
+                        self._set_live_sync_state(
+                            status="running",
+                            activity=f"Tool: {part.tool_name}",
+                            tool_name=part.tool_name,
+                        )
                         logger.info(
                             f"Tool call: {part.tool_name} with args {part.tool_args}"
                         )
@@ -2118,6 +2163,7 @@ class Session:
                         logger.debug("History compacted.")
 
                     self.session_manager.save_history(self.folder_context)
+                    self._set_live_sync_state(status="completed", activity="Completed")
                     return self._collect_turn_response(
                         initial_history_len,
                         status="completed",
@@ -2379,6 +2425,9 @@ class Session:
                     }
                 )
                 self.session_manager.save_history(self.folder_context)
+                self._set_live_sync_state(
+                    status="interrupted", activity="Interrupted by user"
+                )
                 if self.session_manager.get_feature_state():
                     self._set_feature_state(status="interrupted")
                 return self._collect_turn_response(
@@ -2411,6 +2460,7 @@ class Session:
                     continue
 
                 self.session_manager.save_history(self.folder_context)
+                self._set_live_sync_state(status="error", activity=str(e))
                 if self.session_manager.get_feature_state():
                     self._set_feature_state(status="error")
                 return self._collect_turn_response(
@@ -2423,6 +2473,10 @@ class Session:
                 )
 
         self.session_manager.save_history(self.folder_context)
+        self._set_live_sync_state(
+            status="error",
+            activity=f"Reached maximum iterations ({max_iterations})",
+        )
         if self.session_manager.get_feature_state():
             self._set_feature_state(status="max_iterations_reached")
         return self._collect_turn_response(

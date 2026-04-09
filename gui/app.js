@@ -706,27 +706,6 @@ function latestUserTextFromHistory(history = []) {
   return "";
 }
 
-function inferHistoryRunState(history = []) {
-  let lastUserIndex = -1;
-  let lastAssistantTextIndex = -1;
-  let latestToolCall = "";
-  for (let i = 0; i < history.length; i += 1) {
-    const msg = history[i] || {};
-    if (msg.role === "user") lastUserIndex = i;
-    if (msg.role === "assistant") {
-      const parts = Array.isArray(msg.parts) ? msg.parts : [];
-      if (parts.some((p) => p?.type === "text" && String(p.text || "").trim())) {
-        lastAssistantTextIndex = i;
-      }
-      const toolPart = parts.find((p) => p?.type === "tool_call");
-      if (toolPart) latestToolCall = String(toolPart.tool_name || "").trim();
-    }
-    if (msg.role === "tool") latestToolCall = latestToolCall || "tool_result";
-  }
-  const running = lastUserIndex > lastAssistantTextIndex && lastUserIndex >= 0;
-  return { running, latestToolCall };
-}
-
 function syncActivityFromHistory(sessionName, history = []) {
   const cursor = Number(state.historyCursorBySession[sessionName] || 0);
   const start = Math.max(0, Math.min(cursor, history.length));
@@ -752,29 +731,34 @@ function syncActivityFromHistory(sessionName, history = []) {
   state.historyCursorBySession[sessionName] = history.length;
 }
 
-function syncPendingStateFromHistory(sessionName, history = []) {
-  const activeTaskFromApi = !!state.pendingBySession[sessionName];
+function syncPendingStateFromLiveSync(sessionName, history = [], liveSync = {}) {
+  const activeTaskFromApi = !!state.pendingBySession[sessionName]
+    && state.pendingBySession[sessionName]?.source !== "live_sync";
   if (activeTaskFromApi) return;
-  const { running, latestToolCall } = inferHistoryRunState(history);
-  if (!running) {
+  const status = String(liveSync?.status || "").trim().toLowerCase();
+  if (!["starting", "running", "awaiting_input", "awaiting_approval"].includes(status)) {
     if (state.taskBySession[sessionName]?.status === "running") {
       state.taskBySession[sessionName].status = "completed";
     }
-    delete state.pendingBySession[sessionName];
+    if (state.pendingBySession[sessionName]?.source === "live_sync") {
+      delete state.pendingBySession[sessionName];
+    }
     return;
   }
   const userText = latestUserTextFromHistory(history);
-  const startedAt = Date.now();
+  const startedAt = Number((liveSync?.started_at || 0) * 1000) || Date.now();
+  const latestActivity = String(liveSync?.latest_activity || "").trim();
+  const toolName = String(liveSync?.last_tool_name || "").trim();
   state.pendingBySession[sessionName] = {
     userText,
-    latestActivity: latestToolCall ? `Tool: ${latestToolCall}` : "Thinking",
+    latestActivity: latestActivity || (toolName ? `Tool: ${toolName}` : "Thinking"),
     startedAt: state.pendingBySession[sessionName]?.startedAt || startedAt,
     status: "running",
-    source: "history",
+    source: "live_sync",
   };
   state.taskBySession[sessionName] = {
     ...(state.taskBySession[sessionName] || {}),
-    status: "running",
+    status: status === "starting" ? "starting" : "running",
     startedAt: state.taskBySession[sessionName]?.startedAt || startedAt,
   };
 }
@@ -1917,7 +1901,7 @@ async function refreshHistory(resetToBottom = true) {
   }
   const rawHistory = Array.isArray(payload.history) ? payload.history : [];
   syncActivityFromHistory(state.currentSession, rawHistory);
-  syncPendingStateFromHistory(state.currentSession, rawHistory);
+  syncPendingStateFromLiveSync(state.currentSession, rawHistory, payload.live_sync || {});
   state.loadedMessages = normalizedMessages(rawHistory);
   state.visibleCount = Math.min(24, state.loadedMessages.length || 24);
   renderFeed(resetToBottom);

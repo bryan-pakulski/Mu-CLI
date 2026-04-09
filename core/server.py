@@ -1404,6 +1404,7 @@ def build_history_payload(
         "session_name": response_session_name,
         "history": history,
         "history_length": len(history),
+        "live_sync": session.session_manager.get_session_live_sync(response_session_name),
     }
 
 

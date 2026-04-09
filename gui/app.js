@@ -141,6 +141,7 @@ const ui = {
   memorySearchInput: el("memorySearchInput"),
   memoryBufferList: el("memoryBufferList"),
   scratchpadBufferList: el("scratchpadBufferList"),
+  memoryHeatmap: el("memoryHeatmap"),
   memoryLayersList: el("memoryLayersList"),
   memoryActivityList: el("memoryActivityList"),
   closeMemoryModalBtn: el("closeMemoryModalBtn"),
@@ -1540,6 +1541,29 @@ function renderMemoryModal() {
   ui.scratchpadBufferList.innerHTML = scratchEntries.length
     ? scratchEntries.map((entry) => renderEntry(entry, "scratchpad")).join("")
     : '<div class="activity-empty">No scratchpad entries found.</div>';
+
+  const heatmapEntries = [...memoryEntries.map((entry) => ({ ...entry, bucket: "memory" })), ...scratchEntries.map((entry) => ({ ...entry, bucket: "scratchpad" }))];
+  const maxHits = Math.max(1, ...heatmapEntries.map((entry) => Number(entry.hits || 0)));
+  ui.memoryHeatmap.innerHTML = heatmapEntries.length
+    ? heatmapEntries.map((entry) => {
+      const hits = Number(entry.hits || 0);
+      const intensity = Math.max(0.12, Math.min(1, hits / maxHits));
+      const hue = entry.bucket === "memory" ? 210 : 145;
+      const tags = (entry.tags || []).join(", ");
+      const label = `#${entry.id || "?"}`;
+      const source = String(entry.source || "").slice(0, 80);
+      return `<button class="memory-heat-cell ${entry.bucket}" style="--heat:${intensity};--heat-hue:${hue}" title="${label} · hits:${hits}${tags ? ` · tags:${tags}` : ""}${source ? ` · source:${source}` : ""}" type="button"><span>${label}</span><small>${hits}</small></button>`;
+    }).join("")
+    : '<div class="activity-empty">No entries yet for heatmap.</div>';
+  ui.memoryHeatmap?.querySelectorAll(".memory-heat-cell").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const entryId = (cell.textContent || "").split("\n")[0].trim().replace("#", "");
+      if (!entryId) return;
+      mem.query = entryId;
+      ui.memorySearchInput.value = entryId;
+      renderMemoryModal();
+    });
+  });
 
   const layers = Array.isArray(mem.layers) ? mem.layers : [];
   ui.memoryLayersList.innerHTML = layers.length

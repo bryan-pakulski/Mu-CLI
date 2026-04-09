@@ -2031,6 +2031,7 @@ function mapEventToActivity(evt) {
 function startTaskEventStream(taskId, sessionName) {
   closeEventStream(sessionName);
   const es = new EventSource(api(`/api/events?task_id=${encodeURIComponent(taskId)}`));
+  es.taskId = String(taskId || "");
   state.eventSourceBySession[sessionName] = es;
   const handleEvent = (raw) => {
     if (!raw?.data) return;
@@ -2183,14 +2184,16 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
             state.taskBySession[session].status = "completed";
           }
         }
+        closeEventStream(session);
         continue;
       }
 
       const status = String(active.status || "running");
       const pretty = status.replaceAll("_", " ");
+      const activeTaskId = String(active.task_id || "").trim();
       state.taskBySession[session] = {
         ...(state.taskBySession[session] || {}),
-        taskId: String(active.task_id || ""),
+        taskId: activeTaskId,
         status,
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
       };
@@ -2202,12 +2205,17 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
         status: "running",
       };
+      const stream = state.eventSourceBySession[session];
+      const streamedTaskId = String(stream?.taskId || "").trim();
+      if (activeTaskId && streamedTaskId !== activeTaskId) {
+        startTaskEventStream(activeTaskId, session);
+      }
     }
 
     renderSessions();
     updateComposerState();
     if (state.currentSession === sessionName) renderFeed(false);
-    if (state.currentSession && state.pendingBySession[state.currentSession]) {
+    if (state.currentSession) {
       refreshHistory(false).catch(() => {});
       if (state.currentView === "board") refreshBoardData().catch(() => {});
     }
@@ -2648,7 +2656,9 @@ async function bootstrap() {
   }, 3000);
   if (state.serverTaskPollTimer) clearInterval(state.serverTaskPollTimer);
   state.serverTaskPollTimer = setInterval(() => {
-    refreshServerTaskState();
+    refreshSessions().catch(() => {});
+    refreshRuntime().catch(() => {});
+    refreshServerTaskState().catch(() => {});
   }, 2000);
   setViewMode(boardMode(), state.currentSession);
   if (state.approvalPollTimer) clearInterval(state.approvalPollTimer);

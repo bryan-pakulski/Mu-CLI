@@ -166,6 +166,9 @@ const ui = {
   customAccentInput: el("customAccentInput"),
   chatViewBtn: el("chatViewBtn"),
   boardViewBtn: el("boardViewBtn"),
+  modeChatBtn: el("modeChatBtn"),
+  modeBoardBtn: el("modeBoardBtn"),
+  modeLoopBtn: el("modeLoopBtn"),
   chatView: el("chatView"),
   boardView: el("boardView"),
   loopView: el("loopView"),
@@ -1264,6 +1267,12 @@ function setViewMode(mode, sessionName = state.currentSession) {
   ui.chatViewBtn?.classList.toggle("active", !boardActive && !loopActive);
   ui.boardViewBtn?.classList.toggle("active", boardActive);
   ui.loopViewBtn?.classList.toggle("active", loopActive);
+  ui.modeChatBtn?.classList.toggle("active", !boardActive && !loopActive);
+  ui.modeBoardBtn?.classList.toggle("active", boardActive);
+  ui.modeLoopBtn?.classList.toggle("active", loopActive);
+  ui.modeChatBtn?.setAttribute("aria-selected", (!boardActive && !loopActive) ? "true" : "false");
+  ui.modeBoardBtn?.setAttribute("aria-selected", boardActive ? "true" : "false");
+  ui.modeLoopBtn?.setAttribute("aria-selected", loopActive ? "true" : "false");
   ui.chatView?.classList.toggle("hidden", boardActive || loopActive);
   ui.boardView?.classList.toggle("hidden", !boardActive);
   ui.loopView?.classList.toggle("hidden", !loopActive);
@@ -2998,6 +3007,15 @@ ${marker}` : marker;
   ui.boardViewBtn?.addEventListener("click", async () => {
     setViewMode("board");
     await refreshBoardData({ force: true });
+  });
+  ui.modeChatBtn?.addEventListener("click", () => setViewMode("chat"));
+  ui.modeBoardBtn?.addEventListener("click", async () => {
+    setViewMode("board");
+    await refreshBoardData({ force: true });
+  });
+  ui.modeLoopBtn?.addEventListener("click", () => {
+    setViewMode("loop");
+    renderLoopView(state.currentSession);
   });
   ui.chatBoardSwitch?.addEventListener("change", async () => {
     if (ui.chatBoardSwitch.checked) {

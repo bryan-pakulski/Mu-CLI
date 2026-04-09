@@ -32,14 +32,16 @@
 
       <main class="main-panel">
         <section class="center-panel">
-          <div class="view-toggle-wrap">
-            <span id="chatToggleLabel" class="view-toggle-label active">Chat</span>
-            <label class="view-toggle-switch" title="Toggle between chat and board">
-              <input id="chatBoardSwitch" type="checkbox" />
-              <span class="view-toggle-slider"></span>
-            </label>
-            <span id="boardToggleLabel" class="view-toggle-label">Board</span>
-            <button id="loopViewBtn" class="btn board-icon-btn" type="button" title="Loop mode">∞</button>
+          <div class="view-toggle-wrap mode-switcher" role="tablist" aria-label="View mode">
+            <button id="modeChatBtn" class="mode-switch-btn active" type="button" role="tab" aria-selected="true" title="Chat view">
+              <span class="mode-icon">💬</span><span class="mode-label">Chat</span>
+            </button>
+            <button id="modeBoardBtn" class="mode-switch-btn" type="button" role="tab" aria-selected="false" title="Board view">
+              <span class="mode-icon">🗂️</span><span class="mode-label">Board</span>
+            </button>
+            <button id="modeLoopBtn" class="mode-switch-btn" type="button" role="tab" aria-selected="false" title="Loop view">
+              <span class="mode-icon">∞</span><span class="mode-label">Loop</span>
+            </button>
           </div>
           <button id="settingsBtn" class="settings-btn settings-floating" title="Settings">⚙</button>
 

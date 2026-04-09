@@ -120,6 +120,27 @@ select option:hover{
   border:1px solid var(--border);
   background:color-mix(in oklab, var(--surface) 92%, transparent);
 }
+.mode-switcher{gap:6px;padding:6px}
+.mode-switch-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  border:1px solid transparent;
+  background:transparent;
+  color:var(--muted);
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:12px;
+  cursor:pointer;
+  transition:background .15s ease,border-color .15s ease,color .15s ease,transform .1s ease;
+}
+.mode-switch-btn:hover{color:var(--text);background:color-mix(in oklab,var(--surface-2) 80%, transparent)}
+.mode-switch-btn.active{
+  color:var(--text);
+  border-color:color-mix(in oklab,var(--accent) 45%, var(--border));
+  background:color-mix(in oklab,var(--accent) 18%, var(--surface));
+}
+.mode-switch-btn:active{transform:translateY(1px)}
+.mode-icon{font-size:13px;line-height:1}
+.mode-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em}
 .view-toggle-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;transition:color .12s ease,opacity .12s ease}
 .view-toggle-label.active{color:var(--text);opacity:1}
 .view-toggle-switch{position:relative;width:44px;height:24px;display:inline-block}

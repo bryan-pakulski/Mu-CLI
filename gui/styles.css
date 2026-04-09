@@ -97,7 +97,7 @@ select option:hover{
 .workspace-folder:hover .workspace-remove{opacity:1;pointer-events:auto}
 .workspace-status,.status-badge{font-size:12px;color:var(--muted)}
 
-.main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0;overflow:hidden;transition:grid-template-columns .28s ease}
+.main-panel{background:var(--bg);position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,340px);min-height:0;overflow:hidden;transition:grid-template-columns .28s ease}
 .main-panel.meta-collapsed{grid-template-columns:minmax(0,1fr) 0}
 .center-panel{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;border-right:1px solid var(--border);position:relative}
 .center-panel[data-view="chat"] #boardView{display:none!important}
@@ -318,8 +318,26 @@ button:active, .session-title:active, .workspace-empty:active, .menu-item:active
   100% { box-shadow: 0 0 0 4px transparent; }
 }
 
-.activity-panel{padding:14px 12px;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:10px;background:var(--surface);min-height:0;overflow:hidden;transition:opacity .24s ease,transform .24s ease}
-.main-panel.meta-collapsed .activity-panel{opacity:0;transform:translateX(14px);pointer-events:none}
+.activity-panel{
+  width:100%;
+  min-width:0;
+  padding:14px 12px;
+  display:grid;
+  grid-template-rows:auto auto minmax(0,1fr);
+  gap:10px;
+  background:var(--surface);
+  min-height:0;
+  overflow:hidden;
+  border-left:1px solid var(--border);
+  transition:opacity .24s ease,transform .24s ease,padding .24s ease,border-width .24s ease;
+}
+.main-panel.meta-collapsed .activity-panel{
+  opacity:0;
+  transform:translateX(14px);
+  pointer-events:none;
+  padding:0;
+  border-left-width:0;
+}
 .metadata-toggle-btn{
   position:absolute;right:340px;top:50%;transform:translateY(-50%);
   width:22px;height:46px;padding:0;border-radius:8px 0 0 8px;

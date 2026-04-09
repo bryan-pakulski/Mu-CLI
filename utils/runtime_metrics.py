@@ -150,6 +150,9 @@ def collect_runtime_metrics(session):
 
 
 def collect_context_layers(session):
+    system_limit = max(
+        1, int(session.variables.get("system_prompt_char_limit", 12000) or 12000)
+    )
     summary_limit = max(
         1, int(session.variables.get("conversation_summary_char_limit", 8000) or 8000)
     )
@@ -163,6 +166,7 @@ def collect_context_layers(session):
         1, int(session.variables.get("active_goal_context_char_limit", 4000) or 4000)
     )
     summary_text = str(getattr(session.session_manager, "conversation_summary", "") or "")
+    system_text = str(getattr(session, "system_instruction", "") or "")
     goal_text = str(session._build_active_goal_context() or "")
     tool_text = str(session._build_recent_tool_context(max_chars=tool_limit) or "")
     retrieved_text = str(getattr(session, "_pending_retrieved_context", "") or "")
@@ -171,6 +175,13 @@ def collect_context_layers(session):
         current_turn = json.dumps(session.session_manager.history[-1], default=str)
 
     layers = [
+        {
+            "layer": "L1",
+            "name": "System directives",
+            "current": min(len(system_text), system_limit),
+            "maximum": system_limit,
+            "description": "Primary system prompt and mode directives.",
+        },
         {
             "layer": "L2",
             "name": "Conversation summary",

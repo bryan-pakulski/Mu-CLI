@@ -74,6 +74,19 @@ def _slugify_feature_id(value):
     )
 
 
+def _render_source_links(source: str) -> str:
+    raw = str(source or "").strip()
+    if not raw:
+        return "-"
+    urls = re.findall(r"https?://[^\s,]+", raw)
+    if not urls:
+        return raw
+    lines = []
+    for url in urls:
+        lines.append(f"[link={url}]{url}[/link]")
+    return "\n".join(lines)
+
+
 def _default_feature_directory(session, feature_name):
     workspace_root = (
         os.path.abspath(session.folder_context.folders[0])
@@ -2142,7 +2155,7 @@ def handle_command(session, user_input, allow_prompt=True):
                             f"#{entry.get('id')}",
                             str(entry.get("hits", 0)),
                             tags,
-                            entry.get("source") or "-",
+                            _render_source_links(entry.get("source") or "-"),
                             preview or "(empty)",
                         )
                     console.print(top_table)
@@ -2207,7 +2220,7 @@ def handle_command(session, user_input, allow_prompt=True):
                             f"#{entry.id}",
                             str(entry.hits),
                             tags,
-                            entry.source or "-",
+                            _render_source_links(entry.source or "-"),
                             entry.content,
                         )
                     console.print(table)

@@ -10,7 +10,7 @@ from core.feature_mode import (
 )
 from core.session import Session, SessionManager
 from providers.base import LLMProvider, MessagePart, ProviderResponse
-from utils.runtime_metrics import feature_elapsed_thinking_seconds
+from utils.runtime_metrics import collect_context_layers, feature_elapsed_thinking_seconds
 
 
 class DummyProvider(LLMProvider):
@@ -877,6 +877,13 @@ def test_feature_elapsed_time_excludes_waiting_for_input(tmp_path, monkeypatch):
     feature_state = sm.get_feature_state()
     assert feature_state is not None
     assert feature_elapsed_thinking_seconds(feature_state) == 17
+
+
+def test_context_layers_include_l1_system_directives():
+    sm = SessionManager(session_name="layer-l1")
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    layers = collect_context_layers(session)
+    assert any(layer.get("layer") == "L1" for layer in layers)
 
 
 def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):

@@ -11,6 +11,29 @@ const META_PANEL_COLLAPSED_KEY = "mucli_gui_meta_panel_collapsed_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
 
+function defaultApiBase() {
+  const proto = window.location.protocol === "https:" ? "https:" : "http:";
+  const host = String(window.location.hostname || "").trim();
+  if (host === "localhost" || host === "127.0.0.1") return `${proto}//${host}:8765`;
+  return "http://127.0.0.1:8765";
+}
+
+function normalizeApiBase(rawBase = "") {
+  const fallback = defaultApiBase();
+  const value = String(rawBase || "").trim();
+  if (!value) return fallback;
+  try {
+    const url = new URL(value);
+    const pageHost = String(window.location.hostname || "").trim().toLowerCase();
+    if ((url.hostname === "127.0.0.1" || url.hostname === "localhost") && (pageHost === "127.0.0.1" || pageHost === "localhost")) {
+      url.hostname = pageHost;
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return fallback;
+  }
+}
+
 const PRESET_ACCENTS = [
   { name: "Zinc", value: "#71717a" },
   { name: "Red", value: "#ef4444" },
@@ -46,7 +69,7 @@ const VARIABLE_HELP = {
 };
 
 const state = {
-  apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
+  apiBase: normalizeApiBase(localStorage.getItem("mucli_gui_api_base") || defaultApiBase()),
   currentSession: "",
   currentView: "chat",
   sessions: [],
@@ -238,6 +261,11 @@ const ui = {
 };
 
 ui.apiBaseInput.value = state.apiBase;
+try {
+  localStorage.setItem("mucli_gui_api_base", state.apiBase);
+} catch {
+  // ignore localStorage errors
+}
 try {
   const cached = JSON.parse(localStorage.getItem(SESSIONS_STORAGE_KEY) || "{}");
   if (Array.isArray(cached.sessions)) state.sessions = cached.sessions;
@@ -566,29 +594,47 @@ function api(path) {
 }
 
 async function fetchJson(path, options = {}, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let resp;
-  try {
-    const method = (options.method || "GET").toUpperCase();
-    const headers = { ...(options.headers || {}) };
-    if (options.body && !headers["Content-Type"] && method !== "GET") {
-      headers["Content-Type"] = "application/json";
-    }
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { ...(options.headers || {}) };
+  if (options.body && !headers["Content-Type"] && method !== "GET") {
+    headers["Content-Type"] = "application/json";
+  }
+  const requestOnce = async (url) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      resp = await fetch(api(path), { ...options, method, headers, signal: controller.signal });
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s.`);
-      }
+      const resp = await fetch(url, { ...options, method, headers, signal: controller.signal });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const primaryUrl = api(path);
+  try {
+    return await requestOnce(primaryUrl);
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s.`);
+    }
+    const msg = String(err?.message || "");
+    const isNetworkError = /failed to fetch|networkerror|cors request did not succeed/i.test(msg.toLowerCase());
+    if (!isNetworkError) throw err;
+    try {
+      const alt = new URL(primaryUrl);
+      if (!["127.0.0.1", "localhost"].includes(alt.hostname)) throw err;
+      alt.hostname = alt.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
+      const data = await requestOnce(alt.toString());
+      state.apiBase = `${alt.protocol}//${alt.host}`;
+      ui.apiBaseInput.value = state.apiBase;
+      localStorage.setItem("mucli_gui_api_base", state.apiBase);
+      return data;
+    } catch {
       throw err;
     }
-  } finally {
-    clearTimeout(timeout);
   }
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-  return data;
 }
 
 async function ensureServerSession(sessionName = state.currentSession) {
@@ -2891,7 +2937,8 @@ async function stopCurrentRun() {
 
 function wireEvents() {
   ui.apiBaseInput.addEventListener("change", async () => {
-    state.apiBase = ui.apiBaseInput.value.trim() || state.apiBase;
+    state.apiBase = normalizeApiBase(ui.apiBaseInput.value.trim() || state.apiBase);
+    ui.apiBaseInput.value = state.apiBase;
     localStorage.setItem("mucli_gui_api_base", state.apiBase);
     await bootstrap();
   });

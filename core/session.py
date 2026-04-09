@@ -1455,6 +1455,26 @@ class Session:
         )
         return base_instruction + text
 
+    def _build_loop_mode_prompt(self, text: str) -> str:
+        loop_goal = str(
+            self.variables.get("loop_goal")
+            or text
+            or ""
+        ).strip()
+        if loop_goal and not str(self.variables.get("loop_goal", "")).strip():
+            self.variables["loop_goal"] = loop_goal
+        base_instruction = (
+            "LOOP MODE DIRECTIVE: You are executing a long-horizon loop with a locked mission. "
+            "Maintain a self-directed backlog, keep exactly one active task, and continuously run plan -> execute -> verify -> re-plan cycles. "
+            "Persist durable decisions using save_memory and short-term plans using save_scratchpad. "
+            "After each increment, provide a timeline update with: objective, actions, evidence, decision, and next step. "
+            "When blocked on user input/credentials/environment constraints, call raise_blocker with explicit unblock requirements. "
+            "Do not stop unless user explicitly asks to stop loop mode.\n\n"
+            f"LOCKED LOOP GOAL:\n{loop_goal}\n\n"
+            "INCREMENT REQUEST:\n"
+        )
+        return base_instruction + text
+
     def _feature_doc_tool_violation(self, tool_name: str, tool_args: dict) -> str | None:
         if str(self.variables.get("agent_mode", "default")).lower() != "feature":
             return None
@@ -1863,11 +1883,11 @@ class Session:
 
         parts = list(self.staged_files)
         effective_text = text
-        if (
-            text
-            and str(self.variables.get("agent_mode", "default")).lower() == "feature"
-        ):
+        active_mode = str(self.variables.get("agent_mode", "default")).lower()
+        if text and active_mode == "feature":
             effective_text = self._build_feature_mode_prompt(text)
+        elif text and active_mode == "loop":
+            effective_text = self._build_loop_mode_prompt(text)
         if effective_text:
             parts.append({"type": "text", "text": effective_text})
 
@@ -1934,7 +1954,6 @@ class Session:
                             workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
-        active_mode = str(self.variables.get("agent_mode", "default")).lower()
         if active_mode == "feature":
             base_system_prompt += (
                 "\n\nFEATURE MODE SYSTEM PROMPT\n"

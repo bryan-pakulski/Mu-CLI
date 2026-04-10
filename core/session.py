@@ -1790,15 +1790,7 @@ class Session:
         retries = max(0, int(self.variables.get("provider_max_retries", 2) or 2))
         base_delay = float(self.variables.get("provider_retry_base_delay", 0.4) or 0.4)
         max_delay = float(self.variables.get("provider_retry_max_delay", 3.0) or 3.0)
-        raw_autorepair = self.variables.get("provider_auto_repair_ollama_host", False)
-        allow_ollama_host_autorepair = str(raw_autorepair).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
         attempt = 0
-        host_repair_attempted = False
         while True:
             try:
                 return self.provider.generate(
@@ -1808,29 +1800,6 @@ class Session:
                     tools=tools,
                 )
             except Exception as exc:
-                message = str(exc or "").lower()
-                provider_name = str(
-                    getattr(self.provider, "name", "")
-                    or getattr(self.provider, "model_name", "")
-                    or ""
-                ).lower()
-                if (
-                    allow_ollama_host_autorepair
-                    and not host_repair_attempted
-                    and provider_name == "ollama"
-                    and "400" in message
-                    and "ollama.com" in message
-                ):
-                    host_repair_attempted = True
-                    fallback_host = "http://localhost:11434"
-                    self.variables["ollama_host"] = fallback_host
-                    if hasattr(self.provider, "host"):
-                        self.provider.host = fallback_host
-                    if self.ui:
-                        self.ui.show_info(
-                            "Detected invalid Ollama host (ollama.com). Switched to http://localhost:11434 and retrying once."
-                        )
-                    continue
                 if attempt >= retries or not self._is_transient_provider_error(exc):
                     raise
                 attempt += 1
@@ -2084,6 +2053,7 @@ class Session:
         total_cost = 0.0
 
         logger.info(f"Starting agentic loop (max_iterations={max_iterations})")
+        provider_bad_request_retried = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -2582,6 +2552,30 @@ class Session:
                         + "\n".join(traceback_text.strip().splitlines()[-8:])
                     )
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
+
+                if (
+                    not provider_bad_request_retried
+                    and not current_tool_name
+                    and "400" in str(e).lower()
+                ):
+                    provider_bad_request_retried = True
+                    self.session_manager.history = self.session_manager.history[:initial_history_len]
+                    self.session_manager.summary_anchor = min(
+                        self.session_manager.summary_anchor,
+                        len(self.session_manager.history),
+                    )
+                    self.session_manager.history.append(new_user_message)
+                    self.session_manager.save_history(self.folder_context)
+                    messages = self._build_messages_from_history(
+                        self._prepare_runtime_history(),
+                        new_user_message,
+                    )
+                    iteration -= 1
+                    if self.ui:
+                        self.ui.show_info(
+                            "Provider returned HTTP 400. Rolled back the current turn and retrying once."
+                        )
+                    continue
 
                 choice = self._provider_error_recovery_choice()
                 if choice == "rollback_retry":

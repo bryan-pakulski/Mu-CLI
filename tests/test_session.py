@@ -485,7 +485,10 @@ def test_provider_generate_with_retry_does_not_retry_non_transient_errors():
     assert session.provider.calls == 1
 
 
-def test_provider_generate_with_retry_repairs_invalid_ollama_host_once_when_enabled():
+def test_provider_bad_request_rolls_back_current_turn_and_retries_once(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
     class MisconfiguredOllamaProvider(LLMProvider):
         def __init__(self):
             super().__init__("ollama")
@@ -512,46 +515,16 @@ def test_provider_generate_with_retry_repairs_invalid_ollama_host_once_when_enab
         def upload_file(self, file_path, mime_type):
             return None
 
-    sm = SessionManager()
+    sm = SessionManager(session_name="provider-bad-request-rollback")
     session = Session(MisconfiguredOllamaProvider(), False, "system instruction", sm)
-    session.variables["provider_auto_repair_ollama_host"] = True
 
     result = session.send_message("hello")
 
     assert result["ok"] is True
     assert session.provider.calls == 2
-    assert session.variables["ollama_host"] == "http://localhost:11434"
-    assert session.provider.host == "http://localhost:11434"
-
-
-def test_provider_generate_with_retry_does_not_autorepair_ollama_host_by_default():
-    class MisconfiguredOllamaProvider(LLMProvider):
-        def __init__(self):
-            super().__init__("ollama")
-            self.calls = 0
-            self.host = "https://ollama.com"
-
-        def get_available_models(self):
-            return ["llama3"]
-
-        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
-            self.calls += 1
-            raise Exception(
-                "Failed to connect to Ollama at https://ollama.com: HTTP Error 400: Bad Request"
-            )
-
-        def upload_file(self, file_path, mime_type):
-            return None
-
-    sm = SessionManager()
-    session = Session(MisconfiguredOllamaProvider(), False, "system instruction", sm)
-    session.variables["provider_auto_repair_ollama_host"] = False
-
-    result = session.send_message("hello")
-
-    assert result["ok"] is False
-    assert session.provider.calls >= 1
     assert session.provider.host == "https://ollama.com"
+    user_messages = [m for m in session.session_manager.history if m.get("role") == "user"]
+    assert len(user_messages) == 1
 
 
 def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):

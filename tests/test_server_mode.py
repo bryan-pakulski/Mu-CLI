@@ -608,6 +608,37 @@ def test_build_memory_buffers_payload_exposes_saved_entries():
     assert payload["scratchpad_entries"][0]["content"]
 
 
+def test_build_memory_buffers_payload_supports_named_session_snapshot(tmp_path, monkeypatch):
+    history_root = tmp_path / "history"
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(history_root))
+
+    session = build_test_session()
+    session.session_manager.new_session(
+        name="snapshot-session",
+        provider_name="dummy",
+        model_name="dummy-model",
+    )
+    session.session_manager.task_memory.save("Persisted memory", tags=["persisted"], source="test")
+    session.session_manager.turn_scratchpad.save("Persisted scratch", tags=["persisted"], source="test")
+    session.session_manager.save_history()
+
+    session.session_manager.new_session(
+        name="active-session",
+        provider_name="dummy",
+        model_name="dummy-model",
+    )
+    session.sync_runtime_state()
+
+    payload = build_memory_buffers_payload(session, session_name="snapshot-session")
+
+    assert payload["session_name"] == "snapshot-session"
+    assert payload["memory_entries"]
+    assert payload["memory_entries"][0]["content"] == "Persisted memory"
+    assert payload["scratchpad_entries"]
+    assert payload["scratchpad_entries"][0]["content"] == "Persisted scratch"
+    assert any(layer.get("layer") == "L5" for layer in payload["context_layers"])
+
+
 def test_task_manager_cancel_task_marks_cancelled_and_blocks_completion():
     session = build_test_session()
     manager = TaskManager(session, Lock(), event_hub=EventHub())

@@ -412,6 +412,121 @@ def test_session_sync_runtime_state_rebinds_memory_stores():
     assert session.turn_scratchpad is not original_scratchpad
 
 
+def test_allocate_feature_id_avoids_collisions():
+    sm = SessionManager()
+    sm.upsert_feature({"feature_id": "foo", "feature_name": "Foo"})
+    sm.upsert_feature({"feature_id": "foo_2", "feature_name": "Foo 2"})
+
+    allocated = sm.allocate_feature_id("foo")
+
+    assert allocated == "foo_3"
+
+
+def test_provider_generate_with_retry_retries_transient_errors():
+    class FlakyProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.calls = 0
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            if self.calls < 3:
+                raise RuntimeError("503 Service Unavailable")
+            return ProviderResponse(
+                text="done",
+                parts=[MessagePart(type="text", text="done")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager()
+    session = Session(FlakyProvider(), False, "system instruction", sm)
+    session.variables["provider_max_retries"] = 2
+    session.variables["provider_retry_base_delay"] = 0
+    session.variables["provider_retry_max_delay"] = 0
+
+    result = session.send_message("hello")
+
+    assert result["ok"] is True
+    assert session.provider.calls == 3
+
+
+def test_provider_generate_with_retry_does_not_retry_non_transient_errors():
+    class HardFailProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.calls = 0
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            raise RuntimeError("invalid api key")
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager()
+    session = Session(HardFailProvider(), False, "system instruction", sm)
+    session.variables["provider_max_retries"] = 4
+
+    result = session.send_message("hello")
+
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert session.provider.calls == 1
+
+
+def test_provider_bad_request_rolls_back_current_turn_and_retries_once(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    class MisconfiguredOllamaProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("ollama")
+            self.calls = 0
+            self.host = "https://ollama.com"
+
+        def get_available_models(self):
+            return ["llama3"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise Exception(
+                    "Failed to connect to Ollama at https://ollama.com: HTTP Error 400: Bad Request"
+                )
+            return ProviderResponse(
+                text="done",
+                parts=[MessagePart(type="text", text="done")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager(session_name="provider-bad-request-rollback")
+    session = Session(MisconfiguredOllamaProvider(), False, "system instruction", sm)
+
+    result = session.send_message("hello")
+
+    assert result["ok"] is True
+    assert session.provider.calls == 2
+    assert session.provider.host == "https://ollama.com"
+    user_messages = [m for m in session.session_manager.history if m.get("role") == "user"]
+    assert len(user_messages) == 1
+
+
 def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
     sample = tmp_path / "sample.txt"
     sample.write_text("important line\n" * 50)
@@ -600,9 +715,13 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
         "call flush before acting on the collected context" in provider.last_user_text
     )
     assert "call raise_blocker" in provider.last_user_text
+    assert "Do not pause after progress reports" in provider.last_user_text
+    assert "without asking the user to 'continue'" in provider.last_user_text
     assert "FEATURE MODE SYSTEM PROMPT" in provider.last_system_prompt
     assert "You are in Feature Plan Engine mode" in provider.last_system_prompt
     assert "gather read-only context first" in provider.last_system_prompt
+    assert "Do not stall on status-only updates" in provider.last_system_prompt
+    assert "until all phases and tasks are completed" in provider.last_system_prompt
     assert provider.last_user_text.endswith("Implement an approvals dashboard")
 
 
@@ -672,6 +791,49 @@ def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypat
     assert feature_state["directory"] == plan.directory
     assert feature_state["feature_plan"]["feature_id"] == summary["feature_id"]
     assert feature_state["status"] == "awaiting_approval"
+
+
+def test_loop_mode_watchdog_reprompts_when_model_quits_early():
+    class EarlyQuitLoopProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("dummy")
+            self.calls = 0
+
+        def get_available_models(self):
+            return ["dummy"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            return ProviderResponse(
+                text="Progress update only; stopping here.",
+                parts=[MessagePart(type="text", text="Progress update only; stopping here.")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    provider = EarlyQuitLoopProvider()
+    sm = SessionManager(session_name="loop-watchdog")
+    session = Session(provider, False, "system instruction", sm)
+    session.variables["agent_mode"] = "loop"
+    session.variables["max_iterations"] = 2
+    session.variables["loop_goal"] = "Keep iterating indefinitely until stopped by user."
+
+    result = session.send_message("Start loop mode")
+
+    assert result["status"] == "completed"
+    assert provider.calls == 2
+    assert any(
+        "LOOP WATCHDOG: Continue autonomous loop execution now."
+        in str(part.get("text", ""))
+        for msg in session.session_manager.history
+        if msg.get("role") == "user"
+        for part in (msg.get("parts") or [])
+        if isinstance(part, dict)
+    )
 
 
 def test_get_current_task_sync_does_not_drop_feature_metadata(tmp_path, monkeypatch):

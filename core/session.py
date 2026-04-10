@@ -4,6 +4,7 @@ import json
 import time
 import glob
 import re
+import random
 import shutil
 import traceback
 from copy import deepcopy
@@ -316,7 +317,7 @@ class SessionManager:
         directory: str,
         feature_request: str = "",
     ) -> dict:
-        feature_id = _slugify_feature_id(feature_name)
+        feature_id = self.allocate_feature_id(feature_name)
         metadata_path = self.get_feature_metadata_path(feature_id)
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
         record = {
@@ -353,6 +354,17 @@ class SessionManager:
         self.feature_state = deepcopy(record)
         self.save_history()
         return deepcopy(record)
+
+    def allocate_feature_id(self, requested_id: str) -> str:
+        base = _slugify_feature_id(requested_id)
+        if base not in self.feature_registry:
+            return base
+        suffix = 2
+        while True:
+            candidate = f"{base}_{suffix}"
+            if candidate not in self.feature_registry:
+                return candidate
+            suffix += 1
 
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
         self.feature_state = deepcopy(state) if isinstance(state, dict) else None
@@ -1174,6 +1186,12 @@ class Session:
 
     def _build_active_goal_context(self) -> str:
         sections = []
+        loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
+        if loop_goal and str(self.variables.get("agent_mode", "default")).lower() == "loop":
+            sections.append(f"- loop_goal: {loop_goal}")
+            sections.append(
+                "- loop_memory_policy: persist durable findings with save_memory and in-flight steps with save_scratchpad."
+            )
         feature_state = self.session_manager.get_feature_state()
         if isinstance(feature_state, dict):
             feature_id = str(feature_state.get("feature_id", "") or "").strip()
@@ -1205,6 +1223,26 @@ class Session:
         if scratch:
             sections.append("\nScratchpad snapshot:\n" + scratch)
         return "\n".join(sections).strip()
+
+    def _ensure_loop_goal_persistence(self) -> None:
+        if str(self.variables.get("agent_mode", "default")).lower() != "loop":
+            return
+        loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
+        if not loop_goal:
+            return
+        existing = self.task_memory.search("loop goal", limit=12)
+        if any(loop_goal in str(entry.content or "") for entry in existing):
+            return
+        self.task_memory.save(
+            f"Locked loop goal: {loop_goal}",
+            tags=["loop", "goal", "locked"],
+            source="loop_mode",
+        )
+        self.turn_scratchpad.save(
+            f"Current loop goal: {loop_goal}",
+            tags=["loop", "goal"],
+            source="loop_mode",
+        )
 
     def _build_recent_tool_context(self, max_chars: int = 8000) -> str:
         if max_chars <= 0:
@@ -1431,14 +1469,36 @@ class Session:
             "Use get_execution_state to identify the next pending phase/task, use block_task when work cannot continue without user input, and use resume_task after the user provides unblock context. "
             "Use update_task_status/approve_feature_task/get_tasks/get_current_task exclusively to read or change task status. "
             "Every task must define explicit EXIT CRITERIA, and you may set update_task_status(..., status='completed') only after all exit criteria for that task are demonstrably met and verified in the current codebase/tests. "
+            "As each criterion is satisfied, call update_task_status with cumulative verified_exit_criteria so progress is visible in the task UI. "
             "In review mode, use review_all_completed_tasks first, then review_completed_tasks with categorized issues (bug/risk/enhancement), propose_task_diff for proposed fixes, decide_task_diff for user approvals/denials, and archive_task once tasks become archive-ready. "
             "Harness execution model: progress one task at a time, validate, then move to the next task. Never batch multiple tasks in one step. "
             "For investigation-heavy turns, gather read-only context first, use save_scratchpad for temporary phase notes, and call flush before acting on the collected context. "
             "Memory discipline is mandatory: use save_memory for durable facts/decisions that must survive long loops; use save_scratchpad for short-lived hypotheses and in-flight notes each turn; query memory/scratchpad before re-reading large context. "
             "If you become blocked because you need a user decision or missing context, call raise_blocker with a precise summary, what you tried, and the exact input you need so the harness can pause and ask the user for help. "
+            "Do not pause after progress reports. Unless blocked or waiting on explicit approval/decision, immediately continue to the next actionable implementation step in the same run without asking the user to 'continue'. "
             "Never move to the next task until the current task's exit criteria are fully satisfied and the task is marked completed via update_task_status. "
             "When all tasks are complete, perform a review pass over the tasks and code changes together. If review fails, move failing tasks back to in_progress and continue implementing. If review succeeds, call approve_feature_task with review_status completed before you report success. "
             "In every turn response, clearly identify: current task, evidence gathered, changes made, verification result, and the immediate next step.\n\n"
+        )
+        return base_instruction + text
+
+    def _build_loop_mode_prompt(self, text: str) -> str:
+        loop_goal = str(
+            self.variables.get("loop_goal")
+            or text
+            or ""
+        ).strip()
+        if loop_goal and not str(self.variables.get("loop_goal", "")).strip():
+            self.variables["loop_goal"] = loop_goal
+        base_instruction = (
+            "LOOP MODE DIRECTIVE: You are executing a long-horizon loop with a locked mission. "
+            "Maintain a self-directed backlog, keep exactly one active task, and continuously run plan -> execute -> verify -> re-plan cycles. "
+            "Persist durable decisions using save_memory and short-term plans using save_scratchpad. "
+            "After each increment, provide a timeline update with: objective, actions, evidence, decision, and next step. "
+            "When blocked on user input/credentials/environment constraints, call raise_blocker with explicit unblock requirements. "
+            "Do not stop unless user explicitly asks to stop loop mode.\n\n"
+            f"LOCKED LOOP GOAL:\n{loop_goal}\n\n"
+            "INCREMENT REQUEST:\n"
         )
         return base_instruction + text
 
@@ -1686,6 +1746,71 @@ class Session:
             )
         return False
 
+    def _provider_error_recovery_choice(self) -> str:
+        if self.ui and hasattr(self.ui, "prompt_choices"):
+            return self._prompt_tool_choice(
+                "Provider call failed. Choose recovery strategy:",
+                choices=["retry", "rollback_retry", "abort"],
+                default="retry",
+            )
+        if self._confirm_retry():
+            return "retry"
+        return "abort"
+
+    @staticmethod
+    def _is_transient_provider_error(error: Exception) -> bool:
+        message = str(error or "").lower()
+        transient_markers = (
+            "timeout",
+            "timed out",
+            "temporarily unavailable",
+            "temporary failure",
+            "rate limit",
+            "429",
+            "502",
+            "503",
+            "504",
+            "connection reset",
+            "connection aborted",
+            "network",
+            "econnreset",
+            "service unavailable",
+            "try again",
+        )
+        return any(marker in message for marker in transient_markers)
+
+    def _provider_generate_with_retry(
+        self,
+        *,
+        messages,
+        system_prompt,
+        thinking,
+        tools,
+    ):
+        retries = max(0, int(self.variables.get("provider_max_retries", 2) or 2))
+        base_delay = float(self.variables.get("provider_retry_base_delay", 0.4) or 0.4)
+        max_delay = float(self.variables.get("provider_retry_max_delay", 3.0) or 3.0)
+        attempt = 0
+        while True:
+            try:
+                return self.provider.generate(
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    thinking=thinking,
+                    tools=tools,
+                )
+            except Exception as exc:
+                if attempt >= retries or not self._is_transient_provider_error(exc):
+                    raise
+                attempt += 1
+                delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+                delay += random.uniform(0, min(0.2, delay * 0.25))
+                if self.ui:
+                    self.ui.show_info(
+                        f"Transient provider error detected; retrying ({attempt}/{retries}) in {delay:.2f}s."
+                    )
+                time.sleep(delay)
+
     def _request_tool_approval(
         self,
         *,
@@ -1796,11 +1921,13 @@ class Session:
 
         parts = list(self.staged_files)
         effective_text = text
-        if (
-            text
-            and str(self.variables.get("agent_mode", "default")).lower() == "feature"
-        ):
+        active_mode = str(self.variables.get("agent_mode", "default")).lower()
+        if text and active_mode == "feature":
             effective_text = self._build_feature_mode_prompt(text)
+        elif text and active_mode == "loop":
+            effective_text = self._build_loop_mode_prompt(text)
+        if active_mode == "loop":
+            self._ensure_loop_goal_persistence()
         if effective_text:
             parts.append({"type": "text", "text": effective_text})
 
@@ -1867,20 +1994,34 @@ class Session:
                             workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
         base_system_prompt = self.system_instruction
-        if str(self.variables.get("agent_mode", "default")).lower() == "feature":
+        if active_mode == "feature":
             base_system_prompt += (
                 "\n\nFEATURE MODE SYSTEM PROMPT\n"
                 "You are in Feature Plan Engine mode. "
                 "Use the staged feature-task engine for this request. Start with create_feature, then create_phases, then create_task for each ticket. "
                 "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
                 "Every task must include explicit EXIT CRITERIA and tasks can be marked completed only after all exit criteria are verified. "
+                "Continuously update verified_exit_criteria via update_task_status as each criterion is met so progress remains explicit. "
                 "Step through one task at a time until completion; never work multiple tasks simultaneously. "
                 "Use get_execution_state to choose the next actionable phase/task, use block_task if external input is required, and resume_task when user unblock context arrives. "
                 "Use review_all_completed_tasks/review_completed_tasks/propose_task_diff/decide_task_diff/archive_task for review-and-archive flow after implementation completes. "
                 "gather read-only context first, use save_scratchpad for temporary phase notes, call flush before acting on collected context, and call raise_blocker when blocked on user input. "
                 "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
-                "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows."
+                "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows. "
+                "Do not stall on status-only updates: unless blocked or awaiting explicit approval/decision, continue implementation autonomously until all phases and tasks are completed."
             )
+        elif active_mode == "loop":
+            loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
+            base_system_prompt += (
+                "\n\nLOOP MODE SYSTEM PROMPT\n"
+                "You are executing a long-horizon autonomous loop. "
+                "Work continuously in increments (plan -> execute -> verify -> continue) until stopped by the user. "
+                "Create and maintain your own internal task list as you progress. "
+                "At each increment, provide a concise timeline update: attempted action, outcome, evidence, and next step. "
+                "Use save_memory for durable findings and save_scratchpad for short-lived planning."
+            )
+            if loop_goal:
+                base_system_prompt += f"\nLocked loop goal: {loop_goal}"
         if workspace_context:
             base_system_prompt += f"\n\n{workspace_context}"
         context_limit = max(
@@ -1912,6 +2053,7 @@ class Session:
         total_cost = 0.0
 
         logger.info(f"Starting agentic loop (max_iterations={max_iterations})")
+        provider_bad_request_retried = False
 
         while iteration < max_iterations:
             iteration += 1
@@ -1960,26 +2102,22 @@ class Session:
                     )
                 if self.ui:
                     with self.ui.show_status(status_msg):
-                        response = self.provider.generate(
+                        response = self._provider_generate_with_retry(
                             messages=messages,
                             system_prompt=dynamic_system_prompt,
                             thinking=self.thinking,
-                            tools=(
-                                active_tools
-                                if (self.folder_context.folders and self.agentic)
-                                else None
-                            ),
+                            tools=active_tools
+                            if (self.folder_context.folders and self.agentic)
+                            else None,
                         )
                 else:
-                    response = self.provider.generate(
+                    response = self._provider_generate_with_retry(
                         messages=messages,
                         system_prompt=dynamic_system_prompt,
                         thinking=self.thinking,
-                        tools=(
-                            active_tools
-                            if (self.folder_context.folders and self.agentic)
-                            else None
-                        ),
+                        tools=active_tools
+                        if (self.folder_context.folders and self.agentic)
+                        else None,
                     )
 
                 logger.debug(
@@ -2019,7 +2157,7 @@ class Session:
                                 "thought_signature": part.thought_signature,
                             }
                         )
-                        if self.ui:
+                        if self.ui and active_mode != "loop":
                             self.ui.show_info(
                                 f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                             )
@@ -2074,6 +2212,31 @@ class Session:
                             ],
                         }
                         self.session_manager.history.append(nudge_msg)
+                        messages = self._build_messages_from_history(
+                            self._prepare_runtime_history(),
+                            {"role": "system", "parts": []},
+                        )[:-1]
+                        continue
+
+                    if active_mode == "loop" and iteration < max_iterations:
+                        logger.info(
+                            "Loop mode watchdog: assistant stopped without tool calls; issuing autonomous continue nudge."
+                        )
+                        watchdog_msg = {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "LOOP WATCHDOG: Continue autonomous loop execution now. "
+                                        "Re-plan the next increment, execute concrete actions with tools, "
+                                        "verify outcomes, and proceed without waiting for user confirmation. "
+                                        "Only pause if blocked, and if blocked call raise_blocker with exact unblock requirements."
+                                    ),
+                                }
+                            ],
+                        }
+                        self.session_manager.history.append(watchdog_msg)
                         messages = self._build_messages_from_history(
                             self._prepare_runtime_history(),
                             {"role": "system", "parts": []},
@@ -2264,8 +2427,8 @@ class Session:
                                 f"{count} item(s) currently pending. "
                                 "Continue gathering or call 'flush' when ready to receive all context."
                             )
-                            if self.ui:
-                                self.ui.show_info(f"  [Collated: {part.tool_name}]")
+                        if self.ui and active_mode != "loop":
+                            self.ui.show_info(f"  [Collated: {part.tool_name}]")
                         else:
                             # If it's an error, don't collate it, let the model see the error immediately
                             if self.ui:
@@ -2273,7 +2436,7 @@ class Session:
                                     self._render_tool_result(raw_result)
                                 )
                     else:
-                        if self.ui:
+                        if self.ui and active_mode != "loop":
                             self.ui.show_tool_result(
                                 self._render_tool_result(raw_result)
                             )
@@ -2390,8 +2553,45 @@ class Session:
                     )
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
 
-                # Failsafe for retry
-                if self._confirm_retry():
+                if (
+                    not provider_bad_request_retried
+                    and not current_tool_name
+                    and "400" in str(e).lower()
+                ):
+                    provider_bad_request_retried = True
+                    self.session_manager.history = self.session_manager.history[:initial_history_len]
+                    self.session_manager.summary_anchor = min(
+                        self.session_manager.summary_anchor,
+                        len(self.session_manager.history),
+                    )
+                    self.session_manager.history.append(new_user_message)
+                    self.session_manager.save_history(self.folder_context)
+                    messages = self._build_messages_from_history(
+                        self._prepare_runtime_history(),
+                        new_user_message,
+                    )
+                    iteration -= 1
+                    if self.ui:
+                        self.ui.show_info(
+                            "Provider returned HTTP 400. Rolled back the current turn and retrying once."
+                        )
+                    continue
+
+                choice = self._provider_error_recovery_choice()
+                if choice == "rollback_retry":
+                    self.session_manager.history = self.session_manager.history[: turn_start_index + 1]
+                    self.session_manager.summary_anchor = min(
+                        self.session_manager.summary_anchor,
+                        len(self.session_manager.history),
+                    )
+                    self.session_manager.save_history(self.folder_context)
+                    messages = self._build_messages_from_history(
+                        self._prepare_runtime_history(turn_start_index),
+                        {"role": "system", "parts": []},
+                    )[:-1]
+                    iteration -= 1
+                    continue
+                if choice == "retry":
                     iteration -= 1  # Decrement so the next loop run tries the same step
                     continue
 

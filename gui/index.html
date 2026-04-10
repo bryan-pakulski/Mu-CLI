@@ -32,13 +32,16 @@
 
       <main class="main-panel">
         <section class="center-panel">
-          <div class="view-toggle-wrap">
-            <span id="chatToggleLabel" class="view-toggle-label active">Chat</span>
-            <label class="view-toggle-switch" title="Toggle between chat and board">
-              <input id="chatBoardSwitch" type="checkbox" />
-              <span class="view-toggle-slider"></span>
-            </label>
-            <span id="boardToggleLabel" class="view-toggle-label">Board</span>
+          <div class="view-toggle-wrap mode-switcher" role="tablist" aria-label="View mode">
+            <button id="modeChatBtn" class="mode-switch-btn active" type="button" role="tab" aria-selected="true" title="Chat view">
+              <span class="mode-icon">💬</span><span class="mode-label">Chat</span>
+            </button>
+            <button id="modeBoardBtn" class="mode-switch-btn" type="button" role="tab" aria-selected="false" title="Board view">
+              <span class="mode-icon">🗂️</span><span class="mode-label">Board</span>
+            </button>
+            <button id="modeLoopBtn" class="mode-switch-btn" type="button" role="tab" aria-selected="false" title="Loop view">
+              <span class="mode-icon">∞</span><span class="mode-label">Loop</span>
+            </button>
           </div>
           <button id="settingsBtn" class="settings-btn settings-floating" title="Settings">⚙</button>
 
@@ -75,7 +78,16 @@
                     <option value="research">Research</option>
                     <option value="feature">Feature</option>
                     <option value="debug">Debug</option>
+                    <option value="loop">Loop</option>
                   </select>
+                </label>
+                <label class="field-inline">
+                  <span>Provider</span>
+                  <select id="chatProviderSelect"></select>
+                </label>
+                <label class="field-inline">
+                  <span>Model</span>
+                  <select id="chatModelSelect"></select>
                 </label>
                 <label id="chatFeatureWrap" class="field-inline hidden">
                   <span>Feature</span>
@@ -109,6 +121,7 @@
                   <button id="boardFeatureUnloadBtn" class="btn" type="button">Unload feature</button>
                 </div>
               </div>
+              <button id="featureManagerBtn" class="btn" type="button">Manage features</button>
               <button id="boardRunBtn" class="btn board-run-btn" type="button">▶ Play</button>
               <input id="boardSearchInput" type="text" placeholder="Search tasks..." />
               <select id="boardPhaseFilter">
@@ -120,6 +133,25 @@
           <div id="boardError" class="board-error hidden"></div>
           <div id="boardLanes" class="board-lanes"></div>
         </section>
+        <section id="loopView" class="board-view hidden">
+          <header class="board-head">
+            <div class="board-title-wrap">
+              <h2>Loop Mode</h2>
+              <span id="loopSummary" class="board-summary">Define a long-horizon goal and start the loop.</span>
+            </div>
+            <div class="board-controls">
+              <button id="loopStartBtn" class="btn btn-primary" type="button">Start loop</button>
+              <button id="loopStopBtn" class="btn" type="button">Stop</button>
+              <button id="loopResumeBtn" class="btn" type="button">Resume</button>
+            </div>
+          </header>
+          <div class="field">
+            <label for="loopGoalInput">Locked goal</label>
+            <textarea id="loopGoalInput" rows="3" placeholder="Build a linux desktop environment... optimize kernels..."></textarea>
+          </div>
+          <h4>Timeline</h4>
+          <div id="loopTimelineList" class="memory-list"></div>
+        </section>
         </section>
         <aside class="activity-panel">
           <div class="activity-head">
@@ -129,6 +161,7 @@
           <div id="activityFilters" class="activity-filters"></div>
           <section id="activityList" class="activity-list"></section>
         </aside>
+        <button id="metadataToggleBtn" class="metadata-toggle-btn" type="button" title="Show activity panel" aria-expanded="false">◀</button>
       </main>
     </div>
 
@@ -264,15 +297,33 @@
 
     <div id="createFeatureModal" class="modal hidden" role="dialog" aria-modal="true">
       <div class="folder-modal-card">
-        <h3>Manual feature builder</h3>
-        <p class="muted">Create a draft, refine epics/tasks, then confirm to auto-approve and create the feature.</p>
+        <h3>Feature pipeline builder</h3>
+        <p class="muted">Define scope, requirements, epics, and tasks. Then run the feature pipeline from Play.</p>
+        <div id="featureDraftSummary" class="feature-draft-summary"></div>
         <div class="field"><label for="createFeatureNameInput">Feature name</label><input id="createFeatureNameInput" type="text" placeholder="New feature name" /></div>
+        <div class="field"><label for="createFeatureRequestInput">Business objective</label><textarea id="createFeatureRequestInput" rows="2" placeholder="What business outcome should this feature deliver?"></textarea></div>
+        <div class="field"><label for="createFeatureStakeholdersInput">Stakeholders</label><input id="createFeatureStakeholdersInput" type="text" placeholder="Engineering, Product, Operations..." /></div>
+        <div class="field"><label for="createFeatureConstraintsInput">Constraints</label><textarea id="createFeatureConstraintsInput" rows="2" placeholder="Performance, compliance, deadlines, dependencies..."></textarea></div>
+        <div class="field"><label for="createFeatureAcceptanceInput">Global acceptance criteria</label><textarea id="createFeatureAcceptanceInput" rows="2" placeholder="How do we know this feature is successful?"></textarea></div>
+        <div class="field"><label for="createFeatureRisksInput">Risks / blockers</label><textarea id="createFeatureRisksInput" rows="2" placeholder="Known risks and mitigation notes"></textarea></div>
         <div id="featureEpicList" class="feature-epic-list"></div>
         <button id="addEpicBtn" class="btn" type="button">+ Add epic</button>
         <div class="modal-actions">
           <button id="saveFeatureDraftBtn" class="btn" type="button">Save draft</button>
-          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Confirm feature</button>
+          <button id="createFeatureStubBtn" class="btn btn-primary" type="button">Create feature now</button>
           <button id="createFeatureCancelBtn" class="btn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="featureManagerModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="folder-modal-card memory-modal-card">
+        <h3>Feature manager</h3>
+        <p class="muted">Load, unload, archive, delete, or create features for this session.</p>
+        <div id="featureManagerList" class="settings-list"></div>
+        <div class="modal-actions">
+          <button id="featureManagerCreateBtn" class="btn btn-primary" type="button">Create feature</button>
+          <button id="featureManagerCloseBtn" class="btn" type="button">Close</button>
         </div>
       </div>
     </div>

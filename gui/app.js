@@ -4,8 +4,35 @@ const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
 const PENDING_STORAGE_KEY = "mucli_gui_pending_v1";
 const BOARD_MODE_STORAGE_KEY = "mucli_gui_board_modes_v1";
+const BOARD_STATE_STORAGE_KEY = "mucli_gui_board_state_v1";
+const STREAM_SUBSCRIPTIONS_STORAGE_KEY = "mucli_gui_stream_subscriptions_v1";
+const LOOP_STORAGE_KEY = "mucli_gui_loop_v1";
+const META_PANEL_COLLAPSED_KEY = "mucli_gui_meta_panel_collapsed_v1";
 const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
+
+function defaultApiBase() {
+  const proto = window.location.protocol === "https:" ? "https:" : "http:";
+  const host = String(window.location.hostname || "").trim();
+  if (host === "localhost" || host === "127.0.0.1") return `${proto}//${host}:8765`;
+  return "http://127.0.0.1:8765";
+}
+
+function normalizeApiBase(rawBase = "") {
+  const fallback = defaultApiBase();
+  const value = String(rawBase || "").trim();
+  if (!value) return fallback;
+  try {
+    const url = new URL(value);
+    const pageHost = String(window.location.hostname || "").trim().toLowerCase();
+    if ((url.hostname === "127.0.0.1" || url.hostname === "localhost") && (pageHost === "127.0.0.1" || pageHost === "localhost")) {
+      url.hostname = pageHost;
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return fallback;
+  }
+}
 
 const PRESET_ACCENTS = [
   { name: "Zinc", value: "#71717a" },
@@ -42,7 +69,7 @@ const VARIABLE_HELP = {
 };
 
 const state = {
-  apiBase: localStorage.getItem("mucli_gui_api_base") || "http://127.0.0.1:8765",
+  apiBase: normalizeApiBase(localStorage.getItem("mucli_gui_api_base") || defaultApiBase()),
   currentSession: "",
   currentView: "chat",
   sessions: [],
@@ -64,11 +91,16 @@ const state = {
   memoryBySession: {},
   lastMemoryToolBySession: {},
   pendingApprovals: [],
+  modelOptionsByProvider: {},
+  metaPanelCollapsed: true,
   taskPollTimersBySession: {},
   memoryPollTimer: null,
   approvalPollTimer: null,
   serverTaskPollTimer: null,
   eventSourceBySession: {},
+  eventSourceMetaBySession: {},
+  streamReconnectTimersBySession: {},
+  streamTaskIdBySession: {},
   thinkingPlaceholderTimer: null,
   board: {
     modeBySession: {},
@@ -80,11 +112,13 @@ const state = {
     filterBySession: {},
     pollTimer: null,
     stream: null,
+    streamReconnectTimer: null,
     refreshQueued: false,
     refreshInFlight: false,
     phaseOpenBySession: {},
     drag: null,
   },
+  loopBySession: {},
 };
 
 const ui = {
@@ -94,6 +128,8 @@ const ui = {
   thinkingToggle: el("thinkingToggle"),
   yoloToggle: el("yoloToggle"),
   agentModeSelect: el("agentModeSelect"),
+  chatProviderSelect: el("chatProviderSelect"),
+  chatModelSelect: el("chatModelSelect"),
   chatFeatureWrap: el("chatFeatureWrap"),
   chatFeatureSelect: el("chatFeatureSelect"),
   agenticToggleSettings: el("agenticToggleSettings"),
@@ -158,12 +194,25 @@ const ui = {
   customAccentInput: el("customAccentInput"),
   chatViewBtn: el("chatViewBtn"),
   boardViewBtn: el("boardViewBtn"),
+  modeChatBtn: el("modeChatBtn"),
+  modeBoardBtn: el("modeBoardBtn"),
+  modeLoopBtn: el("modeLoopBtn"),
   chatView: el("chatView"),
   boardView: el("boardView"),
+  loopView: el("loopView"),
+  loopViewBtn: el("loopViewBtn"),
+  loopGoalInput: el("loopGoalInput"),
+  loopSummary: el("loopSummary"),
+  loopStartBtn: el("loopStartBtn"),
+  loopStopBtn: el("loopStopBtn"),
+  loopResumeBtn: el("loopResumeBtn"),
+  loopTimelineList: el("loopTimelineList"),
   chatBoardSwitch: el("chatBoardSwitch"),
   chatToggleLabel: el("chatToggleLabel"),
   boardToggleLabel: el("boardToggleLabel"),
   centerPanel: document.querySelector(".center-panel"),
+  mainPanel: document.querySelector(".main-panel"),
+  metadataToggleBtn: el("metadataToggleBtn"),
   boardSummary: el("boardSummary"),
   boardFeatureCard: el("boardFeatureCard"),
   boardFeatureMenu: el("boardFeatureMenu"),
@@ -173,6 +222,11 @@ const ui = {
   boardFeatureArchiveBtn: el("boardFeatureArchiveBtn"),
   boardFeatureDeleteBtn: el("boardFeatureDeleteBtn"),
   boardFeatureUnloadBtn: el("boardFeatureUnloadBtn"),
+  featureManagerBtn: el("featureManagerBtn"),
+  featureManagerModal: el("featureManagerModal"),
+  featureManagerList: el("featureManagerList"),
+  featureManagerCreateBtn: el("featureManagerCreateBtn"),
+  featureManagerCloseBtn: el("featureManagerCloseBtn"),
   boardSearchInput: el("boardSearchInput"),
   boardPhaseFilter: el("boardPhaseFilter"),
   boardRefreshBtn: el("boardRefreshBtn"),
@@ -192,7 +246,13 @@ const ui = {
   ticketSaveBtn: el("ticketSaveBtn"),
   ticketCloseBtn: el("ticketCloseBtn"),
   createFeatureModal: el("createFeatureModal"),
+  featureDraftSummary: el("featureDraftSummary"),
   createFeatureNameInput: el("createFeatureNameInput"),
+  createFeatureRequestInput: el("createFeatureRequestInput"),
+  createFeatureStakeholdersInput: el("createFeatureStakeholdersInput"),
+  createFeatureConstraintsInput: el("createFeatureConstraintsInput"),
+  createFeatureAcceptanceInput: el("createFeatureAcceptanceInput"),
+  createFeatureRisksInput: el("createFeatureRisksInput"),
   featureEpicList: el("featureEpicList"),
   addEpicBtn: el("addEpicBtn"),
   saveFeatureDraftBtn: el("saveFeatureDraftBtn"),
@@ -201,6 +261,11 @@ const ui = {
 };
 
 ui.apiBaseInput.value = state.apiBase;
+try {
+  localStorage.setItem("mucli_gui_api_base", state.apiBase);
+} catch {
+  // ignore localStorage errors
+}
 try {
   const cached = JSON.parse(localStorage.getItem(SESSIONS_STORAGE_KEY) || "{}");
   if (Array.isArray(cached.sessions)) state.sessions = cached.sessions;
@@ -228,6 +293,41 @@ try {
   if (boardModes && typeof boardModes === "object") state.board.modeBySession = boardModes;
 } catch {
   state.board.modeBySession = {};
+}
+try {
+  const boardState = JSON.parse(localStorage.getItem(BOARD_STATE_STORAGE_KEY) || "{}");
+  if (boardState && typeof boardState === "object") {
+    state.board.selectedFeatureIdBySession = boardState.selectedFeatureIdBySession || {};
+    state.board.selectedTaskIdBySession = boardState.selectedTaskIdBySession || {};
+    state.board.featureDraftBySession = boardState.featureDraftBySession || {};
+    state.board.filterBySession = boardState.filterBySession || {};
+    state.board.phaseOpenBySession = boardState.phaseOpenBySession || {};
+  }
+} catch {
+  // ignore persisted board state parse errors
+}
+try {
+  const loopState = JSON.parse(localStorage.getItem(LOOP_STORAGE_KEY) || "{}");
+  if (loopState && typeof loopState === "object") state.loopBySession = loopState;
+} catch {
+  state.loopBySession = {};
+}
+try {
+  const streamSubscriptions = JSON.parse(localStorage.getItem(STREAM_SUBSCRIPTIONS_STORAGE_KEY) || "{}");
+  if (streamSubscriptions && typeof streamSubscriptions === "object") {
+    state.streamTaskIdBySession = Object.fromEntries(
+      Object.entries(streamSubscriptions)
+        .map(([sessionName, taskId]) => [String(sessionName || "").trim(), String(taskId || "").trim()])
+        .filter(([sessionName, taskId]) => sessionName && taskId)
+    );
+  }
+} catch {
+  state.streamTaskIdBySession = {};
+}
+try {
+  state.metaPanelCollapsed = localStorage.getItem(META_PANEL_COLLAPSED_KEY) !== "0";
+} catch {
+  state.metaPanelCollapsed = true;
 }
 
 function loadPersistedActivity() {
@@ -260,6 +360,110 @@ function persistActivity() {
   } catch {
     return;
   }
+}
+
+function persistLoopState() {
+  try {
+    localStorage.setItem(LOOP_STORAGE_KEY, JSON.stringify(state.loopBySession || {}));
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function persistStreamSubscriptions() {
+  try {
+    localStorage.setItem(STREAM_SUBSCRIPTIONS_STORAGE_KEY, JSON.stringify(state.streamTaskIdBySession || {}));
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function persistBoardState() {
+  try {
+    localStorage.setItem(
+      BOARD_STATE_STORAGE_KEY,
+      JSON.stringify({
+        selectedFeatureIdBySession: state.board.selectedFeatureIdBySession || {},
+        selectedTaskIdBySession: state.board.selectedTaskIdBySession || {},
+        featureDraftBySession: state.board.featureDraftBySession || {},
+        filterBySession: state.board.filterBySession || {},
+        phaseOpenBySession: state.board.phaseOpenBySession || {},
+      })
+    );
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function applyMetadataPanelState() {
+  ui.mainPanel?.classList.toggle("meta-collapsed", !!state.metaPanelCollapsed);
+  if (ui.metadataToggleBtn) {
+    ui.metadataToggleBtn.textContent = state.metaPanelCollapsed ? "◀" : "▶";
+    ui.metadataToggleBtn.title = state.metaPanelCollapsed ? "Show activity panel" : "Hide activity panel";
+    ui.metadataToggleBtn.setAttribute("aria-expanded", state.metaPanelCollapsed ? "false" : "true");
+  }
+}
+
+function setMetadataPanelCollapsed(collapsed) {
+  state.metaPanelCollapsed = !!collapsed;
+  applyMetadataPanelState();
+  try {
+    localStorage.setItem(META_PANEL_COLLAPSED_KEY, state.metaPanelCollapsed ? "1" : "0");
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function providerOptions(currentProvider = "") {
+  const defaults = ["openai", "ollama", "gemini"];
+  const merged = [...defaults];
+  const current = String(currentProvider || "").trim().toLowerCase();
+  if (current && !merged.includes(current)) merged.unshift(current);
+  return merged;
+}
+
+function renderProviderSelect(currentProvider = "") {
+  if (!ui.chatProviderSelect) return;
+  const normalized = String(currentProvider || "").trim().toLowerCase();
+  const options = providerOptions(normalized)
+    .map((provider) => `<option value="${provider}">${provider}</option>`)
+    .join("");
+  ui.chatProviderSelect.innerHTML = options;
+  ui.chatProviderSelect.value = normalized || providerOptions()[0];
+}
+
+function renderModelSelect(selectEl, models = [], selectedModel = "") {
+  if (!selectEl) return;
+  const cleanModels = Array.isArray(models) ? models.map((m) => String(m || "").trim()).filter(Boolean) : [];
+  if (!cleanModels.length) {
+    const fallback = String(selectedModel || "").trim() || "(default)";
+    selectEl.innerHTML = `<option value="${fallback === "(default)" ? "" : fallback}">${fallback}</option>`;
+    selectEl.value = fallback === "(default)" ? "" : fallback;
+    return;
+  }
+  selectEl.innerHTML = cleanModels.map((m) => `<option value="${m}">${m}</option>`).join("");
+  if (selectedModel && cleanModels.includes(selectedModel)) {
+    selectEl.value = selectedModel;
+  } else {
+    selectEl.value = cleanModels[0];
+  }
+}
+
+async function refreshModelMenus(providerName = "", selectedModel = "") {
+  const provider = String(providerName || state.runtime?.provider || "").trim().toLowerCase();
+  if (!provider) return;
+  let models = state.modelOptionsByProvider[provider] || [];
+  if (!models.length) {
+    try {
+      const payload = await fetchJson(`/api/models?provider=${encodeURIComponent(provider)}`, {}, 7000);
+      models = Array.isArray(payload?.models) ? payload.models : [];
+      state.modelOptionsByProvider[provider] = models;
+    } catch {
+      models = [];
+    }
+  }
+  renderModelSelect(ui.chatModelSelect, models, selectedModel);
+  renderModelSelect(ui.modelInput, models, selectedModel);
 }
 
 function loadPersistedPendingState() {
@@ -390,29 +594,58 @@ function api(path) {
 }
 
 async function fetchJson(path, options = {}, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let resp;
-  try {
-    const method = (options.method || "GET").toUpperCase();
-    const headers = { ...(options.headers || {}) };
-    if (options.body && !headers["Content-Type"] && method !== "GET") {
-      headers["Content-Type"] = "application/json";
-    }
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { ...(options.headers || {}) };
+  if (options.body && !headers["Content-Type"] && method !== "GET") {
+    headers["Content-Type"] = "application/json";
+  }
+  const requestOnce = async (url) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      resp = await fetch(api(path), { ...options, method, headers, signal: controller.signal });
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s.`);
-      }
+      const resp = await fetch(url, { ...options, method, headers, signal: controller.signal });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const primaryUrl = api(path);
+  try {
+    return await requestOnce(primaryUrl);
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s.`);
+    }
+    const msg = String(err?.message || "");
+    const isNetworkError = /failed to fetch|networkerror|cors request did not succeed/i.test(msg.toLowerCase());
+    if (!isNetworkError) throw err;
+    try {
+      const alt = new URL(primaryUrl);
+      if (!["127.0.0.1", "localhost"].includes(alt.hostname)) throw err;
+      alt.hostname = alt.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
+      const data = await requestOnce(alt.toString());
+      state.apiBase = `${alt.protocol}//${alt.host}`;
+      ui.apiBaseInput.value = state.apiBase;
+      localStorage.setItem("mucli_gui_api_base", state.apiBase);
+      return data;
+    } catch {
       throw err;
     }
-  } finally {
-    clearTimeout(timeout);
   }
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-  return data;
+}
+
+async function ensureServerSession(sessionName = state.currentSession) {
+  const target = String(sessionName || "").trim();
+  if (!target) return;
+  if (state.serverSession === target) return;
+  await fetchJson("/api/sessions/load", {
+    method: "POST",
+    body: JSON.stringify({ name: target }),
+  }, 12000);
+  state.serverSession = target;
 }
 
 function setStatus(text, kind = "") {
@@ -535,17 +768,47 @@ function currentFeatureDraft(sessionName = state.currentSession) {
   if (!state.board.featureDraftBySession[sessionName]) {
     state.board.featureDraftBySession[sessionName] = {
       name: "",
-      epics: [{ title: "Epic 1", tasks: [""] }],
+      feature_request: "",
+      stakeholders: "",
+      constraints: "",
+      acceptance: "",
+      risks: "",
+      epics: [{ title: "Epic 1", goal: "", tasks: [{ title: "", objectives: [], action_points: [], exit_criteria: [] }] }],
       status: "draft",
     };
   }
-  return state.board.featureDraftBySession[sessionName];
+  const draft = state.board.featureDraftBySession[sessionName];
+  draft.epics = (draft.epics || []).map((epic, idx) => ({
+    title: String(epic?.title || `Epic ${idx + 1}`),
+    goal: String(epic?.goal || ""),
+    tasks: (epic?.tasks || []).map((task) => {
+      if (typeof task === "string") {
+        return { title: task, objectives: [], action_points: [], exit_criteria: [] };
+      }
+      return {
+        title: String(task?.title || ""),
+        objectives: Array.isArray(task?.objectives) ? task.objectives : [],
+        action_points: Array.isArray(task?.action_points) ? task.action_points : [],
+        exit_criteria: Array.isArray(task?.exit_criteria) ? task.exit_criteria : [],
+      };
+    }),
+  }));
+  return draft;
 }
 
 function renderFeatureDraftEditor(sessionName = state.currentSession) {
   if (!ui.featureEpicList) return;
   const draft = currentFeatureDraft(sessionName);
   ui.createFeatureNameInput.value = draft.name || "";
+  if (ui.createFeatureRequestInput) ui.createFeatureRequestInput.value = draft.feature_request || "";
+  if (ui.createFeatureStakeholdersInput) ui.createFeatureStakeholdersInput.value = draft.stakeholders || "";
+  if (ui.createFeatureConstraintsInput) ui.createFeatureConstraintsInput.value = draft.constraints || "";
+  if (ui.createFeatureAcceptanceInput) ui.createFeatureAcceptanceInput.value = draft.acceptance || "";
+  if (ui.createFeatureRisksInput) ui.createFeatureRisksInput.value = draft.risks || "";
+  const totalTasks = (draft.epics || []).reduce((sum, epic) => sum + ((epic.tasks || []).length), 0);
+  if (ui.featureDraftSummary) {
+    ui.featureDraftSummary.textContent = `${(draft.epics || []).length} epic(s) · ${totalTasks} task(s)`;
+  }
   ui.featureEpicList.innerHTML = "";
   draft.epics.forEach((epic, epicIdx) => {
     const card = document.createElement("section");
@@ -553,41 +816,79 @@ function renderFeatureDraftEditor(sessionName = state.currentSession) {
     card.innerHTML = `
       <div class="feature-epic-head">
         <input class="feature-epic-title" value="${epic.title || ""}" placeholder="Epic title" />
+        <input class="feature-epic-goal" value="${epic.goal || ""}" placeholder="Epic goal / KPI" />
         <button class="btn feature-epic-delete" type="button">−</button>
       </div>
       <div class="feature-task-list"></div>
       <button class="btn feature-task-add" type="button">+ Add task</button>
     `;
     const titleInput = card.querySelector(".feature-epic-title");
+    const goalInput = card.querySelector(".feature-epic-goal");
     titleInput.addEventListener("input", () => {
       draft.epics[epicIdx].title = titleInput.value;
+      persistBoardState();
+    });
+    goalInput.addEventListener("input", () => {
+      draft.epics[epicIdx].goal = goalInput.value;
+      persistBoardState();
     });
     card.querySelector(".feature-epic-delete").addEventListener("click", () => {
       draft.epics.splice(epicIdx, 1);
-      if (!draft.epics.length) draft.epics.push({ title: "Epic 1", tasks: [""] });
+      if (!draft.epics.length) {
+        draft.epics.push({ title: "Epic 1", goal: "", tasks: [{ title: "", objectives: [], action_points: [], exit_criteria: [] }] });
+      }
+      persistBoardState();
       renderFeatureDraftEditor(sessionName);
     });
     const list = card.querySelector(".feature-task-list");
-    (epic.tasks || []).forEach((taskTitle, taskIdx) => {
+    (epic.tasks || []).forEach((task, taskIdx) => {
       const row = document.createElement("div");
-      row.className = "feature-task-row";
+      row.className = "feature-task-row feature-task-row-detailed";
+      const objectivesText = Array.isArray(task.objectives) ? task.objectives.join("\n") : "";
+      const actionPointsText = Array.isArray(task.action_points) ? task.action_points.join("\n") : "";
+      const exitCriteriaText = Array.isArray(task.exit_criteria) ? task.exit_criteria.join("\n") : "";
       row.innerHTML = `
-        <input class="feature-task-input" value="${taskTitle || ""}" placeholder="Task title" />
-        <button class="btn feature-task-delete" type="button">−</button>
+        <div class="feature-task-top">
+          <input class="feature-task-input" value="${task.title || ""}" placeholder="Task title" />
+          <button class="btn feature-task-delete" type="button">−</button>
+        </div>
+        <details class="feature-task-details">
+          <summary>Task requirements</summary>
+          <textarea class="feature-task-objectives" rows="2" placeholder="Objectives (one per line)">${objectivesText}</textarea>
+          <textarea class="feature-task-actions" rows="2" placeholder="Action points (one per line)">${actionPointsText}</textarea>
+          <textarea class="feature-task-exit" rows="2" placeholder="Exit criteria (one per line)">${exitCriteriaText}</textarea>
+        </details>
       `;
       const input = row.querySelector(".feature-task-input");
       input.addEventListener("input", () => {
-        draft.epics[epicIdx].tasks[taskIdx] = input.value;
+        draft.epics[epicIdx].tasks[taskIdx].title = input.value;
+        persistBoardState();
+      });
+      row.querySelector(".feature-task-objectives").addEventListener("input", (evt) => {
+        draft.epics[epicIdx].tasks[taskIdx].objectives = String(evt.target.value || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        persistBoardState();
+      });
+      row.querySelector(".feature-task-actions").addEventListener("input", (evt) => {
+        draft.epics[epicIdx].tasks[taskIdx].action_points = String(evt.target.value || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        persistBoardState();
+      });
+      row.querySelector(".feature-task-exit").addEventListener("input", (evt) => {
+        draft.epics[epicIdx].tasks[taskIdx].exit_criteria = String(evt.target.value || "").split("\n").map((x) => x.trim()).filter(Boolean);
+        persistBoardState();
       });
       row.querySelector(".feature-task-delete").addEventListener("click", () => {
         draft.epics[epicIdx].tasks.splice(taskIdx, 1);
-        if (!draft.epics[epicIdx].tasks.length) draft.epics[epicIdx].tasks.push("");
+        if (!draft.epics[epicIdx].tasks.length) {
+          draft.epics[epicIdx].tasks.push({ title: "", objectives: [], action_points: [], exit_criteria: [] });
+        }
+        persistBoardState();
         renderFeatureDraftEditor(sessionName);
       });
       list.appendChild(row);
     });
     card.querySelector(".feature-task-add").addEventListener("click", () => {
-      draft.epics[epicIdx].tasks.push("");
+      draft.epics[epicIdx].tasks.push({ title: "", objectives: [], action_points: [], exit_criteria: [] });
+      persistBoardState();
       renderFeatureDraftEditor(sessionName);
     });
     ui.featureEpicList.appendChild(card);
@@ -597,22 +898,41 @@ function renderFeatureDraftEditor(sessionName = state.currentSession) {
 async function confirmFeatureDraft(sessionName = state.currentSession) {
   const draft = currentFeatureDraft(sessionName);
   draft.name = String(ui.createFeatureNameInput?.value || "").trim();
+  draft.feature_request = String(ui.createFeatureRequestInput?.value || "").trim();
+  draft.stakeholders = String(ui.createFeatureStakeholdersInput?.value || "").trim();
+  draft.constraints = String(ui.createFeatureConstraintsInput?.value || "").trim();
+  draft.acceptance = String(ui.createFeatureAcceptanceInput?.value || "").trim();
+  draft.risks = String(ui.createFeatureRisksInput?.value || "").trim();
+  persistBoardState();
   if (!draft.name) throw new Error("Feature name is required.");
-  const featureId = slugifyFeatureId(draft.name);
-  await fetchJson("/api/tool", {
+  await ensureServerSession(sessionName);
+  const requestedFeatureId = slugifyFeatureId(draft.name);
+  const featureRequestLines = [
+    draft.feature_request || draft.name,
+    draft.stakeholders ? `Stakeholders: ${draft.stakeholders}` : "",
+    draft.constraints ? `Constraints: ${draft.constraints}` : "",
+    draft.acceptance ? `Global acceptance criteria: ${draft.acceptance}` : "",
+    draft.risks ? `Risks/blockers: ${draft.risks}` : "",
+  ].filter(Boolean);
+  const createResult = await fetchJson("/api/tool", {
     method: "POST",
     body: JSON.stringify({
       tool_name: "create_feature",
       tool_args: {
         feature_name: draft.name,
-        feature_id: featureId,
-        feature_request: draft.name,
-        design_plan: "Manual draft created in board UI",
+        feature_id: requestedFeatureId,
+        feature_request: featureRequestLines.join("\n"),
+        design_plan: "Feature pipeline draft created in board UI",
       },
     }),
   });
+  const featureId = String(
+    createResult?.data?.feature_id
+    || createResult?.feature_id
+    || requestedFeatureId
+  ).trim();
   const phases = draft.epics
-    .map((epic, index) => ({ id: index + 1, title: String(epic.title || `Epic ${index + 1}`).trim(), goal: "", order: index + 1 }))
+    .map((epic, index) => ({ id: index + 1, title: String(epic.title || `Epic ${index + 1}`).trim(), goal: String(epic.goal || "").trim(), order: index + 1 }))
     .filter((phase) => phase.title);
   if (phases.length) {
     await fetchJson("/api/tool", {
@@ -624,19 +944,27 @@ async function confirmFeatureDraft(sessionName = state.currentSession) {
     });
   }
   for (const [idx, epic] of draft.epics.entries()) {
-    for (const taskTitle of epic.tasks || []) {
-      const cleanTitle = String(taskTitle || "").trim();
+    for (const task of epic.tasks || []) {
+      const cleanTitle = String(task.title || "").trim();
       if (!cleanTitle) continue;
       await fetchJson("/api/tool", {
         method: "POST",
         body: JSON.stringify({
           tool_name: "create_task",
-          tool_args: { feature_id: featureId, phase_id: idx + 1, title: cleanTitle, overview: "", design: [], exit_criteria: [] },
+          tool_args: {
+            feature_id: featureId,
+            phase_id: idx + 1,
+            title: cleanTitle,
+            objectives: Array.isArray(task.objectives) ? task.objectives : [],
+            action_points: Array.isArray(task.action_points) ? task.action_points : [],
+            exit_criteria: Array.isArray(task.exit_criteria) ? task.exit_criteria : [],
+          },
         }),
       });
     }
   }
   draft.status = "approved";
+  persistBoardState();
   await activateFeature(featureId);
   await refreshBoardData({ force: true });
   setStatus(`Feature "${draft.name}" created and approved.`, "connected");
@@ -954,6 +1282,101 @@ function boardFilters(sessionName = state.currentSession) {
   return state.board.filterBySession[sessionName];
 }
 
+function loopState(sessionName = state.currentSession) {
+  if (!state.loopBySession[sessionName]) {
+    state.loopBySession[sessionName] = {
+      goal: "",
+      running: false,
+      inFlight: false,
+      iteration: 0,
+      timeline: [],
+      lastAssistantText: "",
+    };
+  }
+  const loop = state.loopBySession[sessionName];
+  loop.goal = String(loop.goal || "");
+  loop.running = !!loop.running;
+  loop.inFlight = !!loop.inFlight;
+  loop.iteration = Number.isFinite(Number(loop.iteration)) ? Number(loop.iteration) : 0;
+  loop.timeline = Array.isArray(loop.timeline) ? loop.timeline.slice(-300) : [];
+  loop.lastAssistantText = String(loop.lastAssistantText || "");
+  state.loopBySession[sessionName] = loop;
+  return loop;
+}
+
+function pushLoopTimeline(sessionName, title, detail = "", status = "info") {
+  const loop = loopState(sessionName);
+  loop.timeline.push({ title, detail, status, at: Date.now() });
+  if (loop.timeline.length > 300) {
+    loop.timeline.splice(0, loop.timeline.length - 300);
+  }
+  if (state.currentView === "loop" && sessionName === state.currentSession) {
+    renderLoopView();
+  }
+  persistLoopState();
+}
+
+function renderLoopView(sessionName = state.currentSession) {
+  const loop = loopState(sessionName);
+  if (ui.loopGoalInput) ui.loopGoalInput.value = loop.goal || "";
+  if (ui.loopGoalInput) ui.loopGoalInput.disabled = loop.running;
+  if (ui.loopSummary) {
+    ui.loopSummary.textContent = loop.running
+      ? `Running · iteration ${loop.iteration}`
+      : (loop.goal ? "Paused. You can resume at any time." : "Define a long-horizon goal and start the loop.");
+  }
+  if (ui.loopStartBtn) ui.loopStartBtn.disabled = loop.running;
+  if (ui.loopStopBtn) ui.loopStopBtn.disabled = !loop.running;
+  if (ui.loopResumeBtn) ui.loopResumeBtn.disabled = loop.running || !loop.goal;
+  if (ui.loopTimelineList) {
+    ui.loopTimelineList.innerHTML = loop.timeline.length
+      ? loop.timeline.slice(-120).reverse().map((item) => (
+        `<article class="memory-item">
+          <div class="memory-item-title">${item.title} · ${new Date(item.at).toLocaleTimeString()}</div>
+          <div class="memory-item-body">${item.detail || ""}</div>
+        </article>`
+      )).join("")
+      : '<div class="activity-empty">No loop timeline yet.</div>';
+  }
+}
+
+function latestAssistantSummary(sessionName = state.currentSession) {
+  const messages = sessionName === state.currentSession ? state.loadedMessages : [];
+  const lastAssistant = [...messages].reverse().find((msg) => msg.role === "assistant");
+  return String(lastAssistant?.text || "").trim();
+}
+
+async function runLoopCycle(sessionName = state.currentSession) {
+  const loop = loopState(sessionName);
+  if (!loop.running || loop.inFlight) return;
+  loop.inFlight = true;
+  const prompt = loop.iteration === 0
+    ? `LOOP GOAL (LOCKED): ${loop.goal}\nStart executing this long-horizon task. Create your own subtasks and keep progressing.`
+    : `Continue progressing the LOCKED loop goal: ${loop.goal}\nProvide a concise timeline update and continue.`;
+  try {
+    await setAgentMode("loop");
+    await executeSend(sessionName, prompt);
+    loop.iteration += 1;
+    const summary = latestAssistantSummary(sessionName);
+    if (summary && summary !== loop.lastAssistantText) {
+      loop.lastAssistantText = summary;
+      pushLoopTimeline(sessionName, `Iteration ${loop.iteration}`, summary.slice(0, 1200));
+    } else {
+      pushLoopTimeline(sessionName, `Iteration ${loop.iteration}`, "Completed step; continuing loop.");
+    }
+  } catch (err) {
+    loop.running = false;
+    pushLoopTimeline(sessionName, "Loop halted", String(err?.message || "Unknown error"), "error");
+  } finally {
+    loop.inFlight = false;
+    persistLoopState();
+    renderLoopView(sessionName);
+    if (loop.running) {
+      setTimeout(() => runLoopCycle(sessionName), 500);
+    }
+  }
+}
+
 function setViewMode(mode, sessionName = state.currentSession) {
   if (ui.centerPanel) {
     ui.centerPanel.classList.remove("view-switching");
@@ -966,21 +1389,37 @@ function setViewMode(mode, sessionName = state.currentSession) {
   state.board.modeBySession[sessionName] = mode;
   persistBoardModes();
   const boardActive = mode === "board";
+  const loopActive = mode === "loop";
   if (ui.centerPanel) {
-    ui.centerPanel.dataset.view = boardActive ? "board" : "chat";
+    ui.centerPanel.dataset.view = boardActive ? "board" : (loopActive ? "loop" : "chat");
   }
-  ui.chatViewBtn?.classList.toggle("active", !boardActive);
+  ui.chatViewBtn?.classList.toggle("active", !boardActive && !loopActive);
   ui.boardViewBtn?.classList.toggle("active", boardActive);
-  ui.chatView?.classList.toggle("hidden", boardActive);
+  ui.loopViewBtn?.classList.toggle("active", loopActive);
+  ui.modeChatBtn?.classList.toggle("active", !boardActive && !loopActive);
+  ui.modeBoardBtn?.classList.toggle("active", boardActive);
+  ui.modeLoopBtn?.classList.toggle("active", loopActive);
+  ui.modeChatBtn?.setAttribute("aria-selected", (!boardActive && !loopActive) ? "true" : "false");
+  ui.modeBoardBtn?.setAttribute("aria-selected", boardActive ? "true" : "false");
+  ui.modeLoopBtn?.setAttribute("aria-selected", loopActive ? "true" : "false");
+  ui.chatView?.classList.toggle("hidden", boardActive || loopActive);
   ui.boardView?.classList.toggle("hidden", !boardActive);
+  ui.loopView?.classList.toggle("hidden", !loopActive);
   if (ui.chatBoardSwitch) ui.chatBoardSwitch.checked = boardActive;
-  ui.chatToggleLabel?.classList.toggle("active", !boardActive);
+  ui.chatToggleLabel?.classList.toggle("active", !boardActive && !loopActive);
   ui.boardToggleLabel?.classList.toggle("active", boardActive);
   ui.boardFeatureMenu?.classList.add("hidden");
   ui.boardFeatureActionsMenu?.classList.add("hidden");
-  if (ui.chatView) ui.chatView.style.display = boardActive ? "none" : "";
+  if (ui.chatView) ui.chatView.style.display = (boardActive || loopActive) ? "none" : "";
   if (ui.boardView) ui.boardView.style.display = boardActive ? "" : "none";
-  if (boardActive) renderBoard();
+  if (ui.loopView) ui.loopView.style.display = loopActive ? "" : "none";
+  if (boardActive) {
+    startBoardEventStream();
+    renderBoard();
+  } else {
+    stopBoardEventStream();
+  }
+  if (loopActive) renderLoopView(sessionName);
 }
 
 function allowedTransitions(status) {
@@ -1055,6 +1494,7 @@ function openTicketModal(taskId) {
   const editable = !selectedFeatureArchived() && ["pending", "not_started"].includes(String(task.status || "").toLowerCase());
 
   state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
+  persistBoardState();
   ui.ticketTitle.textContent = `Task ${task.id}: ${task.title || ""}`;
   ui.ticketStatusPill.textContent = task.status || "unknown";
   ui.ticketTitleInput.value = task.title || "";
@@ -1119,8 +1559,8 @@ function renderBoard() {
   const featureIsArchived = selectedFeatureArchived(state.currentSession);
   if (!plan) {
     const draft = state.board.featureDraftBySession[state.currentSession];
-    ui.boardSummary.textContent = draft?.name ? `Draft: ${draft.name}` : "No active feature.";
-    ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan available for this session.</div>';
+    ui.boardSummary.textContent = draft?.name ? `Pipeline draft: ${draft.name}` : "No active feature.";
+    ui.boardLanes.innerHTML = '<div class="board-empty">No feature plan yet. Use “Manage features” → “Create feature” to build a pipeline, then press Play.</div>';
     return;
   }
   const filters = boardFilters();
@@ -1171,10 +1611,21 @@ function renderBoard() {
             state.board.phaseOpenBySession[state.currentSession] = {};
           }
           state.board.phaseOpenBySession[state.currentSession][phaseKey] = wrap.open;
+          persistBoardState();
         });
         wrap.innerHTML = `<summary><span>${phaseMeta?.title || "Unassigned"}</span><span>${items.length}</span></summary><div class="phase-group-cards"></div>`;
         const cardWrap = wrap.querySelector(".phase-group-cards");
         for (const task of items) {
+          const exitCriteria = Array.isArray(task.exit_criteria) ? task.exit_criteria.filter(Boolean) : [];
+          const verifiedCriteria = new Set(
+            Array.isArray(task.verified_exit_criteria) ? task.verified_exit_criteria.filter(Boolean) : []
+          );
+          const verifiedCount = exitCriteria.reduce((total, criterion) => (
+            verifiedCriteria.has(String(criterion || "").trim()) ? total + 1 : total
+          ), 0);
+          const completionPct = exitCriteria.length ? Math.round((verifiedCount / exitCriteria.length) * 100) : (
+            laneForStatus(task.status) === "completed" ? 100 : 0
+          );
           const card = document.createElement("article");
           const selected = Number(state.board.selectedTaskIdBySession[state.currentSession]) === Number(task.id);
           card.className = `task-card${selected ? " active" : ""}`;
@@ -1184,6 +1635,10 @@ function renderBoard() {
           card.innerHTML = `
             <div class="task-title">${task.title || `Task ${task.id}`}</div>
             <div class="task-meta">#${task.id} · ${task.status || "unknown"} · Drag to move</div>
+            <div class="task-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${completionPct}" title="${verifiedCount}/${exitCriteria.length || 0} exit criteria verified">
+              <div class="task-progress-fill" style="width:${completionPct}%"></div>
+            </div>
+            <div class="task-progress-meta">${verifiedCount}/${exitCriteria.length || 0} exit criteria met</div>
           `;
 
           let dragged = false;
@@ -1202,6 +1657,7 @@ function renderBoard() {
           card.addEventListener("click", () => {
             if (dragged) return;
             state.board.selectedTaskIdBySession[state.currentSession] = Number(task.id);
+            persistBoardState();
             openTicketModal(task.id);
           });
 
@@ -1287,7 +1743,12 @@ function scheduleBoardRefresh() {
 }
 
 function startBoardEventStream() {
+  if (state.currentView !== "board") return;
   if (state.board.stream) return;
+  if (state.board.streamReconnectTimer) {
+    clearTimeout(state.board.streamReconnectTimer);
+    state.board.streamReconnectTimer = null;
+  }
   const es = new EventSource(api("/api/events"));
   state.board.stream = es;
   const handle = (raw) => {
@@ -1305,8 +1766,23 @@ function startBoardEventStream() {
       state.board.stream.close();
       state.board.stream = null;
     }
-    setTimeout(startBoardEventStream, 1500);
+    if (state.board.streamReconnectTimer) return;
+    state.board.streamReconnectTimer = setTimeout(() => {
+      state.board.streamReconnectTimer = null;
+      startBoardEventStream();
+    }, 1500);
   };
+}
+
+function stopBoardEventStream() {
+  if (state.board.stream) {
+    state.board.stream.close();
+    state.board.stream = null;
+  }
+  if (state.board.streamReconnectTimer) {
+    clearTimeout(state.board.streamReconnectTimer);
+    state.board.streamReconnectTimer = null;
+  }
 }
 
 async function refreshBoardData({ force = false } = {}) {
@@ -1316,6 +1792,7 @@ async function refreshBoardData({ force = false } = {}) {
   if (state.board.refreshInFlight) return;
   state.board.refreshInFlight = true;
   try {
+    await ensureServerSession(sessionName);
     const statePayload = await fetchJson("/api/state", {}, 8000);
     const featureState = statePayload?.feature_state || state.runtime?.feature_state || {};
     const featuresPayload = await fetchJson("/api/features", {}, 8000);
@@ -1332,6 +1809,7 @@ async function refreshBoardData({ force = false } = {}) {
       if (featureRecord) {
         directory = String(featureRecord.directory || "").trim() || directory;
         state.board.selectedFeatureIdBySession[sessionName] = selectedFeatureId;
+        persistBoardState();
       }
     }
     renderFeatureSelectors(sessionName);
@@ -1346,6 +1824,7 @@ async function refreshBoardData({ force = false } = {}) {
     const selected = state.board.selectedTaskIdBySession[sessionName];
     if (!selected && (planPayload?.feature_plan?.phases || []).length) {
       state.board.selectedTaskIdBySession[sessionName] = Number(planPayload.feature_plan.phases[0].id);
+      persistBoardState();
     }
     setBoardError("");
   } catch (err) {
@@ -1415,7 +1894,8 @@ async function refreshMemoryRuntime(sessionName = state.currentSession) {
 
 async function refreshMemoryBuffers(sessionName = state.currentSession) {
   try {
-    const payload = await fetchJson("/api/memory-buffers", {}, 3000);
+    const targetSession = encodeURIComponent(sessionName || state.currentSession || "");
+    const payload = await fetchJson(`/api/memory-buffers?session_name=${targetSession}`, {}, 3000);
     const mem = sessionMemory(sessionName);
     mem.buffer = Array.isArray(payload.memory_entries) ? payload.memory_entries : [];
     mem.scratchpad = Array.isArray(payload.scratchpad_entries) ? payload.scratchpad_entries : [];
@@ -1727,8 +2207,10 @@ async function refreshRuntime() {
     }
     if (ui.agenticToggleSettings) ui.agenticToggleSettings.checked = !!runtime.agentic;
     if (ui.thinkingToggleSettings) ui.thinkingToggleSettings.checked = !!runtime.thinking;
-    const model = runtime.model || "";
-    ui.modelInput.innerHTML = `<option value="${model}">${model || "(default)"}</option>`;
+    const provider = String(runtime.provider || "").trim().toLowerCase();
+    const model = String(runtime.model || "").trim();
+    renderProviderSelect(provider);
+    await refreshModelMenus(provider, model);
     setStatus("Connected", "connected");
   } catch (err) {
     setStatus(`Error: ${err.message}`, "error");
@@ -1908,7 +2390,19 @@ async function deleteSession(name) {
 async function applyRuntime() {
   const agentic = ui.agenticToggleSettings?.checked ?? ui.agenticToggle.checked;
   const thinking = ui.thinkingToggleSettings?.checked ?? ui.thinkingToggle.checked;
-  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: ui.modelInput.value, agentic, thinking }) });
+  const selectedModel = String(ui.modelInput?.value || ui.chatModelSelect?.value || "").trim();
+  await fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model: selectedModel, agentic, thinking }) });
+  await refreshRuntime();
+}
+
+async function setProvider(providerName) {
+  const provider = String(providerName || "").trim().toLowerCase();
+  if (!provider) return;
+  await ensureServerSession(state.currentSession);
+  await fetchJson("/api/command", {
+    method: "POST",
+    body: JSON.stringify({ command: `/provider ${provider}` }),
+  });
   await refreshRuntime();
 }
 
@@ -1924,14 +2418,17 @@ async function activateFeature(featureId) {
   const resolved = String(featureId || "").trim();
   if (!resolved) {
     state.board.selectedFeatureIdBySession[state.currentSession] = "";
+    persistBoardState();
     renderFeatureSelectors(state.currentSession);
     return;
   }
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/activate", {
     method: "POST",
     body: JSON.stringify({ feature_id: resolved }),
   });
   state.board.selectedFeatureIdBySession[state.currentSession] = resolved;
+  persistBoardState();
   await refreshRuntime();
   await refreshBoardData({ force: true });
   setStatus("Active feature updated.", "connected");
@@ -1940,6 +2437,7 @@ async function activateFeature(featureId) {
 async function archiveSelectedFeature() {
   const record = selectedFeatureRecord();
   if (!record?.feature_id) return setStatus("No feature selected.", "warning");
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/archive", {
     method: "POST",
     body: JSON.stringify({ feature_id: record.feature_id }),
@@ -1951,25 +2449,64 @@ async function archiveSelectedFeature() {
 async function deleteSelectedFeature() {
   const record = selectedFeatureRecord();
   if (!record?.feature_id) return setStatus("No feature selected.", "warning");
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/delete", {
     method: "POST",
     body: JSON.stringify({ feature_id: record.feature_id }),
   });
   state.board.selectedFeatureIdBySession[state.currentSession] = "";
+  persistBoardState();
   await refreshBoardData({ force: true });
   setStatus("Feature deleted.", "warning");
 }
 
 async function unloadFeature() {
+  await ensureServerSession(state.currentSession);
   await fetchJson("/api/features/unload", {
     method: "POST",
     body: JSON.stringify({}),
   });
   state.board.selectedFeatureIdBySession[state.currentSession] = "";
   state.board.planBySession[state.currentSession] = null;
+  persistBoardState();
   renderFeatureSelectors(state.currentSession);
   renderBoard();
   setStatus("Feature unloaded.", "warning");
+}
+
+function renderFeatureManagerModal() {
+  const sessionName = state.currentSession;
+  const features = featureList(sessionName);
+  const activeFeatureId = selectedFeatureId(sessionName);
+  if (!ui.featureManagerList) return;
+  if (!features.length) {
+    ui.featureManagerList.innerHTML = '<div class="activity-empty">No features available.</div>';
+    return;
+  }
+  ui.featureManagerList.innerHTML = features.map((feature) => {
+    const id = feature.feature_id || "";
+    const name = feature.feature_name || id || "feature";
+    const isActive = !!id && id === activeFeatureId;
+    return `<article class="settings-list-item">
+      <div>
+        <div class="memory-item-title">${isActive ? "ACTIVE · " : ""}${id}</div>
+        <div class="memory-item-body">${name} · ${feature.status || "draft"}</div>
+      </div>
+      <div class="settings-list-actions">
+        <button class="btn" data-fm-action="load" data-feature-id="${id}">Load</button>
+        <button class="btn" data-fm-action="archive" data-feature-id="${id}">Archive</button>
+        <button class="btn" data-fm-action="delete" data-feature-id="${id}">Delete</button>
+        ${isActive ? '<button class="btn" data-fm-action="unload" data-feature-id="">Unload</button>' : ""}
+      </div>
+    </article>`;
+  }).join("");
+}
+
+async function openFeatureManagerModal() {
+  await ensureServerSession(state.currentSession);
+  await refreshBoardData({ force: true });
+  renderFeatureManagerModal();
+  showModal(ui.featureManagerModal);
 }
 
 async function saveSettings() {
@@ -1998,11 +2535,41 @@ async function clearConversationContext() {
   await refreshHistory(true);
 }
 
-function closeEventStream(sessionName) {
+function clearTaskStreamReconnectTimer(sessionName) {
+  const timer = state.streamReconnectTimersBySession[sessionName];
+  if (timer) {
+    clearTimeout(timer);
+    delete state.streamReconnectTimersBySession[sessionName];
+  }
+}
+
+function scheduleTaskStreamReconnect(sessionName, taskId) {
+  if (!sessionName || !taskId || state.streamReconnectTimersBySession[sessionName]) return;
+  const prevAttempts = Number(state.eventSourceMetaBySession[sessionName]?.attempts || 0);
+  const nextAttempts = prevAttempts + 1;
+  const delayMs = Math.min(12000, 1200 * (2 ** Math.min(nextAttempts - 1, 4)));
+  state.eventSourceMetaBySession[sessionName] = { taskId, attempts: nextAttempts, lastDisconnectAt: Date.now() };
+  state.streamReconnectTimersBySession[sessionName] = setTimeout(() => {
+    delete state.streamReconnectTimersBySession[sessionName];
+    const currentTaskId = String(state.taskBySession[sessionName]?.taskId || "");
+    const persistedTaskId = String(state.streamTaskIdBySession[sessionName] || "");
+    const reconnectTaskId = currentTaskId || persistedTaskId || String(taskId || "");
+    if (!reconnectTaskId) return;
+    startTaskEventStream(reconnectTaskId, sessionName);
+  }, delayMs);
+}
+
+function closeEventStream(sessionName, { clearPersisted = false } = {}) {
   const src = state.eventSourceBySession[sessionName];
   if (src) {
     src.close();
     delete state.eventSourceBySession[sessionName];
+  }
+  clearTaskStreamReconnectTimer(sessionName);
+  if (clearPersisted) {
+    delete state.streamTaskIdBySession[sessionName];
+    delete state.eventSourceMetaBySession[sessionName];
+    persistStreamSubscriptions();
   }
 }
 
@@ -2029,9 +2596,12 @@ function mapEventToActivity(evt) {
 }
 
 function startTaskEventStream(taskId, sessionName) {
-  closeEventStream(sessionName);
+  closeEventStream(sessionName, { clearPersisted: true });
   const es = new EventSource(api(`/api/events?task_id=${encodeURIComponent(taskId)}`));
   state.eventSourceBySession[sessionName] = es;
+  state.eventSourceMetaBySession[sessionName] = { taskId: String(taskId || ""), attempts: 0, connectedAt: Date.now() };
+  state.streamTaskIdBySession[sessionName] = String(taskId || "");
+  persistStreamSubscriptions();
   const handleEvent = (raw) => {
     if (!raw?.data) return;
     let evt;
@@ -2088,6 +2658,12 @@ function startTaskEventStream(taskId, sessionName) {
       );
     }
     pushActivity(sessionName, mapped.title, mapped.detail, mapped.tag);
+    state.eventSourceMetaBySession[sessionName] = {
+      ...(state.eventSourceMetaBySession[sessionName] || {}),
+      taskId: String(taskId || ""),
+      attempts: 0,
+      lastEventAt: Date.now(),
+    };
     const pending = state.pendingBySession[sessionName];
     if (pending) pending.latestActivity = mapped.title;
     renderFeed(false);
@@ -2110,6 +2686,7 @@ function startTaskEventStream(taskId, sessionName) {
   es.onerror = () => {
     pushActivity(sessionName, "Activity stream disconnected", "Waiting for task status updates.");
     closeEventStream(sessionName);
+    scheduleTaskStreamReconnect(sessionName, String(taskId || ""));
   };
 }
 
@@ -2178,6 +2755,12 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
             state.taskBySession[session].status = "completed";
           }
         }
+        if (state.eventSourceBySession[session]) closeEventStream(session, { clearPersisted: true });
+        else if (state.streamTaskIdBySession[session]) {
+          delete state.streamTaskIdBySession[session];
+          delete state.eventSourceMetaBySession[session];
+          persistStreamSubscriptions();
+        }
         continue;
       }
 
@@ -2189,6 +2772,7 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
         status,
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
       };
+      const activeTaskId = String(active.task_id || "");
       state.pendingBySession[session] = {
         ...(state.pendingBySession[session] || {}),
         userText: state.pendingBySession[session]?.userText || "",
@@ -2196,6 +2780,15 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
         startedAt: Number((active.created_at || Date.now() / 1000) * 1000),
         status: "running",
       };
+      const connectedTaskId = String(state.eventSourceMetaBySession[session]?.taskId || "");
+      if (activeTaskId && (!state.eventSourceBySession[session] || (connectedTaskId && connectedTaskId !== activeTaskId))) {
+        startTaskEventStream(activeTaskId, session);
+      }
+      const loop = loopState(session);
+      if (loop.goal && status === "running") {
+        loop.running = true;
+        persistLoopState();
+      }
     }
 
     renderSessions();
@@ -2208,6 +2801,23 @@ async function refreshServerTaskState(sessionName = state.currentSession) {
   } catch {
     return;
   }
+}
+
+function reconnectPersistedStreams() {
+  for (const [sessionName, taskId] of Object.entries(state.streamTaskIdBySession || {})) {
+    const cleanSession = String(sessionName || "").trim();
+    const cleanTaskId = String(taskId || "").trim();
+    if (!cleanSession || !cleanTaskId) continue;
+    const status = String(state.taskBySession[cleanSession]?.status || "").toLowerCase();
+    if (isTerminalTaskStatus(status)) {
+      delete state.streamTaskIdBySession[cleanSession];
+      continue;
+    }
+    if (!state.eventSourceBySession[cleanSession]) {
+      startTaskEventStream(cleanTaskId, cleanSession);
+    }
+  }
+  persistStreamSubscriptions();
 }
 
 async function processQueuedSends() {
@@ -2263,7 +2873,7 @@ async function executeSend(sessionAtSend, text) {
     pushActivity(sessionAtSend, "Request failed", String(err?.message || "Unknown error"));
     throw err;
   } finally {
-    closeEventStream(sessionAtSend);
+    closeEventStream(sessionAtSend, { clearPersisted: true });
     stopTaskTicker(sessionAtSend);
     delete state.pendingBySession[sessionAtSend];
     renderSessions();
@@ -2344,7 +2954,8 @@ async function stopCurrentRun() {
 
 function wireEvents() {
   ui.apiBaseInput.addEventListener("change", async () => {
-    state.apiBase = ui.apiBaseInput.value.trim() || state.apiBase;
+    state.apiBase = normalizeApiBase(ui.apiBaseInput.value.trim() || state.apiBase);
+    ui.apiBaseInput.value = state.apiBase;
     localStorage.setItem("mucli_gui_api_base", state.apiBase);
     await bootstrap();
   });
@@ -2359,7 +2970,17 @@ function wireEvents() {
   });
 
   ui.composer.addEventListener("submit", (evt) => sendMessage(evt).catch((err) => setStatus(`Error: ${err.message}`, "error")));
-  ui.menuBtn.addEventListener("click", (evt) => { evt.stopPropagation(); ui.chatMenu.classList.toggle("hidden"); });
+  ui.menuBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    const willOpen = ui.chatMenu.classList.contains("hidden");
+    ui.chatMenu.classList.toggle("hidden");
+    if (willOpen) {
+      const provider = String(ui.chatProviderSelect?.value || state.runtime?.provider || "").trim().toLowerCase();
+      const model = String(ui.chatModelSelect?.value || state.runtime?.model || "").trim();
+      renderProviderSelect(provider);
+      refreshModelMenus(provider, model).catch(() => {});
+    }
+  });
   ui.chatMenu.addEventListener("click", (evt) => evt.stopPropagation());
   ui.memoryOption.addEventListener("click", () => {
     ui.chatMenu.classList.add("hidden");
@@ -2380,6 +3001,25 @@ function wireEvents() {
     setAgentMode(ui.agentModeSelect.value)
       .then(() => setStatus(`Mode set to ${ui.agentModeSelect.value}.`, "connected"))
       .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.chatProviderSelect?.addEventListener("change", () => {
+    const provider = String(ui.chatProviderSelect?.value || "").trim().toLowerCase();
+    setProvider(provider)
+      .then(async () => {
+        await refreshModelMenus(provider, "");
+        setStatus(`Provider set to ${provider}.`, "connected");
+      })
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.chatModelSelect?.addEventListener("change", () => {
+    const model = String(ui.chatModelSelect?.value || "").trim();
+    fetchJson("/api/runtime", { method: "POST", body: JSON.stringify({ model }) })
+      .then(() => refreshRuntime())
+      .then(() => setStatus(`Model set to ${model || "(default)"}.`, "connected"))
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.metadataToggleBtn?.addEventListener("click", () => {
+    setMetadataPanelCollapsed(!state.metaPanelCollapsed);
   });
   ui.chatFeatureSelect?.addEventListener("change", () => {
     activateFeature(ui.chatFeatureSelect.value).catch((err) => setStatus(`Error: ${err.message}`, "error"));
@@ -2482,13 +3122,24 @@ ${marker}` : marker;
   ui.createFeatureCancelBtn?.addEventListener("click", () => hideModal(ui.createFeatureModal));
   ui.addEpicBtn?.addEventListener("click", () => {
     const draft = currentFeatureDraft(state.currentSession);
-    draft.epics.push({ title: `Epic ${draft.epics.length + 1}`, tasks: [""] });
+    draft.epics.push({
+      title: `Epic ${draft.epics.length + 1}`,
+      goal: "",
+      tasks: [{ title: "", objectives: [], action_points: [], exit_criteria: [] }],
+    });
+    persistBoardState();
     renderFeatureDraftEditor(state.currentSession);
   });
   ui.saveFeatureDraftBtn?.addEventListener("click", () => {
     const draft = currentFeatureDraft(state.currentSession);
     draft.name = String(ui.createFeatureNameInput?.value || "").trim();
+    draft.feature_request = String(ui.createFeatureRequestInput?.value || "").trim();
+    draft.stakeholders = String(ui.createFeatureStakeholdersInput?.value || "").trim();
+    draft.constraints = String(ui.createFeatureConstraintsInput?.value || "").trim();
+    draft.acceptance = String(ui.createFeatureAcceptanceInput?.value || "").trim();
+    draft.risks = String(ui.createFeatureRisksInput?.value || "").trim();
     draft.status = "draft";
+    persistBoardState();
     hideModal(ui.createFeatureModal);
     renderBoard();
     setStatus("Feature draft saved.", "warning");
@@ -2515,7 +3166,7 @@ ${marker}` : marker;
   ui.closeSettingsBtn.addEventListener("click", () => hideModal(ui.settingsModal));
   ui.saveSettingsBtn.addEventListener("click", () => saveSettings().catch((err) => setStatus(`Error: ${err.message}`, "error")));
 
-  [ui.folderModal, ui.memoryModal, ui.ticketModal, ui.createFeatureModal, ui.settingsModal].forEach((modalEl) => {
+  [ui.folderModal, ui.memoryModal, ui.ticketModal, ui.createFeatureModal, ui.settingsModal, ui.featureManagerModal].forEach((modalEl) => {
     modalEl?.addEventListener("click", (evt) => {
       if (evt.target === modalEl) hideModal(modalEl);
     });
@@ -2547,6 +3198,15 @@ ${marker}` : marker;
     setViewMode("board");
     await refreshBoardData({ force: true });
   });
+  ui.modeChatBtn?.addEventListener("click", () => setViewMode("chat"));
+  ui.modeBoardBtn?.addEventListener("click", async () => {
+    setViewMode("board");
+    await refreshBoardData({ force: true });
+  });
+  ui.modeLoopBtn?.addEventListener("click", () => {
+    setViewMode("loop");
+    renderLoopView(state.currentSession);
+  });
   ui.chatBoardSwitch?.addEventListener("change", async () => {
     if (ui.chatBoardSwitch.checked) {
       setViewMode("board");
@@ -2555,13 +3215,55 @@ ${marker}` : marker;
     }
     setViewMode("chat");
   });
+  ui.loopViewBtn?.addEventListener("click", () => {
+    setViewMode("loop");
+    renderLoopView(state.currentSession);
+  });
+  ui.loopGoalInput?.addEventListener("input", () => {
+    const loop = loopState(state.currentSession);
+    if (loop.running) return;
+    loop.goal = String(ui.loopGoalInput?.value || "");
+    persistLoopState();
+  });
+  ui.loopStartBtn?.addEventListener("click", async () => {
+    const loop = loopState(state.currentSession);
+    loop.goal = String(ui.loopGoalInput?.value || "").trim();
+    if (!loop.goal) return setStatus("Loop goal is required.", "warning");
+    loop.running = true;
+    loop.iteration = 0;
+    persistLoopState();
+    pushLoopTimeline(state.currentSession, "Loop started", loop.goal);
+    renderLoopView(state.currentSession);
+    runLoopCycle(state.currentSession);
+  });
+  ui.loopResumeBtn?.addEventListener("click", () => {
+    const loop = loopState(state.currentSession);
+    if (!loop.goal) return setStatus("Set a loop goal first.", "warning");
+    loop.running = true;
+    persistLoopState();
+    pushLoopTimeline(state.currentSession, "Loop resumed", loop.goal);
+    renderLoopView(state.currentSession);
+    runLoopCycle(state.currentSession);
+  });
+  ui.loopStopBtn?.addEventListener("click", async () => {
+    const loop = loopState(state.currentSession);
+    loop.running = false;
+    persistLoopState();
+    pushLoopTimeline(state.currentSession, "Loop stopped", "Paused by user.");
+    if (state.pendingBySession[state.currentSession]) {
+      await stopCurrentRun();
+    }
+    renderLoopView(state.currentSession);
+  });
   ui.boardRefreshBtn?.addEventListener("click", () => refreshBoardData({ force: true }));
   ui.boardSearchInput?.addEventListener("input", () => {
     boardFilters().search = ui.boardSearchInput.value || "";
+    persistBoardState();
     renderBoard();
   });
   ui.boardPhaseFilter?.addEventListener("change", () => {
     boardFilters().phase = ui.boardPhaseFilter.value || "";
+    persistBoardState();
     renderBoard();
   });
   ui.boardFeatureCard?.addEventListener("click", (evt) => {
@@ -2592,25 +3294,84 @@ ${marker}` : marker;
     ui.boardFeatureActionsMenu?.classList.add("hidden");
     unloadFeature().catch((err) => setStatus(`Error: ${err.message}`, "error"));
   });
+  ui.featureManagerBtn?.addEventListener("click", () => {
+    openFeatureManagerModal().catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
+  ui.featureManagerCloseBtn?.addEventListener("click", () => hideModal(ui.featureManagerModal));
+  ui.featureManagerCreateBtn?.addEventListener("click", () => {
+    hideModal(ui.featureManagerModal);
+    showModal(ui.createFeatureModal);
+  });
+  ui.featureManagerList?.addEventListener("click", (evt) => {
+    const btn = evt.target.closest("button[data-fm-action]");
+    if (!btn) return;
+    const action = btn.getAttribute("data-fm-action");
+    const featureId = btn.getAttribute("data-feature-id") || "";
+    const handlers = {
+      load: () => activateFeature(featureId),
+      archive: () => {
+        state.board.selectedFeatureIdBySession[state.currentSession] = featureId;
+        persistBoardState();
+        return archiveSelectedFeature();
+      },
+      delete: () => {
+        state.board.selectedFeatureIdBySession[state.currentSession] = featureId;
+        persistBoardState();
+        return deleteSelectedFeature();
+      },
+      unload: () => unloadFeature(),
+    };
+    const fn = handlers[action];
+    if (!fn) return;
+    fn()
+      .then(async () => {
+        await refreshBoardData({ force: true });
+        renderFeatureManagerModal();
+      })
+      .catch((err) => setStatus(`Error: ${err.message}`, "error"));
+  });
   ui.boardRunBtn?.addEventListener("click", async () => {
     if (state.pendingBySession[state.currentSession]) {
       await stopCurrentRun();
       renderBoard();
       return;
     }
-    const feature = selectedFeatureRecord(state.currentSession);
-    if (!feature?.feature_id) return setStatus("No active feature to run.", "warning");
+    let feature = selectedFeatureRecord(state.currentSession);
+    if (!feature?.feature_id) {
+      const draft = currentFeatureDraft(state.currentSession);
+      const hasDraftTasks = (draft.epics || []).some((epic) =>
+        (epic.tasks || []).some((task) => String(task?.title || "").trim())
+      );
+      if (!String(draft.name || "").trim() || !hasDraftTasks) {
+        return setStatus("No active feature. Create a draft in Feature pipeline builder first.", "warning");
+      }
+      setStatus("Creating feature from pipeline draft…", "connected");
+      await confirmFeatureDraft(state.currentSession);
+      feature = selectedFeatureRecord(state.currentSession);
+    }
     await executeSend(
       state.currentSession,
       `Start working on active feature "${feature.feature_name || feature.feature_id}" and continue with the next actionable task.`
     );
     renderBoard();
   });
+  window.addEventListener("online", () => {
+    if (state.currentView === "board") startBoardEventStream();
+    reconnectPersistedStreams();
+    refreshServerTaskState().catch(() => {});
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (state.currentView === "board") startBoardEventStream();
+    reconnectPersistedStreams();
+    refreshServerTaskState().catch(() => {});
+  });
 }
 
 async function bootstrap() {
   renderAccentSwatches();
   applyThemeFromStorage();
+  applyMetadataPanelState();
   renderSessions();
   await Promise.allSettled([
     refreshRuntime(),
@@ -2622,12 +3383,17 @@ async function bootstrap() {
     refreshHistory(true),
     refreshWorkspace(),
     refreshMemoryRuntime(),
-    refreshMemoryBuffers(),
     refreshApprovals(),
     refreshBoardData({ force: true }),
     refreshServerTaskState(),
   ]);
-  startBoardEventStream();
+  reconnectPersistedStreams();
+  for (const [sessionName, loop] of Object.entries(state.loopBySession || {})) {
+    if (!loop?.running) continue;
+    if (state.pendingBySession[sessionName]) continue;
+    if (sessionName !== state.currentSession) continue;
+    runLoopCycle(sessionName);
+  }
   if (state.board.pollTimer) clearInterval(state.board.pollTimer);
   state.board.pollTimer = setInterval(() => {
     if (state.currentView === "board") refreshBoardData();

@@ -485,6 +485,44 @@ def test_provider_generate_with_retry_does_not_retry_non_transient_errors():
     assert session.provider.calls == 1
 
 
+def test_provider_generate_with_retry_repairs_invalid_ollama_host_once():
+    class MisconfiguredOllamaProvider(LLMProvider):
+        def __init__(self):
+            super().__init__("ollama")
+            self.calls = 0
+            self.host = "https://ollama.com"
+
+        def get_available_models(self):
+            return ["llama3"]
+
+        def generate(self, messages, system_prompt=None, thinking=False, tools=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise Exception(
+                    "Failed to connect to Ollama at https://ollama.com: HTTP Error 400: Bad Request"
+                )
+            return ProviderResponse(
+                text="done",
+                parts=[MessagePart(type="text", text="done")],
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+            )
+
+        def upload_file(self, file_path, mime_type):
+            return None
+
+    sm = SessionManager()
+    session = Session(MisconfiguredOllamaProvider(), False, "system instruction", sm)
+
+    result = session.send_message("hello")
+
+    assert result["ok"] is True
+    assert session.provider.calls == 2
+    assert session.variables["ollama_host"] == "http://localhost:11434"
+    assert session.provider.host == "http://localhost:11434"
+
+
 def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
     sample = tmp_path / "sample.txt"
     sample.write_text("important line\n" * 50)

@@ -1746,6 +1746,17 @@ class Session:
             )
         return False
 
+    def _provider_error_recovery_choice(self) -> str:
+        if self.ui and hasattr(self.ui, "prompt_choices"):
+            return self._prompt_tool_choice(
+                "Provider call failed. Choose recovery strategy:",
+                choices=["retry", "rollback_retry", "abort"],
+                default="retry",
+            )
+        if self._confirm_retry():
+            return "retry"
+        return "abort"
+
     @staticmethod
     def _is_transient_provider_error(error: Exception) -> bool:
         message = str(error or "").lower()
@@ -1780,6 +1791,7 @@ class Session:
         base_delay = float(self.variables.get("provider_retry_base_delay", 0.4) or 0.4)
         max_delay = float(self.variables.get("provider_retry_max_delay", 3.0) or 3.0)
         attempt = 0
+        host_repair_attempted = False
         while True:
             try:
                 return self.provider.generate(
@@ -1789,6 +1801,28 @@ class Session:
                     tools=tools,
                 )
             except Exception as exc:
+                message = str(exc or "").lower()
+                provider_name = str(
+                    getattr(self.provider, "name", "")
+                    or getattr(self.provider, "model_name", "")
+                    or ""
+                ).lower()
+                if (
+                    not host_repair_attempted
+                    and provider_name == "ollama"
+                    and "400" in message
+                    and "ollama.com" in message
+                ):
+                    host_repair_attempted = True
+                    fallback_host = "http://localhost:11434"
+                    self.variables["ollama_host"] = fallback_host
+                    if hasattr(self.provider, "host"):
+                        self.provider.host = fallback_host
+                    if self.ui:
+                        self.ui.show_info(
+                            "Detected invalid Ollama host (ollama.com). Switched to http://localhost:11434 and retrying once."
+                        )
+                    continue
                 if attempt >= retries or not self._is_transient_provider_error(exc):
                     raise
                 attempt += 1
@@ -2541,8 +2575,21 @@ class Session:
                     )
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
 
-                # Failsafe for retry
-                if self._confirm_retry():
+                choice = self._provider_error_recovery_choice()
+                if choice == "rollback_retry":
+                    self.session_manager.history = self.session_manager.history[: turn_start_index + 1]
+                    self.session_manager.summary_anchor = min(
+                        self.session_manager.summary_anchor,
+                        len(self.session_manager.history),
+                    )
+                    self.session_manager.save_history(self.folder_context)
+                    messages = self._build_messages_from_history(
+                        self._prepare_runtime_history(turn_start_index),
+                        {"role": "system", "parts": []},
+                    )[:-1]
+                    iteration -= 1
+                    continue
+                if choice == "retry":
                     iteration -= 1  # Decrement so the next loop run tries the same step
                     continue
 

@@ -1790,6 +1790,13 @@ class Session:
         retries = max(0, int(self.variables.get("provider_max_retries", 2) or 2))
         base_delay = float(self.variables.get("provider_retry_base_delay", 0.4) or 0.4)
         max_delay = float(self.variables.get("provider_retry_max_delay", 3.0) or 3.0)
+        raw_autorepair = self.variables.get("provider_auto_repair_ollama_host", False)
+        allow_ollama_host_autorepair = str(raw_autorepair).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         attempt = 0
         host_repair_attempted = False
         while True:
@@ -1808,7 +1815,8 @@ class Session:
                     or ""
                 ).lower()
                 if (
-                    not host_repair_attempted
+                    allow_ollama_host_autorepair
+                    and not host_repair_attempted
                     and provider_name == "ollama"
                     and "400" in message
                     and "ollama.com" in message

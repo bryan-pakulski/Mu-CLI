@@ -125,7 +125,7 @@ class FolderContext:
                 patterns = self.gitignore_patterns.get(folder, [])
                 if patterns:
                     # Use pathspec for proper gitignore semantics
-                    spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+                    spec = pathspec.PathSpec.from_lines("gitignore", patterns)
                     # Use match_dir for directories, match_file for files
                     if is_dir:
                         return spec.match_file(rel_path + "/") or spec.match_file(rel_path)
@@ -155,7 +155,7 @@ class FolderContext:
                     rel_path = os.path.relpath(full_path, folder)
                     patterns = self.gitignore_patterns.get(folder, [])
                     if patterns:
-                        spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+                        spec = pathspec.PathSpec.from_lines("gitignore", patterns)
                         # Check if the directory itself matches (dir patterns end with /)
                         if spec.match_file(rel_path + "/") or spec.match_file(rel_path):
                             return True

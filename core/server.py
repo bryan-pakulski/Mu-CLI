@@ -246,6 +246,74 @@ class EventHub:
             subscriber["queue"].put(envelope)
 
 
+class SessionArbiter:
+    """Coordinates optional write-lock ownership between multiple clients."""
+
+    def __init__(self):
+        self._lock = Lock()
+        self._owner_client_id: str | None = None
+        self._observer_client_ids: set[str] = set()
+        self._updated_at = time.time()
+
+    def status(self) -> dict:
+        with self._lock:
+            return self._snapshot_unlocked()
+
+    def _snapshot_unlocked(self) -> dict:
+        return {
+            "owner_client_id": self._owner_client_id,
+            "lock_active": bool(self._owner_client_id),
+            "observer_client_ids": sorted(self._observer_client_ids),
+            "updated_at": self._updated_at,
+        }
+
+    def claim(self, client_id: str, *, force: bool = False) -> tuple[bool, dict]:
+        normalized = str(client_id or "").strip()
+        if not normalized:
+            return False, self.status()
+        with self._lock:
+            owner = self._owner_client_id
+            if owner and owner != normalized and not force:
+                return False, self._snapshot_unlocked()
+            self._owner_client_id = normalized
+            self._updated_at = time.time()
+            return True, self._snapshot_unlocked()
+
+    def release(self, client_id: str) -> tuple[bool, dict]:
+        normalized = str(client_id or "").strip()
+        with self._lock:
+            owner = self._owner_client_id
+            if owner and owner != normalized:
+                return False, self._snapshot_unlocked()
+            self._owner_client_id = None
+            self._updated_at = time.time()
+            return True, self._snapshot_unlocked()
+
+    def can_write(self, client_id: str) -> bool:
+        normalized = str(client_id or "").strip()
+        with self._lock:
+            if normalized in self._observer_client_ids:
+                return False
+            owner = self._owner_client_id
+            if not owner:
+                return True
+            return owner == normalized
+
+    def set_observer(self, client_id: str, enabled: bool) -> tuple[bool, dict]:
+        normalized = str(client_id or "").strip()
+        if not normalized:
+            return False, self.status()
+        with self._lock:
+            if enabled:
+                self._observer_client_ids.add(normalized)
+                if self._owner_client_id == normalized:
+                    self._owner_client_id = None
+            else:
+                self._observer_client_ids.discard(normalized)
+            self._updated_at = time.time()
+            return True, self._snapshot_unlocked()
+
+
 @dataclass
 class ApprovalRequest:
     approval_id: str
@@ -1441,6 +1509,31 @@ def build_runtime_payload(session) -> dict:
     }
 
 
+def build_capabilities_payload(session) -> dict:
+    descriptors = []
+    for tool in TOOLS:
+        descriptor = serialize_tool_descriptor(tool.name)
+        if descriptor:
+            descriptors.append(descriptor)
+    return {
+        "api_version": "v1",
+        "server_runtime": "authoritative",
+        "features": {
+            "events_stream": True,
+            "task_queue": True,
+            "approvals": True,
+            "feature_loop": True,
+            "direct_tool_invocation": True,
+            "workspace_browser": True,
+            "multi_client_arbiter": True,
+        },
+        "tools": descriptors,
+        "current_session": session.session_manager.current_session_name,
+        "current_provider": session.provider.name,
+        "current_model": session.provider.model_name,
+    }
+
+
 def build_workspace_payload(session) -> dict:
     session.sync_runtime_state()
     return {
@@ -1677,10 +1770,35 @@ def serve(session, host: str, port: int, command_handler):
         "task_manager": task_manager,
         "approval_manager": approval_manager,
         "event_hub": event_hub,
+        "arbiter": SessionArbiter(),
     }
 
     class MuCLIRequestHandler(BaseHTTPRequestHandler):
         server_version = "MuCLIServer/0.1"
+
+        def _client_id(self, payload: dict | None = None) -> str:
+            if isinstance(payload, dict):
+                body_value = str(payload.get("client_id", "") or "").strip()
+                if body_value:
+                    return body_value
+            header_value = str(self.headers.get("X-MuCLI-Client-ID", "") or "").strip()
+            return header_value or "anonymous"
+
+        def _ensure_write_access(self, payload: dict | None = None) -> str | None:
+            client_id = self._client_id(payload)
+            if state["arbiter"].can_write(client_id):
+                return client_id
+            self._send_json(
+                409,
+                {
+                    "ok": False,
+                    "error_code": "lock_conflict",
+                    "error": "Write lock held by another client.",
+                    "arbiter": state["arbiter"].status(),
+                    "client_id": client_id,
+                },
+            )
+            return None
 
         def _read_json(self):
             length = int(self.headers.get("Content-Length", "0") or "0")
@@ -1800,6 +1918,15 @@ def serve(session, host: str, port: int, command_handler):
                     return
                 self._send_json(200, {"ok": True, "approval": approval})
                 return
+            if parsed.path == "/api/arbiter":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "arbiter": state["arbiter"].status(),
+                    },
+                )
+                return
             if parsed.path == "/api/history":
                 query = parse_qs(parsed.query)
                 limit = query.get("limit", [None])[0]
@@ -1850,6 +1977,12 @@ def serve(session, host: str, port: int, command_handler):
                     return
                 if parsed.path == "/api/runtime":
                     self._send_json(200, {"ok": True, **build_runtime_payload(session)})
+                    return
+                if parsed.path == "/api/capabilities":
+                    self._send_json(
+                        200,
+                        {"ok": True, "capabilities": build_capabilities_payload(session)},
+                    )
                     return
                 if parsed.path == "/api/workspaces":
                     self._send_json(
@@ -1937,7 +2070,54 @@ def serve(session, host: str, port: int, command_handler):
                 self._send_json(400, {"ok": False, "error": str(exc)})
                 return
 
+            if parsed.path == "/api/arbiter/claim":
+                client_id = self._client_id(payload)
+                force = bool(payload.get("force", False))
+                ok, status = state["arbiter"].claim(client_id, force=force)
+                self._send_json(
+                    200 if ok else 409,
+                    {
+                        "ok": ok,
+                        "arbiter": status,
+                        "client_id": client_id,
+                        "error": None if ok else "Write lock is owned by another client.",
+                    },
+                )
+                return
+
+            if parsed.path == "/api/arbiter/release":
+                client_id = self._client_id(payload)
+                ok, status = state["arbiter"].release(client_id)
+                self._send_json(
+                    200 if ok else 409,
+                    {
+                        "ok": ok,
+                        "arbiter": status,
+                        "client_id": client_id,
+                        "error": None if ok else "Only the lock owner can release the lock.",
+                    },
+                )
+                return
+
+            if parsed.path == "/api/arbiter/observer":
+                client_id = self._client_id(payload)
+                enabled = bool(payload.get("enabled", True))
+                ok, status = state["arbiter"].set_observer(client_id, enabled)
+                self._send_json(
+                    200 if ok else 400,
+                    {
+                        "ok": ok,
+                        "arbiter": status,
+                        "client_id": client_id,
+                        "observer": bool(enabled),
+                        "error": None if ok else "A valid client_id is required.",
+                    },
+                )
+                return
+
             if parsed.path == "/api/approvals/resolve":
+                if self._ensure_write_access(payload) is None:
+                    return
                 approval_id = str(payload.get("approval_id", "") or "").strip()
                 decision = str(payload.get("decision", "") or "").strip().lower()
                 reason = payload.get("reason")
@@ -1989,6 +2169,8 @@ def serve(session, host: str, port: int, command_handler):
                 return
 
             if parsed.path == "/api/message":
+                if self._ensure_write_access(payload) is None:
+                    return
                 text = str(payload.get("text", "") or "")
                 if not text.strip():
                     self._send_json(
@@ -2018,6 +2200,8 @@ def serve(session, host: str, port: int, command_handler):
                 return
 
             if parsed.path == "/api/feature-plan/approve":
+                if self._ensure_write_access(payload) is None:
+                    return
                 directory = str(payload.get("directory", "") or "").strip()
                 if not directory:
                     self._send_json(
@@ -2069,6 +2253,8 @@ def serve(session, host: str, port: int, command_handler):
                 return
 
             if parsed.path == "/api/feature-loop":
+                if self._ensure_write_access(payload) is None:
+                    return
                 directory = str(payload.get("directory", "") or "").strip()
                 if not directory:
                     self._send_json(
@@ -2106,6 +2292,8 @@ def serve(session, host: str, port: int, command_handler):
                 return
 
             if parsed.path == "/api/feature-loop/resolve":
+                if self._ensure_write_access(payload) is None:
+                    return
                 task_id = str(payload.get("task_id", "") or "").strip()
                 user_input = str(payload.get("user_input", "") or "")
                 if not task_id:
@@ -2150,6 +2338,8 @@ def serve(session, host: str, port: int, command_handler):
                 return
 
             if parsed.path == "/api/tool":
+                if self._ensure_write_access(payload) is None:
+                    return
                 tool_name = str(payload.get("tool_name", "") or "")
                 tool_args = payload.get("tool_args", {}) or {}
                 if not tool_name:
@@ -2197,6 +2387,13 @@ def serve(session, host: str, port: int, command_handler):
 
             with state["session_lock"]:
                 session = state["session"]
+                read_only_post_paths = {
+                    "/api/workspaces/browse",
+                    "/api/workspaces/list-dir",
+                }
+                if parsed.path not in read_only_post_paths:
+                    if self._ensure_write_access(payload) is None:
+                        return
                 try:
                     if parsed.path == "/api/command":
                         command = str(payload.get("command", "") or "")

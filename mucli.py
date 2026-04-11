@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import atexit
 import json
 import os
 import re
@@ -15,7 +16,7 @@ import urllib.request
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.prompt import Prompt, IntPrompt, Confirm
+from rich.prompt import Prompt, IntPrompt
 from rich.text import Text
 from rich.table import Table
 from rich import box
@@ -26,6 +27,7 @@ from providers.ollama import OllamaProvider
 from utils.logger import logger
 from providers.openai import OpenAIProvider
 from core.server import HeadlessUI, serve
+from core.server_client import MuCLIServerClient, ServerClientError
 from core.session import SessionManager, Session
 from core.feature_mode import (
     load_feature_plan,
@@ -35,6 +37,7 @@ from core.feature_mode import (
 )
 from core.tools import execute_tool
 from ui.rich_ui import RichUI
+from tui.client_runtime import load_client_profile, run_client_loop
 from utils.config import AGENT_MODE_METADATA
 from utils.runtime_metrics import collect_context_layers
 
@@ -2270,7 +2273,9 @@ def handle_command(session, user_input, allow_prompt=True):
 def main():
     logger.info("μCLI starting...")
 
-    parser = argparse.ArgumentParser(description="Interactive AI CLI")
+    parser = argparse.ArgumentParser(
+        description="MuCLI server/client runtime (server is the source of truth)."
+    )
     parser.add_argument("--model", default=None, help="Default model")
     parser.add_argument(
         "--provider",
@@ -2295,6 +2300,16 @@ def main():
         help="Run μCLI in HTTP server mode for GUI/API clients.",
     )
     parser.add_argument(
+        "--connect",
+        default=None,
+        help="Connect CLI to an existing μCLI server (e.g., http://127.0.0.1:8765).",
+    )
+    parser.add_argument(
+        "--spawn-server",
+        action="store_true",
+        help="Force TUI mode to launch a managed local μCLI server subprocess.",
+    )
+    parser.add_argument(
         "--host",
         default="127.0.0.1",
         help="Host interface for --server mode.",
@@ -2304,6 +2319,17 @@ def main():
         type=int,
         default=8765,
         help="Port for --server mode.",
+    )
+    parser.add_argument(
+        "--connect-timeout",
+        type=float,
+        default=30.0,
+        help="HTTP timeout in seconds when using --connect.",
+    )
+    parser.add_argument(
+        "--no-remember-server",
+        action="store_true",
+        help="Do not persist TUI client server/session profile.",
     )
     parser.add_argument(
         "--yolo",
@@ -2328,74 +2354,84 @@ def main():
     args = parser.parse_args()
     ui = HeadlessUI(auto_approve=args.yolo) if args.server else RichUI()
 
-    try:
-        session = build_session(args, ui, allow_prompt=not args.server)
-    except Exception as exc:
-        console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
-        sys.exit(1)
-
     if args.server:
+        try:
+            session = build_session(args, ui, allow_prompt=False)
+        except Exception as exc:
+            console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
+            sys.exit(1)
         serve(session, args.host, args.port, handle_command)
         return
 
-    print_splash(session)
-    release_status = get_release_update_status()
-    if release_status.get("ok") and release_status.get("update_available"):
-        release = release_status.get("latest_release", {})
-        tag = release.get("tag_name", "unknown")
-        release_url = release.get("html_url", "")
+    managed_server = None
+    connect_target = str(args.connect or "").strip()
+    if not connect_target:
+        connect_target = str(load_client_profile().get("server_url", "")).strip()
+    if not connect_target:
+        connect_target = f"http://{args.host}:{args.port}"
+        managed_server = _start_managed_server(args)
+        if not managed_server:
+            sys.exit(1)
+
+    client = MuCLIServerClient(connect_target, timeout=args.connect_timeout)
+    if not _wait_for_server_health(client, timeout=max(5.0, args.connect_timeout)):
         console.print(
-            f"[yellow]New μCLI release available: {tag} "
-            f"(repo: {release_status.get('repo')}).[/yellow]"
+            f"[red]Unable to establish healthy server connection at {client.base_url}.[/red]"
         )
-        if release_url:
-            console.print(f"[dim]{release_url}[/dim]")
-        if Confirm.ask("Would you like to update now?", default=False):
-            update_result = run_auto_update()
-            if update_result["ok"]:
-                ui.show_info(update_result["message"])
-            else:
-                ui.show_error(update_result["message"])
-            for step in update_result.get("steps", []):
-                status = "OK" if step["returncode"] == 0 else "FAILED"
-                console.print(f"[dim]{status} · {step['name']}[/dim]")
-                if step.get("stderr"):
-                    console.print(f"[dim]{step['stderr']}[/dim]")
-    elif release_status.get("ok") and release_status.get("latest_release"):
-        latest_tag = release_status["latest_release"].get("tag_name", "")
-        if latest_tag:
-            console.print(f"[dim]μCLI is up to date ({latest_tag}).[/dim]")
-    refresh_memory_hud(session, ui)
+        if managed_server:
+            managed_server.terminate()
+        sys.exit(1)
+    run_client_loop(ui, client, remember_server=not args.no_remember_server)
+    if managed_server:
+        managed_server.terminate()
 
-    while True:
+
+def _wait_for_server_health(client: MuCLIServerClient, timeout: float = 10.0) -> bool:
+    deadline = time.time() + max(1.0, timeout)
+    while time.time() < deadline:
         try:
-            current_task = get_current_feature_task_label(session)
-            feature_context = get_feature_prompt_context(session)
-            user_input = ui.get_input(
-                session.session_manager.current_session_name,
-                session.staged_files,
-                agent_mode=session.variables.get("agent_mode", "default"),
-                current_task=current_task,
-                feature_context=feature_context,
-            )
+            payload = client.health()
+            if payload.get("ok") and payload.get("status") == "ok":
+                return True
+        except ServerClientError:
+            pass
+        time.sleep(0.2)
+    return False
 
-            if not user_input:
-                continue
 
-            if user_input.startswith("/"):
-                result = handle_command(session, user_input, allow_prompt=True)
-                if result.get("data", {}).get("exit"):
-                    break
-                continue
+def _start_managed_server(args):
+    cmd = [
+        sys.executable,
+        os.path.abspath(__file__),
+        "--server",
+        "--host",
+        args.host,
+        "--port",
+        str(args.port),
+    ]
+    if args.provider:
+        cmd.extend(["--provider", args.provider])
+    if args.model:
+        cmd.extend(["--model", args.model])
+    if args.session:
+        cmd.extend(["--session", args.session])
+    for workspace in args.workspace or []:
+        cmd.extend(["--workspace", workspace])
+    if args.yolo:
+        cmd.append("--yolo")
+    if args.debug:
+        cmd.append("--debug")
+    if args.system:
+        cmd.extend(["--system", args.system])
 
-            session.send_message(user_input)
-            refresh_memory_hud(session, ui)
+    try:
+        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        console.print(f"[red]Failed to start managed μCLI server: {exc}[/red]")
+        return None
 
-        except KeyboardInterrupt:
-            console.print("\n(Interrupted. Type /quit to exit)")
-        except EOFError:
-            console.print("\nGoodbye!")
-            break
+    atexit.register(lambda: process.poll() is None and process.terminate())
+    return process
 
 
 if __name__ == "__main__":

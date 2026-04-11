@@ -9,7 +9,9 @@ from core.server import (
     ApprovalManager,
     EventHub,
     HeadlessUI,
+    SessionArbiter,
     TaskManager,
+    build_capabilities_payload,
     build_runtime_payload,
     build_sessions_payload,
     build_memory_buffers_payload,
@@ -173,6 +175,54 @@ def test_mode_command_without_args_lists_available_modes():
         result["data"]["available_modes"]["feature"]["documentation"]
         == "documentation/feature_plan_engine.md"
     )
+
+
+def test_capabilities_payload_declares_authoritative_server_runtime():
+    session = build_test_session()
+
+    payload = build_capabilities_payload(session)
+
+    assert payload["api_version"] == "v1"
+    assert payload["server_runtime"] == "authoritative"
+    assert payload["features"]["task_queue"] is True
+    assert payload["current_provider"] == session.provider.name
+
+
+def test_session_arbiter_claim_and_release_flow():
+    arbiter = SessionArbiter()
+
+    ok_a, status_a = arbiter.claim("client-a")
+    ok_b, status_b = arbiter.claim("client-b")
+    ok_force, status_force = arbiter.claim("client-b", force=True)
+    ok_release_wrong, _ = arbiter.release("client-a")
+    ok_release_owner, status_release = arbiter.release("client-b")
+
+    assert ok_a is True
+    assert status_a["owner_client_id"] == "client-a"
+    assert ok_b is False
+    assert status_b["owner_client_id"] == "client-a"
+    assert ok_force is True
+    assert status_force["owner_client_id"] == "client-b"
+    assert ok_release_wrong is False
+    assert ok_release_owner is True
+    assert status_release["owner_client_id"] is None
+
+
+def test_session_arbiter_observer_mode_blocks_write():
+    arbiter = SessionArbiter()
+
+    ok_observer, status_observer = arbiter.set_observer("observer-a", True)
+    can_write_observer = arbiter.can_write("observer-a")
+    can_write_other = arbiter.can_write("writer-a")
+    ok_disable, _ = arbiter.set_observer("observer-a", False)
+    can_write_after_disable = arbiter.can_write("observer-a")
+
+    assert ok_observer is True
+    assert "observer-a" in status_observer["observer_client_ids"]
+    assert can_write_observer is False
+    assert can_write_other is True
+    assert ok_disable is True
+    assert can_write_after_disable is True
 
 
 def test_stats_command_returns_session_snapshot():

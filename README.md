@@ -42,10 +42,38 @@
 
 ## Usage Guide
 
-Run the tool using:
+Run the terminal client (defaults to launching/using a local μCLI server runtime):
 ```bash
 python mucli.py
 ```
+
+Dedicated entrypoints:
+```bash
+python mucli_tui.py
+python mucli_server.py --host 127.0.0.1 --port 8765
+```
+
+Run the terminal UI against an already-running central server (shared with GUI clients):
+```bash
+python mucli.py --connect http://127.0.0.1:8765
+```
+
+Disable client profile persistence (server/session remember):
+```bash
+python mucli.py --no-remember-server
+```
+
+In server-backed TUI mode, client-local watcher commands are available:
+- `/tasks` list recent server tasks
+- `/task <task_id>` inspect one task
+- `/watch <task_id|latest>` poll until terminal task state
+- `/approvals` list pending approval requests
+- `/approve <approval_id> <approve|reject|explain> [reason]` resolve a pending approval
+- `/stream [task_id] [count]` tail SSE events (tool traces/approval events) from the server
+- `/stream live [task_id]` continuously stream events (Ctrl+C to stop)
+- `/stream status` / `/stream stop` inspect or stop the background live stream
+- `/lock status|claim|force|release` inspect or control multi-client write lock ownership
+- `/lock observe on|off` toggle read-only observer mode for this client id
 
 Run the server/API mode using:
 ```bash
@@ -118,6 +146,8 @@ Notes:
 - Use `--session <name>` to reuse an existing saved session instead of the default session.
 - Use `--workspace <path>` multiple times to preload one or more folders into context.
 - Use `--yolo` if you want server-driven tool calls to auto-approve modifying tools for a trusted local GUI.
+- μCLI is now server/client-first: the server owns runtime/session state; GUI and TUI clients both connect through the HTTP interface.
+- Use `python mucli.py --connect <url>` for a thin terminal client that can reconnect to the same stateful session runtime as the GUI.
 
 ### API endpoints
 
@@ -151,7 +181,11 @@ For the phased feature workflow and plan file format, see `documentation/feature
 - `GET /api/tasks` / `GET /api/tasks/<task_id>` — inspect async message task state.
 - `GET /api/approvals` / `GET /api/approvals/<approval_id>` — inspect pending approval requests for modifying tools.
 - `POST /api/approvals/resolve` — approve, reject, or explain a pending modifying tool request.
+- `GET /api/arbiter` — inspect current multi-client write lock ownership.
+- `POST /api/arbiter/claim` / `POST /api/arbiter/release` — claim or release write lock ownership for a client id.
+- `POST /api/arbiter/observer` — toggle read-only observer mode for a client id.
 - `GET /api/runtime` — inspect the current runtime state (`thinking`, `agentic`, model, variables, disabled tools, system prompt).
+- `GET /api/capabilities` — discover server API version, runtime mode, and feature flags for adaptive clients.
 - `POST /api/runtime` — update runtime state such as system prompt, model, booleans, disabled tools, and variables.
 - `GET /api/workspaces` — inspect attached workspace folders and tracked files.
 - `POST /api/workspaces/add` — attach a workspace folder.

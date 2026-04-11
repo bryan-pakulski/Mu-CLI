@@ -28,6 +28,15 @@ Make the **μCLI server** the single runtime authority (the "magic") while GUI a
 - [~] Split entrypoints into `mucli-server` and `mucli-tui` executables.
 - [x] Add multi-client arbitration controls (session locks and read-only observer mode).
 
+## Current State Snapshot
+- Server-first runtime model is active in code paths (`--server` authoritative; TUI/GUI via HTTP/SSE).
+- Stage 1, Stage 2, and Stage 3 are complete.
+- Stage 4 is in progress with:
+  - dedicated entrypoints present (`mucli_server.py`, `mucli_tui.py`),
+  - integration fixture present (`tests/test_server_client_integration.py`),
+  - arbiter + observer mode complete.
+- Remaining Stage 4 focus: finalize packaging/release ergonomics and broaden integration coverage.
+
 ## Architectural Direction
 - **Single runtime owner**: provider lifecycle, tool execution, approvals, task queue, feature loops, memory, and session persistence run only inside server mode.
 - **Client-only frontends**: terminal and browser clients send commands/messages and consume state/events.

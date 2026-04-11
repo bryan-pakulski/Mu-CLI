@@ -18,6 +18,13 @@
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for GUIs**: Launch μCLI with an HTTP API so desktop/web clients can drive sessions, commands, and tool execution.
 
+## Architecture at a Glance (Current)
+
+- **Authoritative runtime lives on the server**: providers, tools, approvals, tasks, session history, and workspace state execute and persist in the server process.
+- **TUI/GUI are thin clients**: they interact over HTTP/SSE (`/api/*`, `/api/events`) and can reconnect to the same server session state.
+- **Workspace/tool execution is server-side**: files and commands used by tools must exist on the server host (or mounted storage visible to that host), not on the remote client machine.
+- **Multi-client coordination is supported**: optional write-lock + observer mode via the arbiter endpoints and TUI lock commands.
+
 ## Installation
 
 ### Prerequisites
@@ -148,6 +155,8 @@ Notes:
 - Use `--yolo` if you want server-driven tool calls to auto-approve modifying tools for a trusted local GUI.
 - μCLI is now server/client-first: the server owns runtime/session state; GUI and TUI clients both connect through the HTTP interface.
 - Use `python mucli.py --connect <url>` for a thin terminal client that can reconnect to the same stateful session runtime as the GUI.
+- Remote TUI clients are supported as long as they can reach the server endpoint; for offsite access, place μCLI behind your normal HTTPS/auth boundary.
+- Tool calls operate on server-visible paths; attach workspaces using server-side paths (for example via `--workspace` at server startup or `POST /api/workspaces/add`).
 
 ### API endpoints
 

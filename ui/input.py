@@ -136,7 +136,8 @@ class InputHandler:
         feature_id_completer = DynamicFeatureIdCompleter()
         tool_name_completer = DynamicToolCompleter()
 
-        model_dict = {m: None for m in KNOWN_MODELS}
+        # Flatten per-provider KNOWN_MODELS dict into a single completions dict
+        model_dict = {m: None for models in KNOWN_MODELS.values() for m in models}
 
         provider_completer = NestedCompleter.from_nested_dict(
             {"gemini": None, "ollama": None, "openai": None}

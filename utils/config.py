@@ -383,6 +383,8 @@ NUDGE_TOOL_ERROR = "The previous tool call resulted in an error. Analyze the err
 
 
 # --- Pricing & Models ---
+# NOTE: PRICING_DB is currently Gemini-only. Add entries for Ollama and OpenAI
+# models as their pricing data becomes available / relevant for cost estimation.
 PRICING_DB = {
     "gemini-3.1-pro-preview": {
         "in": 2.00,
@@ -428,15 +430,35 @@ PRICING_DB = {
     },
 }
 
-# TODO: This should be done per provider, this should simply be a template config
-KNOWN_MODELS = [
-    "gemini-3.1-pro-preview",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-3-pro-image-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-]
+# Per-provider known models for tab-completion and defaults.
+# Each provider dynamically fetches its own models via get_available_models();
+# these lists serve as fallbacks and tab-completion suggestions when the API
+# is unavailable or before a provider has been selected.
+KNOWN_MODELS = {
+    "gemini": [
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-3-pro-image-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+    ],
+    "ollama": [
+        "llama3",
+        "llama3.1",
+        "mistral",
+        "codellama",
+        "qwen2",
+        "phi3",
+    ],
+    "openai": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-4",
+        "gpt-3.5-turbo",
+    ],
+}
 
 
 def calculate_cost(model_name, input_tokens, output_tokens):

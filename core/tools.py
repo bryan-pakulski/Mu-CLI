@@ -2828,6 +2828,9 @@ def reddit_search(query: str, subreddit: str = None, sort: str = "relevance", li
 
 def stackoverflow_search(query: str, tags: list = None, sort: str = "relevance", limit: int = 10, folder_context=None) -> str:
     """Searches Stack Overflow for questions using the Stack Exchange API with tag filtering support."""
+    if not query or not query.strip():
+        return json.dumps({"error": "Query cannot be empty", "query": query})
+
     if not _check_bounds(query, folder_context):
         logger.warning(f"stackoverflow_search: Access denied for query: {query}")
         return json.dumps({"error": "Access denied"})

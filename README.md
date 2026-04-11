@@ -70,6 +70,8 @@ Disable client profile persistence (server/session remember):
 python mucli.py --no-remember-server
 ```
 
+If a saved server URL is stale/unreachable, μCLI automatically falls back to launching a managed local server.
+
 In server-backed TUI mode, client-local watcher commands are available:
 - `/tasks` list recent server tasks
 - `/task <task_id>` inspect one task

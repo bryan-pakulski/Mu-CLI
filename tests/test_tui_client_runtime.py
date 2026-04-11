@@ -11,6 +11,7 @@ class StubUI:
         self.error_messages = []
         self.rendered = []
         self.prompted_choices = []
+        self.variables = {}
 
     def show_info(self, message):
         self.info_messages.append(str(message))
@@ -33,6 +34,9 @@ class StubUI:
     def prompt(self, message, default=None):
         return default or "test-reason"
 
+    def set_variables(self, variables_dict):
+        self.variables = dict(variables_dict or {})
+
 
 class StubClient:
     base_url = "http://127.0.0.1:8765"
@@ -53,7 +57,7 @@ class StubClient:
             "state": {
                 "current_session": "default",
                 "staged_files": [],
-                "runtime": {"agent_mode": "default"},
+                "runtime": {"agent_mode": "default", "variables": {"yolo": False}},
                 "feature_state": {},
                 "provider": {"model": "stub-model"},
             },
@@ -143,6 +147,7 @@ def test_run_client_loop_supports_tasks_commands(tmp_path):
 
     assert any("Tasks:" in msg for msg in ui.info_messages)
     assert any("Task t1 status=completed" in msg for msg in ui.info_messages)
+    assert "yolo" in ui.variables
 
 
 def test_watch_command_polls_until_task_completes():

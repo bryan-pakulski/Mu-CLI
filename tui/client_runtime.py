@@ -54,6 +54,8 @@ def run_client_loop(ui, client: MuCLIServerClient, *, remember_server: bool = Tr
             session_name = state.get("current_session") or "remote-session"
             staged = state.get("staged_files") or []
             runtime = state.get("runtime") or {}
+            if hasattr(ui, "set_variables"):
+                ui.set_variables(dict(runtime.get("variables") or {}))
             feature_state = state.get("feature_state") or {}
             feature_plan = (
                 feature_state.get("feature_plan")

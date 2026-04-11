@@ -2364,23 +2364,41 @@ def main():
         return
 
     managed_server = None
-    connect_target = str(args.connect or "").strip()
-    if not connect_target:
-        connect_target = str(load_client_profile().get("server_url", "")).strip()
+    explicit_connect = str(args.connect or "").strip()
+    profile_connect = str(load_client_profile().get("server_url", "")).strip()
+    connect_target = explicit_connect or profile_connect
+
+    if connect_target:
+        client = MuCLIServerClient(connect_target, timeout=args.connect_timeout)
+        if not _wait_for_server_health(client, timeout=max(3.0, args.connect_timeout)):
+            if explicit_connect:
+                console.print(
+                    f"[red]Unable to establish healthy server connection at {client.base_url}.[/red]"
+                )
+                sys.exit(1)
+            console.print(
+                f"[yellow]Saved server URL is unreachable ({client.base_url}); starting a managed local server instead.[/yellow]"
+            )
+            connect_target = ""
+
     if not connect_target:
         connect_target = f"http://{args.host}:{args.port}"
         managed_server = _start_managed_server(args)
         if not managed_server:
             sys.exit(1)
+        client = MuCLIServerClient(connect_target, timeout=args.connect_timeout)
+        if not _wait_for_server_health(client, timeout=max(5.0, args.connect_timeout)):
+            console.print(
+                f"[red]Unable to establish healthy server connection at {client.base_url}.[/red]"
+            )
+            managed_server.terminate()
+            sys.exit(1)
+
+    if not connect_target:
+        console.print("[red]No reachable μCLI server target found.[/red]")
+        sys.exit(1)
 
     client = MuCLIServerClient(connect_target, timeout=args.connect_timeout)
-    if not _wait_for_server_health(client, timeout=max(5.0, args.connect_timeout)):
-        console.print(
-            f"[red]Unable to establish healthy server connection at {client.base_url}.[/red]"
-        )
-        if managed_server:
-            managed_server.terminate()
-        sys.exit(1)
     run_client_loop(ui, client, remember_server=not args.no_remember_server)
     if managed_server:
         managed_server.terminate()

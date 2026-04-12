@@ -261,12 +261,25 @@ select option:hover{
 .message .text pre{border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto;margin:.45rem 0;background:var(--surface)}
 .message .text :not(pre)>code{border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;background:var(--surface-2)}
 
-.folder-modal-card{width:min(560px,92vw);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;}
+.folder-modal-card{width:min(720px,94vw);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;}
 .memory-modal-card{width:min(760px,94vw);max-height:min(82vh,760px);overflow:auto}
-.folder-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin:10px 0 12px;}
-.folder-browser-head{display:flex;align-items:center;gap:10px;margin:4px 0 8px}
-.folder-entry{cursor:pointer}
-.folder-entry:hover{border-color:var(--accent)}
+.folder-layout{display:flex;gap:12px;min-height:340px;max-height:60vh;margin-top:10px}
+.folder-sidebar{width:140px;flex-shrink:0;display:flex;flex-direction:column;gap:2px;padding:6px;border-right:1px solid var(--border)}
+.folder-sidebar-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--muted);transition:background .15s}
+.folder-sidebar-item:hover{background:color-mix(in oklab, var(--surface-2) 90%, transparent)}
+.folder-sidebar-item.active{background:color-mix(in oklab, var(--accent) 18%, transparent);color:var(--fg)}
+.folder-main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.folder-breadcrumb{display:flex;align-items:center;gap:2px;padding:6px 8px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.folder-breadcrumb-seg{cursor:pointer;padding:2px 4px;border-radius:4px;transition:background .15s}
+.folder-breadcrumb-seg:hover{background:color-mix(in oklab, var(--accent) 15%, transparent);color:var(--accent)}
+.folder-breadcrumb-sep{color:var(--border);margin:0 1px}
+.folder-browser-list{flex:1;overflow-y:auto;padding:6px 0}
+.folder-entry{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;border:1px solid transparent;transition:background .12s,border-color .12s}
+.folder-entry:hover{background:color-mix(in oklab, var(--surface-2) 85%, transparent);border-color:var(--border)}
+.folder-entry.selected{background:color-mix(in oklab, var(--accent) 14%, transparent);border-color:var(--accent)}
+.folder-entry.file-entry{color:var(--muted);cursor:default;opacity:.55}
+.folder-entry-icon{font-size:15px;flex-shrink:0}
+.folder-entry-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .muted{color:var(--muted);font-size:12px;}
 .memory-list{display:grid;gap:6px;margin:8px 0 12px}
 .memory-item{border:1px solid color-mix(in oklab, var(--border) 88%, transparent);border-radius:10px;padding:10px;background:color-mix(in oklab, var(--surface-2) 92%, transparent)}

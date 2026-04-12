@@ -69,14 +69,34 @@ def list_workspace_directories(path: str) -> tuple[dict, str | None]:
         return {}, f"Directory not found: {current}"
     try:
         parent = os.path.dirname(current) if os.path.dirname(current) != current else None
-        entries = []
-        for name in sorted(os.listdir(current)):
+        home = os.path.expanduser("~")
+        dirs = []
+        files = []
+        for name in os.listdir(current):
             full = os.path.join(current, name)
             if os.path.isdir(full):
-                entries.append({"name": name, "path": full})
+                dirs.append({"name": name, "path": full, "type": "dir"})
+            elif os.path.isfile(full):
+                files.append({"name": name, "path": full, "type": "file"})
+        dirs.sort(key=lambda e: e["name"].lower())
+        files.sort(key=lambda e: e["name"].lower())
+        entries = dirs + files
+        common_locations = []
+        location_defs = [
+            ("Home", home),
+            ("Desktop", os.path.join(home, "Desktop")),
+            ("Documents", os.path.join(home, "Documents")),
+            ("Downloads", os.path.join(home, "Downloads")),
+            ("Projects", os.path.join(home, "Projects")),
+        ]
+        for loc_name, loc_path in location_defs:
+            if os.path.isdir(loc_path):
+                common_locations.append({"name": loc_name, "path": loc_path})
         return {
             "current_path": current,
             "parent_path": parent,
+            "home_path": home,
+            "common_locations": common_locations,
             "entries": entries,
         }, None
     except Exception as exc:
@@ -1927,6 +1947,23 @@ def serve(session, host: str, port: int, command_handler):
                     )
                     return
 
+                # ── Loop state endpoints ──────────────────────────────────
+                if parsed.path == "/api/loop/status":
+                    loop_state = session.get_loop_state()
+                    self._send_json(200, {
+                        "ok": True,
+                        **loop_state,
+                        "feature_count": len(loop_state.get("features", [])),
+                    })
+                    return
+
+                if parsed.path == "/api/loop/features":
+                    self._send_json(200, {
+                        "ok": True,
+                        "features": session.get_loop_features(),
+                    })
+                    return
+
             self._not_found()
 
         def do_POST(self):
@@ -2557,6 +2594,20 @@ def serve(session, host: str, port: int, command_handler):
                         self._send_json(200, {"ok": True, **listing})
                         return
 
+                    if parsed.path == "/api/workspaces/create-folder":
+                        folder_path = str(payload.get("path", "") or "").strip()
+                        if not folder_path:
+                            self._send_json(400, {"ok": False, "error": "Field 'path' is required."})
+                            return
+                        try:
+                            os.makedirs(folder_path, exist_ok=False)
+                            self._send_json(200, {"ok": True, "path": folder_path})
+                        except FileExistsError:
+                            self._send_json(400, {"ok": False, "error": "Folder already exists."})
+                        except OSError as e:
+                            self._send_json(400, {"ok": False, "error": str(e)})
+                        return
+
                     if parsed.path == "/api/workspaces/remove":
                         path = str(payload.get("path", "") or "").strip()
                         if not path:
@@ -2620,6 +2671,27 @@ def serve(session, host: str, port: int, command_handler):
                                 **build_staged_files_payload(session),
                             },
                         )
+                        return
+
+                    # ── Loop state POST endpoints ────────────────────────────
+                    if parsed.path == "/api/loop/start":
+                        goal = str(payload.get("goal", "") or "").strip()
+                        if not goal:
+                            self._send_json(400, {"ok": False, "error": "goal is required"})
+                            return
+                        session.start_loop(goal)
+                        self._send_json(200, {
+                            "ok": True,
+                            **session.get_loop_state(),
+                        })
+                        return
+
+                    if parsed.path == "/api/loop/stop":
+                        session.stop_loop()
+                        self._send_json(200, {
+                            "ok": True,
+                            **session.get_loop_state(),
+                        })
                         return
                 except Exception as exc:
                     logger.error("Server request failed: %s", exc, exc_info=True)

@@ -93,6 +93,15 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": True,
     },
+    # Loop mode state variables
+    "loop_active": {
+        "type": bool,
+        "default": False,
+    },  # Whether loop mode is currently active
+    "loop_features": {
+        "type": str,
+        "default": "",
+    },  # JSON-serialized list of {feature_id, timestamp} dicts for features created in this loop
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}

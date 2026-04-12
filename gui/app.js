@@ -1,4 +1,5 @@
 const el = (id) => document.getElementById(id);
+const escapeHtml = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const ACTIVITY_STORAGE_KEY = "mucli_gui_activity_v1";
 const SESSIONS_STORAGE_KEY = "mucli_gui_sessions_v1";
 const DRAFTS_STORAGE_KEY = "mucli_gui_drafts_v1";
@@ -165,13 +166,16 @@ const ui = {
   workspaceAddTrigger: el("workspaceAddTrigger"),
   workspaceFolders: el("workspaceFolders"),
   folderModal: el("folderModal"),
-  folderPathInput: el("folderPathInput"),
-  browseFolderBtn: el("browseFolderBtn"),
-  folderUpBtn: el("folderUpBtn"),
-  folderBrowserPath: el("folderBrowserPath"),
+  folderSidebar: el("folderSidebar"),
+  folderBreadcrumb: el("folderBreadcrumb"),
   folderBrowserList: el("folderBrowserList"),
   attachFolderConfirmBtn: el("attachFolderConfirmBtn"),
   closeFolderModalBtn: el("closeFolderModalBtn"),
+  createFolderBtn: el("createFolderBtn"),
+  createFolderInput: el("createFolderInput"),
+  createFolderName: el("createFolderName"),
+  createFolderConfirmBtn: el("createFolderConfirmBtn"),
+  createFolderCancelBtn: el("createFolderCancelBtn"),
   memoryModal: el("memoryModal"),
   memorySearchInput: el("memorySearchInput"),
   memoryBufferList: el("memoryBufferList"),
@@ -1997,30 +2001,103 @@ async function refreshFolderNavigator(path = "") {
       15000,
     );
     const current = payload.current_path || path || "";
-    ui.folderBrowserPath.textContent = current;
-    ui.folderUpBtn.dataset.path = payload.parent_path || "";
+    const homePath = payload.home_path || "";
+    const commonLocations = Array.isArray(payload.common_locations) ? payload.common_locations : [];
     const entries = Array.isArray(payload.entries) ? payload.entries : [];
-    ui.folderBrowserList.innerHTML = entries.length
-      ? entries
-          .map(
-            (entry) =>
-              `<article class="memory-item folder-entry" data-path="${entry.path}"><div class="memory-item-title">Directory</div><div class="memory-item-body">${entry.name}</div></article>`,
-          )
-          .join("")
-      : '<div class="activity-empty">No subdirectories.</div>';
-    ui.folderBrowserList.querySelectorAll(".folder-entry").forEach((el) => {
+
+    // Render sidebar
+    ui.folderSidebar.innerHTML = commonLocations
+      .map((loc) => {
+        const active = loc.path === current ? " active" : "";
+        return `<div class="folder-sidebar-item${active}" data-path="${escapeHtml(loc.path)}">📍 ${escapeHtml(loc.name)}</div>`;
+      })
+      .join("");
+    ui.folderSidebar.querySelectorAll(".folder-sidebar-item").forEach((el) => {
       el.addEventListener("click", () => {
         const nextPath = el.getAttribute("data-path") || "";
         if (!nextPath) return;
-        ui.folderPathInput.value = nextPath;
         refreshFolderNavigator(nextPath);
       });
     });
+
+    // Render breadcrumb
+    const parts = current.replace(/\/$/, "").split("/").filter(Boolean);
+    let breadcrumbHtml = "";
+    let cumPath = "";
+    parts.forEach((seg, i) => {
+      cumPath += "/" + seg;
+      const p = cumPath;
+      breadcrumbHtml += `<span class="folder-breadcrumb-sep">/</span><span class="folder-breadcrumb-seg" data-path="${escapeHtml(p)}">${escapeHtml(seg)}</span>`;
+    });
+    if (!breadcrumbHtml) breadcrumbHtml = '<span class="folder-breadcrumb-seg" data-path="/">/</span>';
+    ui.folderBreadcrumb.innerHTML = breadcrumbHtml;
+    ui.folderBreadcrumb.querySelectorAll(".folder-breadcrumb-seg").forEach((el) => {
+      el.addEventListener("click", () => {
+        const nextPath = el.getAttribute("data-path") || "/";
+        refreshFolderNavigator(nextPath);
+      });
+    });
+
+    // Render entries
+    ui.folderBrowserList.innerHTML = entries.length
+      ? entries
+          .map((entry) => {
+            const isDir = entry.type === "dir";
+            const icon = isDir ? "📁" : "📄";
+            const cls = isDir ? "folder-entry" : "folder-entry file-entry";
+            return `<div class="${cls}" data-path="${escapeHtml(entry.path)}"><span class="folder-entry-icon">${icon}</span><span class="folder-entry-name">${escapeHtml(entry.name)}</span></div>`;
+          })
+          .join("")
+      : '<div class="activity-empty">Empty directory.</div>';
+
+    ui.folderBrowserList.querySelectorAll(".folder-entry").forEach((el) => {
+      // Single click: select item
+      el.addEventListener("click", () => {
+        const p = el.getAttribute("data-path") || "";
+        ui.folderBrowserList.querySelectorAll(".folder-entry.selected").forEach((e) => e.classList.remove("selected"));
+        el.classList.add("selected");
+        ui.folderModal.dataset.selectedPath = p;
+      });
+      // Double click on dir: navigate into it
+      if (!el.classList.contains("file-entry")) {
+        el.addEventListener("dblclick", () => {
+          const nextPath = el.getAttribute("data-path") || "";
+          if (!nextPath) return;
+          refreshFolderNavigator(nextPath);
+        });
+      }
+    });
+
+    // Store current path for attach action
+    ui.folderModal.dataset.currentPath = current;
   } catch (err) {
-    ui.folderBrowserPath.textContent = "Navigator unavailable";
+    ui.folderBreadcrumb.innerHTML = "";
     ui.folderBrowserList.innerHTML = `<div class="activity-empty">${escapeHtml(
       err.message || "Unable to browse directories.",
     )}</div>`;
+  }
+}
+
+async function createFolderInBrowser() {
+  const nameInput = el("createFolderName");
+  const name = nameInput.value.trim();
+  if (!name) { nameInput.focus(); return; }
+  const fullPath = state.folderCurrentPath
+    ? state.folderCurrentPath.replace(/\/+$/, "") + "/" + name
+    : name;
+  try {
+    const data = await fetchJson("/api/workspaces/create-folder", {
+      method: "POST",
+      body: JSON.stringify({ path: fullPath }),
+    });
+    if (!data || !data.ok) { alert(data?.error || "Failed to create folder."); return; }
+    nameInput.value = "";
+    el("createFolderInput").style.display = "none";
+    el("createFolderBtn").style.display = "";
+    state.folderCurrentPath = fullPath;
+    await refreshFolderNavigator(fullPath);
+  } catch (err) {
+    alert(err.message || "Failed to create folder.");
   }
 }
 
@@ -3077,24 +3154,13 @@ ${marker}` : marker;
 
 
   const openFolderModal = () => {
-    ui.folderPathInput.value = "";
     showModal(ui.folderModal);
-    ui.folderPathInput.focus();
     refreshFolderNavigator("");
   };
 
   ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
-  ui.browseFolderBtn.addEventListener("click", async () => {
-    refreshFolderNavigator(ui.folderPathInput.value.trim());
-  });
-  ui.folderUpBtn?.addEventListener("click", () => {
-    const parentPath = ui.folderUpBtn.dataset.path || "";
-    if (!parentPath) return;
-    ui.folderPathInput.value = parentPath;
-    refreshFolderNavigator(parentPath);
-  });
   ui.attachFolderConfirmBtn.addEventListener("click", async () => {
-    const path = ui.folderPathInput.value.trim();
+    const path = ui.folderModal.dataset.selectedPath || ui.folderModal.dataset.currentPath || "";
     if (!path) return;
     ui.attachFolderConfirmBtn.disabled = true;
     const originalText = ui.attachFolderConfirmBtn.textContent;
@@ -3116,6 +3182,21 @@ ${marker}` : marker;
     }
   });
   ui.closeFolderModalBtn.addEventListener("click", () => hideModal(ui.folderModal));
+  ui.createFolderBtn?.addEventListener("click", () => {
+    ui.createFolderBtn.style.display = "none";
+    ui.createFolderInput.style.display = "flex";
+    ui.createFolderName.value = "";
+    ui.createFolderName.focus();
+  });
+  ui.createFolderCancelBtn?.addEventListener("click", () => {
+    ui.createFolderInput.style.display = "none";
+    ui.createFolderBtn.style.display = "";
+  });
+  ui.createFolderConfirmBtn?.addEventListener("click", createFolderInBrowser);
+  ui.createFolderName?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") createFolderInBrowser();
+    if (e.key === "Escape") { ui.createFolderInput.style.display = "none"; ui.createFolderBtn.style.display = ""; }
+  });
   ui.closeMemoryModalBtn.addEventListener("click", closeMemoryModal);
   ui.ticketCloseBtn?.addEventListener("click", () => hideModal(ui.ticketModal));
   ui.ticketSaveBtn?.addEventListener("click", () => saveTicketEdits());

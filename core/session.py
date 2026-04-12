@@ -1244,6 +1244,56 @@ class Session:
             source="loop_mode",
         )
 
+    # ── Loop state management ────────────────────────────────────────
+
+    def get_loop_state(self) -> dict:
+        """Return the current loop mode state dict."""
+        loop_features_raw = self.variables.get("loop_features", "")
+        try:
+            loop_features = json.loads(loop_features_raw) if loop_features_raw else []
+        except (json.JSONDecodeError, TypeError):
+            loop_features = []
+        return {
+            "goal": self.variables.get("loop_goal", ""),
+            "active": self.variables.get("loop_active", False),
+            "features": loop_features,
+        }
+
+    def start_loop(self, goal: str) -> None:
+        """Activate loop mode with the given long-horizon goal."""
+        self.variables["loop_goal"] = goal
+        self.variables["loop_active"] = True
+        self.variables["loop_features"] = json.dumps([])
+        self.variables["agent_mode"] = "loop"
+        self._ensure_loop_goal_persistence()
+        self.save_history()
+
+    def stop_loop(self) -> None:
+        """Deactivate loop mode."""
+        self.variables["loop_active"] = False
+        self.save_history()
+
+    def add_loop_feature(self, feature_id: str) -> None:
+        """Record a feature created during this loop session."""
+        loop_features_raw = self.variables.get("loop_features", "")
+        try:
+            loop_features = json.loads(loop_features_raw) if loop_features_raw else []
+        except (json.JSONDecodeError, TypeError):
+            loop_features = []
+        loop_features.append({
+            "id": feature_id,
+            "timestamp": datetime.now().isoformat(),
+        })
+        self.variables["loop_features"] = json.dumps(loop_features)
+        self.save_history()
+
+    def get_loop_features(self) -> list:
+        """Return list of feature dicts created during this loop."""
+        state = self.get_loop_state()
+        return state.get("features", [])
+
+    # ── End loop state management ─────────────────────────────────────
+
     def _build_recent_tool_context(self, max_chars: int = 8000) -> str:
         if max_chars <= 0:
             return ""

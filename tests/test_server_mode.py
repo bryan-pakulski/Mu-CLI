@@ -156,8 +156,16 @@ def test_list_workspace_directories_returns_subdirs(tmp_path):
     listing, error = list_workspace_directories(str(tmp_path))
 
     assert error is None
+    # Dirs first, then files, each with type field
     names = [item["name"] for item in listing["entries"]]
-    assert names == ["alpha", "beta"]
+    assert names == ["alpha", "beta", "file.txt"]
+    types = {item["name"]: item["type"] for item in listing["entries"]}
+    assert types["alpha"] == "dir"
+    assert types["beta"] == "dir"
+    assert types["file.txt"] == "file"
+    # New fields present
+    assert "home_path" in listing
+    assert "common_locations" in listing
 
 
 def test_mode_command_without_args_lists_available_modes():

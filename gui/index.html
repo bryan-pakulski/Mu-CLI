@@ -229,18 +229,21 @@
 
     <div id="folderModal" class="modal hidden" role="dialog" aria-modal="true">
       <div class="folder-modal-card">
-        <h3>Attach workspace folder</h3>
-        <p class="muted">Pick a folder from your local machine or enter an existing path.</p>
-        <div class="folder-row">
-          <input id="folderPathInput" type="text" placeholder="/path/to/folder" />
-          <button id="browseFolderBtn" class="btn" type="button">Navigator</button>
+        <h3>Browse Folder</h3>
+        <div class="folder-layout">
+          <div class="folder-sidebar" id="folderSidebar"></div>
+          <div class="folder-main">
+            <div class="folder-breadcrumb" id="folderBreadcrumb"></div>
+            <div id="folderBrowserList" class="folder-browser-list"></div>
+          </div>
         </div>
-        <div class="folder-browser-head">
-          <button id="folderUpBtn" class="btn" type="button">Up</button>
-          <span id="folderBrowserPath" class="muted"></span>
-        </div>
-        <div id="folderBrowserList" class="memory-list"></div>
         <div class="modal-actions">
+          <button id="createFolderBtn" class="btn" type="button" title="Create a new folder in the current directory">📁 New Folder</button>
+          <div id="createFolderInput" style="display:none;gap:6px;align-items:center;">
+            <input type="text" id="createFolderName" placeholder="Folder name" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;" />
+            <button id="createFolderConfirmBtn" class="btn btn-primary" type="button">✓</button>
+            <button id="createFolderCancelBtn" class="btn" type="button">✕</button>
+          </div>
           <button id="attachFolderConfirmBtn" class="btn btn-primary" type="button">Attach</button>
           <button id="closeFolderModalBtn" class="btn" type="button">Cancel</button>
         </div>

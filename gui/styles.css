@@ -52,6 +52,8 @@ body{margin:0;min-height:100vh;font-family:Manrope,Inter,sans-serif;background:v
 .session-item.pending{border:1px solid color-mix(in oklab, var(--accent) 48%, transparent)}
 .session-row{display:flex;align-items:center;gap:4px}
 .session-pending-dot{width:7px;height:7px;border-radius:999px;background:var(--accent);display:inline-block;margin-right:6px;animation:dotPulse 1s infinite ease-in-out}
+.session-active-dot{width:7px;height:7px;border-radius:999px;background:#4ade80;display:inline-block;margin-right:6px;animation:dotPulse 1s infinite ease-in-out}
+.session-item.processing{border-left:2px solid #4ade80}
 .session-title{flex:1;border:0;background:transparent;color:var(--text);text-align:left;padding:6px 4px;font-size:14px}
 .session-menu-btn{width:24px;height:24px;padding:0;opacity:.8;transition:opacity .12s,border-color .12s,background .12s;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:999px}
 .session-item:hover .session-menu-btn,.session-item.menu-open .session-menu-btn,.session-item:focus-within .session-menu-btn{opacity:1;pointer-events:auto;border-color:color-mix(in oklab,var(--border) 80%, transparent);background:color-mix(in oklab,var(--surface-2) 90%, transparent)}

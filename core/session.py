@@ -1794,7 +1794,8 @@ class Session:
                 "An error occurred during the LLM call. Would you like to retry?",
                 default=True,
             )
-        return False
+        # No CLI UI available (GUI/server mode) — auto-retry
+        return True
 
     def _provider_error_recovery_choice(self) -> str:
         if self.ui and hasattr(self.ui, "prompt_choices"):
@@ -1804,7 +1805,16 @@ class Session:
                 default="retry",
             )
         if self._confirm_retry():
-            return "retry"
+            # 4xx errors (client errors) mean we sent something wrong → need rollback + retry
+            # 5xx/timeout (server errors) mean remote side failed → just retry without rollback
+            error_msg = str(getattr(self, '_last_provider_error', '') or '').lower()
+            is_4xx = any(str(c) in error_msg for c in range(400, 500))
+            if 'status_code' in error_msg:
+                import re
+                m = re.search(r'status_code[=: ]+(\d+)', error_msg)
+                if m and 400 <= int(m.group(1)) < 500:
+                    is_4xx = True
+            return "rollback_retry" if is_4xx else "retry"
         return "abort"
 
     @staticmethod
@@ -1826,8 +1836,28 @@ class Session:
             "econnreset",
             "service unavailable",
             "try again",
+            "overloaded",
+            "capacity",
+            "server error",
+            "internal server error",
+            "bad gateway",
+            "gateway timeout",
+            "server is",
         )
-        return any(marker in message for marker in transient_markers)
+        if any(marker in message for marker in transient_markers):
+            return True
+        # Treat most HTTP 4xx/5xx from remote providers as transient (retryable)
+        # so the agent auto-recovers without prompting the user in GUI mode.
+        for code in range(400, 600):
+            if str(code) in message:
+                return True
+        # Also catch raw httpx/httpcore error patterns
+        if "status_code" in message:
+            import re
+            m = re.search(r"status_code[=: ]+(\d+)", message)
+            if m and 400 <= int(m.group(1)) < 600:
+                return True
+        return False
 
     def _provider_generate_with_retry(
         self,

@@ -79,13 +79,15 @@ def main() -> int:
 
     gui_cmd = [
         sys.executable,
-        "-m",
-        "http.server",
-        str(args.gui_port),
-        "--bind",
+        str(gui_dir / "proxy_server.py"),
+        "--host",
         args.gui_host,
-        "--directory",
-        str(gui_dir),
+        "--port",
+        str(args.gui_port),
+        "--api-host",
+        args.server_host,
+        "--api-port",
+        str(args.server_port),
     ]
 
     logger.info("Starting server: %s", " ".join(server_cmd))

@@ -63,7 +63,7 @@ def pick_workspace_folder() -> tuple[str, str | None]:
 
 
 def list_workspace_directories(path: str) -> tuple[dict, str | None]:
-    raw = str(path or "").strip() or os.getcwd()
+    raw = str(path or "").strip() or os.path.expanduser("~")
     current = os.path.abspath(os.path.expanduser(raw))
     if not os.path.isdir(current):
         return {}, f"Directory not found: {current}"
@@ -1820,149 +1820,189 @@ def serve(session, host: str, port: int, command_handler):
                     return
                 self._send_json(200, {"ok": True, "approval": approval})
                 return
-            if parsed.path == "/api/history":
-                query = parse_qs(parsed.query)
-                limit = query.get("limit", [None])[0]
-                session_name = str(query.get("session_name", [""])[0] or "").strip()
-                limit_value = int(limit) if limit is not None else None
-                session = state["session"]
-                self._send_json(
-                    200,
-                    {
-                        "ok": True,
-                        **build_history_payload(
-                            session, limit_value, session_name=session_name or None
-                        ),
-                    },
-                )
-                return
+            # ── Read-only GET endpoints: non-blocking lock ──────────────────
+            # These endpoints only read session state. If the lock is held
+            # (e.g. provider call in progress), return 503 busy immediately
+            # instead of blocking the HTTP thread and causing client timeouts.
+            READ_ONLY_GET_ENDPOINTS = {
+                "/health",
+                "/api/state",
+                "/api/tools",
+                "/api/sessions",
+                "/api/runtime",
+                "/api/workspaces",
+                "/api/models",
+                "/api/feature-plan",
+                "/api/features",
+                "/api/staged-files",
+                "/api/memory-buffers",
+                "/api/loop/status",
+                "/api/loop/features",
+                "/api/history",
+            }
 
-            with state["session_lock"]:
-                session = state["session"]
-                if parsed.path == "/health":
+            if parsed.path in READ_ONLY_GET_ENDPOINTS:
+                acquired = state["session_lock"].acquire(blocking=False)
+                if not acquired:
                     self._send_json(
-                        200,
+                        503,
                         {
-                            "ok": True,
-                            "status": "ok",
-                            "session_name": session.session_manager.current_session_name,
+                            "ok": False,
+                            "busy": True,
+                            "message": "Server busy processing request. Retry shortly.",
                         },
                     )
                     return
-                if parsed.path == "/api/state":
-                    self._send_json(
-                        200, {"ok": True, "state": build_state_payload(session)}
-                    )
-                    return
-                if parsed.path == "/api/tools":
-                    self._send_json(
-                        200,
-                        {
-                            "ok": True,
-                            "tools": build_state_payload(session)["available_tools"],
-                        },
-                    )
-                    return
-                if parsed.path == "/api/sessions":
-                    self._send_json(
-                        200, {"ok": True, **build_sessions_payload(session)}
-                    )
-                    return
-                if parsed.path == "/api/runtime":
-                    self._send_json(200, {"ok": True, **build_runtime_payload(session)})
-                    return
-                if parsed.path == "/api/workspaces":
-                    self._send_json(
-                        200, {"ok": True, **build_workspace_payload(session)}
-                    )
-                    return
-                if parsed.path == "/api/models":
-                    query = parse_qs(parsed.query)
-                    provider_name = str(query.get("provider", [""])[0] or "").strip()
-                    payload = discover_provider_models(
-                        session,
-                        provider_name or session.provider.name,
-                    )
-                    self._send_json(
-                        200,
-                        {
-                            "ok": True,
-                            "current_provider": session.provider.name,
-                            "current_model": session.provider.model_name,
-                            **payload,
-                        },
-                    )
-                    return
-                if parsed.path == "/api/feature-plan":
-                    query = parse_qs(parsed.query)
-                    directory = str(query.get("directory", [""])[0] or "").strip()
-                    if not directory:
-                        self._send_json(
-                            400,
-                            {
-                                "ok": False,
-                                "error": "Query parameter 'directory' is required.",
-                            },
-                        )
-                        return
-                    try:
+                try:
+                    session = state["session"]
+                    if parsed.path == "/health":
                         self._send_json(
                             200,
                             {
                                 "ok": True,
-                                "feature_plan": build_feature_plan_payload(
-                                    session,
-                                    directory,
+                                "status": "ok",
+                                "session_name": session.session_manager.current_session_name,
+                            },
+                        )
+                        return
+                    if parsed.path == "/api/state":
+                        self._send_json(
+                            200, {"ok": True, "state": build_state_payload(session)}
+                        )
+                        return
+                    if parsed.path == "/api/tools":
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "tools": build_state_payload(session)["available_tools"],
+                            },
+                        )
+                        return
+                    if parsed.path == "/api/sessions":
+                        self._send_json(
+                            200, {"ok": True, **build_sessions_payload(session)}
+                        )
+                        return
+                    if parsed.path == "/api/runtime":
+                        self._send_json(200, {"ok": True, **build_runtime_payload(session)})
+                        return
+                    if parsed.path == "/api/workspaces":
+                        self._send_json(
+                            200, {"ok": True, **build_workspace_payload(session)}
+                        )
+                        return
+                    if parsed.path == "/api/models":
+                        query = parse_qs(parsed.query)
+                        provider_name = str(query.get("provider", [""])[0] or "").strip()
+                        payload = discover_provider_models(
+                            session,
+                            provider_name or session.provider.name,
+                        )
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "current_provider": session.provider.name,
+                                "current_model": session.provider.model_name,
+                                **payload,
+                            },
+                        )
+                        return
+                    if parsed.path == "/api/feature-plan":
+                        query = parse_qs(parsed.query)
+                        directory = str(query.get("directory", [""])[0] or "").strip()
+                        if not directory:
+                            self._send_json(
+                                400,
+                                {
+                                    "ok": False,
+                                    "error": "Query parameter 'directory' is required.",
+                                },
+                            )
+                            return
+                        try:
+                            self._send_json(
+                                200,
+                                {
+                                    "ok": True,
+                                    "feature_plan": build_feature_plan_payload(
+                                        session,
+                                        directory,
+                                    ),
+                                },
+                            )
+                        except FileNotFoundError:
+                            self._send_json(
+                                200,
+                                {
+                                    "ok": True,
+                                    "active": False,
+                                    "feature_plan": None,
+                                },
+                            )
+                        return
+                    if parsed.path == "/api/features":
+                        self._send_json(
+                            200,
+                            {"ok": True, **build_features_payload(session)},
+                        )
+                        return
+                    if parsed.path == "/api/staged-files":
+                        self._send_json(
+                            200, {"ok": True, **build_staged_files_payload(session)}
+                        )
+                        return
+                    if parsed.path == "/api/memory-buffers":
+                        requested_session_name = str(
+                            query.get("session_name", [""])[0] or ""
+                        ).strip()
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                **build_memory_buffers_payload(
+                                    session, session_name=requested_session_name
                                 ),
                             },
                         )
-                    except FileNotFoundError:
-                        self._send_json(
-                            404, {"ok": False, "error": "Feature plan not found."}
-                        )
-                    return
-                if parsed.path == "/api/features":
-                    self._send_json(
-                        200,
-                        {"ok": True, **build_features_payload(session)},
-                    )
-                    return
-                if parsed.path == "/api/staged-files":
-                    self._send_json(
-                        200, {"ok": True, **build_staged_files_payload(session)}
-                    )
-                    return
-                if parsed.path == "/api/memory-buffers":
-                    requested_session_name = str(
-                        query.get("session_name", [""])[0] or ""
-                    ).strip()
-                    self._send_json(
-                        200,
-                        {
+                        return
+
+                    # ── Loop state endpoints ──────────────────────────────────
+                    if parsed.path == "/api/loop/status":
+                        loop_state = session.get_loop_state()
+                        self._send_json(200, {
                             "ok": True,
-                            **build_memory_buffers_payload(
-                                session, session_name=requested_session_name
-                            ),
-                        },
-                    )
-                    return
+                            **loop_state,
+                            "feature_count": len(loop_state.get("features", [])),
+                        })
+                        return
 
-                # ── Loop state endpoints ──────────────────────────────────
-                if parsed.path == "/api/loop/status":
-                    loop_state = session.get_loop_state()
-                    self._send_json(200, {
-                        "ok": True,
-                        **loop_state,
-                        "feature_count": len(loop_state.get("features", [])),
-                    })
-                    return
+                    if parsed.path == "/api/loop/features":
+                        self._send_json(200, {
+                            "ok": True,
+                            "features": session.get_loop_features(),
+                        })
+                        return
 
-                if parsed.path == "/api/loop/features":
-                    self._send_json(200, {
-                        "ok": True,
-                        "features": session.get_loop_features(),
-                    })
-                    return
+                    if parsed.path == "/api/history":
+                        query = parse_qs(parsed.query)
+                        limit = query.get("limit", [None])[0]
+                        session_name = str(query.get("session_name", [""])[0] or "").strip()
+                        limit_value = int(limit) if limit is not None else None
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                **build_history_payload(
+                                    session, limit_value, session_name=session_name or None
+                                ),
+                            },
+                        )
+                        return
+
+                finally:
+                    state["session_lock"].release()
 
             self._not_found()
 
@@ -1973,6 +2013,7 @@ def serve(session, host: str, port: int, command_handler):
             except ValueError as exc:
                 self._send_json(400, {"ok": False, "error": str(exc)})
                 return
+            session = state["session"]
 
             if parsed.path == "/api/approvals/resolve":
                 approval_id = str(payload.get("approval_id", "") or "").strip()
@@ -2032,6 +2073,14 @@ def serve(session, host: str, port: int, command_handler):
                         400, {"ok": False, "error": "Field 'text' is required."}
                     )
                     return
+                publish_server_event(
+                    state,
+                    "session.active",
+                    {
+                        "session_name": session.session_manager.current_session_name,
+                        "sessions": session.session_manager.get_session_list(),
+                    },
+                )
                 async_mode = bool(payload.get("async", False))
                 task = state["task_manager"].start_message_task(
                     text, state["approval_manager"]
@@ -2049,8 +2098,14 @@ def serve(session, host: str, port: int, command_handler):
                     self._send_json(500, {"ok": False, "error": "Task disappeared."})
                     return
                 if task["status"] == "completed":
+                    publish_server_event(
+                        state, "message.updated", build_runtime_payload(session),
+                    )
                     self._send_json(200, task["result"])
                 else:
+                    publish_server_event(
+                        state, "message.updated", build_runtime_payload(session),
+                    )
                     self._send_json(202, {"ok": True, "task": task})
                 return
 
@@ -2246,6 +2301,14 @@ def serve(session, host: str, port: int, command_handler):
                                 },
                             )
                             return
+                        publish_server_event(
+                            state,
+                            "session.active",
+                            {
+                                "session_name": session.session_manager.current_session_name,
+                                "sessions": session.session_manager.get_session_list(),
+                            },
+                        )
                         result = state["command_handler"](
                             session,
                             command,
@@ -2259,6 +2322,11 @@ def serve(session, host: str, port: int, command_handler):
                                 "result": result,
                                 "session_name": session.session_manager.current_session_name,
                             },
+                        )
+                        publish_server_event(
+                            state,
+                            "message.updated",
+                            build_runtime_payload(session),
                         )
                         self._send_json(200, result)
                         return
@@ -2276,6 +2344,14 @@ def serve(session, host: str, port: int, command_handler):
                         publish_server_event(
                             state,
                             "session.created",
+                            {
+                                "session_name": session.session_manager.current_session_name,
+                                "sessions": session.session_manager.get_session_list(),
+                            },
+                        )
+                        publish_server_event(
+                            state,
+                            "session.active",
                             {
                                 "session_name": session.session_manager.current_session_name,
                                 "sessions": session.session_manager.get_session_list(),
@@ -2311,6 +2387,14 @@ def serve(session, host: str, port: int, command_handler):
                         publish_server_event(
                             state,
                             "session.loaded",
+                            {
+                                "session_name": session.session_manager.current_session_name,
+                                "sessions": session.session_manager.get_session_list(),
+                            },
+                        )
+                        publish_server_event(
+                            state,
+                            "session.active",
                             {
                                 "session_name": session.session_manager.current_session_name,
                                 "sessions": session.session_manager.get_session_list(),
@@ -2680,6 +2764,9 @@ def serve(session, host: str, port: int, command_handler):
                             self._send_json(400, {"ok": False, "error": "goal is required"})
                             return
                         session.start_loop(goal)
+                        publish_server_event(
+                            state, "loop.updated", session.get_loop_state(),
+                        )
                         self._send_json(200, {
                             "ok": True,
                             **session.get_loop_state(),
@@ -2688,6 +2775,9 @@ def serve(session, host: str, port: int, command_handler):
 
                     if parsed.path == "/api/loop/stop":
                         session.stop_loop()
+                        publish_server_event(
+                            state, "loop.updated", session.get_loop_state(),
+                        )
                         self._send_json(200, {
                             "ok": True,
                             **session.get_loop_state(),

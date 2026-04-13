@@ -13,8 +13,12 @@ const THEME_MODE_KEY = "mucli_theme_mode";
 const THEME_ACCENT_KEY = "mucli_theme_accent_value";
 
 function defaultApiBase() {
+  // When served from the proxy (has a port like 4173), use same origin — no CORS.
+  // Fallback to :8765 only when no port detected (direct file access).
   const proto = window.location.protocol === "https:" ? "https:" : "http:";
   const host = String(window.location.hostname || "").trim();
+  const port = String(window.location.port || "").trim();
+  if (port) return `${proto}//${host}:${port}`;
   if (host === "localhost" || host === "127.0.0.1") return `${proto}//${host}:8765`;
   return "http://127.0.0.1:8765";
 }
@@ -26,8 +30,14 @@ function normalizeApiBase(rawBase = "") {
   try {
     const url = new URL(value);
     const pageHost = String(window.location.hostname || "").trim().toLowerCase();
+    const pagePort = String(window.location.port || "").trim();
+    // Normalize localhost <-> 127.0.0.1
     if ((url.hostname === "127.0.0.1" || url.hostname === "localhost") && (pageHost === "127.0.0.1" || pageHost === "localhost")) {
       url.hostname = pageHost;
+    }
+    // If served from proxy (has port), force same origin port to avoid CORS
+    if (pagePort) {
+      url.port = pagePort;
     }
     return url.toString().replace(/\/+$/, "");
   } catch {
@@ -70,7 +80,7 @@ const VARIABLE_HELP = {
 };
 
 const state = {
-  apiBase: normalizeApiBase(localStorage.getItem("mucli_gui_api_base") || defaultApiBase()),
+  apiBase: normalizeApiBase(window.location.port ? defaultApiBase() : (localStorage.getItem("mucli_gui_api_base") || defaultApiBase())),
   currentSession: "",
   currentView: "chat",
   sessions: [],
@@ -98,6 +108,10 @@ const state = {
   memoryPollTimer: null,
   approvalPollTimer: null,
   serverTaskPollTimer: null,
+  statePollTimer: null,
+  messagePollTimer: null,
+  loopPollTimer: null,
+  activeSessionName: null,
   eventSourceBySession: {},
   eventSourceMetaBySession: {},
   streamReconnectTimersBySession: {},
@@ -609,7 +623,10 @@ async function fetchJson(path, options = {}, timeoutMs = 8000) {
     try {
       const resp = await fetch(url, { ...options, method, headers, signal: controller.signal });
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      if (!resp.ok) {
+        if (resp.status === 503) return { ...data, busy: true };
+        throw new Error(data.error || `HTTP ${resp.status}`);
+      }
       return data;
     } finally {
       clearTimeout(timeout);
@@ -630,6 +647,9 @@ async function fetchJson(path, options = {}, timeoutMs = 8000) {
       const alt = new URL(primaryUrl);
       if (!["127.0.0.1", "localhost"].includes(alt.hostname)) throw err;
       alt.hostname = alt.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
+      // In proxy mode (page has port), force fallback to same port to avoid CORS
+      const pagePort = String(window.location.port || "").trim();
+      if (pagePort) alt.port = pagePort;
       const data = await requestOnce(alt.toString());
       state.apiBase = `${alt.protocol}//${alt.host}`;
       ui.apiBaseInput.value = state.apiBase;
@@ -1765,6 +1785,33 @@ function startBoardEventStream() {
     }
   };
   ["task.created", "task.running", "task.awaiting_input", "task.completed", "task.error", "command.completed"].forEach((name) => es.addEventListener(name, handle));
+  es.addEventListener("message.updated", () => {
+    refreshHistory();
+    if (state.activeSessionName) {
+      state.activeSessionName = null;
+      renderSessions();
+    }
+  });
+  es.addEventListener("loop.updated", (raw) => {
+    try {
+      const data = raw?.data ? JSON.parse(raw.data) : null;
+      if (data) { state.loopState = data; }
+    } catch {}
+    renderLoopView();
+  });
+  es.addEventListener("session.active", (raw) => {
+    try {
+      const data = raw?.data ? JSON.parse(raw.data) : null;
+      if (data?.session_name) { state.serverSession = data.session_name; state.activeSessionName = data.session_name; }
+      if (data?.sessions) { state.sessions = data.sessions; }
+    } catch {}
+    refreshSessions();
+    renderSessions();
+  });
+  es.addEventListener("command.completed", () => {
+    state.activeSessionName = null;
+    renderSessions();
+  });
   es.onerror = () => {
     if (state.board.stream) {
       state.board.stream.close();
@@ -1797,9 +1844,11 @@ async function refreshBoardData({ force = false } = {}) {
   state.board.refreshInFlight = true;
   try {
     await ensureServerSession(sessionName);
-    const statePayload = await fetchJson("/api/state", {}, 8000);
+    const statePayload = await fetchJson("/api/state");
+    if (statePayload?.busy) return;
     const featureState = statePayload?.feature_state || state.runtime?.feature_state || {};
-    const featuresPayload = await fetchJson("/api/features", {}, 8000);
+    const featuresPayload = await fetchJson("/api/features");
+    if (featuresPayload?.busy) return;
     const featureList = featuresPayload?.features || [];
     state.board.featureListBySession[sessionName] = featureList;
     const selectedFeatureId = String(
@@ -1823,7 +1872,8 @@ async function refreshBoardData({ force = false } = {}) {
       renderBoard();
       return;
     }
-    const planPayload = await fetchJson(`/api/feature-plan?directory=${encodeURIComponent(directory)}`, {}, 10000);
+    const planPayload = await fetchJson(`/api/feature-plan?directory=${encodeURIComponent(directory)}`);
+    if (planPayload?.busy) return;
     state.board.planBySession[sessionName] = planPayload?.feature_plan || null;
     const selected = state.board.selectedTaskIdBySession[sessionName];
     if (!selected && (planPayload?.feature_plan?.phases || []).length) {
@@ -1847,7 +1897,8 @@ async function refreshBoardData({ force = false } = {}) {
 
 async function refreshApprovals() {
   try {
-    const data = await fetchJson("/api/approvals", {}, 2500);
+    const data = await fetchJson("/api/approvals");
+    if (data?.busy) { state.pendingApprovals = []; renderApprovalBar(); return; }
     state.pendingApprovals = data.pending_approvals || [];
   } catch {
     state.pendingApprovals = [];
@@ -1899,7 +1950,7 @@ async function refreshMemoryRuntime(sessionName = state.currentSession) {
 async function refreshMemoryBuffers(sessionName = state.currentSession) {
   try {
     const targetSession = encodeURIComponent(sessionName || state.currentSession || "");
-    const payload = await fetchJson(`/api/memory-buffers?session_name=${targetSession}`, {}, 3000);
+    const payload = await fetchJson(`/api/memory-buffers?session_name=${targetSession}`, {});
     const mem = sessionMemory(sessionName);
     mem.buffer = Array.isArray(payload.memory_entries) ? payload.memory_entries : [];
     mem.scratchpad = Array.isArray(payload.scratchpad_entries) ? payload.scratchpad_entries : [];
@@ -2068,7 +2119,8 @@ async function refreshFolderNavigator(path = "") {
       }
     });
 
-    // Store current path for attach action
+    // Store current path for attach action and folder creation
+    state.folderCurrentPath = current;
     ui.folderModal.dataset.currentPath = current;
   } catch (err) {
     ui.folderBreadcrumb.innerHTML = "";
@@ -2314,7 +2366,8 @@ async function refreshStateVariables() {
 
 async function refreshSessions() {
   try {
-    const data = await fetchJson("/api/sessions", {}, 2500);
+    const data = await fetchJson("/api/sessions");
+    if (data?.busy) return;
     state.sessions = data.sessions || state.sessions || [];
     if (!state.currentSession) state.currentSession = data.current || state.sessions[0] || "";
     localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
@@ -2329,11 +2382,12 @@ function renderSessions() {
   for (const name of state.sessions) {
     const item = document.createElement("div");
     const isPending = !!state.pendingBySession[name];
+    const isActive = state.activeSessionName === name;
     const isMenuOpen = state.openSessionMenu === name;
-    item.className = `session-item ${name === state.currentSession ? "active" : ""} ${isPending ? "pending" : ""}`;
+    item.className = `session-item ${name === state.currentSession ? "active" : ""} ${isPending ? "pending" : ""} ${isActive ? "processing" : ""}`;
     item.innerHTML = `
       <div class="session-row">
-        <button class="session-title">${isPending ? '<span class="session-pending-dot"></span>' : ""}${name}</button>
+        <button class="session-title">${isPending ? '<span class="session-pending-dot"></span>' : ""}${isActive ? '<span class="session-active-dot"></span>' : ""}${name}</button>
         <button class="session-menu-btn" title="Session options">⋯</button>
       </div>
       <div class="session-popup ${isMenuOpen ? "" : "hidden"}">
@@ -2384,7 +2438,14 @@ async function refreshHistory(resetToBottom = true) {
   const path = state.currentSession
     ? `/api/history?limit=300&session_name=${encodeURIComponent(state.currentSession)}`
     : "/api/history?limit=300";
-  const payload = await fetchJson(path, {}, 3000);
+  let payload;
+  try {
+    payload = await fetchJson(path);
+  } catch (err) {
+    console.debug("[refreshHistory] fetch failed:", err?.message || err);
+    return;
+  }
+  if (payload && payload.busy) return;
   if (!state.currentSession && payload.session_name) {
     state.currentSession = payload.session_name;
     if (!state.sessions.includes(payload.session_name)) state.sessions.unshift(payload.session_name);
@@ -2415,6 +2476,27 @@ async function loadSession(name) {
   state.serverSession = name;
   state.currentSession = name;
   localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify({ sessions: state.sessions, currentSession: state.currentSession }));
+  // Restart polling timers on session switch
+  if (state.statePollTimer) clearInterval(state.statePollTimer);
+  state.statePollTimer = setInterval(async () => {
+    try {
+      const d = await fetchJson("/api/state");
+      if (d?.busy) return;
+      if (d) Object.assign(state, { ...state, ...d });
+    } catch {}
+  }, 3000);
+  if (state.messagePollTimer) clearInterval(state.messagePollTimer);
+  state.messagePollTimer = setInterval(() => {
+    if (state.currentView === "chat") refreshHistory();
+  }, 2000);
+  if (state.loopPollTimer) clearInterval(state.loopPollTimer);
+  state.loopPollTimer = setInterval(async () => {
+    try {
+      const d = await fetchJson("/api/loop/status");
+      if (d?.busy) return;
+      if (d && d.ok) { state.loopState = d; renderLoopView(); }
+    } catch {}
+  }, 3000);
   await refreshSessions();
   await refreshRuntime();
   await refreshServerTaskState(name);
@@ -2808,7 +2890,8 @@ function isTerminalTaskStatus(status) {
 async function refreshServerTaskState(sessionName = state.currentSession) {
   if (!sessionName && !state.sessions.length) return;
   try {
-    const payload = await fetchJson("/api/tasks", {}, 2500);
+    const payload = await fetchJson("/api/tasks");
+    if (payload?.busy) return;
     const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
     const activeTasks = tasks
       .filter((task) => !isTerminalTaskStatus(task.status))
@@ -3155,7 +3238,7 @@ ${marker}` : marker;
 
   const openFolderModal = () => {
     showModal(ui.folderModal);
-    refreshFolderNavigator("");
+    refreshFolderNavigator();
   };
 
   ui.workspaceAddTrigger.addEventListener("click", openFolderModal);
@@ -3486,6 +3569,26 @@ async function bootstrap() {
   setViewMode(boardMode(), state.currentSession);
   if (state.approvalPollTimer) clearInterval(state.approvalPollTimer);
   state.approvalPollTimer = setInterval(() => refreshApprovals(), 2000);
+  if (state.statePollTimer) clearInterval(state.statePollTimer);
+  state.statePollTimer = setInterval(async () => {
+    try {
+      const d = await fetchJson("/api/state");
+      if (d?.busy) return;
+      if (d) Object.assign(state, { ...state, ...d });
+    } catch {}
+  }, 3000);
+  if (state.messagePollTimer) clearInterval(state.messagePollTimer);
+  state.messagePollTimer = setInterval(() => {
+    if (state.currentView === "chat") refreshHistory();
+  }, 2000);
+  if (state.loopPollTimer) clearInterval(state.loopPollTimer);
+  state.loopPollTimer = setInterval(async () => {
+    try {
+      const d = await fetchJson("/api/loop/status");
+      if (d?.busy) return;
+      if (d && d.ok) { state.loopState = d; renderLoopView(); }
+    } catch {}
+  }, 3000);
   ui.messageInput.value = state.draftBySession[state.currentSession] || "";
   ui.messageInput.style.height = "auto";
   ui.messageInput.style.height = `${Math.min(ui.messageInput.scrollHeight, 180)}px`;

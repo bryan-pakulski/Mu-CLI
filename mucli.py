@@ -26,7 +26,7 @@ from providers.ollama import OllamaProvider
 from utils.logger import logger
 from providers.openai import OpenAIProvider
 from core.server import HeadlessUI, serve
-from core.session import SessionManager, Session
+from core.session import SessionManager, Session, derive_feature_state_status
 from core.feature_mode import (
     load_feature_plan,
     refresh_and_persist_feature_plan,
@@ -114,7 +114,7 @@ def refresh_feature_record(session, feature_id=None):
         "metadata_path": summary.get("metadata_path"),
         "feature_plan": summary,
         "next_phase": summary.get("next_phase"),
-        "status": session._derive_feature_state_status(summary),
+        "status": derive_feature_state_status(summary),
         "updated_at": record.get("updated_at"),
     }
     session.session_manager.upsert_feature(updated)

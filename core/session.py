@@ -72,6 +72,40 @@ def _slugify_feature_id(value: str) -> str:
     return slug or "feature"
 
 
+def derive_feature_state_status(feature_plan: dict | None) -> str:
+    """Derive the feature status from the feature plan summary dict.
+
+    This is the canonical state machine for feature status:
+    - awaiting_approval: not yet approved
+    - in_progress: approved and has active tasks
+    - running: approved but no task activity detected
+    - completed: all phases done, all tasks completed/archived, or review_status == "completed"
+    """
+    if not isinstance(feature_plan, dict):
+        return "running"
+    if not feature_plan.get("approved", False):
+        return "awaiting_approval"
+    if feature_plan.get("review_status") == "completed":
+        return "completed"
+    # Check if any tasks are in progress or blocked → in_progress
+    tasks = feature_plan.get("tasks") or []
+    if isinstance(tasks, list):
+        for task in tasks:
+            if isinstance(task, dict) and task.get("status") in ("in_progress", "blocked"):
+                return "in_progress"
+    # All phases completed and next_phase is None → completed
+    if (
+        feature_plan.get("phases_completed")
+        and feature_plan.get("next_phase") is None
+    ):
+        return "completed"
+    # Approved with non-archived tasks → in_progress
+    active_tasks = [t for t in tasks if isinstance(t, dict) and t.get("status") not in ("archived", None)]
+    if active_tasks:
+        return "in_progress"
+    return "running"
+
+
 class SessionManager:
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
@@ -367,6 +401,12 @@ class SessionManager:
             suffix += 1
 
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
+        if isinstance(state, dict):
+            # Re-derive status from feature_plan if present
+            feature_plan = state.get("feature_plan")
+            if isinstance(feature_plan, dict):
+                derived = derive_feature_state_status(feature_plan)
+                state = {**state, "status": derived}
         self.feature_state = deepcopy(state) if isinstance(state, dict) else None
         if isinstance(self.feature_state, dict):
             record = self.upsert_feature(self.feature_state)
@@ -847,18 +887,7 @@ class Session:
         )
 
     def _derive_feature_state_status(self, feature_plan: dict | None) -> str:
-        if not isinstance(feature_plan, dict):
-            return "running"
-        if not feature_plan.get("approved", False):
-            return "awaiting_approval"
-        if feature_plan.get("review_status") == "completed":
-            return "completed"
-        if (
-            feature_plan.get("phases_completed")
-            and feature_plan.get("next_phase") is None
-        ):
-            return "review"
-        return "running"
+        return derive_feature_state_status(feature_plan)
 
     def _set_feature_state(
         self,
@@ -877,7 +906,7 @@ class Session:
         )
         state = {
             "type": "feature",
-            "status": status or self._derive_feature_state_status(plan_summary),
+            "status": status or derive_feature_state_status(plan_summary),
             "feature_id": (
                 plan_summary.get("feature_id")
                 if isinstance(plan_summary, dict)

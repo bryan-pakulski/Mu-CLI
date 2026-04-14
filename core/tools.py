@@ -164,6 +164,26 @@ TOOLS = [
         requires_approval=False,
     ),
     ToolDefinition(
+        name="search_references",
+        description="Searches the whole project workspace for references to a query string. Returns a list of matches with filepath, line_number, and a short context snippet (surrounding lines) for each match. This complements search_for_string by providing surrounding context lines.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The exact text string to search for across all workspace files.",
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "Number of context lines before and after each match (default 3).",
+                    "default": 3,
+                },
+            },
+            "required": ["query"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
         name="retrieve_relevant_context",
         description="Retrieve semantically relevant code snippets using indexed symbols, lexical overlap, recency, and git-diff weighting.",
         parameters={
@@ -1144,6 +1164,7 @@ _COLLATED_TOOL_NAMES = {
     "get_workspace_details",
     "read_file",
     "search_for_string",
+    "search_references",
     "retrieve_relevant_context",
     "get_chunk",
     "list_dir",
@@ -1196,6 +1217,11 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "summary_builder": "read_file_preview",
     },
     "search_for_string": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "summary_builder": "parse_search_results",
+    },
+    "search_references": {
         "execution_kind": "read",
         "preview_policy": "none",
         "summary_builder": "parse_search_results",
@@ -1592,6 +1618,37 @@ def retrieve_relevant_context(
         f"Retrieved {payload.get('count', 0)} snippet(s) for query '{query}'."
     )
     return json.dumps(payload, indent=2)
+
+
+def search_references(query: str, folder_context, context_lines: int = 3) -> str:
+    """Searches all workspace files for the query string and returns matches with context."""
+    if not folder_context:
+        return json.dumps({"error": "No workspace attached to search."})
+    if not str(query or "").strip():
+        return json.dumps({"error": "query is required"})
+
+    context_lines = max(0, int(context_lines or 3))
+    results = []
+    for filepath in folder_context.get_file_list():
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+        except Exception:
+            continue
+        for i, line in enumerate(lines):
+            if query in line:
+                start = max(0, i - context_lines)
+                end = min(len(lines), i + context_lines + 1)
+                snippet = "".join(lines[start:end])
+                results.append({
+                    "filepath": filepath,
+                    "line_number": i + 1,
+                    "context_snippet": snippet.rstrip(),
+                })
+
+    if not results:
+        return json.dumps({"query": query, "count": 0, "results": []})
+    return json.dumps({"query": query, "count": len(results), "results": results}, indent=2)
 
 
 def get_chunk(filename: str, start_line: int, end_line: int, folder_context) -> str:
@@ -3323,6 +3380,14 @@ def _handle_search_for_string(args, folder_context, ui, variables) -> str:
     return search_for_string(args.get("string", ""), folder_context)
 
 
+def _handle_search_references(args, folder_context, ui, variables) -> str:
+    return search_references(
+        args.get("query", ""),
+        folder_context,
+        context_lines=args.get("context_lines", 3),
+    )
+
+
 def _handle_retrieve_relevant_context(args, folder_context, ui, variables) -> str:
     return retrieve_relevant_context(
         args.get("query", ""),
@@ -4154,6 +4219,16 @@ def _handle_approve_feature_task(args: dict, context: ToolExecutionContext) -> s
     if context.ui:
         context.ui.show_info(f"Feature plan {status}: {plan.feature_id}")
 
+    # Update in-memory feature state so status reflects approval/review
+    feature_state = session.session_manager.get_feature_state() or {}
+    updated_feature = {
+        **feature_state,
+        "directory": directory or feature_state.get("directory", ""),
+        "metadata_path": metadata_path,
+        "feature_plan": summary,
+    }
+    session.session_manager.set_feature_state(updated_feature)
+
     return json.dumps(
         {
             "ok": True,
@@ -4503,6 +4578,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     ),
     "read_file": _legacy_handler(_handle_read_file),
     "search_for_string": _legacy_handler(_handle_search_for_string),
+    "search_references": _legacy_handler(_handle_search_references),
     "retrieve_relevant_context": _legacy_handler(_handle_retrieve_relevant_context),
     "get_chunk": _legacy_handler(_handle_get_chunk),
     "get_current_time": _legacy_handler(_handle_get_current_time),

@@ -1,7 +1,6 @@
 # FolderContext (agentic map/tools)
 
 import os
-import mimetypes
 import pathspec
 import difflib
 import fnmatch
@@ -16,9 +15,13 @@ class FolderContext:
     max_files_to_load = MAX_FILES_TO_LOAD
     max_file_size_bytes = MAX_FILE_SIZE_BYTES
 
+    # Class-level registry of all live instances (for test cleanup)
+    _instances: list = []
+
     def __init__(self):
         self.folders = []
         self.initial_snapshots = {}  # path -> content at start (lazy)
+        FolderContext._instances.append(self)
         self.gitignore_patterns = {}  # folder_path -> list of patterns
         self.ignore_patterns = {
             ".git",
@@ -49,6 +52,15 @@ class FolderContext:
             "dist",
             "build",
         }
+
+    @classmethod
+    def reset_all(cls):
+        """Clear all live FolderContext instances (for test isolation)."""
+        for instance in cls._instances:
+            instance.folders.clear()
+            instance.initial_snapshots.clear()
+            instance.gitignore_patterns.clear()
+        cls._instances.clear()
 
     def add_folder(self, folder_path):
         folder_path = os.path.abspath(os.path.expanduser(folder_path))
@@ -177,21 +189,20 @@ class FolderContext:
         return False
 
     def _is_text_file(self, filepath):
-        """Simple heuristic to check if file is text."""
-        mime, _ = mimetypes.guess_type(filepath)
-        if (
-            mime
-            and not mime.startswith("text/")
-            and mime != "application/json"
-            and mime != "application/javascript"
-        ):
-            # Fallback: try reading first chunk
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    f.read(1024)
-                return True
-            except (UnicodeDecodeError, IOError):
+        """Heuristic to check if file is text using null-byte detection.
+
+        Checks the first 8KB for null bytes (\\x00). Binary files almost
+        always contain null bytes early. Avoids opening files in text mode
+        as a fallback, which caused massive I/O and memory leaks on large
+        workspaces with many binary files.
+        """
+        try:
+            with open(filepath, "rb") as f:
+                chunk = f.read(8192)
+            if b"\x00" in chunk:
                 return False
+        except (OSError, IOError):
+            return False
         return True
 
     def _get_file_size(self, filepath):
@@ -202,13 +213,20 @@ class FolderContext:
             return 0
 
     def _scan_and_snapshot(self, folder_path):
-        """Fast scan: only stores file paths, not content. Content is lazy loaded."""
+        """Fast scan: only stores file paths, not content. Content is lazy loaded.
+        Respects max_files_to_load cap to prevent unbounded memory growth.
+        """
+        files_tracked = len(self.initial_snapshots)
         for root, dirs, files in os.walk(folder_path):
             # Prune directories based on ignore patterns
             dirs[:] = [
                 d for d in dirs if not self._is_ignored_path(os.path.join(root, d))]
 
             for file in files:
+                # Cap: stop scanning once we've tracked enough files
+                if files_tracked >= self.max_files_to_load:
+                    return
+
                 full_path = os.path.join(root, file)
                 if self.is_ignored(full_path):
                     continue
@@ -217,6 +235,7 @@ class FolderContext:
                 if full_path not in self.initial_snapshots and self._is_text_file(full_path):
                     # Store None as placeholder - content loaded lazily on demand
                     self.initial_snapshots[full_path] = None
+                    files_tracked += 1
 
     def _load_file_content(self, filepath):
         """Load file content with size limit. Returns None if too large or error."""
@@ -390,6 +409,37 @@ class FolderContext:
 
     def get_file_list(self):
         return list(self.initial_snapshots.keys())
+
+    def track_file(self, filepath):
+        """Add a file to initial_snapshots if not already tracked.
+        Called by file-modifying tools (write_file, search_and_replace_file, apply_diff)
+        to ensure new/modified files are visible to search_for_string.
+        """
+        if filepath not in self.initial_snapshots and self._is_text_file(filepath):
+            self.initial_snapshots[filepath] = None  # lazy loaded on demand
+
+    def sync_with_filesystem(self):
+        """Re-scan tracked folders to pick up externally added/removed files.
+        Called before search_for_string to ensure developer file changes
+        outside mucli are visible.
+        """
+        files_tracked = len(self.initial_snapshots)
+        for folder in self.folders:
+            for root, dirs, files in os.walk(folder):
+                dirs[:] = [d for d in dirs if not self._is_ignored_path(os.path.join(root, d))]
+                for file in files:
+                    if files_tracked >= self.max_files_to_load:
+                        break
+                    full_path = os.path.join(root, file)
+                    if not self.is_ignored(full_path) and full_path not in self.initial_snapshots:
+                        if self._is_text_file(full_path):
+                            self.initial_snapshots[full_path] = None
+                            files_tracked += 1
+
+        # Remove files that no longer exist on disk
+        for path in list(self.initial_snapshots.keys()):
+            if not os.path.exists(path):
+                del self.initial_snapshots[path]
 
     def to_dict(self):
         return {

@@ -46,6 +46,12 @@ class SemanticCodeIndex:
         self._last_refresh_latency_ms: float = 0.0
         self.workspace_root: str = os.getcwd()
 
+    def reset(self) -> None:
+        """Reset the index to a fresh state. Useful for test isolation."""
+        self.documents.clear()
+        self._last_refresh_latency_ms = 0.0
+        self.workspace_root = os.getcwd()
+
     @property
     def last_refresh_latency_ms(self) -> float:
         return self._last_refresh_latency_ms

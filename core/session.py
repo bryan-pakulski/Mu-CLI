@@ -16,6 +16,7 @@ from core.collation import CollationBuffer
 from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
 from core.memory import ScratchpadStore, TaskMemoryStore
 from core.retrieval import SemanticCodeIndex
+from core.tools import _RETRIEVAL_INDEX
 from core.workspace import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference
 from core.tools import (
@@ -814,7 +815,7 @@ class Session:
         self.agentic = True
         self.staged_files = []  # list of dicts
         self.disabled_tools = []  # list of tool names strings
-        self.retrieval_index = SemanticCodeIndex()
+        self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
 
         self.sync_runtime_state()

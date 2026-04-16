@@ -5,6 +5,7 @@ import datetime
 import difflib
 import re
 import bisect
+import html
 from dataclasses import dataclass, asdict, field
 from urllib.parse import quote
 from typing import Any, Callable
@@ -1573,8 +1574,15 @@ def read_file(filename: str, folder_context) -> str:
 
 def search_for_string(search_string: str, folder_context) -> str:
     """Returns a list of all files that contain the string as well as the line number."""
+    # Unescape HTML entities — provider SDKs (especially Gemini) escape angle brackets
+    # in tool call args, so '&lt;/style&gt;' becomes '</style>' for correct matching.
+    search_string = html.unescape(search_string)
+
     if not folder_context:
         return "No workspace attached to search."
+
+    # Sync with filesystem to pick up externally added/removed files
+    folder_context.sync_with_filesystem()
 
     results = []
     for filepath in folder_context.get_file_list():
@@ -1718,6 +1726,9 @@ def write_file(filename: str, content: str, folder_context) -> str:
             os.makedirs(dirname, exist_ok=True)
         with open(filename, "w", encoding="utf-8") as f:
             f.write(content)
+        # Track file in workspace so search_for_string can find it
+        if folder_context and hasattr(folder_context, 'track_file'):
+            folder_context.track_file(filename)
         return f"Successfully wrote to {filename}"
     except Exception as e:
         logger.error(f"write_file: Error writing to {filename}: {e}")
@@ -1884,6 +1895,9 @@ def apply_diff(filename: str, diff: str, folder_context) -> str:
             os.unlink(tmp_diff_path)
 
             if result.returncode == 0:
+                # Track file in workspace so search_for_string can find it
+                if folder_context and hasattr(folder_context, 'track_file'):
+                    folder_context.track_file(filename)
                 return f"Successfully applied diff to {filename}"
             else:
                 logger.error(
@@ -2102,6 +2116,9 @@ def search_and_replace_file(
     try:
         with open(filename, "w", encoding="utf-8") as f:
             f.write(new_content)
+        # Track file in workspace so search_for_string can find it
+        if folder_context and hasattr(folder_context, 'track_file'):
+            folder_context.track_file(filename)
         return json.dumps({
             "success": True,
             "matches_found": len(matches),

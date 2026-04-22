@@ -10,7 +10,7 @@ import termios
 import time
 import tty
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 
 from rich.console import Group
 from rich.columns import Columns
@@ -49,8 +49,10 @@ def _truncate(value: str, limit: int = 72) -> str:
 
 
 def _fmt_time(epoch: float, *, with_date: bool = False) -> str:
-    fmt = "%Y-%m-%d %H:%M:%S UTC" if with_date else "%H:%M:%S"
-    return datetime.fromtimestamp(float(epoch or 0), tz=timezone.utc).strftime(fmt)
+    local_tz = datetime.now().astimezone().tzinfo
+    tz_label = datetime.now().astimezone().tzname() or "local"
+    fmt = f"%Y-%m-%d %H:%M:%S {tz_label}" if with_date else f"%H:%M:%S {tz_label}"
+    return datetime.fromtimestamp(float(epoch or 0), tz=local_tz).strftime(fmt)
 
 
 def _sparkline(values: list[int]) -> str:
@@ -600,7 +602,8 @@ def _render_watch(
         snapshots = sorted(
             snapshots, key=lambda item: str(item.get("name", "")).lower()
         )
-    now_text = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now_local = datetime.now().astimezone()
+    now_text = now_local.strftime(f"%Y-%m-%d %H:%M:%S {now_local.tzname() or 'local'}")
 
     if not snapshots:
         return Group(

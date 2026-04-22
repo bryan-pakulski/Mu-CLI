@@ -26,7 +26,8 @@ class RichUI:
         self.input_handler = InputHandler()
 
     def render_message(self, role, content, model_name=None):
-        ts = datetime.utcnow().strftime("%H:%M:%S UTC")
+        local_now = datetime.now().astimezone()
+        ts = local_now.strftime(f"%H:%M:%S {local_now.tzname() or 'local'}")
         if role == "user":
             self.console.print(
                 Panel(

@@ -2195,6 +2195,13 @@ class Session:
         provider_bad_request_retried = False
         exact_tool_sequence_history: list[str] = []
         pattern_tool_sequence_history: list[str] = []
+        loop_detection_enabled = bool(
+            self.variables.get("loop_detection_enabled", True)
+        )
+        loop_detection_repeat_threshold = max(
+            2,
+            int(self.variables.get("loop_detection_repeat_threshold", 3) or 3),
+        )
 
         while iteration < max_iterations:
             iteration += 1
@@ -2656,17 +2663,19 @@ class Session:
                 self.session_manager.history.append(tool_result_msg)
                 self.session_manager.save_history(self.folder_context)
 
-                if iteration_tool_exact_fingerprints:
+                if loop_detection_enabled and iteration_tool_exact_fingerprints:
                     exact_seq = " -> ".join(iteration_tool_exact_fingerprints)
                     pattern_seq = " -> ".join(iteration_tool_pattern)
                     exact_tool_sequence_history.append(exact_seq)
                     pattern_tool_sequence_history.append(pattern_seq)
 
                     exact_loop_detected = self._is_repeated_tool_sequence(
-                        exact_tool_sequence_history, repeat_threshold=3
+                        exact_tool_sequence_history,
+                        repeat_threshold=loop_detection_repeat_threshold,
                     )
                     pattern_loop_detected = self._is_repeated_tool_sequence(
-                        pattern_tool_sequence_history, repeat_threshold=3
+                        pattern_tool_sequence_history,
+                        repeat_threshold=loop_detection_repeat_threshold,
                     )
 
                     if exact_loop_detected or pattern_loop_detected:

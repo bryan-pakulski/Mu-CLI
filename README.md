@@ -104,7 +104,11 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/quit` | `/q` | Exit the application |
 
 `--watch` mode is a read-only dashboard (non-mutating) and does not accept slash commands.
-It supports keyboard navigation for browsing data: `↑/↓` (or `j/k`) navigates, `Enter` opens a session detail view, `Esc`/`b` goes back, `←/→` (or `h/l`) switches tabs (including the feature board), `n/p` pages, `/` searches, `c` clears search, `s` cycles sort modes, `r` toggles running-only sessions, `?` opens a help overlay, and `q` exits.
+It supports keyboard navigation for browsing data: `↑/↓` (or `j/k`) navigates, `Enter` opens a session detail view, `Esc`/`b` goes back, `←/→` (or `h/l`) switches tabs (including feature board and variables), `n/p` pages, `/` searches, `c` clears search, `e` expands the focused item for full-content browsing, `s` cycles sort modes, `r` toggles running-only sessions, `?` opens a help overlay, and `q` exits.
+
+Loop detection is configurable via session variables:
+- `/set loop_detection_enabled true|false`
+- `/set loop_detection_repeat_threshold <int>`
 
 ## Server Mode
 

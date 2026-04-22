@@ -102,6 +102,14 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "",
     },  # JSON-serialized list of {feature_id, timestamp} dicts for features created in this loop
+    "loop_detection_enabled": {
+        "type": bool,
+        "default": True,
+    },
+    "loop_detection_repeat_threshold": {
+        "type": int,
+        "default": 3,
+    },
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}

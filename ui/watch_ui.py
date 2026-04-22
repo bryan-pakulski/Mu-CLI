@@ -21,7 +21,7 @@ from rich.text import Text
 from rich import box
 
 RUNNING_THRESHOLD_SECONDS = 8.0
-DETAIL_TABS = ["board", "chat", "memory", "layers", "metadata", "features"]
+DETAIL_TABS = ["board", "chat", "memory", "layers", "metadata", "variables", "features"]
 
 
 @dataclass
@@ -36,6 +36,8 @@ class WatchState:
     sort_key: str = "updated"
     running_only: bool = False
     help_overlay: bool = False
+    expand_focused: bool = False
+    focused_offset: int = 0
     should_exit: bool = False
 
 
@@ -328,6 +330,18 @@ def _detail_lines(snapshot: dict, tab: str) -> list[str]:
                 lines.append(f"    phases: {len(phases)}")
         return lines
 
+    if tab == "variables":
+        lines = ["Session variables:"]
+        variables = payload.get("variables", {}) if isinstance(payload, dict) else {}
+        if not isinstance(variables, dict) or not variables:
+            lines.append("  (none)")
+            return lines
+        for key in sorted(variables.keys()):
+            value = variables.get(key)
+            rendered = json.dumps(value, default=str)
+            lines.append(f"  {key}: {rendered}")
+        return lines
+
     # metadata tab
     lines = ["Session metadata:"]
     variables = payload.get("variables", {}) if isinstance(payload, dict) else {}
@@ -412,9 +426,24 @@ def _render_detail(snapshot: dict, state: WatchState) -> Panel:
         prefix = "▶" if idx == state.detail_cursor else " "
         rendered_lines.append(f"{prefix} {idx:>4} {line}")
     selected = lines[state.detail_cursor] if lines else "(empty)"
+    if state.expand_focused:
+        expanded_text = str(selected)
+        start_idx = max(0, state.focused_offset)
+        expanded_window = expanded_text[start_idx : start_idx + 1200]
+        selected_panel = Panel(
+            expanded_window or "(empty)",
+            title=f"Focused Item (expanded, offset {start_idx})",
+            border_style="magenta",
+        )
+    else:
+        selected_panel = Panel(
+            _truncate(selected, 500),
+            title="Focused Item",
+            border_style="magenta",
+        )
     body = Group(
         Panel("\n".join(rendered_lines) if rendered_lines else "(empty)", title="Entries", border_style="cyan"),
-        Panel(_truncate(selected, 500), title="Focused Item", border_style="magenta"),
+        selected_panel,
     )
     return Panel(body, title=f"Session Detail — {snapshot.get('name', '-')}", subtitle=subtitle, box=box.ROUNDED)
 
@@ -441,6 +470,10 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
         return state
     if key in ("?",):
         state.help_overlay = not state.help_overlay
+        return state
+    if key in ("e",):
+        state.expand_focused = not state.expand_focused
+        state.focused_offset = 0
         return state
     if key in ("s",):
         ordering = ["updated", "tokens", "name"]
@@ -495,12 +528,18 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
         state.detail_offset = 0
         return state
     if key in ("n", "\x1b[6~"):
-        state.detail_offset += 8
-        state.detail_cursor = max(state.detail_cursor, state.detail_offset)
+        if state.expand_focused:
+            state.focused_offset += 300
+        else:
+            state.detail_offset += 8
+            state.detail_cursor = max(state.detail_cursor, state.detail_offset)
         return state
     if key in ("p", "\x1b[5~"):
-        state.detail_offset = max(0, state.detail_offset - 8)
-        state.detail_cursor = max(0, min(state.detail_cursor, state.detail_offset + 17))
+        if state.expand_focused:
+            state.focused_offset = max(0, state.focused_offset - 300)
+        else:
+            state.detail_offset = max(0, state.detail_offset - 8)
+            state.detail_cursor = max(0, min(state.detail_cursor, state.detail_offset + 17))
         return state
     return state
 
@@ -619,8 +658,8 @@ def _render_watch(
             f"[bold cyan]μCLI Watch[/bold cyan] ✨ [dim]read-only realtime command center[/dim]\n"
             f"Sessions: [cyan]{len(snapshots)}[/cyan] • "
             f"Refresh: [cyan]{refresh_seconds:.1f}s[/cyan] • Now: [cyan]{now_text}[/cyan]\n"
-            f"Mode: [cyan]{mode_text}[/cyan] • Enter open session • Esc/b back • sort:{state.sort_key} • running-only:{state.running_only}\n"
-            f"Keys: ↑/↓ or j/k navigate • ←/→ or h/l tabs • n/p page • / find • c clear-find • s sort • r running-filter • ? help • q quit\n"
+            f"Mode: [cyan]{mode_text}[/cyan] • Enter open session • Esc/b back • sort:{state.sort_key} • running-only:{state.running_only} • expand:{state.expand_focused}\n"
+            f"Keys: ↑/↓ or j/k navigate • ←/→ or h/l tabs • n/p page (or focused scroll) • e expand focus • / find • c clear-find • s sort • r running-filter • ? help • q quit\n"
             f"Tabs: {tabs}{search_text}"
         ),
         border_style="bright_cyan",
@@ -637,6 +676,7 @@ def _render_watch(
             "• n/p: page detail list\n"
             "• / then type then Enter: search/filter active tab\n"
             "• c: clear search\n"
+            "• e: expand/collapse focused item full content\n"
             "• s: cycle sorting (updated/tokens/name)\n"
             "• r: toggle running-only filter\n"
             "• ?: toggle this help\n"

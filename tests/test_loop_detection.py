@@ -1,4 +1,5 @@
 from core.session import Session
+from utils.config import DEFAULT_VARIABLES
 
 
 def test_tool_sequence_repetition_detection():
@@ -17,3 +18,8 @@ def test_tool_fingerprint_pattern_mode_is_name_only():
     )
     assert fp.startswith("read_file:")
     assert pattern == "read_file"
+
+
+def test_loop_detection_variables_exist():
+    assert "loop_detection_enabled" in DEFAULT_VARIABLES
+    assert "loop_detection_repeat_threshold" in DEFAULT_VARIABLES

@@ -17,7 +17,7 @@
 - **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for Integrations**: Launch μCLI with an HTTP API so external clients can drive sessions, commands, and tool execution.
-- **Realtime Watch Mode**: Launch a read-only TUI monitor (`--watch`) with a Jira-style feature board, per-session drill-down, chat/memory/layer/metadata views, and live status (running/idle).
+- **Realtime Watch Mode**: Launch a read-only TUI command center (`--watch`) with KPI cards, update pulse sparkline, Jira-style feature board, per-session drill-down, chat/memory/layer/metadata views, and live status (running/idle).
 
 ## Installation
 

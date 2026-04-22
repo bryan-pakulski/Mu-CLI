@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from rich.console import Group
+from rich.columns import Columns
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
@@ -43,6 +44,33 @@ def _truncate(value: str, limit: int = 72) -> str:
 def _fmt_time(epoch: float, *, with_date: bool = False) -> str:
     fmt = "%Y-%m-%d %H:%M:%S UTC" if with_date else "%H:%M:%S"
     return datetime.fromtimestamp(float(epoch or 0), tz=timezone.utc).strftime(fmt)
+
+
+def _sparkline(values: list[int]) -> str:
+    ticks = "▁▂▃▄▅▆▇█"
+    if not values:
+        return ""
+    low = min(values)
+    high = max(values)
+    if high == low:
+        return ticks[0] * len(values)
+    out = []
+    for val in values:
+        idx = int((val - low) / max(1, (high - low)) * (len(ticks) - 1))
+        out.append(ticks[max(0, min(idx, len(ticks) - 1))])
+    return "".join(out)
+
+
+def _status_style(status: str) -> str:
+    mapping = {
+        "running": "bold green",
+        "idle": "dim",
+        "in_progress": "yellow",
+        "blocked": "bold red",
+        "completed": "green",
+        "not_started": "dim",
+    }
+    return mapping.get(str(status or ""), "white")
 
 
 def _extract_last_activity(history: list[dict]) -> str:
@@ -323,10 +351,10 @@ def _build_feature_board(snapshot: dict):
     plan = feature.get("feature_plan", {}) if isinstance(feature, dict) else {}
     tasks = plan.get("phases", []) if isinstance(plan, dict) else []
 
-    table = Table(title="Feature Board (Jira-style)", expand=True)
+    table = Table(title="Feature Board (Jira-style)", expand=True, row_styles=["", "dim"])
     statuses = ["not_started", "in_progress", "blocked", "completed"]
     for status in statuses:
-        table.add_column(status, style="cyan")
+        table.add_column(status, style=_status_style(status))
 
     by_status = {status: [] for status in statuses}
     for task in tasks if isinstance(tasks, list) else []:
@@ -336,9 +364,12 @@ def _build_feature_board(snapshot: dict):
         key = status if status in by_status else "not_started"
         verified = len(task.get("verified_exit_criteria", []) or [])
         total_exit = len(task.get("exit_criteria", []) or [])
+        percent = int((verified / max(1, total_exit)) * 100)
+        bar_count = min(10, int(round(percent / 10)))
+        meter = "█" * bar_count + "░" * (10 - bar_count)
         card = (
             f"#{task.get('number', task.get('id', '?'))} {task.get('title', 'untitled')}\n"
-            f"progress {verified}/{max(total_exit, 1)} exit criteria"
+            f"{meter} {percent:>3}% ({verified}/{max(total_exit, 1)})"
         )
         by_status[key].append(card)
 
@@ -478,7 +509,8 @@ def _render_watch(
 
     for idx, item in enumerate(snapshots):
         pointer = "▶" if idx == state.selected_index else " "
-        status = "[green]running[/green]" if item.get("running") else "[dim]idle[/dim]"
+        status_label = "running" if item.get("running") else "idle"
+        status = f"[{_status_style(status_label)}]{status_label}[/{_status_style(status_label)}]"
         table.add_row(
             pointer,
             str(item.get("name", "-")),
@@ -496,6 +528,40 @@ def _render_watch(
         f"[bold cyan]{name}[/bold cyan]" if i == state.tab_index else name
         for i, name in enumerate(DETAIL_TABS)
     )
+    running_count = sum(1 for item in snapshots if item.get("running"))
+    features_count = sum(1 for item in snapshots if item.get("feature") not in ("", "-"))
+    token_total = sum(int(item.get("tokens", 0) or 0) for item in snapshots)
+    spark = _sparkline([int(item.get("updated_at", 0) or 0) for item in snapshots[-12:]])
+    stat_cards = Columns(
+        [
+            Panel(
+                f"[bold cyan]{len(snapshots)}[/bold cyan]\nSessions",
+                border_style="cyan",
+                padding=(0, 2),
+            ),
+            Panel(
+                f"[bold green]{running_count}[/bold green]\nRunning",
+                border_style="green",
+                padding=(0, 2),
+            ),
+            Panel(
+                f"[bold yellow]{features_count}[/bold yellow]\nWith Features",
+                border_style="yellow",
+                padding=(0, 2),
+            ),
+            Panel(
+                f"[bold magenta]{token_total:,}[/bold magenta]\nTotal Tokens",
+                border_style="magenta",
+                padding=(0, 2),
+            ),
+            Panel(
+                f"[bold white]{spark or '—'}[/bold white]\nUpdate Pulse",
+                border_style="blue",
+                padding=(0, 2),
+            ),
+        ],
+        expand=True,
+    )
     mode_text = "session view" if state.in_session_view else "board list"
     search_text = (
         f"\nSearch: [yellow]{state.search_query}[/yellow]"
@@ -506,7 +572,7 @@ def _render_watch(
         search_text = f"\nSearch mode: [yellow]{state.search_query}[/yellow]_"
     header = Panel(
         Text.from_markup(
-            f"[bold]μCLI Watch[/bold] • read-only realtime monitor\n"
+            f"[bold cyan]μCLI Watch[/bold cyan] ✨ [dim]read-only realtime command center[/dim]\n"
             f"Sessions: [cyan]{len(snapshots)}[/cyan] • "
             f"Refresh: [cyan]{refresh_seconds:.1f}s[/cyan] • Now: [cyan]{now_text}[/cyan]\n"
             f"Mode: [cyan]{mode_text}[/cyan] • Enter open session • Esc/b back\n"
@@ -517,8 +583,8 @@ def _render_watch(
     )
     footer = Text(f"Session path: {session_root}", style="dim")
     if state.in_session_view:
-        return Group(header, _render_detail(current, state), footer)
-    return Group(header, table, footer)
+        return Group(header, stat_cards, _render_detail(current, state), footer)
+    return Group(header, stat_cards, table, footer)
 
 
 class _KeyReader:

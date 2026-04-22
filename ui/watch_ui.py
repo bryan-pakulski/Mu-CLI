@@ -18,6 +18,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich import box
 
 RUNNING_THRESHOLD_SECONDS = 8.0
 DETAIL_TABS = ["board", "chat", "memory", "layers", "metadata", "features"]
@@ -31,6 +32,10 @@ class WatchState:
     in_session_view: bool = False
     search_mode: bool = False
     search_query: str = ""
+    detail_cursor: int = 0
+    sort_key: str = "updated"
+    running_only: bool = False
+    help_overlay: bool = False
     should_exit: bool = False
 
 
@@ -390,16 +395,28 @@ def _render_detail(snapshot: dict, state: WatchState) -> Panel:
         lines = [line for line in lines if query in line.lower()]
         if not lines:
             lines = [f"No matches for '{state.search_query}'."]
+    if lines:
+        state.detail_cursor = max(0, min(state.detail_cursor, len(lines) - 1))
+    else:
+        state.detail_cursor = 0
     start = max(0, min(state.detail_offset, max(0, len(lines) - 1)))
-    window = lines[start : start + 22]
+    window = lines[start : start + 18]
     search_suffix = f" | search: {state.search_query}" if state.search_query else ""
     subtitle = (
         f"Tab: {active_tab} | lines {start + 1}-{start + len(window)}{search_suffix}"
         if lines
         else f"Tab: {active_tab}{search_suffix}"
     )
-    body = "\n".join(window) if window else "(empty)"
-    return Panel(body, title=f"Session Detail — {snapshot.get('name', '-')}", subtitle=subtitle)
+    rendered_lines = []
+    for idx, line in enumerate(window, start=start):
+        prefix = "▶" if idx == state.detail_cursor else " "
+        rendered_lines.append(f"{prefix} {idx:>4} {line}")
+    selected = lines[state.detail_cursor] if lines else "(empty)"
+    body = Group(
+        Panel("\n".join(rendered_lines) if rendered_lines else "(empty)", title="Entries", border_style="cyan"),
+        Panel(_truncate(selected, 500), title="Focused Item", border_style="magenta"),
+    )
+    return Panel(body, title=f"Session Detail — {snapshot.get('name', '-')}", subtitle=subtitle, box=box.ROUNDED)
 
 
 def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
@@ -422,6 +439,19 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
     if key in ("q", "\x03"):
         state.should_exit = True
         return state
+    if key in ("?",):
+        state.help_overlay = not state.help_overlay
+        return state
+    if key in ("s",):
+        ordering = ["updated", "tokens", "name"]
+        idx = ordering.index(state.sort_key) if state.sort_key in ordering else 0
+        state.sort_key = ordering[(idx + 1) % len(ordering)]
+        return state
+    if key in ("r",):
+        state.running_only = not state.running_only
+        state.selected_index = 0
+        state.detail_offset = 0
+        return state
     if key in ("/",):
         state.search_mode = True
         state.search_query = ""
@@ -433,6 +463,7 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
     if key in ("\r", "\n"):
         state.in_session_view = True
         state.detail_offset = 0
+        state.detail_cursor = 0
         return state
     if key in ("\x1b", "b"):
         state.in_session_view = False
@@ -440,14 +471,17 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
         return state
     if key in ("\x1b[A", "k"):
         if state.in_session_view:
-            state.detail_offset = max(0, state.detail_offset - 1)
+            state.detail_cursor = max(0, state.detail_cursor - 1)
+            state.detail_offset = max(0, min(state.detail_offset, state.detail_cursor))
         else:
             state.selected_index = max(0, state.selected_index - 1)
             state.detail_offset = 0
         return state
     if key in ("\x1b[B", "j"):
         if state.in_session_view:
-            state.detail_offset += 1
+            state.detail_cursor += 1
+            if state.detail_cursor >= state.detail_offset + 18:
+                state.detail_offset += 1
         else:
             state.selected_index = min(max(0, total_sessions - 1), state.selected_index + 1)
             state.detail_offset = 0
@@ -462,9 +496,11 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
         return state
     if key in ("n", "\x1b[6~"):
         state.detail_offset += 8
+        state.detail_cursor = max(state.detail_cursor, state.detail_offset)
         return state
     if key in ("p", "\x1b[5~"):
         state.detail_offset = max(0, state.detail_offset - 8)
+        state.detail_cursor = max(0, min(state.detail_cursor, state.detail_offset + 17))
         return state
     return state
 
@@ -476,6 +512,14 @@ def _render_watch(
     snapshots: list[dict] | None = None,
 ) -> Group:
     snapshots = snapshots if isinstance(snapshots, list) else load_session_snapshots(session_root)
+    if state.running_only:
+        snapshots = [item for item in snapshots if item.get("running")]
+    if state.sort_key == "tokens":
+        snapshots = sorted(snapshots, key=lambda item: int(item.get("tokens", 0) or 0), reverse=True)
+    elif state.sort_key == "name":
+        snapshots = sorted(snapshots, key=lambda item: str(item.get("name", "")).lower())
+    else:
+        snapshots = sorted(snapshots, key=lambda item: float(item.get("updated_at", 0) or 0), reverse=True)
     now_text = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     if not snapshots:
@@ -495,7 +539,7 @@ def _render_watch(
     current = snapshots[state.selected_index]
     state.detail_offset = max(0, state.detail_offset)
 
-    table = Table(title="Session Activity", expand=True)
+    table = Table(title="Session Activity", expand=True, box=box.SIMPLE_HEAVY, row_styles=["", "dim"])
     table.add_column(" ", no_wrap=True, width=2)
     table.add_column("Session", style="bold cyan", no_wrap=True)
     table.add_column("State", no_wrap=True)
@@ -575,13 +619,35 @@ def _render_watch(
             f"[bold cyan]μCLI Watch[/bold cyan] ✨ [dim]read-only realtime command center[/dim]\n"
             f"Sessions: [cyan]{len(snapshots)}[/cyan] • "
             f"Refresh: [cyan]{refresh_seconds:.1f}s[/cyan] • Now: [cyan]{now_text}[/cyan]\n"
-            f"Mode: [cyan]{mode_text}[/cyan] • Enter open session • Esc/b back\n"
-            f"Keys: ↑/↓ or j/k navigate • ←/→ or h/l tabs • n/p page • / find • c clear-find • q quit\n"
+            f"Mode: [cyan]{mode_text}[/cyan] • Enter open session • Esc/b back • sort:{state.sort_key} • running-only:{state.running_only}\n"
+            f"Keys: ↑/↓ or j/k navigate • ←/→ or h/l tabs • n/p page • / find • c clear-find • s sort • r running-filter • ? help • q quit\n"
             f"Tabs: {tabs}{search_text}"
         ),
-        border_style="cyan",
+        border_style="bright_cyan",
+        box=box.DOUBLE,
     )
     footer = Text(f"Session path: {session_root}", style="dim")
+    if state.help_overlay:
+        help_panel = Panel(
+            "[bold]μCLI Watch Controls[/bold]\n"
+            "• Enter: open selected session detail\n"
+            "• Esc/b: back to session list\n"
+            "• j/k or arrows: move selection/cursor\n"
+            "• h/l or arrows: switch tabs\n"
+            "• n/p: page detail list\n"
+            "• / then type then Enter: search/filter active tab\n"
+            "• c: clear search\n"
+            "• s: cycle sorting (updated/tokens/name)\n"
+            "• r: toggle running-only filter\n"
+            "• ?: toggle this help\n"
+            "• q: quit",
+            border_style="yellow",
+            box=box.DOUBLE_EDGE,
+            title="Help Overlay",
+        )
+        if state.in_session_view:
+            return Group(header, stat_cards, _render_detail(current, state), help_panel, footer)
+        return Group(header, stat_cards, table, help_panel, footer)
     if state.in_session_view:
         return Group(header, stat_cards, _render_detail(current, state), footer)
     return Group(header, stat_cards, table, footer)

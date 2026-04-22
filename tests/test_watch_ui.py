@@ -111,3 +111,31 @@ def test_render_detail_board_tab(tmp_path):
     state = WatchState(tab_index=0, in_session_view=True)
     panel = _render_detail(snap, state)
     assert isinstance(panel, Panel)
+
+
+def test_loop_active_session_marked_running_even_if_file_is_stale(tmp_path):
+    session_root = tmp_path / "sessions"
+    session_dir = session_root / "demo"
+    session_dir.mkdir(parents=True)
+    session_file = session_dir / "session.json"
+    session_file.write_text(
+        json.dumps(
+            {
+                "variables": {"loop_active": True},
+                "history": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Stale timestamp should still be considered active because loop_active=true.
+    old_ts = 1_600_000_000
+    import os
+    os.utime(session_file, (old_ts, old_ts))
+
+    snap = load_session_snapshots(str(session_root))[0]
+    assert snap["running"] is True
+
+
+def test_watch_state_defaults_to_name_sorting():
+    state = WatchState()
+    assert state.sort_key == "name"

@@ -33,7 +33,7 @@ class WatchState:
     search_mode: bool = False
     search_query: str = ""
     detail_cursor: int = 0
-    sort_key: str = "updated"
+    sort_key: str = "name"
     running_only: bool = False
     help_overlay: bool = False
     expand_focused: bool = False
@@ -78,6 +78,41 @@ def _status_style(status: str) -> str:
         "not_started": "dim",
     }
     return mapping.get(str(status or ""), "white")
+
+
+def _is_session_active(payload: dict, updated_at: float, now: float) -> bool:
+    if (now - float(updated_at or 0)) <= 45.0:
+        return True
+
+    variables = payload.get("variables", {}) if isinstance(payload, dict) else {}
+    if isinstance(variables, dict) and bool(variables.get("loop_active", False)):
+        return True
+
+    feature_state = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
+    if isinstance(feature_state, dict):
+        active_statuses = {
+            "running",
+            "in_progress",
+            "awaiting_input",
+            "awaiting_approval",
+            "blocked",
+        }
+        status = str(feature_state.get("status", "") or "").strip().lower()
+        if status in active_statuses:
+            return True
+
+    history = payload.get("history", []) if isinstance(payload, dict) else []
+    if isinstance(history, list) and history:
+        # If the latest assistant message still contains a tool_call, treat as active.
+        last = history[-1] if isinstance(history[-1], dict) else {}
+        if str(last.get("role", "") or "").strip() == "assistant":
+            parts = last.get("parts", [])
+            if isinstance(parts, list) and any(
+                isinstance(part, dict) and part.get("type") == "tool_call"
+                for part in parts
+            ):
+                return True
+    return False
 
 
 def _extract_last_activity(history: list[dict]) -> str:
@@ -212,7 +247,7 @@ def load_session_snapshots(session_root: str) -> list[dict]:
         token_counts = payload.get("token_counts", {})
         provider_config = payload.get("provider_config", {})
         updated_at = float(os.path.getmtime(session_path))
-        running = (now - updated_at) <= RUNNING_THRESHOLD_SECONDS
+        running = _is_session_active(payload, updated_at, now)
 
         snapshots.append(
             {
@@ -553,12 +588,18 @@ def _render_watch(
     snapshots = snapshots if isinstance(snapshots, list) else load_session_snapshots(session_root)
     if state.running_only:
         snapshots = [item for item in snapshots if item.get("running")]
-    if state.sort_key == "tokens":
+    if state.sort_key == "updated":
+        snapshots = sorted(
+            snapshots,
+            key=lambda item: float(item.get("updated_at", 0) or 0),
+            reverse=True,
+        )
+    elif state.sort_key == "tokens":
         snapshots = sorted(snapshots, key=lambda item: int(item.get("tokens", 0) or 0), reverse=True)
-    elif state.sort_key == "name":
-        snapshots = sorted(snapshots, key=lambda item: str(item.get("name", "")).lower())
     else:
-        snapshots = sorted(snapshots, key=lambda item: float(item.get("updated_at", 0) or 0), reverse=True)
+        snapshots = sorted(
+            snapshots, key=lambda item: str(item.get("name", "")).lower()
+        )
     now_text = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     if not snapshots:

@@ -246,6 +246,22 @@ def test_memory_clear_completion_includes_scratch_alias():
     assert "scratch" in completion_texts
 
 
+def test_input_history_is_isolated_per_session():
+    handler = InputHandler()
+
+    handler._ensure_session_history("alpha")
+    first_session_obj = handler.session
+    first_history_file = handler._history_file_for_session("alpha")
+
+    handler._ensure_session_history("beta")
+    second_session_obj = handler.session
+    second_history_file = handler._history_file_for_session("beta")
+
+    assert first_history_file != second_history_file
+    assert first_session_obj is not second_session_obj
+    assert handler.active_session_name == "beta"
+
+
 def test_workspace_completion_includes_clear_subcommand():
     handler = InputHandler()
     document = Document(

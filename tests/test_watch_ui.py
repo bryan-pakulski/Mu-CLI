@@ -137,3 +137,25 @@ def test_loop_active_session_marked_running_even_if_file_is_stale(tmp_path):
 def test_watch_state_defaults_to_name_sorting():
     state = WatchState()
     assert state.sort_key == "name"
+
+
+def test_awaiting_approval_feature_is_idle_when_stale(tmp_path):
+    session_root = tmp_path / "sessions"
+    session_dir = session_root / "demo"
+    session_dir.mkdir(parents=True)
+    session_file = session_dir / "session.json"
+    session_file.write_text(
+        json.dumps(
+            {
+                "feature_state": {"status": "awaiting_approval"},
+                "history": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    old_ts = 1_600_000_000
+    import os
+
+    os.utime(session_file, (old_ts, old_ts))
+    snap = load_session_snapshots(str(session_root))[0]
+    assert snap["running"] is False

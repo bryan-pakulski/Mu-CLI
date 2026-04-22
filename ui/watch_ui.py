@@ -100,7 +100,7 @@ def _derive_running(payload: dict, updated_at: float, now: float) -> tuple[bool,
     feature_state = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
     if isinstance(feature_state, dict):
         status = str(feature_state.get("status", "")).lower()
-        if status in {"running", "in_progress", "awaiting_input", "awaiting_approval", "blocked"}:
+        if status in {"running", "in_progress", "awaiting_input", "blocked"}:
             return True, f"feature:{status}"
     history = payload.get("history", []) if isinstance(payload, dict) else []
     if isinstance(history, list) and history:

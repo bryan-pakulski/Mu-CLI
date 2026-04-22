@@ -1,4 +1,4 @@
-"""Read-only realtime session watcher for Mu-CLI."""
+"""Realtime read-only session watcher TUI."""
 
 from __future__ import annotations
 
@@ -12,210 +12,134 @@ import tty
 from dataclasses import dataclass
 from datetime import datetime
 
-from rich.console import Group
+from rich import box
 from rich.columns import Columns
+from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich import box
 
-RUNNING_THRESHOLD_SECONDS = 8.0
-DETAIL_TABS = ["board", "chat", "memory", "layers", "metadata", "variables", "features"]
+DETAIL_TABS = ["overview", "chat", "features", "memory", "variables", "layers"]
 
 
 @dataclass
 class WatchState:
     selected_index: int = 0
     tab_index: int = 0
-    detail_offset: int = 0
     in_session_view: bool = False
-    search_mode: bool = False
-    search_query: str = ""
+    detail_offset: int = 0
     detail_cursor: int = 0
     sort_key: str = "name"
     running_only: bool = False
-    help_overlay: bool = False
-    expand_focused: bool = False
-    focused_offset: int = 0
+    search_mode: bool = False
+    search_query: str = ""
     should_exit: bool = False
 
 
-def _truncate(value: str, limit: int = 72) -> str:
-    raw = str(value or "").strip().replace("\n", " ")
-    if len(raw) <= limit:
-        return raw
-    return raw[: max(0, limit - 1)] + "…"
+def _truncate(value: str, max_len: int = 72) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
 
 
-def _fmt_time(epoch: float, *, with_date: bool = False) -> str:
-    local_tz = datetime.now().astimezone().tzinfo
-    tz_label = datetime.now().astimezone().tzname() or "local"
-    fmt = f"%Y-%m-%d %H:%M:%S {tz_label}" if with_date else f"%H:%M:%S {tz_label}"
-    return datetime.fromtimestamp(float(epoch or 0), tz=local_tz).strftime(fmt)
+def _local_now() -> datetime:
+    return datetime.now().astimezone()
 
 
-def _sparkline(values: list[int]) -> str:
-    ticks = "▁▂▃▄▅▆▇█"
-    if not values:
-        return ""
-    low = min(values)
-    high = max(values)
-    if high == low:
-        return ticks[0] * len(values)
-    out = []
-    for val in values:
-        idx = int((val - low) / max(1, (high - low)) * (len(ticks) - 1))
-        out.append(ticks[max(0, min(idx, len(ticks) - 1))])
-    return "".join(out)
-
-
-def _status_style(status: str) -> str:
-    mapping = {
-        "running": "bold green",
-        "idle": "dim",
-        "in_progress": "yellow",
-        "blocked": "bold red",
-        "completed": "green",
-        "not_started": "dim",
-    }
-    return mapping.get(str(status or ""), "white")
-
-
-def _is_session_active(payload: dict, updated_at: float, now: float) -> bool:
-    if (now - float(updated_at or 0)) <= 45.0:
-        return True
-
-    variables = payload.get("variables", {}) if isinstance(payload, dict) else {}
-    if isinstance(variables, dict) and bool(variables.get("loop_active", False)):
-        return True
-
-    feature_state = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
-    if isinstance(feature_state, dict):
-        active_statuses = {
-            "running",
-            "in_progress",
-            "awaiting_input",
-            "awaiting_approval",
-            "blocked",
-        }
-        status = str(feature_state.get("status", "") or "").strip().lower()
-        if status in active_statuses:
-            return True
-
-    history = payload.get("history", []) if isinstance(payload, dict) else []
-    if isinstance(history, list) and history:
-        # If the latest assistant message still contains a tool_call, treat as active.
-        last = history[-1] if isinstance(history[-1], dict) else {}
-        if str(last.get("role", "") or "").strip() == "assistant":
-            parts = last.get("parts", [])
-            if isinstance(parts, list) and any(
-                isinstance(part, dict) and part.get("type") == "tool_call"
-                for part in parts
-            ):
-                return True
-    return False
+def _fmt_ts(epoch: float, *, include_date: bool = False) -> str:
+    now = _local_now()
+    label = now.tzname() or "local"
+    fmt = f"%Y-%m-%d %H:%M:%S {label}" if include_date else f"%H:%M:%S {label}"
+    return datetime.fromtimestamp(float(epoch or 0), tz=now.tzinfo).strftime(fmt)
 
 
 def _extract_last_activity(history: list[dict]) -> str:
     if not isinstance(history, list) or not history:
         return "idle"
-
-    for message in reversed(history):
-        if not isinstance(message, dict):
+    for msg in reversed(history):
+        if not isinstance(msg, dict):
             continue
-        role = str(message.get("role", "") or "").strip() or "unknown"
-        parts = message.get("parts", [])
-        if not isinstance(parts, list):
-            continue
-        for part in parts:
+        role = str(msg.get("role", "unknown"))
+        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
             if not isinstance(part, dict):
                 continue
-            part_type = str(part.get("type", "") or "").strip()
-            if part_type == "tool_call":
-                tool_name = str(part.get("tool_name", "") or "").strip() or "tool"
-                return f"{role}: tool_call({tool_name})"
-            if part_type == "tool_result":
-                tool_name = str(part.get("tool_name", "") or "").strip() or "tool"
-                return f"{role}: tool_result({tool_name})"
-            if part_type == "text":
-                text = str(part.get("text", "") or "").strip()
-                if text:
-                    return f"{role}: {_truncate(text, 80)}"
+            ptype = str(part.get("type", ""))
+            if ptype == "tool_call":
+                return f"{role}: tool_call({part.get('tool_name', 'tool')})"
+            if ptype == "tool_result":
+                return f"{role}: tool_result({part.get('tool_name', 'tool')})"
+            if ptype == "text" and str(part.get("text", "")).strip():
+                return f"{role}: {_truncate(part.get('text', ''), 84)}"
     return "idle"
 
 
-def _extract_feature_label(feature_state: dict | None) -> str:
+def _derive_feature_name(feature_state: dict | None) -> str:
     if not isinstance(feature_state, dict):
         return "-"
-    plan = feature_state.get("feature_plan")
-    feature_name = ""
+    plan = feature_state.get("feature_plan", {})
     if isinstance(plan, dict):
-        feature_name = str(plan.get("feature_name", "") or "").strip()
-    if not feature_name:
-        feature_name = str(feature_state.get("feature_name", "") or "").strip()
-    if not feature_name:
-        feature_name = str(feature_state.get("feature_id", "") or "").strip()
-    if not feature_name:
-        return "-"
-    return _truncate(feature_name, 42)
+        value = str(plan.get("feature_name", "")).strip()
+        if value:
+            return _truncate(value, 42)
+    for key in ("feature_name", "feature_id"):
+        value = str(feature_state.get(key, "")).strip()
+        if value:
+            return _truncate(value, 42)
+    return "-"
 
 
-def _build_layers(payload: dict, history: list[dict]) -> list[dict]:
+def _derive_running(payload: dict, updated_at: float, now: float) -> tuple[bool, str]:
+    age = now - float(updated_at or 0)
+    if age <= 45:
+        return True, "recent_write"
+    variables = payload.get("variables", {}) if isinstance(payload, dict) else {}
+    if isinstance(variables, dict) and bool(variables.get("loop_active", False)):
+        return True, "loop_active"
+    feature_state = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
+    if isinstance(feature_state, dict):
+        status = str(feature_state.get("status", "")).lower()
+        if status in {"running", "in_progress", "awaiting_input", "awaiting_approval", "blocked"}:
+            return True, f"feature:{status}"
+    history = payload.get("history", []) if isinstance(payload, dict) else []
+    if isinstance(history, list) and history:
+        last = history[-1] if isinstance(history[-1], dict) else {}
+        if str(last.get("role", "")) == "assistant":
+            parts = last.get("parts", [])
+            if isinstance(parts, list) and any(
+                isinstance(part, dict) and part.get("type") == "tool_call" for part in parts
+            ):
+                return True, "assistant_tool_call"
+    return False, "idle"
+
+
+def _derive_layers(payload: dict, history: list[dict]) -> list[dict]:
     folder_context = payload.get("folder_context", {}) if isinstance(payload, dict) else {}
-    summary_text = str(payload.get("conversation_summary", "") or "")
-    scratchpad = payload.get("turn_scratchpad", {}) if isinstance(payload, dict) else {}
+    conversation_summary = str(payload.get("conversation_summary", "") or "")
+    scratch = payload.get("turn_scratchpad", {}) if isinstance(payload, dict) else {}
     feature_state = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
     tool_parts = []
-    for message in history[-20:]:
-        for part in (message.get("parts", []) if isinstance(message, dict) else []):
+    for msg in history[-20:]:
+        for part in msg.get("parts", []) if isinstance(msg, dict) else []:
             if isinstance(part, dict) and part.get("type") in ("tool_call", "tool_result"):
                 tool_parts.append(part)
-    tool_blob = json.dumps(tool_parts, default=str)
     current_turn = json.dumps(history[-1], default=str) if history else ""
-    l3_goal = json.dumps(
+    l3 = json.dumps(
         {
             "feature_state": feature_state if isinstance(feature_state, dict) else {},
-            "scratchpad_entries": len(
-                (scratchpad.get("entries", []) if isinstance(scratchpad, dict) else [])
-            ),
+            "scratchpad_entries": len(scratch.get("entries", []))
+            if isinstance(scratch, dict)
+            else 0,
         },
         default=str,
     )
     return [
-        {
-            "layer": "L1",
-            "name": "Workspace map",
-            "current": len(folder_context.get("folders", []))
-            + len(folder_context.get("files", []))
-            if isinstance(folder_context, dict)
-            else 0,
-            "description": "Tracked folders/files currently attached to session context.",
-        },
-        {
-            "layer": "L2",
-            "name": "Conversation summary",
-            "current": len(summary_text),
-            "description": "Long-horizon summary text currently stored.",
-        },
-        {
-            "layer": "L3",
-            "name": "Active goal",
-            "current": len(l3_goal),
-            "description": "Feature progress + scratchpad signal for current goal.",
-        },
-        {
-            "layer": "L4",
-            "name": "Recent tool activity",
-            "current": len(tool_blob),
-            "description": "Compressed recent tool call/result data.",
-        },
-        {
-            "layer": "L5",
-            "name": "Current turn",
-            "current": len(current_turn),
-            "description": "Most recent request/response payload.",
-        },
+        {"layer": "L1", "name": "Workspace map", "size": len(folder_context.get("folders", [])) + len(folder_context.get("files", [])) if isinstance(folder_context, dict) else 0},
+        {"layer": "L2", "name": "Conversation summary", "size": len(conversation_summary)},
+        {"layer": "L3", "name": "Active goal", "size": len(l3)},
+        {"layer": "L4", "name": "Recent tool activity", "size": len(json.dumps(tool_parts, default=str))},
+        {"layer": "L5", "name": "Current turn", "size": len(current_turn)},
     ]
 
 
@@ -223,273 +147,143 @@ def load_session_snapshots(session_root: str) -> list[dict]:
     snapshots: list[dict] = []
     if not os.path.isdir(session_root):
         return snapshots
-
     now = time.time()
     for name in sorted(os.listdir(session_root)):
         session_path = os.path.join(session_root, name, "session.json")
         if not os.path.isfile(session_path):
             continue
-
         try:
             with open(session_path, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
+                raw = json.load(handle)
         except (OSError, json.JSONDecodeError):
             continue
 
-        if isinstance(data, list):
-            payload = {"history": data}
-        elif isinstance(data, dict):
-            payload = data
-        else:
-            payload = {"history": []}
-
-        history = payload.get("history", [])
-        variables = payload.get("variables", {})
-        feature_state = payload.get("feature_state")
-        token_counts = payload.get("token_counts", {})
-        provider_config = payload.get("provider_config", {})
+        payload = raw if isinstance(raw, dict) else {"history": raw if isinstance(raw, list) else []}
+        history = payload.get("history", []) if isinstance(payload, dict) else []
         updated_at = float(os.path.getmtime(session_path))
-        running = _is_session_active(payload, updated_at, now)
-
+        running, running_reason = _derive_running(payload, updated_at, now)
+        feature_state = payload.get("feature_state")
+        token_counts = payload.get("token_counts", {}) if isinstance(payload, dict) else {}
+        provider_config = payload.get("provider_config", {}) if isinstance(payload, dict) else {}
         snapshots.append(
             {
                 "name": name,
                 "path": session_path,
                 "updated_at": updated_at,
                 "running": running,
-                "running_label": "running" if running else "idle",
+                "running_reason": running_reason,
                 "history_length": len(history) if isinstance(history, list) else 0,
-                "agent_mode": str(variables.get("agent_mode", "default") or "default"),
-                "feature": _extract_feature_label(feature_state),
-                "feature_status": (
-                    str(feature_state.get("status", "-") or "-")
-                    if isinstance(feature_state, dict)
-                    else "-"
-                ),
+                "agent_mode": str(payload.get("variables", {}).get("agent_mode", "default")),
+                "feature": _derive_feature_name(feature_state),
+                "feature_status": str(feature_state.get("status", "-")) if isinstance(feature_state, dict) else "-",
                 "tokens": int(token_counts.get("total", 0) or 0),
-                "model": str(provider_config.get("model", "-") or "-"),
                 "provider": str(provider_config.get("provider", "-") or "-"),
+                "model": str(provider_config.get("model", "-") or "-"),
                 "activity": _extract_last_activity(history if isinstance(history, list) else []),
+                "layers": _derive_layers(payload, history if isinstance(history, list) else []),
                 "payload": payload,
-                "layers": _build_layers(payload, history if isinstance(history, list) else []),
             }
         )
-
-    snapshots.sort(key=lambda item: item.get("updated_at", 0), reverse=True)
     return snapshots
 
 
 def _detail_lines(snapshot: dict, tab: str) -> list[str]:
     payload = snapshot.get("payload", {}) if isinstance(snapshot, dict) else {}
     history = payload.get("history", []) if isinstance(payload, dict) else []
-    feature = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
-    memory = payload.get("task_memory", {}) if isinstance(payload, dict) else {}
-    scratch = payload.get("turn_scratchpad", {}) if isinstance(payload, dict) else {}
-
+    feature_state = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
+    if tab == "overview":
+        return [
+            f"session: {snapshot.get('name')}",
+            f"updated: {_fmt_ts(snapshot.get('updated_at', 0), include_date=True)}",
+            f"state: {'active' if snapshot.get('running') else 'idle'} ({snapshot.get('running_reason', '-')})",
+            f"mode: {snapshot.get('agent_mode', '-')}",
+            f"provider/model: {snapshot.get('provider', '-')}/{snapshot.get('model', '-')}",
+            f"history turns: {snapshot.get('history_length', 0)}",
+            f"tokens: {snapshot.get('tokens', 0)}",
+            f"last activity: {snapshot.get('activity', '-')}",
+        ]
     if tab == "chat":
-        lines = [f"History entries: {len(history) if isinstance(history, list) else 0}"]
-        if isinstance(history, list):
-            for idx, msg in enumerate(history):
-                role = str(msg.get("role", "unknown"))
-                parts = msg.get("parts", [])
-                summary = "no parts"
-                if isinstance(parts, list) and parts:
-                    first = parts[0]
-                    if isinstance(first, dict):
-                        part_type = str(first.get("type", "unknown"))
-                        if part_type == "text":
-                            summary = _truncate(str(first.get("text", "")), 100)
-                        else:
-                            summary = _truncate(json.dumps(first, default=str), 100)
-                lines.append(f"{idx:>4} | {role:<9} | {summary}")
+        lines = [f"history entries: {len(history) if isinstance(history, list) else 0}"]
+        for idx, msg in enumerate(history if isinstance(history, list) else []):
+            role = str(msg.get("role", "unknown"))
+            snippet = "no parts"
+            parts = msg.get("parts", [])
+            if isinstance(parts, list) and parts and isinstance(parts[0], dict):
+                part = parts[0]
+                if part.get("type") == "text":
+                    snippet = _truncate(part.get("text", ""), 120)
+                else:
+                    snippet = _truncate(json.dumps(part, default=str), 120)
+            lines.append(f"{idx:>4} | {role:<10} | {snippet}")
         return lines
-
-    if tab == "memory":
-        lines = ["Task memory entries:"]
-        entries = memory.get("entries", []) if isinstance(memory, dict) else []
-        if not entries:
-            lines.append("  (none)")
-        for entry in entries:
-            if isinstance(entry, dict):
-                tags = ",".join(entry.get("tags", []) or [])
-                lines.append(
-                    f"  #{entry.get('id', '?')} [{tags or '-'}] "
-                    f"{_truncate(entry.get('content', ''), 110)}"
-                )
-
-        lines.append("")
-        lines.append("Scratchpad entries:")
-        scratch_entries = scratch.get("entries", []) if isinstance(scratch, dict) else []
-        if not scratch_entries:
-            lines.append("  (none)")
-        for entry in scratch_entries:
-            if isinstance(entry, dict):
-                lines.append(
-                    f"  #{entry.get('id', '?')} {_truncate(entry.get('content', ''), 110)}"
-                )
-        return lines
-
-    if tab == "layers":
-        lines = ["Context layers (L1→L5):"]
-        for layer in snapshot.get("layers", []):
-            lines.append(
-                f"  {layer.get('layer')}: {layer.get('name')} | size={layer.get('current', 0)}"
-            )
-            lines.append(f"      {layer.get('description', '')}")
-        return lines
-
     if tab == "features":
-        lines = ["Feature state:"]
-        if not isinstance(feature, dict):
+        lines = ["feature state:"]
+        if not isinstance(feature_state, dict):
             lines.append("  (none)")
             return lines
-        for key in (
-            "feature_id",
-            "feature_name",
-            "status",
-            "directory",
-            "metadata_path",
-            "next_phase",
-            "next_task",
-            "updated_at",
-        ):
-            if key in feature:
-                lines.append(f"  {key}: {_truncate(json.dumps(feature.get(key), default=str), 120)}")
-        plan = feature.get("feature_plan", {})
-        if isinstance(plan, dict):
-            lines.append("")
-            lines.append("  feature_plan:")
-            for k in ("feature_name", "approved", "review_status"):
-                if k in plan:
-                    lines.append(f"    {k}: {_truncate(str(plan.get(k)), 120)}")
-            phases = plan.get("phases", [])
-            if isinstance(phases, list):
-                lines.append(f"    phases: {len(phases)}")
+        for key in ("feature_id", "feature_name", "status", "directory", "metadata_path"):
+            if key in feature_state:
+                lines.append(f"  {key}: {_truncate(json.dumps(feature_state.get(key), default=str), 130)}")
+        phases = ((feature_state.get("feature_plan") or {}).get("phases", [])) if isinstance(feature_state.get("feature_plan"), dict) else []
+        if isinstance(phases, list):
+            lines.append(f"  phases: {len(phases)}")
         return lines
-
+    if tab == "memory":
+        lines = ["task memory:"]
+        task_memory = payload.get("task_memory", {}) if isinstance(payload, dict) else {}
+        for entry in task_memory.get("entries", []) if isinstance(task_memory, dict) else []:
+            if isinstance(entry, dict):
+                lines.append(f"  #{entry.get('id', '?')} {_truncate(entry.get('content', ''), 120)}")
+        lines.append("")
+        lines.append("scratchpad:")
+        scratch = payload.get("turn_scratchpad", {}) if isinstance(payload, dict) else {}
+        for entry in scratch.get("entries", []) if isinstance(scratch, dict) else []:
+            if isinstance(entry, dict):
+                lines.append(f"  #{entry.get('id', '?')} {_truncate(entry.get('content', ''), 120)}")
+        if len(lines) == 3:
+            lines.append("  (none)")
+        return lines
     if tab == "variables":
-        lines = ["Session variables:"]
+        lines = ["variables:"]
         variables = payload.get("variables", {}) if isinstance(payload, dict) else {}
         if not isinstance(variables, dict) or not variables:
-            lines.append("  (none)")
-            return lines
+            return lines + ["  (none)"]
         for key in sorted(variables.keys()):
-            value = variables.get(key)
-            rendered = json.dumps(value, default=str)
-            lines.append(f"  {key}: {rendered}")
+            lines.append(f"  {key}: {json.dumps(variables.get(key), default=str)}")
         return lines
-
-    # metadata tab
-    lines = ["Session metadata:"]
-    variables = payload.get("variables", {}) if isinstance(payload, dict) else {}
-    folder_context = payload.get("folder_context", {}) if isinstance(payload, dict) else {}
-    lines.extend(
-        [
-            f"  session: {snapshot.get('name', '-')}",
-            f"  path: {snapshot.get('path', '-')}",
-            f"  updated_at: {_fmt_time(snapshot.get('updated_at', 0), with_date=True)}",
-            f"  status: {snapshot.get('running_label', 'idle')}",
-            f"  provider/model: {snapshot.get('provider', '-')}/{snapshot.get('model', '-')}",
-            f"  turns: {snapshot.get('history_length', 0)}",
-            f"  tokens: {snapshot.get('tokens', 0)}",
-            f"  mode: {variables.get('agent_mode', 'default') if isinstance(variables, dict) else 'default'}",
-            f"  yolo: {variables.get('yolo', False) if isinstance(variables, dict) else False}",
-            f"  workspace folders: {len(folder_context.get('folders', [])) if isinstance(folder_context, dict) else 0}",
-            f"  workspace files: {len(folder_context.get('files', [])) if isinstance(folder_context, dict) else 0}",
-        ]
-    )
+    # layers
+    lines = ["context layers:"]
+    for layer in snapshot.get("layers", []):
+        lines.append(f"  {layer.get('layer')}: {layer.get('name')} size={layer.get('size')}")
     return lines
 
 
-def _build_feature_board(snapshot: dict):
-    payload = snapshot.get("payload", {}) if isinstance(snapshot, dict) else {}
-    feature = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
-    plan = feature.get("feature_plan", {}) if isinstance(feature, dict) else {}
-    tasks = plan.get("phases", []) if isinstance(plan, dict) else []
-
-    table = Table(title="Feature Board (Jira-style)", expand=True, row_styles=["", "dim"])
-    statuses = ["not_started", "in_progress", "blocked", "completed"]
-    for status in statuses:
-        table.add_column(status, style=_status_style(status))
-
-    by_status = {status: [] for status in statuses}
-    for task in tasks if isinstance(tasks, list) else []:
-        if not isinstance(task, dict):
-            continue
-        status = str(task.get("status", "not_started") or "not_started")
-        key = status if status in by_status else "not_started"
-        verified = len(task.get("verified_exit_criteria", []) or [])
-        total_exit = len(task.get("exit_criteria", []) or [])
-        percent = int((verified / max(1, total_exit)) * 100)
-        bar_count = min(10, int(round(percent / 10)))
-        meter = "█" * bar_count + "░" * (10 - bar_count)
-        card = (
-            f"#{task.get('number', task.get('id', '?'))} {task.get('title', 'untitled')}\n"
-            f"{meter} {percent:>3}% ({verified}/{max(total_exit, 1)})"
-        )
-        by_status[key].append(card)
-
-    rows = max(1, max((len(items) for items in by_status.values()), default=1))
-    for idx in range(rows):
-        table.add_row(*[by_status[s][idx] if idx < len(by_status[s]) else "" for s in statuses])
-    return table
-
-
 def _render_detail(snapshot: dict, state: WatchState) -> Panel:
-    active_tab = DETAIL_TABS[state.tab_index % len(DETAIL_TABS)]
-    if active_tab == "board":
-        return Panel(_build_feature_board(snapshot), title=f"Session Detail — {snapshot.get('name', '-')}", subtitle="Tab: board")
-
-    lines = _detail_lines(snapshot, active_tab)
+    tab = DETAIL_TABS[state.tab_index % len(DETAIL_TABS)]
+    lines = _detail_lines(snapshot, tab)
     if state.search_query:
-        query = state.search_query.lower()
-        lines = [line for line in lines if query in line.lower()]
-        if not lines:
-            lines = [f"No matches for '{state.search_query}'."]
-    if lines:
-        state.detail_cursor = max(0, min(state.detail_cursor, len(lines) - 1))
-    else:
-        state.detail_cursor = 0
+        q = state.search_query.lower()
+        lines = [line for line in lines if q in line.lower()] or [f"No matches for '{state.search_query}'."]
+    state.detail_cursor = max(0, min(state.detail_cursor, max(0, len(lines) - 1)))
     start = max(0, min(state.detail_offset, max(0, len(lines) - 1)))
-    window = lines[start : start + 18]
-    search_suffix = f" | search: {state.search_query}" if state.search_query else ""
-    subtitle = (
-        f"Tab: {active_tab} | lines {start + 1}-{start + len(window)}{search_suffix}"
-        if lines
-        else f"Tab: {active_tab}{search_suffix}"
-    )
-    rendered_lines = []
+    window = lines[start : start + 22]
+    out = []
     for idx, line in enumerate(window, start=start):
-        prefix = "▶" if idx == state.detail_cursor else " "
-        rendered_lines.append(f"{prefix} {idx:>4} {line}")
-    selected = lines[state.detail_cursor] if lines else "(empty)"
-    if state.expand_focused:
-        expanded_text = str(selected)
-        start_idx = max(0, state.focused_offset)
-        expanded_window = expanded_text[start_idx : start_idx + 1200]
-        selected_panel = Panel(
-            expanded_window or "(empty)",
-            title=f"Focused Item (expanded, offset {start_idx})",
-            border_style="magenta",
-        )
-    else:
-        selected_panel = Panel(
-            _truncate(selected, 500),
-            title="Focused Item",
-            border_style="magenta",
-        )
-    body = Group(
-        Panel("\n".join(rendered_lines) if rendered_lines else "(empty)", title="Entries", border_style="cyan"),
-        selected_panel,
+        out.append(f"{'▶' if idx == state.detail_cursor else ' '} {idx:>4} {line}")
+    return Panel(
+        "\n".join(out) if out else "(empty)",
+        title=f"{snapshot.get('name', '-')}: {tab}",
+        subtitle=f"lines {start + 1}-{start + len(window)}",
+        border_style="cyan",
     )
-    return Panel(body, title=f"Session Detail — {snapshot.get('name', '-')}", subtitle=subtitle, box=box.ROUNDED)
 
 
 def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
     if state.search_mode:
-        if key in ("\r", "\n"):
+        if key in ("\n", "\r"):
             state.search_mode = False
             state.detail_offset = 0
+            state.detail_cursor = 0
             return state
         if key in ("\x1b",):
             state.search_mode = False
@@ -505,252 +299,166 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
     if key in ("q", "\x03"):
         state.should_exit = True
         return state
-    if key in ("?",):
-        state.help_overlay = not state.help_overlay
-        return state
-    if key in ("e",):
-        state.expand_focused = not state.expand_focused
-        state.focused_offset = 0
-        return state
-    if key in ("s",):
-        ordering = ["updated", "tokens", "name"]
-        idx = ordering.index(state.sort_key) if state.sort_key in ordering else 0
-        state.sort_key = ordering[(idx + 1) % len(ordering)]
-        return state
-    if key in ("r",):
-        state.running_only = not state.running_only
-        state.selected_index = 0
-        state.detail_offset = 0
-        return state
     if key in ("/",):
         state.search_mode = True
         state.search_query = ""
         return state
     if key in ("c",):
         state.search_query = ""
-        state.search_mode = False
         return state
-    if key in ("\r", "\n"):
+    if key in ("\n", "\r"):
         state.in_session_view = True
         state.detail_offset = 0
         state.detail_cursor = 0
         return state
     if key in ("\x1b", "b"):
         state.in_session_view = False
-        state.detail_offset = 0
+        return state
+    if key in ("s",):
+        order = ["name", "updated", "tokens"]
+        idx = order.index(state.sort_key) if state.sort_key in order else 0
+        state.sort_key = order[(idx + 1) % len(order)]
+        return state
+    if key in ("r",):
+        state.running_only = not state.running_only
+        state.selected_index = 0
         return state
     if key in ("\x1b[A", "k"):
         if state.in_session_view:
             state.detail_cursor = max(0, state.detail_cursor - 1)
-            state.detail_offset = max(0, min(state.detail_offset, state.detail_cursor))
+            state.detail_offset = min(state.detail_offset, state.detail_cursor)
         else:
             state.selected_index = max(0, state.selected_index - 1)
-            state.detail_offset = 0
         return state
     if key in ("\x1b[B", "j"):
         if state.in_session_view:
             state.detail_cursor += 1
-            if state.detail_cursor >= state.detail_offset + 18:
+            if state.detail_cursor >= state.detail_offset + 22:
                 state.detail_offset += 1
         else:
             state.selected_index = min(max(0, total_sessions - 1), state.selected_index + 1)
-            state.detail_offset = 0
         return state
     if key in ("\x1b[C", "l"):
         state.tab_index = (state.tab_index + 1) % len(DETAIL_TABS)
         state.detail_offset = 0
+        state.detail_cursor = 0
         return state
     if key in ("\x1b[D", "h"):
         state.tab_index = (state.tab_index - 1) % len(DETAIL_TABS)
         state.detail_offset = 0
+        state.detail_cursor = 0
         return state
     if key in ("n", "\x1b[6~"):
-        if state.expand_focused:
-            state.focused_offset += 300
-        else:
-            state.detail_offset += 8
-            state.detail_cursor = max(state.detail_cursor, state.detail_offset)
+        state.detail_offset += 8
+        state.detail_cursor = max(state.detail_cursor, state.detail_offset)
         return state
     if key in ("p", "\x1b[5~"):
-        if state.expand_focused:
-            state.focused_offset = max(0, state.focused_offset - 300)
-        else:
-            state.detail_offset = max(0, state.detail_offset - 8)
-            state.detail_cursor = max(0, min(state.detail_cursor, state.detail_offset + 17))
+        state.detail_offset = max(0, state.detail_offset - 8)
+        state.detail_cursor = max(0, min(state.detail_cursor, state.detail_offset + 21))
         return state
     return state
 
 
-def _render_watch(
-    session_root: str,
-    refresh_seconds: float,
-    state: WatchState,
-    snapshots: list[dict] | None = None,
-) -> Group:
+def _sort_snapshots(snapshots: list[dict], sort_key: str) -> list[dict]:
+    if sort_key == "updated":
+        return sorted(snapshots, key=lambda s: float(s.get("updated_at", 0) or 0), reverse=True)
+    if sort_key == "tokens":
+        return sorted(snapshots, key=lambda s: int(s.get("tokens", 0) or 0), reverse=True)
+    return sorted(snapshots, key=lambda s: str(s.get("name", "")).lower())
+
+
+def _render_watch(session_root: str, refresh_seconds: float, state: WatchState, snapshots: list[dict] | None = None) -> Group:
     snapshots = snapshots if isinstance(snapshots, list) else load_session_snapshots(session_root)
-    if state.running_only:
-        snapshots = [item for item in snapshots if item.get("running")]
-    if state.sort_key == "updated":
-        snapshots = sorted(
-            snapshots,
-            key=lambda item: float(item.get("updated_at", 0) or 0),
-            reverse=True,
-        )
-    elif state.sort_key == "tokens":
-        snapshots = sorted(snapshots, key=lambda item: int(item.get("tokens", 0) or 0), reverse=True)
-    else:
-        snapshots = sorted(
-            snapshots, key=lambda item: str(item.get("name", "")).lower()
-        )
-    now_local = datetime.now().astimezone()
-    now_text = now_local.strftime(f"%Y-%m-%d %H:%M:%S {now_local.tzname() or 'local'}")
+    snapshots = _sort_snapshots(
+        [s for s in snapshots if (s.get("running") or not state.running_only)],
+        state.sort_key,
+    )
+    now = _local_now()
+    now_text = now.strftime(f"%Y-%m-%d %H:%M:%S {now.tzname() or 'local'}")
 
     if not snapshots:
         return Group(
             Panel(
-                Text(
-                    "No saved sessions yet.\nStart Mu-CLI normally and create a session.",
-                    justify="center",
-                ),
+                "No sessions found.\nStart MuCLI normally to create session state.",
                 title="μCLI Watch",
-                border_style="cyan",
-            ),
-            Text(f"Session path: {session_root}\nRefresh: {refresh_seconds:.1f}s"),
-        )
-
-    state.selected_index = min(state.selected_index, len(snapshots) - 1)
-    current = snapshots[state.selected_index]
-    state.detail_offset = max(0, state.detail_offset)
-
-    table = Table(title="Session Activity", expand=True, box=box.SIMPLE_HEAVY, row_styles=["", "dim"])
-    table.add_column(" ", no_wrap=True, width=2)
-    table.add_column("Session", style="bold cyan", no_wrap=True)
-    table.add_column("State", no_wrap=True)
-    table.add_column("Mode", style="magenta", no_wrap=True)
-    table.add_column("Feature", style="yellow")
-    table.add_column("Turns", justify="right", style="green", no_wrap=True)
-    table.add_column("Tokens", justify="right", style="green", no_wrap=True)
-    table.add_column("Provider/Model", style="blue")
-    table.add_column("Latest Activity", style="white")
-    table.add_column("Updated", style="dim", no_wrap=True)
-
-    for idx, item in enumerate(snapshots):
-        pointer = "▶" if idx == state.selected_index else " "
-        status_label = "running" if item.get("running") else "idle"
-        status = f"[{_status_style(status_label)}]{status_label}[/{_status_style(status_label)}]"
-        table.add_row(
-            pointer,
-            str(item.get("name", "-")),
-            status,
-            str(item.get("agent_mode", "default")),
-            str(item.get("feature", "-")),
-            str(item.get("history_length", 0)),
-            f"{int(item.get('tokens', 0)):,}",
-            f"{item.get('provider', '-')}/{item.get('model', '-')}",
-            _truncate(str(item.get("activity", "-")), 68),
-            _fmt_time(float(item.get("updated_at", 0) or 0)),
-        )
-
-    tabs = " | ".join(
-        f"[bold cyan]{name}[/bold cyan]" if i == state.tab_index else name
-        for i, name in enumerate(DETAIL_TABS)
-    )
-    running_count = sum(1 for item in snapshots if item.get("running"))
-    features_count = sum(1 for item in snapshots if item.get("feature") not in ("", "-"))
-    token_total = sum(int(item.get("tokens", 0) or 0) for item in snapshots)
-    spark = _sparkline([int(item.get("updated_at", 0) or 0) for item in snapshots[-12:]])
-    stat_cards = Columns(
-        [
-            Panel(
-                f"[bold cyan]{len(snapshots)}[/bold cyan]\nSessions",
-                border_style="cyan",
-                padding=(0, 2),
-            ),
-            Panel(
-                f"[bold green]{running_count}[/bold green]\nRunning",
-                border_style="green",
-                padding=(0, 2),
-            ),
-            Panel(
-                f"[bold yellow]{features_count}[/bold yellow]\nWith Features",
                 border_style="yellow",
-                padding=(0, 2),
             ),
-            Panel(
-                f"[bold magenta]{token_total:,}[/bold magenta]\nTotal Tokens",
-                border_style="magenta",
-                padding=(0, 2),
-            ),
-            Panel(
-                f"[bold white]{spark or '—'}[/bold white]\nUpdate Pulse",
-                border_style="blue",
-                padding=(0, 2),
-            ),
+            Text(f"path: {session_root}"),
+        )
+
+    state.selected_index = min(max(0, state.selected_index), len(snapshots) - 1)
+    selected = snapshots[state.selected_index]
+
+    table = Table(title="Live Session Reporting", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column(" ")
+    table.add_column("Session", style="bold cyan")
+    table.add_column("State")
+    table.add_column("Reason", style="dim")
+    table.add_column("Mode", style="magenta")
+    table.add_column("Feature", style="yellow")
+    table.add_column("Turns", justify="right")
+    table.add_column("Tokens", justify="right")
+    table.add_column("Last Activity")
+    table.add_column("Updated")
+    for i, row in enumerate(snapshots):
+        table.add_row(
+            "▶" if i == state.selected_index else " ",
+            str(row.get("name", "-")),
+            "[green]active[/green]" if row.get("running") else "[dim]idle[/dim]",
+            str(row.get("running_reason", "-")),
+            str(row.get("agent_mode", "-")),
+            str(row.get("feature", "-")),
+            str(row.get("history_length", 0)),
+            f"{int(row.get('tokens', 0)):,}",
+            _truncate(row.get("activity", "-"), 72),
+            _fmt_ts(row.get("updated_at", 0)),
+        )
+
+    running = sum(1 for s in snapshots if s.get("running"))
+    blocked = sum(1 for s in snapshots if str(s.get("feature_status", "")).lower() == "blocked")
+    cards = Columns(
+        [
+            Panel(f"[bold]{len(snapshots)}[/bold]\nSessions", border_style="cyan"),
+            Panel(f"[bold green]{running}[/bold green]\nActive", border_style="green"),
+            Panel(f"[bold red]{blocked}[/bold red]\nBlocked features", border_style="red"),
+            Panel(f"[bold magenta]{sum(int(s.get('tokens', 0) or 0) for s in snapshots):,}[/bold magenta]\nTotal tokens", border_style="magenta"),
         ],
         expand=True,
     )
-    mode_text = "session view" if state.in_session_view else "board list"
-    search_text = (
-        f"\nSearch: [yellow]{state.search_query}[/yellow]"
-        if state.search_query
-        else ""
+
+    tabs = " | ".join(
+        f"[bold cyan]{tab}[/bold cyan]" if idx == state.tab_index else tab
+        for idx, tab in enumerate(DETAIL_TABS)
     )
-    if state.search_mode:
-        search_text = f"\nSearch mode: [yellow]{state.search_query}[/yellow]_"
     header = Panel(
         Text.from_markup(
-            f"[bold cyan]μCLI Watch[/bold cyan] ✨ [dim]read-only realtime command center[/dim]\n"
-            f"Sessions: [cyan]{len(snapshots)}[/cyan] • "
-            f"Refresh: [cyan]{refresh_seconds:.1f}s[/cyan] • Now: [cyan]{now_text}[/cyan]\n"
-            f"Mode: [cyan]{mode_text}[/cyan] • Enter open session • Esc/b back • sort:{state.sort_key} • running-only:{state.running_only} • expand:{state.expand_focused}\n"
-            f"Keys: ↑/↓ or j/k navigate • ←/→ or h/l tabs • n/p page (or focused scroll) • e expand focus • / find • c clear-find • s sort • r running-filter • ? help • q quit\n"
-            f"Tabs: {tabs}{search_text}"
+            f"[bold cyan]μCLI Watch[/bold cyan] · live reporting\n"
+            f"now: [cyan]{now_text}[/cyan] · refresh: [cyan]{refresh_seconds:.1f}s[/cyan] · sort: [cyan]{state.sort_key}[/cyan] · running-only: [cyan]{state.running_only}[/cyan]\n"
+            "keys: j/k select · Enter open · b/Esc back · h/l tabs · / search · c clear · s sort · r running filter · q quit\n"
+            f"tabs: {tabs}"
         ),
-        border_style="bright_cyan",
-        box=box.DOUBLE,
+        border_style="cyan",
     )
-    footer = Text(f"Session path: {session_root}", style="dim")
-    if state.help_overlay:
-        help_panel = Panel(
-            "[bold]μCLI Watch Controls[/bold]\n"
-            "• Enter: open selected session detail\n"
-            "• Esc/b: back to session list\n"
-            "• j/k or arrows: move selection/cursor\n"
-            "• h/l or arrows: switch tabs\n"
-            "• n/p: page detail list\n"
-            "• / then type then Enter: search/filter active tab\n"
-            "• c: clear search\n"
-            "• e: expand/collapse focused item full content\n"
-            "• s: cycle sorting (updated/tokens/name)\n"
-            "• r: toggle running-only filter\n"
-            "• ?: toggle this help\n"
-            "• q: quit",
-            border_style="yellow",
-            box=box.DOUBLE_EDGE,
-            title="Help Overlay",
-        )
-        if state.in_session_view:
-            return Group(header, stat_cards, _render_detail(current, state), help_panel, footer)
-        return Group(header, stat_cards, table, help_panel, footer)
+    footer = Text(f"path: {session_root}", style="dim")
     if state.in_session_view:
-        return Group(header, stat_cards, _render_detail(current, state), footer)
-    return Group(header, stat_cards, table, footer)
+        return Group(header, cards, _render_detail(selected, state), footer)
+    return Group(header, cards, table, footer)
 
 
 class _KeyReader:
     def __enter__(self):
         self.enabled = sys.stdin.isatty()
         self.fd = None
-        self.old_settings = None
+        self.old = None
         if self.enabled:
             self.fd = sys.stdin.fileno()
-            self.old_settings = termios.tcgetattr(self.fd)
+            self.old = termios.tcgetattr(self.fd)
             tty.setcbreak(self.fd)
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if self.enabled and self.fd is not None and self.old_settings is not None:
-            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
+        if self.enabled and self.fd is not None and self.old is not None:
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
 
     def read_key(self, timeout: float = 0.0) -> str | None:
         if not self.enabled:
@@ -773,24 +481,21 @@ def run_watch_mode(session_root: str, refresh_seconds: float = 1.5) -> None:
     refresh_seconds = max(0.2, float(refresh_seconds or 1.5))
     state = WatchState()
     snapshots = load_session_snapshots(session_root)
-    next_snapshot_refresh = 0.0
+    next_refresh = 0.0
 
-    with _KeyReader() as keys, Live(
+    with _KeyReader() as reader, Live(
         _render_watch(session_root, refresh_seconds, state, snapshots),
         refresh_per_second=8,
         screen=True,
     ) as live:
         while not state.should_exit:
             now = time.time()
-            if now >= next_snapshot_refresh:
+            if now >= next_refresh:
                 snapshots = load_session_snapshots(session_root)
-                next_snapshot_refresh = now + refresh_seconds
-
-            key = keys.read_key(timeout=0.05)
+                next_refresh = now + refresh_seconds
+            key = reader.read_key(timeout=0.05)
             if key:
                 state = _handle_key(state, key, len(snapshots))
                 if state.should_exit:
                     break
-                live.update(_render_watch(session_root, refresh_seconds, state, snapshots))
-                continue
             live.update(_render_watch(session_root, refresh_seconds, state, snapshots))

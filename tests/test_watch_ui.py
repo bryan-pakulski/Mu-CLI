@@ -70,7 +70,7 @@ def test_detail_lines_exposes_memory_and_metadata_tabs(tmp_path):
     variables_lines = "\n".join(_detail_lines(snap, "variables"))
     assert "remember this" in memory_lines
     assert "scratch note" in memory_lines
-    assert "workspace folders: 1" in metadata_lines
+    assert "L1: Workspace map size=2" in metadata_lines
     assert "agent_mode" in variables_lines
 
 
@@ -84,8 +84,6 @@ def test_enter_opens_session_view_and_search_mode():
     state = _handle_key(state, "\n", 2)
     assert state.search_mode is False
     assert state.search_query == "m"
-    state = _handle_key(state, "e", 2)
-    assert state.expand_focused is True
 
 
 def test_render_detail_board_tab(tmp_path):

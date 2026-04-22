@@ -1824,7 +1824,7 @@ class Session:
                 "An error occurred during the LLM call. Would you like to retry?",
                 default=True,
             )
-        # No CLI UI available (GUI/server mode) — auto-retry
+        # No CLI UI available (server mode) — auto-retry
         return True
 
     def _provider_error_recovery_choice(self) -> str:
@@ -1877,7 +1877,7 @@ class Session:
         if any(marker in message for marker in transient_markers):
             return True
         # Treat most HTTP 4xx/5xx from remote providers as transient (retryable)
-        # so the agent auto-recovers without prompting the user in GUI mode.
+        # so the agent auto-recovers without prompting the user in server mode.
         for code in range(400, 600):
             if str(code) in message:
                 return True

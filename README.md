@@ -16,7 +16,8 @@
 - **Feature Plan Engine**: Feature mode can persist phased plans in `documentation/feature_req_<id>/`, pause on structured blockers, and drive implementation/review loops from those plan files.
 - **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
-- **Server Mode for GUIs**: Launch μCLI with an HTTP API so desktop/web clients can drive sessions, commands, and tool execution.
+- **Server Mode for Integrations**: Launch μCLI with an HTTP API so external clients can drive sessions, commands, and tool execution.
+- **Realtime Watch Mode**: Launch a read-only TUI monitor (`--watch`) that continuously shows session status, active feature progress, and latest agent activity.
 
 ## Installation
 
@@ -50,6 +51,11 @@ python mucli.py
 Run the server/API mode using:
 ```bash
 python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
+```
+
+Run the realtime watcher mode using:
+```bash
+python mucli.py --watch
 ```
 
 ### Getting Started
@@ -97,9 +103,11 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/splash` | | Show the welcome splash screen |
 | `/quit` | `/q` | Exit the application |
 
+`--watch` mode is a read-only dashboard (non-interactive) and does not accept slash commands.
+
 ## Server Mode
 
-μCLI can run as a lightweight HTTP server so a GUI can interact with the same session, command, and tooling primitives used by the terminal UI.
+μCLI can run as a lightweight HTTP server so API clients can interact with the same session, command, and tooling primitives used by the terminal UI.
 
 ### Starting the server
 
@@ -117,11 +125,11 @@ Notes:
 
 - Use `--session <name>` to reuse an existing saved session instead of the default session.
 - Use `--workspace <path>` multiple times to preload one or more folders into context.
-- Use `--yolo` if you want server-driven tool calls to auto-approve modifying tools for a trusted local GUI.
+- Use `--yolo` if you want server-driven tool calls to auto-approve modifying tools for trusted local integrations.
 
 ### API endpoints
 
-For a higher-level assessment of whether the current server stack is ready for GUI work, see `documentation/server_architecture_review.md`.
+For a higher-level assessment of the server stack, see `documentation/server_architecture_review.md`.
 For the phased feature workflow and plan file format, see `documentation/feature_plan_engine.md`.
 
 ### Feature CLI loop quickstart
@@ -165,25 +173,9 @@ For the phased feature workflow and plan file format, see `documentation/feature
 - `POST /api/feature-loop/resolve` — resume a paused feature loop after the user supplies blocker context.
 - `POST /api/message` — send a normal chat turn to the active session.
 - `POST /api/command` — execute a slash command such as `/folder .`, `/set yolo true`, or `/tool list`.
-- `POST /api/tool` — invoke a tool directly with JSON arguments for GUI workflows that want structured tool access. Structured tool responses include envelope fields such as `error`, `error_code`, `modified_files`, `artifacts`, and `telemetry`.
+- `POST /api/tool` — invoke a tool directly with JSON arguments for integration workflows that want structured tool access. Structured tool responses include envelope fields such as `error`, `error_code`, `modified_files`, `artifacts`, and `telemetry`.
 
 For provider switching, you can still use `POST /api/command` with a slash command such as `{"command":"/provider ollama"}`.
-
-### Lightweight GUI launcher
-
-You can launch the API server and a compact reactive browser GUI together:
-
-```bash
-./start_gui.sh
-```
-
-Optional flags are forwarded to `gui/launcher.py`:
-
-```bash
-./start_gui.sh --server-host 127.0.0.1 --server-port 8765 --gui-host 127.0.0.1 --gui-port 4173 --provider openai --model gpt-5
-```
-
-The GUI is served from `gui/` and logs with rollover are written to `~/.mucli/gui/logs/`.
 
 ### Example requests
 
@@ -195,7 +187,7 @@ curl -X POST http://127.0.0.1:8765/api/message \
   -d '{"text":"Summarize the current workspace."}'
 ```
 
-Send an async chat message for GUI workflows:
+Send an async chat message for async client workflows:
 
 ```bash
 curl -X POST http://127.0.0.1:8765/api/message \
@@ -269,7 +261,7 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 - `save_memory`, `search_memory`, `list_memory`: Persist and retrieve concise high-value notes during an agentic task.
 - `save_scratchpad`, `search_scratchpad`, `list_scratchpad`, `clear_scratchpad`: Manage turn-local notes separately from durable memory.
 - Structured tool result summaries are attached during agentic execution so the model can reason over smaller schemas instead of large raw blobs.
-- Structured tool result envelopes now track normalized error state, modified files, artifacts, and telemetry so session, server, and future GUI consumers can share the same result contract.
+- Structured tool result envelopes now track normalized error state, modified files, artifacts, and telemetry so session and server consumers can share the same result contract.
 - **Git Suite**: `git_init`, `git_status`, `git_log`, `git_diff`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_merge_request`.
 
 

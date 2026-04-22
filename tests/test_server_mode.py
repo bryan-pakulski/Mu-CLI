@@ -576,6 +576,35 @@ def test_get_feature_prompt_context_returns_task_and_progress():
     assert context["overall_total"] == 2
 
 
+def test_get_feature_prompt_context_reports_completed_progress():
+    session = build_test_session()
+    session.session_manager.set_feature_state(
+        {
+            "status": "completed",
+            "feature_plan": {
+                "phases_completed": True,
+                "phases": [
+                    {
+                        "number": 1,
+                        "title": "Implement fixtures/sipp.py",
+                        "status": "completed",
+                        "task_counts": {"completed": 2, "in_progress": 0, "not_started": 0},
+                    }
+                ],
+            },
+        }
+    )
+
+    context = get_feature_prompt_context(session)
+
+    assert context["status"] == "awaiting_approval"
+    assert context["task"] == "completed"
+    assert context["phase_done"] == 1
+    assert context["phase_total"] == 1
+    assert context["overall_done"] == 1
+    assert context["overall_total"] == 1
+
+
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):
     session = build_test_session()
     workspace = tmp_path / "workspace"

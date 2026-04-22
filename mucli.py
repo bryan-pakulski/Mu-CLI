@@ -156,6 +156,12 @@ def get_feature_prompt_context(session):
     tasks = plan.get("phases", [])
     overall_total = max(1, len(tasks))
     overall_done = sum(1 for task in tasks if task.get("status") == "completed")
+    all_completed = bool(tasks) and (
+        bool(plan.get("phases_completed"))
+        or bool(plan.get("tasks_completed"))
+        or overall_done >= len(tasks)
+        or str(feature_state.get("status", "")).strip().lower() == "completed"
+    )
 
     next_task = plan.get("next_task") or plan.get("next_phase")
     active_task = None
@@ -174,7 +180,11 @@ def get_feature_prompt_context(session):
     phase_done = 0
     phase_total = 1
     task_title = "n/a"
-    if isinstance(active_task, dict):
+    if all_completed:
+        phase_done = 1
+        phase_total = 1
+        task_title = "completed"
+    elif isinstance(active_task, dict):
         task_title = str(active_task.get("title", "") or "").strip() or "n/a"
         counts = active_task.get("task_counts", {}) or {}
         phase_done = int(counts.get("completed", 0) or 0)

@@ -2559,6 +2559,7 @@ class Session:
                     should_collate = (
                         part.tool_name in COLLATED_TOOLS
                         and self.variables.get("collation_enabled", True)
+                        and len(tool_calls) > 1
                     )
 
                     if is_flush:

@@ -580,6 +580,7 @@ def test_single_tool_call_returns_immediate_structured_result(tmp_path, monkeypa
 
     assert tool_result["data"].get("collated") is not True
     assert "important line" in tool_result["raw"]
+    assert tool_result["telemetry"]["raw_line_count"] == 50
 
 
 def test_memory_round_trip_via_session_manager(tmp_path, monkeypatch):

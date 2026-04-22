@@ -32,16 +32,17 @@ class RichUI:
             self.console.print(
                 Panel(
                     content,
-                    title=f"   User  ·  {ts} ",
-                    style="bold cyan",
-                    box=box.HEAVY,
+                    title="User",
+                    style="blue",
+                    box=box.ROUNDED,
                     title_align="right",
-                    border_style="cyan",
                 )
             )
         else:
-            header = f"[bold magenta]󰚩 Assistant ({model_name or 'model'})[/bold magenta] [dim]· {ts}[/dim]"
-            self.console.print(Panel(header, box=box.MINIMAL, border_style="magenta"))
+            if model_name:
+                self.console.print(f"\nAssistant ({model_name}) [{ts}]:")
+            else:
+                self.console.print(f"\nAssistant [{ts}]:")
             render_response(content)
 
     def get_input(
@@ -102,10 +103,10 @@ class RichUI:
         return choice, reason
 
     def show_error(self, message):
-        self.console.print(f"[bold red]✖[/bold red] [red]{message}[/red]")
+        self.console.print(f"[red]{message}[/red]")
 
     def show_info(self, message):
-        self.console.print(f"[bold cyan]ℹ[/bold cyan] [blue]{message}[/blue]")
+        self.console.print(f"[blue]{message}[/blue]")
 
     def build_meter(
         self,

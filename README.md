@@ -18,6 +18,7 @@
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for Integrations**: Launch μCLI with an HTTP API so external clients can drive sessions, commands, and tool execution.
 - **Realtime Watch Mode**: Launch a read-only TUI command center (`--watch`) with KPI cards, update pulse sparkline, Jira-style feature board, per-session drill-down, chat/memory/layer/metadata views, and live status (running/idle).
+- **Styled Terminal UX**: Both chat and watch UIs use enhanced rich styling (status glyphs, highlighted headers, and neon panel accents) for higher-signal terminal workflows.
 
 ## Installation
 

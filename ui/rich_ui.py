@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import datetime
 import os
 import select
 import sys
@@ -25,19 +26,21 @@ class RichUI:
         self.input_handler = InputHandler()
 
     def render_message(self, role, content, model_name=None):
+        ts = datetime.utcnow().strftime("%H:%M:%S UTC")
         if role == "user":
             self.console.print(
                 Panel(
                     content,
-                    title="User",
-                    style="blue",
-                    box=box.ROUNDED,
+                    title=f"   User  ·  {ts} ",
+                    style="bold cyan",
+                    box=box.HEAVY,
                     title_align="right",
+                    border_style="cyan",
                 )
             )
         else:
-            if model_name:
-                self.console.print(f"\nAssistant ({model_name}):")
+            header = f"[bold magenta]󰚩 Assistant ({model_name or 'model'})[/bold magenta] [dim]· {ts}[/dim]"
+            self.console.print(Panel(header, box=box.MINIMAL, border_style="magenta"))
             render_response(content)
 
     def get_input(
@@ -98,10 +101,10 @@ class RichUI:
         return choice, reason
 
     def show_error(self, message):
-        self.console.print(f"[red]{message}[/red]")
+        self.console.print(f"[bold red]✖[/bold red] [red]{message}[/red]")
 
     def show_info(self, message):
-        self.console.print(f"[blue]{message}[/blue]")
+        self.console.print(f"[bold cyan]ℹ[/bold cyan] [blue]{message}[/blue]")
 
     def build_meter(
         self,

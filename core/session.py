@@ -7,6 +7,7 @@ import re
 import random
 import shutil
 import traceback
+import hashlib
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
@@ -1889,6 +1890,34 @@ class Session:
                 return True
         return False
 
+    @staticmethod
+    def _tool_call_fingerprint(tool_name: str, tool_args, *, pattern_only: bool = False) -> str:
+        name = str(tool_name or "").strip().lower() or "tool"
+        if pattern_only:
+            return name
+        try:
+            payload = json.dumps(
+                tool_args or {},
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            payload = str(tool_args)
+        digest = hashlib.sha1(f"{name}|{payload}".encode("utf-8")).hexdigest()[:12]
+        return f"{name}:{digest}"
+
+    @staticmethod
+    def _is_repeated_tool_sequence(
+        sequence_history: list[str], repeat_threshold: int = 3
+    ) -> bool:
+        if len(sequence_history) < repeat_threshold:
+            return False
+        tail = sequence_history[-repeat_threshold:]
+        if not all(tail):
+            return False
+        return len(set(tail)) == 1
+
     def _provider_generate_with_retry(
         self,
         *,
@@ -2164,12 +2193,16 @@ class Session:
 
         logger.info(f"Starting agentic loop (max_iterations={max_iterations})")
         provider_bad_request_retried = False
+        exact_tool_sequence_history: list[str] = []
+        pattern_tool_sequence_history: list[str] = []
 
         while iteration < max_iterations:
             iteration += 1
             logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
             current_tool_name = None
             current_tool_args = None
+            iteration_tool_exact_fingerprints: list[str] = []
+            iteration_tool_pattern: list[str] = []
 
             try:
                 dynamic_system_prompt = base_system_prompt
@@ -2414,6 +2447,14 @@ class Session:
                 for i, part in enumerate(tool_calls):
                     current_tool_name = part.tool_name
                     current_tool_args = part.tool_args
+                    iteration_tool_exact_fingerprints.append(
+                        self._tool_call_fingerprint(part.tool_name, part.tool_args)
+                    )
+                    iteration_tool_pattern.append(
+                        self._tool_call_fingerprint(
+                            part.tool_name, part.tool_args, pattern_only=True
+                        )
+                    )
                     approval_plan = approval_plans.get(i)
                     needs_approval = approval_plan is not None
                     if needs_approval:
@@ -2614,6 +2655,51 @@ class Session:
                 tool_result_msg = {"role": "tool", "parts": tool_result_parts}
                 self.session_manager.history.append(tool_result_msg)
                 self.session_manager.save_history(self.folder_context)
+
+                if iteration_tool_exact_fingerprints:
+                    exact_seq = " -> ".join(iteration_tool_exact_fingerprints)
+                    pattern_seq = " -> ".join(iteration_tool_pattern)
+                    exact_tool_sequence_history.append(exact_seq)
+                    pattern_tool_sequence_history.append(pattern_seq)
+
+                    exact_loop_detected = self._is_repeated_tool_sequence(
+                        exact_tool_sequence_history, repeat_threshold=3
+                    )
+                    pattern_loop_detected = self._is_repeated_tool_sequence(
+                        pattern_tool_sequence_history, repeat_threshold=3
+                    )
+
+                    if exact_loop_detected or pattern_loop_detected:
+                        loop_kind = "exact" if exact_loop_detected else "pattern"
+                        warning_text = (
+                            "Loop detection triggered: repeated tool-call sequence "
+                            f"detected 3x ({loop_kind})."
+                        )
+                        if self.ui:
+                            self.ui.show_error(warning_text)
+                        logger.warning(warning_text)
+                        loop_break_msg = {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "LOOP DETECTED: You repeated the same tool-call sequence three times. "
+                                        "You MUST break out now. Do NOT repeat this sequence again. "
+                                        "Take a materially different action: apply a concrete code change, "
+                                        "run a different validation path, or raise_blocker with exact missing requirements. "
+                                        "Then explain what changed and why this breaks the loop."
+                                    ),
+                                }
+                            ],
+                        }
+                        self.session_manager.history.append(loop_break_msg)
+                        self.session_manager.save_history(self.folder_context)
+                        messages = self._build_messages_from_history(
+                            self._prepare_runtime_history(turn_start_index),
+                            {"role": "system", "parts": []},
+                        )[:-1]
+                        continue
 
                 messages = self._build_messages_from_history(
                     self._prepare_runtime_history(turn_start_index),

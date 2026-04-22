@@ -357,8 +357,13 @@ def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
     return state
 
 
-def _render_watch(session_root: str, refresh_seconds: float, state: WatchState) -> Group:
-    snapshots = load_session_snapshots(session_root)
+def _render_watch(
+    session_root: str,
+    refresh_seconds: float,
+    state: WatchState,
+    snapshots: list[dict] | None = None,
+) -> Group:
+    snapshots = snapshots if isinstance(snapshots, list) else load_session_snapshots(session_root)
     now_text = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     if not snapshots:
@@ -459,18 +464,25 @@ class _KeyReader:
 def run_watch_mode(session_root: str, refresh_seconds: float = 1.5) -> None:
     refresh_seconds = max(0.2, float(refresh_seconds or 1.5))
     state = WatchState()
+    snapshots = load_session_snapshots(session_root)
+    next_snapshot_refresh = 0.0
 
     with _KeyReader() as keys, Live(
-        _render_watch(session_root, refresh_seconds, state),
+        _render_watch(session_root, refresh_seconds, state, snapshots),
         refresh_per_second=8,
         screen=True,
     ) as live:
         while not state.should_exit:
+            now = time.time()
+            if now >= next_snapshot_refresh:
+                snapshots = load_session_snapshots(session_root)
+                next_snapshot_refresh = now + refresh_seconds
+
             key = keys.read_key(timeout=0.05)
             if key:
-                snapshots = load_session_snapshots(session_root)
                 state = _handle_key(state, key, len(snapshots))
                 if state.should_exit:
                     break
-            live.update(_render_watch(session_root, refresh_seconds, state))
-            time.sleep(refresh_seconds)
+                live.update(_render_watch(session_root, refresh_seconds, state, snapshots))
+                continue
+            live.update(_render_watch(session_root, refresh_seconds, state, snapshots))

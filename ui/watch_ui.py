@@ -19,7 +19,7 @@ from rich.table import Table
 from rich.text import Text
 
 RUNNING_THRESHOLD_SECONDS = 8.0
-DETAIL_TABS = ["chat", "memory", "layers", "metadata", "features"]
+DETAIL_TABS = ["board", "chat", "memory", "layers", "metadata", "features"]
 
 
 @dataclass
@@ -27,6 +27,9 @@ class WatchState:
     selected_index: int = 0
     tab_index: int = 0
     detail_offset: int = 0
+    in_session_view: bool = False
+    search_mode: bool = False
+    search_query: str = ""
     should_exit: bool = False
 
 
@@ -314,31 +317,109 @@ def _detail_lines(snapshot: dict, tab: str) -> list[str]:
     return lines
 
 
+def _build_feature_board(snapshot: dict):
+    payload = snapshot.get("payload", {}) if isinstance(snapshot, dict) else {}
+    feature = payload.get("feature_state", {}) if isinstance(payload, dict) else {}
+    plan = feature.get("feature_plan", {}) if isinstance(feature, dict) else {}
+    tasks = plan.get("phases", []) if isinstance(plan, dict) else []
+
+    table = Table(title="Feature Board (Jira-style)", expand=True)
+    statuses = ["not_started", "in_progress", "blocked", "completed"]
+    for status in statuses:
+        table.add_column(status, style="cyan")
+
+    by_status = {status: [] for status in statuses}
+    for task in tasks if isinstance(tasks, list) else []:
+        if not isinstance(task, dict):
+            continue
+        status = str(task.get("status", "not_started") or "not_started")
+        key = status if status in by_status else "not_started"
+        verified = len(task.get("verified_exit_criteria", []) or [])
+        total_exit = len(task.get("exit_criteria", []) or [])
+        card = (
+            f"#{task.get('number', task.get('id', '?'))} {task.get('title', 'untitled')}\n"
+            f"progress {verified}/{max(total_exit, 1)} exit criteria"
+        )
+        by_status[key].append(card)
+
+    rows = max(1, max((len(items) for items in by_status.values()), default=1))
+    for idx in range(rows):
+        table.add_row(*[by_status[s][idx] if idx < len(by_status[s]) else "" for s in statuses])
+    return table
+
+
 def _render_detail(snapshot: dict, state: WatchState) -> Panel:
     active_tab = DETAIL_TABS[state.tab_index % len(DETAIL_TABS)]
+    if active_tab == "board":
+        return Panel(_build_feature_board(snapshot), title=f"Session Detail — {snapshot.get('name', '-')}", subtitle="Tab: board")
+
     lines = _detail_lines(snapshot, active_tab)
+    if state.search_query:
+        query = state.search_query.lower()
+        lines = [line for line in lines if query in line.lower()]
+        if not lines:
+            lines = [f"No matches for '{state.search_query}'."]
     start = max(0, min(state.detail_offset, max(0, len(lines) - 1)))
     window = lines[start : start + 22]
+    search_suffix = f" | search: {state.search_query}" if state.search_query else ""
     subtitle = (
-        f"Tab: {active_tab} | lines {start + 1}-{start + len(window)}"
+        f"Tab: {active_tab} | lines {start + 1}-{start + len(window)}{search_suffix}"
         if lines
-        else f"Tab: {active_tab}"
+        else f"Tab: {active_tab}{search_suffix}"
     )
     body = "\n".join(window) if window else "(empty)"
     return Panel(body, title=f"Session Detail — {snapshot.get('name', '-')}", subtitle=subtitle)
 
 
 def _handle_key(state: WatchState, key: str, total_sessions: int) -> WatchState:
+    if state.search_mode:
+        if key in ("\r", "\n"):
+            state.search_mode = False
+            state.detail_offset = 0
+            return state
+        if key in ("\x1b",):
+            state.search_mode = False
+            state.search_query = ""
+            return state
+        if key in ("\x7f", "\b"):
+            state.search_query = state.search_query[:-1]
+            return state
+        if key and len(key) == 1 and key.isprintable():
+            state.search_query += key
+        return state
+
     if key in ("q", "\x03"):
         state.should_exit = True
         return state
-    if key in ("\x1b[A", "k"):
-        state.selected_index = max(0, state.selected_index - 1)
+    if key in ("/",):
+        state.search_mode = True
+        state.search_query = ""
+        return state
+    if key in ("c",):
+        state.search_query = ""
+        state.search_mode = False
+        return state
+    if key in ("\r", "\n"):
+        state.in_session_view = True
         state.detail_offset = 0
         return state
-    if key in ("\x1b[B", "j"):
-        state.selected_index = min(max(0, total_sessions - 1), state.selected_index + 1)
+    if key in ("\x1b", "b"):
+        state.in_session_view = False
         state.detail_offset = 0
+        return state
+    if key in ("\x1b[A", "k"):
+        if state.in_session_view:
+            state.detail_offset = max(0, state.detail_offset - 1)
+        else:
+            state.selected_index = max(0, state.selected_index - 1)
+            state.detail_offset = 0
+        return state
+    if key in ("\x1b[B", "j"):
+        if state.in_session_view:
+            state.detail_offset += 1
+        else:
+            state.selected_index = min(max(0, total_sessions - 1), state.selected_index + 1)
+            state.detail_offset = 0
         return state
     if key in ("\x1b[C", "l"):
         state.tab_index = (state.tab_index + 1) % len(DETAIL_TABS)
@@ -415,18 +496,29 @@ def _render_watch(
         f"[bold cyan]{name}[/bold cyan]" if i == state.tab_index else name
         for i, name in enumerate(DETAIL_TABS)
     )
+    mode_text = "session view" if state.in_session_view else "board list"
+    search_text = (
+        f"\nSearch: [yellow]{state.search_query}[/yellow]"
+        if state.search_query
+        else ""
+    )
+    if state.search_mode:
+        search_text = f"\nSearch mode: [yellow]{state.search_query}[/yellow]_"
     header = Panel(
         Text.from_markup(
             f"[bold]μCLI Watch[/bold] • read-only realtime monitor\n"
             f"Sessions: [cyan]{len(snapshots)}[/cyan] • "
             f"Refresh: [cyan]{refresh_seconds:.1f}s[/cyan] • Now: [cyan]{now_text}[/cyan]\n"
-            f"Keys: ↑/↓ or j/k session • ←/→ or h/l tabs • n/p scroll • q quit\n"
-            f"Tabs: {tabs}"
+            f"Mode: [cyan]{mode_text}[/cyan] • Enter open session • Esc/b back\n"
+            f"Keys: ↑/↓ or j/k navigate • ←/→ or h/l tabs • n/p page • / find • c clear-find • q quit\n"
+            f"Tabs: {tabs}{search_text}"
         ),
         border_style="cyan",
     )
     footer = Text(f"Session path: {session_root}", style="dim")
-    return Group(header, table, _render_detail(current, state), footer)
+    if state.in_session_view:
+        return Group(header, _render_detail(current, state), footer)
+    return Group(header, table, footer)
 
 
 class _KeyReader:

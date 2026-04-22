@@ -1,6 +1,8 @@
 import json
 
-from ui.watch_ui import _extract_last_activity, _detail_lines, load_session_snapshots
+from rich.panel import Panel
+
+from ui.watch_ui import _extract_last_activity, _detail_lines, _handle_key, WatchState, _render_detail, load_session_snapshots
 
 
 def test_extract_last_activity_prefers_latest_tool_call():
@@ -68,3 +70,40 @@ def test_detail_lines_exposes_memory_and_metadata_tabs(tmp_path):
     assert "remember this" in memory_lines
     assert "scratch note" in memory_lines
     assert "workspace folders: 1" in metadata_lines
+
+
+def test_enter_opens_session_view_and_search_mode():
+    state = WatchState()
+    state = _handle_key(state, "\n", 2)
+    assert state.in_session_view is True
+    state = _handle_key(state, "/", 2)
+    assert state.search_mode is True
+    state = _handle_key(state, "m", 2)
+    state = _handle_key(state, "\n", 2)
+    assert state.search_mode is False
+    assert state.search_query == "m"
+
+
+def test_render_detail_board_tab(tmp_path):
+    session_root = tmp_path / "sessions"
+    session_dir = session_root / "demo"
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.json").write_text(
+        json.dumps(
+            {
+                "feature_state": {
+                    "feature_plan": {
+                        "phases": [
+                            {"id": 1, "number": 1, "title": "Plan", "status": "not_started", "exit_criteria": ["A"]},
+                            {"id": 2, "number": 2, "title": "Build", "status": "in_progress", "exit_criteria": ["A", "B"], "verified_exit_criteria": ["A"]},
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    snap = load_session_snapshots(str(session_root))[0]
+    state = WatchState(tab_index=0, in_session_view=True)
+    panel = _render_detail(snap, state)
+    assert isinstance(panel, Panel)

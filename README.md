@@ -17,7 +17,7 @@
 - **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for Integrations**: Launch μCLI with an HTTP API so external clients can drive sessions, commands, and tool execution.
-- **Realtime Watch Mode**: Launch a read-only TUI monitor (`--watch`) that continuously shows session status (running/idle), active feature progress, chat activity, memory/layer summaries, and metadata.
+- **Realtime Watch Mode**: Launch a read-only TUI monitor (`--watch`) with a Jira-style feature board, per-session drill-down, chat/memory/layer/metadata views, and live status (running/idle).
 
 ## Installation
 
@@ -104,7 +104,7 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/quit` | `/q` | Exit the application |
 
 `--watch` mode is a read-only dashboard (non-mutating) and does not accept slash commands.
-It supports keyboard navigation for browsing data: `↑/↓` (or `j/k`) selects sessions, `←/→` (or `h/l`) switches tabs, `n/p` scrolls, and `q` exits.
+It supports keyboard navigation for browsing data: `↑/↓` (or `j/k`) navigates, `Enter` opens a session detail view, `Esc`/`b` goes back, `←/→` (or `h/l`) switches tabs (including the feature board), `n/p` pages, `/` searches, `c` clears search, and `q` exits.
 
 ## Server Mode
 

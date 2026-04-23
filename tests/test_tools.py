@@ -220,6 +220,34 @@ def test_error_code_coverage_core_categories(tmp_path, monkeypatch):
     assert failed_payload["error_code"] == "execution_failed"
 
 
+def test_bash_tool_executes_raw_command(tmp_path):
+    ctx = FolderContext()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx.add_folder(str(workspace))
+
+    payload = json.loads(execute_tool("bash", {"command": "pwd"}, ctx))
+    _assert_tool_envelope(payload)
+    assert payload["ok"] is True
+    assert str(workspace) in payload["message"]
+
+
+def test_bash_tool_rejects_out_of_bounds_cwd(tmp_path):
+    ctx = FolderContext()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx.add_folder(str(workspace))
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    payload = json.loads(
+        execute_tool("bash", {"command": "pwd", "cwd": str(outside)}, ctx)
+    )
+    _assert_tool_envelope(payload)
+    assert payload["ok"] is False
+    assert payload["error_code"] == "access_denied"
+
+
 def test_create_feature_create_phases_create_task_staged_flow(tmp_path):
     ctx = FolderContext()
     ctx.add_folder(str(tmp_path))

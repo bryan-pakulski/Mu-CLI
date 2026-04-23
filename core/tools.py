@@ -361,6 +361,35 @@ TOOLS = [
         requires_approval=True,
     ),
     ToolDefinition(
+        name="bash",
+        description="Executes a raw bash command in the attached workspace and returns combined STDOUT/STDERR.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute.",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Optional working directory. Must be within the attached workspace.",
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "Maximum seconds before terminating the command (default 120).",
+                    "default": 120,
+                },
+                "max_output_chars": {
+                    "type": "integer",
+                    "description": "Maximum combined output length to return (default 12000).",
+                    "default": 12000,
+                },
+            },
+            "required": ["command"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
         name="git_status",
         description="Shows the working tree status.",
         parameters={"type": "object", "properties": {}},
@@ -1264,6 +1293,10 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "execution_kind": "mutate",
         "preview_policy": "optional",
         "summary_builder": "agent_task_preview",
+    },
+    "bash": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
     },
     "git_status": {
         "execution_kind": "read",
@@ -2359,6 +2392,67 @@ def git_branch(folder_context) -> str:
     return run_git_command(["branch"], folder_context)
 
 
+def bash_command(
+    command: str,
+    folder_context,
+    *,
+    cwd: str | None = None,
+    timeout_seconds: int = 120,
+    max_output_chars: int = 12000,
+) -> str:
+    """Executes a raw bash command in the workspace."""
+    command = str(command or "").strip()
+    if not command:
+        return "Error: command is required."
+
+    if not folder_context or not folder_context.folders:
+        return "Error: No workspace attached."
+
+    import subprocess
+
+    workdir = str(cwd or folder_context.folders[0]).strip()
+    if not _check_bounds(workdir, folder_context):
+        logger.warning(f"bash_command: Access denied or path ignored: {workdir}")
+        return f"Error: Access denied or path ignored. '{workdir}'"
+
+    timeout_seconds = max(1, int(timeout_seconds or 120))
+    max_output_chars = max(512, int(max_output_chars or 12000))
+
+    try:
+        process = subprocess.run(
+            ["bash", "-lc", command],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            cwd=workdir,
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial = f"{exc.stdout or ''}\n{exc.stderr or ''}".strip()
+        if len(partial) > max_output_chars:
+            partial = partial[:max_output_chars]
+        return (
+            f"Error: Command timed out after {timeout_seconds} seconds.\n"
+            f"{partial}".strip()
+        )
+    except Exception as exc:
+        logger.error(f"bash_command: Error executing command {command!r}: {exc}")
+        return f"Error executing bash command: {exc}"
+
+    chunks = []
+    if process.stdout:
+        chunks.append(f"STDOUT:\n{process.stdout.rstrip()}")
+    if process.stderr:
+        chunks.append(f"STDERR:\n{process.stderr.rstrip()}")
+    if not chunks:
+        chunks.append("Command executed with no output.")
+    chunks.append(f"Exit code: {process.returncode}")
+    output = "\n\n".join(chunks)
+
+    if len(output) > max_output_chars:
+        output = output[:max_output_chars] + "\n\n...[TRUNCATED]..."
+    return output
+
+
 def url_grounding(url: str, folder_context) -> str:
     """Accesses a URL to gather additional context. Supports JavaScript-heavy websites."""
     try:
@@ -3441,6 +3535,16 @@ def _handle_list_agent_tasks(args, folder_context, ui, variables) -> str:
 
 def _handle_run_agent_task(args, folder_context, ui, variables) -> str:
     return run_agent_task(args.get("task_name", ""), folder_context, variables)
+
+
+def _handle_bash(args, folder_context, ui, variables) -> str:
+    return bash_command(
+        args.get("command", ""),
+        folder_context,
+        cwd=args.get("cwd"),
+        timeout_seconds=args.get("timeout_seconds", 120),
+        max_output_chars=args.get("max_output_chars", 12000),
+    )
 
 
 def _handle_apply_diff(args, folder_context, ui, variables) -> str:
@@ -4603,6 +4707,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "write_file": _legacy_handler(_handle_write_file),
     "list_agent_tasks": _legacy_handler(_handle_list_agent_tasks),
     "run_agent_task": _legacy_handler(_handle_run_agent_task),
+    "bash": _legacy_handler(_handle_bash),
     "apply_diff": _legacy_handler(_handle_apply_diff),
     "git_status": _legacy_handler(_handle_git_status),
     "git_init": _legacy_handler(_handle_git_init),

@@ -262,6 +262,7 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 - `apply_diff`: Applies unified diffs (patches) to existing files for precise edits.
 - `list_agent_tasks`: Discovers automation scripts in `Makefile.agents`.
 - `run_agent_task`: Executes tasks defined in a `Makefile.agents` (e.g., running tests).
+- `bash`: Executes raw shell commands in the attached workspace.
 - `batch_job`: Executes multiple of the above tools in a single turn.
 - `get_current_time`: Provides the current system time in ISO format.
 - `save_memory`, `search_memory`, `list_memory`: Persist and retrieve concise high-value notes during an agentic task.
@@ -274,5 +275,5 @@ When in **Agentic Mode**, the AI can invoke the following tools:
 ## Additional Notes
 
 - **Configuration**: Local settings and session history are stored in `~/.mucli_chats/`.
-- **Safety**: By default, any tool that modifies your filesystem (`write_file`, `apply_diff`, `run_agent_task`) requires manual `[y/n]` approval unless `/yolo` is enabled.
+- **Safety**: By default, any tool that modifies your filesystem (`write_file`, `apply_diff`, `run_agent_task`, `bash`) requires manual `[y/n]` approval unless `/yolo` is enabled.
 - **Makefile.agents**: You can define custom automation tasks in a file named `Makefile.agents` in your workspace root, and the AI will be able to discover and run them.

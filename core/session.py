@@ -1891,21 +1891,48 @@ class Session:
         return False
 
     @staticmethod
+    def _coarse_tool_args(tool_args):
+        """Build a stable, coarse-grained representation of tool args for loop pattern checks."""
+        if isinstance(tool_args, dict):
+            coarse = {}
+            for key in sorted(tool_args.keys()):
+                val = tool_args.get(key)
+                if isinstance(val, str):
+                    coarse[key] = f"str:{hashlib.sha1(val.encode('utf-8')).hexdigest()[:10]}"
+                elif isinstance(val, (int, float, bool)) or val is None:
+                    coarse[key] = val
+                elif isinstance(val, list):
+                    coarse[key] = [Session._coarse_tool_args(item) for item in val[:8]]
+                elif isinstance(val, dict):
+                    coarse[key] = Session._coarse_tool_args(val)
+                else:
+                    coarse[key] = type(val).__name__
+            return coarse
+        if isinstance(tool_args, list):
+            return [Session._coarse_tool_args(item) for item in tool_args[:8]]
+        if isinstance(tool_args, str):
+            return f"str:{hashlib.sha1(tool_args.encode('utf-8')).hexdigest()[:10]}"
+        if isinstance(tool_args, (int, float, bool)) or tool_args is None:
+            return tool_args
+        return type(tool_args).__name__
+
+    @staticmethod
     def _tool_call_fingerprint(tool_name: str, tool_args, *, pattern_only: bool = False) -> str:
         name = str(tool_name or "").strip().lower() or "tool"
-        if pattern_only:
-            return name
+        payload_source = (
+            Session._coarse_tool_args(tool_args or {}) if pattern_only else (tool_args or {})
+        )
         try:
             payload = json.dumps(
-                tool_args or {},
+                payload_source,
                 sort_keys=True,
                 default=str,
                 separators=(",", ":"),
             )
         except (TypeError, ValueError):
-            payload = str(tool_args)
+            payload = str(payload_source)
         digest = hashlib.sha1(f"{name}|{payload}".encode("utf-8")).hexdigest()[:12]
-        return f"{name}:{digest}"
+        return f"{name}:{digest}" if not pattern_only else f"{name}~{digest}"
 
     @staticmethod
     def _is_repeated_tool_sequence(
@@ -2683,7 +2710,7 @@ class Session:
                         loop_kind = "exact" if exact_loop_detected else "pattern"
                         warning_text = (
                             "Loop detection triggered: repeated tool-call sequence "
-                            f"detected 3x ({loop_kind})."
+                            f"detected {loop_detection_repeat_threshold}x ({loop_kind})."
                         )
                         if self.ui:
                             self.ui.show_error(warning_text)

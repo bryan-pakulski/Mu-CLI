@@ -509,6 +509,13 @@ class _KeyReader:
         if ch != "\x1b":
             return ch
         seq = ch
+        # Arrow keys and modified arrows arrive as a short escape sequence.
+        # Wait slightly longer for the first follow-up byte to avoid treating
+        # a split arrow sequence as a raw "Esc" back action.
+        ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+        if not ready:
+            return seq
+        seq += sys.stdin.read(1)
         ready, _, _ = select.select([sys.stdin], [], [], 0.01)
         while ready:
             seq += sys.stdin.read(1)
@@ -516,9 +523,21 @@ class _KeyReader:
         return seq
 
 
+def _is_up_key(key: str) -> bool:
+    if key in {"\x1b[A", "\x1bOA"}:
+        return True
+    return key.startswith("\x1b[") and key.endswith("A")
+
+
+def _is_down_key(key: str) -> bool:
+    if key in {"\x1b[B", "\x1bOB"}:
+        return True
+    return key.startswith("\x1b[") and key.endswith("B")
+
+
 def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
-    up_keys = {"\x1b[A", "\x1bOA"}
-    down_keys = {"\x1b[B", "\x1bOB"}
+    is_up = _is_up_key(key)
+    is_down = _is_down_key(key)
 
     if key in {"q", "Q"} and not state.confirm_quit:
         state.confirm_quit = True
@@ -529,7 +548,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         if key in {"\x1b", "b"}:
             state.confirm_quit = False
             return state
-        if key in up_keys | down_keys:
+        if is_up or is_down:
             state.confirm_index = 1 - state.confirm_index
             return state
         if key in {"\n", "\r"}:
@@ -560,9 +579,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
 
     if state.screen == "sessions":
         state.session_names = _discover_sessions(session_root)
-        if key in down_keys:
+        if is_down:
             state.session_index = min(max(0, len(state.session_names) - 1), state.session_index + 1)
-        elif key in up_keys:
+        elif is_up:
             state.session_index = max(0, state.session_index - 1)
         elif key in {"\n", "\r"} and state.session_names:
             state.selected_session = state.session_names[state.session_index]
@@ -574,9 +593,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
     if state.screen == "contexts":
         payload = _load_session_payload(session_root, state.selected_session or "")
         items = _session_context_items(payload)
-        if key in down_keys:
+        if is_down:
             state.context_index = min(max(0, len(items) - 1), state.context_index + 1)
-        elif key in up_keys:
+        elif is_up:
             state.context_index = max(0, state.context_index - 1)
         elif key in {"\n", "\r"} and items:
             selected = items[state.context_index]
@@ -588,9 +607,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
     if state.screen == "features":
         payload = _load_session_payload(session_root, state.selected_session or "")
         state.feature_records = _feature_records(payload)
-        if key in down_keys:
+        if is_down:
             state.feature_index = min(max(0, len(state.feature_records) - 1), state.feature_index + 1)
-        elif key in up_keys:
+        elif is_up:
             state.feature_index = max(0, state.feature_index - 1)
         elif key in {"\n", "\r"} and state.feature_records:
             state.selected_feature = state.feature_records[state.feature_index]
@@ -603,9 +622,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         if not plan:
             return state
         items = _feature_items(plan)
-        if key in down_keys:
+        if is_down:
             state.item_index = min(len(items) - 1, state.item_index + 1)
-        elif key in up_keys:
+        elif is_up:
             state.item_index = max(0, state.item_index - 1)
         elif key in {"\n", "\r"}:
             sel = items[state.item_index]
@@ -617,9 +636,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         return state
 
     if state.screen == "task_detail":
-        if key in down_keys:
+        if is_down:
             state.detail_offset += 1
-        elif key in up_keys:
+        elif is_up:
             state.detail_offset = max(0, state.detail_offset - 1)
         return state
 

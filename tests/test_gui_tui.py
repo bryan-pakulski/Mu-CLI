@@ -155,6 +155,20 @@ def test_handle_key_supports_application_cursor_sequences(tmp_path):
     assert state.screen == "items"
 
 
+def test_handle_key_supports_modified_csi_arrow_sequences(tmp_path):
+    session_root, _ = _write_session_fixture(tmp_path)
+    state = GuiState()
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "contexts"
+
+    state = _handle_key(state, "\x1b[1;2B", session_root)
+    assert state.context_index == 1
+
+    state = _handle_key(state, "\x1b[1;2A", session_root)
+    assert state.context_index == 0
+
+
 def test_tool_usage_counts_sorts_descending():
     payload = {
         "history": [

@@ -1939,6 +1939,14 @@ class Session:
         """Ignore bookkeeping tools that can repeat during normal feature progression."""
         name = str(tool_name or "").strip().lower()
         return name not in {
+            "create_feature",
+            "create_phases",
+            "create_task",
+            "update_task",
+            "update_phases",
+            "review_task",
+            "review_all_completed_tasks",
+            "review_completed_tasks",
             "update_task_status",
             "get_execution_state",
             "get_tasks",

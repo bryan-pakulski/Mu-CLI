@@ -43,6 +43,7 @@ class GuiState:
     session_index: int = 0
     selected_session: str | None = None
 
+    context_index: int = 0
     feature_records: list[dict] = field(default_factory=list)
     feature_index: int = 0
     selected_feature: dict | None = None
@@ -166,6 +167,44 @@ def _sessions_view(session_root: str, state: GuiState) -> Panel:
     return Panel(table, border_style="green")
 
 
+def _session_context_items(payload: dict) -> list[dict]:
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    feature_count = len(_feature_records(payload))
+    usage = _tool_usage_counts(payload)
+    total_tool_calls = sum(count for _, count in usage)
+    research_calls = 0
+    for msg in history:
+        if not isinstance(msg, dict):
+            continue
+        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "tool_call":
+                tool_name = str(part.get("tool_name", "") or "").lower()
+                if any(token in tool_name for token in ("research", "search", "web", "citation")):
+                    research_calls += 1
+    return [
+        {"id": "chat", "label": "Chat Timeline", "count": len(history)},
+        {"id": "research", "label": "Research Engine", "count": research_calls},
+        {"id": "tools", "label": "Tool Heatmap", "count": total_tool_calls},
+        {"id": "features", "label": "Feature Workstreams", "count": feature_count},
+        {"id": "variables", "label": "Runtime Variables", "count": len(payload.get("variables", {}) if isinstance(payload.get("variables"), dict) else {})},
+        {"id": "memory", "label": "Task Memory", "count": len(payload.get("task_memory", {}) if isinstance(payload.get("task_memory"), dict) else {})},
+    ]
+
+
+def _session_contexts_view(payload: dict, state: GuiState) -> Panel:
+    items = _session_context_items(payload)
+    state.context_index = max(0, min(state.context_index, max(0, len(items) - 1)))
+    table = Table(title="Session Stack", expand=True)
+    table.add_column(" ", width=2)
+    table.add_column("Layer")
+    table.add_column("Count", justify="right")
+    for i, item in enumerate(items):
+        table.add_row("▶" if i == state.context_index else " ", item["label"], str(item["count"]))
+    return Panel(table, border_style="bright_cyan")
+
+
 def _features_view(payload: dict, state: GuiState) -> Panel:
     state.feature_records = _feature_records(payload)
     state.feature_index = max(0, min(state.feature_index, max(0, len(state.feature_records) - 1)))
@@ -249,6 +288,85 @@ def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
     return Panel("\n".join(lines), title="History Browser", border_style="bright_blue")
 
 
+def _chat_panel(payload: dict) -> Panel:
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    lines = [f"turns: {len(history)}", ""]
+    for msg in history[-30:]:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "unknown"))
+        snippet = ""
+        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
+            if isinstance(part, dict) and part.get("type") == "text":
+                snippet = str(part.get("text", "")).strip().replace("\n", " ")
+                break
+        if len(snippet) > 110:
+            snippet = snippet[:109] + "…"
+        lines.append(f"{role:<10} {snippet or '(non-text)'}")
+    return Panel("\n".join(lines), title="Chat Timeline", border_style="green")
+
+
+def _research_panel(payload: dict) -> Panel:
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    lines = ["Research activity:", ""]
+    hits = 0
+    for msg in history[-60:]:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "unknown"))
+        parts = msg.get("parts", []) if isinstance(msg.get("parts"), list) else []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "tool_call":
+                tool = str(part.get("tool_name", "") or "")
+                if any(token in tool.lower() for token in ("research", "search", "web", "citation")):
+                    hits += 1
+                    lines.append(f"{role:<10} tool_call  {tool}")
+            elif part.get("type") == "tool_result":
+                payload_text = str(part.get("content", "") or "")
+                if "citation" in payload_text.lower() or "source" in payload_text.lower():
+                    hits += 1
+                    lines.append(f"{role:<10} tool_result citation/source payload")
+    if hits == 0:
+        lines.append("No explicit research/citation tool activity found in recent turns.")
+    return Panel("\n".join(lines[:40]), title="Research Engine", border_style="magenta")
+
+
+def _variables_panel(payload: dict) -> Panel:
+    variables = payload.get("variables", {}) if isinstance(payload.get("variables"), dict) else {}
+    if not variables:
+        return Panel("No runtime variables persisted in this session.", title="Runtime Variables", border_style="yellow")
+    table = Table(expand=True)
+    table.add_column("Variable")
+    table.add_column("Value")
+    for key, value in list(sorted(variables.items(), key=lambda item: str(item[0]).lower()))[:40]:
+        rendered = str(value)
+        if len(rendered) > 100:
+            rendered = rendered[:99] + "…"
+        table.add_row(str(key), rendered)
+    return Panel(table, title="Runtime Variables", border_style="cyan")
+
+
+def _memory_panel(payload: dict) -> Panel:
+    memory = payload.get("task_memory", {}) if isinstance(payload.get("task_memory"), dict) else {}
+    scratch = payload.get("turn_scratchpad", {}) if isinstance(payload.get("turn_scratchpad"), dict) else {}
+    lines = [
+        f"task_memory keys: {len(memory)}",
+        f"turn_scratchpad keys: {len(scratch)}",
+        "",
+        "task_memory preview:",
+    ]
+    for key, value in list(memory.items())[:15]:
+        text = str(value).replace("\n", " ")
+        if len(text) > 90:
+            text = text[:89] + "…"
+        lines.append(f"- {key}: {text}")
+    if not memory:
+        lines.append("- (empty)")
+    return Panel("\n".join(lines), title="Task Memory", border_style="yellow")
+
+
 def _task_detail_panel(task, state: GuiState) -> Panel:
     lines = [
         f"task_id: {task.id}",
@@ -330,8 +448,20 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     else:
         session_name = state.selected_session or ""
         payload = _load_session_payload(session_root, session_name) if session_name else {}
-        if state.screen == "features":
+        if state.screen == "contexts":
+            body = _session_contexts_view(payload, state)
+        elif state.screen == "features":
             body = _features_view(payload, state)
+        elif state.screen == "chat":
+            body = _chat_panel(payload)
+        elif state.screen == "research":
+            body = _research_panel(payload)
+        elif state.screen == "tools":
+            body = _heatmap_panel(payload)
+        elif state.screen == "variables":
+            body = _variables_panel(payload)
+        elif state.screen == "memory":
+            body = _memory_panel(payload)
         else:
             plan = _load_feature_plan_from_record(state.selected_feature)
             if not plan:
@@ -419,6 +549,11 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         elif state.screen == "items":
             state.screen = "features"
         elif state.screen == "features":
+            state.screen = "contexts"
+            state.selected_feature = None
+        elif state.screen in {"chat", "research", "tools", "variables", "memory"}:
+            state.screen = "contexts"
+        elif state.screen == "contexts":
             state.screen = "sessions"
             state.selected_feature = None
         return state
@@ -431,8 +566,23 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             state.session_index = max(0, state.session_index - 1)
         elif key in {"\n", "\r"} and state.session_names:
             state.selected_session = state.session_names[state.session_index]
-            state.screen = "features"
+            state.screen = "contexts"
+            state.context_index = 0
             state.feature_index = 0
+        return state
+
+    if state.screen == "contexts":
+        payload = _load_session_payload(session_root, state.selected_session or "")
+        items = _session_context_items(payload)
+        if key in down_keys:
+            state.context_index = min(max(0, len(items) - 1), state.context_index + 1)
+        elif key in up_keys:
+            state.context_index = max(0, state.context_index - 1)
+        elif key in {"\n", "\r"} and items:
+            selected = items[state.context_index]
+            state.screen = selected["id"]
+            if selected["id"] == "features":
+                state.feature_index = 0
         return state
 
     if state.screen == "features":

@@ -63,9 +63,20 @@ def test_handle_key_hierarchical_navigation(tmp_path):
     state = GuiState()
 
     state = _handle_key(state, "\n", session_root)
-    assert state.screen == "features"
+    assert state.screen == "contexts"
     assert state.selected_session == "s1"
 
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "chat"
+
+    state = _handle_key(state, "\x1b", session_root)
+    assert state.screen == "contexts"
+
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "features"
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "items"
     assert state.selected_feature is not None
@@ -85,6 +96,11 @@ def test_handle_key_opens_task_detail_and_scrolls(tmp_path):
     state = GuiState()
 
     state = _handle_key(state, "\n", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "features"
     state = _handle_key(state, "\n", session_root)
     state = _handle_key(state, "\x1b[B", session_root)
     state = _handle_key(state, "\x1b[B", session_root)
@@ -120,6 +136,16 @@ def test_handle_key_supports_application_cursor_sequences(tmp_path):
     state = GuiState()
 
     state = _handle_key(state, "\n", session_root)
+    assert state.screen == "contexts"
+
+    state = _handle_key(state, "\x1bOB", session_root)
+    assert state.context_index == 1
+
+    state = _handle_key(state, "\x1bOB", session_root)
+    state = _handle_key(state, "\x1bOB", session_root)
+    assert state.context_index == 3
+
+    state = _handle_key(state, "\n", session_root)
     assert state.screen == "features"
 
     state = _handle_key(state, "\x1bOB", session_root)
@@ -127,12 +153,6 @@ def test_handle_key_supports_application_cursor_sequences(tmp_path):
 
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "items"
-
-    state = _handle_key(state, "\x1bOB", session_root)
-    assert state.item_index == 1
-
-    state = _handle_key(state, "\x1bOA", session_root)
-    assert state.item_index == 0
 
 
 def test_tool_usage_counts_sorts_descending():

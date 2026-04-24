@@ -144,16 +144,29 @@ def _bucket_tasks(plan: FeaturePlan) -> dict[str, list]:
 
 
 def _task_panel(task, selected: bool = False) -> Panel:
+    status = normalize_task_status(task.status)
+    status_style = {
+        STATUS_COMPLETED: "green",
+        STATUS_ARCHIVED: "green",
+        STATUS_IN_PROGRESS: "yellow",
+        STATUS_BLOCKED: "red",
+        STATUS_PENDING: "cyan",
+        STATUS_NOT_STARTED: "cyan",
+    }.get(status, "white")
     lines = [
         f"[bold]{task.id}[/bold] — {task.title}",
         f"phase: {task.phase_id if task.phase_id is not None else '-'}",
-        f"status: {normalize_task_status(task.status)}",
+        f"status: [{status_style}]{status}[/{status_style}]",
     ]
     if task.blocked_reason:
         lines.append(f"blocked: {task.blocked_reason}")
     if task.exit_criteria:
         lines.append(f"criteria: {len(task.exit_criteria)}")
-    return Panel("\n".join(lines), border_style="bright_green" if selected else "blue", padding=(0, 1))
+    return Panel(
+        "\n".join(lines),
+        border_style="bright_green" if selected else status_style,
+        padding=(0, 1),
+    )
 
 
 def _selected_task(plan: FeaturePlan, state: GuiState):
@@ -327,6 +340,38 @@ def _mode_tabs(state: GuiState) -> Table:
     return table
 
 
+def _hero_banner(state: GuiState, session_count: int) -> Panel:
+    phase = int(time.time() * 2) % 8
+    wave = "▁▂▃▄▅▆▇█"
+    pulse = "".join(wave[(i + phase) % len(wave)] for i in range(24))
+    banner = Text.from_markup(
+        "[bold bright_cyan]███╗   ███╗██╗   ██╗ ██████╗██╗     ██╗[/bold bright_cyan]\n"
+        "[bold bright_blue]████╗ ████║██║   ██║██╔════╝██║     ██║[/bold bright_blue]\n"
+        "[bold bright_magenta]██╔████╔██║██║   ██║██║     ██║     ██║[/bold bright_magenta]\n"
+        "[bold bright_green]██║╚██╔╝██║██║   ██║██║     ██║     ██║[/bold bright_green]\n"
+        "[bold bright_yellow]██║ ╚═╝ ██║╚██████╔╝╚██████╗███████╗██║[/bold bright_yellow]\n"
+        "[bold white]╚═╝     ╚═╝ ╚═════╝  ╚═════╝╚══════╝╚═╝[/bold white]\n"
+        f"[dim]mode={MODE_TABS[state.tab_index]} • sessions={session_count} • neon pulse {pulse}[/dim]"
+    )
+    return Panel(banner, border_style="bright_cyan", title="🚀 TERMINAL COMMAND CENTER")
+
+
+def _ambient_panel(plan: FeaturePlan) -> Panel:
+    done = sum(1 for t in plan.tasks if normalize_task_status(t.status) in {STATUS_COMPLETED, STATUS_ARCHIVED})
+    total = len(plan.tasks)
+    active = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_IN_PROGRESS)
+    blocked = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_BLOCKED)
+    matrix = [
+        f"⚡ Completion    {done:>3}/{total:<3}  {_bar(done, max(1, total), 18)}",
+        f"🔥 In-Progress   {active:>3}      {_bar(active, max(1, total), 18)}",
+        f"🧱 Blocked       {blocked:>3}      {_bar(blocked, max(1, total), 18)}",
+        "",
+        f"🧠 Event stream  {_spark([i for i, _ in enumerate(plan.event_log[-18:], start=1)])}",
+        f"🛰  Refresh glow {''.join('◆' if (i + int(time.time())) % 3 == 0 else '·' for i in range(24))}",
+    ]
+    return Panel("\n".join(matrix), title="SITUATIONAL AWARENESS", border_style="bright_magenta")
+
+
 def _features_panel(features: list[dict], state: GuiState) -> Panel:
     if not features:
         return Panel("(no features in session)", title="󱞁 Features", border_style="yellow")
@@ -373,12 +418,13 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         ),
         border_style="bright_cyan",
     )
+    hero = _hero_banner(state, len(state.session_names))
 
     if active_mode != "feature":
-        return Group(tabs, header, Panel(f"{active_mode} mode tab is not implemented yet.\nSwitch to FEATURE tab.", border_style="yellow", title=f"{active_mode.title()} Mode"))
+        return Group(tabs, hero, header, Panel(f"{active_mode} mode tab is not implemented yet.\nSwitch to FEATURE tab.", border_style="yellow", title=f"{active_mode.title()} Mode"))
 
     if not state.session_names:
-        return Group(tabs, header, _sessions_panel(state), Panel("No sessions available.", border_style="yellow"))
+        return Group(tabs, hero, header, _sessions_panel(state), Panel("No sessions available.", border_style="yellow"))
 
     state.session_index = max(0, min(state.session_index, len(state.session_names) - 1))
     selected_name = state.pinned_session or state.session_names[state.session_index]
@@ -391,6 +437,7 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     if not plan:
         right: Panel | Group = Group(
             _features_panel(features, state),
+            Panel("No feature metadata for selected feature. Pick another with [ / ].", border_style="red"),
             Panel(f"Session '{selected_name}' has no active feature plan metadata.", border_style="yellow", title="Feature Mode"),
         )
     else:
@@ -401,14 +448,19 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
             border_style="green",
         )
         widgets = _stats_widgets(plan, payload)
+        ambient = _ambient_panel(plan)
         if state.history_open:
-            right = Group(_features_panel(features, state), top, widgets, _history_browser(plan, payload, state))
+            right = Group(_features_panel(features, state), top, widgets, ambient, _history_browser(plan, payload, state))
         elif state.detail_open:
-            right = Group(_features_panel(features, state), top, widgets, _task_detail_panel(plan, state, selected_name))
+            right = Group(_features_panel(features, state), top, widgets, ambient, _task_detail_panel(plan, state, selected_name))
         else:
-            right = Group(_features_panel(features, state), top, widgets, _feature_board(plan, state))
+            right = Group(_features_panel(features, state), top, widgets, ambient, _feature_board(plan, state))
 
-    return Group(tabs, header, Columns([_sessions_panel(state), right], expand=True, equal=False))
+    footer = Panel(
+        "[dim]HISTORY BROWSER + FEATURE TIMELINE + LIVE ANALYTICS • engineered for wow[/dim]",
+        border_style="bright_black",
+    )
+    return Group(tabs, hero, header, Columns([_sessions_panel(state), right], expand=True, equal=False), footer)
 
 
 class _KeyReader:

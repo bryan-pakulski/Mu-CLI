@@ -17,6 +17,7 @@
 - **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for Integrations**: Launch μCLI with an HTTP API so external clients can drive sessions, commands, and tool execution.
+- **Terminal GUI (`--gui`)**: Launch a full-screen TUI with mode tabs. Feature mode starts with a kanban-style board for task flow visualization.
 
 ## Installation
 
@@ -50,6 +51,11 @@ python mucli.py
 Run the server/API mode using:
 ```bash
 python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
+```
+
+Run the terminal GUI mode using:
+```bash
+python mucli.py --gui
 ```
 
 ### Getting Started

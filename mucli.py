@@ -35,6 +35,7 @@ from core.feature_mode import (
 )
 from core.tools import execute_tool
 from ui.rich_ui import RichUI
+from ui.gui_tui import run_gui_mode
 from utils.config import AGENT_MODE_METADATA
 from utils.config import SESSION_DIR
 from utils.runtime_metrics import collect_context_layers
@@ -2321,6 +2322,17 @@ def main():
         action="store_true",
         help="Enable YOLO mode at startup.",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch full-screen terminal GUI.",
+    )
+    parser.add_argument(
+        "--gui-refresh",
+        type=float,
+        default=1.0,
+        help="Refresh interval (seconds) for --gui mode.",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
         "--system",
@@ -2344,6 +2356,10 @@ def main():
     except Exception as exc:
         console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
         sys.exit(1)
+
+    if args.gui:
+        run_gui_mode(session, refresh_seconds=args.gui_refresh)
+        return
 
     if args.server:
         serve(session, args.host, args.port, handle_command)

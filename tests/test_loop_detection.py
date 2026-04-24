@@ -41,3 +41,12 @@ def test_feature_bookkeeping_tools_are_excluded_from_loop_tracking():
 def test_loop_detection_variables_exist():
     assert "loop_detection_enabled" in DEFAULT_VARIABLES
     assert "loop_detection_repeat_threshold" in DEFAULT_VARIABLES
+
+
+def test_transient_provider_error_does_not_retry_http_400():
+    assert Session._is_transient_provider_error(Exception("HTTP Error 400: Bad Request")) is False
+
+
+def test_transient_provider_error_retries_429_and_503():
+    assert Session._is_transient_provider_error(Exception("HTTP Error 429: Too Many Requests")) is True
+    assert Session._is_transient_provider_error(Exception("status_code=503 upstream unavailable")) is True

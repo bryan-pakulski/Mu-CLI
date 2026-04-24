@@ -1836,15 +1836,9 @@ class Session:
                 default="retry",
             )
         if self._confirm_retry():
-            # 4xx errors (client errors) mean we sent something wrong → need rollback + retry
-            # 5xx/timeout (server errors) mean remote side failed → just retry without rollback
             error_msg = str(getattr(self, '_last_provider_error', '') or '').lower()
-            is_4xx = any(str(c) in error_msg for c in range(400, 500))
-            if 'status_code' in error_msg:
-                import re
-                m = re.search(r'status_code[=: ]+(\d+)', error_msg)
-                if m and 400 <= int(m.group(1)) < 500:
-                    is_4xx = True
+            status = self._extract_http_status_code(error_msg)
+            is_4xx = bool(status is not None and 400 <= status < 500)
             return "rollback_retry" if is_4xx else "retry"
         return "abort"
 
@@ -1877,18 +1871,34 @@ class Session:
         )
         if any(marker in message for marker in transient_markers):
             return True
-        # Treat most HTTP 4xx/5xx from remote providers as transient (retryable)
-        # so the agent auto-recovers without prompting the user in server mode.
-        for code in range(400, 600):
-            if str(code) in message:
-                return True
-        # Also catch raw httpx/httpcore error patterns
-        if "status_code" in message:
-            import re
-            m = re.search(r"status_code[=: ]+(\d+)", message)
-            if m and 400 <= int(m.group(1)) < 600:
-                return True
+        status = Session._extract_http_status_code(message)
+        if status is not None:
+            return Session._is_retryable_http_status(status)
         return False
+
+    @staticmethod
+    def _extract_http_status_code(message: str) -> int | None:
+        patterns = (
+            r"http error[: ]+(\d{3})",
+            r"status_code[=: ]+(\d{3})",
+            r"\b(?:http\s*)?(\d{3})\b",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, message)
+            if not match:
+                continue
+            try:
+                code = int(match.group(1))
+                if 100 <= code <= 599:
+                    return code
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    def _is_retryable_http_status(status_code: int) -> bool:
+        # Retry only commonly transient HTTP errors.
+        return status_code in {408, 409, 425, 429, 500, 502, 503, 504}
 
     @staticmethod
     def _coarse_tool_args(tool_args):
@@ -2808,10 +2818,13 @@ class Session:
                     )
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
 
+                status_code = self._extract_http_status_code(str(e).lower())
                 if (
                     not provider_bad_request_retried
                     and not current_tool_name
-                    and "400" in str(e).lower()
+                    and status_code is not None
+                    and 400 <= status_code < 500
+                    and status_code not in {408, 409, 425, 429}
                 ):
                     provider_bad_request_retried = True
                     self.session_manager.history = self.session_manager.history[:initial_history_len]
@@ -2828,7 +2841,7 @@ class Session:
                     iteration -= 1
                     if self.ui:
                         self.ui.show_info(
-                            "Provider returned HTTP 400. Rolled back the current turn and retrying once."
+                            f"Provider returned HTTP {status_code}. Rolled back the current turn and retrying once."
                         )
                     continue
 

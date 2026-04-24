@@ -69,3 +69,12 @@ def test_handle_key_toggles_history_browser_in_board_focus():
     assert state.history_offset == 1
     state = _handle_key(state, "b")
     assert state.history_open is False
+
+
+def test_handle_key_cycles_feature_history_index():
+    state = GuiState(session_names=["a"], focus="sessions", session_index=0, feature_index=0)
+    state = _handle_key(state, "\n")  # board
+    state = _handle_key(state, "]")
+    assert state.feature_index == 1
+    state = _handle_key(state, "[")
+    assert state.feature_index == 0

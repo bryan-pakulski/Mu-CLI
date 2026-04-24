@@ -48,6 +48,7 @@ class GuiState:
     detail_offset: int = 0
     history_open: bool = False
     history_offset: int = 0
+    feature_index: int = 0
 
 
 def _discover_sessions(session_root: str) -> list[str]:
@@ -76,6 +77,25 @@ def _load_feature_plan_for_session_name(session_root: str, session_name: str) ->
     payload = _load_session_payload(session_root, session_name)
     feature_state = payload.get("feature_state", {}) if isinstance(payload.get("feature_state"), dict) else {}
     metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
+    if not metadata_path:
+        return None
+    try:
+        return load_feature_plan(metadata_path)
+    except Exception:
+        return None
+
+
+def _feature_records(payload: dict) -> list[dict]:
+    registry = payload.get("feature_registry", {}) if isinstance(payload.get("feature_registry"), dict) else {}
+    records = [value for value in registry.values() if isinstance(value, dict)]
+    records.sort(key=lambda item: float(item.get("updated_at", 0) or 0), reverse=True)
+    return records
+
+
+def _load_feature_plan_from_record(feature_record: dict | None) -> FeaturePlan | None:
+    if not isinstance(feature_record, dict):
+        return None
+    metadata_path = str(feature_record.get("metadata_path", "") or "").strip()
     if not metadata_path:
         return None
     try:
@@ -307,6 +327,21 @@ def _mode_tabs(state: GuiState) -> Table:
     return table
 
 
+def _features_panel(features: list[dict], state: GuiState) -> Panel:
+    if not features:
+        return Panel("(no features in session)", title="󱞁 Features", border_style="yellow")
+    state.feature_index = max(0, min(state.feature_index, len(features) - 1))
+    lines = []
+    for idx, feature in enumerate(features[:40]):
+        marker = "▶" if idx == state.feature_index else " "
+        fid = str(feature.get("feature_id", "-"))
+        status = str(feature.get("status", "unknown"))
+        name = str(feature.get("feature_name", fid))
+        lines.append(f"{marker} {fid:<20} [{status:<10}] {name}")
+    lines.append("\n[dim][ / ] browse feature history[/dim]")
+    return Panel("\n".join(lines), title="󱞁 Features", border_style="bright_blue")
+
+
 def _sessions_panel(state: GuiState) -> Panel:
     state.session_index = max(0, min(state.session_index, max(0, len(state.session_names) - 1)))
     lines = []
@@ -334,7 +369,7 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     header = Panel(
         Text.from_markup(
             f"[bold cyan]μCLI GUI[/bold cyan] • multi-session • [green]{clock}[/green]\n"
-            "keys: ←/→ mode • Tab focus • j/k move • Enter pin/open or card detail • H history browser • b back • q quit"
+            "keys: ←/→ mode • Tab focus • j/k move • Enter pin/open or card detail • [ / ] feature history • H history browser • b back • q quit"
         ),
         border_style="bright_cyan",
     )
@@ -348,23 +383,30 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     state.session_index = max(0, min(state.session_index, len(state.session_names) - 1))
     selected_name = state.pinned_session or state.session_names[state.session_index]
     payload = _load_session_payload(session_root, selected_name)
-    plan = _load_feature_plan_for_session_name(session_root, selected_name)
+    features = _feature_records(payload)
+    state.feature_index = max(0, min(state.feature_index, max(0, len(features) - 1)))
+    selected_feature = features[state.feature_index] if features else None
+    plan = _load_feature_plan_from_record(selected_feature) or _load_feature_plan_for_session_name(session_root, selected_name)
 
     if not plan:
-        right: Panel | Group = Panel(f"Session '{selected_name}' has no active feature plan metadata.", border_style="yellow", title="Feature Mode")
+        right: Panel | Group = Group(
+            _features_panel(features, state),
+            Panel(f"Session '{selected_name}' has no active feature plan metadata.", border_style="yellow", title="Feature Mode"),
+        )
     else:
+        status_label = selected_feature.get("status") if isinstance(selected_feature, dict) else plan.overall_status()
         top = Panel(
             f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]\n"
-            f"[dim]review={plan.review_status} • tasks={len(plan.tasks)} • events={len(plan.event_log)}[/dim]",
+            f"[dim]status={status_label} • review={plan.review_status} • tasks={len(plan.tasks)} • events={len(plan.event_log)}[/dim]",
             border_style="green",
         )
         widgets = _stats_widgets(plan, payload)
         if state.history_open:
-            right = Group(top, widgets, _history_browser(plan, payload, state))
+            right = Group(_features_panel(features, state), top, widgets, _history_browser(plan, payload, state))
         elif state.detail_open:
-            right = Group(top, widgets, _task_detail_panel(plan, state, selected_name))
+            right = Group(_features_panel(features, state), top, widgets, _task_detail_panel(plan, state, selected_name))
         else:
-            right = Group(top, widgets, _feature_board(plan, state))
+            right = Group(_features_panel(features, state), top, widgets, _feature_board(plan, state))
 
     return Group(tabs, header, Columns([_sessions_panel(state), right], expand=True, equal=False))
 
@@ -444,6 +486,16 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
         elif state.focus == "board" and not state.history_open:
             state.detail_open = True
             state.detail_offset = 0
+        return state
+    if key in {"[", "]"} and state.focus == "board":
+        if key == "[":
+            state.feature_index = max(0, state.feature_index - 1)
+        else:
+            state.feature_index += 1
+        state.detail_open = False
+        state.history_open = False
+        state.detail_offset = 0
+        state.history_offset = 0
         return state
 
     if state.focus == "sessions":

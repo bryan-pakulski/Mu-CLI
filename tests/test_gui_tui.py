@@ -21,8 +21,7 @@ def _sample_plan() -> FeaturePlan:
 
 def test_bucket_tasks_maps_statuses_to_board_columns():
     buckets = _bucket_tasks(_sample_plan())
-    assert [t.id for t in buckets["Backlog"]] == [1]
-    assert [t.id for t in buckets["Selected for Development"]] == [2]
+    assert [t.id for t in buckets["Backlog"]] == [1, 2]
     assert [t.id for t in buckets["In Progress"]] == [3]
     assert [t.id for t in buckets["Done"]] == [4]
 

@@ -107,13 +107,13 @@ def _bar(value: int, maximum: int, width: int = 18) -> str:
 
 
 def _bucket_tasks(plan: FeaturePlan) -> dict[str, list]:
-    buckets = {"Backlog": [], "Selected for Development": [], "In Progress": [], "Done": []}
+    buckets = {"Backlog": [], "In Progress": [], "Done": []}
     for task in plan.tasks:
         status = normalize_task_status(task.status)
         if status in {STATUS_NOT_STARTED, STATUS_PENDING}:
             buckets["Backlog"].append(task)
         elif status == STATUS_BLOCKED:
-            buckets["Selected for Development"].append(task)
+            buckets["Backlog"].append(task)
         elif status == STATUS_IN_PROGRESS:
             buckets["In Progress"].append(task)
         elif status in {STATUS_COMPLETED, STATUS_ARCHIVED}:
@@ -239,6 +239,22 @@ def _history_browser(plan: FeaturePlan, payload: dict, state: GuiState) -> Panel
     for event in plan.event_log[-60:]:
         ts = datetime.fromtimestamp(float(getattr(event, "created_at", 0) or 0)).strftime("%H:%M:%S")
         lines.append(f"  [{ts}] {getattr(event, 'kind', '-')}: {getattr(event, 'entity', '-')}#{getattr(event, 'entity_id', '-')}")
+
+    lines += ["", "All Features (including archived):"]
+    registry = payload.get("feature_registry", {}) if isinstance(payload.get("feature_registry"), dict) else {}
+    feature_records = sorted(
+        [value for value in registry.values() if isinstance(value, dict)],
+        key=lambda item: float(item.get("updated_at", 0) or 0),
+        reverse=True,
+    )
+    if feature_records:
+        for feature in feature_records[:40]:
+            fid = str(feature.get("feature_id", "-"))
+            name = str(feature.get("feature_name", fid))
+            status = str(feature.get("status", "unknown"))
+            lines.append(f"  {fid:<28} | {status:<12} | {name}")
+    else:
+        lines.append("  (none)")
 
     lines += ["", "Conversation History (recent):"]
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
@@ -425,7 +441,7 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
         state.selected_bucket = max(0, state.selected_bucket - 1)
         state.selected_card = 0
     elif key in {"l"}:
-        state.selected_bucket = min(3, state.selected_bucket + 1)
+        state.selected_bucket = min(2, state.selected_bucket + 1)
         state.selected_card = 0
     elif key in {"\x1b[B", "j"}:
         state.selected_card += 1

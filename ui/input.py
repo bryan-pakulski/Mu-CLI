@@ -186,6 +186,12 @@ class InputHandler:
         )
 
         mode_completer = NestedCompleter.from_nested_dict(MODE_CHOICES)
+        research_completer = NestedCompleter.from_nested_dict(
+            {
+                "status": None,
+                "sources": None,
+            }
+        )
         unset_completer = MergedCompleter(
             [
                 variable_completer,
@@ -229,6 +235,7 @@ class InputHandler:
             "/update": None,
             "/agentic": None,
             "/mode": mode_completer,
+            "/research": research_completer,
             "/feature": feature_completer,
             "/features": feature_completer,
             "/memory": memory_completer,

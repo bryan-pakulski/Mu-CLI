@@ -147,6 +147,7 @@ def test_command_completion_covers_all_cli_commands_and_aliases():
         "/update",
         "/agentic",
         "/mode",
+        "/research",
         "/feature",
         "/features",
         "/tool",
@@ -227,6 +228,24 @@ def test_tool_enable_completion_suggests_tool_names(monkeypatch):
     completion_texts = {completion.text for completion in completions}
 
     assert "write_file" in completion_texts
+
+
+def test_research_completion_includes_status_and_sources():
+    handler = InputHandler()
+    document = Document(
+        text="/research s",
+        cursor_position=len("/research s"),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+
+    assert "status" in completion_texts
+    assert "sources" in completion_texts
 
 
 def test_memory_clear_completion_includes_scratch_alias():

@@ -540,7 +540,7 @@ def print_help():
         "Manage per-session feature plans and switch the active feature",
     )
     table.add_row(
-        "/research <status|mode|ask|sources|help>",
+        "/research <status|sources|query>",
         "",
         "Research workflow commands (citation-first prompts, source review)",
     )
@@ -1451,36 +1451,8 @@ def handle_command(session, user_input, allow_prompt=True):
         )
 
     if cmd == "/research":
-        research_parts = arg.split(" ", 1) if arg else ["status"]
-        research_cmd = research_parts[0].strip().lower()
-        research_arg = research_parts[1].strip() if len(research_parts) > 1 else ""
-
-        if research_cmd in {"help", "?"}:
-            usage = (
-                "Research Command Surface:\n"
-                "- /research status\n"
-                "- /research mode\n"
-                "- /research ask <question>\n"
-                "- /research sources\n"
-                "- /research help\n"
-            )
-            if allow_prompt:
-                console.print(Panel(usage, title="Research Help", border_style="magenta"))
-            return serialize_command_result(session, cmd, message="Rendered research help.", data={"usage": usage})
-
-        if research_cmd in {"mode", "on"}:
-            session.variables["agent_mode"] = "research"
-            session.session_manager.save_history(session.folder_context)
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                message="Agent strategy set to research mode.",
-                data={
-                    "current_mode": "research",
-                    "available_tools": _research_tool_names(),
-                },
-            )
+        research_query = (arg or "").strip()
+        research_cmd = research_query.lower()
 
         if research_cmd in {"status", ""}:
             active_mode = str(session.variables.get("agent_mode", "default"))
@@ -1506,39 +1478,31 @@ def handle_command(session, user_input, allow_prompt=True):
                 data={"sources": sources},
             )
 
-        if research_cmd == "ask":
-            if not research_arg:
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="Usage: /research ask <question>",
-                )
-            session.variables["agent_mode"] = "research"
-            session.session_manager.save_history(session.folder_context)
-            refresh_memory_hud(session, ui)
-            research_prompt = (
-                "Research request:\n"
-                f"{research_arg}\n\n"
-                "Requirements:\n"
-                "- Prefer primary/official sources when possible.\n"
-                "- Include explicit source URLs.\n"
-                "- Clearly separate facts vs inference.\n"
-            )
-            send_result = session.send_message(research_prompt)
+        if not research_query:
             return serialize_command_result(
                 session,
                 cmd,
-                ok=bool(send_result.get("ok", True)),
-                message="Executed research query.",
-                data={"query": research_arg, "send_result": send_result},
+                ok=False,
+                message="Usage: /research <status|sources|query>",
             )
-
+        session.variables["agent_mode"] = "research"
+        session.session_manager.save_history(session.folder_context)
+        refresh_memory_hud(session, ui)
+        research_prompt = (
+            "Research request:\n"
+            f"{research_query}\n\n"
+            "Requirements:\n"
+            "- Prefer primary/official sources when possible.\n"
+            "- Include explicit source URLs.\n"
+            "- Clearly separate facts vs inference.\n"
+        )
+        send_result = session.send_message(research_prompt)
         return serialize_command_result(
             session,
             cmd,
-            ok=False,
-            message=f"Unknown research command: {research_cmd}. Use '/research help'.",
+            ok=bool(send_result.get("ok", True)),
+            message="Executed research query.",
+            data={"query": research_query, "send_result": send_result},
         )
 
     if cmd == "/mode":

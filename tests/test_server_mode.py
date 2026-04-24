@@ -214,12 +214,12 @@ def test_research_sources_collects_recent_urls():
     assert "https://docs.example.com/guide" in result["data"]["sources"]
 
 
-def test_research_ask_sets_mode_and_executes_prompt():
+def test_research_query_sets_mode_and_executes_prompt():
     session = build_test_session()
 
     result = handle_command(
         session,
-        "/research ask compare sqlite vs postgres for embedded analytics",
+        "/research compare sqlite vs postgres for embedded analytics",
         allow_prompt=False,
     )
 

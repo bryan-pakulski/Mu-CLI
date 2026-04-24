@@ -69,13 +69,13 @@ def test_handle_key_hierarchical_navigation(tmp_path):
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "chat"
 
-    state = _handle_key(state, "\x1b", session_root)
+    state = _handle_key(state, "h", session_root)
     assert state.screen == "contexts"
 
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\n", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "l", session_root)
     assert state.screen == "features"
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "items"
@@ -84,10 +84,10 @@ def test_handle_key_hierarchical_navigation(tmp_path):
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "overview"
 
-    state = _handle_key(state, "\x1b", session_root)
+    state = _handle_key(state, "h", session_root)
     assert state.screen == "items"
 
-    state = _handle_key(state, "\x1b", session_root)
+    state = _handle_key(state, "h", session_root)
     assert state.screen == "features"
 
 
@@ -96,23 +96,23 @@ def test_handle_key_opens_task_detail_and_scrolls(tmp_path):
     state = GuiState()
 
     state = _handle_key(state, "\n", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\n", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "l", session_root)
     assert state.screen == "features"
     state = _handle_key(state, "\n", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\x1b[B", session_root)
-    state = _handle_key(state, "\n", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "l", session_root)
 
     assert state.screen == "task_detail"
 
-    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "j", session_root)
     assert state.detail_offset == 1
 
-    state = _handle_key(state, "\x1b", session_root)
+    state = _handle_key(state, "h", session_root)
     assert state.screen == "items"
 
 
@@ -124,49 +124,55 @@ def test_handle_key_quit_confirmation(tmp_path):
     assert state.confirm_quit is True
     assert state.should_exit is False
 
-    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "j", session_root)
     assert state.confirm_index == 1
 
     state = _handle_key(state, "\n", session_root)
     assert state.should_exit is True
 
 
-def test_handle_key_supports_application_cursor_sequences(tmp_path):
+def test_handle_key_supports_vim_navigation_sequences(tmp_path):
     session_root, _ = _write_session_fixture(tmp_path)
     state = GuiState()
 
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "contexts"
 
-    state = _handle_key(state, "\x1bOB", session_root)
+    state = _handle_key(state, "j", session_root)
     assert state.context_index == 1
 
-    state = _handle_key(state, "\x1bOB", session_root)
-    state = _handle_key(state, "\x1bOB", session_root)
+    state = _handle_key(state, "j", session_root)
+    state = _handle_key(state, "j", session_root)
     assert state.context_index == 3
 
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "features"
 
-    state = _handle_key(state, "\x1bOB", session_root)
+    state = _handle_key(state, "j", session_root)
     assert state.feature_index == 0
 
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "items"
 
 
-def test_handle_key_supports_modified_csi_arrow_sequences(tmp_path):
+def test_handle_key_supports_h_back_and_l_select(tmp_path):
     session_root, _ = _write_session_fixture(tmp_path)
     state = GuiState()
 
     state = _handle_key(state, "\n", session_root)
     assert state.screen == "contexts"
 
-    state = _handle_key(state, "\x1b[1;2B", session_root)
+    state = _handle_key(state, "j", session_root)
     assert state.context_index == 1
 
-    state = _handle_key(state, "\x1b[1;2A", session_root)
+    state = _handle_key(state, "k", session_root)
     assert state.context_index == 0
+
+    state = _handle_key(state, "l", session_root)
+    assert state.screen == "chat"
+
+    state = _handle_key(state, "h", session_root)
+    assert state.screen == "contexts"
 
 
 def test_tool_usage_counts_sorts_descending():

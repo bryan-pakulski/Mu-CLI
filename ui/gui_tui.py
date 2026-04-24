@@ -141,7 +141,7 @@ def _header(state: GuiState) -> Panel:
         Text.from_markup(
             f"[bold cyan]μCLI Functional GUI[/bold cyan] • [green]{datetime.now().strftime('%H:%M:%S')}[/green]\n"
             f"path: [magenta]{' > '.join(breadcrumb)}[/magenta]\n"
-            "controls: ↑/↓ navigate • Enter select • Esc back • q quit"
+            "controls: j/k navigate • Enter or l select • h back • q quit"
         ),
         border_style="cyan",
     )
@@ -524,20 +524,18 @@ class _KeyReader:
 
 
 def _is_up_key(key: str) -> bool:
-    if key in {"\x1b[A", "\x1bOA"}:
-        return True
-    return key.startswith("\x1b[") and key.endswith("A")
+    return key in {"k", "K"}
 
 
 def _is_down_key(key: str) -> bool:
-    if key in {"\x1b[B", "\x1bOB"}:
-        return True
-    return key.startswith("\x1b[") and key.endswith("B")
+    return key in {"j", "J"}
 
 
 def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
     is_up = _is_up_key(key)
     is_down = _is_down_key(key)
+    is_select = key in {"\n", "\r", "l", "L"}
+    is_back = key in {"\x1b", "b", "B", "h", "H"}
 
     if key in {"q", "Q"} and not state.confirm_quit:
         state.confirm_quit = True
@@ -545,13 +543,13 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         return state
 
     if state.confirm_quit:
-        if key in {"\x1b", "b"}:
+        if is_back:
             state.confirm_quit = False
             return state
         if is_up or is_down:
             state.confirm_index = 1 - state.confirm_index
             return state
-        if key in {"\n", "\r"}:
+        if is_select:
             if state.confirm_index == 1:
                 state.should_exit = True
             else:
@@ -559,7 +557,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             return state
         return state
 
-    if key in {"\x1b", "b"}:
+    if is_back:
         if state.screen == "task_detail":
             state.screen = "items"
             state.detail_offset = 0
@@ -583,7 +581,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             state.session_index = min(max(0, len(state.session_names) - 1), state.session_index + 1)
         elif is_up:
             state.session_index = max(0, state.session_index - 1)
-        elif key in {"\n", "\r"} and state.session_names:
+        elif is_select and state.session_names:
             state.selected_session = state.session_names[state.session_index]
             state.screen = "contexts"
             state.context_index = 0
@@ -597,7 +595,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             state.context_index = min(max(0, len(items) - 1), state.context_index + 1)
         elif is_up:
             state.context_index = max(0, state.context_index - 1)
-        elif key in {"\n", "\r"} and items:
+        elif is_select and items:
             selected = items[state.context_index]
             state.screen = selected["id"]
             if selected["id"] == "features":
@@ -611,7 +609,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             state.feature_index = min(max(0, len(state.feature_records) - 1), state.feature_index + 1)
         elif is_up:
             state.feature_index = max(0, state.feature_index - 1)
-        elif key in {"\n", "\r"} and state.feature_records:
+        elif is_select and state.feature_records:
             state.selected_feature = state.feature_records[state.feature_index]
             state.screen = "items"
             state.item_index = 0
@@ -626,7 +624,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             state.item_index = min(len(items) - 1, state.item_index + 1)
         elif is_up:
             state.item_index = max(0, state.item_index - 1)
-        elif key in {"\n", "\r"}:
+        elif is_select:
             sel = items[state.item_index]
             if sel["kind"] == "task":
                 state.screen = "task_detail"

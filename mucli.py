@@ -2352,7 +2352,7 @@ def main():
     ui = HeadlessUI(auto_approve=args.yolo) if args.server else RichUI()
 
     try:
-        session = build_session(args, ui, allow_prompt=not args.server)
+        session = build_session(args, ui, allow_prompt=not (args.server or args.gui))
     except Exception as exc:
         console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
         sys.exit(1)

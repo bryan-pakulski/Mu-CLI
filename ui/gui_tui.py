@@ -379,14 +379,17 @@ class _KeyReader:
         if ch != "\x1b":
             return ch
         seq = ch
-        ready, _, _ = select.select([sys.stdin], [], [], 0.0001)
+        ready, _, _ = select.select([sys.stdin], [], [], 0.01)
         while ready:
             seq += sys.stdin.read(1)
-            ready, _, _ = select.select([sys.stdin], [], [], 0.0001)
+            ready, _, _ = select.select([sys.stdin], [], [], 0.01)
         return seq
 
 
 def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
+    up_keys = {"\x1b[A", "\x1bOA"}
+    down_keys = {"\x1b[B", "\x1bOB"}
+
     if key in {"q", "Q"} and not state.confirm_quit:
         state.confirm_quit = True
         state.confirm_index = 0
@@ -396,7 +399,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         if key in {"\x1b", "b"}:
             state.confirm_quit = False
             return state
-        if key in {"\x1b[B", "\x1b[A"}:
+        if key in up_keys | down_keys:
             state.confirm_index = 1 - state.confirm_index
             return state
         if key in {"\n", "\r"}:
@@ -422,9 +425,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
 
     if state.screen == "sessions":
         state.session_names = _discover_sessions(session_root)
-        if key == "\x1b[B":
+        if key in down_keys:
             state.session_index = min(max(0, len(state.session_names) - 1), state.session_index + 1)
-        elif key == "\x1b[A":
+        elif key in up_keys:
             state.session_index = max(0, state.session_index - 1)
         elif key in {"\n", "\r"} and state.session_names:
             state.selected_session = state.session_names[state.session_index]
@@ -435,9 +438,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
     if state.screen == "features":
         payload = _load_session_payload(session_root, state.selected_session or "")
         state.feature_records = _feature_records(payload)
-        if key == "\x1b[B":
+        if key in down_keys:
             state.feature_index = min(max(0, len(state.feature_records) - 1), state.feature_index + 1)
-        elif key == "\x1b[A":
+        elif key in up_keys:
             state.feature_index = max(0, state.feature_index - 1)
         elif key in {"\n", "\r"} and state.feature_records:
             state.selected_feature = state.feature_records[state.feature_index]
@@ -450,9 +453,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         if not plan:
             return state
         items = _feature_items(plan)
-        if key == "\x1b[B":
+        if key in down_keys:
             state.item_index = min(len(items) - 1, state.item_index + 1)
-        elif key == "\x1b[A":
+        elif key in up_keys:
             state.item_index = max(0, state.item_index - 1)
         elif key in {"\n", "\r"}:
             sel = items[state.item_index]
@@ -464,9 +467,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         return state
 
     if state.screen == "task_detail":
-        if key == "\x1b[B":
+        if key in down_keys:
             state.detail_offset += 1
-        elif key == "\x1b[A":
+        elif key in up_keys:
             state.detail_offset = max(0, state.detail_offset - 1)
         return state
 

@@ -115,6 +115,26 @@ def test_handle_key_quit_confirmation(tmp_path):
     assert state.should_exit is True
 
 
+def test_handle_key_supports_application_cursor_sequences(tmp_path):
+    session_root, _ = _write_session_fixture(tmp_path)
+    state = GuiState()
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "features"
+
+    state = _handle_key(state, "\x1bOB", session_root)
+    assert state.feature_index == 0
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "items"
+
+    state = _handle_key(state, "\x1bOB", session_root)
+    assert state.item_index == 1
+
+    state = _handle_key(state, "\x1bOA", session_root)
+    assert state.item_index == 0
+
+
 def test_tool_usage_counts_sorts_descending():
     payload = {
         "history": [

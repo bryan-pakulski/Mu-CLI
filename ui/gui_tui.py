@@ -356,6 +356,27 @@ def _hero_banner(state: GuiState, session_count: int) -> Panel:
     return Panel(banner, border_style="bright_cyan", title="🚀 TERMINAL COMMAND CENTER")
 
 
+def _starfield_panel() -> Panel:
+    phase = int(time.time() * 3)
+    rows = []
+    glyphs = "·✦✧⋆✶✺"
+    for y in range(7):
+        row = []
+        for x in range(42):
+            idx = (x * 7 + y * 11 + phase) % len(glyphs)
+            row.append(glyphs[idx] if (x + y + phase) % 5 == 0 else " ")
+        rows.append("".join(row))
+    rows.append("[dim]signal mesh synced[/dim]")
+    return Panel("\n".join(rows), title="COSMIC TELEMETRY", border_style="bright_blue")
+
+
+def _spectrum_footer() -> str:
+    blocks = "▁▂▃▄▅▆▇█"
+    phase = int(time.time() * 4)
+    band = "".join(blocks[(i + phase) % len(blocks)] for i in range(80))
+    return f"[bright_magenta]{band}[/bright_magenta]"
+
+
 def _ambient_panel(plan: FeaturePlan) -> Panel:
     done = sum(1 for t in plan.tasks if normalize_task_status(t.status) in {STATUS_COMPLETED, STATUS_ARCHIVED})
     total = len(plan.tasks)
@@ -419,12 +440,26 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         border_style="bright_cyan",
     )
     hero = _hero_banner(state, len(state.session_names))
+    starfield = _starfield_panel()
 
     if active_mode != "feature":
-        return Group(tabs, hero, header, Panel(f"{active_mode} mode tab is not implemented yet.\nSwitch to FEATURE tab.", border_style="yellow", title=f"{active_mode.title()} Mode"))
+        return Group(
+            tabs,
+            Columns([hero, starfield], expand=True),
+            header,
+            Panel(f"{active_mode} mode tab is not implemented yet.\nSwitch to FEATURE tab.", border_style="yellow", title=f"{active_mode.title()} Mode"),
+            Panel(_spectrum_footer(), border_style="bright_black"),
+        )
 
     if not state.session_names:
-        return Group(tabs, hero, header, _sessions_panel(state), Panel("No sessions available.", border_style="yellow"))
+        return Group(
+            tabs,
+            Columns([hero, starfield], expand=True),
+            header,
+            _sessions_panel(state),
+            Panel("No sessions available.", border_style="yellow"),
+            Panel(_spectrum_footer(), border_style="bright_black"),
+        )
 
     state.session_index = max(0, min(state.session_index, len(state.session_names) - 1))
     selected_name = state.pinned_session or state.session_names[state.session_index]
@@ -457,10 +492,17 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
             right = Group(_features_panel(features, state), top, widgets, ambient, _feature_board(plan, state))
 
     footer = Panel(
-        "[dim]HISTORY BROWSER + FEATURE TIMELINE + LIVE ANALYTICS • engineered for wow[/dim]",
+        "[dim]HISTORY BROWSER + FEATURE TIMELINE + LIVE ANALYTICS + COSMIC TELEMETRY[/dim]\n"
+        + _spectrum_footer(),
         border_style="bright_black",
     )
-    return Group(tabs, hero, header, Columns([_sessions_panel(state), right], expand=True, equal=False), footer)
+    return Group(
+        tabs,
+        Columns([hero, starfield], expand=True),
+        header,
+        Columns([_sessions_panel(state), right], expand=True, equal=False),
+        footer,
+    )
 
 
 class _KeyReader:

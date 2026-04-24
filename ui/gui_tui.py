@@ -49,6 +49,8 @@ class GuiState:
     history_open: bool = False
     history_offset: int = 0
     feature_index: int = 0
+    tools_open: bool = False
+    tools_offset: int = 0
 
 
 def _discover_sessions(session_root: str) -> list[str]:
@@ -329,6 +331,42 @@ def _history_browser(plan: FeaturePlan, payload: dict, state: GuiState) -> Panel
     return Panel("\n".join(window) if window else "(empty)", title="History Browser", subtitle="H close • j/k scroll", border_style="bright_magenta")
 
 
+def _tool_usage_counts(payload: dict) -> list[tuple[str, int]]:
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    counts: dict[str, int] = {}
+    for msg in history:
+        if not isinstance(msg, dict):
+            continue
+        parts = msg.get("parts", [])
+        for part in parts if isinstance(parts, list) else []:
+            if isinstance(part, dict) and part.get("type") == "tool_call":
+                tool = str(part.get("tool_name", "tool") or "tool")
+                counts[tool] = counts.get(tool, 0) + 1
+    return sorted(counts.items(), key=lambda item: item[1], reverse=True)
+
+
+def _tool_heatmap_panel(payload: dict, state: GuiState) -> Panel:
+    usage = _tool_usage_counts(payload)
+    if not usage:
+        return Panel("(no tool call history)", title="Tool Heatmap", border_style="yellow")
+
+    max_count = max(count for _, count in usage)
+    lines = ["Most-used tools:"]
+    for idx, (name, count) in enumerate(usage):
+        if idx >= state.tools_offset + 24:
+            break
+        if idx < state.tools_offset:
+            continue
+        bar = _bar(count, max_count, 22)
+        lines.append(f"{name:<22} {count:>4} {bar}")
+    return Panel(
+        "\n".join(lines),
+        title="Tool Heatmap",
+        subtitle="T close • j/k scroll",
+        border_style="bright_yellow",
+    )
+
+
 def _mode_tabs(state: GuiState) -> Table:
     table = Table.grid(expand=True)
     for _ in MODE_TABS:
@@ -435,7 +473,7 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     header = Panel(
         Text.from_markup(
             f"[bold cyan]μCLI GUI[/bold cyan] • multi-session • [green]{clock}[/green]\n"
-            "keys: ←/→ mode • Tab focus • j/k move • Enter pin/open or card detail • [ / ] feature history • H history browser • b back • q quit"
+            "keys: ←/→ mode • Tab focus • j/k move • Enter pin/open or card detail • [ / ] feature history • H history • T tool heatmap • b back • q quit"
         ),
         border_style="bright_cyan",
     )
@@ -486,6 +524,8 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         ambient = _ambient_panel(plan)
         if state.history_open:
             right = Group(_features_panel(features, state), top, widgets, ambient, _history_browser(plan, payload, state))
+        elif state.tools_open:
+            right = Group(_features_panel(features, state), top, widgets, ambient, _tool_heatmap_panel(payload, state))
         elif state.detail_open:
             right = Group(_features_panel(features, state), top, widgets, ambient, _task_detail_panel(plan, state, selected_name))
         else:
@@ -552,17 +592,30 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
         state.detail_offset = 0
         state.history_open = False
         state.history_offset = 0
+        state.tools_open = False
+        state.tools_offset = 0
         state.focus = "board" if state.focus == "sessions" else "sessions"
         return state
     if key == "H" and state.focus == "board":
         state.history_open = not state.history_open
         state.history_offset = 0
         state.detail_open = False
+        state.tools_open = False
+        state.tools_offset = 0
+        return state
+    if key == "T" and state.focus == "board":
+        state.tools_open = not state.tools_open
+        state.tools_offset = 0
+        state.detail_open = False
+        state.history_open = False
         return state
     if key in {"b", "\x1b"}:
         if state.history_open:
             state.history_open = False
             state.history_offset = 0
+        elif state.tools_open:
+            state.tools_open = False
+            state.tools_offset = 0
         elif state.detail_open:
             state.detail_open = False
             state.detail_offset = 0
@@ -577,7 +630,9 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
             state.detail_offset = 0
             state.history_open = False
             state.history_offset = 0
-        elif state.focus == "board" and not state.history_open:
+            state.tools_open = False
+            state.tools_offset = 0
+        elif state.focus == "board" and not state.history_open and not state.tools_open:
             state.detail_open = True
             state.detail_offset = 0
         return state
@@ -588,8 +643,10 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
             state.feature_index += 1
         state.detail_open = False
         state.history_open = False
+        state.tools_open = False
         state.detail_offset = 0
         state.history_offset = 0
+        state.tools_offset = 0
         return state
 
     if state.focus == "sessions":
@@ -604,6 +661,13 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
             state.history_offset += 1
         elif key in {"\x1b[A", "k"}:
             state.history_offset = max(0, state.history_offset - 1)
+        return state
+
+    if state.tools_open:
+        if key in {"\x1b[B", "j"}:
+            state.tools_offset += 1
+        elif key in {"\x1b[A", "k"}:
+            state.tools_offset = max(0, state.tools_offset - 1)
         return state
 
     if state.detail_open:

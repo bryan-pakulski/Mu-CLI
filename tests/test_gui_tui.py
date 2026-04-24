@@ -78,3 +78,14 @@ def test_handle_key_cycles_feature_history_index():
     assert state.feature_index == 1
     state = _handle_key(state, "[")
     assert state.feature_index == 0
+
+
+def test_handle_key_toggles_tool_heatmap():
+    state = GuiState(session_names=["a"], focus="sessions", session_index=0)
+    state = _handle_key(state, "\n")
+    state = _handle_key(state, "T")
+    assert state.tools_open is True
+    state = _handle_key(state, "j")
+    assert state.tools_offset == 1
+    state = _handle_key(state, "b")
+    assert state.tools_open is False

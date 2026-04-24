@@ -1,5 +1,7 @@
+import json
+
 from core.feature_mode import FeaturePlan, FeatureTask
-from ui.gui_tui import _bucket_tasks, _handle_key, GuiState
+from ui.gui_tui import _bucket_tasks, _discover_sessions, _handle_key, GuiState
 
 
 def _sample_plan() -> FeaturePlan:
@@ -25,11 +27,22 @@ def test_bucket_tasks_maps_statuses_to_board_columns():
     assert [t.id for t in buckets["Done"]] == [4]
 
 
-def test_handle_key_switches_tabs_and_navigation_state():
-    state = GuiState(tab_index=2, selected_bucket=0, selected_card=0)
-    state = _handle_key(state, "\x1b[C")
-    assert state.tab_index == 3
-    state = _handle_key(state, "\t")
-    assert state.selected_bucket == 1
+def test_discover_sessions_lists_only_directories_with_session_json(tmp_path):
+    (tmp_path / "s1").mkdir()
+    (tmp_path / "s2").mkdir()
+    (tmp_path / "s3").mkdir()
+    (tmp_path / "s1" / "session.json").write_text(json.dumps({"history": []}))
+    (tmp_path / "s3" / "session.json").write_text(json.dumps({"history": []}))
+
+    assert _discover_sessions(str(tmp_path)) == ["s1", "s3"]
+
+
+def test_handle_key_navigates_sessions_and_pin_focus():
+    state = GuiState(session_names=["a", "b", "c"], focus="sessions", session_index=0)
     state = _handle_key(state, "j")
-    assert state.selected_card == 1
+    assert state.session_index == 1
+    state = _handle_key(state, "\n")
+    assert state.pinned_session == "b"
+    assert state.focus == "board"
+    state = _handle_key(state, "b")
+    assert state.focus == "sessions"

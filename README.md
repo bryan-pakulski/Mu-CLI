@@ -17,7 +17,7 @@
 - **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for Integrations**: Launch μCLI with an HTTP API so external clients can drive sessions, commands, and tool execution.
-- **Terminal GUI (`--gui`)**: Launch a full-screen TUI with mode tabs. Feature mode starts with a kanban-style board for task flow visualization.
+- **Terminal GUI (`--gui`)**: Launch a full-screen TUI with mode tabs and a multi-session navigator. Feature mode includes a kanban-style board and interactive session switching.
 
 ## Installation
 
@@ -57,6 +57,7 @@ Run the terminal GUI mode using:
 ```bash
 python mucli.py --gui
 ```
+Inside GUI mode: use `↑/↓` (`j/k`) to select sessions, `Enter` to open/pin a session board, `Tab` to switch focus between the session list and board, `b` to return focus to sessions, and `q` to exit back to CLI.
 
 ### Getting Started
 1. **Select a Provider**: Choose between Gemini, OpenAI, or Ollama.

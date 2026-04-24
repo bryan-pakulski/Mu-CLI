@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 import select
 import sys
 import termios
 import time
 import tty
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from rich.columns import Columns
 from rich.console import Group
@@ -37,18 +39,50 @@ class GuiState:
     selected_bucket: int = 0
     selected_card: int = 0
     should_exit: bool = False
+    focus: str = "sessions"  # sessions | board
+    session_index: int = 0
+    pinned_session: str | None = None
+    session_names: list[str] = field(default_factory=list)
 
 
-def _load_feature_plan_for_session(session) -> FeaturePlan | None:
-    feature_state = session.session_manager.get_feature_state() or {}
+# ---------------- Session discovery ----------------
+
+def _discover_sessions(session_root: str) -> list[str]:
+    if not os.path.isdir(session_root):
+        return []
+    names = []
+    for name in sorted(os.listdir(session_root)):
+        session_path = os.path.join(session_root, name, "session.json")
+        if os.path.isfile(session_path):
+            names.append(name)
+    return names
+
+
+def _load_feature_plan_for_session_name(session_root: str, session_name: str) -> FeaturePlan | None:
+    session_path = os.path.join(session_root, session_name, "session.json")
+    if not os.path.isfile(session_path):
+        return None
+    try:
+        with open(session_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    feature_state = payload.get("feature_state", {}) if isinstance(payload.get("feature_state"), dict) else {}
     metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
-    if metadata_path:
-        try:
-            return load_feature_plan(metadata_path)
-        except Exception:
-            return None
-    return None
+    if not metadata_path:
+        return None
 
+    try:
+        return load_feature_plan(metadata_path)
+    except Exception:
+        return None
+
+
+# ---------------- Board rendering ----------------
 
 def _bucket_tasks(plan: FeaturePlan) -> dict[str, list]:
     buckets = {
@@ -105,24 +139,21 @@ def _feature_board(plan: FeaturePlan, state: GuiState) -> Group:
         cards = buckets[name]
         card_panels = []
         for c_idx, task in enumerate(cards[:10]):
-            is_selected = b_idx == state.selected_bucket and c_idx == state.selected_card
+            is_selected = (
+                state.focus == "board"
+                and b_idx == state.selected_bucket
+                and c_idx == state.selected_card
+            )
             card_panels.append(_task_panel(task, selected=is_selected))
 
         if not card_panels:
             card_panels = [Panel("(empty)", border_style="dim")]
 
         title = f"{name} ({len(cards)} Tasks)"
-        border = "green" if b_idx == state.selected_bucket else "cyan"
+        border = "green" if (state.focus == "board" and b_idx == state.selected_bucket) else "cyan"
         columns.append(Panel(Group(*card_panels), title=title, border_style=border))
 
-    header = Panel(
-        Text.from_markup(
-            f"[bold green]Feature Board[/bold green] • {plan.feature_name} ([cyan]{plan.feature_id}[/cyan])\n"
-            "keys: ←/→ switch mode • h/l switch lane • j/k move card • q quit"
-        ),
-        border_style="green",
-    )
-    return Group(header, Columns(columns, expand=True))
+    return Group(Columns(columns, expand=True))
 
 
 def _mode_tabs(state: GuiState) -> Table:
@@ -139,31 +170,77 @@ def _mode_tabs(state: GuiState) -> Table:
     return table
 
 
-def _render_gui(session, state: GuiState) -> Group:
+def _sessions_panel(state: GuiState) -> Panel:
+    state.session_index = max(0, min(state.session_index, max(0, len(state.session_names) - 1)))
+    lines = []
+    for i, name in enumerate(state.session_names[:40]):
+        marker = "▶" if i == state.session_index else " "
+        pin = "📌" if state.pinned_session == name else " "
+        style = "bold green" if (state.focus == "sessions" and i == state.session_index) else "white"
+        lines.append(f"[{style}]{marker} {pin} {name}[/{style}]")
+
+    if not lines:
+        lines = ["(no sessions found)"]
+
+    return Panel(
+        "\n".join(lines),
+        title="Sessions",
+        border_style="green" if state.focus == "sessions" else "cyan",
+    )
+
+
+def _render_gui(session_root: str, state: GuiState) -> Group:
+    state.session_names = _discover_sessions(session_root)
     tabs = _mode_tabs(state)
     active_mode = MODE_TABS[state.tab_index]
 
-    if active_mode != "feature":
-        placeholder = Panel(
-            f"{active_mode} mode tab is not implemented yet.\nSwitch to FEATURE tab.",
-            border_style="yellow",
-            title=f"{active_mode.title()} Mode",
-        )
-        return Group(tabs, placeholder)
+    header = Panel(
+        Text.from_markup(
+            "[bold cyan]μCLI GUI[/bold cyan] • multi-session\n"
+            "keys: ←/→ mode • Tab switch focus • j/k move • Enter pin/open session • b back to sessions • q quit"
+        ),
+        border_style="cyan",
+    )
 
-    plan = _load_feature_plan_for_session(session)
-    if not plan:
+    if active_mode != "feature":
         return Group(
             tabs,
+            header,
             Panel(
-                "No active feature plan found.\nUse /feature new or /feature load first.",
+                f"{active_mode} mode tab is not implemented yet.\nSwitch to FEATURE tab.",
                 border_style="yellow",
-                title="Feature Mode",
+                title=f"{active_mode.title()} Mode",
             ),
         )
 
-    return Group(tabs, _feature_board(plan, state))
+    if not state.session_names:
+        return Group(tabs, header, _sessions_panel(state), Panel("No sessions available.", border_style="yellow"))
 
+    state.session_index = max(0, min(state.session_index, len(state.session_names) - 1))
+    selected_name = state.pinned_session or state.session_names[state.session_index]
+    plan = _load_feature_plan_for_session_name(session_root, selected_name)
+
+    right: Panel | Group
+    if plan:
+        right = Group(
+            Panel(
+                f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]",
+                border_style="green",
+            ),
+            _feature_board(plan, state),
+        )
+    else:
+        right = Panel(
+            f"Session '{selected_name}' has no active feature plan metadata.",
+            border_style="yellow",
+            title="Feature Mode",
+        )
+
+    layout = Columns([_sessions_panel(state), right], expand=True, equal=False)
+    return Group(tabs, header, layout)
+
+
+# ---------------- Input handling ----------------
 
 class _KeyReader:
     def __enter__(self):
@@ -201,43 +278,64 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
     if key in {"q", "\x03"}:
         state.should_exit = True
         return state
-    if key in {"\x1b[C", "l"}:  # right
+    if key in {"\x1b[C"}:  # right mode
         state.tab_index = (state.tab_index + 1) % len(MODE_TABS)
-        state.selected_bucket = 0
-        state.selected_card = 0
         return state
-    if key in {"\x1b[D", "h"}:  # left
+    if key in {"\x1b[D"}:  # left mode
         state.tab_index = (state.tab_index - 1) % len(MODE_TABS)
-        state.selected_bucket = 0
-        state.selected_card = 0
         return state
-    if key in {"\x1b[B", "j"}:  # down
-        state.selected_card += 1
+    if key == "\t":
+        state.focus = "board" if state.focus == "sessions" else "sessions"
         return state
-    if key in {"\x1b[A", "k"}:  # up
-        state.selected_card = max(0, state.selected_card - 1)
+    if key in {"b", "\x1b"}:
+        state.focus = "sessions"
         return state
-    if key in {"\t"}:  # next bucket
-        state.selected_bucket = (state.selected_bucket + 1) % 4
-        state.selected_card = 0
+    if key in {"\n", "\r"}:
+        if state.session_names:
+            state.pinned_session = state.session_names[state.session_index]
+            state.focus = "board"
         return state
+
+    if state.focus == "sessions":
+        if key in {"\x1b[B", "j"}:
+            state.session_index += 1
+            return state
+        if key in {"\x1b[A", "k"}:
+            state.session_index = max(0, state.session_index - 1)
+            return state
+    else:
+        if key in {"h"}:
+            state.selected_bucket = max(0, state.selected_bucket - 1)
+            state.selected_card = 0
+            return state
+        if key in {"l"}:
+            state.selected_bucket = min(3, state.selected_bucket + 1)
+            state.selected_card = 0
+            return state
+        if key in {"\x1b[B", "j"}:
+            state.selected_card += 1
+            return state
+        if key in {"\x1b[A", "k"}:
+            state.selected_card = max(0, state.selected_card - 1)
+            return state
+
     return state
 
 
-def run_gui_mode(session, refresh_seconds: float = 1.0) -> None:
+def run_gui_mode(session_root: str, refresh_seconds: float = 1.0) -> None:
     refresh_seconds = max(0.2, float(refresh_seconds or 1.0))
     state = GuiState()
 
     with _KeyReader() as reader, Live(
-        _render_gui(session, state), refresh_per_second=8, screen=True
+        _render_gui(session_root, state), refresh_per_second=8, screen=True
     ) as live:
         next_refresh = 0.0
         while not state.should_exit:
             now = time.time()
             if now >= next_refresh:
-                live.update(_render_gui(session, state))
+                live.update(_render_gui(session_root, state))
                 next_refresh = now + refresh_seconds
             key = reader.read_key(timeout=0.05)
             if key:
                 state = _handle_key(state, key)
-                live.update(_render_gui(session, state))
+                live.update(_render_gui(session_root, state))

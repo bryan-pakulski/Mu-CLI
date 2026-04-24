@@ -2358,7 +2358,7 @@ def main():
         sys.exit(1)
 
     if args.gui:
-        run_gui_mode(session, refresh_seconds=args.gui_refresh)
+        run_gui_mode(SESSION_DIR, refresh_seconds=args.gui_refresh)
         return
 
     if args.server:

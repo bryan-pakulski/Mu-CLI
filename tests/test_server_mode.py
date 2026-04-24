@@ -183,6 +183,52 @@ def test_mode_command_without_args_lists_available_modes():
     )
 
 
+def test_research_status_returns_tools_and_mode_snapshot():
+    session = build_test_session()
+    session.variables["agent_mode"] = "research"
+
+    result = handle_command(session, "/research status", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["current_mode"] == "research"
+    assert "web_search" in result["data"]["available_tools"]
+    assert "citation_policy" in result["data"]
+
+
+def test_research_sources_collects_recent_urls():
+    session = build_test_session()
+    session.session_manager.history.append(
+        {
+            "role": "assistant",
+            "parts": [
+                {"type": "text", "text": "Primary source: https://example.com/spec"},
+                {"type": "text", "text": "Secondary: https://docs.example.com/guide"},
+            ],
+        }
+    )
+
+    result = handle_command(session, "/research sources", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert "https://example.com/spec" in result["data"]["sources"]
+    assert "https://docs.example.com/guide" in result["data"]["sources"]
+
+
+def test_research_ask_sets_mode_and_executes_prompt():
+    session = build_test_session()
+
+    result = handle_command(
+        session,
+        "/research ask compare sqlite vs postgres for embedded analytics",
+        allow_prompt=False,
+    )
+
+    assert result["ok"] is True
+    assert session.variables["agent_mode"] == "research"
+    assert result["data"]["query"] == "compare sqlite vs postgres for embedded analytics"
+    assert result["data"]["send_result"]["assistant_text"].startswith("echo: Research request:")
+
+
 def test_stats_command_returns_session_snapshot():
     session = build_test_session()
 

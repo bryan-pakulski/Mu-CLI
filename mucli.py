@@ -69,6 +69,40 @@ def print_mode_overview(session):
     console.print(f"[dim]Current mode: {current_mode}[/dim]")
 
 
+def _research_tool_names():
+    return [
+        "web_search",
+        "url_grounding",
+        "arxiv_search",
+        "doi_resolve",
+        "reddit_search",
+        "stackoverflow_search",
+        "hackernews_search",
+        "read_document",
+    ]
+
+
+def _extract_recent_sources(history, limit=12):
+    urls = []
+    seen = set()
+    pattern = re.compile(r"https?://[^\s)\]>\"']+")
+    for message in reversed(history):
+        if not isinstance(message, dict):
+            continue
+        for part in message.get("parts", []) if isinstance(message.get("parts"), list) else []:
+            if not isinstance(part, dict):
+                continue
+            text_blob = json.dumps(part, ensure_ascii=False, default=str)
+            for match in pattern.findall(text_blob):
+                if match in seen:
+                    continue
+                seen.add(match)
+                urls.append(match)
+                if len(urls) >= limit:
+                    return urls
+    return urls
+
+
 def _slugify_feature_id(value):
     return (
         re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower()).strip("_")
@@ -504,6 +538,11 @@ def print_help():
         "/feature <list|new|load|delete|status|phases|exit|create|show|move|block|review|archive|monitor>",
         "/features",
         "Manage per-session feature plans and switch the active feature",
+    )
+    table.add_row(
+        "/research <status|mode|ask|sources|help>",
+        "",
+        "Research workflow commands (citation-first prompts, source review)",
     )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
     table.add_row(
@@ -1409,6 +1448,97 @@ def handle_command(session, user_input, allow_prompt=True):
                 )
         return serialize_command_result(
             session, cmd, data={"variables": dict(session.variables)}
+        )
+
+    if cmd == "/research":
+        research_parts = arg.split(" ", 1) if arg else ["status"]
+        research_cmd = research_parts[0].strip().lower()
+        research_arg = research_parts[1].strip() if len(research_parts) > 1 else ""
+
+        if research_cmd in {"help", "?"}:
+            usage = (
+                "Research Command Surface:\n"
+                "- /research status\n"
+                "- /research mode\n"
+                "- /research ask <question>\n"
+                "- /research sources\n"
+                "- /research help\n"
+            )
+            if allow_prompt:
+                console.print(Panel(usage, title="Research Help", border_style="magenta"))
+            return serialize_command_result(session, cmd, message="Rendered research help.", data={"usage": usage})
+
+        if research_cmd in {"mode", "on"}:
+            session.variables["agent_mode"] = "research"
+            session.session_manager.save_history(session.folder_context)
+            refresh_memory_hud(session, ui)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Agent strategy set to research mode.",
+                data={
+                    "current_mode": "research",
+                    "available_tools": _research_tool_names(),
+                },
+            )
+
+        if research_cmd in {"status", ""}:
+            active_mode = str(session.variables.get("agent_mode", "default"))
+            sources = _extract_recent_sources(session.session_manager.history, limit=6)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Research status snapshot.",
+                data={
+                    "current_mode": active_mode,
+                    "available_tools": _research_tool_names(),
+                    "recent_sources": sources,
+                    "citation_policy": "When researching, include source URLs and cite claims.",
+                },
+            )
+
+        if research_cmd == "sources":
+            sources = _extract_recent_sources(session.session_manager.history, limit=20)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Collected recent research sources.",
+                data={"sources": sources},
+            )
+
+        if research_cmd == "ask":
+            if not research_arg:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /research ask <question>",
+                )
+            session.variables["agent_mode"] = "research"
+            session.session_manager.save_history(session.folder_context)
+            refresh_memory_hud(session, ui)
+            research_prompt = (
+                "Research request:\n"
+                f"{research_arg}\n\n"
+                "Requirements:\n"
+                "- Prefer primary/official sources when possible.\n"
+                "- Include explicit source URLs.\n"
+                "- Clearly separate facts vs inference.\n"
+            )
+            send_result = session.send_message(research_prompt)
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=bool(send_result.get("ok", True)),
+                message="Executed research query.",
+                data={"query": research_arg, "send_result": send_result},
+            )
+
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=False,
+            message=f"Unknown research command: {research_cmd}. Use '/research help'.",
         )
 
     if cmd == "/mode":

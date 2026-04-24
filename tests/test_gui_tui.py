@@ -46,3 +46,15 @@ def test_handle_key_navigates_sessions_and_pin_focus():
     assert state.focus == "board"
     state = _handle_key(state, "b")
     assert state.focus == "sessions"
+
+
+def test_handle_key_opens_and_closes_card_detail_mode():
+    state = GuiState(session_names=["a"], focus="sessions", session_index=0)
+    state = _handle_key(state, "\n")  # pin/open session
+    assert state.focus == "board"
+    state = _handle_key(state, "\n")  # open card detail
+    assert state.detail_open is True
+    state = _handle_key(state, "j")
+    assert state.detail_offset == 1
+    state = _handle_key(state, "b")
+    assert state.detail_open is False

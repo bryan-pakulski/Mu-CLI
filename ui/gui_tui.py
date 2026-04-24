@@ -43,6 +43,8 @@ class GuiState:
     session_index: int = 0
     pinned_session: str | None = None
     session_names: list[str] = field(default_factory=list)
+    detail_open: bool = False
+    detail_offset: int = 0
 
 
 # ---------------- Session discovery ----------------
@@ -156,6 +158,60 @@ def _feature_board(plan: FeaturePlan, state: GuiState) -> Group:
     return Group(Columns(columns, expand=True))
 
 
+def _selected_task(plan: FeaturePlan, state: GuiState):
+    buckets = _bucket_tasks(plan)
+    bucket_names = list(buckets.keys())
+    if not bucket_names:
+        return None
+    b_idx = max(0, min(state.selected_bucket, len(bucket_names) - 1))
+    cards = buckets[bucket_names[b_idx]]
+    if not cards:
+        return None
+    c_idx = max(0, min(state.selected_card, len(cards) - 1))
+    return cards[c_idx]
+
+
+def _task_detail_panel(plan: FeaturePlan, state: GuiState, session_name: str) -> Panel:
+    task = _selected_task(plan, state)
+    if not task:
+        return Panel("(No card selected in this lane.)", title="Card Detail", border_style="yellow")
+
+    lines = [
+        f"session: {session_name}",
+        f"feature: {plan.feature_name} ({plan.feature_id})",
+        "",
+        f"task_id: {task.id}",
+        f"title: {task.title}",
+        f"phase_id: {task.phase_id}",
+        f"status: {normalize_task_status(task.status)}",
+        "",
+        "objectives:",
+    ]
+    lines.extend([f"  - {item}" for item in (task.objectives or [])] or ["  - (none)"])
+    lines.append("")
+    lines.append("action_points:")
+    lines.extend([f"  - {item}" for item in (task.action_points or [])] or ["  - (none)"])
+    lines.append("")
+    lines.append("exit_criteria:")
+    lines.extend([f"  - {item}" for item in (task.exit_criteria or [])] or ["  - (none)"])
+    lines.append("")
+    lines.append("verified_exit_criteria:")
+    lines.extend([f"  - {item}" for item in (task.verified_exit_criteria or [])] or ["  - (none)"])
+    lines.append("")
+    lines.append(f"blocked_reason: {task.blocked_reason or '-'}")
+    lines.append(f"notes: {task.notes or '-'}")
+
+    start = max(0, min(state.detail_offset, max(0, len(lines) - 1)))
+    window = lines[start : start + 24]
+    body = "\n".join(window) if window else "(empty)"
+    return Panel(
+        body,
+        title=f"Card Detail • Task {task.id}",
+        subtitle="Enter=open detail • j/k scroll • b/Esc back",
+        border_style="magenta",
+    )
+
+
 def _mode_tabs(state: GuiState) -> Table:
     table = Table.grid(expand=True)
     for _ in MODE_TABS:
@@ -197,7 +253,7 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     header = Panel(
         Text.from_markup(
             "[bold cyan]μCLI GUI[/bold cyan] • multi-session\n"
-            "keys: ←/→ mode • Tab switch focus • j/k move • Enter pin/open session • b back to sessions • q quit"
+            "keys: ←/→ mode • Tab switch focus • j/k move • Enter pin/open session or open card detail • b back • q quit"
         ),
         border_style="cyan",
     )
@@ -222,13 +278,22 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
 
     right: Panel | Group
     if plan:
-        right = Group(
-            Panel(
-                f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]",
-                border_style="green",
-            ),
-            _feature_board(plan, state),
-        )
+        if state.detail_open:
+            right = Group(
+                Panel(
+                    f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]",
+                    border_style="green",
+                ),
+                _task_detail_panel(plan, state, selected_name),
+            )
+        else:
+            right = Group(
+                Panel(
+                    f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]",
+                    border_style="green",
+                ),
+                _feature_board(plan, state),
+            )
     else:
         right = Panel(
             f"Session '{selected_name}' has no active feature plan metadata.",
@@ -285,15 +350,26 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
         state.tab_index = (state.tab_index - 1) % len(MODE_TABS)
         return state
     if key == "\t":
+        state.detail_open = False
+        state.detail_offset = 0
         state.focus = "board" if state.focus == "sessions" else "sessions"
         return state
     if key in {"b", "\x1b"}:
-        state.focus = "sessions"
+        if state.detail_open:
+            state.detail_open = False
+            state.detail_offset = 0
+        else:
+            state.focus = "sessions"
         return state
     if key in {"\n", "\r"}:
-        if state.session_names:
+        if state.focus == "sessions" and state.session_names:
             state.pinned_session = state.session_names[state.session_index]
             state.focus = "board"
+            state.detail_open = False
+            state.detail_offset = 0
+        elif state.focus == "board":
+            state.detail_open = True
+            state.detail_offset = 0
         return state
 
     if state.focus == "sessions":
@@ -304,6 +380,14 @@ def _handle_key(state: GuiState, key: str) -> GuiState:
             state.session_index = max(0, state.session_index - 1)
             return state
     else:
+        if state.detail_open:
+            if key in {"\x1b[B", "j"}:
+                state.detail_offset += 1
+                return state
+            if key in {"\x1b[A", "k"}:
+                state.detail_offset = max(0, state.detail_offset - 1)
+                return state
+            return state
         if key in {"h"}:
             state.selected_bucket = max(0, state.selected_bucket - 1)
             state.selected_card = 0

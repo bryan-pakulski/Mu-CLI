@@ -1,4 +1,4 @@
-"""Terminal GUI mode for MuCLI (`--gui`)."""
+"""Functional terminal GUI mode for MuCLI (`--gui`)."""
 
 from __future__ import annotations
 
@@ -31,36 +31,34 @@ from core.feature_mode import (
     normalize_task_status,
 )
 
-MODE_TABS = ["default", "debug", "feature", "research", "git"]
-
 
 @dataclass
 class GuiState:
-    tab_index: int = 2
-    selected_bucket: int = 0
-    selected_card: int = 0
+    screen: str = "sessions"
     should_exit: bool = False
-    focus: str = "sessions"
-    session_index: int = 0
-    pinned_session: str | None = None
+    confirm_quit: bool = False
+    confirm_index: int = 0  # 0 cancel, 1 quit
+
     session_names: list[str] = field(default_factory=list)
-    detail_open: bool = False
-    detail_offset: int = 0
-    history_open: bool = False
-    history_offset: int = 0
+    session_index: int = 0
+    selected_session: str | None = None
+
+    feature_records: list[dict] = field(default_factory=list)
     feature_index: int = 0
-    tools_open: bool = False
-    tools_offset: int = 0
+    selected_feature: dict | None = None
+
+    item_index: int = 0
+    detail_offset: int = 0
 
 
 def _discover_sessions(session_root: str) -> list[str]:
     if not os.path.isdir(session_root):
         return []
-    names = []
+    out = []
     for name in sorted(os.listdir(session_root)):
         if os.path.isfile(os.path.join(session_root, name, "session.json")):
-            names.append(name)
-    return names
+            out.append(name)
+    return out
 
 
 def _load_session_payload(session_root: str, session_name: str) -> dict:
@@ -69,35 +67,23 @@ def _load_session_payload(session_root: str, session_name: str) -> dict:
         return {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        return payload if isinstance(payload, dict) else {}
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
 
 
-def _load_feature_plan_for_session_name(session_root: str, session_name: str) -> FeaturePlan | None:
-    payload = _load_session_payload(session_root, session_name)
-    feature_state = payload.get("feature_state", {}) if isinstance(payload.get("feature_state"), dict) else {}
-    metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
-    if not metadata_path:
-        return None
-    try:
-        return load_feature_plan(metadata_path)
-    except Exception:
-        return None
-
-
 def _feature_records(payload: dict) -> list[dict]:
     registry = payload.get("feature_registry", {}) if isinstance(payload.get("feature_registry"), dict) else {}
-    records = [value for value in registry.values() if isinstance(value, dict)]
+    records = [v for v in registry.values() if isinstance(v, dict)]
     records.sort(key=lambda item: float(item.get("updated_at", 0) or 0), reverse=True)
     return records
 
 
-def _load_feature_plan_from_record(feature_record: dict | None) -> FeaturePlan | None:
-    if not isinstance(feature_record, dict):
+def _load_feature_plan_from_record(record: dict | None) -> FeaturePlan | None:
+    if not isinstance(record, dict):
         return None
-    metadata_path = str(feature_record.get("metadata_path", "") or "").strip()
+    metadata_path = str(record.get("metadata_path", "") or "").strip()
     if not metadata_path:
         return None
     try:
@@ -106,120 +92,165 @@ def _load_feature_plan_from_record(feature_record: dict | None) -> FeaturePlan |
         return None
 
 
-def _spark(values: list[int]) -> str:
-    ticks = "▁▂▃▄▅▆▇█"
-    if not values:
-        return "—"
-    lo = min(values)
-    hi = max(values)
-    if lo == hi:
-        return ticks[0] * len(values)
-    out = []
-    for v in values:
-        idx = int((v - lo) / max(1, hi - lo) * (len(ticks) - 1))
-        out.append(ticks[max(0, min(idx, len(ticks) - 1))])
-    return "".join(out)
+def _tool_usage_counts(payload: dict) -> list[tuple[str, int]]:
+    counts: dict[str, int] = {}
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    for msg in history:
+        if not isinstance(msg, dict):
+            continue
+        parts = msg.get("parts", [])
+        for part in parts if isinstance(parts, list) else []:
+            if isinstance(part, dict) and part.get("type") == "tool_call":
+                tool = str(part.get("tool_name", "tool") or "tool")
+                counts[tool] = counts.get(tool, 0) + 1
+    return sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
 
-def _bar(value: int, maximum: int, width: int = 18) -> str:
-    maximum = max(1, int(maximum or 1))
-    value = max(0, int(value or 0))
-    filled = min(width, int(round((value / maximum) * width)))
-    return "█" * filled + "░" * (width - filled)
+def _status_color(status: str) -> str:
+    normalized = normalize_task_status(status)
+    if normalized in {STATUS_COMPLETED, STATUS_ARCHIVED}:
+        return "green"
+    if normalized == STATUS_IN_PROGRESS:
+        return "yellow"
+    if normalized == STATUS_BLOCKED:
+        return "red"
+    return "cyan"
 
 
-def _bucket_tasks(plan: FeaturePlan) -> dict[str, list]:
-    buckets = {"Backlog": [], "In Progress": [], "Done": []}
-    for task in plan.tasks:
-        status = normalize_task_status(task.status)
-        if status in {STATUS_NOT_STARTED, STATUS_PENDING}:
-            buckets["Backlog"].append(task)
-        elif status == STATUS_BLOCKED:
-            buckets["Backlog"].append(task)
-        elif status == STATUS_IN_PROGRESS:
-            buckets["In Progress"].append(task)
-        elif status in {STATUS_COMPLETED, STATUS_ARCHIVED}:
-            buckets["Done"].append(task)
-        else:
-            buckets["Backlog"].append(task)
-    return buckets
-
-
-def _task_panel(task, selected: bool = False) -> Panel:
-    status = normalize_task_status(task.status)
-    status_style = {
-        STATUS_COMPLETED: "green",
-        STATUS_ARCHIVED: "green",
-        STATUS_IN_PROGRESS: "yellow",
-        STATUS_BLOCKED: "red",
-        STATUS_PENDING: "cyan",
-        STATUS_NOT_STARTED: "cyan",
-    }.get(status, "white")
-    lines = [
-        f"[bold]{task.id}[/bold] — {task.title}",
-        f"phase: {task.phase_id if task.phase_id is not None else '-'}",
-        f"status: [{status_style}]{status}[/{status_style}]",
+def _feature_items(plan: FeaturePlan) -> list[dict]:
+    items = [
+        {"kind": "view", "id": "overview", "label": "Overview"},
+        {"kind": "view", "id": "heatmap", "label": "Tool Heatmap"},
+        {"kind": "view", "id": "history", "label": "History Browser"},
     ]
-    if task.blocked_reason:
-        lines.append(f"blocked: {task.blocked_reason}")
-    if task.exit_criteria:
-        lines.append(f"criteria: {len(task.exit_criteria)}")
+    for task in plan.tasks:
+        items.append({"kind": "task", "task": task})
+    return items
+
+
+def _header(state: GuiState) -> Panel:
+    breadcrumb = ["Sessions"]
+    if state.selected_session:
+        breadcrumb.append(state.selected_session)
+    if isinstance(state.selected_feature, dict):
+        breadcrumb.append(str(state.selected_feature.get("feature_id", "feature")))
+    breadcrumb.append(state.screen)
+
     return Panel(
-        "\n".join(lines),
-        border_style="bright_green" if selected else status_style,
-        padding=(0, 1),
+        Text.from_markup(
+            f"[bold cyan]μCLI Functional GUI[/bold cyan] • [green]{datetime.now().strftime('%H:%M:%S')}[/green]\n"
+            f"path: [magenta]{' > '.join(breadcrumb)}[/magenta]\n"
+            "controls: ↑/↓ navigate • Enter select • Esc back • q quit"
+        ),
+        border_style="cyan",
     )
 
 
-def _selected_task(plan: FeaturePlan, state: GuiState):
-    buckets = _bucket_tasks(plan)
-    names = list(buckets.keys())
-    if not names:
-        return None
-    lane = max(0, min(state.selected_bucket, len(names) - 1))
-    cards = buckets[names[lane]]
-    if not cards:
-        return None
-    card = max(0, min(state.selected_card, len(cards) - 1))
-    return cards[card]
+def _sessions_view(session_root: str, state: GuiState) -> Panel:
+    state.session_names = _discover_sessions(session_root)
+    state.session_index = max(0, min(state.session_index, max(0, len(state.session_names) - 1)))
+    table = Table(title="Sessions", expand=True)
+    table.add_column(" ", width=2)
+    table.add_column("Session")
+    table.add_column("Features", justify="right")
+    table.add_column("Turns", justify="right")
+
+    for i, name in enumerate(state.session_names):
+        payload = _load_session_payload(session_root, name)
+        features = _feature_records(payload)
+        turns = len(payload.get("history", [])) if isinstance(payload.get("history"), list) else 0
+        table.add_row("▶" if i == state.session_index else " ", name, str(len(features)), str(turns))
+
+    if not state.session_names:
+        return Panel("No sessions found.", title="Sessions", border_style="yellow")
+    return Panel(table, border_style="green")
 
 
-def _feature_board(plan: FeaturePlan, state: GuiState) -> Group:
-    buckets = _bucket_tasks(plan)
-    names = list(buckets.keys())
-    state.selected_bucket = max(0, min(state.selected_bucket, len(names) - 1))
-    cards = buckets[names[state.selected_bucket]]
-    if cards:
-        state.selected_card = max(0, min(state.selected_card, len(cards) - 1))
-    else:
-        state.selected_card = 0
+def _features_view(payload: dict, state: GuiState) -> Panel:
+    state.feature_records = _feature_records(payload)
+    state.feature_index = max(0, min(state.feature_index, max(0, len(state.feature_records) - 1)))
 
-    cols = []
-    for b_idx, name in enumerate(names):
-        lane_cards = buckets[name]
-        panels = []
-        for c_idx, task in enumerate(lane_cards[:10]):
-            sel = (
-                state.focus == "board" and not state.detail_open and not state.history_open
-                and b_idx == state.selected_bucket and c_idx == state.selected_card
-            )
-            panels.append(_task_panel(task, selected=sel))
-        if not panels:
-            panels = [Panel("(empty)", border_style="dim")]
-        border = "green" if (state.focus == "board" and b_idx == state.selected_bucket) else "cyan"
-        cols.append(Panel(Group(*panels), title=f"{name} ({len(lane_cards)} Tasks)", border_style=border))
-    return Group(Columns(cols, expand=True))
+    table = Table(title="Features (including archived)", expand=True)
+    table.add_column(" ", width=2)
+    table.add_column("Feature ID")
+    table.add_column("Status")
+    table.add_column("Name")
+
+    for i, feature in enumerate(state.feature_records):
+        status = str(feature.get("status", "unknown"))
+        style = _status_color(status)
+        table.add_row(
+            "▶" if i == state.feature_index else " ",
+            str(feature.get("feature_id", "-")),
+            f"[{style}]{status}[/{style}]",
+            str(feature.get("feature_name", "-")),
+        )
+
+    if not state.feature_records:
+        return Panel("No feature records for this session.", title="Features", border_style="yellow")
+    return Panel(table, border_style="blue")
 
 
-def _task_detail_panel(plan: FeaturePlan, state: GuiState, session_name: str) -> Panel:
-    task = _selected_task(plan, state)
-    if not task:
-        return Panel("(No card selected in this lane.)", title="Card Detail", border_style="yellow")
-
+def _overview_panel(plan: FeaturePlan, payload: dict) -> Panel:
+    total = len(plan.tasks)
+    done = sum(1 for t in plan.tasks if normalize_task_status(t.status) in {STATUS_COMPLETED, STATUS_ARCHIVED})
+    blocked = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_BLOCKED)
+    active = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_IN_PROGRESS)
+    tokens = int((payload.get("token_counts", {}) or {}).get("total", 0) or 0)
     lines = [
-        f"session: {session_name}",
         f"feature: {plan.feature_name} ({plan.feature_id})",
+        f"review_status: {plan.review_status}",
+        f"tasks: {total} | done: {done} | active: {active} | blocked: {blocked}",
+        f"events: {len(plan.event_log)} | tokens: {tokens:,}",
         "",
+        "Recent events:",
+    ]
+    for event in plan.event_log[-12:]:
+        ts = datetime.fromtimestamp(float(getattr(event, "created_at", 0) or 0)).strftime("%H:%M:%S")
+        lines.append(f"  [{ts}] {getattr(event, 'kind', '-')} #{getattr(event, 'entity_id', '-')}")
+    return Panel("\n".join(lines), title="Overview", border_style="green")
+
+
+def _heatmap_panel(payload: dict) -> Panel:
+    usage = _tool_usage_counts(payload)
+    if not usage:
+        return Panel("No tool calls in history.", title="Tool Heatmap", border_style="yellow")
+    max_count = max(count for _, count in usage)
+    lines = []
+    for name, count in usage[:28]:
+        width = 24
+        filled = int(round((count / max_count) * width))
+        bar = "█" * filled + "░" * (width - filled)
+        lines.append(f"{name:<22} {count:>4} {bar}")
+    return Panel("\n".join(lines), title="Tool Heatmap", border_style="magenta")
+
+
+def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
+    lines = ["Feature events:"]
+    for event in plan.event_log[-25:]:
+        ts = datetime.fromtimestamp(float(getattr(event, "created_at", 0) or 0)).strftime("%H:%M:%S")
+        lines.append(f"  [{ts}] {getattr(event, 'kind', '-')} {getattr(event, 'entity', '-')}/{getattr(event, 'entity_id', '-')}")
+
+    lines += ["", "Conversation (recent):"]
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    for msg in history[-20:]:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "unknown"))
+        snippet = ""
+        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
+            if isinstance(part, dict) and part.get("type") == "text":
+                snippet = str(part.get("text", "")).replace("\n", " ").strip()
+                break
+        if len(snippet) > 90:
+            snippet = snippet[:89] + "…"
+        lines.append(f"  {role:<9} | {snippet or '(non-text event)'}")
+
+    return Panel("\n".join(lines), title="History Browser", border_style="bright_blue")
+
+
+def _task_detail_panel(task, state: GuiState) -> Panel:
+    lines = [
         f"task_id: {task.id}",
         f"title: {task.title}",
         f"phase_id: {task.phase_id}",
@@ -232,317 +263,95 @@ def _task_detail_panel(plan: FeaturePlan, state: GuiState, session_name: str) ->
     lines.extend([f"  - {x}" for x in (task.action_points or [])] or ["  - (none)"])
     lines += ["", "exit_criteria:"]
     lines.extend([f"  - {x}" for x in (task.exit_criteria or [])] or ["  - (none)"])
-    lines += ["", "verified_exit_criteria:"]
-    lines.extend([f"  - {x}" for x in (task.verified_exit_criteria or [])] or ["  - (none)"])
     lines += ["", f"blocked_reason: {task.blocked_reason or '-'}", f"notes: {task.notes or '-'}"]
 
     start = max(0, min(state.detail_offset, max(0, len(lines) - 1)))
-    window = lines[start : start + 24]
-    return Panel("\n".join(window) if window else "(empty)", title=f"Card Detail • Task {task.id}", subtitle="j/k scroll • b/Esc back", border_style="magenta")
-
-
-def _stats_widgets(plan: FeaturePlan, payload: dict) -> Columns:
-    total = len(plan.tasks)
-    done = sum(1 for t in plan.tasks if normalize_task_status(t.status) in {STATUS_COMPLETED, STATUS_ARCHIVED})
-    blocked = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_BLOCKED)
-    in_progress = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_IN_PROGRESS)
-    progress = int((done / max(1, total)) * 100)
-
-    token_counts = payload.get("token_counts", {}) if isinstance(payload, dict) else {}
-    total_tokens = int(token_counts.get("total", 0) or 0)
-    history_len = len(payload.get("history", [])) if isinstance(payload.get("history"), list) else 0
-    transitions = []
-    running = 0
-    for event in plan.event_log[-24:]:
-        if getattr(event, "kind", "") == "status_transition":
-            running += 1
-        transitions.append(running)
-
-    gauges = Group(
-        f"[cyan]TASKS[/cyan]    {total:>6}",
-        f"[green]DONE[/green]     {done:>6}  {progress:>3}%",
-        f"[yellow]ACTIVE[/yellow]   {in_progress:>6}",
-        f"[red]BLOCKED[/red]  {blocked:>6}",
-        "",
-        f"[dim]{_bar(done, total, 26)}[/dim]",
-    )
-    perf = Group(
-        f"[magenta]TOKENS[/magenta]  {total_tokens:>8,}",
-        f"[blue]TURNS[/blue]    {history_len:>8}",
-        "",
-        f"[bright_blue]PULSE[/bright_blue] { _spark(transitions)}",
-        f"[bright_cyan]THROUGHPUT[/bright_cyan] {_bar(in_progress + done, max(1, total), 20)}",
-    )
-    distro = Group(
-        "[bold]Lane Distribution[/bold]",
-        f"Backlog      {_bar(total - done - in_progress, max(1, total), 20)}",
-        f"In Progress  {_bar(in_progress, max(1, total), 20)}",
-        f"Done         {_bar(done, max(1, total), 20)}",
-    )
-    return Columns(
-        [
-            Panel(gauges, title=" Workload", border_style="cyan"),
-            Panel(perf, title="󰓅 Runtime", border_style="magenta"),
-            Panel(distro, title="󰋗 Kanban Flow", border_style="blue"),
-        ],
-        expand=True,
-    )
-
-
-def _history_browser(plan: FeaturePlan, payload: dict, state: GuiState) -> Panel:
-    lines = ["Feature Event Log:"]
-    for event in plan.event_log[-60:]:
-        ts = datetime.fromtimestamp(float(getattr(event, "created_at", 0) or 0)).strftime("%H:%M:%S")
-        lines.append(f"  [{ts}] {getattr(event, 'kind', '-')}: {getattr(event, 'entity', '-')}#{getattr(event, 'entity_id', '-')}")
-
-    lines += ["", "All Features (including archived):"]
-    registry = payload.get("feature_registry", {}) if isinstance(payload.get("feature_registry"), dict) else {}
-    feature_records = sorted(
-        [value for value in registry.values() if isinstance(value, dict)],
-        key=lambda item: float(item.get("updated_at", 0) or 0),
-        reverse=True,
-    )
-    if feature_records:
-        for feature in feature_records[:40]:
-            fid = str(feature.get("feature_id", "-"))
-            name = str(feature.get("feature_name", fid))
-            status = str(feature.get("status", "unknown"))
-            lines.append(f"  {fid:<28} | {status:<12} | {name}")
-    else:
-        lines.append("  (none)")
-
-    lines += ["", "Conversation History (recent):"]
-    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
-    for msg in history[-30:]:
-        if not isinstance(msg, dict):
-            continue
-        role = str(msg.get("role", "unknown"))
-        snippet = ""
-        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
-            if isinstance(part, dict) and part.get("type") == "text":
-                snippet = str(part.get("text", "")).strip().replace("\n", " ")
-                break
-        if len(snippet) > 120:
-            snippet = snippet[:119] + "…"
-        lines.append(f"  {role:<10} | {snippet or '(non-text event)'}")
-
-    start = max(0, min(state.history_offset, max(0, len(lines) - 1)))
     window = lines[start : start + 26]
-    return Panel("\n".join(window) if window else "(empty)", title="History Browser", subtitle="H close • j/k scroll", border_style="bright_magenta")
+    return Panel("\n".join(window), title=f"Task {task.id}", subtitle="↑/↓ scroll • Esc back", border_style="yellow")
 
 
-def _tool_usage_counts(payload: dict) -> list[tuple[str, int]]:
-    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
-    counts: dict[str, int] = {}
-    for msg in history:
-        if not isinstance(msg, dict):
-            continue
-        parts = msg.get("parts", [])
-        for part in parts if isinstance(parts, list) else []:
-            if isinstance(part, dict) and part.get("type") == "tool_call":
-                tool = str(part.get("tool_name", "tool") or "tool")
-                counts[tool] = counts.get(tool, 0) + 1
-    return sorted(counts.items(), key=lambda item: item[1], reverse=True)
+def _items_view(plan: FeaturePlan, payload: dict, state: GuiState) -> Group:
+    items = _feature_items(plan)
+    state.item_index = max(0, min(state.item_index, len(items) - 1))
+
+    table = Table(title="Feature Context", expand=True)
+    table.add_column(" ", width=2)
+    table.add_column("Type")
+    table.add_column("Label")
+    table.add_column("Status")
+
+    for i, item in enumerate(items):
+        if item["kind"] == "view":
+            table.add_row("▶" if i == state.item_index else " ", "view", item["label"], "-")
+        else:
+            task = item["task"]
+            st = normalize_task_status(task.status)
+            table.add_row(
+                "▶" if i == state.item_index else " ",
+                "task",
+                f"#{task.id} {task.title}",
+                f"[{_status_color(st)}]{st}[/{_status_color(st)}]",
+            )
+
+    selected = items[state.item_index]
+    if selected["kind"] == "view":
+        if selected["id"] == "overview":
+            preview = _overview_panel(plan, payload)
+        elif selected["id"] == "heatmap":
+            preview = _heatmap_panel(payload)
+        else:
+            preview = _history_panel(plan, payload)
+    else:
+        task = selected["task"]
+        preview = Panel(
+            f"Task #{task.id}\n{task.title}\n\nstatus: {normalize_task_status(task.status)}\nphase: {task.phase_id}",
+            title="Task Preview",
+            border_style="green",
+        )
+
+    return Group(Columns([Panel(table, border_style="cyan"), preview], expand=True, equal=False))
 
 
-def _tool_heatmap_panel(payload: dict, state: GuiState) -> Panel:
-    usage = _tool_usage_counts(payload)
-    if not usage:
-        return Panel("(no tool call history)", title="Tool Heatmap", border_style="yellow")
-
-    max_count = max(count for _, count in usage)
-    lines = ["Most-used tools:"]
-    for idx, (name, count) in enumerate(usage):
-        if idx >= state.tools_offset + 24:
-            break
-        if idx < state.tools_offset:
-            continue
-        bar = _bar(count, max_count, 22)
-        lines.append(f"{name:<22} {count:>4} {bar}")
+def _confirm_modal(state: GuiState) -> Panel:
+    yes = "[bold red]QUIT[/bold red]" if state.confirm_index == 1 else "QUIT"
+    no = "[bold green]CANCEL[/bold green]" if state.confirm_index == 0 else "CANCEL"
     return Panel(
-        "\n".join(lines),
-        title="Tool Heatmap",
-        subtitle="T close • j/k scroll",
-        border_style="bright_yellow",
-    )
-
-
-def _mode_tabs(state: GuiState) -> Table:
-    table = Table.grid(expand=True)
-    for _ in MODE_TABS:
-        table.add_column(justify="center")
-    cells = []
-    for i, mode in enumerate(MODE_TABS):
-        cells.append(f"[bold black on bright_cyan] {mode.upper()} [/bold black on bright_cyan]" if i == state.tab_index else f"[dim]{mode.upper()}[/dim]")
-    table.add_row(*cells)
-    return table
-
-
-def _hero_banner(state: GuiState, session_count: int) -> Panel:
-    phase = int(time.time() * 2) % 8
-    wave = "▁▂▃▄▅▆▇█"
-    pulse = "".join(wave[(i + phase) % len(wave)] for i in range(24))
-    banner = Text.from_markup(
-        "[bold bright_cyan]███╗   ███╗██╗   ██╗ ██████╗██╗     ██╗[/bold bright_cyan]\n"
-        "[bold bright_blue]████╗ ████║██║   ██║██╔════╝██║     ██║[/bold bright_blue]\n"
-        "[bold bright_magenta]██╔████╔██║██║   ██║██║     ██║     ██║[/bold bright_magenta]\n"
-        "[bold bright_green]██║╚██╔╝██║██║   ██║██║     ██║     ██║[/bold bright_green]\n"
-        "[bold bright_yellow]██║ ╚═╝ ██║╚██████╔╝╚██████╗███████╗██║[/bold bright_yellow]\n"
-        "[bold white]╚═╝     ╚═╝ ╚═════╝  ╚═════╝╚══════╝╚═╝[/bold white]\n"
-        f"[dim]mode={MODE_TABS[state.tab_index]} • sessions={session_count} • neon pulse {pulse}[/dim]"
-    )
-    return Panel(banner, border_style="bright_cyan", title="🚀 TERMINAL COMMAND CENTER")
-
-
-def _starfield_panel() -> Panel:
-    phase = int(time.time() * 3)
-    rows = []
-    glyphs = "·✦✧⋆✶✺"
-    for y in range(7):
-        row = []
-        for x in range(42):
-            idx = (x * 7 + y * 11 + phase) % len(glyphs)
-            row.append(glyphs[idx] if (x + y + phase) % 5 == 0 else " ")
-        rows.append("".join(row))
-    rows.append("[dim]signal mesh synced[/dim]")
-    return Panel("\n".join(rows), title="COSMIC TELEMETRY", border_style="bright_blue")
-
-
-def _spectrum_footer() -> str:
-    blocks = "▁▂▃▄▅▆▇█"
-    phase = int(time.time() * 4)
-    band = "".join(blocks[(i + phase) % len(blocks)] for i in range(80))
-    return f"[bright_magenta]{band}[/bright_magenta]"
-
-
-def _ambient_panel(plan: FeaturePlan) -> Panel:
-    done = sum(1 for t in plan.tasks if normalize_task_status(t.status) in {STATUS_COMPLETED, STATUS_ARCHIVED})
-    total = len(plan.tasks)
-    active = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_IN_PROGRESS)
-    blocked = sum(1 for t in plan.tasks if normalize_task_status(t.status) == STATUS_BLOCKED)
-    matrix = [
-        f"⚡ Completion    {done:>3}/{total:<3}  {_bar(done, max(1, total), 18)}",
-        f"🔥 In-Progress   {active:>3}      {_bar(active, max(1, total), 18)}",
-        f"🧱 Blocked       {blocked:>3}      {_bar(blocked, max(1, total), 18)}",
-        "",
-        f"🧠 Event stream  {_spark([i for i, _ in enumerate(plan.event_log[-18:], start=1)])}",
-        f"🛰  Refresh glow {''.join('◆' if (i + int(time.time())) % 3 == 0 else '·' for i in range(24))}",
-    ]
-    return Panel("\n".join(matrix), title="SITUATIONAL AWARENESS", border_style="bright_magenta")
-
-
-def _features_panel(features: list[dict], state: GuiState) -> Panel:
-    if not features:
-        return Panel("(no features in session)", title="󱞁 Features", border_style="yellow")
-    state.feature_index = max(0, min(state.feature_index, len(features) - 1))
-    lines = []
-    for idx, feature in enumerate(features[:40]):
-        marker = "▶" if idx == state.feature_index else " "
-        fid = str(feature.get("feature_id", "-"))
-        status = str(feature.get("status", "unknown"))
-        name = str(feature.get("feature_name", fid))
-        lines.append(f"{marker} {fid:<20} [{status:<10}] {name}")
-    lines.append("\n[dim][ / ] browse feature history[/dim]")
-    return Panel("\n".join(lines), title="󱞁 Features", border_style="bright_blue")
-
-
-def _sessions_panel(state: GuiState) -> Panel:
-    state.session_index = max(0, min(state.session_index, max(0, len(state.session_names) - 1)))
-    lines = []
-    for i, name in enumerate(state.session_names[:40]):
-        marker = "▶" if i == state.session_index else " "
-        pin = "📌" if state.pinned_session == name else " "
-        style = "bold green" if (state.focus == "sessions" and i == state.session_index) else "white"
-        lines.append(f"[{style}]{marker} {pin} {name}[/{style}]")
-    if not lines:
-        lines = ["(no sessions found)"]
-    footer = f"\n\n[dim]{len(state.session_names)} sessions • focus={state.focus}[/dim]"
-    return Panel(
-        "\n".join(lines) + footer,
-        title="󰍉 Sessions",
-        border_style="green" if state.focus == "sessions" else "cyan",
+        f"Exit GUI?\n\n{no}    {yes}\n\nUse ↑/↓ then Enter",
+        title="Confirm Exit",
+        border_style="red",
     )
 
 
 def _render_gui(session_root: str, state: GuiState) -> Group:
-    state.session_names = _discover_sessions(session_root)
-    tabs = _mode_tabs(state)
-    active_mode = MODE_TABS[state.tab_index]
+    header = _header(state)
 
-    clock = datetime.now().strftime("%H:%M:%S")
-    header = Panel(
-        Text.from_markup(
-            f"[bold cyan]μCLI GUI[/bold cyan] • multi-session • [green]{clock}[/green]\n"
-            "keys: ←/→ mode • Tab focus • j/k move • Enter pin/open or card detail • [ / ] feature history • H history • T tool heatmap • b back • q quit"
-        ),
-        border_style="bright_cyan",
-    )
-    hero = _hero_banner(state, len(state.session_names))
-    starfield = _starfield_panel()
-
-    if active_mode != "feature":
-        return Group(
-            tabs,
-            Columns([hero, starfield], expand=True),
-            header,
-            Panel(f"{active_mode} mode tab is not implemented yet.\nSwitch to FEATURE tab.", border_style="yellow", title=f"{active_mode.title()} Mode"),
-            Panel(_spectrum_footer(), border_style="bright_black"),
-        )
-
-    if not state.session_names:
-        return Group(
-            tabs,
-            Columns([hero, starfield], expand=True),
-            header,
-            _sessions_panel(state),
-            Panel("No sessions available.", border_style="yellow"),
-            Panel(_spectrum_footer(), border_style="bright_black"),
-        )
-
-    state.session_index = max(0, min(state.session_index, len(state.session_names) - 1))
-    selected_name = state.pinned_session or state.session_names[state.session_index]
-    payload = _load_session_payload(session_root, selected_name)
-    features = _feature_records(payload)
-    state.feature_index = max(0, min(state.feature_index, max(0, len(features) - 1)))
-    selected_feature = features[state.feature_index] if features else None
-    plan = _load_feature_plan_from_record(selected_feature) or _load_feature_plan_for_session_name(session_root, selected_name)
-
-    if not plan:
-        right: Panel | Group = Group(
-            _features_panel(features, state),
-            Panel("No feature metadata for selected feature. Pick another with [ / ].", border_style="red"),
-            Panel(f"Session '{selected_name}' has no active feature plan metadata.", border_style="yellow", title="Feature Mode"),
-        )
+    if state.screen == "sessions":
+        body = _sessions_view(session_root, state)
     else:
-        status_label = selected_feature.get("status") if isinstance(selected_feature, dict) else plan.overall_status()
-        top = Panel(
-            f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]\n"
-            f"[dim]status={status_label} • review={plan.review_status} • tasks={len(plan.tasks)} • events={len(plan.event_log)}[/dim]",
-            border_style="green",
-        )
-        widgets = _stats_widgets(plan, payload)
-        ambient = _ambient_panel(plan)
-        if state.history_open:
-            right = Group(_features_panel(features, state), top, widgets, ambient, _history_browser(plan, payload, state))
-        elif state.tools_open:
-            right = Group(_features_panel(features, state), top, widgets, ambient, _tool_heatmap_panel(payload, state))
-        elif state.detail_open:
-            right = Group(_features_panel(features, state), top, widgets, ambient, _task_detail_panel(plan, state, selected_name))
+        session_name = state.selected_session or ""
+        payload = _load_session_payload(session_root, session_name) if session_name else {}
+        if state.screen == "features":
+            body = _features_view(payload, state)
         else:
-            right = Group(_features_panel(features, state), top, widgets, ambient, _feature_board(plan, state))
+            plan = _load_feature_plan_from_record(state.selected_feature)
+            if not plan:
+                body = Panel("Selected feature metadata cannot be loaded.", border_style="red")
+            elif state.screen == "items":
+                body = _items_view(plan, payload, state)
+            elif state.screen == "task_detail":
+                task_item = _feature_items(plan)[state.item_index]
+                body = _task_detail_panel(task_item["task"], state)
+            elif state.screen == "overview":
+                body = _overview_panel(plan, payload)
+            elif state.screen == "heatmap":
+                body = _heatmap_panel(payload)
+            else:
+                body = _history_panel(plan, payload)
 
-    footer = Panel(
-        "[dim]HISTORY BROWSER + FEATURE TIMELINE + LIVE ANALYTICS + COSMIC TELEMETRY[/dim]\n"
-        + _spectrum_footer(),
-        border_style="bright_black",
-    )
-    return Group(
-        tabs,
-        Columns([hero, starfield], expand=True),
-        header,
-        Columns([_sessions_panel(state), right], expand=True, equal=False),
-        footer,
-    )
+    if state.confirm_quit:
+        body = Group(body, _confirm_modal(state))
+
+    return Group(header, body)
 
 
 class _KeyReader:
@@ -577,116 +386,91 @@ class _KeyReader:
         return seq
 
 
-def _handle_key(state: GuiState, key: str) -> GuiState:
-    if key in {"q", "\x03"}:
-        state.should_exit = True
-        return state
-    if key in {"\x1b[C"}:
-        state.tab_index = (state.tab_index + 1) % len(MODE_TABS)
-        return state
-    if key in {"\x1b[D"}:
-        state.tab_index = (state.tab_index - 1) % len(MODE_TABS)
-        return state
-    if key == "\t":
-        state.detail_open = False
-        state.detail_offset = 0
-        state.history_open = False
-        state.history_offset = 0
-        state.tools_open = False
-        state.tools_offset = 0
-        state.focus = "board" if state.focus == "sessions" else "sessions"
-        return state
-    if key == "H" and state.focus == "board":
-        state.history_open = not state.history_open
-        state.history_offset = 0
-        state.detail_open = False
-        state.tools_open = False
-        state.tools_offset = 0
-        return state
-    if key == "T" and state.focus == "board":
-        state.tools_open = not state.tools_open
-        state.tools_offset = 0
-        state.detail_open = False
-        state.history_open = False
-        return state
-    if key in {"b", "\x1b"}:
-        if state.history_open:
-            state.history_open = False
-            state.history_offset = 0
-        elif state.tools_open:
-            state.tools_open = False
-            state.tools_offset = 0
-        elif state.detail_open:
-            state.detail_open = False
-            state.detail_offset = 0
-        else:
-            state.focus = "sessions"
-        return state
-    if key in {"\n", "\r"}:
-        if state.focus == "sessions" and state.session_names:
-            state.pinned_session = state.session_names[state.session_index]
-            state.focus = "board"
-            state.detail_open = False
-            state.detail_offset = 0
-            state.history_open = False
-            state.history_offset = 0
-            state.tools_open = False
-            state.tools_offset = 0
-        elif state.focus == "board" and not state.history_open and not state.tools_open:
-            state.detail_open = True
-            state.detail_offset = 0
-        return state
-    if key in {"[", "]"} and state.focus == "board":
-        if key == "[":
-            state.feature_index = max(0, state.feature_index - 1)
-        else:
-            state.feature_index += 1
-        state.detail_open = False
-        state.history_open = False
-        state.tools_open = False
-        state.detail_offset = 0
-        state.history_offset = 0
-        state.tools_offset = 0
+def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
+    if key in {"q", "Q"} and not state.confirm_quit:
+        state.confirm_quit = True
+        state.confirm_index = 0
         return state
 
-    if state.focus == "sessions":
-        if key in {"\x1b[B", "j"}:
-            state.session_index += 1
-        elif key in {"\x1b[A", "k"}:
+    if state.confirm_quit:
+        if key in {"\x1b", "b"}:
+            state.confirm_quit = False
+            return state
+        if key in {"\x1b[B", "\x1b[A"}:
+            state.confirm_index = 1 - state.confirm_index
+            return state
+        if key in {"\n", "\r"}:
+            if state.confirm_index == 1:
+                state.should_exit = True
+            else:
+                state.confirm_quit = False
+            return state
+        return state
+
+    if key in {"\x1b", "b"}:
+        if state.screen == "task_detail":
+            state.screen = "items"
+            state.detail_offset = 0
+        elif state.screen in {"overview", "heatmap", "history"}:
+            state.screen = "items"
+        elif state.screen == "items":
+            state.screen = "features"
+        elif state.screen == "features":
+            state.screen = "sessions"
+            state.selected_feature = None
+        return state
+
+    if state.screen == "sessions":
+        state.session_names = _discover_sessions(session_root)
+        if key == "\x1b[B":
+            state.session_index = min(max(0, len(state.session_names) - 1), state.session_index + 1)
+        elif key == "\x1b[A":
             state.session_index = max(0, state.session_index - 1)
+        elif key in {"\n", "\r"} and state.session_names:
+            state.selected_session = state.session_names[state.session_index]
+            state.screen = "features"
+            state.feature_index = 0
         return state
 
-    if state.history_open:
-        if key in {"\x1b[B", "j"}:
-            state.history_offset += 1
-        elif key in {"\x1b[A", "k"}:
-            state.history_offset = max(0, state.history_offset - 1)
+    if state.screen == "features":
+        payload = _load_session_payload(session_root, state.selected_session or "")
+        state.feature_records = _feature_records(payload)
+        if key == "\x1b[B":
+            state.feature_index = min(max(0, len(state.feature_records) - 1), state.feature_index + 1)
+        elif key == "\x1b[A":
+            state.feature_index = max(0, state.feature_index - 1)
+        elif key in {"\n", "\r"} and state.feature_records:
+            state.selected_feature = state.feature_records[state.feature_index]
+            state.screen = "items"
+            state.item_index = 0
         return state
 
-    if state.tools_open:
-        if key in {"\x1b[B", "j"}:
-            state.tools_offset += 1
-        elif key in {"\x1b[A", "k"}:
-            state.tools_offset = max(0, state.tools_offset - 1)
+    if state.screen == "items":
+        plan = _load_feature_plan_from_record(state.selected_feature)
+        if not plan:
+            return state
+        items = _feature_items(plan)
+        if key == "\x1b[B":
+            state.item_index = min(len(items) - 1, state.item_index + 1)
+        elif key == "\x1b[A":
+            state.item_index = max(0, state.item_index - 1)
+        elif key in {"\n", "\r"}:
+            sel = items[state.item_index]
+            if sel["kind"] == "task":
+                state.screen = "task_detail"
+                state.detail_offset = 0
+            else:
+                state.screen = sel["id"]
         return state
 
-    if state.detail_open:
-        if key in {"\x1b[B", "j"}:
+    if state.screen == "task_detail":
+        if key == "\x1b[B":
             state.detail_offset += 1
-        elif key in {"\x1b[A", "k"}:
+        elif key == "\x1b[A":
             state.detail_offset = max(0, state.detail_offset - 1)
         return state
 
-    if key in {"h"}:
-        state.selected_bucket = max(0, state.selected_bucket - 1)
-        state.selected_card = 0
-    elif key in {"l"}:
-        state.selected_bucket = min(2, state.selected_bucket + 1)
-        state.selected_card = 0
-    elif key in {"\x1b[B", "j"}:
-        state.selected_card += 1
-    elif key in {"\x1b[A", "k"}:
-        state.selected_card = max(0, state.selected_card - 1)
+    # overview/heatmap/history only need Esc/back
     return state
 
 
@@ -703,5 +487,5 @@ def run_gui_mode(session_root: str, refresh_seconds: float = 1.0) -> None:
                 next_refresh = now + refresh_seconds
             key = reader.read_key(timeout=0.05)
             if key:
-                state = _handle_key(state, key)
+                state = _handle_key(state, key, session_root)
                 live.update(_render_gui(session_root, state))

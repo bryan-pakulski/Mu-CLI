@@ -1,29 +1,51 @@
 import json
+from dataclasses import asdict
 
 from core.feature_mode import FeaturePlan, FeatureTask
-from ui.gui_tui import _bucket_tasks, _discover_sessions, _handle_key, GuiState
+from ui.gui_tui import GuiState, _discover_sessions, _handle_key, _tool_usage_counts
 
 
-def _sample_plan() -> FeaturePlan:
-    return FeaturePlan(
-        feature_id="f1",
+def _write_session_fixture(tmp_path):
+    session_id = "s1"
+    session_dir = tmp_path / session_id
+    session_dir.mkdir()
+
+    plan = FeaturePlan(
+        feature_id="feat1",
         feature_name="Feature One",
         feature_request="test",
-        directory=".",
+        directory=str(tmp_path),
+        metadata_path=str(tmp_path / "feat1.json"),
         tasks=[
             FeatureTask(id=1, title="todo", status="not_started"),
-            FeatureTask(id=2, title="blocked", status="blocked"),
-            FeatureTask(id=3, title="doing", status="in_progress"),
-            FeatureTask(id=4, title="done", status="completed"),
+            FeatureTask(id=2, title="doing", status="in_progress"),
         ],
     )
+    (tmp_path / "feat1.json").write_text(json.dumps(asdict(plan)), encoding="utf-8")
 
-
-def test_bucket_tasks_maps_statuses_to_board_columns():
-    buckets = _bucket_tasks(_sample_plan())
-    assert [t.id for t in buckets["Backlog"]] == [1, 2]
-    assert [t.id for t in buckets["In Progress"]] == [3]
-    assert [t.id for t in buckets["Done"]] == [4]
+    session_payload = {
+        "feature_registry": {
+            "feat1": {
+                "feature_id": "feat1",
+                "feature_name": "Feature One",
+                "status": "in_progress",
+                "updated_at": 100,
+                "metadata_path": str(tmp_path / "feat1.json"),
+            }
+        },
+        "history": [
+            {
+                "role": "assistant",
+                "parts": [
+                    {"type": "tool_call", "tool_name": "run_shell"},
+                    {"type": "tool_call", "tool_name": "run_shell"},
+                    {"type": "tool_call", "tool_name": "read_file"},
+                ],
+            }
+        ],
+    }
+    (session_dir / "session.json").write_text(json.dumps(session_payload), encoding="utf-8")
+    return str(tmp_path), session_id
 
 
 def test_discover_sessions_lists_only_directories_with_session_json(tmp_path):
@@ -36,56 +58,73 @@ def test_discover_sessions_lists_only_directories_with_session_json(tmp_path):
     assert _discover_sessions(str(tmp_path)) == ["s1", "s3"]
 
 
-def test_handle_key_navigates_sessions_and_pin_focus():
-    state = GuiState(session_names=["a", "b", "c"], focus="sessions", session_index=0)
-    state = _handle_key(state, "j")
-    assert state.session_index == 1
-    state = _handle_key(state, "\n")
-    assert state.pinned_session == "b"
-    assert state.focus == "board"
-    state = _handle_key(state, "b")
-    assert state.focus == "sessions"
+def test_handle_key_hierarchical_navigation(tmp_path):
+    session_root, _ = _write_session_fixture(tmp_path)
+    state = GuiState()
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "features"
+    assert state.selected_session == "s1"
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "items"
+    assert state.selected_feature is not None
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "overview"
+
+    state = _handle_key(state, "\x1b", session_root)
+    assert state.screen == "items"
+
+    state = _handle_key(state, "\x1b", session_root)
+    assert state.screen == "features"
 
 
-def test_handle_key_opens_and_closes_card_detail_mode():
-    state = GuiState(session_names=["a"], focus="sessions", session_index=0)
-    state = _handle_key(state, "\n")  # pin/open session
-    assert state.focus == "board"
-    state = _handle_key(state, "\n")  # open card detail
-    assert state.detail_open is True
-    state = _handle_key(state, "j")
+def test_handle_key_opens_task_detail_and_scrolls(tmp_path):
+    session_root, _ = _write_session_fixture(tmp_path)
+    state = GuiState()
+
+    state = _handle_key(state, "\n", session_root)
+    state = _handle_key(state, "\n", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\x1b[B", session_root)
+    state = _handle_key(state, "\n", session_root)
+
+    assert state.screen == "task_detail"
+
+    state = _handle_key(state, "\x1b[B", session_root)
     assert state.detail_offset == 1
-    state = _handle_key(state, "b")
-    assert state.detail_open is False
+
+    state = _handle_key(state, "\x1b", session_root)
+    assert state.screen == "items"
 
 
-def test_handle_key_toggles_history_browser_in_board_focus():
-    state = GuiState(session_names=["a"], focus="sessions", session_index=0)
-    state = _handle_key(state, "\n")  # open board
-    assert state.focus == "board"
-    state = _handle_key(state, "H")
-    assert state.history_open is True
-    state = _handle_key(state, "j")
-    assert state.history_offset == 1
-    state = _handle_key(state, "b")
-    assert state.history_open is False
+def test_handle_key_quit_confirmation(tmp_path):
+    session_root, _ = _write_session_fixture(tmp_path)
+    state = GuiState()
+
+    state = _handle_key(state, "q", session_root)
+    assert state.confirm_quit is True
+    assert state.should_exit is False
+
+    state = _handle_key(state, "\x1b[B", session_root)
+    assert state.confirm_index == 1
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.should_exit is True
 
 
-def test_handle_key_cycles_feature_history_index():
-    state = GuiState(session_names=["a"], focus="sessions", session_index=0, feature_index=0)
-    state = _handle_key(state, "\n")  # board
-    state = _handle_key(state, "]")
-    assert state.feature_index == 1
-    state = _handle_key(state, "[")
-    assert state.feature_index == 0
-
-
-def test_handle_key_toggles_tool_heatmap():
-    state = GuiState(session_names=["a"], focus="sessions", session_index=0)
-    state = _handle_key(state, "\n")
-    state = _handle_key(state, "T")
-    assert state.tools_open is True
-    state = _handle_key(state, "j")
-    assert state.tools_offset == 1
-    state = _handle_key(state, "b")
-    assert state.tools_open is False
+def test_tool_usage_counts_sorts_descending():
+    payload = {
+        "history": [
+            {
+                "parts": [
+                    {"type": "tool_call", "tool_name": "a"},
+                    {"type": "tool_call", "tool_name": "b"},
+                    {"type": "tool_call", "tool_name": "a"},
+                ]
+            }
+        ]
+    }
+    assert _tool_usage_counts(payload) == [("a", 2), ("b", 1)]

@@ -1935,6 +1935,17 @@ class Session:
         return f"{name}:{digest}" if not pattern_only else f"{name}~{digest}"
 
     @staticmethod
+    def _track_tool_for_loop_detection(tool_name: str, tool_args) -> bool:
+        """Ignore bookkeeping tools that can repeat during normal feature progression."""
+        name = str(tool_name or "").strip().lower()
+        return name not in {
+            "update_task_status",
+            "get_execution_state",
+            "get_tasks",
+            "get_current_task",
+        }
+
+    @staticmethod
     def _is_repeated_tool_sequence(
         sequence_history: list[str], repeat_threshold: int = 3
     ) -> bool:
@@ -2481,14 +2492,17 @@ class Session:
                 for i, part in enumerate(tool_calls):
                     current_tool_name = part.tool_name
                     current_tool_args = part.tool_args
-                    iteration_tool_exact_fingerprints.append(
-                        self._tool_call_fingerprint(part.tool_name, part.tool_args)
-                    )
-                    iteration_tool_pattern.append(
-                        self._tool_call_fingerprint(
-                            part.tool_name, part.tool_args, pattern_only=True
+                    if self._track_tool_for_loop_detection(
+                        part.tool_name, part.tool_args
+                    ):
+                        iteration_tool_exact_fingerprints.append(
+                            self._tool_call_fingerprint(part.tool_name, part.tool_args)
                         )
-                    )
+                        iteration_tool_pattern.append(
+                            self._tool_call_fingerprint(
+                                part.tool_name, part.tool_args, pattern_only=True
+                            )
+                        )
                     approval_plan = approval_plans.get(i)
                     needs_approval = approval_plan is not None
                     if needs_approval:

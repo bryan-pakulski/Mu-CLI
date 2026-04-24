@@ -30,6 +30,12 @@ def test_bash_pattern_fingerprint_changes_with_command_args():
     assert first != second
 
 
+def test_feature_bookkeeping_tools_are_excluded_from_loop_tracking():
+    assert Session._track_tool_for_loop_detection("update_task_status", {}) is False
+    assert Session._track_tool_for_loop_detection("get_execution_state", {}) is False
+    assert Session._track_tool_for_loop_detection("search_for_string", {}) is True
+
+
 def test_loop_detection_variables_exist():
     assert "loop_detection_enabled" in DEFAULT_VARIABLES
     assert "loop_detection_repeat_threshold" in DEFAULT_VARIABLES

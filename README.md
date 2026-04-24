@@ -17,8 +17,6 @@
 - **Resumable Feature Loops**: The latest feature-loop state is also stored in the session JSON so a blocked or interrupted feature run can be reloaded and continued later.
 - **YOLO Mode**: Optional hands-free execution for trusted environments (removes manual tool approval).
 - **Server Mode for Integrations**: Launch μCLI with an HTTP API so external clients can drive sessions, commands, and tool execution.
-- **Realtime Watch Mode**: Launch a read-only TUI command center (`--watch`) with KPI cards, update pulse sparkline, Jira-style feature board, per-session drill-down, chat/memory/layer/metadata views, and live status (running/idle).
-- **Styled Watcher UX**: The `--watch` TUI uses enhanced rich styling (KPI cards, pulse sparkline, and neon panel accents) for high-signal monitoring workflows.
 
 ## Installation
 
@@ -52,11 +50,6 @@ python mucli.py
 Run the server/API mode using:
 ```bash
 python mucli.py --server --provider openai --model gpt-4o-mini --workspace .
-```
-
-Run the realtime watcher mode using:
-```bash
-python mucli.py --watch
 ```
 
 ### Getting Started
@@ -103,9 +96,6 @@ On startup, μCLI checks for newer GitHub releases (when `origin` points to GitH
 | `/unset [key]` | | Reset a variable to default (or `--all`) |
 | `/splash` | | Show the welcome splash screen |
 | `/quit` | `/q` | Exit the application |
-
-`--watch` mode is a read-only dashboard (non-mutating) and does not accept slash commands.
-It supports keyboard navigation for browsing data: `↑/↓` (or `j/k`) navigates, `Enter` opens a session detail view, `Esc`/`b` goes back, `←/→` (or `h/l`) switches tabs (including feature board and variables), `n/p` pages, `/` searches, `c` clears search, `e` expands the focused item for full-content browsing, `s` cycles sort modes, `r` toggles running-only sessions, `?` opens a help overlay, and `q` exits.
 
 Loop detection is configurable via session variables:
 - `/set loop_detection_enabled true|false`

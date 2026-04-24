@@ -35,7 +35,6 @@ from core.feature_mode import (
 )
 from core.tools import execute_tool
 from ui.rich_ui import RichUI
-from ui.watch_ui import run_watch_mode
 from utils.config import AGENT_MODE_METADATA
 from utils.config import SESSION_DIR
 from utils.runtime_metrics import collect_context_layers
@@ -2322,17 +2321,6 @@ def main():
         action="store_true",
         help="Enable YOLO mode at startup.",
     )
-    parser.add_argument(
-        "--watch",
-        action="store_true",
-        help="Run read-only realtime session watcher TUI.",
-    )
-    parser.add_argument(
-        "--watch-interval",
-        type=float,
-        default=1.5,
-        help="Refresh interval (seconds) for --watch mode.",
-    )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
         "--system",
@@ -2349,10 +2337,6 @@ def main():
         help="Initial system instruction",
     )
     args = parser.parse_args()
-    if args.watch:
-        run_watch_mode(SESSION_DIR, refresh_seconds=args.watch_interval)
-        return
-
     ui = HeadlessUI(auto_approve=args.yolo) if args.server else RichUI()
 
     try:

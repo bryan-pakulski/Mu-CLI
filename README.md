@@ -57,7 +57,7 @@ Run the terminal GUI mode using:
 ```bash
 python mucli.py --gui
 ```
-Inside GUI mode: use `↑/↓` (`j/k`) to select sessions, `Enter` to open/pin a session board, `Tab` to switch focus between the session list and board, and while on the board press `Enter` to open full card details (`j/k` scroll, `b`/`Esc` back). Press `q` to exit back to CLI.
+Inside GUI mode: use `↑/↓` (`j/k`) to select sessions, `Enter` to open/pin a session board, `Tab` to switch focus between the session list and board, and while on the board press `Enter` to open full card details (`j/k` scroll, `b`/`Esc` back). Press `H` to open the history browser (feature events + recent chat) and `q` to exit back to CLI.
 
 ### Getting Started
 1. **Select a Provider**: Choose between Gemini, OpenAI, or Ollama.

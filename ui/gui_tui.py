@@ -223,15 +223,35 @@ def _stats_widgets(plan: FeaturePlan, payload: dict) -> Columns:
             running += 1
         transitions.append(running)
 
-    return Columns([
-        Panel(f"[bold cyan]{total}[/bold cyan]\nTasks", border_style="cyan"),
-        Panel(f"[bold green]{done}[/bold green]\nDone ({progress}%)\n{_bar(done, total)}", border_style="green"),
-        Panel(f"[bold yellow]{in_progress}[/bold yellow]\nIn Progress", border_style="yellow"),
-        Panel(f"[bold red]{blocked}[/bold red]\nBlocked", border_style="red"),
-        Panel(f"[bold magenta]{total_tokens:,}[/bold magenta]\nTokens", border_style="magenta"),
-        Panel(f"[bold white]{history_len}[/bold white]\nTurns", border_style="blue"),
-        Panel(f"[bold white]{_spark(transitions)}[/bold white]\nTransition Pulse", border_style="bright_blue"),
-    ], expand=True)
+    gauges = Group(
+        f"[cyan]TASKS[/cyan]    {total:>6}",
+        f"[green]DONE[/green]     {done:>6}  {progress:>3}%",
+        f"[yellow]ACTIVE[/yellow]   {in_progress:>6}",
+        f"[red]BLOCKED[/red]  {blocked:>6}",
+        "",
+        f"[dim]{_bar(done, total, 26)}[/dim]",
+    )
+    perf = Group(
+        f"[magenta]TOKENS[/magenta]  {total_tokens:>8,}",
+        f"[blue]TURNS[/blue]    {history_len:>8}",
+        "",
+        f"[bright_blue]PULSE[/bright_blue] { _spark(transitions)}",
+        f"[bright_cyan]THROUGHPUT[/bright_cyan] {_bar(in_progress + done, max(1, total), 20)}",
+    )
+    distro = Group(
+        "[bold]Lane Distribution[/bold]",
+        f"Backlog      {_bar(total - done - in_progress, max(1, total), 20)}",
+        f"In Progress  {_bar(in_progress, max(1, total), 20)}",
+        f"Done         {_bar(done, max(1, total), 20)}",
+    )
+    return Columns(
+        [
+            Panel(gauges, title=" Workload", border_style="cyan"),
+            Panel(perf, title="󰓅 Runtime", border_style="magenta"),
+            Panel(distro, title="󰋗 Kanban Flow", border_style="blue"),
+        ],
+        expand=True,
+    )
 
 
 def _history_browser(plan: FeaturePlan, payload: dict, state: GuiState) -> Panel:
@@ -297,7 +317,12 @@ def _sessions_panel(state: GuiState) -> Panel:
         lines.append(f"[{style}]{marker} {pin} {name}[/{style}]")
     if not lines:
         lines = ["(no sessions found)"]
-    return Panel("\n".join(lines), title="Sessions", border_style="green" if state.focus == "sessions" else "cyan")
+    footer = f"\n\n[dim]{len(state.session_names)} sessions • focus={state.focus}[/dim]"
+    return Panel(
+        "\n".join(lines) + footer,
+        title="󰍉 Sessions",
+        border_style="green" if state.focus == "sessions" else "cyan",
+    )
 
 
 def _render_gui(session_root: str, state: GuiState) -> Group:
@@ -305,12 +330,13 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     tabs = _mode_tabs(state)
     active_mode = MODE_TABS[state.tab_index]
 
+    clock = datetime.now().strftime("%H:%M:%S")
     header = Panel(
         Text.from_markup(
-            "[bold cyan]μCLI GUI[/bold cyan] • multi-session\n"
+            f"[bold cyan]μCLI GUI[/bold cyan] • multi-session • [green]{clock}[/green]\n"
             "keys: ←/→ mode • Tab focus • j/k move • Enter pin/open or card detail • H history browser • b back • q quit"
         ),
-        border_style="cyan",
+        border_style="bright_cyan",
     )
 
     if active_mode != "feature":
@@ -327,7 +353,11 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     if not plan:
         right: Panel | Group = Panel(f"Session '{selected_name}' has no active feature plan metadata.", border_style="yellow", title="Feature Mode")
     else:
-        top = Panel(f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]", border_style="green")
+        top = Panel(
+            f"[bold green]{plan.feature_name}[/bold green] ([cyan]{plan.feature_id}[/cyan]) • session: [magenta]{selected_name}[/magenta]\n"
+            f"[dim]review={plan.review_status} • tasks={len(plan.tasks)} • events={len(plan.event_log)}[/dim]",
+            border_style="green",
+        )
         widgets = _stats_widgets(plan, payload)
         if state.history_open:
             right = Group(top, widgets, _history_browser(plan, payload, state))

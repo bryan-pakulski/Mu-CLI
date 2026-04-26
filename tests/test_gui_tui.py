@@ -175,6 +175,26 @@ def test_handle_key_supports_h_back_and_l_select(tmp_path):
     assert state.screen == "contexts"
 
 
+def test_handle_key_search_filter_mode(tmp_path):
+    session_root, _ = _write_session_fixture(tmp_path)
+    state = GuiState()
+
+    state = _handle_key(state, "/", session_root)
+    assert state.search_mode is True
+
+    state = _handle_key(state, "s", session_root)
+    assert state.search_query == "s"
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.search_mode is False
+
+    state = _handle_key(state, "\n", session_root)
+    assert state.screen == "contexts"
+
+    state = _handle_key(state, "j", session_root)
+    assert state.context_index >= 0
+
+
 def test_tool_usage_counts_sorts_descending():
     payload = {
         "history": [

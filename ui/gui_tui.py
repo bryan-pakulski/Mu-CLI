@@ -50,6 +50,9 @@ class GuiState:
 
     item_index: int = 0
     detail_offset: int = 0
+    search_mode: bool = False
+    search_query: str = ""
+    status_message: str = "ready"
 
 
 def _discover_sessions(session_root: str) -> list[str]:
@@ -118,6 +121,21 @@ def _status_color(status: str) -> str:
     return "cyan"
 
 
+def _bar(value: int, max_value: int, width: int = 18) -> str:
+    if max_value <= 0:
+        return "░" * width
+    filled = max(0, min(width, int(round((value / max_value) * width))))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _matches_filter(*values: str, query: str) -> bool:
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    hay = " | ".join(str(v or "") for v in values).lower()
+    return q in hay
+
+
 def _feature_items(plan: FeaturePlan) -> list[dict]:
     items = [
         {"kind": "view", "id": "overview", "label": "Overview"},
@@ -139,16 +157,28 @@ def _header(state: GuiState) -> Panel:
 
     return Panel(
         Text.from_markup(
-            f"[bold cyan]μCLI Functional GUI[/bold cyan] • [green]{datetime.now().strftime('%H:%M:%S')}[/green]\n"
-            f"path: [magenta]{' > '.join(breadcrumb)}[/magenta]\n"
-            "controls: j/k navigate • Enter or l select • h back • q quit"
+            f"[bold bright_magenta]μCLI CYBERDECK[/bold bright_magenta] • [bright_cyan]{datetime.now().strftime('%H:%M:%S')}[/bright_cyan]\n"
+            f"path: [bright_green]{' > '.join(breadcrumb)}[/bright_green]\n"
+            "controls: j/k navigate • Enter or l select • h back • / filter • q quit"
         ),
-        border_style="cyan",
+        border_style="bright_magenta",
+    )
+
+
+def _taskbar(state: GuiState) -> Panel:
+    mode = "[bold yellow]FILTER[/bold yellow]" if state.search_mode else "[bold green]NAV[/bold green]"
+    query = state.search_query if state.search_query else "none"
+    return Panel(
+        Text.from_markup(
+            f"mode: {mode}   filter: [cyan]{query}[/cyan]   status: [white]{state.status_message}[/white]"
+        ),
+        border_style="bright_cyan",
     )
 
 
 def _sessions_view(session_root: str, state: GuiState) -> Panel:
-    state.session_names = _discover_sessions(session_root)
+    all_names = _discover_sessions(session_root)
+    state.session_names = [name for name in all_names if _matches_filter(name, query=state.search_query)]
     state.session_index = max(0, min(state.session_index, max(0, len(state.session_names) - 1)))
     table = Table(title="Sessions", expand=True)
     table.add_column(" ", width=2)
@@ -163,8 +193,8 @@ def _sessions_view(session_root: str, state: GuiState) -> Panel:
         table.add_row("▶" if i == state.session_index else " ", name, str(len(features)), str(turns))
 
     if not state.session_names:
-        return Panel("No sessions found.", title="Sessions", border_style="yellow")
-    return Panel(table, border_style="green")
+        return Panel("No sessions found for active filter.", title="Sessions", border_style="yellow")
+    return Panel(table, border_style="bright_green")
 
 
 def _session_context_items(payload: dict) -> list[dict]:
@@ -194,7 +224,9 @@ def _session_context_items(payload: dict) -> list[dict]:
 
 
 def _session_contexts_view(payload: dict, state: GuiState) -> Panel:
-    items = _session_context_items(payload)
+    items = [item for item in _session_context_items(payload) if _matches_filter(item["label"], query=state.search_query)]
+    if not items:
+        return Panel("No context layers match active filter.", title="Session Stack", border_style="yellow")
     state.context_index = max(0, min(state.context_index, max(0, len(items) - 1)))
     table = Table(title="Session Stack", expand=True)
     table.add_column(" ", width=2)
@@ -206,7 +238,12 @@ def _session_contexts_view(payload: dict, state: GuiState) -> Panel:
 
 
 def _features_view(payload: dict, state: GuiState) -> Panel:
-    state.feature_records = _feature_records(payload)
+    records = _feature_records(payload)
+    state.feature_records = [
+        item
+        for item in records
+        if _matches_filter(item.get("feature_id", ""), item.get("feature_name", ""), item.get("status", ""), query=state.search_query)
+    ]
     state.feature_index = max(0, min(state.feature_index, max(0, len(state.feature_records) - 1)))
 
     table = Table(title="Features (including archived)", expand=True)
@@ -226,8 +263,33 @@ def _features_view(payload: dict, state: GuiState) -> Panel:
         )
 
     if not state.feature_records:
-        return Panel("No feature records for this session.", title="Features", border_style="yellow")
-    return Panel(table, border_style="blue")
+        return Panel("No feature records for this session/filter.", title="Features", border_style="yellow")
+
+    status_counts = {"done": 0, "active": 0, "blocked": 0, "todo": 0}
+    for feature in state.feature_records:
+        normalized = normalize_task_status(str(feature.get("status", "")))
+        if normalized in {STATUS_COMPLETED, STATUS_ARCHIVED}:
+            status_counts["done"] += 1
+        elif normalized == STATUS_IN_PROGRESS:
+            status_counts["active"] += 1
+        elif normalized == STATUS_BLOCKED:
+            status_counts["blocked"] += 1
+        else:
+            status_counts["todo"] += 1
+    total = max(1, len(state.feature_records))
+    viz = Panel(
+        "\n".join(
+            [
+                f"done    {status_counts['done']:>3} {_bar(status_counts['done'], total)}",
+                f"active  {status_counts['active']:>3} {_bar(status_counts['active'], total)}",
+                f"blocked {status_counts['blocked']:>3} {_bar(status_counts['blocked'], total)}",
+                f"todo    {status_counts['todo']:>3} {_bar(status_counts['todo'], total)}",
+            ]
+        ),
+        title="Feature Visualisation",
+        border_style="bright_magenta",
+    )
+    return Panel(Columns([table, viz], expand=True), border_style="bright_blue")
 
 
 def _overview_panel(plan: FeaturePlan, payload: dict) -> Panel:
@@ -389,7 +451,18 @@ def _task_detail_panel(task, state: GuiState) -> Panel:
 
 
 def _items_view(plan: FeaturePlan, payload: dict, state: GuiState) -> Group:
-    items = _feature_items(plan)
+    raw_items = _feature_items(plan)
+    items = []
+    for item in raw_items:
+        if item["kind"] == "view":
+            if _matches_filter(item["label"], query=state.search_query):
+                items.append(item)
+        else:
+            task = item["task"]
+            if _matches_filter(task.title, str(task.id), normalize_task_status(task.status), query=state.search_query):
+                items.append(item)
+    if not items:
+        return Group(Panel("No feature items match active filter.", border_style="yellow"))
     state.item_index = max(0, min(state.item_index, len(items) - 1))
 
     table = Table(title="Feature Context", expand=True)
@@ -434,9 +507,9 @@ def _confirm_modal(state: GuiState) -> Panel:
     yes = "[bold red]QUIT[/bold red]" if state.confirm_index == 1 else "QUIT"
     no = "[bold green]CANCEL[/bold green]" if state.confirm_index == 0 else "CANCEL"
     return Panel(
-        f"Exit GUI?\n\n{no}    {yes}\n\nUse ↑/↓ then Enter",
+        f"Exit GUI?\n\n{no}    {yes}\n\nUse j/k then Enter",
         title="Confirm Exit",
-        border_style="red",
+        border_style="bright_red",
     )
 
 
@@ -481,7 +554,8 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
     if state.confirm_quit:
         body = Group(body, _confirm_modal(state))
 
-    return Group(header, body)
+    footer = _taskbar(state)
+    return Group(header, body, footer)
 
 
 class _KeyReader:
@@ -542,6 +616,25 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         state.confirm_index = 0
         return state
 
+    if state.search_mode:
+        if key in {"\n", "\r", "\x1b"}:
+            state.search_mode = False
+            state.status_message = "filter applied"
+            return state
+        if key in {"\x7f", "\b"}:
+            state.search_query = state.search_query[:-1]
+            state.status_message = "filter updated"
+            return state
+        if key == "\x15":
+            state.search_query = ""
+            state.status_message = "filter cleared"
+            return state
+        if len(key) == 1 and key.isprintable():
+            state.search_query += key
+            state.status_message = "filter updated"
+            return state
+        return state
+
     if state.confirm_quit:
         if is_back:
             state.confirm_quit = False
@@ -575,8 +668,19 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             state.selected_feature = None
         return state
 
+    if key == "/":
+        state.search_mode = True
+        state.status_message = "type to filter, Enter to apply, Esc to cancel"
+        return state
+
     if state.screen == "sessions":
-        state.session_names = _discover_sessions(session_root)
+        state.session_names = [
+            name
+            for name in _discover_sessions(session_root)
+            if _matches_filter(name, query=state.search_query)
+        ]
+        if not state.session_names:
+            return state
         if is_down:
             state.session_index = min(max(0, len(state.session_names) - 1), state.session_index + 1)
         elif is_up:
@@ -590,7 +694,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
 
     if state.screen == "contexts":
         payload = _load_session_payload(session_root, state.selected_session or "")
-        items = _session_context_items(payload)
+        items = [item for item in _session_context_items(payload) if _matches_filter(item["label"], query=state.search_query)]
+        if not items:
+            return state
         if is_down:
             state.context_index = min(max(0, len(items) - 1), state.context_index + 1)
         elif is_up:
@@ -604,7 +710,13 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
 
     if state.screen == "features":
         payload = _load_session_payload(session_root, state.selected_session or "")
-        state.feature_records = _feature_records(payload)
+        state.feature_records = [
+            item
+            for item in _feature_records(payload)
+            if _matches_filter(item.get("feature_id", ""), item.get("feature_name", ""), item.get("status", ""), query=state.search_query)
+        ]
+        if not state.feature_records:
+            return state
         if is_down:
             state.feature_index = min(max(0, len(state.feature_records) - 1), state.feature_index + 1)
         elif is_up:
@@ -619,7 +731,17 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         plan = _load_feature_plan_from_record(state.selected_feature)
         if not plan:
             return state
-        items = _feature_items(plan)
+        items = []
+        for item in _feature_items(plan):
+            if item["kind"] == "view":
+                if _matches_filter(item["label"], query=state.search_query):
+                    items.append(item)
+            else:
+                task = item["task"]
+                if _matches_filter(task.title, str(task.id), normalize_task_status(task.status), query=state.search_query):
+                    items.append(item)
+        if not items:
+            return state
         if is_down:
             state.item_index = min(len(items) - 1, state.item_index + 1)
         elif is_up:

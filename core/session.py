@@ -404,9 +404,12 @@ class SessionManager:
 
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
         if isinstance(state, dict):
-            # Re-derive status from feature_plan if present
+            # Re-derive status from feature_plan when caller did not provide
+            # an explicit status override.
             feature_plan = state.get("feature_plan")
-            if isinstance(feature_plan, dict):
+            explicit_status = str(state.get("status", "") or "").strip()
+            should_derive = (not explicit_status) or explicit_status == "completed"
+            if isinstance(feature_plan, dict) and should_derive:
                 derived = derive_feature_state_status(feature_plan)
                 state = {**state, "status": derived}
         self.feature_state = deepcopy(state) if isinstance(state, dict) else None
@@ -1839,7 +1842,13 @@ class Session:
             error_msg = str(getattr(self, '_last_provider_error', '') or '').lower()
             status = self._extract_http_status_code(error_msg)
             is_4xx = bool(status is not None and 400 <= status < 500)
-            return "rollback_retry" if is_4xx else "retry"
+            if is_4xx:
+                return "rollback_retry"
+            # In non-interactive flows, avoid infinite retry loops for errors that
+            # are not classified as transient/retryable.
+            if not self._is_transient_provider_error(RuntimeError(error_msg)):
+                return "abort"
+            return "retry"
         return "abort"
 
     @staticmethod

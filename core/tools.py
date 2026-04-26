@@ -1668,9 +1668,22 @@ def search_references(query: str, folder_context, context_lines: int = 3) -> str
     if not str(query or "").strip():
         return json.dumps({"error": "query is required"})
 
-    context_lines = max(0, int(context_lines or 3))
+    context_lines = 3 if context_lines is None else max(0, int(context_lines))
     results = []
-    for filepath in folder_context.get_file_list():
+    candidate_files = set(folder_context.get_file_list() or [])
+    # Include on-disk files created after initial folder attachment so searches
+    # do not miss freshly generated files during tests/agent runs.
+    for root in getattr(folder_context, "folders", []) or []:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, _, filenames in os.walk(root):
+            for filename in filenames:
+                fullpath = os.path.join(dirpath, filename)
+                if folder_context and folder_context.is_ignored(fullpath):
+                    continue
+                candidate_files.add(fullpath)
+
+    for filepath in sorted(candidate_files):
         try:
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()

@@ -2539,6 +2539,73 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
     
     query = query.strip()
     
+    def _duckduckgo_instantapi_fallback() -> list[dict]:
+        """DuckDuckGo fallback that does not require third-party packages."""
+        import urllib.parse
+        import urllib.request
+
+        fallback_results: list[dict] = []
+        endpoint = (
+            "https://api.duckduckgo.com/?"
+            + urllib.parse.urlencode(
+                {
+                    "q": query,
+                    "format": "json",
+                    "no_html": "1",
+                    "no_redirect": "1",
+                }
+            )
+        )
+        request = urllib.request.Request(
+            endpoint,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+
+        def _append_result(title: str, url: str, snippet: str):
+            if not url:
+                return
+            fallback_results.append(
+                {
+                    "title": title or url,
+                    "url": url,
+                    "snippet": snippet or "",
+                    "relevance_score": max(0.1, 1.0 - (len(fallback_results) * 0.05)),
+                    "citation_id": register_source(
+                        title=title or url,
+                        url=url,
+                        source_type="web",
+                    ),
+                }
+            )
+
+        abstract_url = str(payload.get("AbstractURL", "") or "").strip()
+        if abstract_url:
+            _append_result(
+                str(payload.get("Heading", "") or "").strip() or "DuckDuckGo Abstract",
+                abstract_url,
+                str(payload.get("AbstractText", "") or "").strip(),
+            )
+
+        def _consume_topics(topics):
+            for topic in topics:
+                if len(fallback_results) >= num_results:
+                    return
+                if not isinstance(topic, dict):
+                    continue
+                if isinstance(topic.get("Topics"), list):
+                    _consume_topics(topic.get("Topics", []))
+                    continue
+                url = str(topic.get("FirstURL", "") or "").strip()
+                text = str(topic.get("Text", "") or "").strip()
+                if url:
+                    title = text.split(" - ")[0].strip() if text else url
+                    _append_result(title, url, text)
+
+        _consume_topics(payload.get("RelatedTopics", []) if isinstance(payload.get("RelatedTopics"), list) else [])
+        return fallback_results[:num_results]
+
     if engine.lower() == "duckduckgo":
         # Use duckduckgo-search package for reliable DuckDuckGo access
         try:
@@ -2611,10 +2678,27 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
             }, indent=2)
             
         except ImportError:
-            return json.dumps({
-                "error": "duckduckgo-search package required. Install with: pip install duckduckgo-search",
-                "results": []
-            })
+            try:
+                results = _duckduckgo_instantapi_fallback()
+                urls_used = [r.get("url", "") for r in results if r.get("url")]
+                return json.dumps(
+                    {
+                        "query": query,
+                        "engine": "duckduckgo",
+                        "num_results": len(results),
+                        "urls_used": urls_used,
+                        "results": results,
+                    },
+                    indent=2,
+                )
+            except Exception as e:
+                logger.error(f"web_search: Import fallback failed for '{query}': {e}")
+                return json.dumps(
+                    {
+                        "error": f"DuckDuckGo search fallback failed: {str(e)}",
+                        "results": [],
+                    }
+                )
         except Exception as e:
             logger.error(f"web_search: Error searching DuckDuckGo for '{query}': {e}")
             return json.dumps({"error": f"Search failed: {str(e)}", "results": []})

@@ -1,9 +1,11 @@
 import os
 import pytest
 import json
+import builtins
 from core.tools import (
     _check_bounds,
     read_file,
+    web_search,
     _handle_create_feature_task,
     ToolExecutionContext,
     execute_tool,
@@ -246,6 +248,56 @@ def test_bash_tool_rejects_out_of_bounds_cwd(tmp_path):
     _assert_tool_envelope(payload)
     assert payload["ok"] is False
     assert payload["error_code"] == "access_denied"
+
+
+def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
+    original_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "ddgs":
+            raise ImportError("forced missing ddgs")
+        return original_import(name, globals, locals, fromlist, level)
+
+    class _FakeResponse:
+        def __init__(self, payload: dict):
+            self._payload = payload
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(request, timeout=0):
+        return _FakeResponse(
+            {
+                "Heading": "DuckDuckGo",
+                "AbstractURL": "https://duckduckgo.com/about",
+                "AbstractText": "DuckDuckGo overview",
+                "RelatedTopics": [
+                    {"FirstURL": "https://example.com/a", "Text": "Example A - snippet"},
+                    {"FirstURL": "https://example.com/b", "Text": "Example B - snippet"},
+                ],
+            }
+        )
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+
+    payload = json.loads(web_search("privacy search", engine="duckduckgo", num_results=3))
+
+    assert payload.get("error") is None
+    assert payload["num_results"] >= 1
+    assert payload["results"][0]["url"].startswith("https://")
+
+
+def test_web_search_returns_unknown_engine_error():
+    payload = json.loads(web_search("hello", engine="bogus"))
+    assert "Unknown search engine" in payload["error"]
+    assert payload["results"] == []
 
 
 def test_create_feature_create_phases_create_task_staged_flow(tmp_path):

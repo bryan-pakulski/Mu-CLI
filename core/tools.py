@@ -2609,22 +2609,19 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
     if engine.lower() == "duckduckgo":
         # Use duckduckgo-search package for reliable DuckDuckGo access
         try:
-            from ddgs import DDGS
-
             results = []
-            with DDGS() as ddg:
-                for i, r in enumerate(ddg.text(query, max_results=num_results)):
-                    results.append({
-                        "title": r.get("title", ""),
-                        "url": r.get("href", ""),
-                        "snippet": r.get("body", ""),
-                        "relevance_score": 1.0 - (i * 0.05),
-                        "citation_id": register_source(
-                            title=r.get("title", ""),
-                            url=r.get("href", ""),
-                            source_type="web"
-                        )
-                    })
+            for i, r in enumerate(_ddgs_text_search(query, max_results=num_results)):
+                results.append({
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "snippet": r.get("body", ""),
+                    "relevance_score": 1.0 - (i * 0.05),
+                    "citation_id": register_source(
+                        title=r.get("title", ""),
+                        url=r.get("href", ""),
+                        source_type="web"
+                    )
+                })
 
             # Fallback for environments where DDGS returns no results due to
             # transient upstream throttling/challenges.
@@ -2750,6 +2747,14 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
     
     else:
         return json.dumps({"error": f"Unknown search engine: {engine}. Use 'duckduckgo' or 'google'", "results": []})
+
+
+def _ddgs_text_search(query: str, max_results: int):
+    """Wrapper around ddgs import/search to make fallback testing deterministic."""
+    from ddgs import DDGS
+
+    with DDGS() as ddg:
+        return list(ddg.text(query, max_results=max_results))
 
 
 def arxiv_search(query: str, folder_context=None, max_results: int = 10, category: str = "") -> str:

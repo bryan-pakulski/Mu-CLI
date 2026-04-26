@@ -1,7 +1,6 @@
 import os
 import pytest
 import json
-import builtins
 from core.tools import (
     _check_bounds,
     read_file,
@@ -251,13 +250,6 @@ def test_bash_tool_rejects_out_of_bounds_cwd(tmp_path):
 
 
 def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
-    original_import = builtins.__import__
-
-    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "ddgs":
-            raise ImportError("forced missing ddgs")
-        return original_import(name, globals, locals, fromlist, level)
-
     class _FakeResponse:
         def __init__(self, payload: dict):
             self._payload = payload
@@ -284,7 +276,10 @@ def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    def _raise_import_error(query: str, max_results: int):
+        raise ImportError("forced missing ddgs")
+
+    monkeypatch.setattr("core.tools._ddgs_text_search", _raise_import_error)
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
 
     payload = json.loads(web_search("privacy search", engine="duckduckgo", num_results=3))

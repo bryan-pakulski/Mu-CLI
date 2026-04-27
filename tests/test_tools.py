@@ -5,6 +5,7 @@ from core.tools import (
     _check_bounds,
     read_file,
     web_search,
+    stackoverflow_search,
     _handle_create_feature_task,
     ToolExecutionContext,
     execute_tool,
@@ -292,6 +293,12 @@ def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
 def test_web_search_returns_unknown_engine_error():
     payload = json.loads(web_search("hello", engine="bogus"))
     assert "Unknown search engine" in payload["error"]
+    assert payload["results"] == []
+
+
+def test_stackoverflow_search_rejects_empty_query():
+    payload = json.loads(stackoverflow_search(""))
+    assert "error" in payload
     assert payload["results"] == []
 
 

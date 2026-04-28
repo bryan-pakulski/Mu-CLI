@@ -140,6 +140,32 @@ def test_handle_command_updates_variables_non_interactively():
     assert result["data"]["key"] == "yolo"
 
 
+def test_continue_command_resumes_paused_execution(monkeypatch):
+    session = build_test_session()
+    session.paused_execution_text = "resume this task"
+
+    def _fake_send_message(text):
+        assert text == "resume this task"
+        return {"ok": True, "status": "completed", "assistant_text": "done"}
+
+    monkeypatch.setattr(session, "send_message", _fake_send_message)
+    result = handle_command(session, "/continue", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["message"] == "Resumed paused execution."
+    assert result["data"]["resumed_text"] == "resume this task"
+
+
+def test_continue_command_errors_when_not_paused():
+    session = build_test_session()
+    session.paused_execution_text = None
+
+    result = handle_command(session, "/continue", allow_prompt=False)
+
+    assert result["ok"] is False
+    assert result["message"] == "No paused execution to continue."
+
+
 def test_memory_buffers_payload_includes_context_layers():
     session = build_test_session()
     payload = build_memory_buffers_payload(session)

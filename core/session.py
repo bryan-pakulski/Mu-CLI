@@ -821,6 +821,7 @@ class Session:
         self.disabled_tools = []  # list of tool names strings
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
+        self.paused_execution_text: str | None = None
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -2111,6 +2112,7 @@ class Session:
 
     def send_message(self, text):
         logger.info(f"Sending message: {text[:100]}...")
+        self.paused_execution_text = None
         self.sync_runtime_state()
         if self.variables.get("scratchpad_enabled", True):
             self.turn_scratchpad.max_entries = max(
@@ -2788,6 +2790,7 @@ class Session:
                 if self.ui:
                     self.ui.show_info("\nAgentic loop interrupted by user.")
                 logger.warning("Agentic loop interrupted by user.")
+                self.paused_execution_text = str(text or "")
                 self.session_manager.history.append(
                     {
                         "role": "tool",
@@ -2885,6 +2888,7 @@ class Session:
                 )
 
         self.session_manager.save_history(self.folder_context)
+        self.paused_execution_text = None
         if self.session_manager.get_feature_state():
             self._set_feature_state(status="max_iterations_reached")
         return self._collect_turn_response(

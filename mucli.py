@@ -549,6 +549,7 @@ def print_help():
         "/update", "", "Attempt to update μCLI from the configured git remote"
     )
     table.add_row("/quit", "/q", "Exit")
+    table.add_row("/continue", "", "Resume last paused execution after Ctrl+C")
     table.add_row(
         "/stats",
         "",
@@ -1008,6 +1009,26 @@ def handle_command(session, user_input, allow_prompt=True):
             print("Goodbye!")
         return serialize_command_result(
             session, cmd, message="Goodbye!", data={"exit": True}
+        )
+
+    if cmd == "/continue":
+        paused_text = str(getattr(session, "paused_execution_text", "") or "").strip()
+        if not paused_text:
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=False,
+                message="No paused execution to continue.",
+            )
+        if allow_prompt:
+            console.print("[dim]Resuming paused execution...[/dim]")
+        send_result = session.send_message(paused_text)
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=bool(send_result.get("ok", True)),
+            message="Resumed paused execution.",
+            data={"resumed_text": paused_text, "send_result": send_result},
         )
 
     if cmd in ["/help", "/h"]:
@@ -2509,7 +2530,11 @@ def main():
                     break
                 continue
 
-            session.send_message(user_input)
+            send_result = session.send_message(user_input)
+            if send_result.get("status") == "interrupted":
+                console.print(
+                    "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
+                )
             refresh_memory_hud(session, ui)
 
         except KeyboardInterrupt:

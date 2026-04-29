@@ -61,6 +61,9 @@ def _discover_sessions(session_root: str) -> list[str]:
     out = []
     for name in sorted(os.listdir(session_root)):
         if os.path.isfile(os.path.join(session_root, name, "session.json")):
+            if "_subagent_" in name:
+                # Hide ephemeral sub-agent child sessions from top-level session list.
+                continue
             out.append(name)
     return out
 
@@ -354,19 +357,28 @@ def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
 
 def _chat_panel(payload: dict) -> Panel:
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
-    lines = [f"turns: {len(history)}", ""]
-    for msg in history[-30:]:
+    lines = [f"turns: {len(history)}", "tip: / filter, j/k scroll, includes tool calls/results", ""]
+    for idx, msg in enumerate(history[-120:], start=max(0, len(history) - 120) + 1):
         if not isinstance(msg, dict):
             continue
         role = str(msg.get("role", "unknown"))
-        snippet = ""
+        snippets: list[str] = []
         for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
-            if isinstance(part, dict) and part.get("type") == "text":
-                snippet = str(part.get("text", "")).strip().replace("\n", " ")
-                break
-        if len(snippet) > 110:
-            snippet = snippet[:109] + "…"
-        lines.append(f"{role:<10} {snippet or '(non-text)'}")
+            if not isinstance(part, dict):
+                continue
+            ptype = str(part.get("type", ""))
+            if ptype == "text":
+                text = str(part.get("text", "")).strip().replace("\n", " ")
+                if text:
+                    snippets.append(text)
+            elif ptype == "tool_call":
+                snippets.append(f"tool_call:{part.get('tool_name', 'tool')}")
+            elif ptype == "tool_result":
+                snippets.append(f"tool_result:{part.get('tool_name', 'tool')}")
+        snippet = " | ".join(snippets) or "(non-text)"
+        if len(snippet) > 180:
+            snippet = snippet[:179] + "…"
+        lines.append(f"{idx:>4} {role:<10} {snippet}")
     return Panel("\n".join(lines), title="Chat Timeline", border_style="green")
 
 

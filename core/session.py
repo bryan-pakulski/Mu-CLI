@@ -3000,6 +3000,19 @@ class Session:
                             self.ui.show_tool_result(
                                 self._render_tool_result(raw_result)
                             )
+                    if (
+                        self.ui
+                        and part.tool_name == "spawn_sub_agents"
+                        and hasattr(self, "get_subagent_counts")
+                    ):
+                        counts = self.get_subagent_counts()
+                        running = int(counts.get("running", 0) or 0)
+                        queued = int(counts.get("queued", 0) or 0)
+                        completed = int(counts.get("completed", 0) or 0)
+                        failed = int(counts.get("failed", 0) or 0)
+                        self.ui.show_info(
+                            f"[SubAgents status] running={running} queued={queued} completed={completed} failed={failed}"
+                        )
 
                     if self.ui and hasattr(self.ui, "emit_tool_trace"):
                         self.ui.emit_tool_trace(

@@ -2,7 +2,7 @@ import json
 from dataclasses import asdict
 
 from core.feature_mode import FeaturePlan, FeatureTask
-from ui.gui_tui import GuiState, _discover_sessions, _handle_key, _tool_usage_counts
+from ui.gui_tui import GuiState, _chat_panel, _discover_sessions, _handle_key, _tool_usage_counts
 
 
 def _write_session_fixture(tmp_path):
@@ -54,8 +54,28 @@ def test_discover_sessions_lists_only_directories_with_session_json(tmp_path):
     (tmp_path / "s3").mkdir()
     (tmp_path / "s1" / "session.json").write_text(json.dumps({"history": []}))
     (tmp_path / "s3" / "session.json").write_text(json.dumps({"history": []}))
+    (tmp_path / "s1_subagent_abcd" / "session.json").parent.mkdir()
+    (tmp_path / "s1_subagent_abcd" / "session.json").write_text(json.dumps({"history": []}))
 
     assert _discover_sessions(str(tmp_path)) == ["s1", "s3"]
+
+
+def test_chat_panel_renders_tool_activity_in_timeline():
+    payload = {
+        "history": [
+            {"role": "user", "parts": [{"type": "text", "text": "run it"}]},
+            {
+                "role": "assistant",
+                "parts": [
+                    {"type": "tool_call", "tool_name": "spawn_sub_agents"},
+                    {"type": "tool_result", "tool_name": "spawn_sub_agents", "tool_result": {"ok": True}},
+                ],
+            },
+        ]
+    }
+    rendered = str(_chat_panel(payload).renderable)
+    assert "tool_call:spawn_sub_agents" in rendered
+    assert "tool_result:spawn_sub_agents" in rendered
 
 
 def test_handle_key_hierarchical_navigation(tmp_path):

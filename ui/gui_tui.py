@@ -160,6 +160,20 @@ def _extract_message_text(msg: dict) -> str:
     return " ".join(snippets).strip()
 
 
+def _history_entries(payload: dict, filter_query: str = "") -> list[dict]:
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    entries = []
+    for idx, msg in enumerate(history):
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "unknown"))
+        text = _extract_message_text(msg)
+        if filter_query and filter_query.lower() not in f"{role} {text}".lower():
+            continue
+        entries.append({"idx": idx + 1, "role": role, "text": text, "raw": msg})
+    return entries
+
+
 def _status_color(status: str) -> str:
     normalized = normalize_task_status(status)
     if normalized in {STATUS_COMPLETED, STATUS_ARCHIVED}:
@@ -369,7 +383,7 @@ def _overview_panel(plan: FeaturePlan, payload: dict) -> Panel:
     return Panel("\n".join(lines), title="Overview", border_style="green")
 
 
-def _heatmap_panel(payload: dict, filter_query: str = "") -> Panel:
+def _heatmap_panel(payload: dict, filter_query: str = "", *, selected_index: int = 0, offset: int = 0) -> Panel:
     usage = _tool_usage_counts(payload)
     if not usage:
         return Panel("No tool calls in history.", title="Tool Heatmap", border_style="yellow")
@@ -379,18 +393,42 @@ def _heatmap_panel(payload: dict, filter_query: str = "") -> Panel:
         if not usage:
             return Panel("No tool calls match filter.", title="Tool Heatmap", border_style="yellow")
     max_count = max(count for _, count in usage)
+    selected_index = max(0, min(selected_index, len(usage) - 1))
+    start = max(0, min(offset, max(0, len(usage) - 20)))
+    window = usage[start:start + 20]
     lines = []
-    for name, count in usage[:28]:
+    for i, (name, count) in enumerate(window, start=start):
         width = 24
         filled = int(round((count / max_count) * width))
         bar = "█" * filled + "░" * (width - filled)
-        lines.append(f"{name:<22} {count:>4} {bar}")
+        pointer = "▶" if i == selected_index else " "
+        lines.append(f"{pointer} {name:<22} {count:>4} {bar}")
+    selected_tool = usage[selected_index][0] if usage else ""
+    details = []
+    for msg in _history_entries(payload):
+        for part in msg["raw"].get("parts", []) if isinstance(msg["raw"].get("parts"), list) else []:
+            if not isinstance(part, dict):
+                continue
+            if str(part.get("tool_name", "")) != selected_tool:
+                continue
+            details.append(
+                {
+                    "role": msg["role"],
+                    "type": part.get("type"),
+                    "tool_name": part.get("tool_name"),
+                    "tool_args": part.get("tool_args"),
+                    "tool_result": part.get("tool_result"),
+                }
+            )
     lines.append("")
     lines.append("filter tools by typing /<tool-name> while on this screen")
+    lines.append(f"window offset: {start} / {max(0, len(usage) - 20)}")
+    if selected_tool:
+        lines += ["", f"selected tool: {selected_tool}", json.dumps(details[-3:], indent=2, default=str)]
     return Panel("\n".join(lines), title="Tool Heatmap", border_style="magenta")
 
 
-def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_query: str = "") -> Panel:
+def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_query: str = "", *, selected_index: int = 0) -> Panel:
     sub_counts = _payload_subagent_counts(payload)
     running = int(sub_counts.get("running", 0) or 0)
     queued = int(sub_counts.get("queued", 0) or 0)
@@ -405,23 +443,15 @@ def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_que
         lines.append(f"  [{ts}] {getattr(event, 'kind', '-')} {getattr(event, 'entity', '-')}/{getattr(event, 'entity_id', '-')}")
 
     lines += ["", "Conversation (recent):"]
-    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
-    history_window = history[max(0, len(history) - 200):]
-    if filter_query:
-        history_window = [m for m in history_window if filter_query.lower() in _extract_message_text(m).lower() or filter_query.lower() in str(m.get("role", "")).lower()]
-    start = max(0, min(offset, max(0, len(history_window) - 20)))
-    for msg in history_window[start:start + 20]:
-        if not isinstance(msg, dict):
-            continue
-        role = str(msg.get("role", "unknown"))
-        snippet = ""
-        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
-            if isinstance(part, dict) and part.get("type") == "text":
-                snippet = str(part.get("text", "")).replace("\n", " ").strip()
-                break
+    entries = _history_entries(payload, filter_query=filter_query)
+    selected_index = max(0, min(selected_index, len(entries) - 1 if entries else 0))
+    start = max(0, min(offset, max(0, len(entries) - 20)))
+    for i, entry in enumerate(entries[start:start + 20], start=start):
+        snippet = entry["text"].replace("\n", " ").strip()
         if len(snippet) > 90:
             snippet = snippet[:89] + "…"
-        lines.append(f"  {role:<9} | {snippet or '(non-text event)'}")
+        pointer = "▶" if i == selected_index else " "
+        lines.append(f"{pointer} {entry['role']:<9} | {snippet or '(non-text event)'}")
 
     timeline = _payload_subagent_timeline(payload)
     if timeline:
@@ -432,12 +462,14 @@ def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_que
             ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
 
-    lines += ["", f"window offset: {start} / {max(0, len(history_window) - 20)}"]
+    lines += ["", f"window offset: {start} / {max(0, len(entries) - 20)}"]
     lines.append("jump: J/K=±10 lines, j/k=±1 line")
+    if entries:
+        lines += ["", "selected entry (full):", json.dumps(entries[selected_index]["raw"], indent=2, default=str)]
     return Panel("\n".join(lines), title="History Browser", border_style="bright_blue")
 
 
-def _chat_panel(payload: dict, offset: int = 0, filter_query: str = "") -> Panel:
+def _chat_panel(payload: dict, offset: int = 0, filter_query: str = "", *, selected_index: int = 0) -> Panel:
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
     sub_counts = _payload_subagent_counts(payload)
     lines = [
@@ -446,31 +478,15 @@ def _chat_panel(payload: dict, offset: int = 0, filter_query: str = "") -> Panel
         "tip: / filter, j/k scroll, includes tool calls/results",
         "",
     ]
-    history_window = history[max(0, len(history) - 300):]
-    if filter_query:
-        history_window = [m for m in history_window if filter_query.lower() in _extract_message_text(m).lower() or filter_query.lower() in str(m.get("role", "")).lower()]
-    start = max(0, min(offset, max(0, len(history_window) - 30)))
-    for idx, msg in enumerate(history_window[start:start + 30], start=max(0, len(history) - len(history_window)) + start + 1):
-        if not isinstance(msg, dict):
-            continue
-        role = str(msg.get("role", "unknown"))
-        snippets: list[str] = []
-        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
-            if not isinstance(part, dict):
-                continue
-            ptype = str(part.get("type", ""))
-            if ptype == "text":
-                text = str(part.get("text", "")).strip().replace("\n", " ")
-                if text:
-                    snippets.append(text)
-            elif ptype == "tool_call":
-                snippets.append(f"tool_call:{part.get('tool_name', 'tool')}")
-            elif ptype == "tool_result":
-                snippets.append(f"tool_result:{part.get('tool_name', 'tool')}")
-        snippet = " | ".join(snippets) or "(non-text)"
+    entries = _history_entries(payload, filter_query=filter_query)
+    selected_index = max(0, min(selected_index, len(entries) - 1 if entries else 0))
+    start = max(0, min(offset, max(0, len(entries) - 30)))
+    for i, entry in enumerate(entries[start:start + 30], start=start):
+        snippet = entry["text"]
         if len(snippet) > 180:
             snippet = snippet[:179] + "…"
-        lines.append(f"{idx:>4} {role:<10} {snippet}")
+        pointer = "▶" if i == selected_index else " "
+        lines.append(f"{pointer} {entry['idx']:>4} {entry['role']:<10} {snippet}")
     timeline = _payload_subagent_timeline(payload)
     if timeline:
         lines += ["", "sub-agent activity:"]
@@ -479,8 +495,10 @@ def _chat_panel(payload: dict, offset: int = 0, filter_query: str = "") -> Panel
                 continue
             ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
-    lines += ["", f"window offset: {start} / {max(0, len(history_window) - 30)}"]
+    lines += ["", f"window offset: {start} / {max(0, len(entries) - 30)}"]
     lines.append("jump: J/K=±10 lines, j/k=±1 line")
+    if entries:
+        lines += ["", "selected entry (full):", json.dumps(entries[selected_index]["raw"], indent=2, default=str)]
     return Panel("\n".join(lines), title="Chat Timeline", border_style="green")
 
 
@@ -560,7 +578,7 @@ def _variables_panel(payload: dict) -> Panel:
     return Panel(table, title="Runtime Variables", border_style="cyan")
 
 
-def _memory_panel(payload: dict, offset: int = 0) -> Panel:
+def _memory_panel(payload: dict, offset: int = 0, *, selected_index: int = 0) -> Panel:
     memory = payload.get("task_memory", {}) if isinstance(payload.get("task_memory"), dict) else {}
     scratch = payload.get("turn_scratchpad", {}) if isinstance(payload.get("turn_scratchpad"), dict) else {}
     lines = [
@@ -571,14 +589,19 @@ def _memory_panel(payload: dict, offset: int = 0) -> Panel:
     ]
     memory_items = list(memory.items())
     start = max(0, min(offset, max(0, len(memory_items) - 15)))
-    for key, value in memory_items[start:start + 15]:
+    selected_index = max(0, min(selected_index, len(memory_items) - 1 if memory_items else 0))
+    for i, (key, value) in enumerate(memory_items[start:start + 15], start=start):
         text = str(value).replace("\n", " ")
         if len(text) > 90:
             text = text[:89] + "…"
-        lines.append(f"- {key}: {text}")
+        pointer = "▶" if i == selected_index else " "
+        lines.append(f"{pointer} {key}: {text}")
     if not memory:
         lines.append("- (empty)")
     lines += ["", f"window offset: {start} / {max(0, len(memory_items) - 15)}"]
+    if memory_items:
+        key, value = memory_items[selected_index]
+        lines += ["", f"selected key: {key}", str(value)]
     return Panel("\n".join(lines), title="Task Memory", border_style="yellow")
 
 
@@ -728,17 +751,17 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         elif state.screen == "features":
             body = _features_view(payload, state)
         elif state.screen == "chat":
-            body = _chat_panel(payload, offset=state.detail_offset, filter_query=state.search_query)
+            body = _chat_panel(payload, offset=state.detail_offset, filter_query=state.search_query, selected_index=state.item_index)
         elif state.screen == "research":
             body = _research_panel(payload)
         elif state.screen == "tools":
-            body = _heatmap_panel(payload, filter_query=state.search_query)
+            body = _heatmap_panel(payload, filter_query=state.search_query, selected_index=state.item_index, offset=state.detail_offset)
         elif state.screen == "subagents":
             body = _subagents_panel(payload)
         elif state.screen == "variables":
             body = _variables_panel(payload)
         elif state.screen == "memory":
-            body = _memory_panel(payload, offset=state.detail_offset)
+            body = _memory_panel(payload, offset=state.detail_offset, selected_index=state.item_index)
         elif state.screen == "turn_context":
             body = _turn_context_panel(payload)
         elif state.screen == "buffers":
@@ -757,9 +780,9 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
             elif state.screen == "overview":
                 body = _overview_panel(plan, payload)
             elif state.screen == "heatmap":
-                body = _heatmap_panel(payload, filter_query=state.search_query)
+                body = _heatmap_panel(payload, filter_query=state.search_query, selected_index=state.item_index, offset=state.detail_offset)
             else:
-                body = _history_panel(plan, payload, offset=state.detail_offset, filter_query=state.search_query)
+                body = _history_panel(plan, payload, offset=state.detail_offset, filter_query=state.search_query, selected_index=state.item_index)
 
     if state.confirm_quit:
         body = Group(body, _confirm_modal(state))
@@ -929,15 +952,26 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
     if state.screen in {"chat", "memory", "history"}:
         if is_down:
             state.detail_offset = min(5000, state.detail_offset + 1)
+            state.item_index = min(5000, state.item_index + 1)
             return state
         if is_up:
             state.detail_offset = max(0, state.detail_offset - 1)
+            state.item_index = max(0, state.item_index - 1)
             return state
         if key == "J":
             state.detail_offset = min(5000, state.detail_offset + 10)
+            state.item_index = min(5000, state.item_index + 10)
             return state
         if key == "K":
             state.detail_offset = max(0, state.detail_offset - 10)
+            state.item_index = max(0, state.item_index - 10)
+            return state
+    if state.screen == "tools":
+        if is_down:
+            state.item_index = min(5000, state.item_index + 1)
+            return state
+        if is_up:
+            state.item_index = max(0, state.item_index - 1)
             return state
 
     if state.screen == "features":

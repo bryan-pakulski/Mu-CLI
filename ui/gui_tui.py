@@ -160,11 +160,12 @@ def _header(state: GuiState) -> Panel:
 
     return Panel(
         Text.from_markup(
-            f"[bold bright_magenta]μCLI CYBERDECK[/bold bright_magenta] • [bright_cyan]{datetime.now().strftime('%H:%M:%S')}[/bright_cyan]\n"
+            f"[bold bright_magenta]μCLI Workspace Console[/bold bright_magenta] • [bright_cyan]{datetime.now().strftime('%H:%M:%S')}[/bright_cyan]\n"
             f"path: [bright_green]{' > '.join(breadcrumb)}[/bright_green]\n"
             "controls: j/k navigate • Enter or l select • h back • / filter • q quit"
         ),
         border_style="bright_magenta",
+        expand=True,
     )
 
 
@@ -176,6 +177,7 @@ def _taskbar(state: GuiState) -> Panel:
             f"mode: {mode}   filter: [cyan]{query}[/cyan]   status: [white]{state.status_message}[/white]"
         ),
         border_style="bright_cyan",
+        expand=True,
     )
 
 
@@ -225,6 +227,9 @@ def _session_context_items(payload: dict) -> list[dict]:
         {"id": "subagents", "label": "Sub-Agent Workers", "count": len(subagents)},
         {"id": "variables", "label": "Runtime Variables", "count": len(payload.get("variables", {}) if isinstance(payload.get("variables"), dict) else {})},
         {"id": "memory", "label": "Task Memory", "count": len(payload.get("task_memory", {}) if isinstance(payload.get("task_memory"), dict) else {})},
+        {"id": "turn_context", "label": "Current Turn Context", "count": len(history)},
+        {"id": "buffers", "label": "Summaries & Buffers", "count": len(payload.get("collation_buffer", {}).get("entries", []) if isinstance(payload.get("collation_buffer"), dict) else [])},
+        {"id": "layers", "label": "Context Layers", "count": len(payload.get("context_layers", []) if isinstance(payload.get("context_layers"), list) else [])},
     ]
 
 
@@ -331,7 +336,7 @@ def _heatmap_panel(payload: dict) -> Panel:
     return Panel("\n".join(lines), title="Tool Heatmap", border_style="magenta")
 
 
-def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
+def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0) -> Panel:
     sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
     running = int(sub_counts.get("running", 0) or 0)
     queued = int(sub_counts.get("queued", 0) or 0)
@@ -347,7 +352,9 @@ def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
 
     lines += ["", "Conversation (recent):"]
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
-    for msg in history[-20:]:
+    history_window = history[max(0, len(history) - 200):]
+    start = max(0, min(offset, max(0, len(history_window) - 20)))
+    for msg in history_window[start:start + 20]:
         if not isinstance(msg, dict):
             continue
         role = str(msg.get("role", "unknown"))
@@ -369,10 +376,11 @@ def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
             ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
 
+    lines += ["", f"window offset: {start} / {max(0, len(history_window) - 20)}"]
     return Panel("\n".join(lines), title="History Browser", border_style="bright_blue")
 
 
-def _chat_panel(payload: dict) -> Panel:
+def _chat_panel(payload: dict, offset: int = 0) -> Panel:
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
     sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
     lines = [
@@ -381,7 +389,9 @@ def _chat_panel(payload: dict) -> Panel:
         "tip: / filter, j/k scroll, includes tool calls/results",
         "",
     ]
-    for idx, msg in enumerate(history[-120:], start=max(0, len(history) - 120) + 1):
+    history_window = history[max(0, len(history) - 300):]
+    start = max(0, min(offset, max(0, len(history_window) - 30)))
+    for idx, msg in enumerate(history_window[start:start + 30], start=max(0, len(history) - len(history_window)) + start + 1):
         if not isinstance(msg, dict):
             continue
         role = str(msg.get("role", "unknown"))
@@ -410,6 +420,7 @@ def _chat_panel(payload: dict) -> Panel:
                 continue
             ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
+    lines += ["", f"window offset: {start} / {max(0, len(history_window) - 30)}"]
     return Panel("\n".join(lines), title="Chat Timeline", border_style="green")
 
 
@@ -489,7 +500,7 @@ def _variables_panel(payload: dict) -> Panel:
     return Panel(table, title="Runtime Variables", border_style="cyan")
 
 
-def _memory_panel(payload: dict) -> Panel:
+def _memory_panel(payload: dict, offset: int = 0) -> Panel:
     memory = payload.get("task_memory", {}) if isinstance(payload.get("task_memory"), dict) else {}
     scratch = payload.get("turn_scratchpad", {}) if isinstance(payload.get("turn_scratchpad"), dict) else {}
     lines = [
@@ -498,14 +509,66 @@ def _memory_panel(payload: dict) -> Panel:
         "",
         "task_memory preview:",
     ]
-    for key, value in list(memory.items())[:15]:
+    memory_items = list(memory.items())
+    start = max(0, min(offset, max(0, len(memory_items) - 15)))
+    for key, value in memory_items[start:start + 15]:
         text = str(value).replace("\n", " ")
         if len(text) > 90:
             text = text[:89] + "…"
         lines.append(f"- {key}: {text}")
     if not memory:
         lines.append("- (empty)")
+    lines += ["", f"window offset: {start} / {max(0, len(memory_items) - 15)}"]
     return Panel("\n".join(lines), title="Task Memory", border_style="yellow")
+
+
+def _turn_context_panel(payload: dict) -> Panel:
+    history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
+    recent = history[-6:]
+    lines = ["Recent turn context:"]
+    for msg in recent:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role", "unknown"))
+        snippet = ""
+        for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
+            if isinstance(part, dict) and part.get("type") == "text":
+                snippet = str(part.get("text", "")).replace("\n", " ").strip()
+                if snippet:
+                    break
+        if len(snippet) > 140:
+            snippet = snippet[:139] + "…"
+        lines.append(f"{role:<10} {snippet or '(non-text event)'}")
+    return Panel("\n".join(lines), title="Current Turn Context", border_style="cyan")
+
+
+def _buffers_panel(payload: dict) -> Panel:
+    summary = str(payload.get("conversation_summary", "") or "")
+    summary_anchor = int(payload.get("summary_anchor", 0) or 0)
+    collation = payload.get("collation_buffer", {}) if isinstance(payload.get("collation_buffer"), dict) else {}
+    entries = collation.get("entries", []) if isinstance(collation.get("entries"), list) else []
+    lines = [
+        f"summary_anchor: {summary_anchor}",
+        f"summary_chars: {len(summary)}",
+        f"collation_pending: {len(entries)}",
+        "",
+        "summary preview:",
+        (summary[:900] + "…") if len(summary) > 900 else (summary or "(empty)"),
+    ]
+    return Panel("\n".join(lines), title="Summaries & Buffers", border_style="yellow")
+
+
+def _context_layers_panel(payload: dict) -> Panel:
+    layers = payload.get("context_layers", []) if isinstance(payload.get("context_layers"), list) else []
+    if not layers:
+        return Panel("No context_layers in payload snapshot.", title="Context Layers", border_style="yellow")
+    lines = []
+    for layer in layers[:20]:
+        if not isinstance(layer, dict):
+            continue
+        lines.append(f"{layer.get('layer', '-')}: {layer.get('name', '-')}")
+        lines.append(f"  chars={layer.get('char_count', 0)} tokens~={layer.get('token_estimate', 0)}")
+    return Panel("\n".join(lines), title="Context Layers", border_style="magenta")
 
 
 def _task_detail_panel(task, state: GuiState) -> Panel:
@@ -605,7 +668,7 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         elif state.screen == "features":
             body = _features_view(payload, state)
         elif state.screen == "chat":
-            body = _chat_panel(payload)
+            body = _chat_panel(payload, offset=state.detail_offset)
         elif state.screen == "research":
             body = _research_panel(payload)
         elif state.screen == "tools":
@@ -615,7 +678,13 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         elif state.screen == "variables":
             body = _variables_panel(payload)
         elif state.screen == "memory":
-            body = _memory_panel(payload)
+            body = _memory_panel(payload, offset=state.detail_offset)
+        elif state.screen == "turn_context":
+            body = _turn_context_panel(payload)
+        elif state.screen == "buffers":
+            body = _buffers_panel(payload)
+        elif state.screen == "layers":
+            body = _context_layers_panel(payload)
         else:
             plan = _load_feature_plan_from_record(state.selected_feature)
             if not plan:
@@ -630,7 +699,7 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
             elif state.screen == "heatmap":
                 body = _heatmap_panel(payload)
             else:
-                body = _history_panel(plan, payload)
+                body = _history_panel(plan, payload, offset=state.detail_offset)
 
     if state.confirm_quit:
         body = Group(body, _confirm_modal(state))
@@ -742,8 +811,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         elif state.screen == "features":
             state.screen = "contexts"
             state.selected_feature = None
-        elif state.screen in {"chat", "research", "tools", "subagents", "variables", "memory"}:
+        elif state.screen in {"chat", "research", "tools", "subagents", "variables", "memory", "turn_context", "buffers", "layers"}:
             state.screen = "contexts"
+            state.detail_offset = 0
         elif state.screen == "contexts":
             state.screen = "sessions"
             state.selected_feature = None
@@ -795,6 +865,13 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             return state
         if key in {"r", "R"}:
             state.status_message = "Use /api/tool retry_sub_agents with selected worker IDs."
+            return state
+    if state.screen in {"chat", "memory", "history"}:
+        if is_down:
+            state.detail_offset = min(5000, state.detail_offset + 1)
+            return state
+        if is_up:
+            state.detail_offset = max(0, state.detail_offset - 1)
             return state
 
     if state.screen == "features":

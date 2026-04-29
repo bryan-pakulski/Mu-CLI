@@ -289,6 +289,7 @@ In FEATURE mode, once all tasks are complete you must perform a review pass and 
 3. Ensure every task contains Objectives, Action Points, and Exit Criteria sections.
 4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in session-managed metadata.
 5. Once approved, repeat this harness loop until done:
+   - If multiple tasks are independent, delegate them to parallel sub-agents and use the feature engine to track ownership/status per task.
    - call `get_current_task` / `get_tasks`,
    - gather read-only context,
    - save quick notes with `save_scratchpad`,
@@ -362,6 +363,7 @@ Operate like a persistent project operator inspired by modern long-horizon agent
 
 3) Continuous Execution Cycle
    - Repeat indefinitely: Plan -> Execute -> Verify -> Reflect -> Re-plan.
+   - For multiple independent queued tasks, use parallel sub-agents where appropriate; keep one parent-owned integration task active.
    - Prefer small, testable increments over risky large jumps.
    - Use tooling aggressively, but do not spam raw tool logs in user-facing summaries.
 

@@ -1153,6 +1153,24 @@ class Session:
             return f"- {role}: [no serializable content]"
         return f"- {role}: " + " | ".join(summaries)
 
+    def _estimate_non_history_context_tokens(self) -> int:
+        """Estimate token overhead from non-history context layers.
+
+        Mirrors layers that are injected outside `recent_history` so history window
+        budgeting does not overrun the effective model context.
+        """
+        summary = str(getattr(self.session_manager, "conversation_summary", "") or "")
+        goal_context = str(self._build_active_goal_context() or "")
+        tool_context = str(
+            self._build_recent_tool_context(
+                max_chars=max(0, int(self.variables.get("recent_tool_context_char_limit", 12000) or 12000))
+            )
+            or ""
+        )
+        retrieved_context = str(getattr(self, "_pending_retrieved_context", "") or "")
+        total_chars = len(summary) + len(goal_context) + len(tool_context) + len(retrieved_context)
+        return max(0, int(total_chars / 4))
+
     def _prepare_runtime_history(
         self, turn_start_index: int | None = None
     ) -> list[dict]:
@@ -1164,6 +1182,7 @@ class Session:
         trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
         trim_threshold = max(0.10, min(trim_threshold, 1.0))
         token_budget = max(512, int(context_limit * trim_threshold))
+        token_budget = max(256, token_budget - self._estimate_non_history_context_tokens())
         start_index = len(self.session_manager.history)
         running_tokens = 0
         while start_index > self.session_manager.summary_anchor:

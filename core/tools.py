@@ -6,8 +6,6 @@ import difflib
 import re
 import bisect
 import html
-import threading
-import uuid
 from dataclasses import dataclass, asdict, field
 from urllib.parse import quote
 from typing import Any, Callable
@@ -38,8 +36,6 @@ from core.feature_mode import (
 from core.retrieval import SemanticCodeIndex
 
 
-_AGENT_WORKER_LOCK = threading.Lock()
-_AGENT_WORKERS: dict[str, dict[str, Any]] = {}
 
 
 def _register_source_and_get_citation(
@@ -361,33 +357,10 @@ TOOLS = [
                     "type": "string",
                     "description": "The name of the task to execute.",
                 },
-                "background": {
-                    "type": "boolean",
-                    "description": "Run task asynchronously in a worker and return immediately.",
-                    "default": False,
-                },
             },
             "required": ["task_name"],
         },
         requires_approval=True,
-    ),
-    ToolDefinition(
-        name="list_agent_workers",
-        description="Lists in-flight and completed background agent workers spawned by run_agent_task(background=true).",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="get_agent_worker_result",
-        description="Returns status/output for a background agent worker by worker_id.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "worker_id": {"type": "string", "description": "Background worker id."},
-            },
-            "required": ["worker_id"],
-        },
-        requires_approval=False,
     ),
     ToolDefinition(
         name="bash",
@@ -1228,8 +1201,6 @@ _COLLATED_TOOL_NAMES = {
     "get_chunk",
     "list_dir",
     "list_agent_tasks",
-    "list_agent_workers",
-    "get_agent_worker_result",
     "git_status",
     "git_log",
     "git_diff",
@@ -1324,14 +1295,6 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "execution_kind": "mutate",
         "preview_policy": "optional",
         "summary_builder": "agent_task_preview",
-    },
-    "list_agent_workers": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "get_agent_worker_result": {
-        "execution_kind": "read",
-        "preview_policy": "none",
     },
     "bash": {
         "execution_kind": "mutate",
@@ -2270,7 +2233,7 @@ def list_agent_tasks(folder_context) -> str:
     return "Available tasks in Makefile.agents:\n\n" + "\n\n".join(all_tasks)
 
 
-def run_agent_task(task_name: str, folder_context, variables: dict = None, background: bool = False) -> str:
+def run_agent_task(task_name: str, folder_context, variables: dict = None) -> str:
     """Executes a task from Makefile.agents."""
     if not variables:
         variables = {}
@@ -2294,7 +2257,6 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None, backg
 
     import subprocess
     cmd = ["make", "-f", "Makefile.agents", task_name]
-    sub_agent_max = max(1, int((variables or {}).get("sub_agent_max_workers", 3) or 3))
 
     def _exec_once() -> str:
         process = subprocess.run(
@@ -2321,64 +2283,6 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None, backg
             )
         return combined_output
 
-    if background:
-        with _AGENT_WORKER_LOCK:
-            active = sum(1 for w in _AGENT_WORKERS.values() if w.get("status") == "running")
-            if active >= sub_agent_max:
-                return json.dumps(
-                    {
-                        "ok": False,
-                        "error": f"sub-agent cap reached ({sub_agent_max})",
-                        "sub_agent_max_workers": sub_agent_max,
-                    }
-                )
-            worker_id = f"worker_{uuid.uuid4().hex[:10]}"
-            _AGENT_WORKERS[worker_id] = {
-                "worker_id": worker_id,
-                "task_name": task_name,
-                "status": "running",
-                "started_at": time.time(),
-                "output": "",
-                "error": "",
-            }
-
-        def _runner():
-            try:
-                out = _exec_once()
-                with _AGENT_WORKER_LOCK:
-                    if worker_id in _AGENT_WORKERS:
-                        _AGENT_WORKERS[worker_id].update(
-                            {"status": "completed", "output": out, "completed_at": time.time()}
-                        )
-            except subprocess.TimeoutExpired as e:
-                with _AGENT_WORKER_LOCK:
-                    if worker_id in _AGENT_WORKERS:
-                        _AGENT_WORKERS[worker_id].update(
-                            {
-                                "status": "failed",
-                                "error": f"timeout after {timeout}s",
-                                "output": f"{e.stdout or ''}\n{e.stderr or ''}",
-                                "completed_at": time.time(),
-                            }
-                        )
-            except Exception as e:
-                with _AGENT_WORKER_LOCK:
-                    if worker_id in _AGENT_WORKERS:
-                        _AGENT_WORKERS[worker_id].update(
-                            {"status": "failed", "error": str(e), "completed_at": time.time()}
-                        )
-
-        threading.Thread(target=_runner, daemon=True).start()
-        return json.dumps(
-            {
-                "ok": True,
-                "status": "running",
-                "worker_id": worker_id,
-                "task_name": task_name,
-                "sub_agent_max_workers": sub_agent_max,
-            }
-        )
-
     try:
         return _exec_once()
     except subprocess.TimeoutExpired as e:
@@ -2386,20 +2290,6 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None, backg
     except Exception as e:
         logger.error(f"run_agent_task: Error executing {task_name}: {e}")
         return f"Error executing task: {e}"
-
-
-def list_agent_workers(folder_context=None) -> str:
-    with _AGENT_WORKER_LOCK:
-        workers = list(_AGENT_WORKERS.values())
-    return json.dumps({"count": len(workers), "workers": workers}, indent=2)
-
-
-def get_agent_worker_result(worker_id: str, folder_context=None) -> str:
-    with _AGENT_WORKER_LOCK:
-        worker = _AGENT_WORKERS.get(str(worker_id or "").strip())
-    if not worker:
-        return json.dumps({"error": f"worker '{worker_id}' not found"})
-    return json.dumps(worker, indent=2)
 
 
 def run_git_command(args_list: list[str], folder_context) -> str:
@@ -3745,20 +3635,7 @@ def _handle_list_agent_tasks(args, folder_context, ui, variables) -> str:
 
 
 def _handle_run_agent_task(args, folder_context, ui, variables) -> str:
-    return run_agent_task(
-        args.get("task_name", ""),
-        folder_context,
-        variables,
-        background=bool(args.get("background", False)),
-    )
-
-
-def _handle_list_agent_workers(args, folder_context, ui, variables) -> str:
-    return list_agent_workers(folder_context)
-
-
-def _handle_get_agent_worker_result(args, folder_context, ui, variables) -> str:
-    return get_agent_worker_result(args.get("worker_id", ""), folder_context)
+    return run_agent_task(args.get("task_name", ""), folder_context, variables)
 
 
 def _handle_bash(args, folder_context, ui, variables) -> str:
@@ -4931,8 +4808,6 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "write_file": _legacy_handler(_handle_write_file),
     "list_agent_tasks": _legacy_handler(_handle_list_agent_tasks),
     "run_agent_task": _legacy_handler(_handle_run_agent_task),
-    "list_agent_workers": _legacy_handler(_handle_list_agent_workers),
-    "get_agent_worker_result": _legacy_handler(_handle_get_agent_worker_result),
     "bash": _legacy_handler(_handle_bash),
     "apply_diff": _legacy_handler(_handle_apply_diff),
     "git_status": _legacy_handler(_handle_git_status),

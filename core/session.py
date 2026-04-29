@@ -886,25 +886,90 @@ class Session:
         if self.ui:
             self.ui.show_info("Staged files cleared.")
 
+    def _execute_child_subagent_task(self, task: SubAgentTask) -> dict:
+        """Run a sub-agent task in an isolated child session runtime."""
+        started = time.time()
+        child_session_name = f"{self.session_manager.current_session_name}_subagent_{task.task_id[:8]}"
+        child_manager = SessionManager(ui=None, session_name=child_session_name)
+        child_manager.variables.update(self.variables)
+        child_manager.variables["subagent_enabled"] = False
+        child_manager.variables["agent_mode"] = str(self.variables.get("agent_mode", "default"))
+        child_manager.variables["max_iterations"] = 1
+
+        child_session = Session(
+            self.provider,
+            self.thinking,
+            self.system_instruction,
+            child_manager,
+            ui=None,
+            debug=self.debug,
+        )
+        child_session.agentic = False
+        child_session.disabled_tools = list(set(self.disabled_tools + ["spawn_sub_agents", "list_sub_agents", "cancel_sub_agents"]))
+        if self.folder_context.folders:
+            for folder in self.folder_context.folders:
+                child_session.folder_context.add_folder(folder)
+
+        prompt = str(task.payload.get("prompt", "") or "").strip()
+        if not prompt:
+            return {
+                "status": "failed",
+                "summary": "Sub-agent task missing prompt.",
+                "error": "missing_prompt",
+                "telemetry": {"elapsed_s": 0, "worker_session": child_session_name},
+            }
+
+        try:
+            result = child_session.send_message(prompt)
+            assistant_text = ""
+            if isinstance(result, dict):
+                assistant_text = str(result.get("assistant_text", "") or "")
+            elapsed = time.time() - started
+            return {
+                "status": "completed",
+                "summary": assistant_text[:500] if assistant_text else f"Sub-agent completed task: {task.title}",
+                "error": "",
+                "telemetry": {
+                    "elapsed_s": round(elapsed, 3),
+                    "worker_session": child_session_name,
+                    "token_counts": dict(child_manager.token_counts),
+                    "history_length": len(child_manager.history),
+                },
+            }
+        except Exception as exc:
+            elapsed = time.time() - started
+            return {
+                "status": "failed",
+                "summary": "",
+                "error": str(exc),
+                "telemetry": {"elapsed_s": round(elapsed, 3), "worker_session": child_session_name},
+            }
+
     def submit_subagent_task(self, *, title: str, prompt: str, batch_id: str | None = None) -> str:
         if not bool(self.variables.get("subagent_enabled", True)):
             raise ValueError("subagent execution is disabled")
 
-        def _worker(task: SubAgentTask) -> dict:
-            # Placeholder autonomous worker execution surface.
-            # Runtime implementation can replace with isolated child Session loop.
-            return {"status": "completed", "summary": f"Completed: {task.title}"}
-
-        return self.subagent_manager.submit(title=title, payload={"prompt": prompt}, worker_fn=_worker, batch_id=batch_id)
+        return self.subagent_manager.submit(
+            title=title,
+            payload={"prompt": prompt},
+            worker_fn=self._execute_child_subagent_task,
+            batch_id=batch_id,
+        )
 
     def submit_subagent_batch(self, tasks: list[dict], *, batch_id: str | None = None) -> dict:
         if not bool(self.variables.get("subagent_enabled", True)):
             raise ValueError("subagent execution is disabled")
 
-        def _worker(task: SubAgentTask) -> dict:
-            return {"status": "completed", "summary": f"Completed: {task.title}"}
+        normalized_tasks = []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            payload = dict(task.get("payload", {}))
+            if "prompt" not in payload and task.get("prompt"):
+                payload["prompt"] = task.get("prompt")
+            normalized_tasks.append({"title": task.get("title", "task"), "payload": payload})
 
-        batch, workers = self.subagent_manager.submit_many(tasks, _worker, batch_id=batch_id)
+        batch, workers = self.subagent_manager.submit_many(normalized_tasks, self._execute_child_subagent_task, batch_id=batch_id)
         return {"batch_id": batch, "workers": workers}
 
     def wait_for_subagents(self, worker_ids: list[str], timeout_s: int | None = None) -> dict:

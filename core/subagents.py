@@ -27,6 +27,8 @@ class SubAgentState:
     ended_at: float | None = None
     summary: str = ""
     error: str = ""
+    telemetry: dict[str, Any] | None = None
+    artifacts: list[dict[str, Any]] | None = None
 
 
 class SubAgentManager:
@@ -92,16 +94,22 @@ class SubAgentManager:
             status = str(result.get("status", "completed"))
             summary = str(result.get("summary", ""))
             error = str(result.get("error", ""))
+            telemetry = result.get("telemetry") if isinstance(result.get("telemetry"), dict) else None
+            artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), list) else None
         except Exception as exc:
             status = "failed"
             summary = ""
             error = str(exc)
+            telemetry = None
+            artifacts = None
         with self._lock:
             state = self._states.get(worker_id)
             if state and state.status != "cancelled":
                 state.status = status
                 state.summary = summary
                 state.error = error
+                state.telemetry = telemetry
+                state.artifacts = artifacts
                 state.ended_at = time.time()
                 state.updated_at = state.ended_at
         self._schedule()

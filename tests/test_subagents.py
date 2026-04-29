@@ -64,6 +64,9 @@ def test_session_subagent_counts_exposed_in_state_payload():
     assert "subagent_counts" in payload
     assert isinstance(payload["subagents"], list)
     assert payload["subagent_counts"]["completed"] >= 1
+    completed = [w for w in payload["subagents"] if w.get("status") == "completed"]
+    if completed:
+        assert isinstance(completed[0].get("telemetry"), dict)
 
 
 def test_session_batch_submit_wait_and_cancel():

@@ -85,11 +85,21 @@ def _load_session_payload(session_root: str, session_name: str) -> dict:
 def _payload_subagents(payload: dict) -> list[dict]:
     direct = payload.get("subagents")
     if isinstance(direct, list):
-        return direct
-    state = payload.get("subagent_state")
-    if isinstance(state, dict) and isinstance(state.get("workers"), list):
-        return state.get("workers", [])
-    return []
+        workers = direct
+    else:
+        state = payload.get("subagent_state")
+        if isinstance(state, dict) and isinstance(state.get("workers"), list):
+            workers = state.get("workers", [])
+        else:
+            workers = []
+    normalized = [w for w in workers if isinstance(w, dict)]
+    normalized.sort(
+        key=lambda w: (
+            -float(w.get("updated_at") or w.get("ended_at") or w.get("started_at") or 0),
+            str(w.get("worker_id", "")),
+        )
+    )
+    return normalized
 
 
 def _payload_subagent_counts(payload: dict) -> dict:
@@ -538,7 +548,9 @@ def _subagents_panel(payload: dict, state: GuiState | None = None) -> Panel:
     timeline = _payload_subagent_timeline(payload)
     lines = [f"workers: {len(workers)}", "controls: use /api/tool cancel_sub_agents | retry_sub_agents", ""]
     selected_idx = max(0, min((state.subagent_index if state else 0), max(0, len(workers) - 1)))
-    for idx, worker in enumerate(workers[:30]):
+    window_start = max(0, min(selected_idx - 8, max(0, len(workers) - 18)))
+    window = workers[window_start:window_start + 18]
+    for idx, worker in enumerate(window, start=window_start):
         if not isinstance(worker, dict):
             continue
         wid = str(worker.get("worker_id", "-"))
@@ -551,8 +563,8 @@ def _subagents_panel(payload: dict, state: GuiState | None = None) -> Panel:
             end_ts = en if isinstance(en, (int, float)) else time.time()
             elapsed = f"{max(0, int(end_ts - st))}s"
         summary = str(worker.get("summary", "") or "")
-        if len(summary) > 60:
-            summary = summary[:59] + "…"
+        if len(summary) > 46:
+            summary = summary[:45] + "…"
         pointer = "▶" if idx == selected_idx else " "
         lines.append(f"{pointer} [{status:<9}] {wid} {elapsed} {title}")
         if summary:
@@ -564,7 +576,7 @@ def _subagents_panel(payload: dict, state: GuiState | None = None) -> Panel:
                 continue
             ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
-    lines += ["", "Enter/l: open selected worker details"]
+    lines += ["", f"window: {window_start}-{window_start + len(window) - 1} / {max(0, len(workers)-1)}", "Enter/l: open selected worker details"]
     return Panel("\n".join(lines), title="Sub-Agent Workers", border_style="magenta")
 
 

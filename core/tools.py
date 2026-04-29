@@ -1244,6 +1244,7 @@ TOOL_POLICY_DOMAIN = {
     "batch_job": "orchestration",
     "retry_sub_agents": "orchestration",
     "get_subagent_timeline": "orchestration",
+    "integrate_sub_agent_outputs": "orchestration",
 }
 
 TOOL_DESCRIPTOR_OVERRIDES = {
@@ -1560,6 +1561,12 @@ TOOLS.extend([
         name="get_subagent_timeline",
         description="Get sub-agent worker timeline events.",
         parameters={"type": "object", "properties": {"worker_id": {"type": "string"}, "limit": {"type": "integer", "default": 100}}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="integrate_sub_agent_outputs",
+        description="Build deterministic merged integration summary from completed sub-agent outputs.",
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
 ])
@@ -4904,6 +4911,14 @@ def _handle_get_subagent_timeline(args: dict, context: ToolExecutionContext) -> 
     return json.dumps(_build_tool_envelope(tool_name="get_subagent_timeline", ok=True, message="Retrieved sub-agent timeline.", data={"events": events}), indent=2)
 
 
+def _handle_integrate_sub_agent_outputs(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="integrate_sub_agent_outputs", ok=False, error_code="session_required", message="integrate_sub_agent_outputs requires a live session context."), indent=2)
+    merged = session.merge_subagent_outputs()
+    return json.dumps(_build_tool_envelope(tool_name="integrate_sub_agent_outputs", ok=True, message="Integrated sub-agent outputs.", data=merged), indent=2)
+
+
 TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
     "flush": _legacy_handler(_handle_flush),
@@ -4984,6 +4999,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "cancel_sub_agents": _handle_cancel_sub_agents,
     "retry_sub_agents": _handle_retry_sub_agents,
     "get_subagent_timeline": _handle_get_subagent_timeline,
+    "integrate_sub_agent_outputs": _handle_integrate_sub_agent_outputs,
 }
 
 

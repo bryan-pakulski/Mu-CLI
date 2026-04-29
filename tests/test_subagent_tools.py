@@ -82,6 +82,18 @@ def test_spawn_list_cancel_subagent_tools():
     timeline = json.loads(raw_timeline)
     assert timeline.get("ok") is True
 
+    raw_integrate = execute_tool(
+        "integrate_sub_agent_outputs",
+        {},
+        session.folder_context,
+        None,
+        session.variables,
+        invocation_source="session",
+        session=session,
+    )
+    integrated = json.loads(raw_integrate)
+    assert integrated.get("ok") is True
+
 
 def test_child_policy_profile_denies_orchestration_domain():
     sm = SessionManager(session_name="subagent-child-policy")

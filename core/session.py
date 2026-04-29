@@ -1038,6 +1038,20 @@ class Session:
             return {"batch_id": "", "workers": []}
         return self.submit_subagent_batch(tasks)
 
+    def merge_subagent_outputs(self) -> dict:
+        outputs = self.collect_subagent_outputs()
+        merged_text_blocks = []
+        artifacts = []
+        for item in outputs:
+            summary = str(item.get("summary", "") or "").strip()
+            if summary:
+                merged_text_blocks.append(f"[{item.get('worker_id')}] {summary}")
+            for art in item.get("artifacts", []):
+                if isinstance(art, dict):
+                    artifacts.append(art)
+        merged_text = "\n".join(sorted(merged_text_blocks))
+        return {"worker_count": len(outputs), "merged_summary": merged_text, "artifacts": artifacts}
+
     def collect_subagent_outputs(self) -> list[dict]:
         """Return deterministic integration envelopes for completed sub-agents."""
         outputs = []

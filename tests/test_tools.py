@@ -11,6 +11,7 @@ from core.tools import (
     execute_tool,
     TOOL_HANDLERS,
     TOOLS,
+    run_agent_task,
 )
 from core.workspace import FolderContext
 
@@ -300,6 +301,25 @@ def test_stackoverflow_search_rejects_empty_query():
     payload = json.loads(stackoverflow_search(""))
     assert "error" in payload
     assert payload["results"] == []
+
+
+def test_run_agent_task_background_respects_sub_agent_cap(tmp_path, monkeypatch):
+    ctx = FolderContext()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx.add_folder(str(workspace))
+    (workspace / "Makefile.agents").write_text("noop:\n\t@echo ok\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "core.tools._AGENT_WORKERS",
+        {"w1": {"status": "running"}, "w2": {"status": "running"}, "w3": {"status": "running"}},
+    )
+
+    payload = json.loads(
+        run_agent_task("noop", ctx, variables={"sub_agent_max_workers": 3}, background=True)
+    )
+    assert payload["ok"] is False
+    assert "cap reached" in payload["error"]
 
 
 def test_create_feature_create_phases_create_task_staged_flow(tmp_path):

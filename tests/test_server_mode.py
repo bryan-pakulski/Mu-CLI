@@ -207,6 +207,7 @@ def test_mode_command_without_args_lists_available_modes():
         result["data"]["available_modes"]["feature"]["documentation"]
         == "documentation/feature_plan_engine.md"
     )
+    assert "sub_agent" in result["data"]["available_modes"]
 
 
 def test_research_status_returns_tools_and_mode_snapshot():

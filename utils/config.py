@@ -49,6 +49,10 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 10000,
     },  # Max characters to return from run_agent_task output
+    "sub_agent_max_workers": {
+        "type": int,
+        "default": 3,
+    },  # Max number of concurrent background sub-agents
     "collation_enabled": {
         "type": bool,
         "default": True,
@@ -315,6 +319,13 @@ ANTI-DETECTION NOTES:
 5. Some sources may require authentication - note this in your findings.
 
 Always cite your sources, verify credibility, and provide comprehensive summaries with proper attribution.""",
+    "sub_agent": """WORKFLOW (Sub-Agent Orchestration):
+1. Delegate long-running Makefile.agents tasks using run_agent_task with background=true.
+2. Respect sub_agent_max_workers (default 3) as the maximum concurrent background workers.
+3. Continue independent analysis/planning while workers execute in parallel.
+4. Poll progress with list_agent_workers and collect outputs with get_agent_worker_result.
+5. Merge worker results into your primary reasoning and next actions.
+6. If worker cap is reached, continue other tasks or wait/poll before spawning more workers.""",
     "loop": """WORKFLOW (Long-Horizon Loop):
 You are in LOOP mode for multi-hour/multi-day autonomous execution.
 Operate like a persistent project operator inspired by modern long-horizon agent workflows:
@@ -378,6 +389,11 @@ AGENT_MODE_METADATA = {
         "documentation": "README.md#agent-modes",
         "display_name": "Research Mode"
     },
+    "sub_agent": {
+        "description": "Delegate concurrent background workers while main agent continues task execution.",
+        "documentation": "README.md#agent-modes",
+        "display_name": "Sub-Agent Mode",
+    },
     "loop": {
         "description": "Long-horizon autonomous loop with ongoing timeline updates.",
         "documentation": "documentation/loop_mode.md",
@@ -416,6 +432,15 @@ WORKFLOW:
 ANTI-DETECTION NOTES:
 - Some websites may block automated access - use url_grounding cautiously.
 - Rate limits may apply to APIs - batch requests when possible.
+""",
+    "sub_agent": """SUB-AGENT MODE SYSTEM PROMPT:
+You are in Sub-Agent orchestration mode.
+- Discover delegatable tasks with list_agent_tasks.
+- Spawn background workers with run_agent_task(background=true).
+- Never exceed sub_agent_max_workers concurrent workers (default 3).
+- While workers run, continue progressing on non-blocking analysis/planning.
+- Poll worker status with list_agent_workers and collect outputs via get_agent_worker_result.
+- Integrate worker outputs into your final reasoning and next actions.
 """,
     "loop": """LOOP MODE SYSTEM PROMPT:
 You are in long-horizon LOOP mode.

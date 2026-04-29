@@ -4879,15 +4879,54 @@ def _handle_spawn_sub_agents(args: dict, context: ToolExecutionContext) -> str:
         return json.dumps(_build_tool_envelope(tool_name="spawn_sub_agents", ok=False, error_code="session_required", message="spawn_sub_agents requires a live session context."), indent=2)
     tasks = args.get("tasks", []) if isinstance(args.get("tasks", []), list) else []
     normalized = []
+
+    def _priority_score(task_dict: dict) -> int:
+        raw_priority = str(task_dict.get("priority", "") or "").strip().lower()
+        explicit_map = {"p0": 0, "critical": 0, "high": 1, "p1": 1, "medium": 2, "p2": 2, "low": 3, "p3": 3}
+        if raw_priority in explicit_map:
+            return explicit_map[raw_priority]
+        text = f"{task_dict.get('title', '')} {task_dict.get('prompt', '')}".lower()
+        if any(token in text for token in ("blocker", "critical", "urgent", "failing test", "regression")):
+            return 0
+        if any(token in text for token in ("test", "verify", "validation", "docs", "documentation")):
+            return 2
+        return 1
+
+    def _expand_chunks(task_dict: dict) -> list[dict]:
+        chunks = task_dict.get("chunks")
+        if not isinstance(chunks, list) or not chunks:
+            return [task_dict]
+        expanded = []
+        base_title = str(task_dict.get("title", "task") or "task")
+        for idx, chunk in enumerate(chunks, start=1):
+            if isinstance(chunk, dict):
+                chunk_title = str(chunk.get("title", f"{base_title} (chunk {idx})") or f"{base_title} (chunk {idx})")
+                chunk_prompt = str(chunk.get("prompt", "") or "")
+            else:
+                chunk_title = f"{base_title} (chunk {idx})"
+                chunk_prompt = str(chunk or "")
+            expanded.append({"title": chunk_title, "payload": {"prompt": chunk_prompt}})
+        return expanded
+
     for task in tasks:
         if not isinstance(task, dict):
             continue
-        payload = dict(task.get("payload", {}))
-        if "prompt" not in payload and task.get("prompt"):
-            payload["prompt"] = task.get("prompt")
-        normalized.append({"title": str(task.get("title", "task")), "payload": payload})
+        for expanded_task in _expand_chunks(task):
+            payload = dict(expanded_task.get("payload", {}))
+            if "prompt" not in payload and expanded_task.get("prompt"):
+                payload["prompt"] = expanded_task.get("prompt")
+            normalized.append(
+                {
+                    "title": str(expanded_task.get("title", "task")),
+                    "payload": payload,
+                    "_priority_score": _priority_score(task),
+                }
+            )
     if not normalized:
         return json.dumps(_build_tool_envelope(tool_name="spawn_sub_agents", ok=False, error_code="invalid_args", message="No valid tasks provided."), indent=2)
+    if bool(args.get("auto_schedule", True)):
+        normalized.sort(key=lambda item: (int(item.get("_priority_score", 1)), len(str(item.get("payload", {}).get("prompt", "") or ""))))
+    normalized = [{k: v for k, v in task.items() if not k.startswith("_")} for task in normalized]
     created = session.submit_subagent_batch(normalized)
     wait_for_completion = bool(args.get("wait_for_completion", False))
     if wait_for_completion:

@@ -132,3 +132,36 @@ def test_child_policy_profile_denies_filesystem_mutation_domain():
     payload = json.loads(raw)
     assert payload.get("ok") is False
     assert payload.get("error_code") == "policy_denied"
+
+
+def test_spawn_sub_agents_auto_schedule_and_chunk_expansion(monkeypatch):
+    sm = SessionManager(session_name="subagent-auto-schedule")
+    session = Session(DummyProvider("dummy"), False, "system", sm)
+    captured = {}
+
+    def _fake_submit_subagent_batch(tasks, batch_id=None):
+        captured["tasks"] = tasks
+        return {"batch_id": "b1", "workers": ["w1", "w2", "w3"]}
+
+    monkeypatch.setattr(session, "submit_subagent_batch", _fake_submit_subagent_batch)
+    raw = execute_tool(
+        "spawn_sub_agents",
+        {
+            "tasks": [
+                {"title": "docs", "prompt": "update documentation"},
+                {"title": "critical fix", "prompt": "regression blocker", "priority": "p0"},
+                {"title": "refactor", "chunks": ["part one", "part two"]},
+            ],
+            "auto_schedule": True,
+        },
+        session.folder_context,
+        None,
+        session.variables,
+        invocation_source="session",
+        session=session,
+    )
+    payload = json.loads(raw)
+    assert payload.get("ok") is True
+    assert len(captured["tasks"]) == 4
+    # Critical/p0 task should be ordered first when auto scheduling is enabled.
+    assert captured["tasks"][0]["title"] == "critical fix"

@@ -516,6 +516,20 @@ class RichUI:
         else:
             status.append("YOLO:off | ", style="dim")
         status.append(build_live_status_line(session), style="white")
+        sub_agents = metrics.get("sub_agents") or {}
+        running_workers = sub_agents.get("running") or []
+        if running_workers:
+            status.append("\n", style="dim")
+            for idx, worker in enumerate(running_workers):
+                worker_id = str(worker.get("worker_id", "worker")).strip() or "worker"
+                task_name = str(worker.get("task_name", "unknown")).strip() or "unknown"
+                elapsed_seconds = int(worker.get("elapsed_seconds", 0) or 0)
+                status.append(
+                    f"↳ {worker_id} · {task_name} · running {elapsed_seconds}s",
+                    style="bold cyan",
+                )
+                if idx < len(running_workers) - 1:
+                    status.append("\n", style="dim")
         return status
 
     @staticmethod

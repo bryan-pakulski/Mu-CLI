@@ -97,6 +97,37 @@ def test_build_live_status_shows_yolo_indicator_when_enabled():
     assert "yolo:on" in status.plain
 
 
+def test_build_live_status_shows_sub_agent_worker_lines(monkeypatch):
+    ui = RichUI()
+    session = _build_session()
+
+    monkeypatch.setattr(
+        "ui.rich_ui.collect_runtime_metrics",
+        lambda _session: {
+            "yolo": {"enabled": False},
+            "sub_agents": {
+                "running": [
+                    {
+                        "worker_id": "worker_a1",
+                        "task_name": "index-project",
+                        "elapsed_seconds": 12,
+                    },
+                    {
+                        "worker_id": "worker_b2",
+                        "task_name": "run-tests",
+                        "elapsed_seconds": 3,
+                    },
+                ]
+            },
+        },
+    )
+
+    status = ui.build_live_status(session, "dummy-model", 1, 8)
+
+    assert "worker_a1 · index-project · running 12s" in status.plain
+    assert "worker_b2 · run-tests · running 3s" in status.plain
+
+
 def test_live_status_line_includes_feature_phase_and_overall_percent(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

@@ -134,6 +134,46 @@ def collect_runtime_metrics(session):
         "mode": {"name": str(session.variables.get("agent_mode", "default"))},
         "yolo": {"enabled": bool(session.variables.get("yolo", False))},
         "feature": collect_feature_progress(session),
+        "sub_agents": collect_sub_agent_workers(),
+    }
+
+
+def collect_sub_agent_workers():
+    try:
+        from core.tools import _AGENT_WORKERS, _AGENT_WORKER_LOCK
+
+        with _AGENT_WORKER_LOCK:
+            workers = [dict(worker) for worker in _AGENT_WORKERS.values()]
+    except Exception:
+        return {"running": [], "completed": 0, "failed": 0, "total": 0}
+
+    now = time.time()
+    running = []
+    completed = 0
+    failed = 0
+    for worker in workers:
+        status = str(worker.get("status", "")).strip().lower()
+        if status == "running":
+            started_at = float(worker.get("started_at", now) or now)
+            running.append(
+                {
+                    "worker_id": str(worker.get("worker_id", "")),
+                    "task_name": str(worker.get("task_name", "unknown")),
+                    "status": status,
+                    "elapsed_seconds": max(0, int(now - started_at)),
+                }
+            )
+        elif status == "completed":
+            completed += 1
+        elif status == "failed":
+            failed += 1
+
+    running.sort(key=lambda item: item["worker_id"])
+    return {
+        "running": running,
+        "completed": completed,
+        "failed": failed,
+        "total": len(workers),
     }
 
 

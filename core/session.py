@@ -8,6 +8,7 @@ import random
 import shutil
 import traceback
 import hashlib
+import subprocess
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
@@ -1038,10 +1039,31 @@ class Session:
             return {"batch_id": "", "workers": []}
         return self.submit_subagent_batch(tasks)
 
-    def merge_subagent_outputs(self) -> dict:
+    def _run_verification_gates(self) -> dict:
+        raw = str(self.variables.get("subagent_verification_commands", "") or "").strip()
+        commands = [cmd.strip() for cmd in raw.split(";") if cmd.strip()]
+        if not commands:
+            return {"passed": True, "checks": []}
+        checks = []
+        passed = True
+        for cmd in commands:
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            checks.append({
+                "command": cmd,
+                "returncode": proc.returncode,
+                "stdout": (proc.stdout or "")[:2000],
+                "stderr": (proc.stderr or "")[:2000],
+            })
+            if proc.returncode != 0:
+                passed = False
+        return {"passed": passed, "checks": checks}
+
+    def merge_subagent_outputs(self, *, apply_patch_artifacts: bool = False, require_verification: bool = True) -> dict:
         outputs = self.collect_subagent_outputs()
         merged_text_blocks = []
         artifacts = []
+        applied = []
+        apply_errors = []
         for item in outputs:
             summary = str(item.get("summary", "") or "").strip()
             if summary:
@@ -1049,8 +1071,25 @@ class Session:
             for art in item.get("artifacts", []):
                 if isinstance(art, dict):
                     artifacts.append(art)
+                    if apply_patch_artifacts and art.get("kind") == "patch" and isinstance(art.get("content"), str):
+                        result = self._execute_tool_with_memory("apply_diff", {"diff": art.get("content")})
+                        text = str(result or "")
+                        if text.lower().startswith("error"):
+                            apply_errors.append({"worker_id": item.get("worker_id"), "error": text})
+                        else:
+                            applied.append({"worker_id": item.get("worker_id"), "status": "applied"})
         merged_text = "\n".join(sorted(merged_text_blocks))
-        return {"worker_count": len(outputs), "merged_summary": merged_text, "artifacts": artifacts}
+        verification = self._run_verification_gates() if require_verification else {"passed": True, "checks": []}
+        accepted = verification.get("passed", False) and not apply_errors
+        return {
+            "worker_count": len(outputs),
+            "merged_summary": merged_text,
+            "artifacts": artifacts,
+            "applied": applied,
+            "apply_errors": apply_errors,
+            "verification": verification,
+            "accepted": accepted,
+        }
 
     def collect_subagent_outputs(self) -> list[dict]:
         """Return deterministic integration envelopes for completed sub-agents."""

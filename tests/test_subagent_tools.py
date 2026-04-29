@@ -112,3 +112,23 @@ def test_child_policy_profile_denies_orchestration_domain():
     payload = json.loads(raw)
     assert payload.get("ok") is False
     assert payload.get("error_code") == "policy_denied"
+
+
+def test_child_policy_profile_denies_filesystem_mutation_domain():
+    sm = SessionManager(session_name="subagent-child-policy-fs")
+    session = Session(DummyProvider("dummy"), False, "system", sm)
+    vars_child = dict(session.variables)
+    vars_child["subagent_policy_profile"] = "child"
+    vars_child["subagent_child_allowed_domains"] = "read,memory"
+    raw = execute_tool(
+        "write_file",
+        {"filename": "tmp.txt", "content": "x"},
+        session.folder_context,
+        None,
+        vars_child,
+        invocation_source="subagent_child",
+        session=session,
+    )
+    payload = json.loads(raw)
+    assert payload.get("ok") is False
+    assert payload.get("error_code") == "policy_denied"

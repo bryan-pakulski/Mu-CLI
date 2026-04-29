@@ -130,6 +130,14 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": True,
     },
+    "subagent_verification_commands": {
+        "type": str,
+        "default": "",
+    },
+    "subagent_child_allowed_domains": {
+        "type": str,
+        "default": "read,memory",
+    },
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}

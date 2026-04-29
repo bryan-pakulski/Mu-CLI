@@ -746,6 +746,14 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
                 state.feature_index = 0
         return state
 
+    if state.screen == "subagents":
+        if key in {"c", "C"}:
+            state.status_message = "Use /api/tool cancel_sub_agents with selected worker IDs."
+            return state
+        if key in {"r", "R"}:
+            state.status_message = "Use /api/tool retry_sub_agents with selected worker IDs."
+            return state
+
     if state.screen == "features":
         payload = _load_session_payload(session_root, state.selected_session or "")
         state.feature_records = [

@@ -634,10 +634,20 @@ class SessionManager:
         return total
 
     def estimate_runtime_history_tokens(self, start_index: int | None = None) -> int:
+        """Estimate runtime context tokens used by active conversation state.
+
+        Includes unsummarized history plus conversation summary and collation buffer,
+        since both are routinely injected into model context.
+        """
         start = self.summary_anchor if start_index is None else max(0, int(start_index))
-        return sum(
+        history_tokens = sum(
             self._estimate_message_tokens(message) for message in self.history[start:]
         )
+        summary_tokens = self._estimate_tokens_from_text(self.conversation_summary)
+        collation_tokens = self._estimate_tokens_from_text(
+            json.dumps(self.collation_buffer.to_dict(), default=str)
+        )
+        return history_tokens + summary_tokens + collation_tokens
 
     def roll_history_summary(self, keep_recent: int) -> bool:
         keep_recent = max(1, int(keep_recent or 1))

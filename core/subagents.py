@@ -41,6 +41,7 @@ class SubAgentManager:
         self._states: dict[str, SubAgentState] = {}
         self._futures: dict[str, Any] = {}
         self._executor = ThreadPoolExecutor(max_workers=self.max_parallel, thread_name_prefix="mucli-subagent")
+        self._events: list[dict[str, Any]] = []
 
     def set_limits(self, *, max_parallel: int | None = None, task_timeout_s: int | None = None):
         with self._lock:
@@ -48,6 +49,16 @@ class SubAgentManager:
                 self.max_parallel = max(1, min(int(max_parallel or 1), 16))
             if task_timeout_s is not None:
                 self.task_timeout_s = max(1, int(task_timeout_s or 1))
+
+    def _event(self, *, worker_id: str, kind: str, payload: dict[str, Any] | None = None):
+        self._events.append({
+            "ts": time.time(),
+            "worker_id": worker_id,
+            "kind": kind,
+            "payload": payload or {},
+        })
+        if len(self._events) > 500:
+            self._events = self._events[-500:]
 
     def submit(self, title: str, payload: dict[str, Any], worker_fn: Callable[[SubAgentTask], dict[str, Any]], *, batch_id: str | None = None) -> str:
         batch = str(batch_id or f"batch-{uuid.uuid4().hex[:8]}")
@@ -66,6 +77,7 @@ class SubAgentManager:
                 updated_at=now,
             )
             self._pending.append((worker_id, task, worker_fn))
+            self._event(worker_id=worker_id, kind="queued", payload={"title": title})
         self._schedule()
         return worker_id
 
@@ -87,6 +99,7 @@ class SubAgentManager:
                 state.started_at = now
                 state.updated_at = now
                 future = self._executor.submit(self._run_worker, worker_id, task, worker_fn)
+                self._event(worker_id=worker_id, kind="started", payload={"batch_id": task.batch_id})
                 self._futures[worker_id] = future
                 running += 1
 
@@ -114,6 +127,7 @@ class SubAgentManager:
                 state.artifacts = artifacts
                 state.ended_at = time.time()
                 state.updated_at = state.ended_at
+                self._event(worker_id=worker_id, kind="finished", payload={"status": status, "error": error})
         self._schedule()
 
     def cancel(self, worker_ids: list[str] | None = None, *, batch_id: str | None = None) -> int:
@@ -130,6 +144,7 @@ class SubAgentManager:
                 state.status = "cancelled"
                 state.updated_at = time.time()
                 state.ended_at = state.updated_at
+                self._event(worker_id=wid, kind="cancelled")
                 cancelled += 1
         return cancelled
 
@@ -144,6 +159,7 @@ class SubAgentManager:
                     state.updated_at = now
                     state.ended_at = now
                     state.error = f"timeout after {self.task_timeout_s}s"
+                    self._event(worker_id=state.worker_id, kind="timed_out", payload={"timeout_s": self.task_timeout_s})
 
     def wait(self, worker_ids: list[str], timeout_s: int | None = None) -> dict[str, Any]:
         deadline = time.time() + max(1, int(timeout_s or self.task_timeout_s))
@@ -189,6 +205,12 @@ class SubAgentManager:
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
             return [asdict(s) for s in self._states.values()]
+
+    def timeline(self, worker_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        events = self._events
+        if worker_id:
+            events = [evt for evt in events if evt.get("worker_id") == worker_id]
+        return events[-max(1, int(limit or 1)):]
 
     def counts(self) -> dict[str, int]:
         base = {"queued": 0, "running": 0, "completed": 0, "failed": 0, "cancelled": 0, "timed_out": 0}

@@ -1242,6 +1242,8 @@ TOOL_POLICY_DOMAIN = {
     "list_sub_agents": "orchestration",
     "cancel_sub_agents": "orchestration",
     "batch_job": "orchestration",
+    "retry_sub_agents": "orchestration",
+    "get_subagent_timeline": "orchestration",
 }
 
 TOOL_DESCRIPTOR_OVERRIDES = {
@@ -1546,6 +1548,18 @@ TOOLS.extend([
                 "batch_id": {"type": "string"},
             },
         },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="retry_sub_agents",
+        description="Retry failed/cancelled sub-agent workers by worker IDs.",
+        parameters={"type": "object", "properties": {"worker_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["worker_ids"]},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="get_subagent_timeline",
+        description="Get sub-agent worker timeline events.",
+        parameters={"type": "object", "properties": {"worker_id": {"type": "string"}, "limit": {"type": "integer", "default": 100}}},
         requires_approval=False,
     ),
 ])
@@ -4873,6 +4887,23 @@ def _handle_cancel_sub_agents(args: dict, context: ToolExecutionContext) -> str:
     return json.dumps(_build_tool_envelope(tool_name="cancel_sub_agents", ok=True, message=f"Cancelled {cancelled} sub-agent worker(s).", data={"cancelled": cancelled}), indent=2)
 
 
+def _handle_retry_sub_agents(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="retry_sub_agents", ok=False, error_code="session_required", message="retry_sub_agents requires a live session context."), indent=2)
+    worker_ids = args.get("worker_ids", []) if isinstance(args.get("worker_ids", []), list) else []
+    created = session.retry_subagents(worker_ids)
+    return json.dumps(_build_tool_envelope(tool_name="retry_sub_agents", ok=True, message="Retried sub-agent workers.", data=created), indent=2)
+
+
+def _handle_get_subagent_timeline(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="get_subagent_timeline", ok=False, error_code="session_required", message="get_subagent_timeline requires a live session context."), indent=2)
+    events = session.get_subagent_timeline(worker_id=args.get("worker_id"), limit=int(args.get("limit", 100) or 100))
+    return json.dumps(_build_tool_envelope(tool_name="get_subagent_timeline", ok=True, message="Retrieved sub-agent timeline.", data={"events": events}), indent=2)
+
+
 TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
     "flush": _legacy_handler(_handle_flush),
@@ -4951,6 +4982,8 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "spawn_sub_agents": _handle_spawn_sub_agents,
     "list_sub_agents": _handle_list_sub_agents,
     "cancel_sub_agents": _handle_cancel_sub_agents,
+    "retry_sub_agents": _handle_retry_sub_agents,
+    "get_subagent_timeline": _handle_get_subagent_timeline,
 }
 
 

@@ -127,7 +127,7 @@ class SessionManager:
         self.feature_registry = {}
         self.active_feature_id = None
         self.variables = DEFAULT_VARIABLES.copy()
-        self.subagent_state = {"workers": [], "counts": {}}
+        self.subagent_state = {"workers": [], "counts": {}, "recovered_task_ids": []}
 
         if session_name:
             self._load_session(session_name)
@@ -158,7 +158,7 @@ class SessionManager:
         self.feature_registry = {}
         self.active_feature_id = None
         self.variables.update(DEFAULT_VARIABLES)
-        self.subagent_state = {"workers": [], "counts": {}}
+        self.subagent_state = {"workers": [], "counts": {}, "recovered_task_ids": []}
 
         data = self.read_session_data(name)
         if data is not None:
@@ -462,7 +462,7 @@ class SessionManager:
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
-        self.subagent_state = {"workers": [], "counts": {}}
+        self.subagent_state = {"workers": [], "counts": {}, "recovered_task_ids": []}
         self.save_history()
         if self.ui:
             self.ui.show_info(f"Started new session: '{name}'")
@@ -852,7 +852,11 @@ class Session:
                 for worker in persisted_workers
                 if isinstance(worker, dict) and str(worker.get("status", "")) in {"queued", "running"}
             ]
+            recovered_ids = set(persisted.get("recovered_task_ids", []) if isinstance(persisted, dict) else [])
             for worker in replay_candidates:
+                task_id = str(worker.get("task_id", "") or "")
+                if task_id and task_id in recovered_ids:
+                    continue
                 payload = worker.get("payload") if isinstance(worker.get("payload"), dict) else {}
                 prompt = str(payload.get("prompt", "") or "").strip()
                 if not prompt:
@@ -862,6 +866,9 @@ class Session:
                     prompt=prompt,
                     batch_id=str(worker.get("batch_id", "") or None),
                 )
+                if task_id:
+                    recovered_ids.add(task_id)
+            self.session_manager.subagent_state["recovered_task_ids"] = sorted(recovered_ids)
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -1014,6 +1021,23 @@ class Session:
     def cancel_subagents(self, worker_ids: list[str] | None = None, *, batch_id: str | None = None) -> int:
         return self.subagent_manager.cancel(worker_ids, batch_id=batch_id)
 
+    def get_subagent_timeline(self, worker_id: str | None = None, limit: int = 100) -> list[dict]:
+        return self.subagent_manager.timeline(worker_id=worker_id, limit=limit)
+
+    def retry_subagents(self, worker_ids: list[str]) -> dict:
+        snapshot = self.get_subagent_snapshot()
+        to_retry = [w for w in snapshot if w.get("worker_id") in set(worker_ids)]
+        tasks = []
+        for worker in to_retry:
+            payload = worker.get("payload") if isinstance(worker.get("payload"), dict) else {}
+            prompt = str(payload.get("prompt", "") or "").strip()
+            if not prompt:
+                continue
+            tasks.append({"title": str(worker.get("title", "retry")), "payload": {"prompt": prompt}})
+        if not tasks:
+            return {"batch_id": "", "workers": []}
+        return self.submit_subagent_batch(tasks)
+
     def collect_subagent_outputs(self) -> list[dict]:
         """Return deterministic integration envelopes for completed sub-agents."""
         outputs = []
@@ -1041,7 +1065,7 @@ class Session:
 
     def get_subagent_snapshot(self) -> list[dict]:
         snapshot = self.subagent_manager.snapshot()
-        self.session_manager.subagent_state = {"workers": snapshot, "counts": self.subagent_manager.counts()}
+        self.session_manager.subagent_state = {"workers": snapshot, "counts": self.subagent_manager.counts(), "timeline": self.subagent_manager.timeline(limit=200), "recovered_task_ids": self.session_manager.subagent_state.get("recovered_task_ids", [])}
         return snapshot
 
     def get_subagent_counts(self) -> dict:
@@ -1050,7 +1074,7 @@ class Session:
             task_timeout_s=int(self.variables.get("subagent_task_timeout_s", 900) or 900),
         )
         counts = self.subagent_manager.counts()
-        self.session_manager.subagent_state = {"workers": self.subagent_manager.snapshot(), "counts": counts}
+        self.session_manager.subagent_state = {"workers": self.subagent_manager.snapshot(), "counts": counts, "timeline": self.subagent_manager.timeline(limit=200), "recovered_task_ids": self.session_manager.subagent_state.get("recovered_task_ids", [])}
         return counts
 
     def sync_runtime_state(self):

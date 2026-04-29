@@ -401,7 +401,8 @@ def _subagents_panel(payload: dict) -> Panel:
     workers = payload.get("subagents", []) if isinstance(payload.get("subagents"), list) else []
     if not workers:
         return Panel("No sub-agent workers recorded.", title="Sub-Agent Workers", border_style="yellow")
-    lines = [f"workers: {len(workers)}", ""]
+    timeline = payload.get("subagent_timeline", []) if isinstance(payload.get("subagent_timeline"), list) else []
+    lines = [f"workers: {len(workers)}", "controls: use /api/tool cancel_sub_agents | retry_sub_agents", ""]
     for worker in workers[:30]:
         if not isinstance(worker, dict):
             continue
@@ -420,6 +421,13 @@ def _subagents_panel(payload: dict) -> Panel:
         lines.append(f"[{status:<9}] {wid} {elapsed} {title}")
         if summary:
             lines.append(f"  ↳ {summary}")
+    if timeline:
+        lines += ["", "recent events:"]
+        for event in timeline[-8:]:
+            if not isinstance(event, dict):
+                continue
+            ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
+            lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
     return Panel("\n".join(lines), title="Sub-Agent Workers", border_style="magenta")
 
 

@@ -58,6 +58,30 @@ def test_spawn_list_cancel_subagent_tools():
     cancelled = json.loads(raw_cancel)
     assert cancelled.get("ok") is True
 
+    raw_retry = execute_tool(
+        "retry_sub_agents",
+        {"worker_ids": workers},
+        session.folder_context,
+        None,
+        session.variables,
+        invocation_source="session",
+        session=session,
+    )
+    retried = json.loads(raw_retry)
+    assert retried.get("ok") is True
+
+    raw_timeline = execute_tool(
+        "get_subagent_timeline",
+        {"limit": 10},
+        session.folder_context,
+        None,
+        session.variables,
+        invocation_source="session",
+        session=session,
+    )
+    timeline = json.loads(raw_timeline)
+    assert timeline.get("ok") is True
+
 
 def test_child_policy_profile_denies_orchestration_domain():
     sm = SessionManager(session_name="subagent-child-policy")

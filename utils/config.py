@@ -254,6 +254,12 @@ GENERAL RULES:
    Keep memories concise and high-value.
    Retrieve memorory before conducting any significant actions or repeating tool work.
 10. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
+
+11. When sub-agent orchestration is available, prefer parallel decomposition for independent workstreams:
+   - Split independent tasks into bounded, testable chunks.
+   - Run chunks concurrently up to configured parallel limit.
+   - Keep a shared integration plan and continuously merge/verify completed chunks.
+   - Do not create nested sub-agents from inside sub-agents.
 """
 
 AGENTIC_MODES = {
@@ -262,7 +268,8 @@ AGENTIC_MODES = {
    These will be stored in your collation buffer.
 2. **Flush**: Call the `flush` tool once you have gathered enough information to analyze the situation.
 3. **Act**: Process the flushed context and provide a solution, use tools available to make needed changes.
-3. **Analyze**: Compare against the original context, determine if the changes are correct, respond with a final summary.""",
+4. **Parallelize (when useful)**: If work can be split safely, delegate independent chunks to sub-agents and continue orchestration work while they run.
+5. **Integrate/Analyze**: Merge completed chunks, run verification, compare against original context, then respond with final summary.""",
     "debug": """WORKFLOW (Debugging):
 1. Read the error message or issue description provided by the user.
 2. Use tooling to find exactly where the error originates in the codebase.

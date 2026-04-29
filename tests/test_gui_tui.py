@@ -109,6 +109,28 @@ def test_history_panel_shows_subagent_activity():
     assert "sa-1 started" in rendered
 
 
+def test_history_panel_reads_subagent_state_fallback_shape():
+    plan = FeaturePlan(
+        feature_id="f2",
+        feature_name="f2",
+        feature_request="r",
+        directory=".",
+        metadata_path="x.json",
+        tasks=[],
+    )
+    payload = {
+        "history": [],
+        "subagent_state": {
+            "workers": [{"worker_id": "sa-2", "status": "running"}],
+            "counts": {"running": 1, "queued": 0, "completed": 0},
+            "timeline": [{"ts": 1, "worker_id": "sa-2", "kind": "started"}],
+        },
+    }
+    rendered = str(_history_panel(plan, payload).renderable)
+    assert "running=1" in rendered
+    assert "sa-2 started" in rendered
+
+
 def test_handle_key_hierarchical_navigation(tmp_path):
     session_root, _ = _write_session_fixture(tmp_path)
     state = GuiState()

@@ -2624,6 +2624,7 @@ class Session:
             2,
             int(self.variables.get("loop_detection_repeat_threshold", 3) or 3),
         )
+        subagent_status_heartbeat_ts = 0.0
 
         while iteration < max_iterations:
             iteration += 1
@@ -2632,6 +2633,19 @@ class Session:
             current_tool_args = None
             iteration_tool_exact_fingerprints: list[str] = []
             iteration_tool_pattern: list[str] = []
+            if self.ui and hasattr(self, "get_subagent_counts"):
+                now = time.time()
+                if now - subagent_status_heartbeat_ts >= 2.0:
+                    counts = self.get_subagent_counts()
+                    running = int(counts.get("running", 0) or 0)
+                    queued = int(counts.get("queued", 0) or 0)
+                    if running > 0 or queued > 0:
+                        completed = int(counts.get("completed", 0) or 0)
+                        failed = int(counts.get("failed", 0) or 0)
+                        self.ui.show_info(
+                            f"[SubAgents heartbeat] running={running} queued={queued} completed={completed} failed={failed}"
+                        )
+                        subagent_status_heartbeat_ts = now
 
             try:
                 dynamic_system_prompt = base_system_prompt

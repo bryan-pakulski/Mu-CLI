@@ -80,6 +80,36 @@ def _load_session_payload(session_root: str, session_name: str) -> dict:
         return {}
 
 
+def _payload_subagents(payload: dict) -> list[dict]:
+    direct = payload.get("subagents")
+    if isinstance(direct, list):
+        return direct
+    state = payload.get("subagent_state")
+    if isinstance(state, dict) and isinstance(state.get("workers"), list):
+        return state.get("workers", [])
+    return []
+
+
+def _payload_subagent_counts(payload: dict) -> dict:
+    direct = payload.get("subagent_counts")
+    if isinstance(direct, dict):
+        return direct
+    state = payload.get("subagent_state")
+    if isinstance(state, dict) and isinstance(state.get("counts"), dict):
+        return state.get("counts", {})
+    return {}
+
+
+def _payload_subagent_timeline(payload: dict) -> list[dict]:
+    direct = payload.get("subagent_timeline")
+    if isinstance(direct, list):
+        return direct
+    state = payload.get("subagent_state")
+    if isinstance(state, dict) and isinstance(state.get("timeline"), list):
+        return state.get("timeline", [])
+    return []
+
+
 def _feature_records(payload: dict) -> list[dict]:
     registry = payload.get("feature_registry", {}) if isinstance(payload.get("feature_registry"), dict) else {}
     records = [v for v in registry.values() if isinstance(v, dict)]
@@ -235,7 +265,7 @@ def _session_context_items(payload: dict) -> list[dict]:
                 tool_name = str(part.get("tool_name", "") or "").lower()
                 if any(token in tool_name for token in ("research", "search", "web", "citation")):
                     research_calls += 1
-    subagents = payload.get("subagents", []) if isinstance(payload.get("subagents"), list) else []
+    subagents = _payload_subagents(payload)
     return [
         {"id": "chat", "label": "Chat Timeline", "count": len(history)},
         {"id": "research", "label": "Research Engine", "count": research_calls},
@@ -361,7 +391,7 @@ def _heatmap_panel(payload: dict, filter_query: str = "") -> Panel:
 
 
 def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_query: str = "") -> Panel:
-    sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
+    sub_counts = _payload_subagent_counts(payload)
     running = int(sub_counts.get("running", 0) or 0)
     queued = int(sub_counts.get("queued", 0) or 0)
     completed = int(sub_counts.get("completed", 0) or 0)
@@ -393,7 +423,7 @@ def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_que
             snippet = snippet[:89] + "…"
         lines.append(f"  {role:<9} | {snippet or '(non-text event)'}")
 
-    timeline = payload.get("subagent_timeline", []) if isinstance(payload.get("subagent_timeline"), list) else []
+    timeline = _payload_subagent_timeline(payload)
     if timeline:
         lines += ["", "Sub-agent events (recent):"]
         for event in timeline[-12:]:
@@ -409,7 +439,7 @@ def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_que
 
 def _chat_panel(payload: dict, offset: int = 0, filter_query: str = "") -> Panel:
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
-    sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
+    sub_counts = _payload_subagent_counts(payload)
     lines = [
         f"turns: {len(history)}",
         f"subagents: running={int(sub_counts.get('running', 0) or 0)} queued={int(sub_counts.get('queued', 0) or 0)} completed={int(sub_counts.get('completed', 0) or 0)}",
@@ -441,7 +471,7 @@ def _chat_panel(payload: dict, offset: int = 0, filter_query: str = "") -> Panel
         if len(snippet) > 180:
             snippet = snippet[:179] + "…"
         lines.append(f"{idx:>4} {role:<10} {snippet}")
-    timeline = payload.get("subagent_timeline", []) if isinstance(payload.get("subagent_timeline"), list) else []
+    timeline = _payload_subagent_timeline(payload)
     if timeline:
         lines += ["", "sub-agent activity:"]
         for event in timeline[-8:]:
@@ -482,10 +512,10 @@ def _research_panel(payload: dict) -> Panel:
 
 
 def _subagents_panel(payload: dict) -> Panel:
-    workers = payload.get("subagents", []) if isinstance(payload.get("subagents"), list) else []
+    workers = _payload_subagents(payload)
     if not workers:
         return Panel("No sub-agent workers recorded.", title="Sub-Agent Workers", border_style="yellow")
-    timeline = payload.get("subagent_timeline", []) if isinstance(payload.get("subagent_timeline"), list) else []
+    timeline = _payload_subagent_timeline(payload)
     lines = [f"workers: {len(workers)}", "controls: use /api/tool cancel_sub_agents | retry_sub_agents", ""]
     for worker in workers[:30]:
         if not isinstance(worker, dict):

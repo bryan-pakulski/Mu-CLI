@@ -19,6 +19,7 @@ from core.memory import ScratchpadStore, TaskMemoryStore
 from core.retrieval import SemanticCodeIndex
 from core.tools import _RETRIEVAL_INDEX
 from core.workspace import FolderContext
+from core.subagents import SubAgentManager, SubAgentTask
 from providers.base import LLMProvider, Message, MessagePart, FileReference
 from core.tools import (
     TOOLS,
@@ -822,6 +823,7 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self.paused_execution_text: str | None = None
+        self.subagent_manager = SubAgentManager(max_parallel=int(self.variables.get("subagent_max_parallel", 3) or 3))
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -873,6 +875,24 @@ class Session:
         self.staged_files = []
         if self.ui:
             self.ui.show_info("Staged files cleared.")
+
+    def submit_subagent_task(self, *, title: str, prompt: str) -> str:
+        if not bool(self.variables.get("subagent_enabled", True)):
+            raise ValueError("subagent execution is disabled")
+
+        def _worker(task: SubAgentTask) -> dict:
+            # Placeholder autonomous worker execution surface.
+            # Runtime implementation can replace with isolated child Session loop.
+            return {"status": "completed", "summary": f"Completed: {task.title}"}
+
+        return self.subagent_manager.submit(title=title, payload={"prompt": prompt}, worker_fn=_worker)
+
+    def get_subagent_snapshot(self) -> list[dict]:
+        return self.subagent_manager.snapshot()
+
+    def get_subagent_counts(self) -> dict:
+        self.subagent_manager.set_max_parallel(int(self.variables.get("subagent_max_parallel", 3) or 3))
+        return self.subagent_manager.counts()
 
     def sync_runtime_state(self):
         self.folder_context = self.session_manager.folder_context

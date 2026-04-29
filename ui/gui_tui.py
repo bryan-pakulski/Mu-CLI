@@ -213,11 +213,13 @@ def _session_context_items(payload: dict) -> list[dict]:
                 tool_name = str(part.get("tool_name", "") or "").lower()
                 if any(token in tool_name for token in ("research", "search", "web", "citation")):
                     research_calls += 1
+    subagents = payload.get("subagents", []) if isinstance(payload.get("subagents"), list) else []
     return [
         {"id": "chat", "label": "Chat Timeline", "count": len(history)},
         {"id": "research", "label": "Research Engine", "count": research_calls},
         {"id": "tools", "label": "Tool Heatmap", "count": total_tool_calls},
         {"id": "features", "label": "Feature Workstreams", "count": feature_count},
+        {"id": "subagents", "label": "Sub-Agent Workers", "count": len(subagents)},
         {"id": "variables", "label": "Runtime Variables", "count": len(payload.get("variables", {}) if isinstance(payload.get("variables"), dict) else {})},
         {"id": "memory", "label": "Task Memory", "count": len(payload.get("task_memory", {}) if isinstance(payload.get("task_memory"), dict) else {})},
     ]

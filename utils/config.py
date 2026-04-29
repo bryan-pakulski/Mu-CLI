@@ -110,6 +110,26 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 3,
     },
+    "subagent_enabled": {
+        "type": bool,
+        "default": True,
+    },
+    "subagent_max_parallel": {
+        "type": int,
+        "default": 3,
+    },
+    "subagent_task_timeout_s": {
+        "type": int,
+        "default": 900,
+    },
+    "subagent_max_iterations": {
+        "type": int,
+        "default": 60,
+    },
+    "subagent_allow_tooling": {
+        "type": bool,
+        "default": True,
+    },
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}
@@ -135,9 +155,14 @@ def validate_and_cast(key, value):
 
     if target_type == int:
         try:
-            return int(value)
+            parsed = int(value)
         except (ValueError, TypeError):
             raise ValueError(f"Invalid integer value for {key}: {value}")
+        if key == "subagent_max_parallel":
+            if parsed < 1:
+                raise ValueError("subagent_max_parallel must be >= 1")
+            return min(parsed, 16)
+        return parsed
 
     if target_type == float:
         try:

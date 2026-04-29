@@ -592,6 +592,10 @@ def print_splash(session):
     mode_meta = AGENT_MODE_METADATA.get(str(agent_mode), {})
     mode_description = mode_meta.get("description", "")
     yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
+    subagent_counts = session.get_subagent_counts() if hasattr(session, "get_subagent_counts") else {}
+    subagent_running = int(subagent_counts.get("running", 0) or 0)
+    subagent_queued = int(subagent_counts.get("queued", 0) or 0)
+    subagent_done = int(subagent_counts.get("completed", 0) or 0)
 
     # Workspace Folder info
     folders = session.folder_context.folders
@@ -614,6 +618,7 @@ def print_splash(session):
     [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
+    [bold magenta]SubAgents:[/bold magenta] [bold cyan]running={subagent_running} queued={subagent_queued} done={subagent_done}[/bold cyan]
 """
     # Add context warning if nearing token limit
     context_limit = int(session.variables.get("context_token_limit", 256000) or 256000)

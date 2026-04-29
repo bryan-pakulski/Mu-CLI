@@ -1398,6 +1398,8 @@ def build_state_payload(session) -> dict:
         "history_length": len(session.session_manager.history),
         "token_counts": dict(session.session_manager.token_counts),
         "feature_state": session.session_manager.get_feature_state(),
+        "subagents": session.get_subagent_snapshot() if hasattr(session, "get_subagent_snapshot") else [],
+        "subagent_counts": session.get_subagent_counts() if hasattr(session, "get_subagent_counts") else {},
         "available_tools": [
             {
                 **serialize_tool_descriptor(tool.name),
@@ -1458,6 +1460,8 @@ def build_runtime_payload(session) -> dict:
         "disabled_tools": list(session.disabled_tools),
         "variables": dict(session.variables),
         "feature_state": session.session_manager.get_feature_state(),
+        "subagents": session.get_subagent_snapshot() if hasattr(session, "get_subagent_snapshot") else [],
+        "subagent_counts": session.get_subagent_counts() if hasattr(session, "get_subagent_counts") else {},
     }
 
 

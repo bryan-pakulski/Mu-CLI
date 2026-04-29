@@ -856,9 +856,10 @@ class Session:
             recovered_ids = set(persisted.get("recovered_task_ids", []) if isinstance(persisted, dict) else [])
             for worker in replay_candidates:
                 task_id = str(worker.get("task_id", "") or "")
-                if task_id and task_id in recovered_ids:
-                    continue
                 payload = worker.get("payload") if isinstance(worker.get("payload"), dict) else {}
+                replay_id = str((payload.get("replay_id") if isinstance(payload, dict) else "") or task_id)
+                if replay_id and replay_id in recovered_ids:
+                    continue
                 prompt = str(payload.get("prompt", "") or "").strip()
                 if not prompt:
                     continue
@@ -867,8 +868,8 @@ class Session:
                     prompt=prompt,
                     batch_id=str(worker.get("batch_id", "") or None),
                 )
-                if task_id:
-                    recovered_ids.add(task_id)
+                if replay_id:
+                    recovered_ids.add(replay_id)
             self.session_manager.subagent_state["recovered_task_ids"] = sorted(recovered_ids)
 
         self.sync_runtime_state()
@@ -995,7 +996,7 @@ class Session:
 
         return self.subagent_manager.submit(
             title=title,
-            payload={"prompt": prompt},
+            payload={"prompt": prompt, "replay_id": f"{batch_id or 'single'}:{title}:{hash(prompt)}"},
             worker_fn=self._execute_child_subagent_task,
             batch_id=batch_id,
         )
@@ -1011,6 +1012,11 @@ class Session:
             payload = dict(task.get("payload", {}))
             if "prompt" not in payload and task.get("prompt"):
                 payload["prompt"] = task.get("prompt")
+            if "replay_id" not in payload:
+                replay_batch = batch_id or "single"
+                replay_title = str(task.get("title", "task") or "task")
+                replay_prompt = str(payload.get("prompt", "") or "")
+                payload["replay_id"] = f"{replay_batch}:{replay_title}:{hash(replay_prompt)}"
             normalized_tasks.append({"title": task.get("title", "task"), "payload": payload})
 
         batch, workers = self.subagent_manager.submit_many(normalized_tasks, self._execute_child_subagent_task, batch_id=batch_id)
@@ -1058,6 +1064,25 @@ class Session:
                 passed = False
         return {"passed": passed, "checks": checks}
 
+    def _analyze_ast_semantic_conflicts(self, artifacts: list[dict]) -> dict:
+        symbol_to_workers: dict[str, set[str]] = {}
+        for art in artifacts:
+            if not isinstance(art, dict) or art.get("kind") != "patch":
+                continue
+            worker_id = str(art.get("worker_id", "") or "")
+            content = str(art.get("content", "") or "")
+            for line in content.splitlines():
+                striped = line.strip()
+                if striped.startswith("def ") or striped.startswith("class "):
+                    token = striped.split("(")[0].split(":")[0]
+                    symbol_to_workers.setdefault(token, set()).add(worker_id)
+        semantic_conflicts = [
+            {"symbol": sym, "workers": sorted(w for w in workers if w)}
+            for sym, workers in symbol_to_workers.items()
+            if len(workers) > 1
+        ]
+        return {"semantic_conflicts": semantic_conflicts, "has_semantic_conflicts": bool(semantic_conflicts)}
+
     def _analyze_patch_artifact_conflicts(self, artifacts: list[dict]) -> dict:
         file_to_workers: dict[str, set[str]] = {}
         for art in artifacts:
@@ -1100,8 +1125,9 @@ class Session:
                             applied.append({"worker_id": item.get("worker_id"), "status": "applied"})
         merged_text = "\n".join(sorted(merged_text_blocks))
         conflict_report = self._analyze_patch_artifact_conflicts(artifacts)
+        semantic_report = self._analyze_ast_semantic_conflicts(artifacts)
         verification = self._run_verification_gates() if require_verification else {"passed": True, "checks": []}
-        accepted = verification.get("passed", False) and not apply_errors and not conflict_report.get("has_conflicts", False)
+        accepted = verification.get("passed", False) and not apply_errors and not conflict_report.get("has_conflicts", False) and not semantic_report.get("has_semantic_conflicts", False)
         return {
             "worker_count": len(outputs),
             "merged_summary": merged_text,
@@ -1110,6 +1136,7 @@ class Session:
             "apply_errors": apply_errors,
             "verification": verification,
             "conflicts": conflict_report.get("conflicts", []),
+            "semantic_conflicts": semantic_report.get("semantic_conflicts", []),
             "accepted": accepted,
         }
 

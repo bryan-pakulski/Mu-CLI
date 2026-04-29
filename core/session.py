@@ -846,12 +846,22 @@ class Session:
         persisted = getattr(self.session_manager, "subagent_state", {}) or {}
         persisted_workers = persisted.get("workers", []) if isinstance(persisted, dict) else []
         if isinstance(persisted_workers, list) and persisted_workers:
-            for worker in persisted_workers:
-                if not isinstance(worker, dict):
+            self.subagent_manager.import_state(persisted_workers)
+            replay_candidates = [
+                worker
+                for worker in persisted_workers
+                if isinstance(worker, dict) and str(worker.get("status", "")) in {"queued", "running"}
+            ]
+            for worker in replay_candidates:
+                payload = worker.get("payload") if isinstance(worker.get("payload"), dict) else {}
+                prompt = str(payload.get("prompt", "") or "").strip()
+                if not prompt:
                     continue
-                if worker.get("status") in {"queued", "running"}:
-                    worker["status"] = "cancelled"
-                self.subagent_manager._states[str(worker.get("worker_id"))] = self.subagent_manager._states.get(str(worker.get("worker_id"))) or __import__("core.subagents", fromlist=["SubAgentState"]).SubAgentState(**{k: worker.get(k) for k in ["worker_id", "task_id", "batch_id", "title", "status", "started_at", "updated_at", "ended_at", "summary", "error", "telemetry", "artifacts"]})
+                self.submit_subagent_task(
+                    title=str(worker.get("title", "recovered-task") or "recovered-task"),
+                    prompt=prompt,
+                    batch_id=str(worker.get("batch_id", "") or None),
+                )
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -911,6 +921,7 @@ class Session:
         child_manager = SessionManager(ui=None, session_name=child_session_name)
         child_manager.variables.update(self.variables)
         child_manager.variables["subagent_enabled"] = False
+        child_manager.variables["subagent_policy_profile"] = "child"
         child_manager.variables["agent_mode"] = str(self.variables.get("agent_mode", "default"))
         child_manager.variables["max_iterations"] = 1
 
@@ -948,6 +959,12 @@ class Session:
                 "status": "completed",
                 "summary": assistant_text[:500] if assistant_text else f"Sub-agent completed task: {task.title}",
                 "error": "",
+                "artifacts": [
+                    {
+                        "kind": "assistant_text",
+                        "content": assistant_text,
+                    }
+                ],
                 "telemetry": {
                     "elapsed_s": round(elapsed, 3),
                     "worker_session": child_session_name,
@@ -996,6 +1013,31 @@ class Session:
 
     def cancel_subagents(self, worker_ids: list[str] | None = None, *, batch_id: str | None = None) -> int:
         return self.subagent_manager.cancel(worker_ids, batch_id=batch_id)
+
+    def collect_subagent_outputs(self) -> list[dict]:
+        """Return deterministic integration envelopes for completed sub-agents."""
+        outputs = []
+        for worker in self.get_subagent_snapshot():
+            if str(worker.get("status", "")) != "completed":
+                continue
+            telemetry = worker.get("telemetry") if isinstance(worker.get("telemetry"), dict) else {}
+            outputs.append(
+                {
+                    "worker_id": worker.get("worker_id"),
+                    "task_id": worker.get("task_id"),
+                    "batch_id": worker.get("batch_id"),
+                    "status": worker.get("status"),
+                    "summary": worker.get("summary", ""),
+                    "artifacts": worker.get("artifacts", []) if isinstance(worker.get("artifacts"), list) else [],
+                    "evidence": {
+                        "elapsed_s": telemetry.get("elapsed_s"),
+                        "token_counts": telemetry.get("token_counts", {}),
+                        "history_length": telemetry.get("history_length"),
+                    },
+                }
+            )
+        outputs.sort(key=lambda item: str(item.get("worker_id", "")))
+        return outputs
 
     def get_subagent_snapshot(self) -> list[dict]:
         snapshot = self.subagent_manager.snapshot()

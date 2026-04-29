@@ -1237,6 +1237,13 @@ def _default_server_policy(tool_name: str) -> str:
     return "allowed"
 
 
+TOOL_POLICY_DOMAIN = {
+    "spawn_sub_agents": "orchestration",
+    "list_sub_agents": "orchestration",
+    "cancel_sub_agents": "orchestration",
+    "batch_job": "orchestration",
+}
+
 TOOL_DESCRIPTOR_OVERRIDES = {
     "get_workspace_details": {
         "execution_kind": "read",
@@ -4960,15 +4967,19 @@ def execute_tool(
     """Descriptor-backed dispatcher with argument validation."""
 
 
-    if invocation_source == "subagent_child" and tool_name in {"spawn_sub_agents", "list_sub_agents", "cancel_sub_agents"}:
-        return json.dumps(
-            _build_tool_envelope(
-                tool_name=tool_name,
-                ok=False,
-                error_code="policy_denied",
-                message="Nested sub-agent orchestration is denied in child sub-agent contexts.",
+    policy_domain = TOOL_POLICY_DOMAIN.get(tool_name)
+    policy_profile = str((variables or {}).get("subagent_policy_profile", "") or "").strip().lower()
+    if invocation_source == "subagent_child" and policy_profile in {"child", "subagent_child"}:
+        denied_domains = {"orchestration"}
+        if policy_domain in denied_domains:
+            return json.dumps(
+                _build_tool_envelope(
+                    tool_name=tool_name,
+                    ok=False,
+                    error_code="policy_denied",
+                    message="Child policy denied this tool domain for sub-agent execution.",
+                )
             )
-        )
 
     descriptor = get_tool_descriptor(tool_name)
     if not descriptor:

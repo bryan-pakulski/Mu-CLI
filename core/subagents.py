@@ -29,6 +29,7 @@ class SubAgentState:
     error: str = ""
     telemetry: dict[str, Any] | None = None
     artifacts: list[dict[str, Any]] | None = None
+    payload: dict[str, Any] | None = None
 
 
 class SubAgentManager:
@@ -60,6 +61,7 @@ class SubAgentManager:
                 batch_id=batch,
                 title=title,
                 status="queued",
+                payload=payload,
                 started_at=None,
                 updated_at=now,
             )
@@ -156,6 +158,33 @@ class SubAgentManager:
             self._schedule()
         snapshot = [s for s in self.snapshot() if s.get("worker_id") in worker_set]
         return {"workers": snapshot, "counts": self.counts()}
+
+    def import_state(self, workers: list[dict[str, Any]]) -> None:
+        with self._lock:
+            for worker in workers:
+                if not isinstance(worker, dict):
+                    continue
+                wid = str(worker.get("worker_id", "") or "").strip()
+                if not wid:
+                    continue
+                status = str(worker.get("status", "queued") or "queued")
+                if status in {"running", "queued"}:
+                    status = "queued"
+                self._states[wid] = SubAgentState(
+                    worker_id=wid,
+                    task_id=str(worker.get("task_id", "") or ""),
+                    batch_id=str(worker.get("batch_id", "") or ""),
+                    title=str(worker.get("title", "") or ""),
+                    status=status,
+                    started_at=worker.get("started_at"),
+                    updated_at=worker.get("updated_at"),
+                    ended_at=worker.get("ended_at"),
+                    summary=str(worker.get("summary", "") or ""),
+                    error=str(worker.get("error", "") or ""),
+                    telemetry=worker.get("telemetry") if isinstance(worker.get("telemetry"), dict) else None,
+                    artifacts=worker.get("artifacts") if isinstance(worker.get("artifacts"), list) else None,
+                    payload=worker.get("payload") if isinstance(worker.get("payload"), dict) else {},
+                )
 
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:

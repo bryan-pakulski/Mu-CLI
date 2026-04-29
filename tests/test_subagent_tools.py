@@ -57,3 +57,22 @@ def test_spawn_list_cancel_subagent_tools():
     )
     cancelled = json.loads(raw_cancel)
     assert cancelled.get("ok") is True
+
+
+def test_child_policy_profile_denies_orchestration_domain():
+    sm = SessionManager(session_name="subagent-child-policy")
+    session = Session(DummyProvider("dummy"), False, "system", sm)
+    vars_child = dict(session.variables)
+    vars_child["subagent_policy_profile"] = "child"
+    raw = execute_tool(
+        "spawn_sub_agents",
+        {"tasks": [{"title": "blocked", "prompt": "x"}]},
+        session.folder_context,
+        None,
+        vars_child,
+        invocation_source="subagent_child",
+        session=session,
+    )
+    payload = json.loads(raw)
+    assert payload.get("ok") is False
+    assert payload.get("error_code") == "policy_denied"

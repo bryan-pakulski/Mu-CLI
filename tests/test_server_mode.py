@@ -166,6 +166,34 @@ def test_continue_command_errors_when_not_paused():
     assert result["message"] == "No paused execution to continue."
 
 
+def test_continue_command_restores_paused_execution_after_reload(monkeypatch):
+    session = build_test_session()
+    session.paused_execution_text = "resume after restart"
+    session.session_manager.paused_execution_text = "resume after restart"
+    session.session_manager.save_history(session.folder_context)
+
+    reloaded_manager = SessionManager(session_name=session.session_manager.current_session_name)
+    reloaded_session = Session(
+        session.provider,
+        session.thinking,
+        session.system_instruction,
+        reloaded_manager,
+        ui=session.ui,
+        debug=session.debug,
+    )
+
+    def _fake_send_message(text):
+        assert text == "resume after restart"
+        return {"ok": True, "status": "completed", "assistant_text": "done"}
+
+    monkeypatch.setattr(reloaded_session, "send_message", _fake_send_message)
+    result = handle_command(reloaded_session, "/continue", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["message"] == "Resumed paused execution."
+    assert result["data"]["resumed_text"] == "resume after restart"
+
+
 def test_memory_buffers_payload_includes_context_layers():
     session = build_test_session()
     payload = build_memory_buffers_payload(session)

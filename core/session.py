@@ -129,6 +129,7 @@ class SessionManager:
         self.active_feature_id = None
         self.variables = DEFAULT_VARIABLES.copy()
         self.subagent_state = {"workers": [], "counts": {}, "recovered_task_ids": []}
+        self.paused_execution_text = None
 
         if session_name:
             self._load_session(session_name)
@@ -160,6 +161,7 @@ class SessionManager:
         self.active_feature_id = None
         self.variables.update(DEFAULT_VARIABLES)
         self.subagent_state = {"workers": [], "counts": {}, "recovered_task_ids": []}
+        self.paused_execution_text = None
 
         data = self.read_session_data(name)
         if data is not None:
@@ -209,6 +211,7 @@ class SessionManager:
                     subagent_state = data.get("subagent_state")
                     if isinstance(subagent_state, dict):
                         self.subagent_state = subagent_state
+                    self.paused_execution_text = data.get("paused_execution_text")
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -265,6 +268,7 @@ class SessionManager:
                 "feature_registry": self.feature_registry,
                 "active_feature_id": self.active_feature_id,
                 "subagent_state": self.subagent_state,
+                "paused_execution_text": self.paused_execution_text,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -841,7 +845,9 @@ class Session:
         self.disabled_tools = []  # list of tool names strings
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
-        self.paused_execution_text: str | None = None
+        self.paused_execution_text: str | None = (
+            str(getattr(self.session_manager, "paused_execution_text", "") or "") or None
+        )
         self.invocation_source = "session"
         self.subagent_manager = SubAgentManager(max_parallel=int(self.variables.get("subagent_max_parallel", 3) or 3), task_timeout_s=int(self.variables.get("subagent_task_timeout_s", 900) or 900))
         persisted = getattr(self.session_manager, "subagent_state", {}) or {}
@@ -2437,6 +2443,7 @@ class Session:
     def send_message(self, text):
         logger.info(f"Sending message: {text[:100]}...")
         self.paused_execution_text = None
+        self.session_manager.paused_execution_text = None
         self.sync_runtime_state()
         if self.variables.get("scratchpad_enabled", True):
             self.turn_scratchpad.max_entries = max(
@@ -3115,6 +3122,7 @@ class Session:
                     self.ui.show_info("\nAgentic loop interrupted by user.")
                 logger.warning("Agentic loop interrupted by user.")
                 self.paused_execution_text = str(text or "")
+                self.session_manager.paused_execution_text = self.paused_execution_text
                 self.session_manager.history.append(
                     {
                         "role": "tool",
@@ -3213,6 +3221,7 @@ class Session:
 
         self.session_manager.save_history(self.folder_context)
         self.paused_execution_text = None
+        self.session_manager.paused_execution_text = None
         if self.session_manager.get_feature_state():
             self._set_feature_state(status="max_iterations_reached")
         return self._collect_turn_response(

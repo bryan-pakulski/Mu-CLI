@@ -833,7 +833,7 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self.paused_execution_text: str | None = None
-        self.subagent_manager = SubAgentManager(max_parallel=int(self.variables.get("subagent_max_parallel", 3) or 3))
+        self.subagent_manager = SubAgentManager(max_parallel=int(self.variables.get("subagent_max_parallel", 3) or 3), task_timeout_s=int(self.variables.get("subagent_task_timeout_s", 900) or 900))
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -886,7 +886,7 @@ class Session:
         if self.ui:
             self.ui.show_info("Staged files cleared.")
 
-    def submit_subagent_task(self, *, title: str, prompt: str) -> str:
+    def submit_subagent_task(self, *, title: str, prompt: str, batch_id: str | None = None) -> str:
         if not bool(self.variables.get("subagent_enabled", True)):
             raise ValueError("subagent execution is disabled")
 
@@ -895,13 +895,32 @@ class Session:
             # Runtime implementation can replace with isolated child Session loop.
             return {"status": "completed", "summary": f"Completed: {task.title}"}
 
-        return self.subagent_manager.submit(title=title, payload={"prompt": prompt}, worker_fn=_worker)
+        return self.subagent_manager.submit(title=title, payload={"prompt": prompt}, worker_fn=_worker, batch_id=batch_id)
+
+    def submit_subagent_batch(self, tasks: list[dict], *, batch_id: str | None = None) -> dict:
+        if not bool(self.variables.get("subagent_enabled", True)):
+            raise ValueError("subagent execution is disabled")
+
+        def _worker(task: SubAgentTask) -> dict:
+            return {"status": "completed", "summary": f"Completed: {task.title}"}
+
+        batch, workers = self.subagent_manager.submit_many(tasks, _worker, batch_id=batch_id)
+        return {"batch_id": batch, "workers": workers}
+
+    def wait_for_subagents(self, worker_ids: list[str], timeout_s: int | None = None) -> dict:
+        return self.subagent_manager.wait(worker_ids, timeout_s=timeout_s)
+
+    def cancel_subagents(self, worker_ids: list[str] | None = None, *, batch_id: str | None = None) -> int:
+        return self.subagent_manager.cancel(worker_ids, batch_id=batch_id)
 
     def get_subagent_snapshot(self) -> list[dict]:
         return self.subagent_manager.snapshot()
 
     def get_subagent_counts(self) -> dict:
-        self.subagent_manager.set_max_parallel(int(self.variables.get("subagent_max_parallel", 3) or 3))
+        self.subagent_manager.set_limits(
+            max_parallel=int(self.variables.get("subagent_max_parallel", 3) or 3),
+            task_timeout_s=int(self.variables.get("subagent_task_timeout_s", 900) or 900),
+        )
         return self.subagent_manager.counts()
 
     def sync_runtime_state(self):

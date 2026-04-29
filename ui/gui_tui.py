@@ -397,6 +397,32 @@ def _research_panel(payload: dict) -> Panel:
     return Panel("\n".join(lines[:40]), title="Research Engine", border_style="magenta")
 
 
+def _subagents_panel(payload: dict) -> Panel:
+    workers = payload.get("subagents", []) if isinstance(payload.get("subagents"), list) else []
+    if not workers:
+        return Panel("No sub-agent workers recorded.", title="Sub-Agent Workers", border_style="yellow")
+    lines = [f"workers: {len(workers)}", ""]
+    for worker in workers[:30]:
+        if not isinstance(worker, dict):
+            continue
+        wid = str(worker.get("worker_id", "-"))
+        status = str(worker.get("status", "unknown"))
+        title = str(worker.get("title", ""))
+        elapsed = "-"
+        st = worker.get("started_at")
+        en = worker.get("ended_at")
+        if isinstance(st, (int, float)):
+            end_ts = en if isinstance(en, (int, float)) else time.time()
+            elapsed = f"{max(0, int(end_ts - st))}s"
+        summary = str(worker.get("summary", "") or "")
+        if len(summary) > 60:
+            summary = summary[:59] + "…"
+        lines.append(f"[{status:<9}] {wid} {elapsed} {title}")
+        if summary:
+            lines.append(f"  ↳ {summary}")
+    return Panel("\n".join(lines), title="Sub-Agent Workers", border_style="magenta")
+
+
 def _variables_panel(payload: dict) -> Panel:
     variables = payload.get("variables", {}) if isinstance(payload.get("variables"), dict) else {}
     if not variables:
@@ -533,6 +559,8 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
             body = _research_panel(payload)
         elif state.screen == "tools":
             body = _heatmap_panel(payload)
+        elif state.screen == "subagents":
+            body = _subagents_panel(payload)
         elif state.screen == "variables":
             body = _variables_panel(payload)
         elif state.screen == "memory":
@@ -663,7 +691,7 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         elif state.screen == "features":
             state.screen = "contexts"
             state.selected_feature = None
-        elif state.screen in {"chat", "research", "tools", "variables", "memory"}:
+        elif state.screen in {"chat", "research", "tools", "subagents", "variables", "memory"}:
             state.screen = "contexts"
         elif state.screen == "contexts":
             state.screen = "sessions"

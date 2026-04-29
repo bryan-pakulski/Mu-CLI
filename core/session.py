@@ -127,6 +127,7 @@ class SessionManager:
         self.feature_registry = {}
         self.active_feature_id = None
         self.variables = DEFAULT_VARIABLES.copy()
+        self.subagent_state = {"workers": [], "counts": {}}
 
         if session_name:
             self._load_session(session_name)
@@ -157,6 +158,7 @@ class SessionManager:
         self.feature_registry = {}
         self.active_feature_id = None
         self.variables.update(DEFAULT_VARIABLES)
+        self.subagent_state = {"workers": [], "counts": {}}
 
         data = self.read_session_data(name)
         if data is not None:
@@ -202,6 +204,10 @@ class SessionManager:
                         self.feature_state = deepcopy(
                             self.feature_registry[self.active_feature_id]
                         )
+
+                    subagent_state = data.get("subagent_state")
+                    if isinstance(subagent_state, dict):
+                        self.subagent_state = subagent_state
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -257,6 +263,7 @@ class SessionManager:
                 "feature_state": self.feature_state,
                 "feature_registry": self.feature_registry,
                 "active_feature_id": self.active_feature_id,
+                "subagent_state": self.subagent_state,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -455,6 +462,7 @@ class SessionManager:
         self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
+        self.subagent_state = {"workers": [], "counts": {}}
         self.save_history()
         if self.ui:
             self.ui.show_info(f"Started new session: '{name}'")
@@ -833,7 +841,17 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self.paused_execution_text: str | None = None
+        self.invocation_source = "session"
         self.subagent_manager = SubAgentManager(max_parallel=int(self.variables.get("subagent_max_parallel", 3) or 3), task_timeout_s=int(self.variables.get("subagent_task_timeout_s", 900) or 900))
+        persisted = getattr(self.session_manager, "subagent_state", {}) or {}
+        persisted_workers = persisted.get("workers", []) if isinstance(persisted, dict) else []
+        if isinstance(persisted_workers, list) and persisted_workers:
+            for worker in persisted_workers:
+                if not isinstance(worker, dict):
+                    continue
+                if worker.get("status") in {"queued", "running"}:
+                    worker["status"] = "cancelled"
+                self.subagent_manager._states[str(worker.get("worker_id"))] = self.subagent_manager._states.get(str(worker.get("worker_id"))) or __import__("core.subagents", fromlist=["SubAgentState"]).SubAgentState(**{k: worker.get(k) for k in ["worker_id", "task_id", "batch_id", "title", "status", "started_at", "updated_at", "ended_at", "summary", "error", "telemetry", "artifacts"]})
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -905,6 +923,7 @@ class Session:
             debug=self.debug,
         )
         child_session.agentic = False
+        child_session.invocation_source = "subagent_child"
         child_session.disabled_tools = list(set(self.disabled_tools + ["spawn_sub_agents", "list_sub_agents", "cancel_sub_agents"]))
         if self.folder_context.folders:
             for folder in self.folder_context.folders:
@@ -920,7 +939,7 @@ class Session:
             }
 
         try:
-            result = child_session.send_message(prompt)
+            result = child_session.send_message(f"[subagent_child] {prompt}")
             assistant_text = ""
             if isinstance(result, dict):
                 assistant_text = str(result.get("assistant_text", "") or "")
@@ -979,14 +998,18 @@ class Session:
         return self.subagent_manager.cancel(worker_ids, batch_id=batch_id)
 
     def get_subagent_snapshot(self) -> list[dict]:
-        return self.subagent_manager.snapshot()
+        snapshot = self.subagent_manager.snapshot()
+        self.session_manager.subagent_state = {"workers": snapshot, "counts": self.subagent_manager.counts()}
+        return snapshot
 
     def get_subagent_counts(self) -> dict:
         self.subagent_manager.set_limits(
             max_parallel=int(self.variables.get("subagent_max_parallel", 3) or 3),
             task_timeout_s=int(self.variables.get("subagent_task_timeout_s", 900) or 900),
         )
-        return self.subagent_manager.counts()
+        counts = self.subagent_manager.counts()
+        self.session_manager.subagent_state = {"workers": self.subagent_manager.snapshot(), "counts": counts}
+        return counts
 
     def sync_runtime_state(self):
         self.folder_context = self.session_manager.folder_context
@@ -1887,7 +1910,7 @@ class Session:
         tool_name: str,
         tool_args: dict,
         *,
-        invocation_source: str = "session",
+        invocation_source: str | None = None,
     ):
         feature_violation = self._feature_doc_tool_violation(tool_name, tool_args)
         if feature_violation:
@@ -1945,7 +1968,7 @@ class Session:
             self.folder_context,
             self.ui,
             self.variables,
-            invocation_source=invocation_source,
+            invocation_source=(invocation_source or getattr(self, "invocation_source", "session")),
             session=self,
         )
 

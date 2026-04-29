@@ -4959,6 +4959,17 @@ def execute_tool(
 ) -> str:
     """Descriptor-backed dispatcher with argument validation."""
 
+
+    if invocation_source == "subagent_child" and tool_name in {"spawn_sub_agents", "list_sub_agents", "cancel_sub_agents"}:
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name=tool_name,
+                ok=False,
+                error_code="policy_denied",
+                message="Nested sub-agent orchestration is denied in child sub-agent contexts.",
+            )
+        )
+
     descriptor = get_tool_descriptor(tool_name)
     if not descriptor:
         return json.dumps(

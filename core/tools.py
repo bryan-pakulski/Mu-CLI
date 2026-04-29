@@ -1495,6 +1495,54 @@ TOOL_DESCRIPTOR_OVERRIDES = {
     },
 }
 
+
+
+TOOLS.extend([
+    ToolDefinition(
+        name="spawn_sub_agents",
+        description="Spawn one or more sub-agent workers for independent tasks.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "prompt": {"type": "string"},
+                            "payload": {"type": "object"},
+                        },
+                        "required": ["title"],
+                    },
+                },
+                "wait_for_completion": {"type": "boolean", "default": False},
+                "timeout_s": {"type": "integer"},
+            },
+            "required": ["tasks"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="list_sub_agents",
+        description="List live and completed sub-agent workers.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="cancel_sub_agents",
+        description="Cancel sub-agent workers by worker IDs or batch ID.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "worker_ids": {"type": "array", "items": {"type": "string"}},
+                "batch_id": {"type": "string"},
+            },
+        },
+        requires_approval=False,
+    ),
+])
+
 TOOL_DESCRIPTORS = {
     tool.name: _build_descriptor(
         tool,
@@ -4774,6 +4822,50 @@ def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
     )
 
 
+
+
+def _handle_spawn_sub_agents(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="spawn_sub_agents", ok=False, error_code="session_required", message="spawn_sub_agents requires a live session context."), indent=2)
+    tasks = args.get("tasks", []) if isinstance(args.get("tasks", []), list) else []
+    normalized = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        payload = dict(task.get("payload", {}))
+        if "prompt" not in payload and task.get("prompt"):
+            payload["prompt"] = task.get("prompt")
+        normalized.append({"title": str(task.get("title", "task")), "payload": payload})
+    if not normalized:
+        return json.dumps(_build_tool_envelope(tool_name="spawn_sub_agents", ok=False, error_code="invalid_args", message="No valid tasks provided."), indent=2)
+    created = session.submit_subagent_batch(normalized)
+    wait_for_completion = bool(args.get("wait_for_completion", False))
+    if wait_for_completion:
+        waited = session.wait_for_subagents(created.get("workers", []), timeout_s=args.get("timeout_s"))
+        return json.dumps(_build_tool_envelope(tool_name="spawn_sub_agents", ok=True, message="Spawned and waited for sub-agents.", data={**created, "result": waited}), indent=2)
+    return json.dumps(_build_tool_envelope(tool_name="spawn_sub_agents", ok=True, message="Spawned sub-agents.", data=created), indent=2)
+
+
+def _handle_list_sub_agents(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="list_sub_agents", ok=False, error_code="session_required", message="list_sub_agents requires a live session context."), indent=2)
+    snapshot = session.get_subagent_snapshot()
+    counts = session.get_subagent_counts()
+    return json.dumps(_build_tool_envelope(tool_name="list_sub_agents", ok=True, message="Retrieved sub-agent snapshot.", data={"workers": snapshot, "counts": counts}), indent=2)
+
+
+def _handle_cancel_sub_agents(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="cancel_sub_agents", ok=False, error_code="session_required", message="cancel_sub_agents requires a live session context."), indent=2)
+    worker_ids = args.get("worker_ids", []) if isinstance(args.get("worker_ids", []), list) else []
+    batch_id = args.get("batch_id")
+    cancelled = session.cancel_subagents(worker_ids=worker_ids or None, batch_id=batch_id)
+    return json.dumps(_build_tool_envelope(tool_name="cancel_sub_agents", ok=True, message=f"Cancelled {cancelled} sub-agent worker(s).", data={"cancelled": cancelled}), indent=2)
+
+
 TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
     "flush": _legacy_handler(_handle_flush),
@@ -4849,6 +4941,9 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
     "search_and_replace_file": _legacy_handler(_handle_search_and_replace_file),
+    "spawn_sub_agents": _handle_spawn_sub_agents,
+    "list_sub_agents": _handle_list_sub_agents,
+    "cancel_sub_agents": _handle_cancel_sub_agents,
 }
 
 

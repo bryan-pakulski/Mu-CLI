@@ -1607,8 +1607,8 @@ class Session:
             self.variables["loop_goal"] = loop_goal
         base_instruction = (
             "LOOP MODE DIRECTIVE: You are executing a long-horizon loop with a locked mission. "
-            "Maintain a self-directed backlog, keep exactly one active task, and continuously run plan -> execute -> verify -> re-plan cycles. "
-            "Persist durable decisions using save_memory and short-term plans using save_scratchpad. "
+            "Manage backlog via the feature task engine (create_feature_task/get_current_task/get_tasks/update_task_status/approve_feature_task), keep exactly one active task, and continuously run plan -> execute -> verify -> re-plan cycles. "
+            "Persist durable decisions using save_memory and short-term plans using save_scratchpad; keep task decisions/status transitions in feature metadata for robust history. "
             "After each increment, provide a timeline update with: objective, actions, evidence, decision, and next step. "
             "When blocked on user input/credentials/environment constraints, call raise_blocker with explicit unblock requirements. "
             "Do not stop unless user explicitly asks to stop loop mode.\n\n"

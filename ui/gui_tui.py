@@ -332,7 +332,15 @@ def _heatmap_panel(payload: dict) -> Panel:
 
 
 def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
-    lines = ["Feature events:"]
+    sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
+    running = int(sub_counts.get("running", 0) or 0)
+    queued = int(sub_counts.get("queued", 0) or 0)
+    completed = int(sub_counts.get("completed", 0) or 0)
+    lines = [
+        f"SubAgents active: running={running} queued={queued} completed={completed}",
+        "",
+        "Feature events:",
+    ]
     for event in plan.event_log[-25:]:
         ts = datetime.fromtimestamp(float(getattr(event, "created_at", 0) or 0)).strftime("%H:%M:%S")
         lines.append(f"  [{ts}] {getattr(event, 'kind', '-')} {getattr(event, 'entity', '-')}/{getattr(event, 'entity_id', '-')}")
@@ -352,12 +360,27 @@ def _history_panel(plan: FeaturePlan, payload: dict) -> Panel:
             snippet = snippet[:89] + "…"
         lines.append(f"  {role:<9} | {snippet or '(non-text event)'}")
 
+    timeline = payload.get("subagent_timeline", []) if isinstance(payload.get("subagent_timeline"), list) else []
+    if timeline:
+        lines += ["", "Sub-agent events (recent):"]
+        for event in timeline[-12:]:
+            if not isinstance(event, dict):
+                continue
+            ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
+            lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
+
     return Panel("\n".join(lines), title="History Browser", border_style="bright_blue")
 
 
 def _chat_panel(payload: dict) -> Panel:
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
-    lines = [f"turns: {len(history)}", "tip: / filter, j/k scroll, includes tool calls/results", ""]
+    sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
+    lines = [
+        f"turns: {len(history)}",
+        f"subagents: running={int(sub_counts.get('running', 0) or 0)} queued={int(sub_counts.get('queued', 0) or 0)} completed={int(sub_counts.get('completed', 0) or 0)}",
+        "tip: / filter, j/k scroll, includes tool calls/results",
+        "",
+    ]
     for idx, msg in enumerate(history[-120:], start=max(0, len(history) - 120) + 1):
         if not isinstance(msg, dict):
             continue
@@ -379,6 +402,14 @@ def _chat_panel(payload: dict) -> Panel:
         if len(snippet) > 180:
             snippet = snippet[:179] + "…"
         lines.append(f"{idx:>4} {role:<10} {snippet}")
+    timeline = payload.get("subagent_timeline", []) if isinstance(payload.get("subagent_timeline"), list) else []
+    if timeline:
+        lines += ["", "sub-agent activity:"]
+        for event in timeline[-8:]:
+            if not isinstance(event, dict):
+                continue
+            ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
+            lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
     return Panel("\n".join(lines), title="Chat Timeline", border_style="green")
 
 

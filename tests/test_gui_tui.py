@@ -2,7 +2,7 @@ import json
 from dataclasses import asdict
 
 from core.feature_mode import FeaturePlan, FeatureTask
-from ui.gui_tui import GuiState, _chat_panel, _discover_sessions, _handle_key, _tool_usage_counts
+from ui.gui_tui import GuiState, _chat_panel, _discover_sessions, _handle_key, _history_panel, _tool_usage_counts
 
 
 def _write_session_fixture(tmp_path):
@@ -76,6 +76,25 @@ def test_chat_panel_renders_tool_activity_in_timeline():
     rendered = str(_chat_panel(payload).renderable)
     assert "tool_call:spawn_sub_agents" in rendered
     assert "tool_result:spawn_sub_agents" in rendered
+
+
+def test_history_panel_shows_subagent_activity():
+    plan = FeaturePlan(
+        feature_id="f1",
+        feature_name="f1",
+        feature_request="r",
+        directory=".",
+        metadata_path="x.json",
+        tasks=[],
+    )
+    payload = {
+        "history": [{"role": "user", "parts": [{"type": "text", "text": "hi"}]}],
+        "subagent_counts": {"running": 1, "queued": 2, "completed": 3},
+        "subagent_timeline": [{"ts": 1, "worker_id": "sa-1", "kind": "started"}],
+    }
+    rendered = str(_history_panel(plan, payload).renderable)
+    assert "SubAgents active: running=1 queued=2 completed=3" in rendered
+    assert "sa-1 started" in rendered
 
 
 def test_handle_key_hierarchical_navigation(tmp_path):

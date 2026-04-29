@@ -271,6 +271,8 @@ GENERAL RULES:
    - Use `spawn_sub_agents` to dispatch chunks, `list_sub_agents` / `get_subagent_timeline` to monitor, and `integrate_sub_agent_outputs` to merge with verification gates.
    - Parent agent retains orchestration ownership: track chunk goals, enforce acceptance criteria, and make final integration decisions.
    - Prefer delegating at least 2 chunks when there are independent tracks (e.g., code changes, tests, docs), unless overhead outweighs benefit.
+   - Do not wait for the user to ask explicitly: proactively spawn sub-agents whenever there are at least 2 independent tracks and safety constraints allow it.
+   - After spawning, keep a parent control loop: monitor (`list_sub_agents`/`get_subagent_timeline`), guide (`message_sub_agent`), and finalize (`complete_sub_agent` or `cancel_sub_agents`).
 """
 
 AGENTIC_MODES = {

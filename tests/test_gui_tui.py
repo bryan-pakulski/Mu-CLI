@@ -131,6 +131,34 @@ def test_history_panel_reads_subagent_state_fallback_shape():
     assert "sa-2 started" in rendered
 
 
+def test_subagent_detail_panel_renders_worker_level_data():
+    from ui.gui_tui import _subagent_detail_panel
+
+    state = GuiState(screen="subagent_detail", selected_subagent_id="sa-9")
+    payload = {
+        "subagent_state": {
+            "workers": [
+                {
+                    "worker_id": "sa-9",
+                    "task_id": "t9",
+                    "status": "running",
+                    "title": "optimize parser",
+                    "batch_id": "b1",
+                    "telemetry": {"elapsed_s": 1.2},
+                    "artifacts": [{"kind": "assistant_text", "content": "working"}],
+                }
+            ],
+            "timeline": [{"ts": 1, "worker_id": "sa-9", "kind": "started", "payload": {}}],
+        },
+        "history": [
+            {"role": "assistant", "parts": [{"type": "tool_call", "tool_name": "message_sub_agent", "tool_args": {"worker_id": "sa-9"}}]}
+        ],
+    }
+    rendered = str(_subagent_detail_panel(payload, state).renderable)
+    assert "worker_id: sa-9" in rendered
+    assert "timeline (filtered):" in rendered
+
+
 def test_handle_key_hierarchical_navigation(tmp_path):
     session_root, _ = _write_session_fixture(tmp_path)
     state = GuiState()

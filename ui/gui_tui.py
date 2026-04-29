@@ -50,6 +50,8 @@ class GuiState:
 
     item_index: int = 0
     detail_offset: int = 0
+    subagent_index: int = 0
+    selected_subagent_id: str | None = None
     search_mode: bool = False
     search_query: str = ""
     status_message: str = "ready"
@@ -529,13 +531,14 @@ def _research_panel(payload: dict) -> Panel:
     return Panel("\n".join(lines[:40]), title="Research Engine", border_style="magenta")
 
 
-def _subagents_panel(payload: dict) -> Panel:
+def _subagents_panel(payload: dict, state: GuiState | None = None) -> Panel:
     workers = _payload_subagents(payload)
     if not workers:
         return Panel("No sub-agent workers recorded.", title="Sub-Agent Workers", border_style="yellow")
     timeline = _payload_subagent_timeline(payload)
     lines = [f"workers: {len(workers)}", "controls: use /api/tool cancel_sub_agents | retry_sub_agents", ""]
-    for worker in workers[:30]:
+    selected_idx = max(0, min((state.subagent_index if state else 0), max(0, len(workers) - 1)))
+    for idx, worker in enumerate(workers[:30]):
         if not isinstance(worker, dict):
             continue
         wid = str(worker.get("worker_id", "-"))
@@ -550,7 +553,8 @@ def _subagents_panel(payload: dict) -> Panel:
         summary = str(worker.get("summary", "") or "")
         if len(summary) > 60:
             summary = summary[:59] + "…"
-        lines.append(f"[{status:<9}] {wid} {elapsed} {title}")
+        pointer = "▶" if idx == selected_idx else " "
+        lines.append(f"{pointer} [{status:<9}] {wid} {elapsed} {title}")
         if summary:
             lines.append(f"  ↳ {summary}")
     if timeline:
@@ -560,7 +564,46 @@ def _subagents_panel(payload: dict) -> Panel:
                 continue
             ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
+    lines += ["", "Enter/l: open selected worker details"]
     return Panel("\n".join(lines), title="Sub-Agent Workers", border_style="magenta")
+
+
+def _subagent_detail_panel(payload: dict, state: GuiState) -> Panel:
+    workers = _payload_subagents(payload)
+    worker_map = {str(w.get("worker_id", "")): w for w in workers if isinstance(w, dict)}
+    worker_id = str(state.selected_subagent_id or "")
+    worker = worker_map.get(worker_id)
+    if not worker:
+        return Panel("Selected sub-agent could not be found.", title="Sub-Agent Detail", border_style="red")
+    lines = [
+        f"worker_id: {worker_id}",
+        f"task_id: {worker.get('task_id', '-')}",
+        f"status: {worker.get('status', '-')}",
+        f"title: {worker.get('title', '-')}",
+        f"batch_id: {worker.get('batch_id', '-')}",
+        "",
+        "telemetry:",
+        json.dumps(worker.get("telemetry", {}), indent=2, default=str),
+        "",
+        "artifacts:",
+        json.dumps(worker.get("artifacts", []), indent=2, default=str)[:2000],
+        "",
+        "timeline (filtered):",
+    ]
+    timeline = [e for e in _payload_subagent_timeline(payload) if isinstance(e, dict) and str(e.get("worker_id", "")) == worker_id]
+    for event in timeline[-30:]:
+        ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
+        lines.append(f"  [{ts}] {event.get('kind', 'event')} payload={event.get('payload', {})}")
+    lines += ["", "parent chat/tool interactions (recent):"]
+    for msg in _history_entries(payload)[-120:]:
+        text = msg.get("text", "")
+        if worker_id in text or "message_sub_agent" in text or "complete_sub_agent" in text:
+            lines.append(f"  #{msg.get('idx')} {msg.get('role')}: {text[:180]}")
+    start = max(0, min(state.detail_offset, max(0, len(lines) - 28)))
+    window = lines[start:start + 28]
+    window.append(f"")
+    window.append(f"offset: {start}/{max(0, len(lines) - 28)}")
+    return Panel("\n".join(window), title=f"Sub-Agent Detail • {worker_id}", border_style="bright_magenta")
 
 
 def _variables_panel(payload: dict) -> Panel:
@@ -757,7 +800,9 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         elif state.screen == "tools":
             body = _heatmap_panel(payload, filter_query=state.search_query, selected_index=state.item_index, offset=state.detail_offset)
         elif state.screen == "subagents":
-            body = _subagents_panel(payload)
+            body = _subagents_panel(payload, state)
+        elif state.screen == "subagent_detail":
+            body = _subagent_detail_panel(payload, state)
         elif state.screen == "variables":
             body = _variables_panel(payload)
         elif state.screen == "memory":
@@ -897,6 +942,9 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         elif state.screen in {"chat", "research", "tools", "subagents", "variables", "memory", "turn_context", "buffers", "layers"}:
             state.screen = "contexts"
             state.detail_offset = 0
+        elif state.screen == "subagent_detail":
+            state.screen = "subagents"
+            state.detail_offset = 0
         elif state.screen == "contexts":
             state.screen = "sessions"
             state.selected_feature = None
@@ -943,11 +991,39 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
         return state
 
     if state.screen == "subagents":
+        payload = _load_session_payload(session_root, state.selected_session or "")
+        workers = _payload_subagents(payload)
+        if is_down:
+            state.subagent_index = min(max(0, len(workers) - 1), state.subagent_index + 1)
+            return state
+        if is_up:
+            state.subagent_index = max(0, state.subagent_index - 1)
+            return state
+        if is_select and workers:
+            selected = workers[state.subagent_index]
+            if isinstance(selected, dict):
+                state.selected_subagent_id = str(selected.get("worker_id", "") or "")
+                state.screen = "subagent_detail"
+                state.detail_offset = 0
+                return state
         if key in {"c", "C"}:
             state.status_message = "Use /api/tool cancel_sub_agents with selected worker IDs."
             return state
         if key in {"r", "R"}:
             state.status_message = "Use /api/tool retry_sub_agents with selected worker IDs."
+            return state
+    if state.screen == "subagent_detail":
+        if is_down:
+            state.detail_offset = min(5000, state.detail_offset + 1)
+            return state
+        if is_up:
+            state.detail_offset = max(0, state.detail_offset - 1)
+            return state
+        if key == "J":
+            state.detail_offset = min(5000, state.detail_offset + 10)
+            return state
+        if key == "K":
+            state.detail_offset = max(0, state.detail_offset - 10)
             return state
     if state.screen in {"chat", "memory", "history"}:
         if is_down:

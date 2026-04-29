@@ -268,6 +268,9 @@ GENERAL RULES:
    - Run chunks concurrently up to configured parallel limit.
    - Keep a shared integration plan and continuously merge/verify completed chunks.
    - Do not create nested sub-agents from inside sub-agents.
+   - Use `spawn_sub_agents` to dispatch chunks, `list_sub_agents` / `get_subagent_timeline` to monitor, and `integrate_sub_agent_outputs` to merge with verification gates.
+   - Parent agent retains orchestration ownership: track chunk goals, enforce acceptance criteria, and make final integration decisions.
+   - Prefer delegating at least 2 chunks when there are independent tracks (e.g., code changes, tests, docs), unless overhead outweighs benefit.
 """
 
 AGENTIC_MODES = {
@@ -297,7 +300,9 @@ In FEATURE mode, once all tasks are complete you must perform a review pass and 
 3. Ensure every task contains Objectives, Action Points, and Exit Criteria sections.
 4. After creating the plan, stop implementation and ask the user to review and approve it. Record approval in session-managed metadata.
 5. Once approved, repeat this harness loop until done:
-   - If multiple tasks are independent, delegate them to parallel sub-agents and use the feature engine to track ownership/status per task.
+   - If multiple tasks are independent, delegate them to parallel sub-agents (`spawn_sub_agents`) and use the feature engine to track ownership/status per task.
+   - While workers run, monitor with `list_sub_agents` / `get_subagent_timeline` and continue parent-side integration prep.
+   - Integrate with `integrate_sub_agent_outputs` and require verification before marking delegated work complete.
    - call `get_current_task` / `get_tasks`,
    - gather read-only context,
    - save quick notes with `save_scratchpad`,

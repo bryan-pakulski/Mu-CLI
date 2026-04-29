@@ -932,7 +932,8 @@ class Session:
     def _execute_child_subagent_task(self, task: SubAgentTask) -> dict:
         """Run a sub-agent task in an isolated child session runtime."""
         started = time.time()
-        child_session_name = f"{self.session_manager.current_session_name}_subagent_{task.task_id[:8]}"
+        worker_tag = str(task.payload.get("worker_id", "") or task.task_id[:8])
+        child_session_name = f"{self.session_manager.current_session_name}_subagent_{worker_tag}"
         child_manager = SessionManager(ui=None, session_name=child_session_name)
         child_manager.variables.update(self.variables)
         child_manager.variables["subagent_enabled"] = False
@@ -1030,6 +1031,29 @@ class Session:
 
     def wait_for_subagents(self, worker_ids: list[str], timeout_s: int | None = None) -> dict:
         return self.subagent_manager.wait(worker_ids, timeout_s=timeout_s)
+
+    def message_subagent(self, worker_id: str, prompt: str) -> dict:
+        state = self.subagent_manager.get_state(worker_id)
+        if state is None:
+            return {"ok": False, "error": "unknown_worker", "worker_id": worker_id}
+        if str(state.status) in {"cancelled", "timed_out", "closed"}:
+            return {"ok": False, "error": "worker_not_interactable", "worker_id": worker_id, "status": state.status}
+        task = SubAgentTask(
+            task_id=str(state.task_id),
+            title=str(state.title or "task"),
+            payload={"prompt": str(prompt or ""), "worker_id": worker_id},
+            batch_id=str(state.batch_id or ""),
+        )
+        result = self._execute_child_subagent_task(task)
+        self.subagent_manager.record_interaction(worker_id, prompt, result if isinstance(result, dict) else {})
+        return {"ok": True, "worker_id": worker_id, "status": result.get("status", "unknown"), "result": result}
+
+    def complete_subagent(self, worker_id: str, summary: str = "") -> bool:
+        state = self.subagent_manager.get_state(worker_id)
+        if state is None:
+            return False
+        self.subagent_manager.set_status(worker_id, "closed", summary=summary or state.summary)
+        return True
 
     def cancel_subagents(self, worker_ids: list[str] | None = None, *, batch_id: str | None = None) -> int:
         return self.subagent_manager.cancel(worker_ids, batch_id=batch_id)

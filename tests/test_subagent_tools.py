@@ -165,3 +165,35 @@ def test_spawn_sub_agents_auto_schedule_and_chunk_expansion(monkeypatch):
     assert len(captured["tasks"]) == 4
     # Critical/p0 task should be ordered first when auto scheduling is enabled.
     assert captured["tasks"][0]["title"] == "critical fix"
+
+
+def test_message_and_complete_sub_agent_tools():
+    sm = SessionManager(session_name="subagent-interactive")
+    session = Session(DummyProvider("dummy"), False, "system", sm)
+    created = session.submit_subagent_task(title="interactive", prompt="initial")
+    session.wait_for_subagents([created], timeout_s=2)
+
+    raw_msg = execute_tool(
+        "message_sub_agent",
+        {"worker_id": created, "prompt": "follow up and refine"},
+        session.folder_context,
+        None,
+        session.variables,
+        invocation_source="session",
+        session=session,
+    )
+    msg_payload = json.loads(raw_msg)
+    assert msg_payload.get("ok") is True
+    assert msg_payload.get("data", {}).get("worker_id") == created
+
+    raw_complete = execute_tool(
+        "complete_sub_agent",
+        {"worker_id": created, "summary": "parent accepted"},
+        session.folder_context,
+        None,
+        session.variables,
+        invocation_source="session",
+        session=session,
+    )
+    complete_payload = json.loads(raw_complete)
+    assert complete_payload.get("ok") is True

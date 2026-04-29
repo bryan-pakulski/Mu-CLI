@@ -130,6 +130,49 @@ class SubAgentManager:
                 self._event(worker_id=worker_id, kind="finished", payload={"status": status, "error": error})
         self._schedule()
 
+    def get_state(self, worker_id: str) -> SubAgentState | None:
+        with self._lock:
+            return self._states.get(worker_id)
+
+    def set_status(self, worker_id: str, status: str, *, summary: str | None = None):
+        with self._lock:
+            state = self._states.get(worker_id)
+            if not state:
+                return
+            state.status = str(status or state.status)
+            state.updated_at = time.time()
+            if summary is not None:
+                state.summary = str(summary)
+            if state.status in {"completed", "failed", "cancelled", "timed_out", "closed"}:
+                state.ended_at = time.time()
+            self._event(worker_id=worker_id, kind="status", payload={"status": state.status})
+
+    def record_interaction(self, worker_id: str, prompt: str, result: dict[str, Any]):
+        with self._lock:
+            state = self._states.get(worker_id)
+            if not state:
+                return
+            state.updated_at = time.time()
+            status = str(result.get("status", "") or "")
+            if status:
+                state.status = status
+            summary = str(result.get("summary", "") or "")
+            if summary:
+                state.summary = summary
+            artifacts = result.get("artifacts")
+            if isinstance(artifacts, list):
+                merged = list(state.artifacts or [])
+                merged.extend(artifacts)
+                state.artifacts = merged[-40:]
+            telemetry = result.get("telemetry")
+            if isinstance(telemetry, dict):
+                state.telemetry = telemetry
+            self._event(
+                worker_id=worker_id,
+                kind="interaction",
+                payload={"prompt": str(prompt or "")[:200], "status": state.status},
+            )
+
     def cancel(self, worker_ids: list[str] | None = None, *, batch_id: str | None = None) -> int:
         targets = set(worker_ids or [])
         cancelled = 0

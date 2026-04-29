@@ -1266,6 +1266,8 @@ TOOL_POLICY_DOMAIN = {
     "retry_sub_agents": "orchestration",
     "get_subagent_timeline": "orchestration",
     "integrate_sub_agent_outputs": "orchestration",
+    "message_sub_agent": "orchestration",
+    "complete_sub_agent": "orchestration",
 }
 
 TOOL_DESCRIPTOR_OVERRIDES = {
@@ -1588,6 +1590,18 @@ TOOLS.extend([
         name="integrate_sub_agent_outputs",
         description="Build deterministic merged integration summary from completed sub-agent outputs.",
         parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="message_sub_agent",
+        description="Send a follow-up message to an existing sub-agent worker.",
+        parameters={"type": "object", "properties": {"worker_id": {"type": "string"}, "prompt": {"type": "string"}}, "required": ["worker_id", "prompt"]},
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="complete_sub_agent",
+        description="Mark a sub-agent as parent-complete and close it.",
+        parameters={"type": "object", "properties": {"worker_id": {"type": "string"}, "summary": {"type": "string"}}, "required": ["worker_id"]},
         requires_approval=False,
     ),
 ])
@@ -4979,6 +4993,30 @@ def _handle_integrate_sub_agent_outputs(args: dict, context: ToolExecutionContex
     return json.dumps(_build_tool_envelope(tool_name="integrate_sub_agent_outputs", ok=True, message="Integrated sub-agent outputs.", data=merged), indent=2)
 
 
+def _handle_message_sub_agent(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="message_sub_agent", ok=False, error_code="session_required", message="message_sub_agent requires a live session context."), indent=2)
+    worker_id = str(args.get("worker_id", "") or "").strip()
+    prompt = str(args.get("prompt", "") or "").strip()
+    if not worker_id or not prompt:
+        return json.dumps(_build_tool_envelope(tool_name="message_sub_agent", ok=False, error_code="invalid_args", message="worker_id and prompt are required."), indent=2)
+    result = session.message_subagent(worker_id, prompt)
+    return json.dumps(_build_tool_envelope(tool_name="message_sub_agent", ok=bool(result.get("ok")), message="Sent message to sub-agent.", error_code=result.get("error"), data=result), indent=2)
+
+
+def _handle_complete_sub_agent(args: dict, context: ToolExecutionContext) -> str:
+    session = context.session
+    if session is None:
+        return json.dumps(_build_tool_envelope(tool_name="complete_sub_agent", ok=False, error_code="session_required", message="complete_sub_agent requires a live session context."), indent=2)
+    worker_id = str(args.get("worker_id", "") or "").strip()
+    summary = str(args.get("summary", "") or "")
+    if not worker_id:
+        return json.dumps(_build_tool_envelope(tool_name="complete_sub_agent", ok=False, error_code="invalid_args", message="worker_id is required."), indent=2)
+    ok = bool(session.complete_subagent(worker_id, summary=summary))
+    return json.dumps(_build_tool_envelope(tool_name="complete_sub_agent", ok=ok, message="Sub-agent closed by parent." if ok else "Sub-agent not found.", data={"worker_id": worker_id}), indent=2)
+
+
 TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
     "flush": _legacy_handler(_handle_flush),
@@ -5060,6 +5098,8 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "retry_sub_agents": _handle_retry_sub_agents,
     "get_subagent_timeline": _handle_get_subagent_timeline,
     "integrate_sub_agent_outputs": _handle_integrate_sub_agent_outputs,
+    "message_sub_agent": _handle_message_sub_agent,
+    "complete_sub_agent": _handle_complete_sub_agent,
 }
 
 

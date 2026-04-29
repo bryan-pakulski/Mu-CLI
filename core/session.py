@@ -1058,6 +1058,24 @@ class Session:
                 passed = False
         return {"passed": passed, "checks": checks}
 
+    def _analyze_patch_artifact_conflicts(self, artifacts: list[dict]) -> dict:
+        file_to_workers: dict[str, set[str]] = {}
+        for art in artifacts:
+            if not isinstance(art, dict) or art.get("kind") != "patch":
+                continue
+            worker_id = str(art.get("worker_id", "") or "")
+            content = str(art.get("content", "") or "")
+            for line in content.splitlines():
+                if line.startswith("+++ ") or line.startswith("--- "):
+                    path = line[4:].strip()
+                    if path and path != "/dev/null":
+                        file_to_workers.setdefault(path, set()).add(worker_id)
+        conflicts = []
+        for path, workers in file_to_workers.items():
+            if len(workers) > 1:
+                conflicts.append({"file": path, "workers": sorted(w for w in workers if w)})
+        return {"conflicts": conflicts, "has_conflicts": bool(conflicts)}
+
     def merge_subagent_outputs(self, *, apply_patch_artifacts: bool = False, require_verification: bool = True) -> dict:
         outputs = self.collect_subagent_outputs()
         merged_text_blocks = []
@@ -1070,7 +1088,9 @@ class Session:
                 merged_text_blocks.append(f"[{item.get('worker_id')}] {summary}")
             for art in item.get("artifacts", []):
                 if isinstance(art, dict):
-                    artifacts.append(art)
+                    normalized_artifact = dict(art)
+                    normalized_artifact.setdefault("worker_id", item.get("worker_id"))
+                    artifacts.append(normalized_artifact)
                     if apply_patch_artifacts and art.get("kind") == "patch" and isinstance(art.get("content"), str):
                         result = self._execute_tool_with_memory("apply_diff", {"diff": art.get("content")})
                         text = str(result or "")
@@ -1079,8 +1099,9 @@ class Session:
                         else:
                             applied.append({"worker_id": item.get("worker_id"), "status": "applied"})
         merged_text = "\n".join(sorted(merged_text_blocks))
+        conflict_report = self._analyze_patch_artifact_conflicts(artifacts)
         verification = self._run_verification_gates() if require_verification else {"passed": True, "checks": []}
-        accepted = verification.get("passed", False) and not apply_errors
+        accepted = verification.get("passed", False) and not apply_errors and not conflict_report.get("has_conflicts", False)
         return {
             "worker_count": len(outputs),
             "merged_summary": merged_text,
@@ -1088,6 +1109,7 @@ class Session:
             "applied": applied,
             "apply_errors": apply_errors,
             "verification": verification,
+            "conflicts": conflict_report.get("conflicts", []),
             "accepted": accepted,
         }
 

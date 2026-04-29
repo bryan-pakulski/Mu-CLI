@@ -133,7 +133,7 @@ TOOLS = [
     ToolDefinition(
         name="get_workspace_details",
         description="Returns a string of the current workspace's path, files, and folders. Use this to discover the structure of the attached project.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -236,7 +236,7 @@ TOOLS = [
     ToolDefinition(
         name="get_current_time",
         description="Returns the current time in ISO format.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -344,7 +344,7 @@ TOOLS = [
     ToolDefinition(
         name="list_agent_tasks",
         description="Lists available tasks in Makefile.agents and their descriptions. Use this to discover automation scripts and when to run them.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -394,7 +394,7 @@ TOOLS = [
     ToolDefinition(
         name="git_status",
         description="Shows the working tree status.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -523,7 +523,7 @@ TOOLS = [
     ToolDefinition(
         name="git_init",
         description="Initialize a new git repository in the workspace.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=True,
     ),
     ToolDefinition(
@@ -547,7 +547,7 @@ TOOLS = [
     ToolDefinition(
         name="git_branch",
         description="List, create, or delete branches.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -729,7 +729,7 @@ TOOLS = [
     ToolDefinition(
         name="flush",
         description="Flushes the collation buffer and returns all the gathered context to the model. Use this when you have finished gathering all the necessary information and are ready to process it.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -851,7 +851,7 @@ TOOLS = [
     ToolDefinition(
         name="clear_scratchpad",
         description="Clears the current turn scratchpad.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -1118,13 +1118,13 @@ TOOLS = [
     ToolDefinition(
         name="get_current_task",
         description="Retrieves the currently active task in the feature plan.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
         name="get_tasks",
         description="Retrieves all tasks in the feature plan (previous, current, and upcoming).",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -1160,7 +1160,7 @@ TOOLS = [
     ToolDefinition(
         name="clear_context",
         description="Clears the current conversation history to free up space, usually done between tasks. System instructions and feature state are preserved.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=True,
     ),
     ToolDefinition(
@@ -1238,6 +1238,17 @@ def _default_server_policy(tool_name: str) -> str:
 
 
 TOOL_POLICY_DOMAIN = {
+    "bash": "shell",
+    "run_agent_task": "shell",
+    "git_merge_request": "network",
+    "read_document": "filesystem_read",
+    "read_file": "filesystem_read",
+    "list_dir": "filesystem_read",
+    "get_chunk": "filesystem_read",
+    "git_status": "vcs_read",
+    "git_diff": "vcs_read",
+    "git_log": "vcs_read",
+    "git_branch": "vcs_read",
     "write_file": "filesystem_mutation",
     "apply_diff": "filesystem_mutation",
     "search_and_replace_file": "filesystem_mutation",
@@ -1546,7 +1557,7 @@ TOOLS.extend([
     ToolDefinition(
         name="list_sub_agents",
         description="List live and completed sub-agent workers.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
     ToolDefinition(
@@ -1576,7 +1587,7 @@ TOOLS.extend([
     ToolDefinition(
         name="integrate_sub_agent_outputs",
         description="Build deterministic merged integration summary from completed sub-agent outputs.",
-        parameters={"type": "object", "properties": {"apply_patch_artifacts": {"type": "boolean", "default": False}, "require_verification": {"type": "boolean", "default": True}}},
+        parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
 ])
@@ -5030,7 +5041,7 @@ def execute_tool(
     policy_profile = str((variables or {}).get("subagent_policy_profile", "") or "").strip().lower()
     if invocation_source == "subagent_child" and policy_profile in {"child", "subagent_child"}:
         allow = set(str((variables or {}).get("subagent_child_allowed_domains", "read,memory") or "read,memory").split(","))
-        denied_domains = {"orchestration", "filesystem_mutation", "vcs_mutation", "network"} - {x.strip() for x in allow if x.strip()}
+        denied_domains = {"orchestration", "filesystem_mutation", "vcs_mutation", "network", "shell"} - {x.strip() for x in allow if x.strip()}
         if policy_domain in denied_domains:
             return json.dumps(
                 _build_tool_envelope(

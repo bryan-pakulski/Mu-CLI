@@ -78,6 +78,18 @@ def test_chat_panel_renders_tool_activity_in_timeline():
     assert "tool_result:spawn_sub_agents" in rendered
 
 
+def test_chat_panel_filter_query_limits_visible_entries():
+    payload = {
+        "history": [
+            {"role": "user", "parts": [{"type": "text", "text": "first"}]},
+            {"role": "assistant", "parts": [{"type": "text", "text": "second"}]},
+        ]
+    }
+    rendered = str(_chat_panel(payload, filter_query="second").renderable)
+    assert "second" in rendered
+    assert "first" not in rendered
+
+
 def test_history_panel_shows_subagent_activity():
     plan = FeaturePlan(
         feature_id="f1",

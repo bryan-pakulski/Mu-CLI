@@ -113,6 +113,23 @@ def _tool_usage_counts(payload: dict) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
 
+def _extract_message_text(msg: dict) -> str:
+    snippets: list[str] = []
+    if not isinstance(msg, dict):
+        return ""
+    for part in msg.get("parts", []) if isinstance(msg.get("parts"), list) else []:
+        if not isinstance(part, dict):
+            continue
+        ptype = str(part.get("type", ""))
+        if ptype == "text":
+            snippets.append(str(part.get("text", "")))
+        elif ptype == "tool_call":
+            snippets.append(f"tool_call:{part.get('tool_name', '')} args={part.get('tool_args', {})}")
+        elif ptype == "tool_result":
+            snippets.append(f"tool_result:{part.get('tool_name', '')} result={part.get('tool_result', '')}")
+    return " ".join(snippets).strip()
+
+
 def _status_color(status: str) -> str:
     normalized = normalize_task_status(status)
     if normalized in {STATUS_COMPLETED, STATUS_ARCHIVED}:
@@ -322,10 +339,15 @@ def _overview_panel(plan: FeaturePlan, payload: dict) -> Panel:
     return Panel("\n".join(lines), title="Overview", border_style="green")
 
 
-def _heatmap_panel(payload: dict) -> Panel:
+def _heatmap_panel(payload: dict, filter_query: str = "") -> Panel:
     usage = _tool_usage_counts(payload)
     if not usage:
         return Panel("No tool calls in history.", title="Tool Heatmap", border_style="yellow")
+    q = str(filter_query or "").strip().lower()
+    if q:
+        usage = [(name, count) for name, count in usage if q in name.lower()]
+        if not usage:
+            return Panel("No tool calls match filter.", title="Tool Heatmap", border_style="yellow")
     max_count = max(count for _, count in usage)
     lines = []
     for name, count in usage[:28]:
@@ -333,10 +355,12 @@ def _heatmap_panel(payload: dict) -> Panel:
         filled = int(round((count / max_count) * width))
         bar = "█" * filled + "░" * (width - filled)
         lines.append(f"{name:<22} {count:>4} {bar}")
+    lines.append("")
+    lines.append("filter tools by typing /<tool-name> while on this screen")
     return Panel("\n".join(lines), title="Tool Heatmap", border_style="magenta")
 
 
-def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0) -> Panel:
+def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0, filter_query: str = "") -> Panel:
     sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
     running = int(sub_counts.get("running", 0) or 0)
     queued = int(sub_counts.get("queued", 0) or 0)
@@ -353,6 +377,8 @@ def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0) -> Panel:
     lines += ["", "Conversation (recent):"]
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
     history_window = history[max(0, len(history) - 200):]
+    if filter_query:
+        history_window = [m for m in history_window if filter_query.lower() in _extract_message_text(m).lower() or filter_query.lower() in str(m.get("role", "")).lower()]
     start = max(0, min(offset, max(0, len(history_window) - 20)))
     for msg in history_window[start:start + 20]:
         if not isinstance(msg, dict):
@@ -377,10 +403,11 @@ def _history_panel(plan: FeaturePlan, payload: dict, offset: int = 0) -> Panel:
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
 
     lines += ["", f"window offset: {start} / {max(0, len(history_window) - 20)}"]
+    lines.append("jump: J/K=±10 lines, j/k=±1 line")
     return Panel("\n".join(lines), title="History Browser", border_style="bright_blue")
 
 
-def _chat_panel(payload: dict, offset: int = 0) -> Panel:
+def _chat_panel(payload: dict, offset: int = 0, filter_query: str = "") -> Panel:
     history = payload.get("history", []) if isinstance(payload.get("history"), list) else []
     sub_counts = payload.get("subagent_counts", {}) if isinstance(payload.get("subagent_counts"), dict) else {}
     lines = [
@@ -390,6 +417,8 @@ def _chat_panel(payload: dict, offset: int = 0) -> Panel:
         "",
     ]
     history_window = history[max(0, len(history) - 300):]
+    if filter_query:
+        history_window = [m for m in history_window if filter_query.lower() in _extract_message_text(m).lower() or filter_query.lower() in str(m.get("role", "")).lower()]
     start = max(0, min(offset, max(0, len(history_window) - 30)))
     for idx, msg in enumerate(history_window[start:start + 30], start=max(0, len(history) - len(history_window)) + start + 1):
         if not isinstance(msg, dict):
@@ -421,6 +450,7 @@ def _chat_panel(payload: dict, offset: int = 0) -> Panel:
             ts = datetime.fromtimestamp(float(event.get("ts", 0) or 0)).strftime("%H:%M:%S")
             lines.append(f"  [{ts}] {event.get('worker_id', '-')} {event.get('kind', 'event')}")
     lines += ["", f"window offset: {start} / {max(0, len(history_window) - 30)}"]
+    lines.append("jump: J/K=±10 lines, j/k=±1 line")
     return Panel("\n".join(lines), title="Chat Timeline", border_style="green")
 
 
@@ -668,11 +698,11 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
         elif state.screen == "features":
             body = _features_view(payload, state)
         elif state.screen == "chat":
-            body = _chat_panel(payload, offset=state.detail_offset)
+            body = _chat_panel(payload, offset=state.detail_offset, filter_query=state.search_query)
         elif state.screen == "research":
             body = _research_panel(payload)
         elif state.screen == "tools":
-            body = _heatmap_panel(payload)
+            body = _heatmap_panel(payload, filter_query=state.search_query)
         elif state.screen == "subagents":
             body = _subagents_panel(payload)
         elif state.screen == "variables":
@@ -697,9 +727,9 @@ def _render_gui(session_root: str, state: GuiState) -> Group:
             elif state.screen == "overview":
                 body = _overview_panel(plan, payload)
             elif state.screen == "heatmap":
-                body = _heatmap_panel(payload)
+                body = _heatmap_panel(payload, filter_query=state.search_query)
             else:
-                body = _history_panel(plan, payload, offset=state.detail_offset)
+                body = _history_panel(plan, payload, offset=state.detail_offset, filter_query=state.search_query)
 
     if state.confirm_quit:
         body = Group(body, _confirm_modal(state))
@@ -872,6 +902,12 @@ def _handle_key(state: GuiState, key: str, session_root: str) -> GuiState:
             return state
         if is_up:
             state.detail_offset = max(0, state.detail_offset - 1)
+            return state
+        if key == "J":
+            state.detail_offset = min(5000, state.detail_offset + 10)
+            return state
+        if key == "K":
+            state.detail_offset = max(0, state.detail_offset - 10)
             return state
 
     if state.screen == "features":

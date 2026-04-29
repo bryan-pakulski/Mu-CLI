@@ -35,7 +35,9 @@ from core.feature_mode import (
 )
 from core.tools import execute_tool
 from ui.rich_ui import RichUI
+from ui.gui_tui import run_gui_mode
 from utils.config import AGENT_MODE_METADATA
+from utils.config import SESSION_DIR
 from utils.runtime_metrics import collect_context_layers
 
 console = Console()
@@ -65,6 +67,40 @@ def print_mode_overview(session):
 
     console.print(table)
     console.print(f"[dim]Current mode: {current_mode}[/dim]")
+
+
+def _research_tool_names():
+    return [
+        "web_search",
+        "url_grounding",
+        "arxiv_search",
+        "doi_resolve",
+        "reddit_search",
+        "stackoverflow_search",
+        "hackernews_search",
+        "read_document",
+    ]
+
+
+def _extract_recent_sources(history, limit=12):
+    urls = []
+    seen = set()
+    pattern = re.compile(r"https?://[^\s)\]>\"']+")
+    for message in reversed(history):
+        if not isinstance(message, dict):
+            continue
+        for part in message.get("parts", []) if isinstance(message.get("parts"), list) else []:
+            if not isinstance(part, dict):
+                continue
+            text_blob = json.dumps(part, ensure_ascii=False, default=str)
+            for match in pattern.findall(text_blob):
+                if match in seen:
+                    continue
+                seen.add(match)
+                urls.append(match)
+                if len(urls) >= limit:
+                    return urls
+    return urls
 
 
 def _slugify_feature_id(value):
@@ -154,6 +190,12 @@ def get_feature_prompt_context(session):
     tasks = plan.get("phases", [])
     overall_total = max(1, len(tasks))
     overall_done = sum(1 for task in tasks if task.get("status") == "completed")
+    all_completed = bool(tasks) and (
+        bool(plan.get("phases_completed"))
+        or bool(plan.get("tasks_completed"))
+        or overall_done >= len(tasks)
+        or str(feature_state.get("status", "")).strip().lower() == "completed"
+    )
 
     next_task = plan.get("next_task") or plan.get("next_phase")
     active_task = None
@@ -172,7 +214,11 @@ def get_feature_prompt_context(session):
     phase_done = 0
     phase_total = 1
     task_title = "n/a"
-    if isinstance(active_task, dict):
+    if all_completed:
+        phase_done = 1
+        phase_total = 1
+        task_title = "completed"
+    elif isinstance(active_task, dict):
         task_title = str(active_task.get("title", "") or "").strip() or "n/a"
         counts = active_task.get("task_counts", {}) or {}
         phase_done = int(counts.get("completed", 0) or 0)
@@ -493,11 +539,17 @@ def print_help():
         "/features",
         "Manage per-session feature plans and switch the active feature",
     )
+    table.add_row(
+        "/research <status|sources|query>",
+        "",
+        "Research workflow commands (citation-first prompts, source review)",
+    )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
     table.add_row(
         "/update", "", "Attempt to update μCLI from the configured git remote"
     )
     table.add_row("/quit", "/q", "Exit")
+    table.add_row("/continue", "", "Resume last paused execution after Ctrl+C")
     table.add_row(
         "/stats",
         "",
@@ -959,6 +1011,26 @@ def handle_command(session, user_input, allow_prompt=True):
             session, cmd, message="Goodbye!", data={"exit": True}
         )
 
+    if cmd == "/continue":
+        paused_text = str(getattr(session, "paused_execution_text", "") or "").strip()
+        if not paused_text:
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=False,
+                message="No paused execution to continue.",
+            )
+        if allow_prompt:
+            console.print("[dim]Resuming paused execution...[/dim]")
+        send_result = session.send_message(paused_text)
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=bool(send_result.get("ok", True)),
+            message="Resumed paused execution.",
+            data={"resumed_text": paused_text, "send_result": send_result},
+        )
+
     if cmd in ["/help", "/h"]:
         if allow_prompt:
             print_help()
@@ -1397,6 +1469,61 @@ def handle_command(session, user_input, allow_prompt=True):
                 )
         return serialize_command_result(
             session, cmd, data={"variables": dict(session.variables)}
+        )
+
+    if cmd == "/research":
+        research_query = (arg or "").strip()
+        research_cmd = research_query.lower()
+
+        if research_cmd in {"status", ""}:
+            active_mode = str(session.variables.get("agent_mode", "default"))
+            sources = _extract_recent_sources(session.session_manager.history, limit=6)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Research status snapshot.",
+                data={
+                    "current_mode": active_mode,
+                    "available_tools": _research_tool_names(),
+                    "recent_sources": sources,
+                    "citation_policy": "When researching, include source URLs and cite claims.",
+                },
+            )
+
+        if research_cmd == "sources":
+            sources = _extract_recent_sources(session.session_manager.history, limit=20)
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Collected recent research sources.",
+                data={"sources": sources},
+            )
+
+        if not research_query:
+            return serialize_command_result(
+                session,
+                cmd,
+                ok=False,
+                message="Usage: /research <status|sources|query>",
+            )
+        session.variables["agent_mode"] = "research"
+        session.session_manager.save_history(session.folder_context)
+        refresh_memory_hud(session, ui)
+        research_prompt = (
+            "Research request:\n"
+            f"{research_query}\n\n"
+            "Requirements:\n"
+            "- Prefer primary/official sources when possible.\n"
+            "- Include explicit source URLs.\n"
+            "- Clearly separate facts vs inference.\n"
+        )
+        send_result = session.send_message(research_prompt)
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=bool(send_result.get("ok", True)),
+            message="Executed research query.",
+            data={"query": research_query, "send_result": send_result},
         )
 
     if cmd == "/mode":
@@ -2292,7 +2419,7 @@ def main():
     parser.add_argument(
         "--server",
         action="store_true",
-        help="Run μCLI in HTTP server mode for GUI/API clients.",
+        help="Run μCLI in HTTP server mode for API clients.",
     )
     parser.add_argument(
         "--host",
@@ -2309,6 +2436,17 @@ def main():
         "--yolo",
         action="store_true",
         help="Enable YOLO mode at startup.",
+    )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch full-screen terminal GUI.",
+    )
+    parser.add_argument(
+        "--gui-refresh",
+        type=float,
+        default=1.0,
+        help="Refresh interval (seconds) for --gui mode.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
@@ -2329,10 +2467,14 @@ def main():
     ui = HeadlessUI(auto_approve=args.yolo) if args.server else RichUI()
 
     try:
-        session = build_session(args, ui, allow_prompt=not args.server)
+        session = build_session(args, ui, allow_prompt=not (args.server or args.gui))
     except Exception as exc:
         console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
         sys.exit(1)
+
+    if args.gui:
+        run_gui_mode(SESSION_DIR, refresh_seconds=args.gui_refresh)
+        return
 
     if args.server:
         serve(session, args.host, args.port, handle_command)
@@ -2388,7 +2530,11 @@ def main():
                     break
                 continue
 
-            session.send_message(user_input)
+            send_result = session.send_message(user_input)
+            if send_result.get("status") == "interrupted":
+                console.print(
+                    "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
+                )
             refresh_memory_hud(session, ui)
 
         except KeyboardInterrupt:

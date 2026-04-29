@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import datetime
 import os
 import select
 import sys
@@ -25,6 +26,8 @@ class RichUI:
         self.input_handler = InputHandler()
 
     def render_message(self, role, content, model_name=None):
+        local_now = datetime.now().astimezone()
+        ts = local_now.strftime(f"%H:%M:%S {local_now.tzname() or 'local'}")
         if role == "user":
             self.console.print(
                 Panel(
@@ -37,7 +40,9 @@ class RichUI:
             )
         else:
             if model_name:
-                self.console.print(f"\nAssistant ({model_name}):")
+                self.console.print(f"\nAssistant ({model_name}) [{ts}]:")
+            else:
+                self.console.print(f"\nAssistant [{ts}]:")
             render_response(content)
 
     def get_input(

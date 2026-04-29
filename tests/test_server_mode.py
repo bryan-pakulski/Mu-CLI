@@ -140,6 +140,32 @@ def test_handle_command_updates_variables_non_interactively():
     assert result["data"]["key"] == "yolo"
 
 
+def test_continue_command_resumes_paused_execution(monkeypatch):
+    session = build_test_session()
+    session.paused_execution_text = "resume this task"
+
+    def _fake_send_message(text):
+        assert text == "resume this task"
+        return {"ok": True, "status": "completed", "assistant_text": "done"}
+
+    monkeypatch.setattr(session, "send_message", _fake_send_message)
+    result = handle_command(session, "/continue", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["message"] == "Resumed paused execution."
+    assert result["data"]["resumed_text"] == "resume this task"
+
+
+def test_continue_command_errors_when_not_paused():
+    session = build_test_session()
+    session.paused_execution_text = None
+
+    result = handle_command(session, "/continue", allow_prompt=False)
+
+    assert result["ok"] is False
+    assert result["message"] == "No paused execution to continue."
+
+
 def test_memory_buffers_payload_includes_context_layers():
     session = build_test_session()
     payload = build_memory_buffers_payload(session)
@@ -181,6 +207,52 @@ def test_mode_command_without_args_lists_available_modes():
         result["data"]["available_modes"]["feature"]["documentation"]
         == "documentation/feature_plan_engine.md"
     )
+
+
+def test_research_status_returns_tools_and_mode_snapshot():
+    session = build_test_session()
+    session.variables["agent_mode"] = "research"
+
+    result = handle_command(session, "/research status", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["current_mode"] == "research"
+    assert "web_search" in result["data"]["available_tools"]
+    assert "citation_policy" in result["data"]
+
+
+def test_research_sources_collects_recent_urls():
+    session = build_test_session()
+    session.session_manager.history.append(
+        {
+            "role": "assistant",
+            "parts": [
+                {"type": "text", "text": "Primary source: https://example.com/spec"},
+                {"type": "text", "text": "Secondary: https://docs.example.com/guide"},
+            ],
+        }
+    )
+
+    result = handle_command(session, "/research sources", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert "https://example.com/spec" in result["data"]["sources"]
+    assert "https://docs.example.com/guide" in result["data"]["sources"]
+
+
+def test_research_query_sets_mode_and_executes_prompt():
+    session = build_test_session()
+
+    result = handle_command(
+        session,
+        "/research compare sqlite vs postgres for embedded analytics",
+        allow_prompt=False,
+    )
+
+    assert result["ok"] is True
+    assert session.variables["agent_mode"] == "research"
+    assert result["data"]["query"] == "compare sqlite vs postgres for embedded analytics"
+    assert result["data"]["send_result"]["assistant_text"].startswith("echo: Research request:")
 
 
 def test_stats_command_returns_session_snapshot():
@@ -574,6 +646,35 @@ def test_get_feature_prompt_context_returns_task_and_progress():
     assert context["phase_total"] == 4
     assert context["overall_done"] == 1
     assert context["overall_total"] == 2
+
+
+def test_get_feature_prompt_context_reports_completed_progress():
+    session = build_test_session()
+    session.session_manager.set_feature_state(
+        {
+            "status": "completed",
+            "feature_plan": {
+                "phases_completed": True,
+                "phases": [
+                    {
+                        "number": 1,
+                        "title": "Implement fixtures/sipp.py",
+                        "status": "completed",
+                        "task_counts": {"completed": 2, "in_progress": 0, "not_started": 0},
+                    }
+                ],
+            },
+        }
+    )
+
+    context = get_feature_prompt_context(session)
+
+    assert context["status"] == "awaiting_approval"
+    assert context["task"] == "completed"
+    assert context["phase_done"] == 1
+    assert context["phase_total"] == 1
+    assert context["overall_done"] == 1
+    assert context["overall_total"] == 1
 
 
 def test_build_state_payload_includes_workspace_and_tools(tmp_path):

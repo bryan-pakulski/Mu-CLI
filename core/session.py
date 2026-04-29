@@ -7,6 +7,7 @@ import re
 import random
 import shutil
 import traceback
+import hashlib
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
@@ -403,9 +404,12 @@ class SessionManager:
 
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
         if isinstance(state, dict):
-            # Re-derive status from feature_plan if present
+            # Re-derive status from feature_plan when caller did not provide
+            # an explicit status override.
             feature_plan = state.get("feature_plan")
-            if isinstance(feature_plan, dict):
+            explicit_status = str(state.get("status", "") or "").strip()
+            should_derive = (not explicit_status) or explicit_status == "completed"
+            if isinstance(feature_plan, dict) and should_derive:
                 derived = derive_feature_state_status(feature_plan)
                 state = {**state, "status": derived}
         self.feature_state = deepcopy(state) if isinstance(state, dict) else None
@@ -817,6 +821,7 @@ class Session:
         self.disabled_tools = []  # list of tool names strings
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
+        self.paused_execution_text: str | None = None
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -1824,7 +1829,7 @@ class Session:
                 "An error occurred during the LLM call. Would you like to retry?",
                 default=True,
             )
-        # No CLI UI available (GUI/server mode) — auto-retry
+        # No CLI UI available (server mode) — auto-retry
         return True
 
     def _provider_error_recovery_choice(self) -> str:
@@ -1835,16 +1840,16 @@ class Session:
                 default="retry",
             )
         if self._confirm_retry():
-            # 4xx errors (client errors) mean we sent something wrong → need rollback + retry
-            # 5xx/timeout (server errors) mean remote side failed → just retry without rollback
             error_msg = str(getattr(self, '_last_provider_error', '') or '').lower()
-            is_4xx = any(str(c) in error_msg for c in range(400, 500))
-            if 'status_code' in error_msg:
-                import re
-                m = re.search(r'status_code[=: ]+(\d+)', error_msg)
-                if m and 400 <= int(m.group(1)) < 500:
-                    is_4xx = True
-            return "rollback_retry" if is_4xx else "retry"
+            status = self._extract_http_status_code(error_msg)
+            is_4xx = bool(status is not None and 400 <= status < 500)
+            if is_4xx:
+                return "rollback_retry"
+            # In non-interactive flows, avoid infinite retry loops for errors that
+            # are not classified as transient/retryable.
+            if not self._is_transient_provider_error(RuntimeError(error_msg)):
+                return "abort"
+            return "retry"
         return "abort"
 
     @staticmethod
@@ -1876,18 +1881,108 @@ class Session:
         )
         if any(marker in message for marker in transient_markers):
             return True
-        # Treat most HTTP 4xx/5xx from remote providers as transient (retryable)
-        # so the agent auto-recovers without prompting the user in GUI mode.
-        for code in range(400, 600):
-            if str(code) in message:
-                return True
-        # Also catch raw httpx/httpcore error patterns
-        if "status_code" in message:
-            import re
-            m = re.search(r"status_code[=: ]+(\d+)", message)
-            if m and 400 <= int(m.group(1)) < 600:
-                return True
+        status = Session._extract_http_status_code(message)
+        if status is not None:
+            return Session._is_retryable_http_status(status)
         return False
+
+    @staticmethod
+    def _extract_http_status_code(message: str) -> int | None:
+        patterns = (
+            r"http error[: ]+(\d{3})",
+            r"status_code[=: ]+(\d{3})",
+            r"\b(?:http\s*)?(\d{3})\b",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, message)
+            if not match:
+                continue
+            try:
+                code = int(match.group(1))
+                if 100 <= code <= 599:
+                    return code
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    def _is_retryable_http_status(status_code: int) -> bool:
+        # Retry only commonly transient HTTP errors.
+        return status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+
+    @staticmethod
+    def _coarse_tool_args(tool_args):
+        """Build a stable, coarse-grained representation of tool args for loop pattern checks."""
+        if isinstance(tool_args, dict):
+            coarse = {}
+            for key in sorted(tool_args.keys()):
+                val = tool_args.get(key)
+                if isinstance(val, str):
+                    coarse[key] = f"str:{hashlib.sha1(val.encode('utf-8')).hexdigest()[:10]}"
+                elif isinstance(val, (int, float, bool)) or val is None:
+                    coarse[key] = val
+                elif isinstance(val, list):
+                    coarse[key] = [Session._coarse_tool_args(item) for item in val[:8]]
+                elif isinstance(val, dict):
+                    coarse[key] = Session._coarse_tool_args(val)
+                else:
+                    coarse[key] = type(val).__name__
+            return coarse
+        if isinstance(tool_args, list):
+            return [Session._coarse_tool_args(item) for item in tool_args[:8]]
+        if isinstance(tool_args, str):
+            return f"str:{hashlib.sha1(tool_args.encode('utf-8')).hexdigest()[:10]}"
+        if isinstance(tool_args, (int, float, bool)) or tool_args is None:
+            return tool_args
+        return type(tool_args).__name__
+
+    @staticmethod
+    def _tool_call_fingerprint(tool_name: str, tool_args, *, pattern_only: bool = False) -> str:
+        name = str(tool_name or "").strip().lower() or "tool"
+        payload_source = (
+            Session._coarse_tool_args(tool_args or {}) if pattern_only else (tool_args or {})
+        )
+        try:
+            payload = json.dumps(
+                payload_source,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            payload = str(payload_source)
+        digest = hashlib.sha1(f"{name}|{payload}".encode("utf-8")).hexdigest()[:12]
+        return f"{name}:{digest}" if not pattern_only else f"{name}~{digest}"
+
+    @staticmethod
+    def _track_tool_for_loop_detection(tool_name: str, tool_args) -> bool:
+        """Ignore bookkeeping tools that can repeat during normal feature progression."""
+        name = str(tool_name or "").strip().lower()
+        return name not in {
+            "create_feature",
+            "create_phases",
+            "create_task",
+            "update_task",
+            "update_phases",
+            "review_task",
+            "review_all_completed_tasks",
+            "review_completed_tasks",
+            "update_task_status",
+            "get_execution_state",
+            "get_tasks",
+            "get_current_task",
+        }
+
+    @staticmethod
+    def _is_repeated_tool_sequence(
+        sequence_history: list[str], repeat_threshold: int = 3
+    ) -> bool:
+        if len(sequence_history) < repeat_threshold:
+            return False
+        tail = sequence_history[-repeat_threshold:]
+        if not all(tail):
+            return False
+        return len(set(tail)) == 1
 
     def _provider_generate_with_retry(
         self,
@@ -2017,6 +2112,7 @@ class Session:
 
     def send_message(self, text):
         logger.info(f"Sending message: {text[:100]}...")
+        self.paused_execution_text = None
         self.sync_runtime_state()
         if self.variables.get("scratchpad_enabled", True):
             self.turn_scratchpad.max_entries = max(
@@ -2164,12 +2260,23 @@ class Session:
 
         logger.info(f"Starting agentic loop (max_iterations={max_iterations})")
         provider_bad_request_retried = False
+        exact_tool_sequence_history: list[str] = []
+        pattern_tool_sequence_history: list[str] = []
+        loop_detection_enabled = bool(
+            self.variables.get("loop_detection_enabled", True)
+        )
+        loop_detection_repeat_threshold = max(
+            2,
+            int(self.variables.get("loop_detection_repeat_threshold", 3) or 3),
+        )
 
         while iteration < max_iterations:
             iteration += 1
             logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
             current_tool_name = None
             current_tool_args = None
+            iteration_tool_exact_fingerprints: list[str] = []
+            iteration_tool_pattern: list[str] = []
 
             try:
                 dynamic_system_prompt = base_system_prompt
@@ -2414,6 +2521,17 @@ class Session:
                 for i, part in enumerate(tool_calls):
                     current_tool_name = part.tool_name
                     current_tool_args = part.tool_args
+                    if self._track_tool_for_loop_detection(
+                        part.tool_name, part.tool_args
+                    ):
+                        iteration_tool_exact_fingerprints.append(
+                            self._tool_call_fingerprint(part.tool_name, part.tool_args)
+                        )
+                        iteration_tool_pattern.append(
+                            self._tool_call_fingerprint(
+                                part.tool_name, part.tool_args, pattern_only=True
+                            )
+                        )
                     approval_plan = approval_plans.get(i)
                     needs_approval = approval_plan is not None
                     if needs_approval:
@@ -2511,6 +2629,7 @@ class Session:
                     should_collate = (
                         part.tool_name in COLLATED_TOOLS
                         and self.variables.get("collation_enabled", True)
+                        and len(tool_calls) > 1
                     )
 
                     if is_flush:
@@ -2615,6 +2734,53 @@ class Session:
                 self.session_manager.history.append(tool_result_msg)
                 self.session_manager.save_history(self.folder_context)
 
+                if loop_detection_enabled and iteration_tool_exact_fingerprints:
+                    exact_seq = " -> ".join(iteration_tool_exact_fingerprints)
+                    pattern_seq = " -> ".join(iteration_tool_pattern)
+                    exact_tool_sequence_history.append(exact_seq)
+                    pattern_tool_sequence_history.append(pattern_seq)
+
+                    exact_loop_detected = self._is_repeated_tool_sequence(
+                        exact_tool_sequence_history,
+                        repeat_threshold=loop_detection_repeat_threshold,
+                    )
+                    pattern_loop_detected = self._is_repeated_tool_sequence(
+                        pattern_tool_sequence_history,
+                        repeat_threshold=loop_detection_repeat_threshold,
+                    )
+
+                    if exact_loop_detected or pattern_loop_detected:
+                        loop_kind = "exact" if exact_loop_detected else "pattern"
+                        warning_text = (
+                            "Loop detection triggered: repeated tool-call sequence "
+                            f"detected {loop_detection_repeat_threshold}x ({loop_kind})."
+                        )
+                        if self.ui:
+                            self.ui.show_error(warning_text)
+                        logger.warning(warning_text)
+                        loop_break_msg = {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "LOOP DETECTED: You repeated the same tool-call sequence three times. "
+                                        "You MUST break out now. Do NOT repeat this sequence again. "
+                                        "Take a materially different action: apply a concrete code change, "
+                                        "run a different validation path, or raise_blocker with exact missing requirements. "
+                                        "Then explain what changed and why this breaks the loop."
+                                    ),
+                                }
+                            ],
+                        }
+                        self.session_manager.history.append(loop_break_msg)
+                        self.session_manager.save_history(self.folder_context)
+                        messages = self._build_messages_from_history(
+                            self._prepare_runtime_history(turn_start_index),
+                            {"role": "system", "parts": []},
+                        )[:-1]
+                        continue
+
                 messages = self._build_messages_from_history(
                     self._prepare_runtime_history(turn_start_index),
                     {"role": "system", "parts": []},
@@ -2624,6 +2790,7 @@ class Session:
                 if self.ui:
                     self.ui.show_info("\nAgentic loop interrupted by user.")
                 logger.warning("Agentic loop interrupted by user.")
+                self.paused_execution_text = str(text or "")
                 self.session_manager.history.append(
                     {
                         "role": "tool",
@@ -2663,10 +2830,13 @@ class Session:
                     )
                 logger.error(f"Error in agentic loop: {e}", exc_info=True)
 
+                status_code = self._extract_http_status_code(str(e).lower())
                 if (
                     not provider_bad_request_retried
                     and not current_tool_name
-                    and "400" in str(e).lower()
+                    and status_code is not None
+                    and 400 <= status_code < 500
+                    and status_code not in {408, 409, 425, 429}
                 ):
                     provider_bad_request_retried = True
                     self.session_manager.history = self.session_manager.history[:initial_history_len]
@@ -2683,7 +2853,7 @@ class Session:
                     iteration -= 1
                     if self.ui:
                         self.ui.show_info(
-                            "Provider returned HTTP 400. Rolled back the current turn and retrying once."
+                            f"Provider returned HTTP {status_code}. Rolled back the current turn and retrying once."
                         )
                     continue
 
@@ -2718,6 +2888,7 @@ class Session:
                 )
 
         self.session_manager.save_history(self.folder_context)
+        self.paused_execution_text = None
         if self.session_manager.get_feature_state():
             self._set_feature_state(status="max_iterations_reached")
         return self._collect_turn_response(

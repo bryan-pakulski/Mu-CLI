@@ -4,11 +4,14 @@ import json
 from core.tools import (
     _check_bounds,
     read_file,
+    web_search,
+    stackoverflow_search,
     _handle_create_feature_task,
     ToolExecutionContext,
     execute_tool,
     TOOL_HANDLERS,
     TOOLS,
+    run_agent_task,
 )
 from core.workspace import FolderContext
 
@@ -218,6 +221,86 @@ def test_error_code_coverage_core_categories(tmp_path, monkeypatch):
         execute_tool("read_file", {"filename": str(workspace / "x.txt")}, ctx)
     )
     assert failed_payload["error_code"] == "execution_failed"
+
+
+def test_bash_tool_executes_raw_command(tmp_path):
+    ctx = FolderContext()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx.add_folder(str(workspace))
+
+    payload = json.loads(execute_tool("bash", {"command": "pwd"}, ctx))
+    _assert_tool_envelope(payload)
+    assert payload["ok"] is True
+    assert str(workspace) in payload["message"]
+
+
+def test_bash_tool_rejects_out_of_bounds_cwd(tmp_path):
+    ctx = FolderContext()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx.add_folder(str(workspace))
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    payload = json.loads(
+        execute_tool("bash", {"command": "pwd", "cwd": str(outside)}, ctx)
+    )
+    _assert_tool_envelope(payload)
+    assert payload["ok"] is False
+    assert payload["error_code"] == "access_denied"
+
+
+def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
+    class _FakeResponse:
+        def __init__(self, payload: dict):
+            self._payload = payload
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(request, timeout=0):
+        return _FakeResponse(
+            {
+                "Heading": "DuckDuckGo",
+                "AbstractURL": "https://duckduckgo.com/about",
+                "AbstractText": "DuckDuckGo overview",
+                "RelatedTopics": [
+                    {"FirstURL": "https://example.com/a", "Text": "Example A - snippet"},
+                    {"FirstURL": "https://example.com/b", "Text": "Example B - snippet"},
+                ],
+            }
+        )
+
+    def _raise_import_error(query: str, max_results: int):
+        raise ImportError("forced missing ddgs")
+
+    monkeypatch.setattr("core.tools._ddgs_text_search", _raise_import_error)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+
+    payload = json.loads(web_search("privacy search", engine="duckduckgo", num_results=3))
+
+    assert payload.get("error") is None
+    assert payload["num_results"] >= 1
+    assert payload["results"][0]["url"].startswith("https://")
+
+
+def test_web_search_returns_unknown_engine_error():
+    payload = json.loads(web_search("hello", engine="bogus"))
+    assert "Unknown search engine" in payload["error"]
+    assert payload["results"] == []
+
+
+def test_stackoverflow_search_rejects_empty_query():
+    payload = json.loads(stackoverflow_search(""))
+    assert "error" in payload
+    assert payload["results"] == []
 
 
 def test_create_feature_create_phases_create_task_staged_flow(tmp_path):

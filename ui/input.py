@@ -128,6 +128,11 @@ class MergedCompleter(Completer):
 
 class InputHandler:
     def __init__(self):
+        self.active_session_name = None
+        self.history_root = os.path.expanduser("~/.mucli_history")
+        if os.path.exists(self.history_root) and not os.path.isdir(self.history_root):
+            self.history_root = os.path.expanduser("~/.mucli_history_sessions")
+        os.makedirs(self.history_root, exist_ok=True)
         self.variables_dict = None  # Will be set via set_variables
         path_completer = PathCompleter(expanduser=True)
         directory_completer = PathCompleter(expanduser=True, only_directories=True)
@@ -181,6 +186,12 @@ class InputHandler:
         )
 
         mode_completer = NestedCompleter.from_nested_dict(MODE_CHOICES)
+        research_completer = NestedCompleter.from_nested_dict(
+            {
+                "status": None,
+                "sources": None,
+            }
+        )
         unset_completer = MergedCompleter(
             [
                 variable_completer,
@@ -224,6 +235,7 @@ class InputHandler:
             "/update": None,
             "/agentic": None,
             "/mode": mode_completer,
+            "/research": research_completer,
             "/feature": feature_completer,
             "/features": feature_completer,
             "/memory": memory_completer,
@@ -263,8 +275,6 @@ class InputHandler:
             }
         )
 
-        history_file = os.path.expanduser("~/.mucli_history")
-
         self.kb = KeyBindings()
 
         @self.kb.add("enter")
@@ -286,13 +296,36 @@ class InputHandler:
             if event.app:
                 event.app.invalidate()
 
-        self.session = PromptSession(
+        self.session = self._build_prompt_session(
+            self._history_file_for_session("default")
+        )
+
+    def _build_prompt_session(self, history_file):
+        return PromptSession(
             history=FileHistory(history_file),
             auto_suggest=AutoSuggestFromHistory(),
             completer=self.completer,
             style=self.style,
             key_bindings=self.kb,
             multiline=True,
+        )
+
+    @staticmethod
+    def _safe_session_name(session_name):
+        cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(session_name or "").strip())
+        return cleaned or "default"
+
+    def _history_file_for_session(self, session_name):
+        safe = self._safe_session_name(session_name)
+        return os.path.join(self.history_root, f"{safe}.history")
+
+    def _ensure_session_history(self, session_name):
+        safe_session = self._safe_session_name(session_name)
+        if self.active_session_name == safe_session:
+            return
+        self.active_session_name = safe_session
+        self.session = self._build_prompt_session(
+            self._history_file_for_session(safe_session)
         )
 
     def set_variables(self, variables_dict):
@@ -395,6 +428,7 @@ class InputHandler:
         current_task=None,
         feature_context=None,
     ):
+        self._ensure_session_history(session_name)
         message = HTML(
             self.build_prompt_markup(
                 session_name,

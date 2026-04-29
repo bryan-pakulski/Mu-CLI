@@ -36,6 +36,8 @@ from core.feature_mode import (
 from core.retrieval import SemanticCodeIndex
 
 
+
+
 def _register_source_and_get_citation(
     title: str,
     url: str,
@@ -354,9 +356,38 @@ TOOLS = [
                 "task_name": {
                     "type": "string",
                     "description": "The name of the task to execute.",
-                }
+                },
             },
             "required": ["task_name"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="bash",
+        description="Executes a raw bash command in the attached workspace and returns combined STDOUT/STDERR.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute.",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Optional working directory. Must be within the attached workspace.",
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "Maximum seconds before terminating the command (default 120).",
+                    "default": 120,
+                },
+                "max_output_chars": {
+                    "type": "integer",
+                    "description": "Maximum combined output length to return (default 12000).",
+                    "default": 12000,
+                },
+            },
+            "required": ["command"],
         },
         requires_approval=True,
     ),
@@ -1265,6 +1296,10 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "preview_policy": "optional",
         "summary_builder": "agent_task_preview",
     },
+    "bash": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
     "git_status": {
         "execution_kind": "read",
         "preview_policy": "none",
@@ -1635,9 +1670,22 @@ def search_references(query: str, folder_context, context_lines: int = 3) -> str
     if not str(query or "").strip():
         return json.dumps({"error": "query is required"})
 
-    context_lines = max(0, int(context_lines or 3))
+    context_lines = 3 if context_lines is None else max(0, int(context_lines))
     results = []
-    for filepath in folder_context.get_file_list():
+    candidate_files = set(folder_context.get_file_list() or [])
+    # Include on-disk files created after initial folder attachment so searches
+    # do not miss freshly generated files during tests/agent runs.
+    for root in getattr(folder_context, "folders", []) or []:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, _, filenames in os.walk(root):
+            for filename in filenames:
+                fullpath = os.path.join(dirpath, filename)
+                if folder_context and folder_context.is_ignored(fullpath):
+                    continue
+                candidate_files.add(fullpath)
+
+    for filepath in sorted(candidate_files):
         try:
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
@@ -2208,9 +2256,9 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None) -> st
         return "Error: Makefile.agents not found in any workspace folder."
 
     import subprocess
-
     cmd = ["make", "-f", "Makefile.agents", task_name]
-    try:
+
+    def _exec_once() -> str:
         process = subprocess.run(
             cmd,
             capture_output=True,
@@ -2218,29 +2266,25 @@ def run_agent_task(task_name: str, folder_context, variables: dict = None) -> st
             timeout=timeout,
             cwd=os.path.dirname(makefile_path),
         )
-
         output = process.stdout
         errors = process.stderr
-
         combined_output = ""
         if output:
             combined_output += f"STDOUT:\n{output}\n"
         if errors:
             combined_output += f"STDERR:\n{errors}\n"
-
         if not combined_output:
             combined_output = "Task executed successfully with no output."
-
-        # Truncate if too long (max 10k chars)
         if len(combined_output) > max_len:
             combined_output = (
                 combined_output[: max_len // 2]
                 + f"\n\n... [TRUNCATED {len(combined_output) - max_len} characters] ...\n\n"
                 + combined_output[-max_len // 2 :]
             )
-
         return combined_output
 
+    try:
+        return _exec_once()
     except subprocess.TimeoutExpired as e:
         return f"Error: Task timed out after {timeout} seconds. Partial output:\n{e.stdout or ''}\n{e.stderr or ''}"
     except Exception as e:
@@ -2359,6 +2403,67 @@ def git_branch(folder_context) -> str:
     return run_git_command(["branch"], folder_context)
 
 
+def bash_command(
+    command: str,
+    folder_context,
+    *,
+    cwd: str | None = None,
+    timeout_seconds: int = 120,
+    max_output_chars: int = 12000,
+) -> str:
+    """Executes a raw bash command in the workspace."""
+    command = str(command or "").strip()
+    if not command:
+        return "Error: command is required."
+
+    if not folder_context or not folder_context.folders:
+        return "Error: No workspace attached."
+
+    import subprocess
+
+    workdir = str(cwd or folder_context.folders[0]).strip()
+    if not _check_bounds(workdir, folder_context):
+        logger.warning(f"bash_command: Access denied or path ignored: {workdir}")
+        return f"Error: Access denied or path ignored. '{workdir}'"
+
+    timeout_seconds = max(1, int(timeout_seconds or 120))
+    max_output_chars = max(512, int(max_output_chars or 12000))
+
+    try:
+        process = subprocess.run(
+            ["bash", "-lc", command],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            cwd=workdir,
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial = f"{exc.stdout or ''}\n{exc.stderr or ''}".strip()
+        if len(partial) > max_output_chars:
+            partial = partial[:max_output_chars]
+        return (
+            f"Error: Command timed out after {timeout_seconds} seconds.\n"
+            f"{partial}".strip()
+        )
+    except Exception as exc:
+        logger.error(f"bash_command: Error executing command {command!r}: {exc}")
+        return f"Error executing bash command: {exc}"
+
+    chunks = []
+    if process.stdout:
+        chunks.append(f"STDOUT:\n{process.stdout.rstrip()}")
+    if process.stderr:
+        chunks.append(f"STDERR:\n{process.stderr.rstrip()}")
+    if not chunks:
+        chunks.append("Command executed with no output.")
+    chunks.append(f"Exit code: {process.returncode}")
+    output = "\n\n".join(chunks)
+
+    if len(output) > max_output_chars:
+        output = output[:max_output_chars] + "\n\n...[TRUNCATED]..."
+    return output
+
+
 def url_grounding(url: str, folder_context) -> str:
     """Accesses a URL to gather additional context. Supports JavaScript-heavy websites."""
     try:
@@ -2445,25 +2550,89 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
     
     query = query.strip()
     
+    def _duckduckgo_instantapi_fallback() -> list[dict]:
+        """DuckDuckGo fallback that does not require third-party packages."""
+        import urllib.parse
+        import urllib.request
+
+        fallback_results: list[dict] = []
+        endpoint = (
+            "https://api.duckduckgo.com/?"
+            + urllib.parse.urlencode(
+                {
+                    "q": query,
+                    "format": "json",
+                    "no_html": "1",
+                    "no_redirect": "1",
+                }
+            )
+        )
+        request = urllib.request.Request(
+            endpoint,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+
+        def _append_result(title: str, url: str, snippet: str):
+            if not url:
+                return
+            fallback_results.append(
+                {
+                    "title": title or url,
+                    "url": url,
+                    "snippet": snippet or "",
+                    "relevance_score": max(0.1, 1.0 - (len(fallback_results) * 0.05)),
+                    "citation_id": register_source(
+                        title=title or url,
+                        url=url,
+                        source_type="web",
+                    ),
+                }
+            )
+
+        abstract_url = str(payload.get("AbstractURL", "") or "").strip()
+        if abstract_url:
+            _append_result(
+                str(payload.get("Heading", "") or "").strip() or "DuckDuckGo Abstract",
+                abstract_url,
+                str(payload.get("AbstractText", "") or "").strip(),
+            )
+
+        def _consume_topics(topics):
+            for topic in topics:
+                if len(fallback_results) >= num_results:
+                    return
+                if not isinstance(topic, dict):
+                    continue
+                if isinstance(topic.get("Topics"), list):
+                    _consume_topics(topic.get("Topics", []))
+                    continue
+                url = str(topic.get("FirstURL", "") or "").strip()
+                text = str(topic.get("Text", "") or "").strip()
+                if url:
+                    title = text.split(" - ")[0].strip() if text else url
+                    _append_result(title, url, text)
+
+        _consume_topics(payload.get("RelatedTopics", []) if isinstance(payload.get("RelatedTopics"), list) else [])
+        return fallback_results[:num_results]
+
     if engine.lower() == "duckduckgo":
         # Use duckduckgo-search package for reliable DuckDuckGo access
         try:
-            from ddgs import DDGS
-
             results = []
-            with DDGS() as ddg:
-                for i, r in enumerate(ddg.text(query, max_results=num_results)):
-                    results.append({
-                        "title": r.get("title", ""),
-                        "url": r.get("href", ""),
-                        "snippet": r.get("body", ""),
-                        "relevance_score": 1.0 - (i * 0.05),
-                        "citation_id": register_source(
-                            title=r.get("title", ""),
-                            url=r.get("href", ""),
-                            source_type="web"
-                        )
-                    })
+            for i, r in enumerate(_ddgs_text_search(query, max_results=num_results)):
+                results.append({
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "snippet": r.get("body", ""),
+                    "relevance_score": 1.0 - (i * 0.05),
+                    "citation_id": register_source(
+                        title=r.get("title", ""),
+                        url=r.get("href", ""),
+                        source_type="web"
+                    )
+                })
 
             # Fallback for environments where DDGS returns no results due to
             # transient upstream throttling/challenges.
@@ -2517,10 +2686,27 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
             }, indent=2)
             
         except ImportError:
-            return json.dumps({
-                "error": "duckduckgo-search package required. Install with: pip install duckduckgo-search",
-                "results": []
-            })
+            try:
+                results = _duckduckgo_instantapi_fallback()
+                urls_used = [r.get("url", "") for r in results if r.get("url")]
+                return json.dumps(
+                    {
+                        "query": query,
+                        "engine": "duckduckgo",
+                        "num_results": len(results),
+                        "urls_used": urls_used,
+                        "results": results,
+                    },
+                    indent=2,
+                )
+            except Exception as e:
+                logger.error(f"web_search: Import fallback failed for '{query}': {e}")
+                return json.dumps(
+                    {
+                        "error": f"DuckDuckGo search fallback failed: {str(e)}",
+                        "results": [],
+                    }
+                )
         except Exception as e:
             logger.error(f"web_search: Error searching DuckDuckGo for '{query}': {e}")
             return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
@@ -2572,6 +2758,14 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
     
     else:
         return json.dumps({"error": f"Unknown search engine: {engine}. Use 'duckduckgo' or 'google'", "results": []})
+
+
+def _ddgs_text_search(query: str, max_results: int):
+    """Wrapper around ddgs import/search to make fallback testing deterministic."""
+    from ddgs import DDGS
+
+    with DDGS() as ddg:
+        return list(ddg.text(query, max_results=max_results))
 
 
 def arxiv_search(query: str, folder_context=None, max_results: int = 10, category: str = "") -> str:
@@ -2902,9 +3096,10 @@ def reddit_search(query: str, subreddit: str = None, sort: str = "relevance", li
 
 def stackoverflow_search(query: str, tags: list = None, sort: str = "relevance", limit: int = 10, folder_context=None) -> str:
     """Searches Stack Overflow for questions using the Stack Exchange API with tag filtering support."""
-    if not _check_bounds(query, folder_context):
-        logger.warning(f"stackoverflow_search: Access denied for query: {query}")
-        return json.dumps({"error": "Access denied"})
+    if not str(query or "").strip():
+        return json.dumps({"error": "query is required", "query": query, "results": []})
+
+    query = query.strip()
 
     if limit is None:
         limit = 10
@@ -3441,6 +3636,16 @@ def _handle_list_agent_tasks(args, folder_context, ui, variables) -> str:
 
 def _handle_run_agent_task(args, folder_context, ui, variables) -> str:
     return run_agent_task(args.get("task_name", ""), folder_context, variables)
+
+
+def _handle_bash(args, folder_context, ui, variables) -> str:
+    return bash_command(
+        args.get("command", ""),
+        folder_context,
+        cwd=args.get("cwd"),
+        timeout_seconds=args.get("timeout_seconds", 120),
+        max_output_chars=args.get("max_output_chars", 12000),
+    )
 
 
 def _handle_apply_diff(args, folder_context, ui, variables) -> str:
@@ -4603,6 +4808,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "write_file": _legacy_handler(_handle_write_file),
     "list_agent_tasks": _legacy_handler(_handle_list_agent_tasks),
     "run_agent_task": _legacy_handler(_handle_run_agent_task),
+    "bash": _legacy_handler(_handle_bash),
     "apply_diff": _legacy_handler(_handle_apply_diff),
     "git_status": _legacy_handler(_handle_git_status),
     "git_init": _legacy_handler(_handle_git_init),

@@ -527,7 +527,7 @@ def test_provider_bad_request_rolls_back_current_turn_and_retries_once(
     assert len(user_messages) == 1
 
 
-def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
+def test_single_tool_call_returns_immediate_structured_result(tmp_path, monkeypatch):
     sample = tmp_path / "sample.txt"
     sample.write_text("important line\n" * 50)
     monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
@@ -578,12 +578,9 @@ def test_collated_structured_result_omits_source_blob(tmp_path, monkeypatch):
     tool_message = next(msg for msg in reversed(sm.history) if msg["role"] == "tool")
     tool_result = tool_message["parts"][0]["tool_result"]
 
-    assert tool_result["data"]["collated"] is True
-    assert tool_result["raw"].startswith(
-        "Stored 'read_file' result in collation buffer"
-    )
-    assert "important line" not in tool_result["raw"]
-    assert tool_result["data"]["source_line_count"] == 50
+    assert tool_result["data"].get("collated") is not True
+    assert "important line" in tool_result["raw"]
+    assert tool_result["telemetry"]["raw_line_count"] == 50
 
 
 def test_memory_round_trip_via_session_manager(tmp_path, monkeypatch):

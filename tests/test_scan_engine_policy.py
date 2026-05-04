@@ -50,7 +50,7 @@ def test_report_requires_repro_and_fix_verification(tmp_path, monkeypatch):
     assert report["ok"] is True
 
 
-def test_report_exports_json_markdown_sarif_and_ci_gate(tmp_path, monkeypatch):
+def test_report_exports_json_and_markdown(tmp_path, monkeypatch):
     folder, session = _ctx(tmp_path, monkeypatch)
     # create unconfirmed + evidence + promote confirmed + verification
     assert json.loads(execute_tool("create_scan_finding", _finding("unconfirmed"), folder, session=session))["ok"] is True
@@ -68,13 +68,6 @@ def test_report_exports_json_markdown_sarif_and_ci_gate(tmp_path, monkeypatch):
     assert md_report["ok"] is True
     assert "# Security Scan Report" in md_report["markdown"]
 
-    sarif_report = json.loads(execute_tool("generate_scan_report", {"format": "sarif"}, folder, session=session))
-    assert sarif_report["ok"] is True
-    assert sarif_report["sarif"]["version"] == "2.1.0"
-
-    gated = json.loads(execute_tool("generate_scan_report", {"format": "json", "severity_gate": "high", "gate_exit_code": 7}, folder, session=session))
-    assert gated["ok"] is True
-    assert gated["ci_exit_code"] == 7
 
 
 def test_unconfirmed_when_repro_fails_and_minimal_poc_attached(tmp_path, monkeypatch):

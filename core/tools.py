@@ -12,6 +12,7 @@ from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
 from utils.citation_manager import register_source, SourceType
+from utils.config import HISTORY_DIR
 from core.feature_mode import (
     create_feature_shell,
     create_feature_phases,
@@ -37,6 +38,102 @@ from core.retrieval import SemanticCodeIndex
 
 
 
+
+
+
+def _scan_storage_paths(context: Any) -> tuple[str, str]:
+    session_name = "default"
+    if context.session is not None and hasattr(context.session, "session_manager"):
+        session_name = str(getattr(context.session.session_manager, "current_session_name", "default") or "default")
+    root = os.path.join(HISTORY_DIR, "sessions", session_name, "scan")
+    os.makedirs(root, exist_ok=True)
+    return root, os.path.join(root, "findings.json")
+
+
+def _load_scan_findings(context: Any) -> dict:
+    _, findings_path = _scan_storage_paths(context)
+    if not os.path.exists(findings_path):
+        return {"findings": []}
+    try:
+        with open(findings_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, dict) and isinstance(payload.get("findings"), list):
+            return payload
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"findings": []}
+
+
+def _save_scan_findings(context: Any, payload: dict) -> None:
+    _, findings_path = _scan_storage_paths(context)
+    with open(findings_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+
+
+def _sha256_text(value: str) -> str:
+    import hashlib
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _handle_create_scan_finding(args: dict, context: Any) -> str:
+    required = ["id", "title", "severity", "confidence", "cwe", "affected_files", "affected_functions", "preconditions", "exploit_steps", "evidence", "fix_recommendation", "verification_steps", "status"]
+    missing = [k for k in required if k not in args]
+    if missing:
+        return f"Error: Missing required fields for scan finding: {', '.join(missing)}"
+    allowed_status = {"confirmed", "unconfirmed", "false_positive"}
+    if str(args.get("status")).strip().lower() not in allowed_status:
+        return "Error: status must be one of confirmed|unconfirmed|false_positive"
+    payload = _load_scan_findings(context)
+    findings = payload.get("findings", [])
+    fid = str(args.get("id")).strip()
+    findings = [f for f in findings if str(f.get("id", "")).strip() != fid]
+    record = {k: args.get(k) for k in required + ["cvss"]}
+    record["status"] = str(record["status"]).strip().lower()
+    record["created_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    record.setdefault("artifacts", [])
+    findings.append(record)
+    payload["findings"] = findings
+    _save_scan_findings(context, payload)
+    return json.dumps({"status": "ok", "finding_id": fid, "findings_count": len(findings)})
+
+
+def _handle_attach_scan_artifact(args: dict, context: Any) -> str:
+    finding_id = str(args.get("finding_id", "")).strip()
+    artifact_name = str(args.get("artifact_name", "")).strip()
+    content = str(args.get("content", ""))
+    artifact_type = str(args.get("artifact_type", "command_output")).strip()
+    if not finding_id or not artifact_name:
+        return "Error: finding_id and artifact_name are required."
+    allow_network = bool(args.get("allow_network", False))
+    if not allow_network and any(x in content.lower() for x in ["http://", "https://", "nmap ", "masscan "]):
+        return "Error: Network probing artifacts blocked by default; set allow_network=true with explicit opt-in context."
+    payload = _load_scan_findings(context)
+    findings = payload.get("findings", [])
+    target = next((f for f in findings if str(f.get("id", "")).strip() == finding_id), None)
+    if target is None:
+        return f"Error: finding_id '{finding_id}' not found."
+    root, _ = _scan_storage_paths(context)
+    artifact_dir = os.path.join(root, "artifacts", finding_id)
+    os.makedirs(artifact_dir, exist_ok=True)
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", artifact_name) or "artifact.txt"
+    path = os.path.join(artifact_dir, safe_name)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    artifact = {
+        "artifact_name": safe_name,
+        "artifact_type": artifact_type,
+        "path": path,
+        "sha256": _sha256_text(content),
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+    target.setdefault("artifacts", []).append(artifact)
+    _save_scan_findings(context, payload)
+    return json.dumps({"status": "ok", "finding_id": finding_id, "artifact": artifact})
+
+
+def _handle_list_scan_findings(args: dict, context: Any) -> str:
+    payload = _load_scan_findings(context)
+    return json.dumps(payload)
 
 def _register_source_and_get_citation(
     title: str,
@@ -1494,6 +1591,58 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "summary_builder": "blocker_summary",
     },
 }
+
+
+
+TOOLS.extend([
+    ToolDefinition(
+        name="create_scan_finding",
+        description="Create or update a structured scan finding with required machine-parseable fields.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "title": {"type": "string"},
+                "severity": {"type": "string"},
+                "confidence": {"type": "string"},
+                "cwe": {"type": "string"},
+                "cvss": {"type": ["number", "null"]},
+                "affected_files": {"type": "array", "items": {"type": "string"}},
+                "affected_functions": {"type": "array", "items": {"type": "string"}},
+                "preconditions": {"type": "array", "items": {"type": "string"}},
+                "exploit_steps": {"type": "array", "items": {"type": "string"}},
+                "evidence": {"type": "array", "items": {"type": "string"}},
+                "fix_recommendation": {"type": "string"},
+                "verification_steps": {"type": "array", "items": {"type": "string"}},
+                "status": {"type": "string", "enum": ["confirmed", "unconfirmed", "false_positive"]},
+            },
+            "required": ["id", "title", "severity", "confidence", "cwe", "affected_files", "affected_functions", "preconditions", "exploit_steps", "evidence", "fix_recommendation", "verification_steps", "status"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="attach_scan_artifact",
+        description="Attach durable evidence artifact to a scan finding with hash and timestamp.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string"},
+                "artifact_name": {"type": "string"},
+                "artifact_type": {"type": "string"},
+                "content": {"type": "string"},
+                "allow_network": {"type": "boolean", "default": False},
+            },
+            "required": ["finding_id", "artifact_name", "content"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="list_scan_findings",
+        description="List structured scan findings and linked artifacts for current session.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+])
 
 TOOL_DESCRIPTORS = {
     tool.name: _build_descriptor(
@@ -4849,6 +4998,9 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
     "search_and_replace_file": _legacy_handler(_handle_search_and_replace_file),
+    "create_scan_finding": _legacy_handler(_handle_create_scan_finding),
+    "attach_scan_artifact": _legacy_handler(_handle_attach_scan_artifact),
+    "list_scan_findings": _legacy_handler(_handle_list_scan_findings),
 }
 
 

@@ -70,6 +70,26 @@ def _save_scan_findings(context: Any, payload: dict) -> None:
         json.dump(payload, handle, indent=2)
 
 
+
+
+_ALLOWED_SCAN_PROFILES = {"safe_local", "extended_local", "network_opt_in"}
+
+
+def _get_scan_policy_profile(context: Any) -> str:
+    payload = _load_scan_findings(context)
+    profile = str(payload.get("policy_profile", "safe_local") or "safe_local").strip().lower()
+    return profile if profile in _ALLOWED_SCAN_PROFILES else "safe_local"
+
+
+def _set_scan_policy_profile(context: Any, profile: str) -> str:
+    normalized = str(profile or "").strip().lower()
+    if normalized not in _ALLOWED_SCAN_PROFILES:
+        return "Error: profile must be one of safe_local|extended_local|network_opt_in"
+    payload = _load_scan_findings(context)
+    payload["policy_profile"] = normalized
+    _save_scan_findings(context, payload)
+    return normalized
+
 def _sha256_text(value: str) -> str:
     import hashlib
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -107,9 +127,12 @@ def _handle_attach_scan_artifact(args: dict, context: Any) -> str:
     artifact_type = str(args.get("artifact_type", "command_output")).strip()
     if not finding_id or not artifact_name:
         return "Error: finding_id and artifact_name are required."
+    profile = _get_scan_policy_profile(context)
     allow_network = bool(args.get("allow_network", False))
-    if not allow_network and any(x in content.lower() for x in ["http://", "https://", "nmap ", "masscan "]):
-        return "Error: Network probing artifacts blocked by default; set allow_network=true with explicit opt-in context."
+    if profile != "network_opt_in" and any(x in content.lower() for x in ["http://", "https://", "nmap ", "masscan "]):
+        return "Error: Network probing artifacts blocked by current scan policy profile."
+    if profile == "network_opt_in" and not allow_network and any(x in content.lower() for x in ["http://", "https://", "nmap ", "masscan "]):
+        return "Error: network_opt_in profile requires explicit allow_network=true per artifact."
     payload = _load_scan_findings(context)
     findings = payload.get("findings", [])
     target = next((f for f in findings if str(f.get("id", "")).strip() == finding_id), None)
@@ -138,7 +161,20 @@ def _handle_attach_scan_artifact(args: dict, context: Any) -> str:
 
 def _handle_list_scan_findings(args: dict, context: Any) -> str:
     payload = _load_scan_findings(context)
+    payload.setdefault("policy_profile", _get_scan_policy_profile(context))
     return json.dumps(payload)
+
+
+def _handle_set_scan_policy_profile(args: dict, context: Any) -> str:
+    profile = str(args.get("profile", "safe_local"))
+    result = _set_scan_policy_profile(context, profile)
+    if result.startswith("Error:"):
+        return result
+    return json.dumps({"status": "ok", "policy_profile": result})
+
+
+def _handle_get_scan_policy_profile(args: dict, context: Any) -> str:
+    return json.dumps({"policy_profile": _get_scan_policy_profile(context)})
 
 def _run_scan_command(command: str, cwd: str | None = None, timeout: int = 120) -> tuple[int, str]:
     import subprocess
@@ -159,8 +195,9 @@ def _workspace_root_from_context(context: Any) -> str:
 def _handle_run_sast_scan(args: dict, context: Any) -> str:
     root = _workspace_root_from_context(context)
     command = str(args.get("command", "semgrep --config auto ."))
-    if "http://" in command or "https://" in command:
-        return "Error: remote target scanning is blocked by default."
+    profile = _get_scan_policy_profile(context)
+    if profile != "network_opt_in" and ("http://" in command or "https://" in command):
+        return "Error: remote target scanning is blocked by current scan policy profile."
     code, output = _run_scan_command(command, cwd=root, timeout=int(args.get("timeout", 180)))
     return json.dumps({"command": command, "exit_code": code, "output": output[:200000]})
 
@@ -1735,6 +1772,8 @@ TOOLS.extend([
         parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
+    ToolDefinition(name="set_scan_policy_profile", description="Set scan guardrail profile: safe_local|extended_local|network_opt_in.", parameters={"type":"object","properties":{"profile":{"type":"string","enum":["safe_local","extended_local","network_opt_in"]}},"required":["profile"]}, requires_approval=False),
+    ToolDefinition(name="get_scan_policy_profile", description="Get current scan guardrail profile.", parameters={"type":"object","properties":{}}, requires_approval=False),
     ToolDefinition(name="run_sast_scan", description="Run local SAST command (semgrep/codeql/bandit).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
     ToolDefinition(name="run_dependency_audit", description="Run local dependency audit command (pip-audit/npm audit/osv-scanner).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
     ToolDefinition(name="run_secrets_scan", description="Run local secrets scanner (gitleaks/trufflehog).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
@@ -5099,10 +5138,12 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "create_scan_finding": _handle_create_scan_finding,
     "attach_scan_artifact": _handle_attach_scan_artifact,
     "list_scan_findings": _handle_list_scan_findings,
-    "run_sast_scan": _legacy_handler(_handle_run_sast_scan),
-    "run_dependency_audit": _legacy_handler(_handle_run_dependency_audit),
-    "run_secrets_scan": _legacy_handler(_handle_run_secrets_scan),
-    "run_policy_checks": _legacy_handler(_handle_run_policy_checks),
+    "set_scan_policy_profile": _handle_set_scan_policy_profile,
+    "get_scan_policy_profile": _handle_get_scan_policy_profile,
+    "run_sast_scan": _handle_run_sast_scan,
+    "run_dependency_audit": _handle_run_dependency_audit,
+    "run_secrets_scan": _handle_run_secrets_scan,
+    "run_policy_checks": _handle_run_policy_checks,
     "generate_scan_report": _handle_generate_scan_report,
 }
 

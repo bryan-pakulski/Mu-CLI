@@ -39,14 +39,14 @@ python mucli.py --gui
 - Workspace context from attached folders and files
 - Session save/load and multi-session workflows
 - Feature mode with persistent plans under `documentation/feature_req_<id>/`
-- Research and debug strategies
+- Research, debug, and security scan strategies
 - Runtime stats and memory/scratchpad support
 - HTTP server API for external integrations
 
 ## Common commands
 - `/help` show commands
 - `/agentic` toggle tool-calling mode
-- `/mode <default|debug|feature|research|git>` switch strategy
+- `/mode <default|debug|scan|feature|research|loop>` switch strategy
 - `/feature <subcommand>` manage feature workflows
 - `/folder <path>` attach workspace folder
 - `/file <path>` attach file

@@ -238,12 +238,23 @@ AGENTIC_MODES = {
 2. **Flush**: Call the `flush` tool once you have gathered enough information to analyze the situation.
 3. **Act**: Process the flushed context and provide a solution, use tools available to make needed changes.
 3. **Analyze**: Compare against the original context, determine if the changes are correct, respond with a final summary.""",
-    "debug": """WORKFLOW (Debugging):
-1. Read the error message or issue description provided by the user.
-2. Use tooling to find exactly where the error originates in the codebase.
-3. You have access to online url grounding, use this to explore any relevent information.
-3. Use `read_file` or `get_chunk` to read the surrounding context of the failing code.
-4. Identify the root cause and propose a precise fix.""",
+    "debug": """WORKFLOW (Debug/Security/Explore):
+1. Treat the primary goal as understanding the codebase deeply: architecture, logic, dataflow, requirements, and trust boundaries.
+2. Map execution paths end-to-end (inputs -> validation -> state changes -> outputs) before proposing fixes.
+3. Identify security exposure while debugging: authN/authZ gaps, injection points, unsafe deserialization, SSRF, path traversal, secrets leakage, and privilege boundaries.
+4. Use `read_file`, `get_chunk`, and workspace discovery tools to trace root cause with concrete file/function evidence.
+5. Explain findings clearly: what breaks, why it breaks, blast radius, exploitability, and precise remediation options.""",
+    "scan": """WORKFLOW (Vulnerability Scan):
+1. Start with hypothesis-driven read-only triage: enumerate attack surfaces, trust boundaries, and risky code paths.
+2. When you identify a possible issue, enter a concrete validation loop and keep iterating until evidence is conclusive:
+   - hypothesize vulnerability and exploitation preconditions,
+   - reproduce with tool calls (safe/local PoC),
+   - capture empirical evidence (command output, logs, failing test, or observable behavior),
+   - refine hypothesis and retest to rule out false positives.
+3. Do not report a vulnerability as a finding until you have empirical evidence from tooling.
+4. For each validated finding, explain exploit mechanics, impact/blast radius, and provide a minimal reproducible example.
+5. Provide production-grade patch guidance and explicit verification steps that demonstrate the issue is actually fixed and resistant to trivial bypasses.
+6. If evidence is insufficient, report the item as unconfirmed with the exact additional checks needed.""",
     "feature": """WORKFLOW (Feature Task Engine):
 In FEATURE mode, you MUST use the feature-task engine (`create_feature_task`, `get_current_task`, `get_tasks`, `update_task_status`, `approve_feature_task`) rather than inventing a separate planning format.
 In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in the session-managed feature metadata.
@@ -366,8 +377,13 @@ AGENT_MODE_METADATA = {
         "documentation": "README.md#agent-modes",
     },
     "debug": {
-        "description": "Root-cause analysis and targeted debugging workflow.",
+        "description": "Deep debug/security/exploration workflow for logic, dataflow, and exposure analysis.",
         "documentation": "README.md#agent-modes",
+    },
+    "scan": {
+        "description": "Read-first vulnerability scanning with exploit explanation and patch guidance.",
+        "documentation": "README.md#agent-modes",
+        "display_name": "Scan Mode",
     },
     "feature": {
         "description": "Phased Feature Plan Engine with approval, blockers, and review.",
@@ -417,6 +433,15 @@ ANTI-DETECTION NOTES:
 - Some websites may block automated access - use url_grounding cautiously.
 - Rate limits may apply to APIs - batch requests when possible.
 """,
+    "scan": """SCAN MODE SYSTEM PROMPT:
+You are in security scan mode.
+- Run in a concrete validate/reproduce loop for each suspected issue: hypothesize -> reproduce with tool calls -> collect evidence -> retest/refine.
+- Only return confirmed findings when backed by empirical evidence from tool output or observable behavior.
+- Distinguish clearly between confirmed, unconfirmed, and disproven hypotheses.
+- For each confirmed finding, include: severity, preconditions, exploit path, minimal repro steps, and patch + verification guidance.
+- Prefer safe/local proof-of-concept workflows and avoid destructive actions.
+""",
+
     "loop": """LOOP MODE SYSTEM PROMPT:
 You are in long-horizon LOOP mode.
 - The loop goal is locked and remains the north star until user changes/stops it.

@@ -37,7 +37,7 @@ def test_scan_finding_and_artifact_are_persisted(tmp_path, monkeypatch):
         "evidence": ["failing test output"],
         "fix_recommendation": "normalize and enforce root",
         "verification_steps": ["re-run exploit test"],
-        "status": "confirmed",
+        "status": "unconfirmed",
     }
     created = json.loads(_handle_create_scan_finding(finding, ctx))
     assert created["status"] == "ok"
@@ -56,6 +56,10 @@ def test_scan_finding_and_artifact_are_persisted(tmp_path, monkeypatch):
     assert artifact["status"] == "ok"
     assert artifact["artifact"]["sha256"]
     assert artifact["artifact"]["timestamp"].endswith("Z")
+
+    finding["status"] = "confirmed"
+    promoted = json.loads(_handle_create_scan_finding(finding, ctx))
+    assert promoted["status"] == "ok"
 
     listed = json.loads(_handle_list_scan_findings({}, ctx))
     assert len(listed["findings"]) == 1
@@ -79,10 +83,25 @@ def test_scan_tools_work_via_execute_tool_envelopes(tmp_path, monkeypatch):
         "evidence": ["command output shows id"],
         "fix_recommendation": "use subprocess list args",
         "verification_steps": ["re-run exploit after patch"],
-        "status": "confirmed",
+        "status": "unconfirmed",
     }
     created = json.loads(execute_tool("create_scan_finding", finding_args, ctx.folder_context, session=ctx.session))
     assert created["ok"] is True
+
+    promote_args = dict(finding_args)
+    promote_args["status"] = "confirmed"
+    blocked_promote = json.loads(execute_tool("create_scan_finding", promote_args, ctx.folder_context, session=ctx.session))
+    assert blocked_promote["ok"] is False
+
+    attach = json.loads(execute_tool(
+        "attach_scan_artifact",
+        {"finding_id": "F-2", "artifact_name": "repro.log", "content": "safe", "artifact_role": "repro", "success": True},
+        ctx.folder_context,
+        session=ctx.session,
+    ))
+    assert attach["ok"] is True
+    promoted = json.loads(execute_tool("create_scan_finding", promote_args, ctx.folder_context, session=ctx.session))
+    assert promoted["ok"] is True
 
     blocked = json.loads(execute_tool(
         "attach_scan_artifact",

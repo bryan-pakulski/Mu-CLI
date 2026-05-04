@@ -90,7 +90,10 @@ def _handle_create_scan_finding(args: dict, context: Any) -> str:
     record = {k: args.get(k) for k in required + ["cvss"]}
     record["status"] = str(record["status"]).strip().lower()
     record["created_at"] = datetime.datetime.utcnow().isoformat() + "Z"
-    record.setdefault("artifacts", [])
+    existing = next((f for f in payload.get("findings", []) if str(f.get("id", "")).strip() == fid), {})
+    record["artifacts"] = existing.get("artifacts", [])
+    if record["status"] == "confirmed" and not record["artifacts"]:
+        return "Error: confirmed findings require at least one attached evidence artifact."
     findings.append(record)
     payload["findings"] = findings
     _save_scan_findings(context, payload)
@@ -122,6 +125,8 @@ def _handle_attach_scan_artifact(args: dict, context: Any) -> str:
     artifact = {
         "artifact_name": safe_name,
         "artifact_type": artifact_type,
+        "artifact_role": str(args.get("artifact_role", "evidence")),
+        "success": bool(args.get("success", False)),
         "path": path,
         "sha256": _sha256_text(content),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -134,6 +139,72 @@ def _handle_attach_scan_artifact(args: dict, context: Any) -> str:
 def _handle_list_scan_findings(args: dict, context: Any) -> str:
     payload = _load_scan_findings(context)
     return json.dumps(payload)
+
+def _run_scan_command(command: str, cwd: str | None = None, timeout: int = 120) -> tuple[int, str]:
+    import subprocess
+    try:
+        proc = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        return proc.returncode, (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+    except Exception as exc:
+        return 1, f"Error executing command: {exc}"
+
+
+def _workspace_root_from_context(context: Any) -> str:
+    folder_context = getattr(context, "folder_context", None)
+    if folder_context and getattr(folder_context, "folders", None):
+        return os.path.abspath(folder_context.folders[0])
+    return os.getcwd()
+
+
+def _handle_run_sast_scan(args: dict, context: Any) -> str:
+    root = _workspace_root_from_context(context)
+    command = str(args.get("command", "semgrep --config auto ."))
+    if "http://" in command or "https://" in command:
+        return "Error: remote target scanning is blocked by default."
+    code, output = _run_scan_command(command, cwd=root, timeout=int(args.get("timeout", 180)))
+    return json.dumps({"command": command, "exit_code": code, "output": output[:200000]})
+
+
+def _handle_run_dependency_audit(args: dict, context: Any) -> str:
+    root = _workspace_root_from_context(context)
+    command = str(args.get("command", "pip-audit || npm audit --json"))
+    code, output = _run_scan_command(command, cwd=root, timeout=int(args.get("timeout", 180)))
+    return json.dumps({"command": command, "exit_code": code, "output": output[:200000]})
+
+
+def _handle_run_secrets_scan(args: dict, context: Any) -> str:
+    root = _workspace_root_from_context(context)
+    command = str(args.get("command", "gitleaks detect --no-git --source ."))
+    code, output = _run_scan_command(command, cwd=root, timeout=int(args.get("timeout", 180)))
+    return json.dumps({"command": command, "exit_code": code, "output": output[:200000]})
+
+
+def _handle_run_policy_checks(args: dict, context: Any) -> str:
+    root = _workspace_root_from_context(context)
+    command = str(args.get("command", "rg -n '(md5|sha1|eval\\(|exec\\()' ."))
+    code, output = _run_scan_command(command, cwd=root, timeout=int(args.get("timeout", 120)))
+    return json.dumps({"command": command, "exit_code": code, "output": output[:200000]})
+
+
+def _handle_generate_scan_report(args: dict, context: Any) -> str:
+    payload = _load_scan_findings(context)
+    findings = payload.get("findings", [])
+    blocking = []
+    for f in findings:
+        status = str(f.get("status", "")).lower()
+        artifacts = f.get("artifacts", []) or []
+        if status == "confirmed":
+            if not artifacts:
+                blocking.append({"id": f.get("id"), "reason": "confirmed finding missing evidence artifacts"})
+                continue
+            has_repro = any(a.get("artifact_role") == "repro" and a.get("success") is True for a in artifacts)
+            has_verify = any(a.get("artifact_role") == "fix_verification" and a.get("success") is True for a in artifacts)
+            if not (has_repro and has_verify):
+                blocking.append({"id": f.get("id"), "reason": "confirmed finding requires successful repro and fix_verification artifacts"})
+    if blocking:
+        return json.dumps({"ok": False, "blocking": blocking})
+    summary = {"total": len(findings), "confirmed": sum(1 for f in findings if str(f.get("status", "")).lower()=="confirmed")}
+    return json.dumps({"ok": True, "summary": summary, "findings": findings})
 
 def _register_source_and_get_citation(
     title: str,
@@ -1642,6 +1713,11 @@ TOOLS.extend([
         parameters={"type": "object", "properties": {}},
         requires_approval=False,
     ),
+    ToolDefinition(name="run_sast_scan", description="Run local SAST command (semgrep/codeql/bandit).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
+    ToolDefinition(name="run_dependency_audit", description="Run local dependency audit command (pip-audit/npm audit/osv-scanner).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
+    ToolDefinition(name="run_secrets_scan", description="Run local secrets scanner (gitleaks/trufflehog).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
+    ToolDefinition(name="run_policy_checks", description="Run static policy checks for risky APIs/config patterns.", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":120}}}, requires_approval=False),
+    ToolDefinition(name="generate_scan_report", description="Generate JSON/markdown-ready scan report; blocks if confirmation policy unmet.", parameters={"type":"object","properties":{}}, requires_approval=False),
 ])
 
 TOOL_DESCRIPTORS = {
@@ -5001,6 +5077,11 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "create_scan_finding": _handle_create_scan_finding,
     "attach_scan_artifact": _handle_attach_scan_artifact,
     "list_scan_findings": _handle_list_scan_findings,
+    "run_sast_scan": _legacy_handler(_handle_run_sast_scan),
+    "run_dependency_audit": _legacy_handler(_handle_run_dependency_audit),
+    "run_secrets_scan": _legacy_handler(_handle_run_secrets_scan),
+    "run_policy_checks": _legacy_handler(_handle_run_policy_checks),
+    "generate_scan_report": _handle_generate_scan_report,
 }
 
 

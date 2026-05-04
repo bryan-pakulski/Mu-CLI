@@ -194,6 +194,16 @@ class InputHandler:
                 "sources": None,
             }
         )
+        scan_completer = NestedCompleter.from_nested_dict(
+            {
+                "status": None,
+                "profile": {
+                    "safe_local": None,
+                    "extended_local": None,
+                    "network_opt_in": None,
+                },
+            }
+        )
         unset_completer = MergedCompleter(
             [
                 variable_completer,
@@ -238,6 +248,7 @@ class InputHandler:
             "/agentic": None,
             "/mode": mode_completer,
             "/research": research_completer,
+            "/scan": scan_completer,
             "/feature": feature_completer,
             "/features": feature_completer,
             "/memory": memory_completer,

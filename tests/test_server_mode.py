@@ -255,6 +255,29 @@ def test_research_query_sets_mode_and_executes_prompt():
     assert result["data"]["send_result"]["assistant_text"].startswith("echo: Research request:")
 
 
+def test_scan_status_reports_profiles():
+    session = build_test_session()
+
+    result = handle_command(session, "/scan status", allow_prompt=False)
+
+    assert result["ok"] is True
+    assert result["data"]["policy_profile"] == "safe_local"
+    assert "network_opt_in" in result["data"]["available_profiles"]
+
+
+def test_scan_profile_command_sets_policy():
+    session = build_test_session()
+
+    result = handle_command(
+        session,
+        "/scan profile extended_local",
+        allow_prompt=False,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["policy_profile"] == "extended_local"
+
+
 def test_stats_command_returns_session_snapshot():
     session = build_test_session()
 

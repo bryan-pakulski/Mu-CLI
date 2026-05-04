@@ -544,6 +544,11 @@ def print_help():
         "",
         "Research workflow commands (citation-first prompts, source review)",
     )
+    table.add_row(
+        "/scan <status|profile ...>",
+        "",
+        "Scan workflow commands (status and policy profile selection)",
+    )
     table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
     table.add_row(
         "/update", "", "Attempt to update μCLI from the configured git remote"
@@ -1524,6 +1529,80 @@ def handle_command(session, user_input, allow_prompt=True):
             ok=bool(send_result.get("ok", True)),
             message="Executed research query.",
             data={"query": research_query, "send_result": send_result},
+        )
+
+    if cmd == "/scan":
+        scan_query = (arg or "").strip()
+        lowered = scan_query.lower()
+
+        if lowered in {"", "status"}:
+            profile_result = execute_tool(
+                "get_scan_policy_profile",
+                {},
+                session.folder_context,
+                session.ui,
+                session.variables,
+                session=session,
+            )
+            profile = "safe_local"
+            try:
+                payload = json.loads(profile_result)
+                profile = payload.get("data", {}).get("policy_profile", "safe_local")
+            except Exception:
+                pass
+            return serialize_command_result(
+                session,
+                cmd,
+                message="Scan status snapshot.",
+                data={
+                    "current_mode": str(session.variables.get("agent_mode", "default")),
+                    "policy_profile": profile,
+                    "available_profiles": [
+                        "safe_local",
+                        "extended_local",
+                        "network_opt_in",
+                    ],
+                },
+            )
+
+        if lowered.startswith("profile"):
+            parts = scan_query.split()
+            if len(parts) < 2:
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message="Usage: /scan profile <safe_local|extended_local|network_opt_in>",
+                )
+            profile = parts[1].strip().lower()
+            result = execute_tool(
+                "set_scan_policy_profile",
+                {"profile": profile},
+                session.folder_context,
+                session.ui,
+                session.variables,
+                session=session,
+            )
+            payload = json.loads(result)
+            if not payload.get("ok", False):
+                return serialize_command_result(
+                    session,
+                    cmd,
+                    ok=False,
+                    message=payload.get("message", "Failed to set scan profile."),
+                )
+            return serialize_command_result(
+                session,
+                cmd,
+                message=f"Scan policy profile set to {profile}.",
+                data={"policy_profile": profile},
+            )
+
+        return serialize_command_result(
+            session,
+            cmd,
+            ok=False,
+            message="Usage: /scan <status|profile [safe_local|extended_local|network_opt_in]>",
         )
 
     if cmd == "/mode":

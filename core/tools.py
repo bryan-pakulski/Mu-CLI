@@ -4998,9 +4998,9 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "raise_blocker": _legacy_handler(_handle_raise_blocker),
     "batch_job": _handle_batch_job,
     "search_and_replace_file": _legacy_handler(_handle_search_and_replace_file),
-    "create_scan_finding": _legacy_handler(_handle_create_scan_finding),
-    "attach_scan_artifact": _legacy_handler(_handle_attach_scan_artifact),
-    "list_scan_findings": _legacy_handler(_handle_list_scan_findings),
+    "create_scan_finding": _handle_create_scan_finding,
+    "attach_scan_artifact": _handle_attach_scan_artifact,
+    "list_scan_findings": _handle_list_scan_findings,
 }
 
 

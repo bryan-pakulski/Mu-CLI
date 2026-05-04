@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 import core.tools as tools
-from core.tools import ToolExecutionContext, _handle_create_scan_finding, _handle_attach_scan_artifact, _handle_list_scan_findings
+from core.tools import ToolExecutionContext, _handle_create_scan_finding, _handle_attach_scan_artifact, _handle_list_scan_findings, execute_tool
 from core.workspace import FolderContext
 
 
@@ -61,3 +61,37 @@ def test_scan_finding_and_artifact_are_persisted(tmp_path, monkeypatch):
     assert len(listed["findings"]) == 1
     assert listed["findings"][0]["id"] == "F-1"
     assert listed["findings"][0]["artifacts"][0]["artifact_name"] == "repro.log"
+
+
+def test_scan_tools_work_via_execute_tool_envelopes(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, monkeypatch)
+    finding_args = {
+        "id": "F-2",
+        "title": "Command injection",
+        "severity": "critical",
+        "confidence": "high",
+        "cwe": "CWE-78",
+        "cvss": 9.8,
+        "affected_files": ["runner.py"],
+        "affected_functions": ["run_cmd"],
+        "preconditions": ["user controls shell arg"],
+        "exploit_steps": ["inject ';id'"],
+        "evidence": ["command output shows id"],
+        "fix_recommendation": "use subprocess list args",
+        "verification_steps": ["re-run exploit after patch"],
+        "status": "confirmed",
+    }
+    created = json.loads(execute_tool("create_scan_finding", finding_args, ctx.folder_context, session=ctx.session))
+    assert created["ok"] is True
+
+    blocked = json.loads(execute_tool(
+        "attach_scan_artifact",
+        {"finding_id": "F-2", "artifact_name": "net.log", "content": "nmap https://example.com"},
+        ctx.folder_context,
+        session=ctx.session,
+    ))
+    assert blocked["ok"] is False
+
+    listed = json.loads(execute_tool("list_scan_findings", {}, ctx.folder_context, session=ctx.session))
+    assert listed["ok"] is True
+    assert listed["data"]["findings"][0]["id"] == "F-2"

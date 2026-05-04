@@ -231,6 +231,24 @@ GENERAL RULES:
 10. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs when deciding what to store or act on.
 """
 
+
+SECURITY_FINDING_SCHEMA = {
+    "id": "string",
+    "title": "string",
+    "severity": "critical|high|medium|low|info",
+    "confidence": "high|medium|low",
+    "cwe": "string",
+    "cvss": "number|null",
+    "affected_files": ["string"],
+    "affected_functions": ["string"],
+    "preconditions": ["string"],
+    "exploit_steps": ["string"],
+    "evidence": ["string"],
+    "fix_recommendation": "string",
+    "verification_steps": ["string"],
+    "status": "confirmed|unconfirmed|false_positive",
+}
+
 AGENTIC_MODES = {
     "default": """WORKFLOW (Collation-Aware Default):
 1. **Context Collection**: Review the workspace map and use read only tools to build up context. 
@@ -254,7 +272,8 @@ AGENTIC_MODES = {
 3. Do not report a vulnerability as a finding until you have empirical evidence from tooling.
 4. For each validated finding, explain exploit mechanics, impact/blast radius, and provide a minimal reproducible example.
 5. Provide production-grade patch guidance and explicit verification steps that demonstrate the issue is actually fixed and resistant to trivial bypasses.
-6. If evidence is insufficient, report the item as unconfirmed with the exact additional checks needed.""",
+6. If evidence is insufficient, report the item as unconfirmed with the exact additional checks needed.
+7. Emit every finding in a machine-parseable schema with fields: id, title, severity, confidence, cwe, optional cvss, affected_files, affected_functions, preconditions, exploit_steps, evidence, fix_recommendation, verification_steps, and status (confirmed|unconfirmed|false_positive).""",
     "feature": """WORKFLOW (Feature Task Engine):
 In FEATURE mode, you MUST use the feature-task engine (`create_feature_task`, `get_current_task`, `get_tasks`, `update_task_status`, `approve_feature_task`) rather than inventing a separate planning format.
 In FEATURE mode, do not begin code implementation until the user has approved the generated plan and that approval has been recorded in the session-managed feature metadata.
@@ -438,7 +457,8 @@ You are in security scan mode.
 - Run in a concrete validate/reproduce loop for each suspected issue: hypothesize -> reproduce with tool calls -> collect evidence -> retest/refine.
 - Only return confirmed findings when backed by empirical evidence from tool output or observable behavior.
 - Distinguish clearly between confirmed, unconfirmed, and disproven hypotheses.
-- For each confirmed finding, include: severity, preconditions, exploit path, minimal repro steps, and patch + verification guidance.
+- For each finding, emit structured fields: id, title, severity, confidence, cwe, optional cvss, affected_files, affected_functions, preconditions, exploit_steps, evidence, fix_recommendation, verification_steps, status.
+- status must be one of confirmed, unconfirmed, false_positive, and must match evidence quality.
 - Prefer safe/local proof-of-concept workflows and avoid destructive actions.
 """,
 

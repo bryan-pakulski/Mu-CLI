@@ -372,6 +372,66 @@ def _feature_directory(workspace_root: str, feature_id: str) -> str:
     return os.path.join(workspace_root, "documentation", f"feature_req_{feature_id}")
 
 
+def _initialize_feature_docs(plan: FeaturePlan) -> None:
+    """Create baseline feature documentation artifacts if they do not exist."""
+    docs_index_path = os.path.join(plan.directory, "README.md")
+    implementation_path = os.path.join(plan.directory, "implementation_log.md")
+    decisions_path = os.path.join(plan.directory, "decision_log.json")
+    supporting_dir = os.path.join(plan.directory, "supporting_data")
+    timeline_path = os.path.join(supporting_dir, "timeline.json")
+
+    os.makedirs(supporting_dir, exist_ok=True)
+
+    if not os.path.exists(docs_index_path):
+        with open(docs_index_path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "# Feature Documentation\n\n"
+                f"- **Feature:** {plan.feature_name}\n"
+                f"- **Feature ID:** `{plan.feature_id}`\n"
+                "- **Goal:** Keep implementation details, decisions, and supporting data in sync over time.\n\n"
+                "## Files\n"
+                "- `feature_plan.json` — machine-readable plan state used by feature mode.\n"
+                "- `implementation_log.md` — chronological implementation notes maintained by the model.\n"
+                "- `decision_log.json` — structured decision records (tradeoffs, alternatives, outcomes).\n"
+                "- `supporting_data/timeline.json` — key milestones and verification checkpoints.\n"
+            )
+
+    if not os.path.exists(implementation_path):
+        with open(implementation_path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "# Implementation Log\n\n"
+                "Maintain this file during implementation. For each meaningful change include:\n"
+                "- date/time\n"
+                "- task/phase reference\n"
+                "- what changed\n"
+                "- how it was validated\n"
+                "- follow-up actions\n"
+            )
+
+    if not os.path.exists(decisions_path):
+        with open(decisions_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "feature_id": plan.feature_id,
+                    "feature_name": plan.feature_name,
+                    "decisions": [],
+                },
+                handle,
+                indent=2,
+            )
+
+    if not os.path.exists(timeline_path):
+        with open(timeline_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "feature_id": plan.feature_id,
+                    "milestones": [],
+                },
+                handle,
+                indent=2,
+            )
+
+
 def _resolve_metadata_path(
     *,
     directory: str | None,
@@ -470,6 +530,7 @@ def create_feature_plan(
         phases_meta=phases_meta,
     )
     os.makedirs(plan.directory, exist_ok=True)
+    _initialize_feature_docs(plan)
     return save_feature_plan(session_id or "", plan)
 
 
@@ -912,6 +973,7 @@ def build_phase_execution_prompt(plan: FeaturePlan, task: FeatureTask) -> str:
         f"Exit Criteria: {', '.join(task.exit_criteria)}. "
         "Perform one bounded step for this task, then verify and record progress before taking the next step. "
         "Use save_scratchpad for short-lived notes/plans and save_memory for durable findings/decisions during this loop. "
+        "Keep the feature documentation folder up to date (`README.md`, `implementation_log.md`, `decision_log.json`, and `supporting_data/timeline.json`) as work progresses. "
         "Update the task status to 'completed' only when all exit criteria are met and verified. "
         "If you are blocked, explain why in your response."
     )

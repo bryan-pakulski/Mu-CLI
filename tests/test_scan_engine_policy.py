@@ -48,3 +48,44 @@ def test_report_requires_repro_and_fix_verification(tmp_path, monkeypatch):
     }, folder, session=session))["ok"] is True
     report = json.loads(execute_tool("generate_scan_report", {}, folder, session=session))
     assert report["ok"] is True
+
+
+def test_report_exports_json_markdown_sarif_and_ci_gate(tmp_path, monkeypatch):
+    folder, session = _ctx(tmp_path, monkeypatch)
+    # create unconfirmed + evidence + promote confirmed + verification
+    assert json.loads(execute_tool("create_scan_finding", _finding("unconfirmed"), folder, session=session))["ok"] is True
+    for role, content in [("repro", "repro ok"), ("fix_verification", "verify ok")]:
+        assert json.loads(execute_tool("attach_scan_artifact", {
+            "finding_id": "FX-1", "artifact_name": f"{role}.log", "content": content, "artifact_role": role, "success": True
+        }, folder, session=session))["ok"] is True
+    assert json.loads(execute_tool("create_scan_finding", _finding("confirmed"), folder, session=session))["ok"] is True
+
+    json_report = json.loads(execute_tool("generate_scan_report", {"format": "json"}, folder, session=session))
+    assert json_report["ok"] is True
+    assert "findings" in json_report
+
+    md_report = json.loads(execute_tool("generate_scan_report", {"format": "markdown"}, folder, session=session))
+    assert md_report["ok"] is True
+    assert "# Security Scan Report" in md_report["markdown"]
+
+    sarif_report = json.loads(execute_tool("generate_scan_report", {"format": "sarif"}, folder, session=session))
+    assert sarif_report["ok"] is True
+    assert sarif_report["sarif"]["version"] == "2.1.0"
+
+    gated = json.loads(execute_tool("generate_scan_report", {"format": "json", "severity_gate": "high", "gate_exit_code": 7}, folder, session=session))
+    assert gated["ok"] is True
+    assert gated["ci_exit_code"] == 7
+
+
+def test_unconfirmed_when_repro_fails_and_minimal_poc_attached(tmp_path, monkeypatch):
+    folder, session = _ctx(tmp_path, monkeypatch)
+    f = _finding("unconfirmed")
+    assert json.loads(execute_tool("create_scan_finding", f, folder, session=session))["ok"] is True
+    attach = json.loads(execute_tool("attach_scan_artifact", {
+        "finding_id": "FX-1", "artifact_name": "poc.sh", "content": "echo poc", "artifact_role": "repro", "success": False
+    }, folder, session=session))
+    assert attach["ok"] is True
+    listed = json.loads(execute_tool("list_scan_findings", {}, folder, session=session))
+    finding = listed["data"]["findings"][0]
+    assert finding["status"] == "unconfirmed"
+    assert finding["artifacts"][0]["artifact_name"] == "poc.sh"

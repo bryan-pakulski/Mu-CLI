@@ -186,6 +186,43 @@ def _handle_run_policy_checks(args: dict, context: Any) -> str:
     return json.dumps({"command": command, "exit_code": code, "output": output[:200000]})
 
 
+def _severity_rank(sev: str) -> int:
+    order = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+    return order.get(str(sev or "").lower(), 0)
+
+
+def _to_markdown_report(findings: list[dict], summary: dict) -> str:
+    lines = ["# Security Scan Report", "", f"- Total findings: {summary['total']}", f"- Confirmed findings: {summary['confirmed']}", ""]
+    for f in findings:
+        lines.append(f"## {f.get('id','n/a')} - {f.get('title','Untitled')}")
+        lines.append(f"- status: {f.get('status')}")
+        lines.append(f"- severity: {f.get('severity')}")
+        lines.append(f"- confidence: {f.get('confidence')}")
+        lines.append(f"- cwe: {f.get('cwe')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _to_sarif(findings: list[dict]) -> dict:
+    return {
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": [{
+            "tool": {"driver": {"name": "Mu-CLI Scan Engine"}},
+            "results": [
+                {
+                    "ruleId": str(f.get("cwe") or "MUCLI-SEC"),
+                    "level": "error" if _severity_rank(f.get("severity")) >= 3 else "warning",
+                    "message": {"text": str(f.get("title") or "Security finding")},
+                    "properties": {"status": f.get("status"), "severity": f.get("severity"), "confidence": f.get("confidence")},
+                    "locations": [{"physicalLocation": {"artifactLocation": {"uri": (f.get("affected_files") or [""])[0]}}}],
+                }
+                for f in findings
+            ],
+        }],
+    }
+
+
 def _handle_generate_scan_report(args: dict, context: Any) -> str:
     payload = _load_scan_findings(context)
     findings = payload.get("findings", [])
@@ -203,8 +240,22 @@ def _handle_generate_scan_report(args: dict, context: Any) -> str:
                 blocking.append({"id": f.get("id"), "reason": "confirmed finding requires successful repro and fix_verification artifacts"})
     if blocking:
         return json.dumps({"ok": False, "blocking": blocking})
+
     summary = {"total": len(findings), "confirmed": sum(1 for f in findings if str(f.get("status", "")).lower()=="confirmed")}
-    return json.dumps({"ok": True, "summary": summary, "findings": findings})
+    fmt = str(args.get("format", "json")).lower()
+    output = {"summary": summary, "findings": findings}
+    if fmt == "markdown":
+        output = {"markdown": _to_markdown_report(findings, summary), "summary": summary}
+    elif fmt == "sarif":
+        output = {"sarif": _to_sarif(findings), "summary": summary}
+
+    gate = str(args.get("severity_gate", "")).lower().strip()
+    exit_code = 0
+    if gate:
+        threshold = _severity_rank(gate)
+        if any(str(f.get("status", "")).lower() == "confirmed" and _severity_rank(f.get("severity")) >= threshold for f in findings):
+            exit_code = int(args.get("gate_exit_code", 2))
+    return json.dumps({"ok": True, **output, "ci_exit_code": exit_code})
 
 def _register_source_and_get_citation(
     title: str,
@@ -1717,7 +1768,7 @@ TOOLS.extend([
     ToolDefinition(name="run_dependency_audit", description="Run local dependency audit command (pip-audit/npm audit/osv-scanner).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
     ToolDefinition(name="run_secrets_scan", description="Run local secrets scanner (gitleaks/trufflehog).", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":180}}}, requires_approval=False),
     ToolDefinition(name="run_policy_checks", description="Run static policy checks for risky APIs/config patterns.", parameters={"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":120}}}, requires_approval=False),
-    ToolDefinition(name="generate_scan_report", description="Generate JSON/markdown-ready scan report; blocks if confirmation policy unmet.", parameters={"type":"object","properties":{}}, requires_approval=False),
+    ToolDefinition(name="generate_scan_report", description="Generate report exports (json|markdown|sarif) with optional severity gate exit code.", parameters={"type":"object","properties":{"format":{"type":"string","enum":["json","markdown","sarif"],"default":"json"},"severity_gate":{"type":"string","enum":["low","medium","high","critical"]},"gate_exit_code":{"type":"integer","default":2}}}, requires_approval=False),
 ])
 
 TOOL_DESCRIPTORS = {

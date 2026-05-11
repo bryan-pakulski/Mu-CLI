@@ -119,57 +119,54 @@ def test_shift_tab_keybinding_is_registered_for_yolo_toggle():
     assert any(len(keys) == 1 and keys[0] == "s-tab" for keys in bindings)
 
 
-def test_command_completion_covers_all_cli_commands_and_aliases():
+def test_command_completion_covers_curated_command_set():
+    """The autocomplete dict must contain every canonical command after the
+    alias cleanup. Dropped aliases (/exit /h /c /v /f /add /cf /dir /sys
+    /ls /rm /open /features /tools /splash /update /clear-workspace /cw)
+    are deliberately absent — `test_command_surface.py` pins THAT direction."""
     handler = InputHandler()
 
     expected_commands = {
+        # session
         "/help",
-        "/h",
-        "/clear",
-        "/c",
-        "/clearfiles",
-        "/cf",
-        "/clear-workspace",
-        "/cw",
-        "/view",
-        "/v",
         "/quit",
-        "/exit",
         "/q",
-        "/file",
-        "/f",
-        "/add",
+        "/clear",
+        "/view",
+        "/new",
+        "/list",
+        "/load",
+        "/delete",
+        "/continue",
+        # workspace
         "/folder",
-        "/dir",
+        "/file",
+        "/clearfiles",
+        "/workspace",
+        # model & provider
         "/model",
         "/provider",
-        "/workspace",
-        "/update",
-        "/agentic",
-        "/mode",
-        "/research",
-        "/feature",
-        "/features",
-        "/tool",
-        "/tools",
         "/system",
-        "/sys",
-        "/thinking",
-        "/list",
-        "/ls",
-        "/load",
-        "/open",
-        "/new",
-        "/delete",
-        "/rm",
-        "/stats",
-        "/splash",
+        "/ollama",
+        # variables
         "/set",
         "/get",
         "/unset",
         "/variables",
-        "/flush",
+        # modes & toggles
+        "/mode",
+        "/plan",
         "/yolo",
+        "/agentic",
+        "/thinking",
+        "/research",
+        # memory / tools / features
+        "/memory",
+        "/tool",
+        "/flush",
+        "/feature",
+        # diagnostics
+        "/stats",
     }
 
     assert expected_commands.issubset(set(handler.command_completions.keys()))

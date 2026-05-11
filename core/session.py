@@ -19,7 +19,7 @@ from core.memory import ScratchpadStore, TaskMemoryStore
 from core.retrieval import SemanticCodeIndex
 from core.tools import _RETRIEVAL_INDEX
 from core.workspace import FolderContext
-from providers.base import LLMProvider, Message, MessagePart, FileReference
+from providers.base import LLMProvider, Message, MessagePart, FileReference, ImageData
 from core.tools import (
     TOOLS,
     COLLATED_TOOLS,
@@ -616,6 +616,10 @@ class SessionManager(HistoryMixin):
                     elif p_type == "file":
                         mime = part.get("file_ref", {}).get("mime_type", "file")
                         self.ui.show_info(f"[Attached File: {mime}]")
+                    elif p_type == "image_input":
+                        img = part.get("image", {}) or {}
+                        src = img.get("source") or img.get("mime_type", "image")
+                        self.ui.show_info(f"[Attached Image: {src}]")
                     elif p_type == "tool_call":
                         self.ui.show_info(f"  [Tool Call: {part.get('tool_name')}]")
                     elif p_type == "tool_result":
@@ -693,6 +697,8 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self.paused_execution_text: str | None = None
+        from core.background_tasks import BackgroundTaskRegistry
+        self.background_tasks = BackgroundTaskRegistry()
 
         self.sync_runtime_state()
         if self.folder_context.folders:
@@ -718,6 +724,37 @@ class Session:
             return
 
         safe_mime = get_safe_mime_type(file_path)
+
+        # Images route through the vision path (image_input + raw bytes), not
+        # the file-ref path — provider.upload_file for OpenAI/Ollama returns a
+        # local path that becomes a plain "[File: ...]" text stub, which
+        # vision-capable models can't actually look at.
+        if safe_mime.startswith("image/"):
+            try:
+                with open(file_path, "rb") as fh:
+                    raw = fh.read()
+            except OSError as e:
+                if self.ui:
+                    self.ui.show_error(f"Could not read image: {e}")
+                return
+            import base64 as _b64
+            self.staged_files.append(
+                {
+                    "type": "image_input",
+                    "image": {
+                        "data_b64": _b64.b64encode(raw).decode("ascii"),
+                        "mime_type": safe_mime,
+                        "source": file_path,
+                    },
+                }
+            )
+            if self.ui:
+                size_kb = max(1, len(raw) // 1024)
+                self.ui.show_info(
+                    f"Staged image: {os.path.basename(file_path)} ({safe_mime}, {size_kb} KB)"
+                )
+            return
+
         if self.ui:
             self.ui.show_info(f"Uploading {file_path} as {safe_mime}...")
 
@@ -934,6 +971,25 @@ class Session:
                         display_name=fr_data.get("display_name"),
                     )
                     parts.append(MessagePart(type="file", file_ref=fr))
+                elif p.get("type") == "image_input":
+                    img_data = p.get("image", {}) or {}
+                    raw = img_data.get("data_b64") or ""
+                    try:
+                        import base64 as _b64
+                        decoded = _b64.b64decode(raw) if raw else b""
+                    except Exception:
+                        decoded = b""
+                    if decoded:
+                        parts.append(
+                            MessagePart(
+                                type="image_input",
+                                image=ImageData(
+                                    data=decoded,
+                                    mime_type=img_data.get("mime_type", "image/png"),
+                                    source=img_data.get("source"),
+                                ),
+                            )
+                        )
                 elif p.get("type") == "tool_call":
                     parts.append(
                         MessagePart(
@@ -989,6 +1045,10 @@ class Session:
                 summaries.append(
                     f"file:{fr.get('display_name', fr.get('uri', 'unknown'))}"
                 )
+            elif p_type == "image_input":
+                img = part.get("image", {}) or {}
+                source = img.get("source") or img.get("mime_type", "image")
+                summaries.append(f"image:{source}")
 
         if not summaries:
             return f"- {role}: [no serializable content]"
@@ -1249,6 +1309,87 @@ class Session:
             return ""
         return "".join(lines).strip()
 
+    def _build_workspace_context_files(self) -> str:
+        """LAYER 1 — read any user-curated context files (AGENTS.md /
+        CLAUDE.md / MUCLI.md / .mu/CONTEXT.md) from each attached workspace
+        folder and concatenate them with provenance headers.
+
+        Returns "" if there are no folders, no files match, or the feature
+        is disabled (`workspace_context_files = ""`).
+        """
+        if not self.folder_context or not self.folder_context.folders:
+            return ""
+        raw_names = str(
+            self.variables.get(
+                "workspace_context_files", "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md"
+            )
+            or ""
+        )
+        candidates = [n.strip() for n in raw_names.split(",") if n.strip()]
+        if not candidates:
+            return ""
+        budget = max(
+            0, int(self.variables.get("workspace_context_max_chars", 8192) or 8192)
+        )
+        if budget == 0:
+            return ""
+        blocks: list[str] = []
+        used = 0
+        seen_paths: set[str] = set()
+        for folder in self.folder_context.folders:
+            for name in candidates:
+                path = os.path.normpath(os.path.join(folder, name))
+                if path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                        body = fh.read().strip()
+                except OSError:
+                    continue
+                if not body:
+                    continue
+                header = f"### {os.path.relpath(path, folder)}  (from {folder})"
+                entry = f"{header}\n{body}"
+                remaining = budget - used
+                if remaining <= 0:
+                    break
+                if len(entry) > remaining:
+                    entry = entry[:remaining].rstrip() + "\n...[truncated]"
+                blocks.append(entry)
+                used += len(entry) + 2  # account for separator
+                if used >= budget:
+                    break
+            if used >= budget:
+                break
+        return "\n\n".join(blocks).strip()
+
+    def _build_skills_block(self) -> str:
+        """LAYER 1B — render the installed skills (from `mu/skills/`,
+        `~/.mu/skills/`, and `<workspace>/.mu/skills/`) into a labelled
+        system-prompt block. Capped by `skills_max_chars` (default 6144).
+        """
+        try:
+            from mu.skills import discover_skills, render_skills_block
+        except ImportError:
+            return ""
+        raw = self.variables.get("skills_max_chars", 6144)
+        try:
+            budget = max(0, int(raw)) if raw is not None else 6144
+        except (TypeError, ValueError):
+            budget = 6144
+        if budget == 0:
+            return ""
+        folders = (
+            list(self.folder_context.folders)
+            if self.folder_context and self.folder_context.folders
+            else []
+        )
+        skills = discover_skills(folders)
+        return render_skills_block(skills, budget=budget)
+
     def _inject_hierarchical_context(self, system_prompt: str) -> str:
         summary_limit = max(
             0, int(self.variables.get("conversation_summary_char_limit", 8000) or 8000)
@@ -1263,6 +1404,27 @@ class Session:
         )
 
         layers = []
+        workspace_files = self._build_workspace_context_files()
+        if workspace_files:
+            ws_limit = max(
+                0,
+                int(self.variables.get("workspace_context_max_chars", 8192) or 8192),
+            )
+            layers.append(
+                "LAYER 1 — Workspace context files (user-curated, authoritative):\n"
+                f"[budget: {ws_limit} chars | eviction: truncate-after-budget]\n"
+                + workspace_files
+            )
+        skills_block = self._build_skills_block()
+        if skills_block:
+            sk_limit = max(
+                0, int(self.variables.get("skills_max_chars", 6144) or 6144)
+            )
+            layers.append(
+                "LAYER 1B — Installed skills (declarative agent extensions):\n"
+                f"[budget: {sk_limit} chars | eviction: drop-tail]\n"
+                + skills_block
+            )
         if summary:
             layers.append(
                 "LAYER 2 — Conversation summary:\n"

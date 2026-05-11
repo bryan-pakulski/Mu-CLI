@@ -485,74 +485,96 @@ def build_stats_snapshot(session):
     return stats
 
 
+# Single source of truth for /help. Grouped by purpose. Aliases column
+# only lists the ONE alias that survived the cleanup (most commands have
+# no alias — /quit's /q is the only one kept for muscle memory).
+_HELP_GROUPS = [
+    (
+        "Session",
+        [
+            ("/help", "", "Show this menu"),
+            ("/quit", "/q", "Exit"),
+            ("/new [name]", "", "Start a new conversation"),
+            ("/list", "", "List saved conversations"),
+            ("/load <name>", "", "Load a conversation"),
+            ("/delete <name>", "", "Delete a saved conversation"),
+            ("/clear", "", "Clear current conversation history"),
+            ("/view", "", "View conversation history"),
+            ("/continue", "", "Resume last paused execution after Ctrl+C"),
+        ],
+    ),
+    (
+        "Workspace",
+        [
+            ("/folder <path>", "", "Attach a folder as workspace context"),
+            ("/file <path>", "", "Stage a file for the next turn"),
+            ("/clearfiles", "", "Clear staged files"),
+            ("/workspace [clear]", "", "List or clear attached workspace folders"),
+        ],
+    ),
+    (
+        "Model & provider",
+        [
+            ("/model [name]", "", "Show / change the model"),
+            ("/provider [name]", "", "Switch provider (gemini, ollama, openai)"),
+            ("/system <txt>", "", "Update the system prompt"),
+            ("/ollama [status|models|pull|options]", "", "Ollama-specific helpers"),
+        ],
+    ),
+    (
+        "Variables",
+        [
+            ("/set <key> <value>", "", "Set a session variable"),
+            ("/get <key>", "", "Get a session variable"),
+            ("/unset <key|--all>", "", "Unset a variable"),
+            ("/variables", "", "Show all variables"),
+        ],
+    ),
+    (
+        "Modes & toggles",
+        [
+            ("/mode <name>", "", "Switch agent mode (default|debug|feature|research|loop)"),
+            ("/plan [on|off|toggle]", "", "Toggle plan mode (read-only enforcement)"),
+            ("/yolo", "", "Toggle YOLO mode (auto-approve writes)"),
+            ("/agentic", "", "Toggle tool-calling mode"),
+            ("/thinking", "", "Toggle extended thinking / reasoning"),
+            ("/research [status|sources]", "", "Research workflow helpers"),
+        ],
+    ),
+    (
+        "Memory, tools, features",
+        [
+            ("/memory <status|list|clear>", "", "Manage durable memory + scratchpad"),
+            ("/tool <enable|disable|list>", "", "Enable/disable tools or list all"),
+            ("/flush", "", "Drain the collation buffer into the next turn"),
+            (
+                "/feature <list|new|load|delete|status|phases|create|show|move|block|review|archive|monitor>",
+                "",
+                "Manage feature-mode plans",
+            ),
+        ],
+    ),
+    (
+        "Diagnostics",
+        [
+            ("/stats", "", "Tokens, cost, memory, context — current snapshot"),
+        ],
+    ),
+]
+
+
 def print_help():
-    table = Table(title="Available Commands", box=box.SIMPLE)
-    table.add_column("Command", style="cyan", no_wrap=True)
-    table.add_column("Alias", style="magenta")
-    table.add_column("Description", style="white")
-
-    table.add_row("/clear", "", "Clear conversation history")
-    table.add_row("/new [name]", "", "Start a new conversation")
-    table.add_row("/delete <name>", "/rm", "Delete a saved conversation")
-    table.add_row("/file <path>", "/f", "Attach a file")
-    table.add_row("/clearfiles", "/cf", "Clear staged files")
-    table.add_row("/clear-workspace", "/cw", "Clear all workspace folders")
-    table.add_row(
-        "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
-    )
-    table.add_row(
-        "/memory <status|list|clear>", "", "Manage memory (e.g. clear scratch|task|all)"
-    )
-    table.add_row("/help", "", "Show this help menu")
-    table.add_row("/list", "/ls", "List saved conversations")
-    table.add_row("/load [name]", "/open", "Load a conversation")
-    table.add_row("/model [name]", "", "Show / change current model")
-    table.add_row("/get [key]", "", "Get a variable")
-    table.add_row("/yolo", "", "Toggle YOLO mode (no approvals)")
-    table.add_row("/set [key] [value]", "", "Set a variable")
-    table.add_row("/unset [key]", "", "Unset a variable (or --all)")
-    table.add_row(
-        "/flush", "", "Flush the collation buffer and inject context into the next turn"
-    )
-    table.add_row("/variables", "", "Show all variables")
-    table.add_row("/agentic", "", "Toggle Agentic (Tool Calling) mode")
-    table.add_row(
-        "/tool <enable/disable/list>",
-        "/tools",
-        "Enable/Disable a tool or list all available tools",
-    )
-    table.add_row(
-        "/mode <mode>",
-        "",
-        "Change the agentic strategy (default, debug, feature, research)",
-    )
-    table.add_row(
-        "/feature <list|new|load|delete|status|phases|exit|create|show|move|block|review|archive|monitor>",
-        "/features",
-        "Manage per-session feature plans and switch the active feature",
-    )
-    table.add_row(
-        "/research <status|sources|query>",
-        "",
-        "Research workflow commands (citation-first prompts, source review)",
-    )
-    table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
-    table.add_row("/plan", "", "Toggle plan mode (read-only tool enforcement)")
-    table.add_row("/quit", "/q", "Exit")
-    table.add_row("/continue", "", "Resume last paused execution after Ctrl+C")
-    table.add_row(
-        "/stats",
-        "",
-        "Show runtime stats, token/cost totals, and feature progress",
-    )
-    table.add_row("/system <txt>", "/sys", "Update system prompt")
-    table.add_row("/thinking", "", "Toggle thinking mode")
-    table.add_row("/view", "", "View conversation history")
-    table.add_row("/workspace [clear]", "", "List or clear workspace metadata")
-
-    console.print(table)
+    for group_name, entries in _HELP_GROUPS:
+        table = Table(title=group_name, box=box.SIMPLE, show_header=False, padding=(0, 1))
+        table.add_column("Command", style="cyan", no_wrap=True)
+        table.add_column("Alias", style="magenta")
+        table.add_column("Description", style="white")
+        for cmd, alias, desc in entries:
+            table.add_row(cmd, alias, desc)
+        console.print(table)
     console.print(
-        "[dim]Tip: End a line with '\\' to continue typing on the next line.[/dim]"
+        "[dim]Tip: end a line with '\\' to continue typing on the next line. "
+        "Tab to autocomplete every command.[/dim]"
     )
 
 
@@ -729,9 +751,17 @@ def choose_session(session_manager):
 
 def sync_provider_settings(session):
     if isinstance(session.provider, OllamaProvider):
-        # Default Ollama host is http://localhost:11434
-        host = session.variables.get("ollama_host", "http://localhost:11434")
-        session.provider.host = host
+        # Respect a per-session override for ollama_host; otherwise let the
+        # provider's own resolution (OLLAMA_HOST env → OLLAMA_API_KEY hosted
+        # → localhost) stand.
+        host_override = session.variables.get("ollama_host")
+        if host_override:
+            session.provider.host = host_override
+            session.provider.invalidate_preflight()
+        # Bind variables so the provider picks up `/set ollama_num_ctx`
+        # etc. on the next call.
+        if hasattr(session.provider, "bind_session_variables"):
+            session.provider.bind_session_variables(session.variables)
 
 
 def build_session(args, ui, allow_prompt=True):
@@ -884,7 +914,7 @@ def handle_command(session, user_input, allow_prompt=True):
             data=data,
         )
 
-    if cmd in ["/quit", "/exit", "/q"]:
+    if cmd in ["/quit", "/q"]:
         if allow_prompt:
             print("Goodbye!")
         return serialize_command_result(
@@ -911,19 +941,19 @@ def handle_command(session, user_input, allow_prompt=True):
             data={"resumed_text": paused_text, "send_result": send_result},
         )
 
-    if cmd in ["/help", "/h"]:
+    if cmd == "/help":
         if allow_prompt:
             print_help()
         return serialize_command_result(session, cmd, data={"commands_help": True})
 
-    if cmd in ["/clear", "/c"]:
+    if cmd == "/clear":
         session.session_manager.clear_current_history()
         refresh_memory_hud(session, ui)
         return serialize_command_result(
             session, cmd, message="Conversation history cleared."
         )
 
-    if cmd in ["/view", "/v"]:
+    if cmd == "/view":
         if allow_prompt:
             session.session_manager.view_history()
         return serialize_command_result(
@@ -932,7 +962,7 @@ def handle_command(session, user_input, allow_prompt=True):
             data={"history": session.session_manager.history},
         )
 
-    if cmd in ["/file", "/f", "/add"]:
+    if cmd == "/file":
         if not arg:
             if ui:
                 ui.show_error("Usage: /file <path_to_file>")
@@ -947,20 +977,13 @@ def handle_command(session, user_input, allow_prompt=True):
             data={"staged_files": list(session.staged_files)},
         )
 
-    if cmd in ["/clearfiles", "/cf"]:
+    if cmd == "/clearfiles":
         session.clear_files()
         return serialize_command_result(session, cmd, message="Staged files cleared.")
 
-    if cmd in ["/clear-workspace", "/cw"]:
-        session.folder_context.folders.clear()
-        session.folder_context.workspace_file_tree = None
-        session.session_manager.save_history(session.folder_context)
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session, cmd, message="Workspace folders cleared."
-        )
+    # `/clear-workspace` and `/cw` removed — use `/workspace clear` instead.
 
-    if cmd in ["/folder", "/dir"]:
+    if cmd == "/folder":
         if arg:
             sub_parts = arg.split(" ", 1)
             if sub_parts[0] == "clear":
@@ -1046,7 +1069,7 @@ def handle_command(session, user_input, allow_prompt=True):
             data={"folders": list(session.folder_context.folders)},
         )
 
-    if cmd in ["/list", "/ls"]:
+    if cmd == "/list":
         if allow_prompt:
             session.session_manager.list_sessions()
         return serialize_command_result(
@@ -1093,7 +1116,7 @@ def handle_command(session, user_input, allow_prompt=True):
             message=f"Started new session: {session.session_manager.current_session_name}",
         )
 
-    if cmd in ["/load", "/open"]:
+    if cmd == "/load":
         if not arg:
             if ui:
                 ui.show_error("Usage: /load <session_name>")
@@ -1123,7 +1146,7 @@ def handle_command(session, user_input, allow_prompt=True):
             message=f"Loaded session: {session.session_manager.current_session_name}",
         )
 
-    if cmd in ["/delete", "/rm"]:
+    if cmd == "/delete":
         if not arg:
             if ui:
                 ui.show_error("Usage: /delete <session_name>")
@@ -1135,7 +1158,7 @@ def handle_command(session, user_input, allow_prompt=True):
             session, cmd, message=f"Deleted session request: {arg.strip()}"
         )
 
-    if cmd in ["/system", "/sys"]:
+    if cmd == "/system":
         if arg:
             session.system_instruction = arg
             if ui:
@@ -1474,7 +1497,7 @@ def handle_command(session, user_input, allow_prompt=True):
             data={"folders": list(session.folder_context.folders)},
         )
 
-    if cmd in ["/feature", "/features"]:
+    if cmd == "/feature":
         feature_parts = arg.split(" ", 1) if arg else ["list"]
         feature_cmd = feature_parts[0].lower()
         feature_arg = feature_parts[1].strip() if len(feature_parts) > 1 else ""
@@ -1946,7 +1969,7 @@ def handle_command(session, user_input, allow_prompt=True):
             message=f"Unknown feature command: {feature_cmd}. Use '/feature help' for workflow-aligned guidance.",
         )
 
-    if cmd in ["/tool", "/tools"]:
+    if cmd == "/tool":
         tool_parts = arg.split(" ", 1) if arg else ["list"]
         tool_cmd = tool_parts[0].lower()
         tool_name = tool_parts[1].strip() if len(tool_parts) > 1 else ""
@@ -2238,12 +2261,6 @@ def handle_command(session, user_input, allow_prompt=True):
         return serialize_command_result(
             session, cmd, message=f"YOLO mode: {session.variables['yolo']}"
         )
-
-    if cmd == "/splash":
-        if allow_prompt:
-            print_splash(session)
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(session, cmd, data={"splash": True})
 
     if ui:
         ui.show_error(f"Unknown command: {cmd}")

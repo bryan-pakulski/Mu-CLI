@@ -44,6 +44,20 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": True,
     },  # Surface retryable tool failures + hints in the live UI
+    "streaming_enabled": {
+        "type": bool,
+        "default": True,
+    },  # Render assistant text token-by-token instead of one final panel
+    # Ollama provider knobs — set via `/set ollama_<key> <value>`.
+    "ollama_host": {"type": str, "default": ""},
+    "ollama_num_ctx": {"type": int, "default": 0},  # 0 = use server default
+    "ollama_num_predict": {"type": int, "default": 0},
+    "ollama_temperature": {"type": float, "default": 0.0},
+    "ollama_top_p": {"type": float, "default": 0.0},
+    "ollama_top_k": {"type": int, "default": 0},
+    "ollama_repeat_penalty": {"type": float, "default": 0.0},
+    "ollama_seed": {"type": int, "default": 0},
+    "ollama_mirostat": {"type": int, "default": 0},
     "collation_enabled": {
         "type": bool,
         "default": True,
@@ -83,6 +97,22 @@ VARIABLE_SCHEMA = {
     "context_trim_threshold": {
         "type": float,
         "default": 0.85,
+    },
+    "workspace_context_max_chars": {
+        "type": int,
+        "default": 8192,
+    },
+    "workspace_context_files": {
+        # Comma-separated list of filenames to auto-load from each attached
+        # workspace folder as LAYER 1 of the system prompt. Empty disables.
+        "type": str,
+        "default": "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md",
+    },
+    "skills_max_chars": {
+        # Total budget for the AVAILABLE SKILLS block injected as LAYER 1B
+        # of the system prompt. 0 disables skills entirely.
+        "type": int,
+        "default": 6144,
     },
     "structured_tool_results": {
         "type": bool,

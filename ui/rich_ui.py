@@ -8,8 +8,10 @@ import time
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
+from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
@@ -24,6 +26,76 @@ class RichUI:
     def __init__(self):
         self.console = Console()
         self.input_handler = InputHandler()
+        # Per-turn streaming state. `_gen_live` is set when an active
+        # `_GenerationLive` context manager is open — streaming-text and
+        # thinking deltas append into that Live's buffer so the Rich Live
+        # region (not bare `console.print`) handles cursor placement.
+        # `_streamed_any_text` survives until the next stream starts so
+        # `render_message` can suppress the duplicate panel.
+        self._gen_live = None
+        self._streamed_any_text = False
+        self._variables = None  # set via set_variables()
+
+    # -------------------------------------------------- live streaming surface
+
+    def _streaming_enabled(self) -> bool:
+        """Honor `variables["streaming_enabled"]` (default True)."""
+        if self._variables is None:
+            return True
+        try:
+            return bool(self._variables.get("streaming_enabled", True))
+        except AttributeError:
+            return True
+
+    def stream_assistant_start(self, model_name=None):
+        """No-op: header rendering is owned by the active `_GenerationLive`.
+        Kept for API compatibility."""
+        return None
+
+    def stream_assistant_delta(self, text: str):
+        """Append a token chunk to the active generation Live, if any."""
+        if not self._streaming_enabled() or not text:
+            return
+        if self._gen_live is not None:
+            self._gen_live.append_text(text)
+            self._streamed_any_text = True
+            return
+        # No active Live — happens in tests or non-streaming paths. Fall
+        # back to a direct print so the text isn't lost.
+        self.console.print(text, end="", soft_wrap=True, highlight=False)
+        self._streamed_any_text = True
+
+    def stream_thinking_delta(self, text: str):
+        """Append a reasoning chunk to the active generation Live, styled
+        in dim italic so it visually separates from user-facing text."""
+        if not self._streaming_enabled() or not text:
+            return
+        if self._gen_live is not None:
+            self._gen_live.append_thinking(text)
+            return
+        self.console.print(
+            f"[dim italic]{text}[/dim italic]", end="", soft_wrap=True, highlight=False
+        )
+
+    def stream_tool_call(self, tool_name: str):
+        """Note a tool call inside the generation Live's text region.
+        Outside an active Live, fall back to a one-line print."""
+        if not self._streaming_enabled() or not tool_name:
+            return
+        if self._gen_live is not None:
+            self._gen_live.note_tool_call(tool_name)
+            return
+        self.console.print(f"\n[cyan]→ {tool_name}[/cyan]", highlight=False)
+
+    def stream_assistant_end(self):
+        """End-of-stream notification. The Live keeps its rendered text in
+        scrollback (transient=False) when its CM exits, so we don't have to
+        print anything here. `_streamed_any_text` is deliberately preserved
+        so `render_message` can suppress the duplicate panel; it resets on
+        the next Live start."""
+        return None
+
+    # -------------------------------------------------- legacy render_message
 
     def render_message(self, role, content, model_name=None):
         local_now = datetime.now().astimezone()
@@ -38,12 +110,20 @@ class RichUI:
                     title_align="right",
                 )
             )
+            return
+        # Assistant path. If the text already streamed token-by-token, the
+        # user has seen it — don't redraw the whole panel. Otherwise (no
+        # streaming, or streaming disabled) fall back to the original panel.
+        if self._streamed_any_text:
+            # The stream already wrote header + body to the console; just
+            # close the visual unit. `stream_assistant_end` may have
+            # already emitted the trailing newline.
+            return
+        if model_name:
+            self.console.print(f"\nAssistant ({model_name}) [{ts}]:")
         else:
-            if model_name:
-                self.console.print(f"\nAssistant ({model_name}) [{ts}]:")
-            else:
-                self.console.print(f"\nAssistant [{ts}]:")
-            render_response(content)
+            self.console.print(f"\nAssistant [{ts}]:")
+        render_response(content)
 
     def get_input(
         self,
@@ -62,6 +142,7 @@ class RichUI:
         )
 
     def set_variables(self, variables_dict):
+        self._variables = variables_dict
         self.input_handler.set_variables(variables_dict)
 
     def confirm(self, message, default=True):
@@ -490,21 +571,24 @@ class RichUI:
         )
         self.console.print("\n")
 
-    @contextmanager
     def show_status(self, message):
-        with self.console.status(message, spinner="aesthetic") as status:
-            watcher_stop = threading.Event()
-            watcher = self._start_yolo_status_watcher(
-                status=status,
-                base_message=message,
-                stop_event=watcher_stop,
-            )
-            try:
-                yield status
-            finally:
-                watcher_stop.set()
-                if watcher:
-                    watcher.join(timeout=0.2)
+        """Open a unified streaming + status `_GenerationLive`.
+
+        Replaces the old `console.status` spinner. The returned context
+        manager opens a single Rich `Live` containing:
+          * top: the accumulating assistant text (token-streamed)
+          * middle: any accumulating thinking content (dim italic)
+          * bottom: a spinner + the status message
+
+        Streaming deltas pumped through `stream_assistant_delta` /
+        `stream_thinking_delta` / `stream_tool_call` write into the same
+        Live so token output never fights with the spinner for cursor
+        position. The status line stays anchored at the bottom.
+
+        Returned object supports `update(new_message)` so callers that
+        previously used the rich Status API keep working.
+        """
+        return _GenerationLive(self, message)
 
     def build_live_status(self, session, model_name, iteration, max_iterations):
         metrics = collect_runtime_metrics(session)
@@ -583,3 +667,132 @@ class RichUI:
         self.console.print(
             f"[{color}]  ↳ Result: {res_preview}... ({char_count} chars)[/{color}]"
         )
+
+
+class _GenerationLive:
+    """Context manager that owns a single Rich Live region for one agent
+    generation iteration.
+
+    Layout (top → bottom):
+      * accumulating assistant text (streamed)
+      * accumulating thinking text (dim italic) — usually empty
+      * tool-call markers as they fire ("→ tool_name" lines)
+      * status footer (spinner + the status message)
+
+    Why one Live instead of `console.status` + bare `console.print` for
+    tokens: a Rich Status is itself a Live, and `console.print(text, end="")`
+    fired while a Live is active doesn't reliably keep tokens on the same
+    line — each print competes with the Live's redraw and cursor tracking
+    breaks (the bug the user reported: scattered tokens, status pushed
+    around).  By routing every streaming source through this one Live,
+    the spinner stays anchored at the bottom and text flows naturally
+    above it. When the CM exits, the rendered content remains in
+    terminal scrollback (transient=False).
+    """
+
+    def __init__(self, ui: "RichUI", status_message: str):
+        self.ui = ui
+        self._status_message = str(status_message or "")
+        self._text_buf: list = []
+        self._thinking_buf: list = []
+        self._tool_call_log: list = []
+        self._live = None
+        self._lock = threading.Lock()
+        self._watcher_stop = threading.Event()
+        self._watcher = None
+
+    # ---------------------------------------------------------- lifecycle
+
+    def __enter__(self):
+        # Wire the UI's streaming handlers to route into us.
+        self.ui._gen_live = self
+        # Start of a new stream — clear the persistent flag so a previous
+        # iteration's panel-suppression hint doesn't bleed forward.
+        self.ui._streamed_any_text = False
+        # Header is part of the live group (rendered every refresh).
+        self._live = Live(
+            self._render(),
+            console=self.ui.console,
+            refresh_per_second=10,
+            transient=False,
+            auto_refresh=True,
+        )
+        self._live.start()
+        # YOLO toggle watcher (Shift+Tab) still works through the same
+        # update mechanism — it changes the status footer text.
+        self._watcher = self.ui._start_yolo_status_watcher(
+            status=self,
+            base_message=self._status_message,
+            stop_event=self._watcher_stop,
+        )
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._watcher_stop.set()
+        if self._watcher is not None:
+            try:
+                self._watcher.join(timeout=0.2)
+            except Exception:
+                pass
+        if self._live is not None:
+            try:
+                # Refresh once more so the final state lands cleanly.
+                self._live.update(self._render(final=True))
+                self._live.stop()
+            except Exception:
+                pass
+            self._live = None
+        self.ui._gen_live = None
+        return False
+
+    # ----------------------------------------------- streaming sinks
+
+    def append_text(self, text: str) -> None:
+        with self._lock:
+            self._text_buf.append(text)
+        self._refresh()
+
+    def append_thinking(self, text: str) -> None:
+        with self._lock:
+            self._thinking_buf.append(text)
+        self._refresh()
+
+    def note_tool_call(self, tool_name: str) -> None:
+        with self._lock:
+            self._tool_call_log.append(str(tool_name or ""))
+        self._refresh()
+
+    def update(self, new_message: str) -> None:
+        """Compat with the old `console.status` API + the YOLO watcher."""
+        self._status_message = str(new_message or "")
+        self._refresh()
+
+    # ------------------------------------------------- render
+
+    def _refresh(self) -> None:
+        if self._live is not None:
+            try:
+                self._live.update(self._render())
+            except Exception:
+                pass
+
+    def _render(self, *, final: bool = False):
+        with self._lock:
+            text = "".join(self._text_buf)
+            thinking = "".join(self._thinking_buf)
+            tool_calls = list(self._tool_call_log)
+        parts = []
+        if thinking:
+            parts.append(Text(thinking, style="dim italic"))
+        if text:
+            parts.append(Text(text))
+        for name in tool_calls:
+            parts.append(Text(f"→ {name}", style="cyan"))
+        # Bottom-anchored status footer. Spinner only while live.
+        if not final and self._status_message:
+            spinner = Spinner("dots", text=Text(f" {self._status_message}", style="dim"))
+            parts.append(spinner)
+        elif self._status_message:
+            parts.append(Text(self._status_message, style="dim"))
+        return Group(*parts) if parts else Text("")
+

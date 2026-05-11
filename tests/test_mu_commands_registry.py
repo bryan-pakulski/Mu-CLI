@@ -96,11 +96,13 @@ def test_help_lists_registered_commands(session):
 
 
 def test_command_aliases_share_handler(session):
+    """/quit and /q (the one surviving alias) resolve to the same handler.
+    /exit was dropped in the alias cleanup."""
     quit_spec = mc.get("/quit")
-    exit_spec = mc.get("/exit")
     q_spec = mc.get("/q")
     assert quit_spec is not None
-    assert quit_spec is exit_spec is q_spec
+    assert quit_spec is q_spec
+    assert mc.get("/exit") is None  # deliberately dropped
 
 
 def test_plan_toggle(session):

@@ -8,16 +8,18 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import (
-    PathCompleter,
-    NestedCompleter,
     Completer,
+    Completion,
     FuzzyWordCompleter,
+    NestedCompleter,
+    PathCompleter,
 )
+from prompt_toolkit.document import Document
 from prompt_toolkit.styles import Style
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.formatted_text import HTML
 
-from utils.config import KNOWN_MODELS, HISTORY_DIR
+from utils.config import HISTORY_DIR, KNOWN_MODELS, VARIABLE_SCHEMA
 
 
 MODE_PROMPT_STYLES = {
@@ -101,6 +103,20 @@ class DynamicFeatureIdCompleter(Completer):
         yield from completer.get_completions(document, complete_event)
 
 
+class _SkillNameCompleter(Completer):
+    """Completes `/skills <name>` from the discovered skills registry."""
+
+    def get_completions(self, document, complete_event):
+        try:
+            from mu.skills import discover_skills
+        except ImportError:
+            return
+        names = sorted({skill.name for skill in discover_skills([])})
+        if not names:
+            return
+        yield from FuzzyWordCompleter(names).get_completions(document, complete_event)
+
+
 class DynamicToolCompleter(Completer):
     def get_completions(self, document, complete_event):
         try:
@@ -124,6 +140,98 @@ class MergedCompleter(Completer):
     def get_completions(self, document, complete_event):
         for completer in self.completers:
             yield from completer.get_completions(document, complete_event)
+
+
+class SetCompleter(Completer):
+    """Position-aware completer for `/set <var> <value>`.
+
+    Without a space typed yet → suggest variable names (delegates to
+    `variable_completer`).  With a space → suggest values appropriate to
+    the named variable's type:
+
+      * `bool` → `true` | `false`
+      * `agent_mode` → registered mode names
+      * everything else → no suggestion (numeric / free-form string)
+
+    The position split keeps variable names from re-appearing once the
+    user is past the name and into the value column.
+    """
+
+    def __init__(self, variable_completer, variable_schema, mode_choices):
+        self._variable_completer = variable_completer
+        self._schema = variable_schema
+        self._mode_choices = mode_choices
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if " " not in text:
+            # Still typing the variable name.
+            yield from self._variable_completer.get_completions(
+                document, complete_event
+            )
+            return
+        # Past the name — offer values for the named variable.
+        var_name, _, value_prefix = text.partition(" ")
+        spec = self._schema.get(var_name)
+        if spec is None:
+            return
+        vtype = spec.get("type")
+        candidates: list = []
+        if vtype is bool:
+            candidates = ["true", "false"]
+        elif var_name == "agent_mode":
+            candidates = list(self._mode_choices.keys())
+        if not candidates:
+            return
+        for c in candidates:
+            if c.startswith(value_prefix):
+                yield Completion(
+                    c, start_position=-len(value_prefix), display=c
+                )
+
+
+class SlashCommandCompleter(Completer):
+    """Top-level completer for slash commands.
+
+    `prompt_toolkit.NestedCompleter` doesn't handle `/`-prefixed keys
+    well: it uses `WordCompleter` with the default `\\w+` word pattern,
+    so when you type `/me` the "word before cursor" is `me` (sans
+    slash) and `/memory` doesn't prefix-match.
+
+    This completer:
+      * suggests slash commands when the user has typed nothing (or only
+        a partial command — `/m`, `/me`, etc.);
+      * descends into the per-command sub-completer once the user has
+        typed a full command followed by a space (`/memory `).
+    """
+
+    def __init__(self, command_completions: dict):
+        self.command_completions = command_completions
+        self._commands = sorted(command_completions.keys())
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        # Once a space appears, the command is "committed" — delegate to
+        # its registered sub-completer (or show no completions if the
+        # command takes no args).
+        if " " in text:
+            cmd, _, remainder = text.partition(" ")
+            sub_completer = self.command_completions.get(cmd)
+            if sub_completer is None:
+                return
+            sub_doc = Document(text=remainder, cursor_position=len(remainder))
+            yield from sub_completer.get_completions(sub_doc, complete_event)
+            return
+
+        # No space yet — completing the command name itself. Prefix-match
+        # against the slash-leading keys directly.
+        for cmd in self._commands:
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display=cmd,
+                )
 
 
 class InputHandler:
@@ -209,59 +317,84 @@ class InputHandler:
                 directory_completer,
             ]
         )
+        plan_completer = NestedCompleter.from_nested_dict(
+            {"on": None, "off": None, "toggle": None}
+        )
 
+        # `/set <var> <value>` — position-aware: variable names without a
+        # space, value suggestions for bool / agent_mode after a space.
+        set_completer = SetCompleter(variable_completer, VARIABLE_SCHEMA, MODE_CHOICES)
+        ollama_completer = NestedCompleter.from_nested_dict(
+            {
+                "status": None,
+                "models": None,
+                "options": None,
+                "pull": None,
+            }
+        )
+
+        # Single source of truth for slash-command autocomplete.
+        #
+        # Curated to ~30 unique commands — no aliases, no dead entries.
+        # Removed (with rationale): /exit /h /c /v (aliases of /quit /help
+        # /clear /view), /f /add (aliases of /file), /cf (alias of
+        # /clearfiles), /dir (alias of /folder), /sys (alias of /system),
+        # /ls /rm (aliases of /list /delete), /open (alias of /load),
+        # /features /tools (plural aliases), /splash (auto-runs at boot,
+        # nothing else to do), /update (command was deleted earlier),
+        # /clear-workspace /cw (use `/workspace clear`).
         self.command_completions = {
+            # session control
             "/help": None,
-            "/h": None,
-            "/clear": None,
-            "/c": None,
-            "/clearfiles": None,
-            "/cf": None,
-            "/clear-workspace": None,
-            "/cw": None,
-            "/view": None,
-            "/v": None,
             "/quit": None,
-            "/exit": None,
             "/q": None,
-            "/file": path_completer,
-            "/f": path_completer,
-            "/add": path_completer,
+            "/clear": None,
+            "/view": None,
+            "/new": None,
+            "/list": None,
+            "/load": session_completer,
+            "/delete": session_completer,
+            "/continue": None,
+            # workspace
             "/folder": folder_completer,
-            "/dir": folder_completer,
+            "/file": path_completer,
+            "/clearfiles": None,
+            "/workspace": NestedCompleter.from_nested_dict({"clear": None}),
+            # model / provider
             "/model": model_dict,
             "/provider": provider_completer,
-            "/workspace": NestedCompleter.from_nested_dict({"clear": None}),
-            "/update": None,
-            "/agentic": None,
-            "/mode": mode_completer,
-            "/research": research_completer,
-            "/feature": feature_completer,
-            "/features": feature_completer,
-            "/memory": memory_completer,
-            "/tool": tool_command_completer,
-            "/tools": tool_command_completer,
             "/system": None,
-            "/sys": None,
-            "/thinking": None,
-            "/list": None,
-            "/ls": None,
-            "/load": session_completer,
-            "/open": session_completer,
-            "/new": None,
-            "/delete": session_completer,
-            "/rm": session_completer,
-            "/stats": None,
-            "/splash": None,
-            "/set": variable_completer,
+            "/ollama": ollama_completer,
+            # variables
+            "/set": set_completer,
             "/get": variable_completer,
             "/unset": unset_completer,
             "/variables": None,
-            "/flush": None,
+            # modes & toggles
+            "/mode": mode_completer,
+            "/plan": plan_completer,
             "/yolo": None,
+            "/agentic": None,
+            "/thinking": None,
+            "/research": research_completer,
+            # memory / tools
+            "/memory": memory_completer,
+            "/tool": tool_command_completer,
+            "/flush": None,
+            "/feature": feature_completer,
+            # diagnostics
+            "/stats": None,
+            # skills
+            "/skills": _SkillNameCompleter(),
         }
 
-        self.completer = NestedCompleter.from_nested_dict(self.command_completions)
+        # Use our slash-aware top-level completer instead of NestedCompleter
+        # directly. Stock NestedCompleter uses WordCompleter under the hood
+        # with a default word pattern that treats `/` as a boundary, so
+        # `/me` never autocompletes to `/memory`. SlashCommandCompleter
+        # prefix-matches the leading slash and only descends to the
+        # per-command sub-completer once a space has been typed.
+        self.completer = SlashCommandCompleter(self.command_completions)
 
         self.style = Style.from_dict(
             {

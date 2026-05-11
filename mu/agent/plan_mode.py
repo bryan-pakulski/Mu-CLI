@@ -28,6 +28,8 @@ WRITE_TOOLS: Set[str] = {
     "apply_diff",
     "search_and_replace_file",
     "bash",
+    "bash_background",
+    "bash_kill",
     # Sub-agents inherit YOLO and can write freely — block at the spawn site.
     "spawn_agent",
     # Feature-mode mutators

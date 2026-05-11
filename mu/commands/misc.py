@@ -5,18 +5,18 @@ from typing import Any
 from . import CommandResult, command
 
 
-@command("/quit", "/exit", "/q", help="Exit the REPL.")
+@command("/quit", "/q", help="Exit the REPL.")
 def quit_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     return CommandResult(ok=True, message="Goodbye!", data={"exit": True}, exit=True)
 
 
-@command("/clear", "/c", help="Clear the conversation history for the current session.")
+@command("/clear", help="Clear the conversation history for the current session.")
 def clear_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     session.session_manager.clear_current_history()
     return CommandResult(ok=True, message="Conversation history cleared.")
 
 
-@command("/view", "/v", help="View the conversation history for the current session.")
+@command("/view", help="View the conversation history for the current session.")
 def view_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     if allow_prompt:
         session.session_manager.view_history()
@@ -26,7 +26,7 @@ def view_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
     )
 
 
-@command("/help", "/h", help="Show this help.")
+@command("/help", help="Show this help.")
 def help_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     from . import list_commands
 

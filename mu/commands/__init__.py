@@ -132,6 +132,8 @@ def _load_command_modules() -> None:
     from . import misc  # noqa: F401 — registers /help, /quit, /clear, /splash
     from . import stats  # noqa: F401 — registers /stats, /thinking, /yolo, /agentic
     from . import mode  # noqa: F401 — registers /plan
+    from . import ollama  # noqa: F401 — registers /ollama
+    from . import skills  # noqa: F401 — registers /skills
 
 
 _load_command_modules()

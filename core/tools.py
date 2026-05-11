@@ -365,6 +365,106 @@ TOOLS = [
         requires_approval=True,
     ),
     ToolDefinition(
+        name="bash_background",
+        description=(
+            "Start a long-running bash command in the background and return a "
+            "task_id you can poll with `bash_status` or read with `bash_logs`. "
+            "Use this for test watchers, dev servers, builds, or anything that "
+            "would block the synchronous `bash` tool for too long."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to run in the background.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional short label for the task (shown in /stats and logs).",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Optional working directory. Must exist.",
+                },
+            },
+            "required": ["command"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="bash_status",
+        description=(
+            "Poll a background task's status (running/completed/failed/killed) "
+            "and the tail of its stdout/stderr."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "The task_id returned by `bash_background`.",
+                },
+                "tail_lines": {
+                    "type": "integer",
+                    "description": "Lines of stdout/stderr to include (default 20).",
+                    "default": 20,
+                },
+            },
+            "required": ["task_id"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="bash_logs",
+        description=(
+            "Read the tail of stdout / stderr from a background task. "
+            "Stream selector: 'stdout', 'stderr', or 'both'."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "The task_id returned by `bash_background`.",
+                },
+                "stream": {
+                    "type": "string",
+                    "description": "Which stream to read: 'stdout', 'stderr', or 'both'.",
+                    "default": "both",
+                },
+                "lines": {
+                    "type": "integer",
+                    "description": "Number of trailing lines to return (default 200).",
+                    "default": 200,
+                },
+            },
+            "required": ["task_id"],
+        },
+        requires_approval=False,
+    ),
+    ToolDefinition(
+        name="bash_kill",
+        description="Terminate a background task. SIGTERM with a short grace, then SIGKILL.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "The task_id to kill.",
+                }
+            },
+            "required": ["task_id"],
+        },
+        requires_approval=True,
+    ),
+    ToolDefinition(
+        name="bash_list",
+        description="List every background task in the session — running or completed.",
+        parameters={"type": "object", "properties": {}},
+        requires_approval=False,
+    ),
+    ToolDefinition(
         name="url_grounding",
         description="Accesses a URL to gather additional context. Supports JavaScript-heavy websites.",
         parameters={
@@ -1087,6 +1187,26 @@ TOOL_DESCRIPTOR_OVERRIDES = {
     "bash": {
         "execution_kind": "mutate",
         "preview_policy": "optional",
+    },
+    "bash_background": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "bash_status": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "bash_logs": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+    },
+    "bash_kill": {
+        "execution_kind": "mutate",
+        "preview_policy": "optional",
+    },
+    "bash_list": {
+        "execution_kind": "read",
+        "preview_policy": "none",
     },
     "url_grounding": {
         "execution_kind": "read",
@@ -3191,6 +3311,95 @@ def _handle_bash(args, folder_context, ui, variables) -> str:
     )
 
 
+# ----------------------------------------------------------- background bash
+
+
+def _bg_registry(context):
+    """Resolve the session's BackgroundTaskRegistry. Falls back to a process-
+    global one if no Session is bound (e.g. unit tests that call handlers
+    directly without going through a Session)."""
+    session = getattr(context, "session", None) if context is not None else None
+    if session is not None and hasattr(session, "background_tasks"):
+        return session.background_tasks
+    global _STANDALONE_BG_REGISTRY
+    try:
+        _STANDALONE_BG_REGISTRY
+    except NameError:
+        from core.background_tasks import BackgroundTaskRegistry
+        _STANDALONE_BG_REGISTRY = BackgroundTaskRegistry()
+    return _STANDALONE_BG_REGISTRY
+
+
+def _bg_handler(fn):
+    """Wrap a `(args, registry) -> str` handler into the
+    `(args, context) -> str` envelope expected by TOOL_HANDLERS."""
+
+    def _wrapped(args: dict, context: ToolExecutionContext) -> str:
+        registry = _bg_registry(context)
+        return fn(args, registry)
+
+    return _wrapped
+
+
+def _handle_bash_background(args: dict, registry) -> str:
+    from core.background_tasks import summarize_task
+    command = str(args.get("command", "") or "").strip()
+    if not command:
+        return json.dumps({"error": "command is required"})
+    try:
+        task = registry.start(
+            command,
+            name=str(args.get("name", "") or "") or None,
+            cwd=str(args.get("cwd", "") or "") or None,
+        )
+    except (ValueError, RuntimeError) as e:
+        return json.dumps({"error": str(e)})
+    summary = summarize_task(task, tail_lines=0)
+    summary["message"] = f"Background task started: {task.task_id}"
+    return json.dumps(summary, indent=2)
+
+
+def _handle_bash_status(args: dict, registry) -> str:
+    from core.background_tasks import summarize_task
+    task_id = str(args.get("task_id", "") or "").strip()
+    task = registry.get(task_id)
+    if task is None:
+        return json.dumps({"error": f"no such task: {task_id}"})
+    tail_lines = max(0, int(args.get("tail_lines", 20) or 20))
+    return json.dumps(summarize_task(task, tail_lines=tail_lines), indent=2)
+
+
+def _handle_bash_logs(args: dict, registry) -> str:
+    from core.background_tasks import tail as _tail
+    task_id = str(args.get("task_id", "") or "").strip()
+    task = registry.get(task_id)
+    if task is None:
+        return json.dumps({"error": f"no such task: {task_id}"})
+    stream = str(args.get("stream", "both") or "both").lower()
+    lines = max(1, int(args.get("lines", 200) or 200))
+    payload: dict = {"task_id": task_id, "status": task.status()}
+    if stream in ("stdout", "both"):
+        payload["stdout"] = _tail(task.stdout_buf, lines)
+    if stream in ("stderr", "both"):
+        payload["stderr"] = _tail(task.stderr_buf, lines)
+    return json.dumps(payload, indent=2)
+
+
+def _handle_bash_kill(args: dict, registry) -> str:
+    from core.background_tasks import summarize_task
+    task_id = str(args.get("task_id", "") or "").strip()
+    task = registry.kill(task_id)
+    if task is None:
+        return json.dumps({"error": f"no such task: {task_id}"})
+    return json.dumps(summarize_task(task, tail_lines=5), indent=2)
+
+
+def _handle_bash_list(args: dict, registry) -> str:
+    from core.background_tasks import summarize_task
+    tasks = [summarize_task(t, tail_lines=3) for t in registry.list()]
+    return json.dumps({"tasks": tasks, "count": len(tasks)}, indent=2)
+
+
 def _handle_apply_diff(args, folder_context, ui, variables) -> str:
     return apply_diff(args.get("filename", ""), args.get("diff", ""), folder_context)
 
@@ -4300,6 +4509,11 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "list_dir": _legacy_handler(_handle_list_dir),
     "write_file": _legacy_handler(_handle_write_file),
     "bash": _legacy_handler(_handle_bash),
+    "bash_background": _bg_handler(_handle_bash_background),
+    "bash_status": _bg_handler(_handle_bash_status),
+    "bash_logs": _bg_handler(_handle_bash_logs),
+    "bash_kill": _bg_handler(_handle_bash_kill),
+    "bash_list": _bg_handler(_handle_bash_list),
     "apply_diff": _legacy_handler(_handle_apply_diff),
     "url_grounding": _legacy_handler(_handle_url_grounding),
     "read_document": _legacy_handler(_handle_read_document),

@@ -26,6 +26,11 @@ from core.tools import (
     execute_tool,
     infer_tool_error_code,
 )
+# Importing `mu.tools` triggers `@tool`-decorator registrations
+# (spawn_agent, todo_write, todo_set_status, todo_list, ...) which mirror
+# into `core.tools.TOOLS` / `TOOL_DESCRIPTORS` / `TOOL_HANDLERS` so the
+# legacy Session loop sees them in `active_tools`.
+import mu.tools  # noqa: F401
 from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.runtime_metrics import build_live_status_line
@@ -108,7 +113,10 @@ def derive_feature_state_status(feature_plan: dict | None) -> str:
     return "running"
 
 
-class SessionManager:
+from mu.session.history import HistoryMixin
+
+
+class SessionManager(HistoryMixin):
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
         logger.info(f"Initializing SessionManager (session_name={session_name})")
@@ -121,7 +129,14 @@ class SessionManager:
         self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
-        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.token_counts = {
+            "input": 0,
+            "output": 0,
+            "total": 0,
+            "total_cost": 0.0,
+            "cached": 0,
+            "reasoning": 0,
+        }
         self.feature_state = None
         self.feature_registry = {}
         self.active_feature_id = None
@@ -151,7 +166,14 @@ class SessionManager:
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
         self.variables.clear()
-        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.token_counts = {
+            "input": 0,
+            "output": 0,
+            "total": 0,
+            "total_cost": 0.0,
+            "cached": 0,
+            "reasoning": 0,
+        }
         self.feature_state = None
         self.feature_registry = {}
         self.active_feature_id = None
@@ -451,7 +473,14 @@ class SessionManager:
         self.summary_anchor = 0
         self.history = []
         self.provider_config = {"provider": provider_name, "model": model_name}
-        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.token_counts = {
+            "input": 0,
+            "output": 0,
+            "total": 0,
+            "total_cost": 0.0,
+            "cached": 0,
+            "reasoning": 0,
+        }
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
         self.save_history()
@@ -526,7 +555,14 @@ class SessionManager:
         self.history = []
         self.conversation_summary = ""
         self.summary_anchor = 0
-        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.token_counts = {
+            "input": 0,
+            "output": 0,
+            "total": 0,
+            "total_cost": 0.0,
+            "cached": 0,
+            "reasoning": 0,
+        }
         self.save_history()
         if self.ui:
             self.ui.show_info("Current chat history cleared.")
@@ -540,7 +576,14 @@ class SessionManager:
         self.collation_buffer = CollationBuffer()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
-        self.token_counts = {"input": 0, "output": 0, "total": 0, "total_cost": 0.0}
+        self.token_counts = {
+            "input": 0,
+            "output": 0,
+            "total": 0,
+            "total_cost": 0.0,
+            "cached": 0,
+            "reasoning": 0,
+        }
         self.feature_state = None
         self.feature_registry = {}
         self.active_feature_id = None
@@ -552,180 +595,8 @@ class SessionManager:
 
         self.save_history()
 
-    def _summarize_history_batch(self, entries: list[dict]) -> str:
-        lines = []
-        for entry in entries:
-            lines.append(self._summarize_history_message(entry))
-        return "\n".join(line for line in lines if line)
-
-    def _summarize_history_message(self, entry: dict) -> str:
-        role = str(entry.get("role", "message"))
-        parts = []
-        for part in entry.get("parts", []):
-            part_type = part.get("type")
-            if part_type == "text":
-                text = str(part.get("text", "")).strip().replace("\n", " ")
-                if text:
-                    parts.append(text[:140])
-            elif part_type == "tool_call":
-                parts.append(
-                    f"tool_call:{part.get('tool_name')} args={_shorten_tool_args(part.get('tool_args', {}))}"
-                )
-            elif part_type == "tool_result":
-                result = str(part.get("tool_result", "")).strip().replace("\n", " ")
-                if len(result) > 140:
-                    result = f"{result[:137]}..."
-                if result:
-                    parts.append(
-                        f"tool_result:{part.get('tool_name', 'tool')} => {result}"
-                    )
-            elif part_type == "file":
-                file_ref = part.get("file_ref", {})
-                parts.append(
-                    f"file:{file_ref.get('display_name') or file_ref.get('uri') or 'unknown'}"
-                )
-
-        if not parts:
-            return f"- {role}: [no serializable content]"
-        return f"- {role}: " + " | ".join(parts)
-
-    def _clip_conversation_summary(self, limit: int = 4_000) -> None:
-        if len(self.conversation_summary) <= limit:
-            return
-        clipped = self.conversation_summary[-limit:].lstrip()
-        newline_index = clipped.find("\n")
-        if newline_index > 0:
-            clipped = clipped[newline_index + 1 :]
-        self.conversation_summary = (
-            f"[conversation_summary_truncated_to_last_{limit}_chars]\n{clipped}"
-        ).strip()
-
-    @staticmethod
-    def _estimate_tokens_from_text(text: str) -> int:
-        raw = str(text or "")
-        if not raw:
-            return 0
-        return max(1, int(len(raw) / 4))
-
-    def _estimate_message_tokens(self, message: dict) -> int:
-        role = str(message.get("role", "") or "")
-        total = 3 + self._estimate_tokens_from_text(role)
-        for part in message.get("parts", []):
-            part_type = str(part.get("type", "") or "")
-            total += self._estimate_tokens_from_text(part_type)
-            if part_type == "text":
-                total += self._estimate_tokens_from_text(part.get("text", ""))
-            elif part_type == "tool_call":
-                total += self._estimate_tokens_from_text(part.get("tool_name", ""))
-                total += self._estimate_tokens_from_text(
-                    json.dumps(part.get("tool_args", {}), default=str)
-                )
-            elif part_type == "tool_result":
-                total += self._estimate_tokens_from_text(part.get("tool_name", ""))
-                total += self._estimate_tokens_from_text(
-                    json.dumps(part.get("tool_result", ""), default=str)
-                )
-            elif part_type == "file":
-                file_ref = part.get("file_ref", {}) or {}
-                total += self._estimate_tokens_from_text(
-                    file_ref.get("display_name") or file_ref.get("uri") or ""
-                )
-        return total
-
-    def estimate_runtime_history_tokens(self, start_index: int | None = None) -> int:
-        start = self.summary_anchor if start_index is None else max(0, int(start_index))
-        return sum(
-            self._estimate_message_tokens(message) for message in self.history[start:]
-        )
-
-    def roll_history_summary(self, keep_recent: int) -> bool:
-        keep_recent = max(1, int(keep_recent or 1))
-        if self.summary_anchor > len(self.history):
-            self.summary_anchor = 0
-        unsummarized_count = len(self.history) - self.summary_anchor
-        if unsummarized_count <= keep_recent:
-            return False
-
-        target_anchor = len(self.history) - keep_recent
-        for idx in range(target_anchor, len(self.history)):
-            if self.history[idx].get("role") == "user":
-                target_anchor = idx
-                break
-
-        if target_anchor <= self.summary_anchor:
-            return False
-
-        summary_batch = self._summarize_history_batch(
-            self.history[self.summary_anchor : target_anchor]
-        )
-        if not summary_batch:
-            self.summary_anchor = target_anchor
-            return True
-
-        header = (
-            f"### Summarized conversation through message {target_anchor}\n"
-            if not self.conversation_summary
-            else f"\n### Summarized conversation through message {target_anchor}\n"
-        )
-        self.conversation_summary = (
-            f"{self.conversation_summary}{header}{summary_batch}".strip()
-        )
-        self._clip_conversation_summary()
-        self.summary_anchor = target_anchor
-        return True
-
-    def roll_history_summary_to_token_budget(
-        self,
-        token_budget: int,
-        *,
-        keep_recent: int = 12,
-        max_passes: int = 8,
-    ) -> bool:
-        token_budget = max(1, int(token_budget or 1))
-        changed = False
-        for _ in range(max(1, int(max_passes or 1))):
-            if self.estimate_runtime_history_tokens() <= token_budget:
-                break
-            if self.roll_history_summary(keep_recent=keep_recent):
-                changed = True
-                continue
-            if self._degrade_oldest_runtime_payload():
-                changed = True
-                continue
-            break
-        return changed
-
-    def _degrade_oldest_runtime_payload(self, max_chars: int = 4000) -> bool:
-        """Fallback budget guard: clip oldest large unsummarized payloads."""
-        if self.summary_anchor > len(self.history):
-            self.summary_anchor = 0
-        for message in self.history[self.summary_anchor :]:
-            parts = message.get("parts", []) or []
-            for part in parts:
-                p_type = part.get("type")
-                if p_type == "text":
-                    value = str(part.get("text", "") or "")
-                    if len(value) > max_chars:
-                        part["text"] = (
-                            value[:max_chars].rstrip()
-                            + f"\n[truncated_to_{max_chars}_chars_for_context_budget]"
-                        )
-                        return True
-                elif p_type == "tool_result":
-                    raw = part.get("tool_result", "")
-                    serialized = (
-                        json.dumps(raw, default=str)
-                        if not isinstance(raw, str)
-                        else raw
-                    )
-                    if len(serialized) > max_chars:
-                        clipped = (
-                            serialized[:max_chars].rstrip()
-                            + f"\n[truncated_to_{max_chars}_chars_for_context_budget]"
-                        )
-                        part["tool_result"] = clipped
-                        return True
-        return False
+    # History summarization & token-budget rolling moved to
+    # mu/session/history.py (HistoryMixin). See top of file for the import.
 
     def view_history(self):
         if not self.history:
@@ -1301,12 +1172,12 @@ class Session:
         self.variables["loop_features"] = json.dumps([])
         self.variables["agent_mode"] = "loop"
         self._ensure_loop_goal_persistence()
-        self.save_history()
+        self.session_manager.save_history(self.folder_context)
 
     def stop_loop(self) -> None:
         """Deactivate loop mode."""
         self.variables["loop_active"] = False
-        self.save_history()
+        self.session_manager.save_history(self.folder_context)
 
     def add_loop_feature(self, feature_id: str) -> None:
         """Record a feature created during this loop session."""
@@ -1512,19 +1383,6 @@ class Session:
             "entries_preview": entries[:20],
         }
 
-    def _parse_list_agent_tasks(self, raw_result: str) -> dict:
-        tasks = []
-        for line in str(raw_result).splitlines():
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                name = stripped[2:].split(":", 1)[0].strip()
-                if name:
-                    tasks.append(name)
-        return {
-            "task_count": len(tasks),
-            "tasks": tasks[:20],
-        }
-
     def _parse_json_result(self, raw_result: str) -> dict:
         try:
             parsed = json.loads(str(raw_result))
@@ -1701,15 +1559,6 @@ class Session:
             }
             if filename:
                 structured["modified_files"] = [filename]
-        elif tool_name == "list_agent_tasks":
-            structured["data"] = self._parse_list_agent_tasks(raw_text)
-        elif tool_name == "run_agent_task":
-            structured["data"] = {
-                "task_name": tool_args.get("task_name", ""),
-                "stdout_present": "STDOUT:" in raw_text,
-                "stderr_present": "STDERR:" in raw_text,
-                "preview": self._clip_preview(raw_text, 260),
-            }
         elif tool_name in {
             "create_feature",
             "create_phases",
@@ -1731,10 +1580,6 @@ class Session:
             "raise_blocker",
         }:
             structured["data"] = self._parse_json_result(raw_text)
-        elif tool_name in {"git_status", "git_diff", "git_log", "git_branch"}:
-            structured["data"] = {
-                "preview": self._clip_preview(raw_text, 260),
-            }
         elif tool_name in {
             "save_memory",
             "search_memory",
@@ -1756,6 +1601,24 @@ class Session:
         *,
         invocation_source: str = "session",
     ):
+        # --- pre_tool hooks: plan mode, sandbox, custom user hooks. -------
+        from mu.agent.hooks import HookContext, default_registry
+        # Side-effect imports — ensure built-in hooks (plan_mode, compactor)
+        # have registered before we fire.
+        import mu.agent.plan_mode  # noqa: F401
+        import mu.agent.compactor  # noqa: F401
+
+        pre_ctx = HookContext(
+            point="pre_tool",
+            session=self,
+            variables=self.variables,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        )
+        short = default_registry.first_short_circuit("pre_tool", pre_ctx)
+        if short is not None:
+            return short.payload
+
         feature_violation = self._feature_doc_tool_violation(tool_name, tool_args)
         if feature_violation:
             return f"Error: {feature_violation}"
@@ -1806,7 +1669,7 @@ class Session:
             self.turn_scratchpad.clear()
             return "Turn scratchpad cleared."
 
-        return execute_tool(
+        result = execute_tool(
             tool_name,
             tool_args,
             self.folder_context,
@@ -1815,6 +1678,18 @@ class Session:
             invocation_source=invocation_source,
             session=self,
         )
+
+        # --- post_tool hooks ---------------------------------------------
+        post_ctx = HookContext(
+            point="post_tool",
+            session=self,
+            variables=self.variables,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            tool_result=result,
+        )
+        default_registry.fire("post_tool", post_ctx)
+        return result
 
     def _prompt_tool_choice(
         self, prompt_text: str, choices: list[str], default: str
@@ -1851,6 +1726,57 @@ class Session:
                 return "abort"
             return "retry"
         return "abort"
+
+    def _announce_retryable_failure(self, tool_name: str, raw_result):
+        """If `raw_result` is a structured failure envelope with `retryable=True`,
+        surface its `hint` on the live UI so the human can see what the agent
+        saw. Also tracks repeat retryable failures of the same (tool, fingerprint)
+        and escalates to an error banner on the third strike so the user knows
+        the agent is stuck.
+        """
+        if not self.ui:
+            return
+        if not bool(self.variables.get("reflective_retry_enabled", True)):
+            return
+        envelope = None
+        if isinstance(raw_result, dict):
+            envelope = raw_result
+        elif isinstance(raw_result, str):
+            try:
+                parsed = json.loads(raw_result)
+                if isinstance(parsed, dict):
+                    envelope = parsed
+            except (ValueError, TypeError):
+                envelope = None
+        if not envelope:
+            return
+        if envelope.get("ok") is not False:
+            return
+        if not envelope.get("retryable"):
+            return
+        error_code = str(envelope.get("error_code") or "unknown")
+        hint = str(envelope.get("hint") or "").strip()
+        if not hint:
+            return
+
+        # Track repeats — `_retryable_failure_counts` is a dict keyed by
+        # (tool_name, error_code) -> count. Reset each turn (cleared in
+        # `_collect_turn_response`).
+        if not hasattr(self, "_retryable_failure_counts"):
+            self._retryable_failure_counts = {}
+        key = (tool_name, error_code)
+        self._retryable_failure_counts[key] = self._retryable_failure_counts.get(key, 0) + 1
+        count = self._retryable_failure_counts[key]
+
+        if count >= 3:
+            self.ui.show_error(
+                f"🔁 {tool_name} has hit {error_code} {count}x this turn. "
+                f"Hint stays the same: {hint[:160]}"
+            )
+        else:
+            self.ui.show_info(
+                f"  [retryable {error_code}] {hint[:200]}"
+            )
 
     @staticmethod
     def _is_transient_provider_error(error: Exception) -> bool:
@@ -1996,14 +1922,45 @@ class Session:
         base_delay = float(self.variables.get("provider_retry_base_delay", 0.4) or 0.4)
         max_delay = float(self.variables.get("provider_retry_max_delay", 3.0) or 3.0)
         attempt = 0
+
+        # Build a streaming renderer that forwards text deltas to the UI in
+        # real time. Falls back gracefully for UIs that do not implement the
+        # streaming callbacks; in that case it just accumulates silently.
+        from mu.ui.stream import build_default_renderer
+        from mu.agent.hooks import HookContext, default_registry
+        import mu.agent.compactor  # noqa: F401 — registers auto-compaction hook
+        import mu.agent.plan_mode  # noqa: F401 — registers plan-mode pre_tool hook
+
         while True:
             try:
-                return self.provider.generate(
+                pre_ctx = HookContext(
+                    point="pre_provider_call",
+                    session=self,
+                    variables=self.variables,
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    tools=tools,
+                )
+                default_registry.fire("pre_provider_call", pre_ctx)
+
+                renderer = build_default_renderer(self.ui)
+                events = self.provider.stream(
                     messages=messages,
                     system_prompt=system_prompt,
                     thinking=thinking,
                     tools=tools,
                 )
+                response = renderer.consume(self.provider, events)
+                post_ctx = HookContext(
+                    point="post_provider_call",
+                    session=self,
+                    variables=self.variables,
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    response=response,
+                )
+                default_registry.fire("post_provider_call", post_ctx)
+                return response
             except Exception as exc:
                 if attempt >= retries or not self._is_transient_provider_error(exc):
                     raise
@@ -2060,6 +2017,12 @@ class Session:
         total_cost: float,
         error: str | None = None,
     ) -> dict:
+        # Clear the rolling flag so a future turn starts fresh.
+        self._history_rolled_this_turn = False
+        # Reset per-turn retry counters so the next turn isn't penalised for
+        # failures the previous turn already escalated on.
+        if hasattr(self, "_retryable_failure_counts"):
+            self._retryable_failure_counts.clear()
         history_delta = self.session_manager.history[start_index:]
         assistant_messages = []
         assistant_text_parts = []
@@ -2222,9 +2185,11 @@ class Session:
                 "\n\nLOOP MODE SYSTEM PROMPT\n"
                 "You are executing a long-horizon autonomous loop. "
                 "Work continuously in increments (plan -> execute -> verify -> continue) until stopped by the user. "
-                "Create and maintain your own internal task list as you progress. "
+                "Maintain a visible task list via `todo_write` and `todo_set_status` so the user can see your plan at any time. "
+                "Exactly one todo should be in_progress at a time. "
                 "At each increment, provide a concise timeline update: attempted action, outcome, evidence, and next step. "
-                "Use save_memory for durable findings and save_scratchpad for short-lived planning."
+                "Use save_memory for durable findings and save_scratchpad for short-lived planning. "
+                "For focused side-quests that would clutter loop context (deep research, isolated refactors), delegate via `spawn_agent` with a tight tools whitelist."
             )
             if loop_goal:
                 base_system_prompt += f"\nLocked loop goal: {loop_goal}"
@@ -2239,6 +2204,10 @@ class Session:
             int(context_limit * trim_threshold),
             keep_recent=4,
         )
+        # Tell the auto-compaction hook we've already rolled this turn so it
+        # doesn't double-roll inside the iteration loop. Cleared in
+        # `_collect_turn_response` when the turn finishes.
+        self._history_rolled_this_turn = True
         base_system_prompt = self._inject_hierarchical_context(base_system_prompt)
 
         recent_history = self._prepare_runtime_history()
@@ -2393,6 +2362,14 @@ class Session:
                 self.session_manager.token_counts["input"] += response.input_tokens
                 self.session_manager.token_counts["output"] += response.output_tokens
                 self.session_manager.token_counts["total"] += response.total_tokens
+                self.session_manager.token_counts["cached"] = (
+                    self.session_manager.token_counts.get("cached", 0)
+                    + getattr(response, "cached_tokens", 0)
+                )
+                self.session_manager.token_counts["reasoning"] = (
+                    self.session_manager.token_counts.get("reasoning", 0)
+                    + getattr(response, "reasoning_tokens", 0)
+                )
 
                 total_in += response.input_tokens
                 total_out += response.output_tokens
@@ -2518,6 +2495,13 @@ class Session:
                                         modification.modified_content,
                                     )
 
+                # --- PHASE 1: approval + decision (serial, in input order) ----
+                # Walk every tool call once. For each, record either an
+                # `early_result` (denied / preview-failed / etc.) OR mark it
+                # `pending` so the parallel execution phase below will run it.
+                pending_executions: list[int] = []  # indices to execute
+                early_results: dict[int, Any] = {}  # i -> pre-resolved result string
+
                 for i, part in enumerate(tool_calls):
                     current_tool_name = part.tool_name
                     current_tool_args = part.tool_args
@@ -2536,14 +2520,11 @@ class Session:
                     needs_approval = approval_plan is not None
                     if needs_approval:
                         result = None
-                        if (
+                        auto_approved = bool(
                             self.variables.get("yolo", False)
                             and approval_plan.can_approve
-                        ):
-                            result = self._execute_tool_with_memory(
-                                part.tool_name,
-                                part.tool_args,
-                            )
+                        )
+
                         if approval_plan.preview_error and self.ui:
                             for modification in approval_plan.modifications:
                                 if modification.preview_error:
@@ -2572,7 +2553,7 @@ class Session:
                             )
 
                         # Show diffs if not already shown in bulk pre-calculation
-                        if result is None and len(approval_plans) <= 1:
+                        if result is None and not auto_approved and len(approval_plans) <= 1:
                             for modification in approval_plan.modifications:
                                 if modification.can_render_diff:
                                     if self.ui:
@@ -2592,7 +2573,7 @@ class Session:
                             else ""
                         )
 
-                        if result is None:
+                        if result is None and not auto_approved:
                             choice, reason = self._request_tool_approval(
                                 approval_plan=approval_plan,
                                 display_args=display_args,
@@ -2609,21 +2590,156 @@ class Session:
                                     f"Tool call {part.tool_name} denied by user with explanation: {reason}"
                                 )
                             else:
-                                result = self._execute_tool_with_memory(
-                                    part.tool_name,
-                                    part.tool_args,
-                                )
+                                auto_approved = True  # user said yes — defer to exec phase
+
+                        if result is not None:
+                            early_results[i] = result
+                        elif auto_approved:
+                            pending_executions.append(i)
                     else:
-                        result = self._execute_tool_with_memory(
-                            part.tool_name,
-                            part.tool_args,
+                        # No approval needed — defer to exec phase.
+                        pending_executions.append(i)
+
+                # --- PHASE 2: execute pending calls (parallel for safe tools, serial for others) ---
+                exec_results: dict[int, Any] = {}
+                if pending_executions:
+                    from mu.agent.parallel import (
+                        PARALLEL_SAFE_TOOLS,
+                        ToolCall as _ParTC,
+                        execute_calls as _exec_calls,
+                    )
+
+                    parallel_indices: list[int] = []
+                    serial_indices: list[int] = []
+                    for i in pending_executions:
+                        part = tool_calls[i]
+                        # `flush` must be serial (it reads the collation
+                        # buffer, which is populated by the post-processing
+                        # phase below for each preceding call).
+                        if part.tool_name == "flush":
+                            serial_indices.append(i)
+                        elif part.tool_name in PARALLEL_SAFE_TOOLS:
+                            parallel_indices.append(i)
+                        else:
+                            serial_indices.append(i)
+
+                    # Parallel batch — preserves input-order results.
+                    if parallel_indices:
+                        par_calls = [
+                            _ParTC(
+                                tool_name=tool_calls[i].tool_name,
+                                tool_args=tool_calls[i].tool_args or {},
+                                tool_call_id=str(i),
+                                thought_signature=tool_calls[i].thought_signature,
+                            )
+                            for i in parallel_indices
+                        ]
+                        max_concurrency = max(
+                            1,
+                            int(
+                                self.variables.get("parallel_tool_concurrency", 4) or 4
+                            ),
                         )
+
+                        # If two or more of the parallel calls are sub-agent
+                        # spawns, replace the streaming per-call logs with a
+                        # live progress panel. Hooked up via
+                        # `self._subagent_progress`, which `spawn_agent` reads
+                        # to register/update/close its row.
+                        spawn_count = sum(
+                            1
+                            for i in parallel_indices
+                            if tool_calls[i].tool_name == "spawn_agent"
+                        )
+                        live_progress_ctx = None
+                        live = None
+                        rich_console = getattr(self.ui, "console", None) if self.ui else None
+                        if spawn_count >= 2 and rich_console is not None:
+                            try:
+                                from mu.ui.progress import SubagentProgressTracker
+                                from rich.live import Live
+
+                                tracker = SubagentProgressTracker()
+                                self._subagent_progress = tracker
+                                live = Live(
+                                    get_renderable=tracker.render_panel,
+                                    console=rich_console,
+                                    refresh_per_second=4,
+                                    transient=False,
+                                )
+                                live.start()
+                                live_progress_ctx = tracker
+                            except Exception as _exc:  # pragma: no cover — defensive
+                                logger.debug(
+                                    "Live progress panel unavailable: %s", _exc
+                                )
+                                live = None
+
+                        if len(par_calls) > 1 and self.ui and live is None:
+                            # Only show the one-liner when we're NOT using the
+                            # live panel (otherwise it pollutes the panel area).
+                            self.ui.show_info(
+                                f"⚡ Dispatching {len(par_calls)} tool call(s) in "
+                                f"parallel (max_concurrency={max_concurrency})."
+                            )
+
+                        try:
+                            par_results = _exec_calls(
+                                par_calls,
+                                lambda tc: self._execute_tool_with_memory(
+                                    tc.tool_name, tc.tool_args
+                                ),
+                                max_concurrency=max_concurrency,
+                            )
+                        finally:
+                            if live is not None:
+                                try:
+                                    live.stop()
+                                except Exception:
+                                    pass
+                            self._subagent_progress = None
+                        for idx, pr in zip(parallel_indices, par_results):
+                            if pr.error is not None:
+                                logger.warning(
+                                    "Parallel tool %s raised %s",
+                                    tool_calls[idx].tool_name,
+                                    pr.error,
+                                )
+                                exec_results[idx] = f"Error: {pr.error}"
+                            else:
+                                exec_results[idx] = pr.result
+
+                    # Serial calls (executed in their original input order).
+                    for idx in serial_indices:
+                        part = tool_calls[idx]
+                        if part.tool_name == "flush":
+                            # Flush is finalised inside the post-processing
+                            # phase below so it can read the freshly written
+                            # collation buffer. Placeholder result here.
+                            exec_results[idx] = None
+                            continue
+                        exec_results[idx] = self._execute_tool_with_memory(
+                            part.tool_name, part.tool_args
+                        )
+
+                # --- PHASE 3: post-processing (serial, in input order) -----------
+                for i, part in enumerate(tool_calls):
+                    current_tool_name = part.tool_name
+                    current_tool_args = part.tool_args
+                    if i in early_results:
+                        result = early_results[i]
+                    else:
+                        result = exec_results.get(i)
 
                     source_result = result
                     raw_result = source_result
                     logger.debug(
                         f"Tool result ({part.tool_name}): {_sanitize_for_log(raw_result)}"
                     )
+                    # Surface retryable failures to the live UI with the
+                    # registered hint. The model already sees the structured
+                    # envelope in its next turn; this is for the human.
+                    self._announce_retryable_failure(part.tool_name, raw_result)
                     # --- Collation Logic ---
                     is_flush = part.tool_name == "flush"
                     should_collate = (

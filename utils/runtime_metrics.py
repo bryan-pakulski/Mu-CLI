@@ -127,12 +127,17 @@ def collect_runtime_metrics(session):
             "input": int(session.session_manager.token_counts.get("input", 0) or 0),
             "output": int(session.session_manager.token_counts.get("output", 0) or 0),
             "total": int(session.session_manager.token_counts.get("total", 0) or 0),
+            "cached": int(session.session_manager.token_counts.get("cached", 0) or 0),
+            "reasoning": int(
+                session.session_manager.token_counts.get("reasoning", 0) or 0
+            ),
             "total_cost": float(
                 session.session_manager.token_counts.get("total_cost", 0.0) or 0.0
             ),
         },
         "mode": {"name": str(session.variables.get("agent_mode", "default"))},
         "yolo": {"enabled": bool(session.variables.get("yolo", False))},
+        "plan": {"enabled": bool(session.variables.get("plan_mode", False))},
         "feature": collect_feature_progress(session),
     }
 
@@ -210,7 +215,11 @@ def build_inline_meter(label, current, maximum, width=8):
 
 def build_live_status_line(session):
     metrics = collect_runtime_metrics(session)
-    parts = [
+    parts = []
+    # Plan mode comes first so its presence is unmissable when active.
+    if metrics["plan"]["enabled"]:
+        parts.append("🔒 PLAN")
+    parts += [
         f"yolo:{'on' if metrics['yolo']['enabled'] else 'off'}",
         build_inline_meter("ctx", metrics["ctx"]["current"], metrics["ctx"]["maximum"]),
         build_inline_meter("mem", metrics["mem"]["current"], metrics["mem"]["maximum"]),

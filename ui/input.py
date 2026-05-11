@@ -269,6 +269,9 @@ class InputHandler:
                 "rprompt": "bg:ansiblue ansiwhite",
                 "files": "ansiyellow",
                 "yolo-indicator": "ansiyellow bold blink",
+                # Plan mode: high-contrast lock indicator so the user can never
+                # miss it. Persists across the prompt while plan_mode=True.
+                "plan-indicator": "bg:ansicyan ansiblack bold",
                 "mode-debug": "ansiyellow bold",
                 "mode-feature": "ansiblue bold",
                 "mode-research": "ansimagenta bold",
@@ -337,6 +340,11 @@ class InputHandler:
             return False
         return bool(self.variables_dict.get("yolo", False))
 
+    def is_plan_mode_enabled(self):
+        if self.variables_dict is None:
+            return False
+        return bool(self.variables_dict.get("plan_mode", False))
+
     def toggle_yolo_mode(self):
         if self.variables_dict is None:
             return False
@@ -377,6 +385,10 @@ class InputHandler:
         if self.is_yolo_enabled():
             yolo_text = " <yolo-indicator>✦</yolo-indicator>"
 
+        plan_text = ""
+        if self.is_plan_mode_enabled():
+            plan_text = " <plan-indicator> 🔒 PLAN MODE </plan-indicator>"
+
         task_text = ""
         if current_task:
             task = str(current_task).strip()
@@ -401,6 +413,7 @@ class InputHandler:
         return (
             f"<prompt>[{session_name}]</prompt>"
             f"{mode_text}"
+            f"{plan_text}"
             f"{yolo_text}"
             f"{task_text}"
             f"{feature_text}"
@@ -410,9 +423,11 @@ class InputHandler:
 
     def build_input_toolbar_text(self):
         yolo_status = "ON" if self.is_yolo_enabled() else "OFF"
+        plan_segment = " | 🔒 PLAN MODE ACTIVE — writes blocked" if self.is_plan_mode_enabled() else ""
         return (
             "[Meta+Enter] or [Esc] [Enter] to submit | "
-            f"[Shift+Tab] toggles YOLO ({yolo_status}) | "
+            f"[Shift+Tab] toggles YOLO ({yolo_status})"
+            f"{plan_segment} | "
             "/help for commands"
         )
 

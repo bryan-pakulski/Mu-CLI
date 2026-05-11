@@ -1,14 +1,23 @@
-import os
+# Ollama provider with NDJSON streaming and `keep_alive` for model residency.
+#
+# The streaming response from /api/chat is a newline-delimited JSON stream.
+# Each line is either a delta chunk (with `message.content` text or
+# `message.tool_calls`) or the final chunk (`"done": true`) carrying
+# `prompt_eval_count` and `eval_count` for usage telemetry.
 import json
-import urllib.request
+import os
 import urllib.error
-from typing import List, Optional
+import urllib.request
+from typing import Any, Dict, Iterator, List, Optional
+
 from .base import (
+    CacheHint,
+    FileReference,
     LLMProvider,
     Message,
     MessagePart,
     ProviderResponse,
-    FileReference,
+    StreamEvent,
     ToolDefinition,
 )
 
@@ -20,7 +29,8 @@ class OllamaProvider(LLMProvider):
     def __init__(self, model_name: str = "", host: str = "https://ollama.com"):
         if not self.API_KEY:
             print(
-                "[Warning] OLLAMA_API_KEY environment variable is required to use public site, defaulting to localhost."
+                "[Warning] OLLAMA_API_KEY environment variable is required to "
+                "use the public site, defaulting to localhost."
             )
             host = "http://localhost:11434"
         super().__init__(model_name)
@@ -41,16 +51,18 @@ class OllamaProvider(LLMProvider):
         except Exception:
             return []
 
-    def _convert_messages(self, messages: List[Message]) -> List[dict]:
-        ollama_msgs = []
+    # ------------------------------------------------------- message conversion
+
+    def _convert_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
+        ollama_msgs: List[Dict[str, Any]] = []
         for msg in messages:
             content = ""
-            tool_calls = []
+            tool_calls: List[Dict[str, Any]] = []
             role = msg.role
 
             for part in msg.parts:
                 if part.type == "text":
-                    content += part.text + "\n"
+                    content += (part.text or "") + "\n"
                 elif part.type == "tool_call":
                     tool_calls.append(
                         {
@@ -68,32 +80,40 @@ class OllamaProvider(LLMProvider):
                     else:
                         content = str(part.tool_result)
 
-            message_dict = {"role": role, "content": content.strip()}
+            message_dict: Dict[str, Any] = {
+                "role": role,
+                "content": content.strip(),
+            }
             if tool_calls:
                 message_dict["tool_calls"] = tool_calls
-
             ollama_msgs.append(message_dict)
         return ollama_msgs
 
-    def generate(
+    # --------------------------------------------------------------- streaming
+
+    def stream(
         self,
         messages: List[Message],
         system_prompt: Optional[str] = None,
         thinking: bool = False,
         tools: Optional[List[ToolDefinition]] = None,
-    ) -> ProviderResponse:
-
+        cache_hint: Optional[CacheHint] = None,
+        reasoning_effort: Optional[str] = None,
+    ) -> Iterator[StreamEvent]:
         ollama_messages = self._convert_messages(messages)
-
         if system_prompt:
             ollama_messages.insert(0, {"role": "system", "content": system_prompt})
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model_name,
             "messages": ollama_messages,
-            "stream": False,
+            "stream": True,
             "options": {},
         }
+
+        # `keep_alive` keeps the model warm across turns. Cache hint maps here.
+        keep_alive = cache_hint.keep_alive_seconds if cache_hint else 600
+        payload["keep_alive"] = keep_alive
 
         if tools:
             payload["tools"] = [
@@ -108,15 +128,14 @@ class OllamaProvider(LLMProvider):
                 for t in tools
             ]
 
+        if thinking:
+            payload["options"]["temperature"] = 0.7  # mild nudge for thinking-style models
+        if reasoning_effort:
+            payload["options"]["reasoning_effort"] = reasoning_effort
+
+        headers = {"Content-Type": "application/json"}
         if self.API_KEY:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.API_KEY}",
-            }
-        else:
-            headers = {
-                "Content-Type": "application/json",
-            }
+            headers["Authorization"] = f"Bearer {self.API_KEY}"
 
         req = urllib.request.Request(
             f"{self.host}/api/chat",
@@ -124,43 +143,83 @@ class OllamaProvider(LLMProvider):
             headers=headers,
         )
 
+        emitted_tool_index = 0
+        last_in = 0
+        last_out = 0
+
         try:
             with urllib.request.urlopen(req) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.URLError as e:
-            raise Exception(f"Failed to connect to Ollama at {self.host}: {e}")
+                for raw in response:
+                    if not raw:
+                        continue
+                    try:
+                        chunk = json.loads(raw.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        continue
 
-        resp_message = result.get("message", {})
-        out_parts = []
-        out_text = resp_message.get("content", "")
+                    msg = chunk.get("message") or {}
+                    content = msg.get("content")
+                    if content:
+                        yield StreamEvent(kind="text_delta", text=content)
 
-        if out_text:
-            out_parts.append(MessagePart(type="text", text=out_text))
+                    thought = msg.get("thinking") or msg.get("reasoning")
+                    if thought:
+                        yield StreamEvent(kind="thinking_delta", text=str(thought))
 
-        if "tool_calls" in resp_message:
-            for tc in resp_message["tool_calls"]:
-                func = tc.get("function", {})
-                out_parts.append(
-                    MessagePart(
-                        type="tool_call",
-                        tool_name=func.get("name"),
-                        tool_args=func.get("arguments", {}),
-                    )
-                )
+                    for tc in msg.get("tool_calls", []) or []:
+                        fn = tc.get("function") or {}
+                        cid = f"ollama_call_{emitted_tool_index}"
+                        emitted_tool_index += 1
+                        yield StreamEvent(
+                            kind="tool_call_start",
+                            tool_name=fn.get("name"),
+                            tool_call_id=cid,
+                        )
+                        yield StreamEvent(
+                            kind="tool_call_complete",
+                            tool_name=fn.get("name"),
+                            tool_args=fn.get("arguments") or {},
+                            tool_call_id=cid,
+                        )
 
-        # Ollama token metrics
-        in_tok = result.get("prompt_eval_count", 0)
-        out_tok = result.get("eval_count", 0)
+                    last_in = chunk.get("prompt_eval_count", last_in) or last_in
+                    last_out = chunk.get("eval_count", last_out) or last_out
 
-        return ProviderResponse(
-            text=out_text,
-            parts=out_parts,
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            total_tokens=in_tok + out_tok,
+                    if chunk.get("done"):
+                        break
+        except urllib.error.URLError as exc:
+            yield StreamEvent(
+                kind="error", text=f"Failed to connect to Ollama at {self.host}: {exc}"
+            )
+            raise
+
+        yield StreamEvent(
+            kind="usage",
+            input_tokens=last_in,
+            output_tokens=last_out,
+            total_tokens=last_in + last_out,
+        )
+        yield StreamEvent(kind="done")
+
+    # ----------------------------------------------------- non-streaming path
+
+    def generate(
+        self,
+        messages: List[Message],
+        system_prompt: Optional[str] = None,
+        thinking: bool = False,
+        tools: Optional[List[ToolDefinition]] = None,
+    ) -> ProviderResponse:
+        return self.drain_stream(
+            self.stream(
+                messages=messages,
+                system_prompt=system_prompt,
+                thinking=thinking,
+                tools=tools,
+            )
         )
 
+    # ----------------------------------------------------------------- files
+
     def upload_file(self, file_path: str, mime_type: str) -> Optional[FileReference]:
-        # Ollama doesn't have a distinct file API. For RAG we'd use context.
-        # This allows the base interface to stay happy.
         return FileReference(uri=file_path, mime_type=mime_type, display_name=file_path)

@@ -234,12 +234,6 @@ TOOLS = [
         requires_approval=False,
     ),
     ToolDefinition(
-        name="get_current_time",
-        description="Returns the current time in ISO format.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
         name="list_dir",
         description="Returns a list of files and directories in the specified path.",
         parameters={
@@ -342,27 +336,6 @@ TOOLS = [
         requires_approval=False,  # We will query the individual tools and only require a single approval
     ),
     ToolDefinition(
-        name="list_agent_tasks",
-        description="Lists available tasks in Makefile.agents and their descriptions. Use this to discover automation scripts and when to run them.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="run_agent_task",
-        description="Executes a task defined in Makefile.agents. This can be used for running tests, builds, or other automated processes.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_name": {
-                    "type": "string",
-                    "description": "The name of the task to execute.",
-                },
-            },
-            "required": ["task_name"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
         name="bash",
         description="Executes a raw bash command in the attached workspace and returns combined STDOUT/STDERR.",
         parameters={
@@ -390,165 +363,6 @@ TOOLS = [
             "required": ["command"],
         },
         requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_status",
-        description="Shows the working tree status.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="git_log",
-        description="Shows the commit logs.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Limit the number of commits to show.",
-                    "default": 10,
-                }
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="git_diff",
-        description="Shows changes between commits, commit and working tree, etc.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "cached": {
-                    "type": "boolean",
-                    "description": "Show changes that are staged for the next commit.",
-                    "default": False,
-                },
-                "filename": {
-                    "type": "string",
-                    "description": "Optional file path to limit the diff to.",
-                },
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="git_checkout",
-        description="Switch branches or restore working tree files.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "branch": {
-                    "type": "string",
-                    "description": "The name of the branch to checkout.",
-                },
-                "create": {
-                    "type": "boolean",
-                    "description": "Whether to create the branch if it doesn't exist.",
-                    "default": False,
-                },
-            },
-            "required": ["branch"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_add",
-        description="Adds file contents to the index (staging area).",
-        parameters={
-            "type": "object",
-            "properties": {
-                "files": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of files to add. Use ['.'] for all changes.",
-                }
-            },
-            "required": ["files"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_commit",
-        description="Record changes to the repository.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "The commit message.",
-                }
-            },
-            "required": ["message"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_push",
-        description="Update remote refs along with associated objects.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "remote": {
-                    "type": "string",
-                    "description": "The name of the remote. Defaults to 'origin'.",
-                    "default": "origin",
-                },
-                "branch": {
-                    "type": "string",
-                    "description": "The name of the branch to push. Defaults to current branch.",
-                },
-            },
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_pull",
-        description="Fetch from and integrate with another repository or a local branch.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "remote": {
-                    "type": "string",
-                    "description": "The name of the remote. Defaults to 'origin'.",
-                    "default": "origin",
-                },
-                "branch": {
-                    "type": "string",
-                    "description": "The name of the branch to pull. Defaults to current branch.",
-                },
-            },
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_init",
-        description="Initialize a new git repository in the workspace.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_merge_request",
-        description="Launch a merge request for the current branch. In this CLI it simulates the action and provides a summary.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "The title of the merge request.",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "The description of the changes.",
-                },
-            },
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="git_branch",
-        description="List, create, or delete branches.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
     ),
     ToolDefinition(
         name="url_grounding",
@@ -1158,12 +972,6 @@ TOOLS = [
         requires_approval=False,
     ),
     ToolDefinition(
-        name="clear_context",
-        description="Clears the current conversation history to free up space, usually done between tasks. System instructions and feature state are preserved.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=True,
-    ),
-    ToolDefinition(
         name="raise_blocker",
         description="Raises a structured blocker when the feature loop needs user input or an external decision before it can safely continue.",
         parameters={
@@ -1200,11 +1008,6 @@ _COLLATED_TOOL_NAMES = {
     "retrieve_relevant_context",
     "get_chunk",
     "list_dir",
-    "list_agent_tasks",
-    "git_status",
-    "git_log",
-    "git_diff",
-    "git_branch",
     "url_grounding",
     "web_search",
     "arxiv_search",
@@ -1263,11 +1066,6 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "preview_policy": "none",
         "summary_builder": "chunk_preview",
     },
-    "get_current_time": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "result_mode": "raw",
-    },
     "list_dir": {
         "execution_kind": "read",
         "preview_policy": "none",
@@ -1286,68 +1084,9 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "preview_policy": "optional",
         "result_mode": "structured",
     },
-    "list_agent_tasks": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "parse_list_agent_tasks",
-    },
-    "run_agent_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-        "summary_builder": "agent_task_preview",
-    },
     "bash": {
         "execution_kind": "mutate",
         "preview_policy": "optional",
-    },
-    "git_status": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "git_preview",
-    },
-    "git_log": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "git_preview",
-    },
-    "git_diff": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "git_preview",
-    },
-    "git_checkout": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "git_add": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "git_commit": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "git_push": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "git_pull": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "git_init": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "git_merge_request": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-        "server_policy": "session_only",
-    },
-    "git_branch": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "git_preview",
     },
     "url_grounding": {
         "execution_kind": "read",
@@ -1479,12 +1218,6 @@ TOOL_DESCRIPTOR_OVERRIDES = {
     "update_task_status": {
         "execution_kind": "mutate",
         "preview_policy": "optional",
-    },
-    "clear_context": {
-        "execution_kind": "control",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
     },
     "raise_blocker": {
         "execution_kind": "control",
@@ -1729,14 +1462,6 @@ def get_chunk(filename: str, start_line: int, end_line: int, folder_context) -> 
     except Exception as e:
         logger.error(f"get_chunk: Error reading {filename}: {e}")
         return f"Error reading file chunk: {e}"
-
-
-def get_current_time(folder_context) -> str:
-    """Returns the current time in ISO format."""
-    try:
-        return datetime.datetime.now().isoformat()
-    except Exception as e:
-        return f"Error getting current time: {e}"
 
 
 def list_dir(path: str, folder_context) -> str:
@@ -2178,229 +1903,6 @@ def search_and_replace_file(
     except Exception as e:
         logger.error(f"search_and_replace_file: Error writing {filename}: {e}")
         return json.dumps({"success": False, "error": f"Error writing file: {str(e)}"})
-
-
-def list_agent_tasks(folder_context) -> str:
-    """Lists tasks from Makefile.agents with their descriptions."""
-    if not folder_context or not folder_context.folders:
-        return "No workspace attached."
-
-    found_any = False
-    all_tasks = []
-
-    for folder in folder_context.folders:
-        makefile_path = os.path.join(folder, "Makefile.agents")
-        if os.path.exists(makefile_path):
-            found_any = True
-            tasks = []
-            try:
-                with open(makefile_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                    for i, line in enumerate(lines):
-                        # 1. Target with ## description on same line
-                        match = re.match(r"^([a-zA-Z0-9_-]+):.*?##\s*(.*)$", line)
-                        if match:
-                            tasks.append(f"  - {match.group(1)}: {match.group(2)}")
-                            continue
-
-                        # 2. Target without ## description on same line
-                        match = re.match(r"^([a-zA-Z0-9_-]+):", line)
-                        if match:
-                            target = match.group(1)
-                            if target in ["FORCE", ".PHONY"]:
-                                continue
-                            # Check line above for ## description
-                            description = ""
-                            if i > 0:
-                                prev_line = lines[i - 1].strip()
-                                if prev_line.startswith("##"):
-                                    description = prev_line.lstrip("#").strip()
-                            if description:
-                                tasks.append(f"  - {target}: {description}")
-                            else:
-                                tasks.append(f"  - {target}")
-                if tasks:
-                    all_tasks.append(f"In {folder}:\n" + "\n".join(tasks))
-            except Exception as e:
-                all_tasks.append(f"Error reading {makefile_path}: {e}")
-
-    if not found_any:
-        return "No Makefile.agents found in any workspace folder."
-
-    if not all_tasks:
-        return "No tasks found in any Makefile.agents."
-
-    return "Available tasks in Makefile.agents:\n\n" + "\n\n".join(all_tasks)
-
-
-def run_agent_task(task_name: str, folder_context, variables: dict = None) -> str:
-    """Executes a task from Makefile.agents."""
-    if not variables:
-        variables = {}
-
-    if not folder_context or not folder_context.folders:
-        return "No workspace attached."
-
-    # Load variables with defaults
-    timeout = variables.get("make_timeout", 600)
-    max_len = variables.get("make_max_output", 10000)
-
-    makefile_path = None
-    for folder in folder_context.folders:
-        path = os.path.join(folder, "Makefile.agents")
-        if os.path.exists(path):
-            makefile_path = path
-            break
-
-    if not makefile_path:
-        return "Error: Makefile.agents not found in any workspace folder."
-
-    import subprocess
-    cmd = ["make", "-f", "Makefile.agents", task_name]
-
-    def _exec_once() -> str:
-        process = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=os.path.dirname(makefile_path),
-        )
-        output = process.stdout
-        errors = process.stderr
-        combined_output = ""
-        if output:
-            combined_output += f"STDOUT:\n{output}\n"
-        if errors:
-            combined_output += f"STDERR:\n{errors}\n"
-        if not combined_output:
-            combined_output = "Task executed successfully with no output."
-        if len(combined_output) > max_len:
-            combined_output = (
-                combined_output[: max_len // 2]
-                + f"\n\n... [TRUNCATED {len(combined_output) - max_len} characters] ...\n\n"
-                + combined_output[-max_len // 2 :]
-            )
-        return combined_output
-
-    try:
-        return _exec_once()
-    except subprocess.TimeoutExpired as e:
-        return f"Error: Task timed out after {timeout} seconds. Partial output:\n{e.stdout or ''}\n{e.stderr or ''}"
-    except Exception as e:
-        logger.error(f"run_agent_task: Error executing {task_name}: {e}")
-        return f"Error executing task: {e}"
-
-
-def run_git_command(args_list: list[str], folder_context) -> str:
-    """Executes a git command in the primary workspace folder."""
-    if not folder_context or not folder_context.folders:
-        return "Error: No workspace attached."
-
-    import subprocess
-
-    # Assume git should run from the first folder (primary project root)
-    cwd = folder_context.folders[0]
-
-    cmd = ["git"] + args_list
-    try:
-        process = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-        )
-
-        output = process.stdout
-        errors = process.stderr
-
-        combined_output = ""
-        if output:
-            combined_output += output
-        if errors:
-            combined_output += f"\nSTDERR:\n{errors}"
-
-        if not combined_output:
-            combined_output = "Command executed successfully with no output."
-
-        return combined_output
-    except Exception as e:
-        logger.error(f"run_git_command: Error executing git {' '.join(args_list)}: {e}")
-        return f"Error executing git command: {e}"
-
-
-def git_status(folder_context) -> str:
-    """Shows the working tree status."""
-    return run_git_command(["status"], folder_context)
-
-
-def git_init(folder_context) -> str:
-    """Initialize a new git repository."""
-    return run_git_command(["init"], folder_context)
-
-
-def git_log(limit: int = 10, folder_context=None) -> str:
-    """Shows the commit logs."""
-    return run_git_command(["log", "--oneline", "-n", str(limit)], folder_context)
-
-
-def git_diff(cached: bool = False, filename: str = None, folder_context=None) -> str:
-    """Shows changes between commits, commit and working tree, etc."""
-    cmd_args = ["diff"]
-    if cached:
-        cmd_args.append("--cached")
-    if filename:
-        if not _check_bounds(filename, folder_context):
-            logger.warning(f"git_diff: Access denied or path ignored: {filename}")
-            return f"Error: Access denied or path ignored. '{filename}'"
-        cmd_args.append(filename)
-    return run_git_command(cmd_args, folder_context)
-
-
-def git_checkout(branch: str, create: bool = False, folder_context=None) -> str:
-    """Switch branches or restore working tree files."""
-    cmd_args = ["checkout"]
-    if create:
-        cmd_args.append("-b")
-    cmd_args.append(branch)
-    return run_git_command(cmd_args, folder_context)
-
-
-def git_add(files: list[str], folder_context=None) -> str:
-    """Adds file contents to the index."""
-    for f in files:
-        if f != "." and not _check_bounds(f, folder_context):
-            logger.warning(f"git_add: Access denied or path ignored: {f}")
-            return f"Error: Access denied or path ignored. '{f}'"
-
-    cmd_args = ["add"] + files
-    return run_git_command(cmd_args, folder_context)
-
-
-def git_commit(message: str, folder_context=None) -> str:
-    """Record changes to the repository."""
-    return run_git_command(["commit", "-m", message], folder_context)
-
-
-def git_push(remote: str = "origin", branch: str = None, folder_context=None) -> str:
-    """Update remote refs."""
-    cmd_args = ["push", remote]
-    if branch:
-        cmd_args.append(branch)
-    return run_git_command(cmd_args, folder_context)
-
-
-def git_pull(remote: str = "origin", branch: str = None, folder_context=None) -> str:
-    """Fetch from and integrate with another repository."""
-    cmd_args = ["pull", remote]
-    if branch:
-        cmd_args.append(branch)
-    return run_git_command(cmd_args, folder_context)
-
-
-def git_branch(folder_context) -> str:
-    """List branches."""
-    return run_git_command(["branch"], folder_context)
 
 
 def bash_command(
@@ -3430,6 +2932,19 @@ def infer_tool_error_code(tool_name: str, result: Any) -> str | None:
     return None
 
 
+def _hint_lookup(tool_name: str, error_code: str | None) -> tuple[str | None, bool]:
+    """Lookup (hint, retryable) for an envelope. Imported lazily to keep
+    `core.tools` independent of `mu.tools._hints` at module load."""
+    if not error_code:
+        return None, False
+    try:
+        from mu.tools._hints import hint_for, retryable_for_code
+
+        return hint_for(tool_name, error_code), retryable_for_code(error_code)
+    except Exception:  # pragma: no cover — defensive
+        return None, False
+
+
 def _build_tool_envelope(
     *,
     tool_name: str,
@@ -3439,13 +2954,28 @@ def _build_tool_envelope(
     error_code: str | None = None,
     artifacts: list | None = None,
     telemetry: dict | None = None,
+    hint: str | None = None,
+    retryable: bool | None = None,
 ) -> dict[str, Any]:
+    # If the caller didn't supply hint/retryable explicitly and the envelope
+    # represents a failure, derive them from the (tool, error_code) registry.
+    if not ok:
+        derived_hint, derived_retryable = _hint_lookup(tool_name, error_code)
+        if hint is None:
+            hint = derived_hint
+        if retryable is None:
+            retryable = derived_retryable
+    else:
+        if retryable is None:
+            retryable = False
     return {
         "ok": bool(ok),
         "error_code": error_code,
         "message": str(message or ""),
         "data": data if data is not None else {},
         "artifacts": artifacts or [],
+        "hint": hint,
+        "retryable": bool(retryable),
         "telemetry": {
             "tool_name": tool_name,
             **(telemetry or {}),
@@ -3469,17 +2999,42 @@ def _envelope_from_handler_result(tool_name: str, handler_result: Any) -> dict[s
             out["data"] = {}
         if "artifacts" not in out:
             out["artifacts"] = []
+        # Backfill hint + retryable from the registry when missing. Tools
+        # that emit their own structured envelopes can override either
+        # value; we never clobber a non-None hint or an explicit retryable.
+        if not out.get("ok"):
+            derived_hint, derived_retryable = _hint_lookup(tool_name, out.get("error_code"))
+            if "hint" not in out or out.get("hint") is None:
+                out["hint"] = derived_hint
+            if "retryable" not in out:
+                out["retryable"] = derived_retryable
+        else:
+            out.setdefault("hint", None)
+            out.setdefault("retryable", False)
         telemetry = out.get("telemetry")
         out["telemetry"] = telemetry if isinstance(telemetry, dict) else {}
         out["telemetry"].setdefault("tool_name", tool_name)
         return out
 
     if isinstance(handler_result, dict):
-        # Already envelope-compliant payload
+        # Already envelope-compliant payload — backfill hint/retryable if
+        # the handler emitted an older 6-key envelope.
         if {"ok", "error_code", "message", "data", "artifacts", "telemetry"}.issubset(
             handler_result.keys()
         ):
-            return handler_result
+            out = dict(handler_result)
+            if not out.get("ok"):
+                derived_hint, derived_retryable = _hint_lookup(
+                    tool_name, out.get("error_code")
+                )
+                if "hint" not in out or out.get("hint") is None:
+                    out["hint"] = derived_hint
+                if "retryable" not in out:
+                    out["retryable"] = derived_retryable
+            else:
+                out.setdefault("hint", None)
+                out.setdefault("retryable", False)
+            return out
         if "ok" in handler_result:
             return _ensure_envelope_shape(handler_result)
         error_code = infer_tool_error_code(tool_name, json.dumps(handler_result))
@@ -3618,24 +3173,12 @@ def _handle_get_chunk(args, folder_context, ui, variables) -> str:
     )
 
 
-def _handle_get_current_time(args, folder_context, ui, variables) -> str:
-    return get_current_time(folder_context)
-
-
 def _handle_list_dir(args, folder_context, ui, variables) -> str:
     return list_dir(args.get("path", ""), folder_context)
 
 
 def _handle_write_file(args, folder_context, ui, variables) -> str:
     return write_file(args.get("filename", ""), args.get("content", ""), folder_context)
-
-
-def _handle_list_agent_tasks(args, folder_context, ui, variables) -> str:
-    return list_agent_tasks(folder_context)
-
-
-def _handle_run_agent_task(args, folder_context, ui, variables) -> str:
-    return run_agent_task(args.get("task_name", ""), folder_context, variables)
 
 
 def _handle_bash(args, folder_context, ui, variables) -> str:
@@ -3659,51 +3202,6 @@ def _handle_search_and_replace_file(args, folder_context, ui, variables) -> str:
         args.get("dry_run", False),
         folder_context
     )
-
-
-def _handle_git_status(args, folder_context, ui, variables) -> str:
-    return git_status(folder_context)
-
-
-def _handle_git_init(args, folder_context, ui, variables) -> str:
-    return git_init(folder_context)
-
-
-def _handle_git_log(args, folder_context, ui, variables) -> str:
-    return git_log(args.get("limit", 10), folder_context)
-
-
-def _handle_git_diff(args, folder_context, ui, variables) -> str:
-    return git_diff(args.get("cached", False), args.get("filename"), folder_context)
-
-
-def _handle_git_checkout(args, folder_context, ui, variables) -> str:
-    return git_checkout(
-        args.get("branch", ""), args.get("create", False), folder_context
-    )
-
-
-def _handle_git_add(args, folder_context, ui, variables) -> str:
-    return git_add(args.get("files", []), folder_context)
-
-
-def _handle_git_commit(args, folder_context, ui, variables) -> str:
-    return git_commit(args.get("message", ""), folder_context)
-
-
-def _handle_git_push(args, folder_context, ui, variables) -> str:
-    return git_push(args.get("remote", "origin"), args.get("branch"), folder_context)
-
-
-def _handle_git_merge_request(args, folder_context, ui, variables) -> str:
-    return (
-        f"Merge Request '{args.get('title')}' launched successfully!\n"
-        f"Description: {args.get('description')}"
-    )
-
-
-def _handle_git_pull(args, folder_context, ui, variables) -> str:
-    return git_pull(args.get("remote", "origin"), args.get("branch"), folder_context)
 
 
 def _handle_url_grounding(args, folder_context, ui, variables) -> str:
@@ -3758,10 +3256,6 @@ def _handle_hackernews_search(args, folder_context, ui, variables) -> str:
 
 def _handle_read_document(args, folder_context, ui, variables) -> str:
     return read_document(args.get("filename", ""), folder_context)
-
-
-def _handle_git_branch(args, folder_context, ui, variables) -> str:
-    return git_branch(folder_context)
 
 
 def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
@@ -4803,29 +4297,15 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "search_references": _legacy_handler(_handle_search_references),
     "retrieve_relevant_context": _legacy_handler(_handle_retrieve_relevant_context),
     "get_chunk": _legacy_handler(_handle_get_chunk),
-    "get_current_time": _legacy_handler(_handle_get_current_time),
     "list_dir": _legacy_handler(_handle_list_dir),
     "write_file": _legacy_handler(_handle_write_file),
-    "list_agent_tasks": _legacy_handler(_handle_list_agent_tasks),
-    "run_agent_task": _legacy_handler(_handle_run_agent_task),
     "bash": _legacy_handler(_handle_bash),
     "apply_diff": _legacy_handler(_handle_apply_diff),
-    "git_status": _legacy_handler(_handle_git_status),
-    "git_init": _legacy_handler(_handle_git_init),
-    "git_log": _legacy_handler(_handle_git_log),
-    "git_diff": _legacy_handler(_handle_git_diff),
-    "git_checkout": _legacy_handler(_handle_git_checkout),
-    "git_add": _legacy_handler(_handle_git_add),
-    "git_commit": _legacy_handler(_handle_git_commit),
-    "git_push": _legacy_handler(_handle_git_push),
-    "git_merge_request": _legacy_handler(_handle_git_merge_request),
-    "git_pull": _legacy_handler(_handle_git_pull),
     "url_grounding": _legacy_handler(_handle_url_grounding),
     "read_document": _legacy_handler(_handle_read_document),
     "web_search": _legacy_handler(_handle_web_search),
     "arxiv_search": _legacy_handler(_handle_arxiv_search),
     "doi_resolve": _legacy_handler(_handle_doi_resolve),
-    "git_branch": _legacy_handler(_handle_git_branch),
     "reddit_search": _legacy_handler(_handle_reddit_search),
     "stackoverflow_search": _legacy_handler(_handle_stackoverflow_search),
     "hackernews_search": _legacy_handler(_handle_hackernews_search),

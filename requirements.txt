@@ -1,4 +1,5 @@
 google-genai
+openai>=1.40.0
 rich
 prompt-toolkit
 Pillow

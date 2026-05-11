@@ -20,7 +20,7 @@ def test_batch_job_basic(tmp_path):
     dummy_file.write_text("hello batch")
 
     commands = [
-        {"tool_name": "get_current_time", "tool_args": {}},
+        {"tool_name": "list_dir", "tool_args": {"path": str(tmp_path)}},
         {"tool_name": "read_file", "tool_args": {"filename": str(dummy_file)}},
     ]
 
@@ -42,7 +42,7 @@ def test_batch_job_nested_prevention(tmp_path):
         {
             "tool_name": "batch_job",
             "tool_args": {
-                "commands": [{"tool_name": "get_current_time", "tool_args": {}}]
+                "commands": [{"tool_name": "list_dir", "tool_args": {}}]
             },
         }
     ]
@@ -141,7 +141,7 @@ def test_batch_job_partial_success_has_nested_children(tmp_path):
 def test_tool_descriptors_expose_execution_metadata():
     read_descriptor = get_tool_descriptor("read_file")
     batch_descriptor = get_tool_descriptor("batch_job")
-    payload = serialize_tool_descriptor("git_commit")
+    payload = serialize_tool_descriptor("bash")
 
     assert read_descriptor is not None
     assert read_descriptor.execution_kind == "read"

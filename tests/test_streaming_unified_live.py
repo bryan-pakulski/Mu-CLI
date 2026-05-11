@@ -206,27 +206,125 @@ def test_generation_live_status_footer_renderable(monkeypatch):
         assert isinstance(last, (Spinner, Text))
 
 
-def test_generation_live_final_render_uses_text_not_spinner(monkeypatch):
-    """On `__exit__`, `_render(final=True)` swaps the spinner for plain text
-    so no stray ANSI escapes remain in the terminal scrollback."""
+def test_generation_live_final_render_drops_status_footer(monkeypatch):
+    """`_render(final=True)` must not include the status footer. The Live
+    is also `transient=True` so this only matters defensively, but keep
+    the rule so the rendered Group never carries the "Generating ... it
+    N/1000 | ..." line into scrollback."""
     from ui.rich_ui import RichUI
-    from rich.text import Text
+    from rich.spinner import Spinner
 
     ui = RichUI()
     monkeypatch.setattr("rich.live.Live.start", lambda self: None)
     monkeypatch.setattr("rich.live.Live.stop", lambda self: None)
     monkeypatch.setattr("rich.live.Live.update", lambda self, renderable: None)
 
-    cm = ui.show_status("Final status")
+    cm = ui.show_status("Generating (dummy) it 3/1000 | ctx: 1%")
     cm.__enter__()
     cm.append_text("the answer")
+    cm.note_tool_call("read_file")
     rendered_final = cm._render(final=True)
-    # The footer is a plain Text on final render.
     children = list(rendered_final.renderables)
-    last = children[-1]
-    assert isinstance(last, Text)
-    assert "Final status" in str(last)
+
+    rendered_strs = [str(c) for c in children]
+    assert any("the answer" in s for s in rendered_strs)
+    assert any("read_file" in s for s in rendered_strs)
+    assert not any(isinstance(c, Spinner) for c in children)
+    assert not any("Generating" in str(c) for c in children)
     cm.__exit__(None, None, None)
+
+
+def test_generation_live_is_transient_so_streamed_region_clears(monkeypatch):
+    """The Live must be created with `transient=True`. The streamed
+    plain-text buffer used during generation is replaced on exit with a
+    properly-styled Markdown re-render (see next test), so leaving the
+    raw plain-text region in scrollback would mean every turn shows the
+    answer twice — once unrendered, once rendered."""
+    from ui.rich_ui import RichUI
+
+    captured = {}
+
+    real_init = __import__("rich.live", fromlist=["Live"]).Live.__init__
+
+    def _capture_init(self, *args, **kwargs):
+        captured["transient"] = kwargs.get("transient")
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr("rich.live.Live.__init__", _capture_init)
+    monkeypatch.setattr("rich.live.Live.start", lambda self: None)
+    monkeypatch.setattr("rich.live.Live.stop", lambda self: None)
+    monkeypatch.setattr("rich.live.Live.update", lambda self, renderable: None)
+
+    ui = RichUI()
+    cm = ui.show_status("x")
+    cm.__enter__()
+    cm.__exit__(None, None, None)
+    assert captured.get("transient") is True
+
+
+def test_generation_live_reemits_markdown_on_exit(monkeypatch):
+    """On exit the Live region is transient. The accumulated assistant
+    text must then be re-printed through `render_response` so it lands
+    in scrollback as a rendered Markdown block — not as raw `**bold**`
+    or `# header` characters."""
+    from ui.rich_ui import RichUI
+
+    monkeypatch.setattr("rich.live.Live.start", lambda self: None)
+    monkeypatch.setattr("rich.live.Live.stop", lambda self: None)
+    monkeypatch.setattr("rich.live.Live.update", lambda self, renderable: None)
+
+    render_calls: list = []
+    import ui.render as _render
+
+    def _spy(text):
+        render_calls.append(text)
+
+    monkeypatch.setattr(_render, "render_response", _spy)
+
+    ui_inst = RichUI()
+    cm = ui_inst.show_status("x")
+    cm.__enter__()
+    cm.append_text("# heading\n\nSome **bold** text.")
+    cm.__exit__(None, None, None)
+
+    assert render_calls, "expected render_response to be called on Live exit"
+    rendered = render_calls[0]
+    assert "# heading" in rendered
+    assert "**bold**" in rendered
+
+
+def test_generation_live_emits_thinking_block_as_dim_italic(monkeypatch):
+    """Thinking is captured during the Live; on exit it must be printed
+    as a separate dim-italic block before the assistant text, not mixed
+    in via render_response (markdown rendering on partial reasoning
+    looks erratic)."""
+    from ui.rich_ui import RichUI
+    from rich.text import Text
+
+    monkeypatch.setattr("rich.live.Live.start", lambda self: None)
+    monkeypatch.setattr("rich.live.Live.stop", lambda self: None)
+    monkeypatch.setattr("rich.live.Live.update", lambda self, renderable: None)
+
+    ui_inst = RichUI()
+    printed: list = []
+
+    real_print = ui_inst.console.print
+
+    def _capture(*args, **kwargs):
+        printed.append(args[0] if args else None)
+        return None
+
+    monkeypatch.setattr(ui_inst.console, "print", _capture)
+    cm = ui_inst.show_status("x")
+    cm.__enter__()
+    cm.append_thinking("Hmm, let me think about this.")
+    cm.__exit__(None, None, None)
+
+    thinking_prints = [
+        p for p in printed if isinstance(p, Text) and "think about this" in str(p)
+    ]
+    assert thinking_prints, "expected a Text print containing the thinking content"
+    assert thinking_prints[0].style == "dim italic"
 
 
 def test_generation_live_clears_streamed_flag_on_enter_then_sets_on_delta(monkeypatch):

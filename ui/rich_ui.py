@@ -709,12 +709,15 @@ class _GenerationLive:
         # Start of a new stream — clear the persistent flag so a previous
         # iteration's panel-suppression hint doesn't bleed forward.
         self.ui._streamed_any_text = False
-        # Header is part of the live group (rendered every refresh).
+        # `transient=True` so the live streaming region clears on exit;
+        # we then re-print the accumulated content as properly-rendered
+        # rich Markdown (otherwise `**bold**` / headers / code fences
+        # would land in scrollback as raw markdown characters).
         self._live = Live(
             self._render(),
             console=self.ui.console,
             refresh_per_second=10,
-            transient=False,
+            transient=True,
             auto_refresh=True,
         )
         self._live.start()
@@ -736,12 +739,36 @@ class _GenerationLive:
                 pass
         if self._live is not None:
             try:
-                # Refresh once more so the final state lands cleanly.
-                self._live.update(self._render(final=True))
                 self._live.stop()
             except Exception:
                 pass
             self._live = None
+        # Live region was transient — it's gone from the terminal now.
+        # Re-emit the accumulated buffers as properly-styled output so
+        # final scrollback shows rendered Markdown (headers/lists/code
+        # fences) instead of the raw character stream the Live was using
+        # for fast token append.
+        with self._lock:
+            text = "".join(self._text_buf).strip()
+            thinking = "".join(self._thinking_buf).strip()
+            tool_calls = list(self._tool_call_log)
+        try:
+            if thinking:
+                # Reasoning content: keep dim italic, no Markdown — partial
+                # markup is common and would render erratically.
+                self.ui.console.print(Text(thinking, style="dim italic"))
+            for name in tool_calls:
+                self.ui.console.print(f"[cyan]→ {name}[/cyan]", highlight=False)
+            if text:
+                from .render import render_response
+                render_response(text)
+        except Exception:
+            # Never let a render bug eat the turn — fall back to raw print.
+            if text:
+                try:
+                    self.ui.console.print(text)
+                except Exception:
+                    pass
         self.ui._gen_live = None
         return False
 
@@ -788,11 +815,13 @@ class _GenerationLive:
             parts.append(Text(text))
         for name in tool_calls:
             parts.append(Text(f"→ {name}", style="cyan"))
-        # Bottom-anchored status footer. Spinner only while live.
+        # Bottom-anchored status footer — ONLY while the Live is active.
+        # On the final render (Live exiting) we deliberately drop the
+        # status: `transient=False` means the final render persists to
+        # scrollback, so including the footer here leaks a duplicate
+        # "Generating ... it N/1000 | ..." stub on every turn.
         if not final and self._status_message:
             spinner = Spinner("dots", text=Text(f" {self._status_message}", style="dim"))
             parts.append(spinner)
-        elif self._status_message:
-            parts.append(Text(self._status_message, style="dim"))
         return Group(*parts) if parts else Text("")
 

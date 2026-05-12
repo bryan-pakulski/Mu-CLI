@@ -26,6 +26,7 @@ MODE_PROMPT_STYLES = {
     "debug": "mode-debug",
     "feature": "mode-feature",
     "research": "mode-research",
+    "security": "mode-security",
 }
 
 MODE_CHOICES = {
@@ -33,6 +34,7 @@ MODE_CHOICES = {
     "debug": None,
     "feature": None,
     "research": None,
+    "security": None,
 }
 
 
@@ -408,6 +410,7 @@ class InputHandler:
                 "mode-debug": "ansiyellow bold",
                 "mode-feature": "ansiblue bold",
                 "mode-research": "ansimagenta bold",
+                "mode-security": "ansired bold",
             }
         )
 

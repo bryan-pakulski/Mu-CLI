@@ -45,6 +45,11 @@ WRITE_TOOLS: Set[str] = {
     "create_feature_task",
     "update_feature_task",
     "approve_feature_task",
+    # Security-mode mutators (the PoC verifications execute shell commands
+    # against the workspace; in plan mode that's a write-side effect even
+    # if the verification itself is read-only-ish).
+    "verify_security_proof",
+    "verify_remediation",
 }
 
 

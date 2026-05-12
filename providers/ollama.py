@@ -287,6 +287,34 @@ class OllamaProvider(LLMProvider):
         self._context_length_cache[model_name] = ctx_len
         return ctx_len
 
+    def effective_response_reserve(
+        self, model_name: Optional[str] = None
+    ) -> Optional[int]:
+        """Compactor reserve for Ollama, derived from `ollama_num_predict`.
+
+        Resolution:
+          * num_predict > 0  → that's the explicit output cap; reserve it
+                                exactly so the input budget gets the rest.
+          * num_predict <= 0 → Ollama's "unlimited" / model-default mode.
+                                Heuristically reserve ~⅛ of the window
+                                (clamped to [512, 2048]) so a long
+                                multi-tool-call output still has room.
+          * No num_predict knob and no window → None (fall back to var).
+        """
+        try:
+            vars_ = getattr(self, "_session_variables", None) or {}
+            raw = vars_.get("ollama_num_predict")
+            if raw is not None:
+                num_predict = int(raw)
+                if num_predict > 0:
+                    return num_predict
+        except (TypeError, ValueError):
+            pass
+        window = self.effective_context_window(model_name)
+        if not window:
+            return None
+        return max(512, min(2048, window // 8))
+
     def effective_context_window(
         self, model_name: Optional[str] = None
     ) -> Optional[int]:

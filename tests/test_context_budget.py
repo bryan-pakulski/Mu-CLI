@@ -201,6 +201,112 @@ def test_ollama_effective_context_caches_per_model(monkeypatch):
     assert call_count["n"] == 1
 
 
+def test_provider_reserve_overrides_session_variable():
+    """When the provider declares a real output cap (e.g. Ollama's
+    `num_predict=512`), the compactor must honor that — not the
+    user-set `response_token_reserve` default."""
+
+    class _ProviderWithReserve(_BaseDummy):
+        def effective_context_window(self, model_name=None):
+            return 8192
+
+        def effective_response_reserve(self, model_name=None):
+            return 512
+
+    session = _session(_ProviderWithReserve("dummy"))
+    session.variables["response_token_reserve"] = 99999  # ignored
+    session.variables["context_trim_threshold"] = 1.0
+    # 8192 - 512 = 7680, threshold = 1.0
+    assert session._resolve_response_reserve() == 512
+    assert session._compaction_token_budget() == 7680
+
+
+def test_session_variable_fallback_when_provider_returns_none():
+    """If the provider doesn't know its output cap, the session falls
+    back to the `response_token_reserve` variable. This preserves the
+    pre-Option-1 behavior for OpenAI / Gemini until they're wired up."""
+
+    class _NoneReserve(_BaseDummy):
+        def effective_context_window(self, model_name=None):
+            return 32768
+
+        def effective_response_reserve(self, model_name=None):
+            return None
+
+    session = _session(_NoneReserve("dummy"))
+    session.variables["response_token_reserve"] = 2048
+    assert session._resolve_response_reserve() == 2048
+
+
+def test_provider_reserve_exception_falls_back_safely():
+    """A provider that raises in `effective_response_reserve` must not
+    crash the compactor — fall back to the session variable."""
+
+    class _Flaky(_BaseDummy):
+        def effective_response_reserve(self, model_name=None):
+            raise RuntimeError("oops")
+
+    session = _session(_Flaky("dummy"))
+    session.variables["response_token_reserve"] = 1024
+    assert session._resolve_response_reserve() == 1024
+
+
+def test_ollama_reserve_honors_num_predict_when_set():
+    """An explicit `ollama_num_predict` is the user's contract; the
+    compactor reserves exactly that — no more, no less."""
+    from providers.ollama import OllamaProvider
+
+    provider = OllamaProvider("llama3", host="http://localhost:11434")
+    provider.bind_session_variables(
+        {"ollama_num_predict": 1500, "ollama_num_ctx": 16384}
+    )
+    assert provider.effective_response_reserve("llama3") == 1500
+
+
+def test_ollama_reserve_heuristic_when_num_predict_is_zero():
+    """`ollama_num_predict=0` means 'use model default' (i.e. potentially
+    unlimited). We must pick a sane heuristic — ⅛ of the window, clamped
+    to [512, 2048] — instead of leaving zero room for output."""
+    from providers.ollama import OllamaProvider
+
+    provider = OllamaProvider("llama3", host="http://localhost:11434")
+    provider.bind_session_variables(
+        {"ollama_num_predict": 0, "ollama_num_ctx": 16384}
+    )
+    # 16384 // 8 = 2048 (hits the upper clamp).
+    assert provider.effective_response_reserve("llama3") == 2048
+
+
+def test_ollama_reserve_heuristic_clamped_for_tiny_window():
+    """For pathologically small windows (2k), the heuristic still
+    reserves at least 512 — small but enough for a one-paragraph reply."""
+    from providers.ollama import OllamaProvider
+
+    provider = OllamaProvider("llama3", host="http://localhost:11434")
+    provider.bind_session_variables(
+        {"ollama_num_predict": 0, "ollama_num_ctx": 2048}
+    )
+    # 2048 // 8 = 256, clamped up to 512.
+    assert provider.effective_response_reserve("llama3") == 512
+
+
+def test_ollama_reserve_returns_none_when_window_unknown(monkeypatch):
+    """If we can't determine the window AND num_predict isn't set,
+    return None so the caller falls back to the session variable."""
+    from providers.ollama import OllamaProvider
+    import urllib.error
+
+    provider = OllamaProvider("unknown", host="http://localhost:1")
+    provider.bind_session_variables({"ollama_num_predict": 0, "ollama_num_ctx": 0})
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            urllib.error.URLError("connection refused")
+        ),
+    )
+    assert provider.effective_response_reserve("unknown") is None
+
+
 def test_ollama_context_overflow_error_classified_with_actionable_hint():
     """A "prompt too long" 400 body must be classified as a typed
     OllamaError with an actionable message — not the generic "API error"

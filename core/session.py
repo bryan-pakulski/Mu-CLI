@@ -1074,6 +1074,29 @@ class Session:
             return min(user_limit, int(provider_window))
         return user_limit
 
+    def _resolve_response_reserve(self) -> int:
+        """How many tokens to leave free for the model's output.
+
+        Preferred source is the provider's `effective_response_reserve()`
+        — which reads `ollama_num_predict` / `max_tokens` / etc. — so the
+        reserve tracks the actual configured output cap instead of a
+        guessed constant. Only falls back to the `response_token_reserve`
+        session variable when the provider has no configured cap.
+        """
+        try:
+            provider_reserve = self.provider.effective_response_reserve(
+                self.provider.model_name
+            )
+        except Exception:
+            provider_reserve = None
+        if provider_reserve and provider_reserve > 0:
+            return int(provider_reserve)
+        raw = self.variables.get("response_token_reserve", 4096)
+        try:
+            return max(0, int(raw)) if raw is not None else 4096
+        except (TypeError, ValueError):
+            return 4096
+
     def _compaction_token_budget(self) -> int:
         """The token ceiling the compactor targets. Reserves headroom for
         the model's response so we don't pack the input right up to the
@@ -1082,11 +1105,7 @@ class Session:
         context_limit = self._resolve_context_limit()
         trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
         trim_threshold = max(0.10, min(trim_threshold, 1.0))
-        raw_reserve = self.variables.get("response_token_reserve", 4096)
-        try:
-            response_reserve = max(0, int(raw_reserve)) if raw_reserve is not None else 4096
-        except (TypeError, ValueError):
-            response_reserve = 4096
+        response_reserve = self._resolve_response_reserve()
         usable = max(1024, context_limit - response_reserve)
         return max(512, int(usable * trim_threshold))
 

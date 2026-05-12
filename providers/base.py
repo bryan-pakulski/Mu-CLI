@@ -163,6 +163,23 @@ class LLMProvider(ABC):
         """
         return None
 
+    def effective_response_reserve(
+        self, model_name: Optional[str] = None
+    ) -> Optional[int]:
+        """Return the number of tokens the compactor should reserve in the
+        context window for the model's response, or `None` if the provider
+        doesn't have a configured output cap.
+
+        For Ollama this maps to `num_predict`; for OpenAI to `max_tokens` /
+        `max_completion_tokens`; for Gemini to `maxOutputTokens`. When the
+        provider returns `None` the session falls back to the user-set
+        `response_token_reserve` variable.
+
+        Implementations should NOT return raw "unlimited" sentinels like -1;
+        return a sane positive integer or `None`.
+        """
+        return None
+
     @abstractmethod
     def generate(
         self,

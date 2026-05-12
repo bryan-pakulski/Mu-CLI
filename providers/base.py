@@ -146,6 +146,23 @@ class LLMProvider(ABC):
     def get_available_models(self) -> List[str]:
         """Returns a list of available model names for this provider."""
 
+    def effective_context_window(
+        self, model_name: Optional[str] = None
+    ) -> Optional[int]:
+        """Return the real input-context ceiling (in tokens) for the active
+        model, or `None` if the provider can't determine it.
+
+        The session compactor uses this to set its rolling budget. Returning
+        `None` falls back to the user-set `context_token_limit` variable —
+        which is fine for frontier API providers (Claude/Gemini/OpenAI) but
+        wrong for Ollama, where every model has a much smaller real window
+        (often 4k-32k) than the harness default of 256k.
+
+        Implementations should cache the result per model_name since this is
+        called once per turn.
+        """
+        return None
+
     @abstractmethod
     def generate(
         self,

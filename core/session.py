@@ -1054,17 +1054,48 @@ class Session:
             return f"- {role}: [no serializable content]"
         return f"- {role}: " + " | ".join(summaries)
 
+    def _resolve_context_limit(self) -> int:
+        """Pick the smaller of (user-set `context_token_limit`, real
+        provider window). Ollama models often have 4k-32k real windows
+        while the user-set default is 256k, so without this the compactor
+        never fires before the provider 400s with "prompt too long".
+        """
+        user_limit = max(
+            1024, int(self.variables.get("context_token_limit", 256000) or 256000)
+        )
+        provider_window: int | None = None
+        try:
+            provider_window = self.provider.effective_context_window(
+                self.provider.model_name
+            )
+        except Exception:
+            provider_window = None
+        if provider_window and provider_window > 0:
+            return min(user_limit, int(provider_window))
+        return user_limit
+
+    def _compaction_token_budget(self) -> int:
+        """The token ceiling the compactor targets. Reserves headroom for
+        the model's response so we don't pack the input right up to the
+        edge and leave nothing for output (= empty generation or another
+        overflow on the second turn)."""
+        context_limit = self._resolve_context_limit()
+        trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
+        trim_threshold = max(0.10, min(trim_threshold, 1.0))
+        raw_reserve = self.variables.get("response_token_reserve", 4096)
+        try:
+            response_reserve = max(0, int(raw_reserve)) if raw_reserve is not None else 4096
+        except (TypeError, ValueError):
+            response_reserve = 4096
+        usable = max(1024, context_limit - response_reserve)
+        return max(512, int(usable * trim_threshold))
+
     def _prepare_runtime_history(
         self, turn_start_index: int | None = None
     ) -> list[dict]:
         if self.session_manager.summary_anchor > len(self.session_manager.history):
             self.session_manager.summary_anchor = 0
-        context_limit = max(
-            1024, int(self.variables.get("context_token_limit", 256000) or 256000)
-        )
-        trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
-        trim_threshold = max(0.10, min(trim_threshold, 1.0))
-        token_budget = max(512, int(context_limit * trim_threshold))
+        token_budget = self._compaction_token_budget()
         start_index = len(self.session_manager.history)
         running_tokens = 0
         while start_index > self.session_manager.summary_anchor:
@@ -2357,13 +2388,8 @@ class Session:
                 base_system_prompt += f"\nLocked loop goal: {loop_goal}"
         if workspace_context:
             base_system_prompt += f"\n\n{workspace_context}"
-        context_limit = max(
-            1024, int(self.variables.get("context_token_limit", 256000) or 256000)
-        )
-        trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
-        trim_threshold = max(0.10, min(trim_threshold, 1.0))
         self.session_manager.roll_history_summary_to_token_budget(
-            int(context_limit * trim_threshold),
+            self._compaction_token_budget(),
             keep_recent=4,
         )
         # Tell the auto-compaction hook we've already rolled this turn so it

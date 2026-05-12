@@ -98,6 +98,13 @@ VARIABLE_SCHEMA = {
         "type": float,
         "default": 0.85,
     },
+    "response_token_reserve": {
+        # Tokens to leave free in the compaction budget for the model's
+        # response. With smaller-context providers (Ollama 8k/32k), packing
+        # input up to the ceiling means there's no room for output.
+        "type": int,
+        "default": 4096,
+    },
     "workspace_context_max_chars": {
         "type": int,
         "default": 8192,

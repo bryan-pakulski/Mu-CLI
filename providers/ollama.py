@@ -185,7 +185,7 @@ def _classify_url_error(host: str, exc: BaseException) -> OllamaError:
 
 
 def _classify_api_error_body(host: str, model: str, body: str) -> OllamaError:
-    """Distinguish 'model not pulled' from other API errors."""
+    """Distinguish 'model not pulled' / 'context overflow' from other API errors."""
     lowered = body.lower()
     if "model" in lowered and ("not found" in lowered or "could not be loaded" in lowered):
         return OllamaError(
@@ -194,6 +194,21 @@ def _classify_api_error_body(host: str, model: str, body: str) -> OllamaError:
                 f"The model '{model}' isn't installed on the Ollama daemon at {host}.\n"
                 f"Fix: `ollama pull {model}` (then retry).\n"
                 f"To list installed models: `ollama list`."
+            ),
+        )
+    if "prompt too long" in lowered or (
+        "exceed" in lowered and "context" in lowered
+    ):
+        return OllamaError(
+            f"Ollama context overflow for '{model}': {body[:200]}",
+            actionable=(
+                f"The prompt exceeds the model's context window. The harness "
+                f"compactor should prevent this — check that "
+                f"`/set ollama_num_ctx <n>` matches your model's real window, "
+                f"or `unset ollama_num_ctx` to let the harness auto-detect it "
+                f"from `/api/show`.\n"
+                f"Quick recovery: `/clear` to drop history, or aggressively "
+                f"lower `context_trim_threshold` (e.g. `/set context_trim_threshold 0.5`)."
             ),
         )
     return OllamaError(f"Ollama API error: {body[:300]}", actionable=body[:500])
@@ -220,6 +235,9 @@ class OllamaProvider(LLMProvider):
         self._preflight_done = False
         self._preflight_error: Optional[OllamaError] = None
         self._cached_models: Optional[List[str]] = None
+        # Model name → trained context length (tokens), or None if unknown.
+        # Populated lazily by `_fetch_context_length`.
+        self._context_length_cache: Dict[str, Optional[int]] = {}
 
     # ----------------------------------------------------------- preflight
 
@@ -227,6 +245,75 @@ class OllamaProvider(LLMProvider):
         self._preflight_done = False
         self._preflight_error = None
         self._cached_models = None
+        self._context_length_cache: Dict[str, Optional[int]] = {}
+
+    def _fetch_context_length(self, model_name: str) -> Optional[int]:
+        """Hit `/api/show` and return the model's trained context length, or
+        None if the endpoint is unreachable / the field is missing. Cached
+        per model so we only probe once per process."""
+        if not model_name:
+            return None
+        if not hasattr(self, "_context_length_cache"):
+            self._context_length_cache = {}
+        if model_name in self._context_length_cache:
+            return self._context_length_cache[model_name]
+        try:
+            payload = json.dumps({"model": model_name}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.host}/api/show",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    **self._auth_headers(),
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.request_timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError):
+            self._context_length_cache[model_name] = None
+            return None
+        # Ollama's /api/show returns a `model_info` dict whose keys are
+        # namespaced by the model architecture, e.g.
+        # `llama.context_length`, `qwen2.context_length`. Grab whichever
+        # one is present.
+        ctx_len: Optional[int] = None
+        model_info = data.get("model_info") or {}
+        if isinstance(model_info, dict):
+            for k, v in model_info.items():
+                if k.endswith(".context_length") and isinstance(v, int) and v > 0:
+                    ctx_len = v
+                    break
+        self._context_length_cache[model_name] = ctx_len
+        return ctx_len
+
+    def effective_context_window(
+        self, model_name: Optional[str] = None
+    ) -> Optional[int]:
+        """Real input-context ceiling for the active Ollama model.
+
+        Resolution order:
+          1. `ollama_num_ctx` session variable, if > 0 — the user is
+             explicitly overriding (and is responsible for sanity).
+          2. The model's trained `context_length` from `/api/show`.
+          3. None (caller falls back to the harness-wide default).
+
+        The session compactor calls this on every turn so we never send
+        a prompt that's larger than the model can read — preventing the
+        "prompt too long; exceeded max context length" 400 from Ollama.
+        """
+        # Resolve from session variables first.
+        try:
+            vars_ = getattr(self, "_session_variables", None) or {}
+            raw = vars_.get("ollama_num_ctx")
+            if raw is not None:
+                num_ctx = int(raw)
+                if num_ctx > 0:
+                    return num_ctx
+        except (TypeError, ValueError):
+            pass
+        target_model = model_name or self.model_name
+        return self._fetch_context_length(target_model)
 
     def preflight(self) -> None:
         """Probe the daemon and cache the result.

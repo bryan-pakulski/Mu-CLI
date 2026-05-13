@@ -2335,11 +2335,19 @@ def url_grounding(url: str, folder_context) -> str:
         from bs4 import BeautifulSoup
 
         with sync_playwright() as p:
-            # Try to launch chromium. We use chromium as it's generally most compatible
+            # Try to launch chromium. We use chromium as it's generally most compatible.
+            # If chromium isn't installed (`playwright install chromium` never ran),
+            # raise so the outer except block can fall through to the httpx fallback
+            # — otherwise the function would short-circuit here and the user would
+            # see a hard error even though static HTML fetch would work fine.
             try:
                 browser = p.chromium.launch(headless=True)
-            except Exception as e:
-                return f"Error: Failed to launch browser. You may need to run 'playwright install chromium'. Details: {e}"
+            except Exception as exc:
+                logger.info(
+                    "url_grounding: chromium launch failed (%s); falling back to httpx.",
+                    exc,
+                )
+                raise
 
             page = browser.new_page()
 
@@ -2482,98 +2490,121 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
         return fallback_results[:num_results]
 
     if engine.lower() == "duckduckgo":
-        # Use duckduckgo-search package for reliable DuckDuckGo access
-        try:
-            results = []
-            for i, r in enumerate(_ddgs_text_search(query, max_results=num_results)):
-                results.append({
-                    "title": r.get("title", ""),
-                    "url": r.get("href", ""),
-                    "snippet": r.get("body", ""),
-                    "relevance_score": 1.0 - (i * 0.05),
-                    "citation_id": register_source(
-                        title=r.get("title", ""),
-                        url=r.get("href", ""),
-                        source_type="web"
-                    )
-                })
+        # Tiered DuckDuckGo strategy. Each tier feeds the same `results`
+        # list so a partial hit from an early tier short-circuits the
+        # later ones. Tiers, in order of result quality:
+        #
+        #   1. `ddgs` package — best quality, ranked results.
+        #   2. HTML scrape of html.duckduckgo.com — works without any
+        #      third-party search dep; ~10 results per query.
+        #   3. InstantAnswer API (api.duckduckgo.com) — Wikipedia-class
+        #      topics only, returns nothing for most real queries.
+        #
+        # The previous arrangement put ImportError from tier 1 directly
+        # onto tier 3, skipping the strong HTML fallback. Now tier 1
+        # missing or returning 0 results both flow into tier 2.
+        results: list[dict] = []
 
-            # Fallback for environments where DDGS returns no results due to
-            # transient upstream throttling/challenges.
-            if not results:
-                try:
-                    import httpx
-                    from bs4 import BeautifulSoup
-
-                    fallback_url = "https://html.duckduckgo.com/html/"
-                    response = httpx.get(
-                        fallback_url,
-                        params={"q": query},
-                        timeout=30.0,
-                        follow_redirects=True,
-                        headers={"User-Agent": "Mozilla/5.0"},
-                    )
-                    response.raise_for_status()
-                    soup = BeautifulSoup(response.text, "html.parser")
-                    for i, row in enumerate(soup.select(".result")[:num_results]):
-                        link = row.select_one(".result__a")
-                        snippet = row.select_one(".result__snippet")
-                        href = link.get("href", "") if link else ""
-                        title = link.get_text(strip=True) if link else ""
-                        body = snippet.get_text(strip=True) if snippet else ""
-                        if not href and not title:
-                            continue
-                        results.append({
-                            "title": title,
-                            "url": href,
-                            "snippet": body,
-                            "relevance_score": 1.0 - (i * 0.05),
-                            "citation_id": register_source(
-                                title=title,
-                                url=href,
-                                source_type="web"
-                            )
-                        })
-                except Exception as fallback_err:
-                    logger.warning(
-                        "web_search: DuckDuckGo HTML fallback failed for '%s': %s",
-                        query,
-                        fallback_err,
-                    )
-            
-            urls_used = [r.get("url", "") for r in results if r.get("url")]
-            return json.dumps({
-                "query": query, "engine": "duckduckgo",
-                "num_results": len(results),
-                "urls_used": urls_used,
-                "results": results
-            }, indent=2)
-            
-        except ImportError:
+        def _scrape_html_fallback() -> list[dict]:
             try:
-                results = _duckduckgo_instantapi_fallback()
-                urls_used = [r.get("url", "") for r in results if r.get("url")]
-                return json.dumps(
-                    {
-                        "query": query,
-                        "engine": "duckduckgo",
-                        "num_results": len(results),
-                        "urls_used": urls_used,
-                        "results": results,
-                    },
-                    indent=2,
+                import httpx
+                from bs4 import BeautifulSoup
+            except ImportError:
+                return []
+            try:
+                response = httpx.get(
+                    "https://html.duckduckgo.com/html/",
+                    params={"q": query},
+                    timeout=30.0,
+                    follow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0"},
                 )
-            except Exception as e:
-                logger.error(f"web_search: Import fallback failed for '{query}': {e}")
-                return json.dumps(
+                response.raise_for_status()
+            except Exception as exc:
+                logger.warning(
+                    "web_search: DuckDuckGo HTML fallback failed for '%s': %s",
+                    query,
+                    exc,
+                )
+                return []
+            soup = BeautifulSoup(response.text, "html.parser")
+            scraped: list[dict] = []
+            for i, row in enumerate(soup.select(".result")[:num_results]):
+                link = row.select_one(".result__a")
+                snippet = row.select_one(".result__snippet")
+                href = link.get("href", "") if link else ""
+                title = link.get_text(strip=True) if link else ""
+                body = snippet.get_text(strip=True) if snippet else ""
+                if not href and not title:
+                    continue
+                scraped.append(
                     {
-                        "error": f"DuckDuckGo search fallback failed: {str(e)}",
-                        "results": [],
+                        "title": title,
+                        "url": href,
+                        "snippet": body,
+                        "relevance_score": 1.0 - (i * 0.05),
+                        "citation_id": register_source(
+                            title=title, url=href, source_type="web"
+                        ),
                     }
                 )
+            return scraped
+
+        # Tier 1: ddgs package.
+        try:
+            for i, r in enumerate(_ddgs_text_search(query, max_results=num_results)):
+                results.append(
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("href", ""),
+                        "snippet": r.get("body", ""),
+                        "relevance_score": 1.0 - (i * 0.05),
+                        "citation_id": register_source(
+                            title=r.get("title", ""),
+                            url=r.get("href", ""),
+                            source_type="web",
+                        ),
+                    }
+                )
+        except ImportError:
+            logger.info(
+                "web_search: `ddgs` package not installed; using HTML fallback."
+            )
         except Exception as e:
-            logger.error(f"web_search: Error searching DuckDuckGo for '{query}': {e}")
-            return json.dumps({"error": f"Search failed: {str(e)}", "results": []})
+            logger.warning(
+                "web_search: ddgs search failed for '%s': %s — trying HTML fallback.",
+                query,
+                e,
+            )
+
+        # Tier 2: HTML scrape. Fires whenever tier 1 produced no results
+        # (because it raised, OR because it succeeded-but-empty).
+        if not results:
+            results = _scrape_html_fallback()
+
+        # Tier 3: InstantAnswer API. Only useful for Wikipedia-class
+        # queries, but better than zero results for those that do match.
+        if not results:
+            try:
+                results = _duckduckgo_instantapi_fallback()
+            except Exception as e:
+                logger.warning(
+                    "web_search: InstantAnswer fallback failed for '%s': %s",
+                    query,
+                    e,
+                )
+
+        urls_used = [r.get("url", "") for r in results if r.get("url")]
+        return json.dumps(
+            {
+                "query": query,
+                "engine": "duckduckgo",
+                "num_results": len(results),
+                "urls_used": urls_used,
+                "results": results,
+            },
+            indent=2,
+        )
     
     elif engine.lower() == "google":
         # Google Custom Search API (requires API key setup)
@@ -2743,7 +2774,11 @@ def arxiv_search(query: str, folder_context=None, max_results: int = 10, categor
             citation_id = register_source(
                 url=result.get("url", ""),
                 title=result.get("title", ""),
-                source_type=SourceType.ARXIV,
+                # SourceType has no ARXIV member — arxiv papers ARE academic.
+                # The old `SourceType.ARXIV` raised AttributeError every call,
+                # which the broad except below collapsed into the cryptic
+                # "arXiv search failed: ARXIV" message users saw.
+                source_type=SourceType.ACADEMIC,
                 authors=result.get("authors", []),
                 date=result.get("published", "")
             )

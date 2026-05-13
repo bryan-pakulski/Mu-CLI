@@ -152,11 +152,30 @@ def _chars_to_tokens(text: str, model: str) -> int:
     return estimate_tokens(text, model)
 
 
+def _current_time_prelude() -> str:
+    """A one-line time-awareness banner prepended to every system prompt.
+
+    Without this the model has to guess at "is this commit recent?" /
+    "schedule X for next Tuesday" / "the doc says deprecated as of
+    2024-12 — are we past that?" type questions. ~25 tokens of overhead
+    per turn for genuine grounding.
+    """
+    import datetime
+
+    now = datetime.datetime.now().astimezone()
+    return (
+        f"Current date/time: {now.strftime('%Y-%m-%d %H:%M %Z')} "
+        f"(weekday: {now.strftime('%A')})."
+    )
+
+
 def compose_base_system_prompt(session) -> str:
     """Reconstruct the base system prompt the provider receives —
     everything *before* the LAYER 1+ blocks get appended.
 
     Mirrors the composition in `Session.send_message`:
+      * a one-line current-date/time prelude (so the model isn't
+        guessing at the wall clock)
       * `system_instruction` (user-set persona/role)
       * feature/loop mode prefixes when those modes are active
       * the agentic harness base + mode workflow text (when agentic
@@ -168,7 +187,7 @@ def compose_base_system_prompt(session) -> str:
     """
     if session is None:
         return ""
-    parts: list = []
+    parts: list = [_current_time_prelude()]
     base = str(getattr(session, "system_instruction", "") or "")
     if base:
         parts.append(base)

@@ -699,6 +699,11 @@ class Session:
         self._pending_retrieved_context = ""
         self._pending_user_text = ""
         self.paused_execution_text: str | None = None
+        # Flips to True when `raise_blocker` fires inside the agentic
+        # loop. The loop-mode watchdog reads it to know the agent
+        # paused intentionally — otherwise it would keep prodding the
+        # model with "continue!" and burn tokens in a wedge loop.
+        self._loop_blocker_raised: bool = False
         from core.background_tasks import BackgroundTaskRegistry
         self.background_tasks = BackgroundTaskRegistry()
 
@@ -954,6 +959,11 @@ class Session:
                 data = self._parse_json_result(raw_result)
             if isinstance(data, dict):
                 self._set_feature_state(status="awaiting_input", blocker=data)
+            # Signal the loop-mode watchdog that this pause is
+            # intentional — without this it would re-prompt the model
+            # with LOOP WATCHDOG every iteration, forcing repeated
+            # re-raises until budget is exhausted.
+            self._loop_blocker_raised = True
             return
 
     def _build_messages_from_history(
@@ -1472,6 +1482,16 @@ class Session:
         )
 
     def _inject_hierarchical_context(self, system_prompt: str) -> str:
+        # Prepend a time-awareness banner so the model isn't guessing
+        # at the wall clock. Cheap (~25 tokens) and reflected in L0 of
+        # the /memory table via compose_base_system_prompt.
+        try:
+            from utils.runtime_metrics import _current_time_prelude
+
+            system_prompt = f"{_current_time_prelude()}\n\n{system_prompt}".strip()
+        except Exception:
+            pass
+
         summary_limit = max(
             0, int(self.variables.get("conversation_summary_char_limit", 8000) or 8000)
         )
@@ -2161,10 +2181,39 @@ class Session:
         thinking,
         tools,
     ):
-        retries = max(0, int(self.variables.get("provider_max_retries", 2) or 2))
-        base_delay = float(self.variables.get("provider_retry_base_delay", 0.4) or 0.4)
-        max_delay = float(self.variables.get("provider_retry_max_delay", 3.0) or 3.0)
-        attempt = 0
+        """Call the provider with exponential-backoff retry on transient
+        failures (429, 503, timeouts, transient network errors).
+
+        Bounded by a cumulative-wait budget
+        (`provider_retry_max_total_wait_seconds`, default 120s) so the
+        agent can't stall forever on a flapping endpoint. A hard
+        `provider_max_retries` ceiling (default 30) is kept as a
+        safety belt against pathological 0-delay loops.
+
+        Backoff schedule with defaults (base=0.4, max=30, budget=120):
+            attempt 1: ~0.4s   (total ~0.4s)
+            attempt 2: ~0.8s   (total ~1.2s)
+            attempt 3: ~1.6s   (total ~2.8s)
+            attempt 4: ~3.2s   (total ~6.0s)
+            attempt 5: ~6.4s   (total ~12.4s)
+            attempt 6: ~12.8s  (total ~25.2s)
+            attempt 7: ~25.6s  (total ~50.8s)
+            attempt 8: 30s capped
+            ...stops once cumulative >= 120s.
+        """
+        base_delay = float(
+            self.variables.get("provider_retry_base_delay", 0.4) or 0.4
+        )
+        max_delay = float(
+            self.variables.get("provider_retry_max_delay", 30.0) or 30.0
+        )
+        total_budget_s = float(
+            self.variables.get("provider_retry_max_total_wait_seconds", 120.0)
+            or 120.0
+        )
+        max_attempts = max(
+            1, int(self.variables.get("provider_max_retries", 30) or 30)
+        )
 
         # Build a streaming renderer that forwards text deltas to the UI in
         # real time. Falls back gracefully for UIs that do not implement the
@@ -2173,6 +2222,9 @@ class Session:
         from mu.agent.hooks import HookContext, default_registry
         import mu.agent.compactor  # noqa: F401 — registers auto-compaction hook
         import mu.agent.plan_mode  # noqa: F401 — registers plan-mode pre_tool hook
+
+        attempt = 0
+        elapsed = 0.0
 
         while True:
             try:
@@ -2205,16 +2257,33 @@ class Session:
                 default_registry.fire("post_provider_call", post_ctx)
                 return response
             except Exception as exc:
-                if attempt >= retries or not self._is_transient_provider_error(exc):
+                if not self._is_transient_provider_error(exc):
+                    raise
+                if elapsed >= total_budget_s or attempt >= max_attempts:
+                    # Budget exhausted — bubble the error up so the
+                    # outer turn loop can surface a clear failure
+                    # instead of stalling forever.
+                    if self.ui:
+                        self.ui.show_error(
+                            f"Provider retry budget exhausted "
+                            f"({attempt} attempts, {elapsed:.1f}s slept). Aborting."
+                        )
                     raise
                 attempt += 1
+                # Exponential backoff with jitter, capped at max_delay.
                 delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
-                delay += random.uniform(0, min(0.2, delay * 0.25))
+                delay += random.uniform(0, min(1.0, delay * 0.25))
+                # Don't oversleep past the remaining budget.
+                remaining = max(0.0, total_budget_s - elapsed)
+                delay = max(0.05, min(delay, remaining))
                 if self.ui:
                     self.ui.show_info(
-                        f"Transient provider error detected; retrying ({attempt}/{retries}) in {delay:.2f}s."
+                        f"Transient provider error; retry {attempt} "
+                        f"in {delay:.1f}s ({elapsed:.1f}s of "
+                        f"{total_budget_s:.0f}s budget used)."
                     )
                 time.sleep(delay)
+                elapsed += delay
 
     def _request_tool_approval(
         self,
@@ -2319,6 +2388,7 @@ class Session:
     def send_message(self, text):
         logger.info(f"Sending message: {text[:100]}...")
         self.paused_execution_text = None
+        self._loop_blocker_raised = False  # fresh turn — last turn's pause doesn't apply
         self.sync_runtime_state()
         if self.variables.get("scratchpad_enabled", True):
             self.turn_scratchpad.max_entries = max(
@@ -2652,29 +2722,48 @@ class Session:
                         continue
 
                     if active_mode == "loop" and iteration < max_iterations:
-                        logger.info(
-                            "Loop mode watchdog: assistant stopped without tool calls; issuing autonomous continue nudge."
-                        )
-                        watchdog_msg = {
-                            "role": "user",
-                            "parts": [
-                                {
-                                    "type": "text",
-                                    "text": (
-                                        "LOOP WATCHDOG: Continue autonomous loop execution now. "
-                                        "Re-plan the next increment, execute concrete actions with tools, "
-                                        "verify outcomes, and proceed without waiting for user confirmation. "
-                                        "Only pause if blocked, and if blocked call raise_blocker with exact unblock requirements."
-                                    ),
-                                }
-                            ],
-                        }
-                        self.session_manager.history.append(watchdog_msg)
-                        messages = self._build_messages_from_history(
-                            self._prepare_runtime_history(),
-                            {"role": "system", "parts": []},
-                        )[:-1]
-                        continue
+                        if self._loop_blocker_raised:
+                            # The agent already raised a blocker this
+                            # turn — pausing intentionally. Don't poke
+                            # it; let the loop finalize so the user can
+                            # respond. Without this gate the watchdog
+                            # would re-prompt every iteration, burning
+                            # tokens while the model repeats the
+                            # blocker message.
+                            logger.info(
+                                "Loop mode: blocker raised; skipping watchdog continue."
+                            )
+                            if self.ui:
+                                self.ui.show_info(
+                                    "Loop paused — blocker raised. "
+                                    "Provide the requested input, set a new loop goal, or /mode default."
+                                )
+                            # Fall through to the normal finalize path
+                            # below (no `continue`).
+                        else:
+                            logger.info(
+                                "Loop mode watchdog: assistant stopped without tool calls; issuing autonomous continue nudge."
+                            )
+                            watchdog_msg = {
+                                "role": "user",
+                                "parts": [
+                                    {
+                                        "type": "text",
+                                        "text": (
+                                            "LOOP WATCHDOG: Continue autonomous loop execution now. "
+                                            "Re-plan the next increment, execute concrete actions with tools, "
+                                            "verify outcomes, and proceed without waiting for user confirmation. "
+                                            "Only pause if blocked, and if blocked call raise_blocker with exact unblock requirements."
+                                        ),
+                                    }
+                                ],
+                            }
+                            self.session_manager.history.append(watchdog_msg)
+                            messages = self._build_messages_from_history(
+                                self._prepare_runtime_history(),
+                                {"role": "system", "parts": []},
+                            )[:-1]
+                            continue
 
                     if self.ui:
                         self.ui.show_info(

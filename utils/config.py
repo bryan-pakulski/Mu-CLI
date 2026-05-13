@@ -105,6 +105,33 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 4096,
     },
+    # ----- Provider retry (transient failures: 429s, timeouts, 5xx) -----
+    "provider_retry_max_total_wait_seconds": {
+        # Cumulative time budget across ALL retries for a single
+        # provider call. Once retry sleeps add up to this, the next
+        # transient failure raises instead of retrying — bounds the
+        # worst-case time the agent stalls on a flapping endpoint.
+        "type": float,
+        "default": 120.0,
+    },
+    "provider_retry_base_delay": {
+        # Initial sleep after the first transient failure. Each
+        # subsequent attempt doubles this (jittered).
+        "type": float,
+        "default": 0.4,
+    },
+    "provider_retry_max_delay": {
+        # Cap on any *single* sleep — the backoff stops doubling here.
+        "type": float,
+        "default": 30.0,
+    },
+    "provider_max_retries": {
+        # Safety belt — even with budget left, abort after this many
+        # transient failures. Catches pathological cases (e.g. retry
+        # math bug, persistent 429 with 0s suggested wait).
+        "type": int,
+        "default": 30,
+    },
     # ----- LAYER 1 — Workspace context files -----
     "workspace_context_max_chars": {
         # Char budget for LAYER 1 (workspace files like AGENTS.md, CLAUDE.md,

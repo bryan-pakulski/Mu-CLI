@@ -137,6 +137,20 @@ skills will trigger compaction sooner.
 | `tool_context_window` | int | `6` | Recent tool messages kept uncompressed in history. |
 | `compact_history` | bool | `true` | Auto-compact tooling history after each finished turn. |
 
+### Provider retry (transient failures)
+
+When the provider returns a transient error (429, 503, timeout,
+connection reset), mucli backs off exponentially. The retry loop is
+bounded by a cumulative-wait budget rather than a fixed retry count so
+real outages get meaningful backoff without infinite stalling.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `provider_retry_max_total_wait_seconds` | float | `120.0` | Cumulative time budget across all retries for one provider call. Bounds worst-case stall on a flapping endpoint. |
+| `provider_retry_base_delay` | float | `0.4` | Initial sleep after the first transient failure. Doubles each attempt (with jitter). |
+| `provider_retry_max_delay` | float | `30.0` | Cap on any single sleep — backoff stops doubling here. |
+| `provider_max_retries` | int | `30` | Safety belt against pathological 0-delay loops; the budget is normally the binding constraint. |
+
 Inspect live usage with `/memory` — every layer is shown with its
 current token count and per-layer cap, plus a **TOTAL** row against
 `context_token_limit`.

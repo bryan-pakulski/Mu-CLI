@@ -387,7 +387,15 @@ class InputHandler:
         research_completer = NestedCompleter.from_nested_dict(
             {
                 "status": None,
-                "sources": None,
+                "sources": NestedCompleter.from_nested_dict(
+                    {"--type": None, "--min": None, "--query": None}
+                ),
+                "show": None,
+                "bibliography": None,
+                "biblio": None,
+                "bib": None,
+                "stats": None,
+                "clear": None,
             }
         )
         unset_completer = MergedCompleter(

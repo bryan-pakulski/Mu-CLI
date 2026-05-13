@@ -139,6 +139,12 @@ for the engine model.
 | Command | Description |
 | --- | --- |
 | `/research <query>` | Run web search + synthesis as a one-shot. Uses the same research tools the model has available. |
+| `/research status` | Source counts, by type, average credibility, current mode. |
+| `/research sources [--type X] [--min N] [--query Q]` | List every source the research tools have registered with the citation engine. Each row has id, type, credibility (★), title, URL. Filters: `--type web\|academic\|social\|forum\|news\|documentation\|other`, `--min <0..1>`, `--query <substring>`. |
+| `/research show <id>` | Full record for one source: title, URL, type, credibility score, authors, dates, metadata. |
+| `/research bibliography` (also `biblio`/`bib`) | Compile the markdown bibliography block (`[^n]:` footnotes with credibility ratings) ready to paste into a report. |
+| `/research stats` | Breakdown by source type + credibility-tier histogram. |
+| `/research clear` | Wipe the citation engine. Useful when starting a new research topic. |
 
 ## Diagnostics
 

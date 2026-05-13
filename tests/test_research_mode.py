@@ -1,30 +1,30 @@
 """Tests for research mode system prompt and configuration."""
 
 import pytest
-from utils.config import AGENTIC_MODE_SYSTEM_PROMPTS, AGENT_MODE_METADATA
+from utils.config import AGENTIC_MODES, AGENT_MODE_METADATA
 
 
 class TestResearchModeSystemPrompt:
     """Tests for research mode system prompt configuration."""
 
     def test_research_mode_exists_in_system_prompts(self):
-        """Test that research mode is defined in AGENTIC_MODE_SYSTEM_PROMPTS."""
-        assert "research" in AGENTIC_MODE_SYSTEM_PROMPTS, "Research mode should exist in AGENTIC_MODE_SYSTEM_PROMPTS"
+        """Test that research mode is defined in AGENTIC_MODES."""
+        assert "research" in AGENTIC_MODES, "Research mode should exist in AGENTIC_MODES"
 
     def test_research_mode_prompt_not_empty(self):
         """Test that research mode system prompt is not empty."""
-        research_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get("research", "")
+        research_prompt = AGENTIC_MODES.get("research", "")
         assert research_prompt, "Research mode system prompt should not be empty"
         assert len(research_prompt) > 100, "Research mode system prompt should be substantial"
 
     def test_research_mode_prompt_contains_workflow(self):
         """Test that research mode prompt contains WORKFLOW section."""
-        research_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get("research", "")
+        research_prompt = AGENTIC_MODES.get("research", "")
         assert "WORKFLOW" in research_prompt, "Research mode should have WORKFLOW section"
 
     def test_research_mode_prompt_contains_tool_descriptions(self):
         """Test that research mode prompt describes research tools."""
-        research_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get("research", "")
+        research_prompt = AGENTIC_MODES.get("research", "")
         
         # Check for tool descriptions
         tool_keywords = ["web_search", "arxiv_search", "url_grounding", "read_document"]
@@ -33,7 +33,7 @@ class TestResearchModeSystemPrompt:
 
     def test_research_mode_prompt_contains_citation_requirements(self):
         """Test that research mode prompt includes citation requirements."""
-        research_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get("research", "")
+        research_prompt = AGENTIC_MODES.get("research", "")
         
         # Check for citation-related content
         citation_keywords = ["citation", "source", "reference", "bibliography"]
@@ -42,7 +42,7 @@ class TestResearchModeSystemPrompt:
 
     def test_research_mode_prompt_contains_verification_guidance(self):
         """Test that research mode prompt includes source verification guidance."""
-        research_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get("research", "")
+        research_prompt = AGENTIC_MODES.get("research", "")
         
         # Check for verification-related content
         verification_keywords = ["verify", "credibility", "cross-reference", "reliable"]
@@ -51,7 +51,7 @@ class TestResearchModeSystemPrompt:
 
     def test_research_mode_prompt_anti_detection_notes(self):
         """Test that research mode prompt includes anti-detection guidance."""
-        research_prompt = AGENTIC_MODE_SYSTEM_PROMPTS.get("research", "")
+        research_prompt = AGENTIC_MODES.get("research", "")
         
         # Check for anti-detection content
         detection_keywords = ["rate limit", "javascript", "paywall", "authentication", "detection", "crawl"]

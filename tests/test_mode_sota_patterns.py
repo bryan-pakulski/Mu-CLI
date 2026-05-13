@@ -13,7 +13,7 @@ expected coverage per mode.
 
 import pytest
 
-from utils.config import AGENTIC_MODES, AGENTIC_MODE_SYSTEM_PROMPTS, AGENTIC_SYSTEM_BASE
+from utils.config import AGENTIC_MODES, AGENTIC_MODES, AGENTIC_SYSTEM_BASE
 
 
 # ============================================================ shared base
@@ -191,9 +191,9 @@ def test_research_mode_persists_findings_to_memory():
 
 
 def test_research_mode_compact_form_preserves_workflow_section():
-    """The short AGENTIC_MODE_SYSTEM_PROMPTS variant is what `/mode` sets;
+    """The short AGENTIC_MODES variant is what `/mode` sets;
     pin its structural shape."""
-    p = AGENTIC_MODE_SYSTEM_PROMPTS["research"]
+    p = AGENTIC_MODES["research"]
     assert "WORKFLOW" in p
     assert "credibility" in p.lower()
 

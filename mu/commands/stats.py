@@ -54,30 +54,204 @@ def yolo_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
     )
 
 
-@command("/stats", help="Show runtime stats (tokens, cost, memory, queue).")
+def _fmt_age(seconds: float) -> str:
+    seconds = max(0.0, float(seconds or 0.0))
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f}m"
+    if seconds < 86400:
+        return f"{seconds / 3600:.1f}h"
+    return f"{seconds / 86400:.1f}d"
+
+
+def _ago(timestamp: Any, now: float) -> str:
+    try:
+        ts = float(timestamp)
+    except (TypeError, ValueError):
+        return "—"
+    return _fmt_age(now - ts) + " ago"
+
+
+def _empty_stats(now: float) -> dict:
+    return {
+        "session_started_at": now,
+        "first_call_at": None,
+        "last_call_at": None,
+        "tools": {},
+        "skills": {},
+        "approvals": {"approved": 0, "denied": 0},
+        "errors": {},
+    }
+
+
+def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
+    """Print a Rich-formatted view of the stats snapshot + tracker."""
+    if not allow_prompt:
+        return
+    ui = getattr(session, "ui", None)
+    if ui is None:
+        return
+    console = getattr(ui, "console", None)
+    if console is None:
+        return
+
+    import time as _time_mod
+
+    try:
+        from rich import box
+        from rich.table import Table
+    except Exception:
+        return
+
+    tokens = snapshot.get("tokens", {}) or {}
+    ctx = snapshot.get("ctx", {}) or {}
+    mode = (snapshot.get("mode", {}) or {}).get("name", "default")
+    yolo_on = (snapshot.get("yolo", {}) or {}).get("enabled", False)
+    plan_on = (snapshot.get("plan", {}) or {}).get("enabled", False)
+    tool_stats = snapshot.get("tool_stats") or {}
+    tools = tool_stats.get("tools") or {}
+    skills = tool_stats.get("skills") or {}
+    errors = tool_stats.get("errors") or {}
+    approvals = tool_stats.get("approvals") or {}
+    now = _time_mod.time()
+
+    # Header / runtime line
+    runtime_table = Table(box=box.SIMPLE, show_header=False)
+    runtime_table.add_column("Field", style="cyan")
+    runtime_table.add_column("Value", style="white")
+    runtime_table.add_row("Mode", mode)
+    runtime_table.add_row(
+        "Toggles",
+        f"yolo={'ON' if yolo_on else 'off'} · plan={'ON' if plan_on else 'off'}",
+    )
+    runtime_table.add_row(
+        "Context",
+        f"{ctx.get('current', 0):,} / {ctx.get('maximum', 0):,} tokens",
+    )
+    runtime_table.add_row(
+        "Tokens (lifetime)",
+        f"in={tokens.get('input', 0):,} · out={tokens.get('output', 0):,} · "
+        f"total={tokens.get('total', 0):,} · cached={tokens.get('cached', 0):,} · "
+        f"reasoning={tokens.get('reasoning', 0):,}",
+    )
+    cost = tokens.get("total_cost", 0.0) or 0.0
+    runtime_table.add_row("Estimated cost", f"${cost:.4f}")
+    started = tool_stats.get("session_started_at") or now
+    runtime_table.add_row(
+        "Session age",
+        f"{_fmt_age(now - started)} (last tool: {_ago(tool_stats.get('last_call_at'), now)})",
+    )
+    total_tool_calls = sum(int(b.get("count", 0) or 0) for b in tools.values())
+    total_failed = sum(int(b.get("count", 0) or 0) - int(b.get("success", 0) or 0) for b in tools.values())
+    approve_n = int(approvals.get("approved", 0) or 0)
+    deny_n = int(approvals.get("denied", 0) or 0)
+    runtime_table.add_row(
+        "Activity",
+        f"{total_tool_calls} tool call(s) · {total_failed} failed · "
+        f"{approve_n} approved · {deny_n} denied",
+    )
+    console.print(runtime_table)
+
+    # Tool-usage table
+    if tools:
+        tool_table = Table(
+            title="Tools used (top by call count)", box=box.SIMPLE
+        )
+        tool_table.add_column("Tool", style="cyan", no_wrap=True)
+        tool_table.add_column("Calls", style="green", justify="right")
+        tool_table.add_column("Success", style="green", justify="right")
+        tool_table.add_column("Fail", style="red", justify="right")
+        tool_table.add_column("Avg ms", style="yellow", justify="right")
+        tool_table.add_column("Last used", style="dim")
+        tool_table.add_column("Last args", style="dim")
+        ranked = sorted(
+            tools.items(), key=lambda kv: int(kv[1].get("count", 0) or 0), reverse=True
+        )
+        for name, bucket in ranked[:15]:
+            count = int(bucket.get("count", 0) or 0)
+            success = int(bucket.get("success", 0) or 0)
+            failed = int(bucket.get("failed", 0) or 0)
+            total_ms = float(bucket.get("total_ms", 0.0) or 0.0)
+            avg_ms = total_ms / count if count else 0.0
+            tool_table.add_row(
+                name,
+                str(count),
+                str(success),
+                str(failed) if failed else "-",
+                f"{avg_ms:.0f}",
+                _ago(bucket.get("last_used_at"), now),
+                str(bucket.get("last_args") or "")[:60],
+            )
+        console.print(tool_table)
+    else:
+        console.print("[dim]No tool calls recorded yet this session.[/dim]")
+
+    # Skills table
+    if skills:
+        skill_table = Table(title="Skills invoked", box=box.SIMPLE)
+        skill_table.add_column("Skill", style="cyan", no_wrap=True)
+        skill_table.add_column("Invocations", style="green", justify="right")
+        skill_table.add_column("Last used", style="dim")
+        ranked_skills = sorted(
+            skills.items(),
+            key=lambda kv: int(kv[1].get("invocations", 0) or 0),
+            reverse=True,
+        )
+        for name, bucket in ranked_skills:
+            skill_table.add_row(
+                name,
+                str(int(bucket.get("invocations", 0) or 0)),
+                _ago(bucket.get("last_used_at"), now),
+            )
+        console.print(skill_table)
+
+    # Error tally
+    if errors:
+        err_table = Table(title="Tool errors", box=box.SIMPLE)
+        err_table.add_column("error_code", style="red")
+        err_table.add_column("count", style="yellow", justify="right")
+        for code, n in sorted(errors.items(), key=lambda kv: -int(kv[1] or 0)):
+            err_table.add_row(str(code), str(int(n or 0)))
+        console.print(err_table)
+
+
+@command(
+    "/stats",
+    help="Show runtime stats (tokens, cost, tool/skill usage). /stats clear wipes the tracker.",
+)
 def stats_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
+    sub = (args or "").strip().lower()
+
+    if sub == "clear":
+        # Wipe only the per-session usage tracker. Token counts live on
+        # `session_manager.token_counts` (lifetime spend on real money)
+        # and stay put — that's not "metadata", that's accounting.
+        import time as _time_mod
+
+        session.tool_stats = _empty_stats(_time_mod.time())
+        ui = getattr(session, "ui", None)
+        if ui is not None and hasattr(ui, "show_info") and allow_prompt:
+            ui.show_info(
+                "[bold green]Stats tracker cleared.[/bold green] "
+                "Token counts kept (lifetime accounting)."
+            )
+        return CommandResult(
+            ok=True,
+            message="Stats tracker cleared.",
+            data={"tool_stats": session.tool_stats},
+        )
+    if sub:
+        return CommandResult(
+            ok=False, message=f"Unknown subcommand {sub!r}. Usage: /stats [clear]"
+        )
+
     # Reuse the canonical collector from utils.runtime_metrics so the
     # numbers match the live status line.
     from utils.runtime_metrics import collect_runtime_metrics
 
     snapshot = collect_runtime_metrics(session)
-    # Print a compact summary so /stats has visible output.
-    ui = getattr(session, "ui", None)
-    if ui is not None and hasattr(ui, "show_info"):
-        try:
-            tokens = snapshot.get("tokens", {}) or {}
-            ctx = snapshot.get("ctx", {}) or {}
-            mode = (snapshot.get("mode", {}) or {}).get("name", "default")
-            yolo_on = (snapshot.get("yolo", {}) or {}).get("enabled", False)
-            plan_on = (snapshot.get("plan", {}) or {}).get("enabled", False)
-            ui.show_info(
-                f"mode={mode} yolo={'on' if yolo_on else 'off'} "
-                f"plan={'on' if plan_on else 'off'} | "
-                f"ctx={ctx.get('current', 0)}/{ctx.get('maximum', 0)} | "
-                f"tokens in={tokens.get('input', 0)} out={tokens.get('output', 0)} "
-                f"total={tokens.get('total', 0)} cached={tokens.get('cached', 0)} "
-                f"reasoning={tokens.get('reasoning', 0)}"
-            )
-        except Exception:
-            pass
+    snapshot["tool_stats"] = getattr(session, "tool_stats", {}) or {}
+
+    _render_stats(session, snapshot, allow_prompt)
     return CommandResult(ok=True, message="ok", data=snapshot)

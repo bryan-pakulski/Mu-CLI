@@ -257,45 +257,49 @@ class TestResearchModeSystemPrompt:
     """Tests for RESEARCH mode system prompt configuration."""
     
     def test_research_mode_in_system_prompts(self):
-        """Test that research mode is in AGENTIC_MODE_SYSTEM_PROMPTS."""
-        from utils.config import AGENTIC_MODE_SYSTEM_PROMPTS
+        """Test that research mode is in AGENTIC_MODES."""
+        from utils.config import AGENTIC_MODES
         
-        assert "research" in AGENTIC_MODE_SYSTEM_PROMPTS
-        assert isinstance(AGENTIC_MODE_SYSTEM_PROMPTS["research"], str)
+        assert "research" in AGENTIC_MODES
+        assert isinstance(AGENTIC_MODES["research"], str)
     
     def test_research_mode_has_tools_section(self):
         """Test that research mode prompt contains TOOLS section."""
-        from utils.config import AGENTIC_MODE_SYSTEM_PROMPTS
+        from utils.config import AGENTIC_MODES
         
-        prompt = AGENTIC_MODE_SYSTEM_PROMPTS["research"]
+        prompt = AGENTIC_MODES["research"]
         assert "TOOLS" in prompt or "tools" in prompt.lower()
     
     def test_research_mode_has_workflow_section(self):
         """Test that research mode prompt contains WORKFLOW section."""
-        from utils.config import AGENTIC_MODE_SYSTEM_PROMPTS
+        from utils.config import AGENTIC_MODES
         
-        prompt = AGENTIC_MODE_SYSTEM_PROMPTS["research"]
+        prompt = AGENTIC_MODES["research"]
         assert "WORKFLOW" in prompt or "workflow" in prompt.lower()
     
     def test_research_mode_has_citation_section(self):
         """Test that research mode prompt contains citation guidance."""
-        from utils.config import AGENTIC_MODE_SYSTEM_PROMPTS
+        from utils.config import AGENTIC_MODES
         
-        prompt = AGENTIC_MODE_SYSTEM_PROMPTS["research"]
+        prompt = AGENTIC_MODES["research"]
         assert "CITATION" in prompt or "citation" in prompt.lower()
     
     def test_research_mode_has_verification_section(self):
-        """Test that research mode prompt contains verification guidance."""
-        from utils.config import AGENTIC_MODE_SYSTEM_PROMPTS
-        
-        prompt = AGENTIC_MODE_SYSTEM_PROMPTS["research"]
-        assert "Verify source credibility" in prompt or "VERIFICATION" in prompt or "verification" in prompt.lower()
+        """Test that research mode prompt contains verification guidance.
+        The long-form prompt expresses verification as a credibility-
+        ranked cross-reference rule rather than the literal word
+        "verification" the dead short-form dict used."""
+        from utils.config import AGENTIC_MODES
+
+        prompt = AGENTIC_MODES["research"]
+        assert "credibility" in prompt.lower()
+        assert "cross-reference" in prompt.lower()
     
     def test_research_mode_has_anti_detection_section(self):
         """Test that research mode prompt contains anti-detection notes."""
-        from utils.config import AGENTIC_MODE_SYSTEM_PROMPTS
+        from utils.config import AGENTIC_MODES
         
-        prompt = AGENTIC_MODE_SYSTEM_PROMPTS["research"]
+        prompt = AGENTIC_MODES["research"]
         assert "ANTI-DETECTION" in prompt or "anti-detection" in prompt.lower()
     
     def test_research_mode_metadata_exists(self):

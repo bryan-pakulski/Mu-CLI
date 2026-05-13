@@ -487,7 +487,7 @@ class InputHandler:
             "/tool": tool_command_completer,
             "/feature": feature_completer,
             # diagnostics
-            "/stats": None,
+            "/stats": NestedCompleter.from_nested_dict({"clear": None}),
             # skills
             "/skills": _SkillNameCompleter(),
             # docs

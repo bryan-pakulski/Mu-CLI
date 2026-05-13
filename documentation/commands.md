@@ -144,7 +144,8 @@ for the engine model.
 
 | Command | Description |
 | --- | --- |
-| `/stats` | Runtime token counts, cache hits, reasoning tokens, estimated cost. |
+| `/stats` | Runtime token counts, cost, mode/toggles, plus per-session tool & skill usage (top tools by call count + avg latency, every skill invoked, failed-call tally by error code). |
+| `/stats clear` | Wipe the per-session usage tracker (counts, latencies, skill invocations, errors). Lifetime token counts and cost are kept — they represent real spend, not metadata. |
 | `/help`, `/h` | List commands available in this session. |
 
 ## Provider-specific

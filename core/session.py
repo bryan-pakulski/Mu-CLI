@@ -41,6 +41,7 @@ from utils.config import (
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
     DEFAULT_VARIABLES,
+    NUDGE_EMPTY_RESPONSE,
     validate_and_cast,
 )
 
@@ -704,6 +705,20 @@ class Session:
         # paused intentionally — otherwise it would keep prodding the
         # model with "continue!" and burn tokens in a wedge loop.
         self._loop_blocker_raised: bool = False
+        # Per-session usage tracker. Populated by the pre_tool /
+        # post_tool hooks in `mu/agent/usage_tracker.py`. Surfaced via
+        # `/stats`. Reset via `/stats clear`.
+        import time as _time_mod
+
+        self.tool_stats: dict = {
+            "session_started_at": _time_mod.time(),
+            "first_call_at": None,
+            "last_call_at": None,
+            "tools": {},  # name → {count, success, failed, total_ms, last_used_at, last_args}
+            "skills": {},  # name → {invocations, last_used_at}
+            "approvals": {"approved": 0, "denied": 0},
+            "errors": {},  # error_code → count
+        }
         from core.background_tasks import BackgroundTaskRegistry
         self.background_tasks = BackgroundTaskRegistry()
 
@@ -2222,6 +2237,7 @@ class Session:
         from mu.agent.hooks import HookContext, default_registry
         import mu.agent.compactor  # noqa: F401 — registers auto-compaction hook
         import mu.agent.plan_mode  # noqa: F401 — registers plan-mode pre_tool hook
+        import mu.agent.usage_tracker  # noqa: F401 — registers per-session usage hooks
 
         attempt = 0
         elapsed = 0.0
@@ -2708,10 +2724,7 @@ class Session:
                         nudge_msg = {
                             "role": "user",
                             "parts": [
-                                {
-                                    "type": "text",
-                                    "text": "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user.",
-                                }
+                                {"type": "text", "text": NUDGE_EMPTY_RESPONSE}
                             ],
                         }
                         self.session_manager.history.append(nudge_msg)

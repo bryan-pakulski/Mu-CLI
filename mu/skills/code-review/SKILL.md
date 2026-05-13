@@ -1,7 +1,7 @@
 ---
 name: code-review
 description: Review a diff or file for correctness, security, and clarity issues.
-trigger: when the user asks to review code or a diff
+trigger: \b(code\s+review|review\s+(this|the|my|a)?\s*(code|diff|change|pr|patch))\b
 ---
 
 When reviewing code:

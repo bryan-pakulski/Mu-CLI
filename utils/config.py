@@ -62,10 +62,6 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": True,
     },
-    "collation_flush_command": {
-        "type": str,
-        "default": "/flush",
-    },
     "memory_enabled": {
         "type": bool,
         "default": True,
@@ -91,10 +87,14 @@ VARIABLE_SCHEMA = {
         "default": 6,
     },
     "context_token_limit": {
+        # Global cap on total prompt tokens (sum of all 7 layers + history).
+        # The compactor reserves headroom for non-L5 layers before deciding
+        # how much room L5 (conversation history) gets.
         "type": int,
         "default": 256000,
     },
     "context_trim_threshold": {
+        # Fraction of the global cap above which compaction kicks in.
         "type": float,
         "default": 0.85,
     },
@@ -105,7 +105,10 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 4096,
     },
+    # ----- LAYER 1 — Workspace context files -----
     "workspace_context_max_chars": {
+        # Char budget for LAYER 1 (workspace files like AGENTS.md, CLAUDE.md,
+        # .mu/CONTEXT.md per attached folder).
         "type": int,
         "default": 8192,
     },
@@ -115,11 +118,52 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md",
     },
+    # ----- LAYER 1B — Installed skills -----
     "skills_max_chars": {
         # Total budget for the AVAILABLE SKILLS block injected as LAYER 1B
         # of the system prompt. 0 disables skills entirely.
         "type": int,
         "default": 6144,
+    },
+    # ----- LAYER 2 — Conversation summary -----
+    "conversation_summary_char_limit": {
+        # Char budget for LAYER 2 (rolling summary of older history).
+        # Clipped from the tail when exceeded so the most recent summary
+        # batches survive.
+        "type": int,
+        "default": 8000,
+    },
+    # ----- LAYER 3 — Active goal context -----
+    "active_goal_context_char_limit": {
+        # Char budget for LAYER 3 (feature/task status + scratchpad snapshot).
+        "type": int,
+        "default": 4000,
+    },
+    # ----- LAYER 4 — Recent tool activity -----
+    "recent_tool_context_char_limit": {
+        # Char budget for LAYER 4 (compressed recent tool calls/results).
+        "type": int,
+        "default": 12000,
+    },
+    # ----- LAYER 4B — Retrieved snippets -----
+    "retrieval_context_char_limit": {
+        # Char budget for LAYER 4B (semantic-retrieval snippets injected
+        # for the current turn).
+        "type": int,
+        "default": 5000,
+    },
+    "retrieval_top_k": {
+        # Number of semantic-retrieval hits to include in LAYER 4B.
+        "type": int,
+        "default": 5,
+    },
+    "skills_mode": {
+        # "compact" (default): name + description + trigger hint only;
+        # bodies auto-expand when a skill's regex trigger matches the
+        # latest user message, or on `invoke_skill(name)`. "full" reverts
+        # to v1 behavior — every skill body is inlined up to the budget.
+        "type": str,
+        "default": "compact",
     },
     "structured_tool_results": {
         "type": bool,
@@ -466,20 +510,23 @@ Operating principles:
 AGENT_MODE_METADATA = {
     "default": {
         "description": "General coding and codebase assistance.",
-        "documentation": "README.md#agent-modes",
+        "documentation": "documentation/default_mode.md",
+        "display_name": "Default Mode",
     },
     "debug": {
         "description": "Root-cause analysis and targeted debugging workflow.",
-        "documentation": "README.md#agent-modes",
+        "documentation": "documentation/debug_mode.md",
+        "display_name": "Debug Mode",
     },
     "feature": {
         "description": "Phased Feature Plan Engine with approval, blockers, and review.",
         "documentation": "documentation/feature_plan_engine.md",
+        "display_name": "Feature Mode",
     },
     "research": {
         "description": "Exploration and explanation mode for understanding systems.",
-        "documentation": "README.md#agent-modes",
-        "display_name": "Research Mode"
+        "documentation": "documentation/research_mode.md",
+        "display_name": "Research Mode",
     },
     "loop": {
         "description": "Long-horizon autonomous loop with ongoing timeline updates.",

@@ -694,8 +694,10 @@ class Session:
         self.agentic = True
         self.staged_files = []  # list of dicts
         self.disabled_tools = []  # list of tool names strings
+        self.disabled_skills: list[str] = []  # names of skills to suppress
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
+        self._pending_user_text = ""
         self.paused_execution_text: str | None = None
         from core.background_tasks import BackgroundTaskRegistry
         self.background_tasks = BackgroundTaskRegistry()
@@ -1098,15 +1100,34 @@ class Session:
             return 4096
 
     def _compaction_token_budget(self) -> int:
-        """The token ceiling the compactor targets. Reserves headroom for
-        the model's response so we don't pack the input right up to the
-        edge and leave nothing for output (= empty generation or another
-        overflow on the second turn)."""
+        """The token ceiling the compactor targets for L5 (conversation
+        history) specifically.
+
+        The global cap (`context_token_limit`, or the provider's actual
+        window when smaller) covers all 7 prompt layers PLUS the model's
+        response reserve. L5 gets whatever the cap minus the non-L5
+        layers (workspace files, skills, summary, goal context, recent
+        tool activity, retrieval snippets) leaves room for, with the
+        trim threshold applied to that residual.
+
+        Computing the non-L5 layer tokens here means a heavy AGENTS.md or
+        many auto-expanded skills tighten the compactor's threshold
+        instead of being silently piled on top of the L5 budget.
+        """
         context_limit = self._resolve_context_limit()
         trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
         trim_threshold = max(0.10, min(trim_threshold, 1.0))
         response_reserve = self._resolve_response_reserve()
-        usable = max(1024, context_limit - response_reserve)
+
+        non_l5_tokens = 0
+        try:
+            from utils.runtime_metrics import estimate_non_l5_context_tokens
+
+            non_l5_tokens = int(estimate_non_l5_context_tokens(self) or 0)
+        except Exception:
+            non_l5_tokens = 0
+
+        usable = max(1024, context_limit - response_reserve - non_l5_tokens)
         return max(512, int(usable * trim_threshold))
 
     def _prepare_runtime_history(
@@ -1420,6 +1441,7 @@ class Session:
         """LAYER 1B — render the installed skills (from `mu/skills/`,
         `~/.mu/skills/`, and `<workspace>/.mu/skills/`) into a labelled
         system-prompt block. Capped by `skills_max_chars` (default 6144).
+        Mode is controlled by `skills_mode` (`"compact"` default).
         """
         try:
             from mu.skills import discover_skills, render_skills_block
@@ -1438,7 +1460,16 @@ class Session:
             else []
         )
         skills = discover_skills(folders)
-        return render_skills_block(skills, budget=budget)
+        disabled = set(getattr(self, "disabled_skills", []) or [])
+        if disabled:
+            skills = [s for s in skills if s.name not in disabled]
+        mode = str(self.variables.get("skills_mode", "compact") or "compact").lower()
+        if mode not in {"compact", "full"}:
+            mode = "compact"
+        user_text = str(getattr(self, "_pending_user_text", "") or "")
+        return render_skills_block(
+            skills, budget=budget, user_text=user_text, mode=mode
+        )
 
     def _inject_hierarchical_context(self, system_prompt: str) -> str:
         summary_limit = max(
@@ -1471,8 +1502,8 @@ class Session:
                 0, int(self.variables.get("skills_max_chars", 6144) or 6144)
             )
             layers.append(
-                "LAYER 1B — Installed skills (declarative agent extensions):\n"
-                f"[budget: {sk_limit} chars | eviction: drop-tail]\n"
+                "LAYER 1B — Installed skills (compact index; bodies auto-load on trigger or via `invoke_skill`):\n"
+                f"[budget: {sk_limit} chars | eviction: drop-tail after auto-expand]\n"
                 + skills_block
             )
         if summary:
@@ -2415,6 +2446,7 @@ class Session:
         # doesn't double-roll inside the iteration loop. Cleared in
         # `_collect_turn_response` when the turn finishes.
         self._history_rolled_this_turn = True
+        self._pending_user_text = effective_text or text or ""
         base_system_prompt = self._inject_hierarchical_context(base_system_prompt)
 
         recent_history = self._prepare_runtime_history()

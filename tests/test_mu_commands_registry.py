@@ -79,13 +79,79 @@ def test_stats_returns_snapshot(session):
     assert "ctx" in result.data
 
 
-def test_clear_history(session):
+def test_clear_does_not_touch_history(session):
+    """/clear only wipes the terminal screen — history stays put."""
+    # Isolate from any prior on-disk session state.
+    session.session_manager.history = []
     session.session_manager.history.append(
         {"role": "user", "parts": [{"type": "text", "text": "hi"}]}
     )
     result = mc.dispatch(session, "/clear", allow_prompt=False)
     assert result.ok is True
+    # History MUST NOT be touched by /clear in v2.
+    assert len(session.session_manager.history) == 1
+
+
+def test_clear_calls_console_clear_when_allowed(session):
+    """With allow_prompt=True and a UI console available, /clear invokes
+    console.clear() so the user starts on an empty screen."""
+    cleared = {"calls": 0}
+
+    class _FakeConsole:
+        def clear(self):
+            cleared["calls"] += 1
+
+    session.ui = SimpleNamespace(console=_FakeConsole())
+    result = mc.dispatch(session, "/clear", allow_prompt=True)
+    assert result.ok is True
+    assert cleared["calls"] == 1
+
+
+def test_clear_skips_terminal_when_allow_prompt_false(session):
+    """In non-interactive contexts (allow_prompt=False) the terminal must
+    not be cleared even if a UI console is attached."""
+    cleared = {"calls": 0}
+
+    class _FakeConsole:
+        def clear(self):
+            cleared["calls"] += 1
+
+    session.ui = SimpleNamespace(console=_FakeConsole())
+    result = mc.dispatch(session, "/clear", allow_prompt=False)
+    assert result.ok is True
+    assert cleared["calls"] == 0
+
+
+def test_history_show_returns_history(session):
+    # Isolate from any prior on-disk session state.
+    session.session_manager.history = []
+    session.session_manager.history.append(
+        {"role": "user", "parts": [{"type": "text", "text": "hi"}]}
+    )
+    result = mc.dispatch(session, "/history", allow_prompt=False)
+    assert result.ok is True
+    assert len(result.data["history"]) == 1
+
+
+def test_history_clear_wipes_history(session):
+    session.session_manager.history.append(
+        {"role": "user", "parts": [{"type": "text", "text": "hi"}]}
+    )
+    result = mc.dispatch(session, "/history clear", allow_prompt=False)
+    assert result.ok is True
     assert session.session_manager.history == []
+
+
+def test_history_rejects_unknown_subcommand(session):
+    result = mc.dispatch(session, "/history nope", allow_prompt=False)
+    assert result is not None
+    assert result.ok is False
+
+
+def test_view_command_no_longer_registered(session):
+    """`/view` was renamed to `/history` — the registry must not catch it."""
+    result = mc.dispatch(session, "/view", allow_prompt=False)
+    assert result is None
 
 
 def test_help_lists_registered_commands(session):
@@ -93,6 +159,68 @@ def test_help_lists_registered_commands(session):
     assert result.ok is True
     assert "/quit" in result.message
     assert "/stats" in result.message
+
+
+def test_help_includes_legacy_and_registry_commands(session):
+    """/help must surface BOTH registry-ported commands (like /skills) and
+    commands still implemented in the legacy mucli.py dispatch
+    (like /model, /continue, /feature). Regression-pin for the gap
+    where /help only listed registry-ported commands."""
+    result = mc.dispatch(session, "/help", allow_prompt=False)
+    assert result.ok is True
+    must_appear = {
+        # registry-ported
+        "/quit", "/clear", "/history", "/session", "/workspace",
+        "/skills", "/docs", "/mcp", "/stats", "/plan",
+        "/agentic", "/thinking", "/yolo",
+        # still in legacy mucli.py dispatcher
+        "/continue", "/model", "/provider",
+        "/set", "/get", "/unset", "/variables",
+        "/mode", "/research", "/memory", "/tool", "/feature",
+        "/ollama",
+    }
+    for cmd in must_appear:
+        assert cmd in result.message, f"/help is missing {cmd}"
+    # /system and /flush were removed; the flush *tool* lives on but the
+    # slash command is gone.
+    for cmd in ("/system", "/flush"):
+        assert cmd not in result.message, f"/help still mentions removed {cmd}"
+
+
+def test_system_and_flush_commands_are_gone(session):
+    """Sanity-pin: /system and /flush were dropped (the flush *tool*
+    survives in core.tools for the model)."""
+    assert mc.dispatch(session, "/system", allow_prompt=False) is None
+    assert mc.dispatch(session, "/system override", allow_prompt=False) is None
+    assert mc.dispatch(session, "/flush", allow_prompt=False) is None
+
+    # The `flush` tool must still be registered for the model to call.
+    from core.tools import TOOLS, TOOL_HANDLERS
+
+    assert any(t.name == "flush" for t in TOOLS), "flush tool definition removed"
+    assert "flush" in TOOL_HANDLERS, "flush tool handler removed"
+
+
+def test_help_h_alias(session):
+    """/h should resolve to /help."""
+    result = mc.dispatch(session, "/h", allow_prompt=False)
+    assert result is not None
+    assert result.ok is True
+    assert "/quit" in result.message
+
+
+def test_help_returns_structured_data(session):
+    """Non-interactive callers (JSON output) need a structured command list."""
+    result = mc.dispatch(session, "/help", allow_prompt=False)
+    assert "commands" in result.data
+    assert "groups" in result.data
+    commands = result.data["commands"]
+    assert len(commands) > 20  # we have a lot of commands
+    # Each entry has the expected shape
+    for entry in commands:
+        assert "command" in entry
+        assert "description" in entry
+        assert "group" in entry
 
 
 def test_command_aliases_share_handler(session):

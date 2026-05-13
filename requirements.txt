@@ -10,3 +10,4 @@ pypdf
 ddgs
 beautifulsoup4
 httpx
+tiktoken

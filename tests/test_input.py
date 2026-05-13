@@ -132,21 +132,14 @@ def test_command_completion_covers_curated_command_set():
         "/quit",
         "/q",
         "/clear",
-        "/view",
-        "/new",
-        "/list",
-        "/load",
-        "/delete",
+        "/history",
+        "/session",
         "/continue",
         # workspace
-        "/folder",
-        "/file",
-        "/clearfiles",
         "/workspace",
         # model & provider
         "/model",
         "/provider",
-        "/system",
         "/ollama",
         # variables
         "/set",
@@ -163,7 +156,7 @@ def test_command_completion_covers_curated_command_set():
         # memory / tools / features
         "/memory",
         "/tool",
-        "/flush",
+        "/mcp",
         "/feature",
         # diagnostics
         "/stats",
@@ -189,11 +182,11 @@ def test_unset_completion_includes_all_keyword():
     assert "--all" in completion_texts
 
 
-def test_folder_completion_includes_clear_subcommand():
+def test_workspace_folder_completion_includes_clear_subcommand():
     handler = InputHandler()
     document = Document(
-        text="/folder c",
-        cursor_position=len("/folder c"),
+        text="/workspace folder c",
+        cursor_position=len("/workspace folder c"),
     )
     completions = list(
         handler.completer.get_completions(
@@ -245,7 +238,9 @@ def test_research_completion_includes_status_and_sources():
     assert "sources" in completion_texts
 
 
-def test_memory_clear_completion_includes_scratch_alias():
+def test_memory_clear_completion_suggests_scratchpad():
+    """`/memory clear scr` → suggests `scratchpad` (the alias `scratch`
+    was removed in the cleanup pass)."""
     handler = InputHandler()
     document = Document(
         text="/memory clear scr",
@@ -258,8 +253,31 @@ def test_memory_clear_completion_includes_scratch_alias():
         )
     )
     completion_texts = {completion.text for completion in completions}
+    assert "scratchpad" in completion_texts
+    # `scratch` was an alias and is no longer offered.
+    assert "scratch" not in completion_texts
 
-    assert "scratch" in completion_texts
+
+def test_memory_list_completion_includes_layers():
+    """`/memory list <Tab>` should offer all 8 layer IDs plus the
+    stores (task, scratchpad, all)."""
+    handler = InputHandler()
+    document = Document(
+        text="/memory list ",
+        cursor_position=len("/memory list "),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+    for target in (
+        "all", "task", "scratchpad",
+        "L0", "L1", "L1B", "L2", "L3", "L4", "L4B", "L5",
+    ):
+        assert target in completion_texts, f"/memory list {target!r} not suggested"
 
 
 def test_input_history_is_isolated_per_session():
@@ -343,7 +361,7 @@ def test_get_session_names_supports_session_directory_layout(tmp_path, monkeypat
     assert sessions == ["alpha", "beta"]
 
 
-def test_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
+def test_session_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
     monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "my_session").mkdir(parents=True)
     (tmp_path / "sessions" / "my_session" / "session.json").write_text(
@@ -352,7 +370,9 @@ def test_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
     )
 
     handler = InputHandler()
-    document = Document(text="/load my", cursor_position=len("/load my"))
+    document = Document(
+        text="/session load my", cursor_position=len("/session load my")
+    )
     completions = list(
         handler.completer.get_completions(
             document,

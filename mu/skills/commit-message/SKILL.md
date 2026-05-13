@@ -1,7 +1,7 @@
 ---
 name: commit-message
 description: Draft a git commit message from staged-diff context.
-trigger: when the user asks to commit or write a commit message
+trigger: \b(commit\s+message|git\s+commit|write\s+(a\s+)?commit)\b
 ---
 
 When asked to draft a commit message:

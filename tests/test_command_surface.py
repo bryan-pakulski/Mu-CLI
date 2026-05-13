@@ -125,59 +125,40 @@ def test_help_only_lists_real_commands():
     )
 
 
+_DROPPED_ALIASES = {
+    "/exit",
+    # NOTE: /h was previously in this set but was reinstated as a /help
+    # alias — README advertises it and users hit it reflexively.
+    "/c",
+    "/v",
+    "/dir",
+    "/sys",
+    "/ls",
+    "/rm",
+    "/open",
+    "/add",
+    "/f",
+    "/cf",
+    "/cw",
+    "/clear-workspace",
+    "/features",
+    "/tools",
+    "/splash",
+    "/update",
+}
+
+
 def test_help_groups_have_no_dropped_aliases():
-    """We deliberately removed /exit /h /c /v /dir /sys /ls /rm /open /add
-    /f /cf /cw /features /tools /splash /update. None should still appear
-    in /help."""
-    dropped = {
-        "/exit",
-        "/h",
-        "/c",
-        "/v",
-        "/dir",
-        "/sys",
-        "/ls",
-        "/rm",
-        "/open",
-        "/add",
-        "/f",
-        "/cf",
-        "/cw",
-        "/clear-workspace",
-        "/features",
-        "/tools",
-        "/splash",
-        "/update",
-    }
+    """We deliberately removed these aliases. None should still appear in /help."""
     help_cmds = _help_commands()
-    leaked = dropped & help_cmds
+    leaked = _DROPPED_ALIASES & help_cmds
     assert not leaked, f"Dropped aliases still in /help: {sorted(leaked)}"
 
 
 def test_autocomplete_has_no_dropped_aliases():
     """And none should be tab-completable either."""
-    dropped = {
-        "/exit",
-        "/h",
-        "/c",
-        "/v",
-        "/dir",
-        "/sys",
-        "/ls",
-        "/rm",
-        "/open",
-        "/add",
-        "/f",
-        "/cf",
-        "/cw",
-        "/clear-workspace",
-        "/features",
-        "/tools",
-        "/splash",
-        "/update",
-    }
     autocomplete = _autocomplete_commands()
-    leaked = dropped & autocomplete
+    leaked = _DROPPED_ALIASES & autocomplete
     assert not leaked, (
         f"Dropped aliases still in InputHandler.command_completions: {sorted(leaked)}"
     )
@@ -193,17 +174,11 @@ def test_core_commands_are_present():
         "/quit",
         "/q",
         "/clear",
-        "/view",
-        "/new",
-        "/list",
-        "/load",
-        "/delete",
-        "/folder",
-        "/file",
+        "/history",
+        "/session",
         "/workspace",
         "/model",
         "/provider",
-        "/system",
         "/ollama",
         "/set",
         "/get",
@@ -216,7 +191,7 @@ def test_core_commands_are_present():
         "/thinking",
         "/memory",
         "/tool",
-        "/flush",
+        "/mcp",
         "/feature",
         "/stats",
         "/continue",

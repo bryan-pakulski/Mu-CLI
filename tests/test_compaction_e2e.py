@@ -45,7 +45,13 @@ class _Tiny8kProvider(LLMProvider):
 
 def _make_session(provider=None):
     sm = SessionManager()
-    return Session(provider or _Tiny8kProvider("tiny-8k"), False, "sys", sm)
+    session = Session(provider or _Tiny8kProvider("tiny-8k"), False, "sys", sm)
+    # Isolate this test from L0 (system-prompt) accounting — the
+    # agentic harness adds ~3-5k tokens to L0 which would dominate
+    # the 8k-window budget and make the L5-trimming test flaky.
+    # L0/agentic accounting is covered in test_token_estimator.py.
+    session.agentic = False
+    return session
 
 
 def _stuff_history_over_budget(sm: SessionManager, n_turns: int = 40, size: int = 1500):

@@ -51,6 +51,16 @@ def _session(provider):
     return Session(provider, False, "system instruction", sm)
 
 
+def _isolate_compaction_math(session, monkeypatch):
+    """Stub the non-L5 layer estimate to 0 so the compaction-budget math
+    can be exercised in isolation from layer accounting. The
+    layer-aware behavior is covered by tests/test_token_estimator.py."""
+    monkeypatch.setattr(
+        "utils.runtime_metrics.estimate_non_l5_context_tokens",
+        lambda _session: 0,
+    )
+
+
 def test_provider_window_none_falls_back_to_user_limit():
     session = _session(_UnboundedProvider("dummy"))
     session.variables["context_token_limit"] = 100_000
@@ -74,20 +84,22 @@ def test_user_limit_can_go_lower_than_provider():
     assert session._resolve_context_limit() == 4096
 
 
-def test_compaction_budget_subtracts_response_reserve():
+def test_compaction_budget_subtracts_response_reserve(monkeypatch):
     """The budget compactor targets must leave headroom for the model's
     own output — otherwise we pack the input to the edge and there's no
     room left to generate."""
     session = _session(_SmallWindowProvider("dummy"))
+    _isolate_compaction_math(session, monkeypatch)
     session.variables["context_token_limit"] = 256_000
     session.variables["context_trim_threshold"] = 1.0
     session.variables["response_token_reserve"] = 2048
-    # 8192 (provider) - 2048 (reserve) = 6144 usable, threshold=1.0.
+    # 8192 (provider) - 2048 (reserve) - 0 (non-L5) = 6144 usable, threshold=1.0.
     assert session._compaction_token_budget() == 6144
 
 
-def test_compaction_budget_applies_trim_threshold():
+def test_compaction_budget_applies_trim_threshold(monkeypatch):
     session = _session(_SmallWindowProvider("dummy"))
+    _isolate_compaction_math(session, monkeypatch)
     session.variables["context_token_limit"] = 256_000
     session.variables["context_trim_threshold"] = 0.5
     session.variables["response_token_reserve"] = 0
@@ -201,7 +213,7 @@ def test_ollama_effective_context_caches_per_model(monkeypatch):
     assert call_count["n"] == 1
 
 
-def test_provider_reserve_overrides_session_variable():
+def test_provider_reserve_overrides_session_variable(monkeypatch):
     """When the provider declares a real output cap (e.g. Ollama's
     `num_predict=512`), the compactor must honor that — not the
     user-set `response_token_reserve` default."""
@@ -214,9 +226,10 @@ def test_provider_reserve_overrides_session_variable():
             return 512
 
     session = _session(_ProviderWithReserve("dummy"))
+    _isolate_compaction_math(session, monkeypatch)
     session.variables["response_token_reserve"] = 99999  # ignored
     session.variables["context_trim_threshold"] = 1.0
-    # 8192 - 512 = 7680, threshold = 1.0
+    # 8192 - 512 (provider reserve) - 0 (non-L5) = 7680, threshold = 1.0
     assert session._resolve_response_reserve() == 512
     assert session._compaction_token_budget() == 7680
 

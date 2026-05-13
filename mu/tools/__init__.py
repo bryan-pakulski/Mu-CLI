@@ -140,6 +140,27 @@ def list_descriptors() -> List["ToolDescriptor"]:
     return list(_REGISTRY.values())
 
 
+def unregister(name: str) -> bool:
+    """Remove a tool from both this registry and the legacy mirrors.
+
+    Returns True if the tool existed and was removed. Used by `/mcp reload`
+    to drop stale MCP tools before re-registering from a fresh handshake.
+    """
+    legacy = _import_legacy()
+    found = False
+    if name in _REGISTRY:
+        del _REGISTRY[name]
+        found = True
+    _HANDLERS.pop(name, None)
+    if hasattr(legacy, "TOOL_DESCRIPTORS"):
+        legacy.TOOL_DESCRIPTORS.pop(name, None)
+    if hasattr(legacy, "TOOL_HANDLERS"):
+        legacy.TOOL_HANDLERS.pop(name, None)
+    if hasattr(legacy, "TOOLS"):
+        legacy.TOOLS[:] = [t for t in legacy.TOOLS if t.name != name]
+    return found
+
+
 # ----------------------------------------------------------------- execution
 
 

@@ -105,12 +105,23 @@ class HistoryMixin:
 
     # ----------------------------------------------------- token estimation
 
-    @staticmethod
-    def _estimate_tokens_from_text(text: Any) -> int:
-        raw = str(text or "")
-        if not raw:
-            return 0
-        return max(1, int(len(raw) / 4))
+    def _active_model(self) -> str:
+        """The model whose tokenizer should drive history-token estimates.
+
+        Reads `provider_config['model']` populated by Session at startup
+        and refreshed on `/model` / `/provider`. Empty string is fine —
+        the estimator falls back to a general-purpose encoder."""
+        cfg = getattr(self, "provider_config", None) or {}
+        return str(cfg.get("model") or "")
+
+    def _estimate_tokens_from_text(self, text: Any) -> int:
+        # Delegate to the shared tiktoken-backed estimator. Driving
+        # every token-budget decision through the same function means
+        # /memory layer counts, the splash banner, and the compactor
+        # trim trigger all agree.
+        from utils.token_estimator import estimate_tokens
+
+        return estimate_tokens(text, self._active_model())
 
     def _estimate_message_tokens(self, message: Dict[str, Any]) -> int:
         role = str(message.get("role", "") or "")

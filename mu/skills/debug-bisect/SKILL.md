@@ -1,7 +1,7 @@
 ---
 name: debug-bisect
 description: Locate the source of a regression by narrowing the search space.
-trigger: when the user reports a recently-broken feature
+trigger: \b(regression|bisect|used\s+to\s+work|recently\s+broke|stopped\s+working)\b
 ---
 
 When asked to debug something that "used to work":

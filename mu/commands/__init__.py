@@ -134,6 +134,17 @@ def _load_command_modules() -> None:
     from . import mode  # noqa: F401 — registers /plan
     from . import ollama  # noqa: F401 — registers /ollama
     from . import skills  # noqa: F401 — registers /skills
+    from . import docs  # noqa: F401 — registers /docs
+    from . import session  # noqa: F401 — registers /session
+    from . import workspace  # noqa: F401 — registers /workspace (folder/file/clear)
+    from . import mcp  # noqa: F401 — registers /mcp
+    from . import runtime  # noqa: F401 — registers /continue, /flush
+    from . import variables  # noqa: F401 — registers /set, /get, /unset, /variables
+    from . import provider  # noqa: F401 — registers /model, /provider, /system
+    from . import tool  # noqa: F401 — registers /tool
+    from . import memory  # noqa: F401 — registers /memory
+    from . import research  # noqa: F401 — registers /research
+    from . import feature  # noqa: F401 — registers /feature
 
 
 _load_command_modules()

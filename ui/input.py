@@ -29,13 +29,16 @@ MODE_PROMPT_STYLES = {
     "security": "mode-security",
 }
 
-MODE_CHOICES = {
-    "default": None,
-    "debug": None,
-    "feature": None,
-    "research": None,
-    "security": None,
-}
+def _mode_choices():
+    try:
+        from utils.config import AGENT_MODE_METADATA
+
+        return {name: None for name in AGENT_MODE_METADATA}
+    except Exception:
+        return {"default": None}
+
+
+MODE_CHOICES = _mode_choices()
 
 
 def get_session_names():
@@ -71,6 +74,44 @@ class DynamicVariableCompleter(Completer):
         # We always get the latest keys from the dictionary reference
         completer = FuzzyWordCompleter(list(self.input_handler.variables_dict.keys()))
         yield from completer.get_completions(document, complete_event)
+
+
+class GetCompleter(Completer):
+    """Position-aware completer for `/get [<var> | layer [<id>]]`.
+
+    Without a space → variable names plus the literal `layer`.
+    After `/get layer <Tab>` → layer IDs (L1, L1B, ...).
+    """
+
+    def __init__(self, variable_completer):
+        self._variable_completer = variable_completer
+        try:
+            from mu.commands.variables import LAYER_BUDGET_VARS
+
+            self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
+        except Exception:
+            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4", "L4B")
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if " " not in text:
+            yield from self._variable_completer.get_completions(
+                document, complete_event
+            )
+            if "layer".startswith(text):
+                yield Completion("layer", start_position=-len(text), display="layer")
+            return
+
+        first, _, remainder = text.partition(" ")
+        if first.lower() != "layer":
+            return
+        for layer_id in self._layer_ids:
+            if layer_id.upper().startswith(remainder.upper()):
+                yield Completion(
+                    layer_id,
+                    start_position=-len(remainder),
+                    display=layer_id,
+                )
 
 
 class DynamicFeatureIdCompleter(Completer):
@@ -119,6 +160,34 @@ class _SkillNameCompleter(Completer):
         yield from FuzzyWordCompleter(names).get_completions(document, complete_event)
 
 
+class _DocsNameCompleter(Completer):
+    """Completes `/docs <name>` from files under `documentation/`."""
+
+    def get_completions(self, document, complete_event):
+        try:
+            from mu.commands.docs import list_doc_names
+        except ImportError:
+            return
+        names = list_doc_names()
+        if not names:
+            return
+        yield from FuzzyWordCompleter(names).get_completions(document, complete_event)
+
+
+class _MCPServerNameCompleter(Completer):
+    """Completes server names from `.mu/mcp.json` (used by `/mcp debug`)."""
+
+    def get_completions(self, document, complete_event):
+        try:
+            from mu.mcp import discover
+        except ImportError:
+            return
+        names = sorted(discover().keys())
+        if not names:
+            return
+        yield from FuzzyWordCompleter(names).get_completions(document, complete_event)
+
+
 class DynamicToolCompleter(Completer):
     def get_completions(self, document, complete_event):
         try:
@@ -148,47 +217,67 @@ class SetCompleter(Completer):
     """Position-aware completer for `/set <var> <value>`.
 
     Without a space typed yet → suggest variable names (delegates to
-    `variable_completer`).  With a space → suggest values appropriate to
-    the named variable's type:
+    `variable_completer`), plus the literal `layer` for the
+    `/set layer <id> <chars>` shortcut. After a space:
 
-      * `bool` → `true` | `false`
-      * `agent_mode` → registered mode names
+      * `/set layer <Tab>`  → suggest layer IDs (L1, L1B, L2, …)
+      * `/set <bool_var> <Tab>` → `true` | `false`
+      * `/set agent_mode <Tab>` → registered mode names
       * everything else → no suggestion (numeric / free-form string)
-
-    The position split keeps variable names from re-appearing once the
-    user is past the name and into the value column.
     """
 
     def __init__(self, variable_completer, variable_schema, mode_choices):
         self._variable_completer = variable_completer
         self._schema = variable_schema
         self._mode_choices = mode_choices
+        try:
+            from mu.commands.variables import LAYER_BUDGET_VARS
+
+            self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
+        except Exception:
+            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4", "L4B")
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
         if " " not in text:
-            # Still typing the variable name.
+            # Still typing the variable name — offer normal variables
+            # and the `layer` keyword.
             yield from self._variable_completer.get_completions(
                 document, complete_event
             )
+            if "layer".startswith(text):
+                yield Completion("layer", start_position=-len(text), display="layer")
             return
-        # Past the name — offer values for the named variable.
-        var_name, _, value_prefix = text.partition(" ")
-        spec = self._schema.get(var_name)
+
+        # Past the name — special-case `/set layer <id> <chars>`.
+        first, _, remainder = text.partition(" ")
+        if first.lower() == "layer":
+            if " " not in remainder:
+                for layer_id in self._layer_ids:
+                    if layer_id.upper().startswith(remainder.upper()):
+                        yield Completion(
+                            layer_id,
+                            start_position=-len(remainder),
+                            display=layer_id,
+                        )
+            return
+
+        # Generic `/set <var> <value>` value-side completion.
+        spec = self._schema.get(first)
         if spec is None:
             return
         vtype = spec.get("type")
         candidates: list = []
         if vtype is bool:
             candidates = ["true", "false"]
-        elif var_name == "agent_mode":
+        elif first == "agent_mode":
             candidates = list(self._mode_choices.keys())
         if not candidates:
             return
         for c in candidates:
-            if c.startswith(value_prefix):
+            if c.startswith(remainder):
                 yield Completion(
-                    c, start_position=-len(value_prefix), display=c
+                    c, start_position=-len(remainder), display=c
                 )
 
 
@@ -279,19 +368,18 @@ class InputHandler:
             }
         )
 
+        try:
+            from mu.commands.memory import LIST_TARGETS as _MEMORY_LIST_TARGETS
+        except ImportError:
+            _MEMORY_LIST_TARGETS = (
+                "all", "task", "scratchpad",
+                "L1", "L1B", "L2", "L3", "L4", "L4B", "L5",
+            )
         memory_completer = NestedCompleter.from_nested_dict(
             {
                 "status": None,
-                "list": {"task": None, "scratchpad": None, "scratch": None, "all": None},
-                "ls": {"task": None, "scratchpad": None, "scratch": None, "all": None},
-                "clear": {
-                    "task": None,
-                    "scratchpad": None,
-                    "scratch": None,
-                    "longterm": None,
-                    "long-term": None,
-                    "all": None,
-                },
+                "list": {target: None for target in _MEMORY_LIST_TARGETS},
+                "clear": {"task": None, "scratchpad": None, "all": None},
             }
         )
 
@@ -308,7 +396,7 @@ class InputHandler:
                 FuzzyWordCompleter(["--all"]),
             ]
         )
-        folder_completer = MergedCompleter(
+        folder_subcompleter = MergedCompleter(
             [
                 NestedCompleter.from_nested_dict(
                     {
@@ -318,6 +406,27 @@ class InputHandler:
                 ),
                 directory_completer,
             ]
+        )
+        file_subcompleter = MergedCompleter(
+            [
+                FuzzyWordCompleter(["clear"]),
+                path_completer,
+            ]
+        )
+        workspace_completer = NestedCompleter.from_nested_dict(
+            {
+                "folder": folder_subcompleter,
+                "file": file_subcompleter,
+                "clear": None,
+            }
+        )
+        session_subcommand_completer = NestedCompleter.from_nested_dict(
+            {
+                "list": None,
+                "load": session_completer,
+                "new": None,
+                "delete": session_completer,
+            }
         )
         plan_completer = NestedCompleter.from_nested_dict(
             {"on": None, "off": None, "toggle": None}
@@ -348,28 +457,22 @@ class InputHandler:
         self.command_completions = {
             # session control
             "/help": None,
+            "/h": None,
             "/quit": None,
             "/q": None,
             "/clear": None,
-            "/view": None,
-            "/new": None,
-            "/list": None,
-            "/load": session_completer,
-            "/delete": session_completer,
+            "/history": NestedCompleter.from_nested_dict({"clear": None, "show": None}),
+            "/session": session_subcommand_completer,
             "/continue": None,
             # workspace
-            "/folder": folder_completer,
-            "/file": path_completer,
-            "/clearfiles": None,
-            "/workspace": NestedCompleter.from_nested_dict({"clear": None}),
+            "/workspace": workspace_completer,
             # model / provider
             "/model": model_dict,
             "/provider": provider_completer,
-            "/system": None,
             "/ollama": ollama_completer,
             # variables
             "/set": set_completer,
-            "/get": variable_completer,
+            "/get": GetCompleter(variable_completer),
             "/unset": unset_completer,
             "/variables": None,
             # modes & toggles
@@ -382,12 +485,22 @@ class InputHandler:
             # memory / tools
             "/memory": memory_completer,
             "/tool": tool_command_completer,
-            "/flush": None,
             "/feature": feature_completer,
             # diagnostics
             "/stats": None,
             # skills
             "/skills": _SkillNameCompleter(),
+            # docs
+            "/docs": _DocsNameCompleter(),
+            # mcp
+            "/mcp": NestedCompleter.from_nested_dict(
+                {
+                    "list": None,
+                    "status": None,
+                    "reload": None,
+                    "debug": _MCPServerNameCompleter(),
+                }
+            ),
         }
 
         # Use our slash-aware top-level completer instead of NestedCompleter

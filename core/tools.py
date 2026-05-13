@@ -1271,6 +1271,25 @@ TOOLS = [
         },
         requires_approval=False,
     ),
+    ToolDefinition(
+        name="invoke_skill",
+        description=(
+            "Load the full body of an installed skill into context. Use after "
+            "seeing a skill name in the AVAILABLE SKILLS index that fits the "
+            "user's request but wasn't auto-expanded. Call once per skill needed."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Exact skill name from the AVAILABLE SKILLS index.",
+                }
+            },
+            "required": ["name"],
+        },
+        requires_approval=False,
+    ),
 ]
 _COLLATED_TOOL_NAMES = {
     "get_workspace_details",
@@ -1562,6 +1581,12 @@ TOOL_DESCRIPTOR_OVERRIDES = {
         "result_mode": "structured",
         "server_policy": "session_only",
         "summary_builder": "blocker_summary",
+    },
+    "invoke_skill": {
+        "execution_kind": "read",
+        "preview_policy": "none",
+        "result_mode": "raw",
+        "server_policy": "session_only",
     },
 }
 
@@ -3514,6 +3539,19 @@ def _handle_list_dir(args, folder_context, ui, variables) -> str:
     return list_dir(args.get("path", ""), folder_context)
 
 
+def _handle_invoke_skill(args, folder_context, ui, variables) -> str:
+    from mu.skills import get_skill, render_skills_expanded
+
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return "Error: invoke_skill requires a non-empty `name` argument."
+    folders = list(getattr(folder_context, "folders", []) or [])
+    skill = get_skill(name, folders)
+    if skill is None:
+        return f"Error: no skill named {name!r} is installed."
+    return render_skills_expanded(skill)
+
+
 def _handle_write_file(args, folder_context, ui, variables) -> str:
     return write_file(args.get("filename", ""), args.get("content", ""), folder_context)
 
@@ -5001,6 +5039,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
     "retrieve_relevant_context": _legacy_handler(_handle_retrieve_relevant_context),
     "get_chunk": _legacy_handler(_handle_get_chunk),
     "list_dir": _legacy_handler(_handle_list_dir),
+    "invoke_skill": _legacy_handler(_handle_invoke_skill),
     "write_file": _legacy_handler(_handle_write_file),
     "bash": _legacy_handler(_handle_bash),
     "bash_background": _bg_handler(_handle_bash_background),

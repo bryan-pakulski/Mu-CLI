@@ -10,12 +10,13 @@ Modules:
 """
 
 from .client import MCPClient, MCPError, MCPTool
-from .registry import discover, register_all
+from .registry import close_all, discover, register_all
 
 __all__ = [
     "MCPClient",
     "MCPError",
     "MCPTool",
+    "close_all",
     "discover",
     "register_all",
 ]

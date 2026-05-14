@@ -733,29 +733,132 @@ def select_provider_and_model(
     return provider
 
 
+def _safe_delete_session(session_manager, name: str, *, silent: bool = False) -> None:
+    """Drop a session at startup, bypassing the active-session guard.
+
+    `SessionManager.delete_session` refuses to remove the currently-
+    active session — but at startup `current_session_name` is just the
+    bootstrap default placeholder, the user hasn't loaded anything
+    yet. Temporarily clear it so any session can be deleted, then
+    restore (unless we just deleted the placeholder itself).
+
+    When `silent=True` the SessionManager's UI is detached for the
+    duration of the call so its `show_info("Deleted session: ...")`
+    print doesn't punch a hole through an active TUI render (the
+    interactive picker uses this)."""
+    prior_active = session_manager.current_session_name
+    prior_ui = getattr(session_manager, "ui", None)
+    session_manager.current_session_name = None
+    if silent:
+        session_manager.ui = None
+    try:
+        session_manager.delete_session(name)
+    finally:
+        if prior_active and prior_active != name:
+            session_manager.current_session_name = prior_active
+        if silent:
+            session_manager.ui = prior_ui
+
+
 def choose_session(session_manager):
+    """Interactive session picker at startup.
+
+    Prefers an arrow-key + key-shortcut picker (prompt-toolkit). Falls
+    back to a numbered IntPrompt menu when the TTY isn't suitable
+    (CI, weird shells, redirected stdin)."""
     sessions = session_manager.get_session_list()
     if not sessions:
         return "new", None
 
-    console.print("\n[bold cyan]Available Sessions:[/bold cyan]")
-    for i, s in enumerate(sessions, 1):
-        console.print(f" {i}. {s}")
-    console.print(f" {len(sessions) + 1}. [New Session]")
+    try:
+        from ui.session_picker import run_interactive_picker
 
-    choice = IntPrompt.ask(
-        "Select a session", choices=[str(i) for i in range(1, len(sessions) + 2)]
-    )
+        action, name = run_interactive_picker(
+            sessions,
+            on_delete=lambda n: _safe_delete_session(session_manager, n, silent=True),
+        )
+    except Exception:
+        # Fall back to the numbered picker so non-TTY environments
+        # (CI, pipes) still work.
+        return _choose_session_numbered(session_manager)
 
-    if choice == len(sessions) + 1:
+    if action == "load":
+        return "load", name
+    if action == "new":
         from rich.prompt import Prompt
 
-        name = Prompt.ask(
+        raw = Prompt.ask(
             "Enter name for new session (optional, press enter for default)"
         )
-        return "new", name if name else None
-    else:
+        return "new", raw if raw else None
+    # "quit" — caller treats this as a clean exit.
+    raise SystemExit(0)
+
+
+def _choose_session_numbered(session_manager):
+    """Legacy fallback for environments where the prompt-toolkit picker
+    can't run. Same behavior as before: numbered list + delete sub-flow."""
+    while True:
+        sessions = session_manager.get_session_list()
+        if not sessions:
+            return "new", None
+
+        console.print("\n[bold cyan]Available Sessions:[/bold cyan]")
+        for i, s in enumerate(sessions, 1):
+            console.print(f" {i}. {s}")
+        new_idx = len(sessions) + 1
+        delete_idx = len(sessions) + 2
+        console.print(f" {new_idx}. [bold green][New Session][/bold green]")
+        console.print(f" {delete_idx}. [bold red][Delete a session…][/bold red]")
+
+        choice = IntPrompt.ask(
+            "Select a session",
+            choices=[str(i) for i in range(1, delete_idx + 1)],
+        )
+
+        if choice == new_idx:
+            from rich.prompt import Prompt
+
+            name = Prompt.ask(
+                "Enter name for new session (optional, press enter for default)"
+            )
+            return "new", name if name else None
+        if choice == delete_idx:
+            _delete_session_flow(session_manager, sessions)
+            continue
         return "load", sessions[choice - 1]
+
+
+def _delete_session_flow(session_manager, sessions):
+    """Numbered prompt → confirm → delete. Used by the fallback picker."""
+    if not sessions:
+        return
+
+    console.print("\n[bold red]Delete a session[/bold red]")
+    for i, s in enumerate(sessions, 1):
+        console.print(f" {i}. {s}")
+    cancel_idx = len(sessions) + 1
+    console.print(f" {cancel_idx}. [dim][Cancel][/dim]")
+
+    choice = IntPrompt.ask(
+        "Pick a session to delete",
+        choices=[str(i) for i in range(1, cancel_idx + 1)],
+    )
+    if choice == cancel_idx:
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
+    target = sessions[choice - 1]
+    from rich.prompt import Confirm
+
+    if not Confirm.ask(
+        f"Delete session [bold red]{target!r}[/bold red]? This cannot be undone.",
+        default=False,
+    ):
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
+    _safe_delete_session(session_manager, target)
 
 
 def sync_provider_settings(session):

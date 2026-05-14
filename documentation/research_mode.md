@@ -53,7 +53,10 @@ use [default](default_mode.md). For multi-hour deep dives use
 
 6. **Read primary sources**
    - `url_grounding` for landing pages.
-   - `read_document` for PDFs.
+   - `read_document` for PDFs — accepts either a local path or an
+     `http(s)://` URL. Passing a URL fetches the PDF directly (no
+     curl/download step) and auto-registers the source in the citation
+     engine (arxiv → academic, otherwise documentation).
    - `read_file` for in-repo files.
    - Don't synthesize from snippets when full text is available.
 

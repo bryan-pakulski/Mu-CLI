@@ -76,12 +76,20 @@ def _research_tool_names() -> List[str]:
 
 def _source_to_dict(source) -> Dict[str, Any]:
     """Project a Source dataclass into the JSON-friendly shape every
-    subcommand returns in `data`."""
+    subcommand returns in `data`.
+
+    Defensive on `source_type`: historically some call sites passed
+    plain strings ("web"). Newer code coerces at registration but
+    existing in-memory sources (this session, or pickled state) may
+    still carry strings — handle both shapes so /research never
+    crashes on legacy data."""
+    raw_type = source.source_type
+    type_value = getattr(raw_type, "value", None) or str(raw_type)
     return {
         "id": source.id,
         "title": source.title,
         "url": source.url,
-        "type": source.source_type.value,
+        "type": type_value,
         "credibility": round(source.credibility_score, 3),
         "authors": list(source.authors),
         "date": source.date,

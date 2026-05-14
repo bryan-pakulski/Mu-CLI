@@ -799,13 +799,22 @@ TOOLS = [
     ),
     ToolDefinition(
         name="read_document",
-        description="Reads and parses documents like PDFs to gather additional context.",
+        description=(
+            "Reads and parses documents like PDFs to gather additional "
+            "context. Accepts either a local filesystem path OR an http(s) "
+            "URL — URLs are fetched directly (no need to curl/download "
+            "first) and any successful URL fetch is auto-registered in the "
+            "citation engine."
+        ),
         parameters={
             "type": "object",
             "properties": {
                 "filename": {
                     "type": "string",
-                    "description": "The path to the document file (e.g., a PDF).",
+                    "description": (
+                        "Either a local path to the document or an http(s) "
+                        "URL (e.g. 'https://arxiv.org/pdf/2301.12345.pdf')."
+                    ),
                 }
             },
             "required": ["filename"],
@@ -3153,8 +3162,135 @@ def hackernews_search(query: str, sort: str = "relevance", num_results: int = 10
         return json.dumps({"error": f"Hacker News search failed: {str(e)}", "query": query})
 
 
+def _looks_like_url(target: str) -> bool:
+    target = (target or "").strip().lower()
+    return target.startswith("http://") or target.startswith("https://")
+
+
+def _extract_pdf_text(reader) -> str:
+    """Concatenate every page's extracted text. Empty pages skipped."""
+    chunks = []
+    for page in reader.pages:
+        extracted = page.extract_text()
+        if extracted:
+            chunks.append(extracted)
+    return "\n".join(chunks)
+
+
+def _pdf_metadata_title(reader) -> str:
+    """Best-effort title pulled from the PDF's `/Info` dict. Returns ''
+    if not present so the caller can fall back to the URL."""
+    try:
+        info = reader.metadata
+    except Exception:
+        return ""
+    if not info:
+        return ""
+    title = getattr(info, "title", None) or info.get("/Title", "")  # type: ignore[union-attr]
+    return str(title or "").strip()
+
+
+def _read_pdf_from_url(url: str) -> str:
+    """Fetch a PDF over the network, extract text, register the source
+    in the citation engine, and return text plus a citation footer.
+
+    Saves the agent the curl + read_document dance — one tool call.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return "Error: 'httpx' not installed. Cannot fetch PDFs by URL."
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return "Error: 'pypdf' not installed. Cannot parse PDF files."
+
+    try:
+        response = httpx.get(
+            url,
+            follow_redirects=True,
+            timeout=60.0,
+            headers={"User-Agent": "Mozilla/5.0 (mucli read_document)"},
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        return f"Error fetching PDF: HTTP {exc.response.status_code} for {url}"
+    except httpx.HTTPError as exc:
+        return f"Error fetching PDF: {exc}"
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.error("read_document: fetch failed for %s: %s", url, exc)
+        return f"Error fetching PDF: {exc}"
+
+    content_type = (response.headers.get("content-type") or "").lower()
+    # Servers sometimes mislabel PDFs as octet-stream — sniff the magic
+    # number as a tiebreaker. Real PDFs start with `%PDF-`.
+    body = response.content
+    looks_pdf = body.startswith(b"%PDF-")
+    if "pdf" not in content_type and not looks_pdf:
+        return (
+            f"Error: URL did not return a PDF (content-type={content_type!r}, "
+            f"first bytes={body[:8]!r}). Use url_grounding for HTML pages."
+        )
+
+    import io
+
+    try:
+        reader = PdfReader(io.BytesIO(body))
+    except Exception as exc:
+        return f"Error parsing PDF: {exc}"
+
+    if getattr(reader, "is_encrypted", False):
+        try:
+            # pypdf >=3 supports empty-password decrypt for many files.
+            reader.decrypt("")
+        except Exception:
+            return "Error: PDF is encrypted and cannot be parsed without a password."
+
+    try:
+        text = _extract_pdf_text(reader)
+    except Exception as exc:
+        return f"Error extracting PDF text: {exc}"
+
+    # Auto-register the source so /research bibliography picks it up.
+    # Register even when text extraction is empty: the fetch succeeded
+    # and the URL is a real source the user pointed at; a blank/OCR-only
+    # body is content commentary, not a reason to lose the citation.
+    citation_footer = ""
+    try:
+        from utils.citation_manager import SourceType, register_source
+
+        title = _pdf_metadata_title(reader) or url
+        citation_id = register_source(
+            title=title,
+            url=url,
+            source_type=SourceType.ACADEMIC if "arxiv.org" in url.lower() else SourceType.DOCUMENTATION,
+        )
+        citation_footer = f"\n\n---\nCitation: [^{citation_id}]\nSource: {url}"
+    except Exception:  # pragma: no cover — defensive
+        logger.debug("read_document: citation registration failed", exc_info=True)
+
+    if not text.strip():
+        return (
+            f"PDF fetched ({len(body):,} bytes) but no text was extractable. "
+            "It may be a scanned/image-only PDF (OCR not supported)."
+            + citation_footer
+        )
+
+    return text + citation_footer
+
+
 def read_document(filename: str, folder_context) -> str:
-    """Reads and parses documents like PDFs to gather additional context."""
+    """Reads and parses documents like PDFs to gather additional context.
+
+    Accepts either a local path (subject to workspace bounds) or an
+    http(s) URL — URLs skip the curl + download dance and go straight
+    through httpx + pypdf, with the source auto-registered in the
+    citation engine on success.
+    """
+    target = str(filename or "").strip()
+    if _looks_like_url(target):
+        return _read_pdf_from_url(target)
+
     if not _check_bounds(filename, folder_context):
         logger.warning(f"read_document: Access denied or file ignored: {filename}")
         return f"Error: Access denied or file ignored. '{filename}'"
@@ -3165,11 +3301,7 @@ def read_document(filename: str, folder_context) -> str:
             from pypdf import PdfReader
 
             reader = PdfReader(filename)
-            text = ""
-            for page in reader.pages:
-                extracted = page.extract_text()
-                if extracted:
-                    text += extracted + "\n"
+            text = _extract_pdf_text(reader)
             return text
         except ImportError:
             logger.error("read_document: 'pypdf' not installed.")

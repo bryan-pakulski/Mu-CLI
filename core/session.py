@@ -1885,6 +1885,7 @@ class Session:
         # have registered before we fire.
         import mu.agent.plan_mode  # noqa: F401
         import mu.agent.compactor  # noqa: F401
+        import mu.agent.secret_guard  # noqa: F401 — registers bash secret-guard hook
 
         pre_ctx = HookContext(
             point="pre_tool",
@@ -1965,6 +1966,7 @@ class Session:
             tool_name=tool_name,
             tool_args=tool_args,
             tool_result=result,
+            metadata=pre_ctx.metadata,
         )
         default_registry.fire("post_tool", post_ctx)
         return result
@@ -2238,6 +2240,7 @@ class Session:
         import mu.agent.compactor  # noqa: F401 — registers auto-compaction hook
         import mu.agent.plan_mode  # noqa: F401 — registers plan-mode pre_tool hook
         import mu.agent.usage_tracker  # noqa: F401 — registers per-session usage hooks
+        import mu.agent.secret_guard  # noqa: F401 — registers bash secret-guard hook
 
         attempt = 0
         elapsed = 0.0

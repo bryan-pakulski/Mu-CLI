@@ -34,6 +34,11 @@ one-line summary; this file is the full reference.
 | `/yolo` | Auto-approve write-side tools (`write_file`, `apply_diff`, `bash`, ...). |
 | `/mode <name>` | Switch agent mode. See [Agent modes](#agent-modes). |
 
+> Secret-path access (SSH keys, cloud creds, `.env*`, etc.) is blocked
+> independently of `/plan` and `/yolo` by the always-on controls in
+> [security_controls.md](security_controls.md). The session variable
+> `security_allow_secret_paths` opts out for one session if needed.
+
 ### Agent modes
 
 Valid values for `/mode`. Each has a dedicated doc covering the

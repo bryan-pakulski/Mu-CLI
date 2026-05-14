@@ -12,6 +12,7 @@ from typing import Any, Callable
 from providers.base import ToolDefinition
 from utils.logger import logger
 from utils.citation_manager import register_source, SourceType
+from core.secret_paths import redact_secrets
 from core.feature_mode import (
     create_feature_shell,
     create_feature_phases,
@@ -1655,7 +1656,22 @@ COLLATED_TOOLS = [
 
 
 def _check_bounds(filename: str, folder_context) -> bool:
-    """Validates if a file path is within the attached workspace folders and not ignored."""
+    """Validates if a file path is within the attached workspace folders and not ignored.
+
+    The secret-path denylist (see `core/secret_paths.py`) runs *before* the
+    workspace check and applies unconditionally, even when no workspace is
+    attached, so SSH keys / cloud creds / `.env*` files are never accessible.
+    """
+    from core.secret_paths import is_denied_path
+
+    # Secret-path denials are unconditional at the file layer — there is no
+    # override here. Workflows that legitimately need an excluded path can
+    # use bash with the explicit `security_allow_secret_paths` opt-in.
+    denied, reason = is_denied_path(filename)
+    if denied:
+        logger.warning(f"_check_bounds: blocked secret path {filename!r}: {reason}")
+        return False
+
     if not folder_context or not folder_context.folders:
         return True  # If no workspace attached, bypass boundary strictness
 
@@ -1676,6 +1692,20 @@ def _check_bounds(filename: str, folder_context) -> bool:
         return False
 
     return True
+
+
+def _scrub_and_annotate(text: str) -> str:
+    """Run output through the secret scrubber and append a notice if anything
+    was redacted, so the model knows the result was sanitized."""
+    if not isinstance(text, str) or not text:
+        return text
+    scrubbed, n = redact_secrets(text)
+    if n > 0:
+        scrubbed = (
+            f"{scrubbed}\n\n"
+            f"[security: redacted {n} secret(s) from output]"
+        )
+    return scrubbed
 
 
 def get_workspace_details(folder_context) -> str:
@@ -1701,7 +1731,7 @@ def read_file(filename: str, folder_context) -> str:
         return f"Error: Access denied or file ignored. '{filename}' is outside boundaries or in ignore list."
     try:
         with open(filename, "r", encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
     except FileNotFoundError:
         return f"Error: File '{filename}' not found. Try using search_for_string to locate it."
     except UnicodeDecodeError:
@@ -1709,6 +1739,7 @@ def read_file(filename: str, folder_context) -> str:
     except Exception as e:
         logger.error(f"read_file: Error reading {filename}: {e}")
         return f"Error reading file: {e}"
+    return _scrub_and_annotate(content)
 
 
 def search_for_string(search_string: str, folder_context) -> str:
@@ -1735,7 +1766,7 @@ def search_for_string(search_string: str, folder_context) -> str:
 
     if not results:
         return f"No matches found for '{search_string}'"
-    return "\n".join(results)
+    return _scrub_and_annotate("\n".join(results))
 
 
 _RETRIEVAL_INDEX = SemanticCodeIndex()
@@ -1800,10 +1831,11 @@ def search_references(query: str, folder_context, context_lines: int = 3) -> str
                 start = max(0, i - context_lines)
                 end = min(len(lines), i + context_lines + 1)
                 snippet = "".join(lines[start:end])
+                scrubbed_snippet, _ = redact_secrets(snippet.rstrip())
                 results.append({
                     "filepath": filepath,
                     "line_number": i + 1,
-                    "context_snippet": snippet.rstrip(),
+                    "context_snippet": scrubbed_snippet,
                 })
 
     if not results:
@@ -1825,7 +1857,7 @@ def get_chunk(filename: str, start_line: int, end_line: int, folder_context) -> 
         end_idx = min(len(lines), end_line)
 
         chunk = lines[start_idx:end_idx]
-        return "".join(chunk)
+        return _scrub_and_annotate("".join(chunk))
     except FileNotFoundError:
         return f"Error: File '{filename}' not found. Try using search_for_string to locate it."
     except UnicodeDecodeError:
@@ -2334,7 +2366,7 @@ def bash_command(
 
     if len(output) > max_output_chars:
         output = output[:max_output_chars] + "\n\n...[TRUNCATED]..."
-    return output
+    return _scrub_and_annotate(output)
 
 
 def url_grounding(url: str, folder_context) -> str:

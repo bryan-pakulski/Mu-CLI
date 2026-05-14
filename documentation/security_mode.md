@@ -12,6 +12,12 @@ vulnerable" findings get approved.
 For non-security debugging use [debug](debug_mode.md). For multi-week
 hardening campaigns put security mode inside [loop](loop_mode.md).
 
+> See also [security_controls.md](security_controls.md) — that doc
+> covers the always-on harness-level protections (secret-path denylist,
+> bash guard, output scrubber) that keep the harness itself from
+> leaking secrets. Distinct from this mode, which looks for
+> vulnerabilities *in the workspace*.
+
 ## Engine tools
 
 The security engine is the only source of truth for the audit. The

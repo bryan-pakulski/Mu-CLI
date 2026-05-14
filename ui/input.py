@@ -340,7 +340,9 @@ class InputHandler:
         feature_id_completer = DynamicFeatureIdCompleter()
         tool_name_completer = DynamicToolCompleter()
 
-        model_dict = {m: None for m in KNOWN_MODELS}
+        model_completer = NestedCompleter.from_nested_dict(
+            {m: None for m in KNOWN_MODELS}
+        )
 
         provider_completer = NestedCompleter.from_nested_dict(
             {"gemini": None, "ollama": None, "openai": None}
@@ -475,7 +477,7 @@ class InputHandler:
             # workspace
             "/workspace": workspace_completer,
             # model / provider
-            "/model": model_dict,
+            "/model": model_completer,
             "/provider": provider_completer,
             "/ollama": ollama_completer,
             # variables

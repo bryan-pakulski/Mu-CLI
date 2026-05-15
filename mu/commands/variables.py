@@ -369,8 +369,10 @@ def get_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
             ui = getattr(session, "ui", None)
             console = getattr(ui, "console", None) if ui is not None else None
             if console is not None:
+                from utils.helpers import safe_markup
+
                 for k, v in session.variables.items():
-                    console.print(f"[blue]{k}[/blue] = {v}")
+                    console.print(f"[blue]{safe_markup(k)}[/blue] = {safe_markup(v)}")
         return CommandResult(
             ok=True,
             message="Listed variables.",
@@ -426,8 +428,12 @@ def variables_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comm
         ui = getattr(session, "ui", None)
         console = getattr(ui, "console", None) if ui is not None else None
         if console is not None:
+            from utils.helpers import safe_markup
+
             for k, v in session.variables.items():
-                console.print(f"[blue]{k}[/blue] = [green]{v}[/green]")
+                console.print(
+                    f"[blue]{safe_markup(k)}[/blue] = [green]{safe_markup(v)}[/green]"
+                )
     return CommandResult(
         ok=True,
         message="Listed variables.",

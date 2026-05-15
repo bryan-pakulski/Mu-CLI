@@ -2,6 +2,8 @@
 
 from typing import Any, Dict
 
+from utils.helpers import safe_markup
+
 from . import CommandResult, command
 
 
@@ -71,7 +73,9 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                 console.print(table)
 
                 def print_top(title, stats):
-                    console.print(f"[bold cyan]{title} Top Entries[/bold cyan]")
+                    from rich.text import Text
+
+                    console.print(f"[bold cyan]{safe_markup(title)} Top Entries[/bold cyan]")
                     if not stats["top_entries"]:
                         console.print("[dim]No entries yet.[/dim]")
                         return
@@ -89,9 +93,9 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                         top.add_row(
                             f"#{entry.get('id')}",
                             str(entry.get("hits", 0)),
-                            tags,
-                            entry.get("source") or "-",
-                            preview or "(empty)",
+                            Text(tags),
+                            Text(entry.get("source") or "-"),
+                            Text(preview or "(empty)"),
                         )
                     console.print(top)
 
@@ -104,16 +108,18 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                 layer_table.add_column("Usage", style="yellow", justify="right")
                 layer_table.add_column("Fill", style="green", justify="right")
                 layer_table.add_column("Description", style="dim")
+                from rich.text import Text as _Text
+
                 for layer in layer_stats:
                     cur = int(layer.get("current", 0) or 0)
                     mx = max(1, int(layer.get("maximum", 1) or 1))
                     pct = min(100, int(round((cur / mx) * 100)))
                     layer_table.add_row(
-                        str(layer.get("layer", "")),
-                        str(layer.get("name", "")),
+                        _Text(str(layer.get("layer", ""))),
+                        _Text(str(layer.get("name", ""))),
                         f"{cur}/{mx}",
                         f"{pct}%",
-                        str(layer.get("description", "")),
+                        _Text(str(layer.get("description", ""))),
                     )
                 # Aggregate row — the global cap (context_token_limit) is
                 # what the provider actually enforces, not any single layer.
@@ -283,8 +289,10 @@ def _print_store_table(console, store, title) -> None:
     from rich.table import Table
 
     if not store.entries:
-        console.print(f"[dim]No entries in {title}.[/dim]")
+        console.print(f"[dim]No entries in {safe_markup(title)}.[/dim]")
         return
+    from rich.text import Text
+
     table = Table(title=title, box=box.SIMPLE)
     table.add_column("ID", style="dim", justify="right")
     table.add_column("Hits", style="yellow", justify="right")
@@ -296,9 +304,9 @@ def _print_store_table(console, store, title) -> None:
         table.add_row(
             f"#{entry.id}",
             str(entry.hits),
-            tags,
-            entry.source or "-",
-            entry.content,
+            Text(tags),
+            Text(entry.source or "-"),
+            Text(entry.content),
         )
     console.print(table)
 

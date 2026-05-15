@@ -7,6 +7,7 @@ import subprocess
 import shutil
 import io
 from rich.console import Console
+from rich.markup import escape as safe_markup  # noqa: F401  re-export
 from .config import HAS_PIL, SESSION_DIR
 
 # Need local PIL import logic for helper

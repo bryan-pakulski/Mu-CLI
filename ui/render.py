@@ -2,9 +2,12 @@
 import re
 import mimetypes
 from rich.console import Console
+from rich.errors import MarkupError
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.panel import Panel
+
+from utils.helpers import safe_markup
 
 console = Console()
 
@@ -28,7 +31,7 @@ def render_response(text):
             )
 
         if title:
-            console.print(f"[bold cyan]### {title}[/bold cyan]")
+            console.print(f"[bold cyan]### {safe_markup(title)}[/bold cyan]")
         console.print(
             f" [bold cyan]┌── {lang} ─────────────────────────────────[/bold cyan]"
         )
@@ -70,5 +73,9 @@ def render_response(text):
                 title = f"{tag.replace('_', ' ').upper()}: {path}"
                 print_code_panel(content.strip(), lang, title)
         else:
-            console.print(Markdown(part.strip()))
+            body = part.strip()
+            try:
+                console.print(Markdown(body))
+            except MarkupError:
+                console.print(body, markup=False)
             console.print("")

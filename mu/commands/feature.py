@@ -61,7 +61,7 @@ def _print_markdown(session: Any, markdown: str, allow_prompt: bool) -> None:
         console.print(Markdown(markdown))
     except Exception:
         try:
-            console.print(markdown)
+            console.print(markdown, markup=False)
         except Exception:
             pass
 
@@ -542,7 +542,9 @@ def _monitor(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
                 line = monitor_line(payload)
                 if line != last_line:
                     try:
-                        console.print(f"[cyan]{line}[/cyan]")
+                        from utils.helpers import safe_markup as _esc
+
+                        console.print(f"[cyan]{_esc(line)}[/cyan]")
                     except Exception:
                         pass
                     last_line = line

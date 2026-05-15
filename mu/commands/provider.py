@@ -49,7 +49,7 @@ def model_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
 
                 console.print("\n[bold cyan]Available Models:[/bold cyan]")
                 for i, model in enumerate(models, 1):
-                    console.print(f" {i}. {model}")
+                    console.print(f" {i}. {model}", markup=False)
                 choice = IntPrompt.ask(
                     "Select a model",
                     choices=[str(i) for i in range(1, len(models) + 1)],

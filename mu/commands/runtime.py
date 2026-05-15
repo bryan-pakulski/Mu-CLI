@@ -14,7 +14,9 @@ def _emit_dim(session: Any, body: str, allow_prompt: bool) -> None:
     console = getattr(ui, "console", None) if ui is not None else None
     if console is not None and allow_prompt:
         try:
-            console.print(f"[dim]{body}[/dim]")
+            from utils.helpers import safe_markup
+
+            console.print(f"[dim]{safe_markup(body)}[/dim]")
         except Exception:
             pass
 

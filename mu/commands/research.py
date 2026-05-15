@@ -211,6 +211,8 @@ def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
                 table.add_column("Cred", style="green", justify="right")
                 table.add_column("Title", style="white")
                 table.add_column("URL", style="blue")
+                from rich.text import Text
+
                 for src in sources[:50]:  # cap table render; data field has everything
                     stars = "★" * int(round(src.credibility_score * 5))
                     cred = f"{stars} {src.credibility_score:.2f}"
@@ -218,10 +220,10 @@ def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
                     url = (src.url or "")[:60]
                     table.add_row(
                         f"#{src.id}",
-                        src.source_type.value,
+                        Text(src.source_type.value),
                         cred,
-                        title,
-                        url,
+                        Text(title),
+                        Text(url),
                     )
                 console.print(table)
                 if len(sources) > 50:
@@ -270,6 +272,8 @@ def _show_source(session: Any, raw_id: str, allow_prompt: bool) -> CommandResult
                 from rich import box
                 from rich.table import Table
 
+                from rich.text import Text
+
                 tbl = Table(show_header=False, box=box.SIMPLE)
                 tbl.add_column("k", style="cyan")
                 tbl.add_column("v")
@@ -283,10 +287,12 @@ def _show_source(session: Any, raw_id: str, allow_prompt: bool) -> CommandResult
                     ("Published", body["date"] or "—"),
                     ("Accessed", body["accessed"]),
                 ):
-                    tbl.add_row(label, str(value))
+                    tbl.add_row(label, Text(str(value)))
                 console.print(tbl)
                 if body["metadata"]:
-                    console.print(f"[dim]metadata:[/dim] {body['metadata']}")
+                    from utils.helpers import safe_markup
+
+                    console.print(f"[dim]metadata:[/dim] {safe_markup(body['metadata'])}")
             except Exception:
                 pass
     return CommandResult(ok=True, message=f"Source #{cid}.", data=body)
@@ -304,7 +310,7 @@ def _bibliography(session: Any, allow_prompt: bool) -> CommandResult:
                 console.print(Markdown(body))
             except Exception:
                 try:
-                    console.print(body)
+                    console.print(body, markup=False)
                 except Exception:
                     pass
         elif not body:
@@ -337,15 +343,20 @@ def _stats(session: Any, allow_prompt: bool) -> CommandResult:
                 from rich import box
                 from rich.table import Table
 
+                from rich.text import Text
+
                 t = Table(title="Research engine stats", box=box.SIMPLE)
                 t.add_column("Metric", style="cyan")
                 t.add_column("Value", style="white")
-                t.add_row("Sources collected", str(len(sources)))
-                t.add_row("Average credibility", f"{avg:.2f}")
-                t.add_row("By type", ", ".join(f"{k}={v}" for k, v in sorted(by_type.items())) or "—")
+                t.add_row("Sources collected", Text(str(len(sources))))
+                t.add_row("Average credibility", Text(f"{avg:.2f}"))
+                t.add_row(
+                    "By type",
+                    Text(", ".join(f"{k}={v}" for k, v in sorted(by_type.items())) or "—"),
+                )
                 t.add_row(
                     "Credibility tiers",
-                    ", ".join(f"{k}={v}" for k, v in cred_buckets.items() if v > 0) or "—",
+                    Text(", ".join(f"{k}={v}" for k, v in cred_buckets.items() if v > 0) or "—"),
                 )
                 console.print(t)
             except Exception:

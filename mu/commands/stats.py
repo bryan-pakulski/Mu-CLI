@@ -168,6 +168,8 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
         ranked = sorted(
             tools.items(), key=lambda kv: int(kv[1].get("count", 0) or 0), reverse=True
         )
+        from rich.text import Text as _Text
+
         for name, bucket in ranked[:15]:
             count = int(bucket.get("count", 0) or 0)
             success = int(bucket.get("success", 0) or 0)
@@ -175,13 +177,13 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
             total_ms = float(bucket.get("total_ms", 0.0) or 0.0)
             avg_ms = total_ms / count if count else 0.0
             tool_table.add_row(
-                name,
+                _Text(str(name)),
                 str(count),
                 str(success),
                 str(failed) if failed else "-",
                 f"{avg_ms:.0f}",
                 _ago(bucket.get("last_used_at"), now),
-                str(bucket.get("last_args") or "")[:60],
+                _Text(str(bucket.get("last_args") or "")[:60]),
             )
         console.print(tool_table)
     else:
@@ -198,9 +200,11 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
             key=lambda kv: int(kv[1].get("invocations", 0) or 0),
             reverse=True,
         )
+        from rich.text import Text as _Text
+
         for name, bucket in ranked_skills:
             skill_table.add_row(
-                name,
+                _Text(str(name)),
                 str(int(bucket.get("invocations", 0) or 0)),
                 _ago(bucket.get("last_used_at"), now),
             )
@@ -211,8 +215,10 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
         err_table = Table(title="Tool errors", box=box.SIMPLE)
         err_table.add_column("error_code", style="red")
         err_table.add_column("count", style="yellow", justify="right")
+        from rich.text import Text as _Text
+
         for code, n in sorted(errors.items(), key=lambda kv: -int(kv[1] or 0)):
-            err_table.add_row(str(code), str(int(n or 0)))
+            err_table.add_row(_Text(str(code)), str(int(n or 0)))
         console.print(err_table)
 
 

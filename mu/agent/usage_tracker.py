@@ -67,22 +67,23 @@ def _ensure_stats(session: Any) -> Optional[Dict[str, Any]]:
 
 
 def _skill_banner(ui: Any, skill_name: str) -> None:
-    """Print a visible banner for a skill activation. Routes through
-    `ui.show_info` when available so it lands in the same surface as
-    other status messages (mode-toggle banner, plan-mode banner, etc.).
-    Falls back to a console.print or plain print so it's always seen."""
+    """Print a visible banner for a skill activation. Renders the static
+    styling via Rich markup but escapes the dynamic skill name so a
+    bracketed name can never derail the markup parser.
+
+    `show_info` on RichUI now renders messages literally (no markup), so
+    this banner goes straight to the console with `Text.from_markup`
+    instead of routing through it, keeping the highlighted background."""
+    from rich.markup import escape as _esc
+
     label = skill_name or "?"
-    body = f"[bold black on yellow] 🎯 SKILL ACTIVE: {label} [/bold black on yellow]"
-    if ui is not None and hasattr(ui, "show_info"):
-        try:
-            ui.show_info(body)
-            return
-        except Exception:
-            pass
+    body = f"[bold black on yellow] 🎯 SKILL ACTIVE: {_esc(label)} [/bold black on yellow]"
     console = getattr(ui, "console", None) if ui is not None else None
     if console is not None:
         try:
-            console.print(body)
+            from rich.text import Text as _Text
+
+            console.print(_Text.from_markup(body))
             return
         except Exception:
             pass

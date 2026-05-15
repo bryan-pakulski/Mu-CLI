@@ -53,16 +53,19 @@ def _show(session: Any, allow_prompt: bool) -> CommandResult:
         if console is not None:
             console.print("\n[bold cyan]Workspace folders:[/bold cyan]")
             if folders:
-                console.print(session.folder_context.get_tree_map())
+                console.print(session.folder_context.get_tree_map(), markup=False)
             else:
                 console.print("[dim](none)[/dim]")
             console.print("\n[bold cyan]Staged files:[/bold cyan]")
             if staged:
                 for entry in staged:
                     if isinstance(entry, dict):
-                        console.print(f"  • {entry.get('path') or entry.get('name') or entry}")
+                        console.print(
+                            f"  • {entry.get('path') or entry.get('name') or entry}",
+                            markup=False,
+                        )
                     else:
-                        console.print(f"  • {entry}")
+                        console.print(f"  • {entry}", markup=False)
             else:
                 console.print("[dim](none)[/dim]")
 

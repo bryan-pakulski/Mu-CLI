@@ -19,6 +19,7 @@ from rich.text import Text
 from .input import InputHandler
 from .render import render_response
 from utils.config import AGENT_MODE_METADATA
+from utils.helpers import safe_markup
 from utils.runtime_metrics import build_live_status_line, collect_runtime_metrics
 
 
@@ -62,7 +63,7 @@ class RichUI:
             return
         # No active Live — happens in tests or non-streaming paths. Fall
         # back to a direct print so the text isn't lost.
-        self.console.print(text, end="", soft_wrap=True, highlight=False)
+        self.console.print(text, end="", soft_wrap=True, highlight=False, markup=False)
         self._streamed_any_text = True
 
     def stream_thinking_delta(self, text: str):
@@ -74,7 +75,7 @@ class RichUI:
             self._gen_live.append_thinking(text)
             return
         self.console.print(
-            f"[dim italic]{text}[/dim italic]", end="", soft_wrap=True, highlight=False
+            Text(text, style="dim italic"), end="", soft_wrap=True, highlight=False
         )
 
     def stream_tool_call(self, tool_name: str):
@@ -85,7 +86,10 @@ class RichUI:
         if self._gen_live is not None:
             self._gen_live.note_tool_call(tool_name)
             return
-        self.console.print(f"\n[cyan]→ {tool_name}[/cyan]", highlight=False)
+        self.console.print(
+            Text.assemble(("\n→ ", "cyan"), (str(tool_name), "cyan")),
+            highlight=False,
+        )
 
     def stream_assistant_end(self):
         """End-of-stream notification. The Live keeps its rendered text in
@@ -103,7 +107,7 @@ class RichUI:
         if role == "user":
             self.console.print(
                 Panel(
-                    content,
+                    Text(str(content)),
                     title="User",
                     style="blue",
                     box=box.ROUNDED,
@@ -184,10 +188,10 @@ class RichUI:
         return choice, reason
 
     def show_error(self, message):
-        self.console.print(f"[red]{message}[/red]")
+        self.console.print(Text(str(message), style="red"))
 
     def show_info(self, message):
-        self.console.print(f"[blue]{message}[/blue]")
+        self.console.print(Text(str(message), style="blue"))
 
     def build_meter(
         self,
@@ -665,7 +669,7 @@ class RichUI:
             else "green"
         )
         self.console.print(
-            f"[{color}]  ↳ Result: {res_preview}... ({char_count} chars)[/{color}]"
+            f"[{color}]  ↳ Result: {safe_markup(res_preview)}... ({char_count} chars)[/{color}]"
         )
 
 
@@ -758,7 +762,10 @@ class _GenerationLive:
                 # markup is common and would render erratically.
                 self.ui.console.print(Text(thinking, style="dim italic"))
             for name in tool_calls:
-                self.ui.console.print(f"[cyan]→ {name}[/cyan]", highlight=False)
+                self.ui.console.print(
+                    Text.assemble(("→ ", "cyan"), (str(name), "cyan")),
+                    highlight=False,
+                )
             if text:
                 from .render import render_response
                 render_response(text)

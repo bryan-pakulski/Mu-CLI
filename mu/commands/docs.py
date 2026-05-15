@@ -83,7 +83,7 @@ def _render_markdown(session: Any, content: str, allow_prompt: bool) -> None:
         console.print(Markdown(content))
     except Exception:
         # Fall back to plain text if Markdown rendering fails for any reason.
-        console.print(content)
+        console.print(content, markup=False)
 
 
 def _list_docs(session: Any, allow_prompt: bool) -> CommandResult:

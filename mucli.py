@@ -17,6 +17,7 @@ from rich import box
 # Import from our new modular structure
 from providers.gemini import GeminiProvider
 from providers.ollama import OllamaProvider
+from utils.helpers import safe_markup
 from utils.logger import logger
 from providers.openai import OpenAIProvider
 from core.session import SessionManager, Session, derive_feature_state_status
@@ -55,7 +56,7 @@ def print_mode_overview(session):
         )
 
     console.print(table)
-    console.print(f"[dim]Current mode: {current_mode}[/dim]")
+    console.print(f"[dim]Current mode: {safe_markup(current_mode)}[/dim]")
 
 
 def _research_tool_names():
@@ -342,9 +343,9 @@ def _feature_three_option_prompt(question, options, *, allow_prompt):
         raise ValueError("feature prompt requires exactly three options")
     if not allow_prompt:
         return choices[0][0]
-    console.print(f"[bold cyan]{question}[/bold cyan]")
+    console.print(f"[bold cyan]{safe_markup(question)}[/bold cyan]")
     for idx, (_, label) in enumerate(choices, start=1):
-        console.print(f"  {idx}. {label}")
+        console.print(f"  {idx}. {label}", markup=False)
     selected = IntPrompt.ask("Select option", choices=[1, 2, 3], default=1)
     return choices[selected - 1][0]
 
@@ -689,7 +690,7 @@ def select_provider_and_model(
             raise ValueError("A valid --provider is required in non-interactive mode.")
         console.print("\n[bold cyan]Available Providers:[/bold cyan]")
         for i, p in enumerate(providers, 1):
-            console.print(f" {i}. {p}")
+            console.print(f" {i}. {p}", markup=False)
         choice = IntPrompt.ask(
             "Select a provider", choices=[str(i) for i in range(1, len(providers) + 1)]
         )
@@ -720,9 +721,9 @@ def select_provider_and_model(
                 f"A valid --model is required for provider '{provider_name}' in "
                 "non-interactive mode."
             )
-        console.print(f"\n[bold cyan]Available Models for {provider_name}:[/bold cyan]")
+        console.print(f"\n[bold cyan]Available Models for {safe_markup(provider_name)}:[/bold cyan]")
         for i, m in enumerate(models, 1):
-            console.print(f" {i}. {m}")
+            console.print(f" {i}. {m}", markup=False)
 
         choice = IntPrompt.ask(
             "Select a model", choices=[str(i) for i in range(1, len(models) + 1)]
@@ -805,7 +806,7 @@ def _choose_session_numbered(session_manager):
 
         console.print("\n[bold cyan]Available Sessions:[/bold cyan]")
         for i, s in enumerate(sessions, 1):
-            console.print(f" {i}. {s}")
+            console.print(f" {i}. {s}", markup=False)
         new_idx = len(sessions) + 1
         delete_idx = len(sessions) + 2
         console.print(f" {new_idx}. [bold green][New Session][/bold green]")
@@ -836,7 +837,7 @@ def _delete_session_flow(session_manager, sessions):
 
     console.print("\n[bold red]Delete a session[/bold red]")
     for i, s in enumerate(sessions, 1):
-        console.print(f" {i}. {s}")
+        console.print(f" {i}. {s}", markup=False)
     cancel_idx = len(sessions) + 1
     console.print(f" {cancel_idx}. [dim][Cancel][/dim]")
 
@@ -1091,7 +1092,7 @@ def main():
     try:
         session = build_session(args, ui, allow_prompt=True)
     except Exception as exc:
-        console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
+        console.print(f"[red]Failed to initialize Session/Provider: {safe_markup(exc)}[/red]")
         sys.exit(1)
 
     print_splash(session)

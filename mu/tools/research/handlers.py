@@ -114,16 +114,86 @@ def _url_grounding_tool(args: Dict[str, Any], context) -> str:
 
 # ============================================================== web_search
 
-def _ddgs_text_search(query: str, max_results: int):
-    """Wrapper around ddgs import/search to make fallback testing deterministic."""
-    from ddgs import DDGS
+_DDGS_HARD_TIMEOUT = 20.0
 
-    with DDGS() as ddg:
-        return list(ddg.text(query, max_results=max_results))
+
+def _ddgs_text_search(query: str, max_results: int):
+    """Run a DDGS text search with a hard wall-clock timeout.
+
+    The `ddgs` library does NOT plumb a timeout to its underlying HTTP
+    layer in every release, so a flaky DDG endpoint can hang the call
+    indefinitely. We dispatch the call to a daemon thread and wait at
+    most `_DDGS_HARD_TIMEOUT` seconds; on timeout we raise so the
+    caller falls through to the HTML and InstantAnswer fallbacks
+    (which both have explicit httpx/urllib timeouts).
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+    def _do_search() -> list[dict]:
+        from ddgs import DDGS
+
+        with DDGS() as ddg:
+            return list(ddg.text(query, max_results=max_results))
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_do_search)
+        try:
+            return future.result(timeout=_DDGS_HARD_TIMEOUT)
+        except FuturesTimeout as exc:
+            # Cancel the underlying request best-effort; the thread is
+            # daemon so the process can exit even if the request never
+            # returns. The caller handles the exception and falls back.
+            future.cancel()
+            raise TimeoutError(
+                f"ddgs.text() did not return within {_DDGS_HARD_TIMEOUT:.0f}s "
+                f"for query {query!r}"
+            ) from exc
+
+
+_WEB_SEARCH_HARD_TIMEOUT = 60.0
 
 
 def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, folder_context=None) -> str:
-    """Search the web using DuckDuckGo or Google Custom Search API."""
+    """Search the web using DuckDuckGo or Google Custom Search API.
+
+    Bounded by `_WEB_SEARCH_HARD_TIMEOUT` so even pathological combinations
+    of slow fallbacks (DNS hang on every endpoint, etc.) can't freeze the
+    chat indefinitely.
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+    def _run() -> str:
+        return _web_search_impl(query, engine, num_results, folder_context)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_run)
+        try:
+            return future.result(timeout=_WEB_SEARCH_HARD_TIMEOUT)
+        except FuturesTimeout:
+            future.cancel()
+            logger.warning(
+                "web_search: hard timeout (%.0fs) for query %r — every fallback hung.",
+                _WEB_SEARCH_HARD_TIMEOUT,
+                query,
+            )
+            return json.dumps(
+                {
+                    "query": query,
+                    "engine": engine,
+                    "error": (
+                        f"web_search timed out after {_WEB_SEARCH_HARD_TIMEOUT:.0f}s. "
+                        "All search backends were unresponsive — try again, "
+                        "or use a different engine via engine='google' if "
+                        "GOOGLE_SEARCH_API_KEY is set."
+                    ),
+                    "num_results": 0,
+                    "urls_used": [],
+                    "results": [],
+                }
+            )
+
+
+def _web_search_impl(query: str, engine: str = "duckduckgo", num_results: int = 10, folder_context=None) -> str:
     num_results = min(max(1, num_results), 50)
 
     if not query or not query.strip():

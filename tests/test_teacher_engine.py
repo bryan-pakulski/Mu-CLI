@@ -29,6 +29,7 @@ from mu.teacher.engine import (
     LESSON_ASSIGNED,
     LESSON_COMPLETED,
     LESSON_GRADED,
+    LESSON_LECTURING,
     LESSON_PENDING,
     LESSON_PRESENTING,
     LESSON_REMEDIATING,
@@ -38,6 +39,7 @@ from mu.teacher.engine import (
     VerificationSpec,
     advance_lesson_status,
     close_socratic_dialog,
+    conclude_lecture,
     course_metrics,
     create_course,
     decide_next,
@@ -47,7 +49,9 @@ from mu.teacher.engine import (
     load_course,
     next_pending_lesson,
     record_dialog_turn,
+    record_lecture_turn,
     save_course,
+    start_lecture,
 )
 
 
@@ -118,17 +122,129 @@ def test_full_round_trip_preserves_nested_structures(isolated_workspace):
 
 def test_lesson_transition_table_rejects_illegal_moves():
     assert is_valid_lesson_transition(LESSON_PENDING, LESSON_PRESENTING)
+    assert is_valid_lesson_transition(LESSON_PRESENTING, LESSON_LECTURING)
     assert is_valid_lesson_transition(LESSON_PRESENTING, LESSON_ASSIGNED)
+    assert is_valid_lesson_transition(LESSON_LECTURING, LESSON_ASSIGNED)
     assert is_valid_lesson_transition(LESSON_ASSIGNED, LESSON_GRADED)
     assert is_valid_lesson_transition(LESSON_GRADED, LESSON_COMPLETED)
     assert is_valid_lesson_transition(LESSON_GRADED, LESSON_REMEDIATING)
     assert is_valid_lesson_transition(LESSON_REMEDIATING, LESSON_ASSIGNED)
+    assert is_valid_lesson_transition(LESSON_REMEDIATING, LESSON_LECTURING)
     # No skipping.
     assert not is_valid_lesson_transition(LESSON_PENDING, LESSON_ASSIGNED)
     assert not is_valid_lesson_transition(LESSON_PENDING, LESSON_GRADED)
     assert not is_valid_lesson_transition(LESSON_GRADED, LESSON_PENDING)
+    # Lecturing is forward-only; it doesn't go back to presenting.
+    assert not is_valid_lesson_transition(LESSON_LECTURING, LESSON_PRESENTING)
     # Completed is terminal.
     assert not is_valid_lesson_transition(LESSON_COMPLETED, LESSON_PRESENTING)
+
+
+def test_start_lecture_transitions_from_presenting(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    lesson = start_lecture(course, "l1", plan="Cover malloc/free")
+    assert lesson.status == LESSON_LECTURING
+    assert lesson.lecture_plan == "Cover malloc/free"
+
+
+def test_start_lecture_is_idempotent_when_already_lecturing(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    # Calling again shouldn't raise.
+    lesson = start_lecture(course, "l1")
+    assert lesson.status == LESSON_LECTURING
+
+
+def test_record_lecture_turn_requires_lecturing_status(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    # Skipped start_lecture — should refuse.
+    with pytest.raises(ValueError, match="requires lesson status 'lecturing'"):
+        record_lecture_turn(course, "l1", role="agent_explanation", content="x")
+
+
+def test_record_lecture_turn_validates_role(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    with pytest.raises(ValueError, match="lecture turn role"):
+        record_lecture_turn(course, "l1", role="not_a_role", content="x")
+
+
+def test_conclude_lecture_refuses_below_min_checks(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    # Only one agent_check; default min_lecture_checks is 2.
+    record_lecture_turn(course, "l1", role="agent_explanation", content="malloc returns void*")
+    record_lecture_turn(course, "l1", role="agent_check", content="What does it return?")
+    record_lecture_turn(course, "l1", role="learner_response", content="void pointer", comprehension_signal="on track")
+    with pytest.raises(ValueError, match="agent_check.* turns required"):
+        conclude_lecture(course, "l1", comprehension_pct=90, gaps=[])
+
+
+def test_conclude_lecture_refuses_below_comprehension_threshold(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    record_lecture_turn(course, "l1", role="agent_check", content="q1?")
+    record_lecture_turn(course, "l1", role="learner_response", content="a1")
+    record_lecture_turn(course, "l1", role="agent_check", content="q2?")
+    record_lecture_turn(course, "l1", role="learner_response", content="a2")
+    # Default threshold is 60. comprehension_pct=40 < 60 → refusal.
+    with pytest.raises(ValueError, match="below threshold"):
+        conclude_lecture(course, "l1", comprehension_pct=40, gaps=["X"])
+
+
+def test_conclude_lecture_advances_to_assigned(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    for _ in range(2):
+        record_lecture_turn(course, "l1", role="agent_check", content="q?")
+        record_lecture_turn(course, "l1", role="learner_response", content="a")
+    lesson = conclude_lecture(
+        course, "l1", comprehension_pct=85, gaps=["pointer arithmetic"], summary="solid"
+    )
+    assert lesson.status == LESSON_ASSIGNED
+    assert lesson.lecture_concluded is True
+    assert lesson.lecture_comprehension_pct == 85
+    assert lesson.lecture_gaps == ["pointer arithmetic"]
+
+
+def test_conclude_lecture_can_stay_lecturing_when_not_ready(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    for _ in range(2):
+        record_lecture_turn(course, "l1", role="agent_check", content="q?")
+        record_lecture_turn(course, "l1", role="learner_response", content="a")
+    lesson = conclude_lecture(
+        course, "l1", comprehension_pct=80, gaps=[], ready_for_assignment=False
+    )
+    # Agent decided more lecture is needed; lesson stays lecturing.
+    assert lesson.status == LESSON_LECTURING
+    assert lesson.lecture_concluded is True
+
+
+def test_lecture_round_trip_through_disk(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1", plan="malloc + free")
+    for _ in range(2):
+        record_lecture_turn(course, "l1", role="agent_check", content="q?")
+        record_lecture_turn(course, "l1", role="learner_response", content="a")
+    conclude_lecture(course, "l1", comprehension_pct=80, gaps=["arithmetic"])
+    save_course(course)
+    reloaded = load_course(course.course_id)
+    lesson = find_lesson(reloaded, "l1")
+    assert lesson is not None
+    assert lesson.status == LESSON_ASSIGNED
+    assert lesson.lecture_concluded is True
+    assert len(lesson.lecture_turns) == 4
+    assert lesson.lecture_turns[0].role == "agent_check"
 
 
 def test_advance_lesson_status_rejects_invalid(isolated_workspace):

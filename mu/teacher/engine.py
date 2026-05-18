@@ -31,6 +31,7 @@ COURSE_ARCHIVED = "archived"
 
 LESSON_PENDING = "pending"
 LESSON_PRESENTING = "presenting"
+LESSON_LECTURING = "lecturing"
 LESSON_ASSIGNED = "assigned"
 LESSON_GRADED = "graded"
 LESSON_COMPLETED = "completed"
@@ -38,10 +39,16 @@ LESSON_REMEDIATING = "remediating"
 
 ALLOWED_LESSON_TRANSITIONS: dict[str, set[str]] = {
     LESSON_PENDING: {LESSON_PRESENTING},
-    LESSON_PRESENTING: {LESSON_ASSIGNED},
+    # presenting → lecturing is the prep-and-teach path; presenting →
+    # assigned is the shortcut for trivial lessons the diagnostic
+    # showed the learner already knows the concept for.
+    LESSON_PRESENTING: {LESSON_LECTURING, LESSON_ASSIGNED},
+    LESSON_LECTURING: {LESSON_ASSIGNED},
     LESSON_ASSIGNED: {LESSON_GRADED},
     LESSON_GRADED: {LESSON_COMPLETED, LESSON_REMEDIATING},
-    LESSON_REMEDIATING: {LESSON_ASSIGNED},
+    # Remediation can either re-teach (back to lecturing) or just
+    # re-assign with a different exercise.
+    LESSON_REMEDIATING: {LESSON_LECTURING, LESSON_ASSIGNED},
     LESSON_COMPLETED: set(),
 }
 
@@ -114,6 +121,28 @@ class DialogTurn:
 
 
 @dataclass
+class LectureTurn:
+    """One turn of the back-and-forth lecture phase.
+
+    `role` is one of:
+    - `agent_explanation` — the agent is teaching (covering material,
+      giving examples). Free-form content.
+    - `agent_check` — the agent pauses to ask the learner a
+      comprehension question. The engine counts these against
+      `min_lecture_checks` so the lecturer can't just monologue and
+      claim comprehension was confirmed.
+    - `learner_response` — the learner's answer to a check or
+      a question they raised mid-lecture.
+    """
+
+    turn_index: int
+    role: str
+    content: str
+    comprehension_signal: str | None = None
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
 class Assignment:
     assignment_id: str
     lesson_id: str
@@ -140,6 +169,16 @@ class Lesson:
     status: str = LESSON_PENDING
     assignment_ids: list[str] = field(default_factory=list)
     remediation_count: int = 0
+    # ---- lecture phase ---------------------------------------------
+    # Optional but encouraged: agent presents the material with
+    # interleaved comprehension checks before assigning hands-on work.
+    lecture_plan: str = ""
+    lecture_turns: list[LectureTurn] = field(default_factory=list)
+    lecture_comprehension_pct: int | None = None
+    lecture_gaps: list[str] = field(default_factory=list)
+    lecture_concluded: bool = False
+    min_lecture_checks: int = 2
+    lecture_comprehension_threshold: int = 60
 
 
 @dataclass
@@ -275,12 +314,33 @@ def _course_from_dict(data: dict[str, Any]) -> Course:
     for raw in data.get("modules", []):
         course.modules.append(Module(**raw))
     for raw in data.get("lessons", []):
-        course.lessons.append(Lesson(**raw))
+        course.lessons.append(_lesson_from_dict(raw))
     for raw in data.get("assignments", []):
         course.assignments.append(_assignment_from_dict(raw))
     for raw in data.get("event_log", []):
         course.event_log.append(CourseEvent(**raw))
     return course
+
+
+def _lesson_from_dict(raw: dict[str, Any]) -> Lesson:
+    lecture_turns = [LectureTurn(**item) for item in raw.get("lecture_turns", [])]
+    return Lesson(
+        lesson_id=raw["lesson_id"],
+        module_id=raw["module_id"],
+        title=raw.get("title", raw["lesson_id"]),
+        learning_objectives=list(raw.get("learning_objectives", [])),
+        concept_brief=raw.get("concept_brief", ""),
+        status=raw.get("status", LESSON_PENDING),
+        assignment_ids=list(raw.get("assignment_ids", [])),
+        remediation_count=int(raw.get("remediation_count", 0)),
+        lecture_plan=raw.get("lecture_plan", ""),
+        lecture_turns=lecture_turns,
+        lecture_comprehension_pct=raw.get("lecture_comprehension_pct"),
+        lecture_gaps=list(raw.get("lecture_gaps", [])),
+        lecture_concluded=bool(raw.get("lecture_concluded", False)),
+        min_lecture_checks=int(raw.get("min_lecture_checks", 2)),
+        lecture_comprehension_threshold=int(raw.get("lecture_comprehension_threshold", 60)),
+    )
 
 
 def _assignment_from_dict(raw: dict[str, Any]) -> Assignment:
@@ -545,6 +605,175 @@ def _write_dialog_transcript(course: Course, assignment: Assignment) -> None:
         handle.write("\n".join(lines))
 
 
+# --- lecture phase --------------------------------------------------------
+
+
+def start_lecture(course: Course, lesson_id: str, *, plan: str = "") -> Lesson:
+    """Transition a lesson into the back-and-forth teaching phase.
+
+    Refuses unless the lesson is currently in `presenting` (or
+    `remediating` — the agent is re-teaching after a failed grade).
+    """
+    lesson = find_lesson(course, lesson_id)
+    if lesson is None:
+        raise ValueError(f"Lesson {lesson_id!r} not found")
+    if lesson.status == LESSON_LECTURING:
+        # Idempotent — agent restarted the lecture; just stay where we are.
+        return lesson
+    advance_lesson_status(course, lesson_id, LESSON_LECTURING)
+    if plan:
+        lesson.lecture_plan = plan
+    return lesson
+
+
+def record_lecture_turn(
+    course: Course,
+    lesson_id: str,
+    *,
+    role: str,
+    content: str,
+    comprehension_signal: str | None = None,
+) -> LectureTurn:
+    lesson = find_lesson(course, lesson_id)
+    if lesson is None:
+        raise ValueError(f"Lesson {lesson_id!r} not found")
+    if lesson.status != LESSON_LECTURING:
+        raise ValueError(
+            f"record_lecture_turn requires lesson status 'lecturing' "
+            f"(lesson {lesson_id!r} is {lesson.status!r}); "
+            "call start_lecture first"
+        )
+    if role not in {"agent_explanation", "agent_check", "learner_response"}:
+        raise ValueError(
+            "lecture turn role must be one of "
+            "'agent_explanation' | 'agent_check' | 'learner_response', "
+            f"got {role!r}"
+        )
+    turn = LectureTurn(
+        turn_index=len(lesson.lecture_turns),
+        role=role,
+        content=str(content or "").strip(),
+        comprehension_signal=comprehension_signal,
+    )
+    lesson.lecture_turns.append(turn)
+    add_event(
+        course,
+        kind="lecture_turn",
+        entity="lesson",
+        entity_id=lesson_id,
+        payload={"role": role, "turn_index": turn.turn_index},
+    )
+    return turn
+
+
+def conclude_lecture(
+    course: Course,
+    lesson_id: str,
+    *,
+    comprehension_pct: int,
+    summary: str = "",
+    gaps: list[str] | None = None,
+    ready_for_assignment: bool = True,
+) -> Lesson:
+    """Close out the lecture phase.
+
+    Refuses unless:
+      * The lesson is in `lecturing` status.
+      * At least `lesson.min_lecture_checks` agent_check turns have
+        been recorded — the engine doesn't let the agent monologue
+        without pausing to check the learner.
+      * `comprehension_pct >= lesson.lecture_comprehension_threshold`.
+
+    If `ready_for_assignment` is False, the lesson stays in lecturing
+    (presumably to do another round). Otherwise, the lesson transitions
+    forward — the agent can call `assign_exercise` next.
+    """
+    lesson = find_lesson(course, lesson_id)
+    if lesson is None:
+        raise ValueError(f"Lesson {lesson_id!r} not found")
+    if lesson.status != LESSON_LECTURING:
+        raise ValueError(
+            f"conclude_lecture requires lesson status 'lecturing' "
+            f"(lesson {lesson_id!r} is {lesson.status!r})"
+        )
+    check_count = sum(1 for t in lesson.lecture_turns if t.role == "agent_check")
+    if check_count < lesson.min_lecture_checks:
+        raise ValueError(
+            f"conclude_lecture refused: at least {lesson.min_lecture_checks} "
+            f"`agent_check` turns required, have {check_count}. "
+            "Pause and ask the learner a comprehension question."
+        )
+    score = max(0, min(100, int(comprehension_pct)))
+    threshold = int(lesson.lecture_comprehension_threshold)
+    if score < threshold:
+        raise ValueError(
+            f"conclude_lecture refused: comprehension {score}% is below "
+            f"threshold {threshold}%. Keep lecturing — explain again, try "
+            "a different angle, or address the gaps the learner showed."
+        )
+    lesson.lecture_comprehension_pct = score
+    lesson.lecture_gaps = list(gaps or [])
+    lesson.lecture_concluded = True
+    if summary:
+        # Append the summary to the lecture plan so it's visible in the
+        # persisted course.json without overwriting the original plan.
+        joiner = "\n\n--- summary ---\n" if lesson.lecture_plan else ""
+        lesson.lecture_plan = lesson.lecture_plan + joiner + summary.strip()
+    if ready_for_assignment:
+        advance_lesson_status(course, lesson_id, LESSON_ASSIGNED)
+    add_event(
+        course,
+        kind="lecture_concluded",
+        entity="lesson",
+        entity_id=lesson_id,
+        payload={
+            "comprehension_pct": score,
+            "gaps": list(gaps or []),
+            "ready_for_assignment": ready_for_assignment,
+            "agent_check_count": check_count,
+            "turn_count": len(lesson.lecture_turns),
+        },
+    )
+    _write_lecture_transcript(course, lesson)
+    return lesson
+
+
+def _write_lecture_transcript(course: Course, lesson: Lesson) -> None:
+    if not course.directory:
+        return
+    target_dir = os.path.join(course.directory, "lessons")
+    os.makedirs(target_dir, exist_ok=True)
+    lines = [
+        f"# Lecture transcript — {lesson.lesson_id}: {lesson.title}",
+        "",
+    ]
+    if lesson.lecture_plan:
+        lines.extend([lesson.lecture_plan, ""])
+    for turn in lesson.lecture_turns:
+        speaker = {
+            "agent_explanation": "**Agent (teach)**",
+            "agent_check": "**Agent (check)**",
+            "learner_response": "**Learner**",
+        }.get(turn.role, f"**{turn.role}**")
+        lines.append(f"{speaker} ({turn.turn_index}): {turn.content}")
+        if turn.comprehension_signal:
+            lines.append(f"  _signal_: {turn.comprehension_signal}")
+        lines.append("")
+    if lesson.lecture_concluded:
+        lines.append("---")
+        lines.append(
+            f"**Comprehension**: {lesson.lecture_comprehension_pct}% "
+            f"(threshold {lesson.lecture_comprehension_threshold}%, "
+            f"{sum(1 for t in lesson.lecture_turns if t.role == 'agent_check')} checks)"
+        )
+        if lesson.lecture_gaps:
+            lines.append("**Gaps**:")
+            for gap in lesson.lecture_gaps:
+                lines.append(f"  - {gap}")
+    with open(os.path.join(target_dir, f"{lesson.lesson_id}.md"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+
+
 # --- metrics for HUD ------------------------------------------------------
 
 
@@ -603,9 +832,11 @@ __all__ = [
     "LESSON_ASSIGNED",
     "LESSON_COMPLETED",
     "LESSON_GRADED",
+    "LESSON_LECTURING",
     "LESSON_PENDING",
     "LESSON_PRESENTING",
     "LESSON_REMEDIATING",
+    "LectureTurn",
     "Lesson",
     "Module",
     "RubricItem",
@@ -613,6 +844,7 @@ __all__ = [
     "add_event",
     "advance_lesson_status",
     "close_socratic_dialog",
+    "conclude_lecture",
     "course_metrics",
     "create_course",
     "decide_next",
@@ -623,5 +855,7 @@ __all__ = [
     "load_course",
     "next_pending_lesson",
     "record_dialog_turn",
+    "record_lecture_turn",
     "save_course",
+    "start_lecture",
 ]

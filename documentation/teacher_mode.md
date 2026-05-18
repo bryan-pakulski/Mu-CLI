@@ -28,6 +28,9 @@ The teacher engine is the only source of truth for course progress.
 | `approve_curriculum` | Learner-side approval. Unlocks the lesson loop; refuses unless status is `curriculum_proposed`. |
 | `start_lesson` | Set the current lesson and flip its status to `presenting`. |
 | `present_concept` | Record the agent's ≤3-sentence intro for the lesson. |
+| `start_lecture` | Enter the lecture / back-and-forth teaching phase. Optional `plan` outlines the chunks you'll cover. |
+| `record_lecture_turn` | Append a turn to the lecture: `agent_explanation`, `agent_check`, or `learner_response`. |
+| `conclude_lecture` | Close the lecture with a `comprehension_pct` and `gaps`. Refuses unless `min_lecture_checks` is met and the score clears the threshold. |
 | `assign_exercise` | Create an assignment. Engine writes `artifact_files` to `work/` and persists the verification spec. |
 | `submit_assignment` | Record the learner's submission payload (inline answer or notes referencing edited artifact files). |
 | `grade_assignment` | Run the verifier. For exec_markers kinds runs `verify_cmd`; for MC/fill-blank with live UI launches the quiz Application; for rubric kinds requires `llm_rubric_score` after the keyword gate passes. |
@@ -58,9 +61,26 @@ The teacher engine is the only source of truth for course progress.
 Repeat until the course is complete.
 
 1. `start_lesson(next_lesson_id)`.
-2. `present_concept` — ≤ 3 sentences. Concrete, with one runnable
-   example if applicable.
-3. `assign_exercise` — pick the SMALLEST exercise that proves the
+2. `present_concept` — ≤ 3 sentences. The headline / hook.
+3. **Lecture phase** (the prep stage — covers the concept with
+   back-and-forth Q&A before the hands-on exercise):
+   1. `start_lecture(lesson_id, plan)` — opens the lecture.
+   2. Cover the material in small chunks. After each chunk:
+      - `record_lecture_turn(role="agent_explanation", content="...")` — what you just covered
+      - `record_lecture_turn(role="agent_check", content="comprehension question")`
+      - The learner answers. Record it:
+        `record_lecture_turn(role="learner_response", content="...", comprehension_signal="on track | confused | partial")`
+   3. Use the learner's answers to decide whether to dig deeper,
+      clarify, or move on. If they're wrong or partial, address the
+      gap BEFORE moving on.
+   4. `conclude_lecture(comprehension_pct, gaps, summary)` when the
+      topic is genuinely covered AND there are ≥ `min_lecture_checks`
+      `agent_check` turns. The engine refuses if either threshold
+      isn't met — keep lecturing.
+   Skip the lecture phase ONLY when the diagnostic showed the learner
+   already knows this concept (e.g. a C++ programmer learning C
+   pointer syntax — most of it is review). Then go straight to (4).
+4. `assign_exercise` — pick the SMALLEST exercise that proves the
    concept. Pick the kind to match the topic:
    - **code**: `fix-broken-code` (you write a broken file via
      `artifact_files`; learner edits) or `implement-from-scratch`.
@@ -72,12 +92,14 @@ Repeat until the course is complete.
      `record_dialog_turn` (one call per agent question, one per learner
      answer). Close with `close_dialog`.
    - **read a trace**: `predict-output` or `explain-trace`.
-4. Learner does the work. Call `submit_assignment` if they answered
+5. Learner does the work. Call `submit_assignment` if they answered
    inline; for code edits the engine reads the work files at grade time.
-5. `grade_assignment` (or `close_dialog` for socratic kinds).
-6. Give specific, honest feedback. If they got 40%, say so.
-7. `decide_next(advance | remediate)`. If `remediate`, do a *different*
-   small exercise on the same concept — don't repeat the failed one.
+6. `grade_assignment` (or `close_dialog` for socratic kinds).
+7. Give specific, honest feedback. If they got 40%, say so.
+8. `decide_next(advance | remediate)`. If `remediate`, do a *different*
+   small exercise on the same concept — and if the failure was a
+   *understanding* gap, re-enter the lecture phase (`start_lecture`
+   is allowed from `remediating`) before re-assigning.
 
 ### Phase 4 — Module review
 

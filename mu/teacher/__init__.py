@@ -18,6 +18,7 @@ from mu.teacher.engine import (
     Course,
     DialogTurn,
     Grade,
+    LectureTurn,
     Lesson,
     Module,
     RubricItem,
@@ -25,6 +26,7 @@ from mu.teacher.engine import (
     add_event,
     advance_lesson_status,
     close_socratic_dialog,
+    conclude_lecture,
     course_metrics,
     create_course,
     decide_next,
@@ -35,7 +37,9 @@ from mu.teacher.engine import (
     load_course,
     next_pending_lesson,
     record_dialog_turn,
+    record_lecture_turn,
     save_course,
+    start_lecture,
 )
 from mu.teacher.grading import grade as grade_assignment_payload
 from mu.teacher.storage import (
@@ -49,6 +53,7 @@ __all__ = [
     "Course",
     "DialogTurn",
     "Grade",
+    "LectureTurn",
     "Lesson",
     "Module",
     "RubricItem",
@@ -56,6 +61,7 @@ __all__ = [
     "add_event",
     "advance_lesson_status",
     "close_socratic_dialog",
+    "conclude_lecture",
     "course_directory",
     "course_metrics",
     "create_course",
@@ -68,6 +74,8 @@ __all__ = [
     "load_course",
     "next_pending_lesson",
     "record_dialog_turn",
+    "record_lecture_turn",
     "save_course",
+    "start_lecture",
     "workspace_root",
 ]

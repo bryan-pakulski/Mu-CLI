@@ -30,6 +30,7 @@ from mu.teacher.engine import (
     LESSON_ASSIGNED,
     LESSON_COMPLETED,
     LESSON_GRADED,
+    LESSON_LECTURING,
     LESSON_PENDING,
     LESSON_PRESENTING,
     Assignment,
@@ -41,6 +42,7 @@ from mu.teacher.engine import (
     add_event,
     advance_lesson_status,
     close_socratic_dialog,
+    conclude_lecture,
     course_metrics,
     create_course,
     decide_next,
@@ -50,7 +52,9 @@ from mu.teacher.engine import (
     load_course,
     next_pending_lesson,
     record_dialog_turn,
+    record_lecture_turn,
     save_course,
+    start_lecture,
 )
 from mu.teacher.grading import grade as grade_assignment_payload
 from mu.tools import tool
@@ -604,6 +608,167 @@ def present_concept_tool(args: dict[str, Any], context) -> str:
         return _err(str(exc))
 
 
+# ----- lecture phase ----------------------------------------------------
+
+
+@tool(
+    name="start_lecture",
+    description=(
+        "Begin the back-and-forth lecture phase for the active lesson. "
+        "Optionally include a `plan` string outlining what you'll cover. "
+        "Follow up with record_lecture_turn for each agent_explanation, "
+        "agent_check, and learner_response. Conclude with conclude_lecture."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "lesson_id": {"type": "string"},
+            "plan": {
+                "type": "string",
+                "description": "Optional outline of the topics you'll cover.",
+            },
+            "min_lecture_checks": {
+                "type": "integer",
+                "description": (
+                    "Minimum `agent_check` turns required before "
+                    "conclude_lecture is allowed. Defaults to 2."
+                ),
+            },
+            "lecture_comprehension_threshold": {
+                "type": "integer",
+                "description": (
+                    "Minimum comprehension_pct required to advance to "
+                    "the assignment phase. Defaults to 60."
+                ),
+            },
+        },
+        "required": ["lesson_id"],
+    },
+    requires_approval=False,
+)
+def start_lecture_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        lesson_id = _storage.slugify(str(args.get("lesson_id", "")).strip())
+        lesson = find_lesson(course, lesson_id)
+        if lesson is None:
+            return _not_found_err("lesson", lesson_id, [l.lesson_id for l in course.lessons])
+        if "min_lecture_checks" in args:
+            lesson.min_lecture_checks = max(0, int(args["min_lecture_checks"]))
+        if "lecture_comprehension_threshold" in args:
+            lesson.lecture_comprehension_threshold = max(
+                0, min(100, int(args["lecture_comprehension_threshold"]))
+            )
+        start_lecture(course, lesson_id, plan=str(args.get("plan", "") or ""))
+        _persist(session, course)
+        return _ok({"lesson": asdict(find_lesson(course, lesson_id))})
+    except Exception as exc:
+        return _err(str(exc))
+
+
+@tool(
+    name="record_lecture_turn",
+    description=(
+        "Append one turn (agent_explanation | agent_check | learner_response) "
+        "to the active lesson's lecture. Use `agent_explanation` when "
+        "you're presenting material, `agent_check` when you pause to ask a "
+        "comprehension question, and `learner_response` for what the "
+        "learner said. The engine counts `agent_check` turns against "
+        "`min_lecture_checks` so monologuing isn't allowed."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "lesson_id": {"type": "string"},
+            "role": {
+                "type": "string",
+                "enum": ["agent_explanation", "agent_check", "learner_response"],
+            },
+            "content": {"type": "string"},
+            "comprehension_signal": {
+                "type": "string",
+                "description": (
+                    "Optional per-turn note: 'on track' | 'confused' | "
+                    "'partial' | etc. Influences gap analysis."
+                ),
+            },
+        },
+        "required": ["lesson_id", "role", "content"],
+    },
+    requires_approval=False,
+)
+def record_lecture_turn_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        turn = record_lecture_turn(
+            course,
+            _storage.slugify(str(args.get("lesson_id", "")).strip()),
+            role=str(args.get("role", "")).strip(),
+            content=str(args.get("content", "")).strip(),
+            comprehension_signal=(
+                str(args.get("comprehension_signal")).strip()
+                if args.get("comprehension_signal")
+                else None
+            ),
+        )
+        _persist(session, course)
+        return _ok({"turn": asdict(turn)})
+    except Exception as exc:
+        return _err(str(exc))
+
+
+@tool(
+    name="conclude_lecture",
+    description=(
+        "Close out the lecture phase with an honest comprehension score "
+        "and a list of gaps. Refuses unless the lesson has met its "
+        "min_lecture_checks and comprehension_pct >= the configured "
+        "threshold. Set ready_for_assignment=false to keep lecturing "
+        "without advancing (e.g. comprehension was weak; you want "
+        "another pass)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "lesson_id": {"type": "string"},
+            "comprehension_pct": {"type": "integer"},
+            "summary": {"type": "string"},
+            "gaps": {"type": "array", "items": {"type": "string"}},
+            "ready_for_assignment": {"type": "boolean", "default": True},
+        },
+        "required": ["lesson_id", "comprehension_pct"],
+    },
+    requires_approval=True,
+)
+def conclude_lecture_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        lesson_id = _storage.slugify(str(args.get("lesson_id", "")).strip())
+        lesson = conclude_lecture(
+            course,
+            lesson_id,
+            comprehension_pct=int(args.get("comprehension_pct", 0)),
+            summary=str(args.get("summary", "") or ""),
+            gaps=[str(g) for g in (args.get("gaps") or [])],
+            ready_for_assignment=bool(args.get("ready_for_assignment", True)),
+        )
+        _persist(session, course)
+        return _ok(
+            {
+                "lesson_id": lesson_id,
+                "status": lesson.status,
+                "comprehension_pct": lesson.lecture_comprehension_pct,
+                "gaps": lesson.lecture_gaps,
+                "ready_for_assignment": lesson.status == LESSON_ASSIGNED,
+            }
+        )
+    except Exception as exc:
+        return _err(str(exc))
+
+
 @tool(
     name="assign_exercise",
     description=(
@@ -790,7 +955,7 @@ def assign_exercise_tool(args: dict[str, Any], context) -> str:
         with open(os.path.join(prompt_dir, "prompt.md"), "w", encoding="utf-8") as handle:
             handle.write(f"# Assignment {assignment_id}\n\n{assignment.prompt}\n")
 
-        if lesson.status == LESSON_PRESENTING:
+        if lesson.status in {LESSON_PRESENTING, LESSON_LECTURING}:
             advance_lesson_status(course, lesson_id, LESSON_ASSIGNED)
         elif lesson.status == "remediating":
             # Re-assignment during remediation flips back to 'assigned'.
@@ -1318,6 +1483,7 @@ __all__ = [
     "assign_exercise_tool",
     "close_dialog_tool",
     "complete_module_tool",
+    "conclude_lecture_tool",
     "create_course_tool",
     "decide_next_tool",
     "finalize_course_tool",
@@ -1328,6 +1494,8 @@ __all__ = [
     "raise_teacher_blocker_tool",
     "record_diagnostic_tool",
     "record_dialog_turn_tool",
+    "record_lecture_turn_tool",
+    "start_lecture_tool",
     "start_lesson_tool",
     "submit_assignment_tool",
 ]

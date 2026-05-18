@@ -55,7 +55,7 @@ this, don't change it" use [research](research_mode.md).
 ## Delegation
 
 For self-contained side-quests that would bloat context (deep codebase
-research, large multi-file refactors, isolated benchmarks), fire
+research, large multi-file refactors), fire
 `spawn_agent` calls in parallel. Up to four run concurrently (capped at
 `parallel_tool_concurrency`). Children inherit folder context but have
 isolated history; they return a focused summary the parent can fold in.

@@ -333,7 +333,7 @@ AGENTIC_MODES = {
 7. **Final summary.** What changed, what was verified, what's still open. Tight; no narration of every tool call.
 
 Delegation:
-- For self-contained side-quests that would bloat context (deep codebase research, large multi-file refactors, isolated benchmarks), issue `spawn_agent` calls in parallel — 4 of them in one turn run concurrently capped at `parallel_tool_concurrency` (default 4). Children inherit folder context but have isolated history.""",
+- For self-contained side-quests that would bloat context (deep codebase research, large multi-file refactors), issue `spawn_agent` calls in parallel — 4 of them in one turn run concurrently capped at `parallel_tool_concurrency` (default 4). Children inherit folder context but have isolated history.""",
     "debug": """WORKFLOW (Debugging):
 
 0. **Recall.** Call `search_memory` with the error string / file path / suspect symbol. If this bug or a sibling has been seen before, start from that fix — do not re-derive.
@@ -458,7 +458,7 @@ You are in LOOP mode for multi-hour / multi-day autonomous execution. Operate as
    e. **Reflect.** If verification failed, add a remediation subtask via `todo_write` and continue. If it passed, mark the todo `completed`.
 
 4) Delegation for focused side-quests
-   - Deep research, exploratory benchmarks, isolated refactors that would clutter the loop's context: fire `spawn_agent` with a tight tools whitelist. Multiple spawns in one turn run concurrently — use this to fan out research across angles.
+   - Deep research, isolated refactors that would clutter the loop's context: fire `spawn_agent` with a tight tools whitelist. Multiple spawns in one turn run concurrently — use this to fan out research across angles.
 
 5) Memory Discipline (compounds across hours)
    - `save_memory` for durable findings, root causes, invariants. Tag aggressively.

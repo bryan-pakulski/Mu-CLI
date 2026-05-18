@@ -68,8 +68,17 @@ class RichUI:
 
     def stream_thinking_delta(self, text: str):
         """Append a reasoning chunk to the active generation Live, styled
-        in dim italic so it visually separates from user-facing text."""
+        in dim italic so it visually separates from user-facing text.
+
+        Gated on `show_thinking` (default True), with one mode-aware
+        wrinkle: teacher mode hides thinking by default unless the user
+        has explicitly toggled `/show-thinking on` (tracked via
+        `show_thinking_explicit`). The model still GENERATES reasoning
+        when `session.thinking=True` — this gate only controls rendering.
+        """
         if not self._streaming_enabled() or not text:
+            return
+        if not self._show_thinking_effective():
             return
         if self._gen_live is not None:
             self._gen_live.append_thinking(text)
@@ -77,6 +86,27 @@ class RichUI:
         self.console.print(
             Text(text, style="dim italic"), end="", soft_wrap=True, highlight=False
         )
+
+    def _show_thinking_effective(self) -> bool:
+        """Resolve `show_thinking` against per-mode defaults.
+
+        Teacher mode hides thinking by default — the lecture cadence
+        works better without dim-italic reasoning blocks competing with
+        agent_explanation turns for the learner's attention. Any other
+        mode falls back to the stored `show_thinking` value.
+
+        The user's `/show-thinking` toggle wins: once they set the
+        explicit flag, mode-based overrides stop applying.
+        """
+        variables = self._variables or {}
+        explicit = bool(variables.get("show_thinking_explicit", False))
+        stored = bool(variables.get("show_thinking", True))
+        if explicit:
+            return stored
+        mode = str(variables.get("agent_mode", "default") or "default").lower()
+        if mode == "teacher":
+            return False
+        return stored
 
     def stream_tool_call(self, tool_name: str):
         """Note a tool call inside the generation Live's text region.

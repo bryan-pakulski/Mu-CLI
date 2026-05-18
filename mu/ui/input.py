@@ -509,6 +509,7 @@ class InputHandler:
             "/agentic": None,
             "/thinking": None,
             "/verbose": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
+            "/show-thinking": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
             "/research": research_completer,
             # memory / tools
             "/memory": memory_completer,

@@ -44,6 +44,14 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": False,
     },  # When False (default), hide tool-arg dumps, token lines, result previews, "Compacting turn history" notices, and user-echo panels. The compact inline "→ tool_name" indicator stays so progress is still visible.
+    "show_thinking": {
+        "type": bool,
+        "default": True,
+    },  # When False, suppress streamed reasoning/thinking deltas in the UI. The model still GENERATES thinking when `session.thinking=True` — this only controls whether the dim-italic text is rendered to the terminal. Mode-aware: teacher mode hides thinking by default unless the user has explicitly toggled this var (see `show_thinking_explicit`).
+    "show_thinking_explicit": {
+        "type": bool,
+        "default": False,
+    },  # Tracks whether the user has explicitly called `/show-thinking`. When False, modes can apply their own default policy (teacher mode hides; others show). The `/show-thinking` command flips this to True so subsequent mode switches don't override the user's choice.
     "reflective_retry_enabled": {
         "type": bool,
         "default": True,

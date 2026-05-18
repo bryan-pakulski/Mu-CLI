@@ -55,6 +55,45 @@ def yolo_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
 
 
 @command(
+    "/show-thinking",
+    help=(
+        "Toggle display of reasoning/thinking deltas. When OFF, the model "
+        "still generates thinking (controlled by /thinking) but the dim-"
+        "italic text is hidden from the terminal. Teacher mode hides "
+        "thinking by default — calling /show-thinking pins your preference "
+        "across mode switches."
+    ),
+)
+def show_thinking_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
+    arg = (args or "").strip().lower()
+    current = bool(session.variables.get("show_thinking", True))
+    if arg in ("", "toggle"):
+        new_value = not current
+    elif arg in ("on", "true", "1", "yes", "enable"):
+        new_value = True
+    elif arg in ("off", "false", "0", "no", "disable"):
+        new_value = False
+    else:
+        return CommandResult(
+            ok=False,
+            message=f"Unknown /show-thinking argument: {args!r}. Use 'on', 'off', or 'toggle'.",
+        )
+    session.variables["show_thinking"] = new_value
+    # Mark the preference as explicit so mode switches stop applying
+    # their own defaults (teacher mode hides by default; the explicit
+    # flag pins the user's choice across `/mode` toggles).
+    session.variables["show_thinking_explicit"] = True
+    if hasattr(session, "session_manager") and hasattr(session, "folder_context"):
+        session.session_manager.save_history(session.folder_context)
+    _emit_toggle_banner(session, "💭 Show thinking", new_value)
+    return CommandResult(
+        ok=True,
+        message=f"Show thinking: {'ON' if new_value else 'OFF'}",
+        data={"show_thinking": new_value},
+    )
+
+
+@command(
     "/verbose",
     help=(
         "Toggle verbose rendering. When OFF (default) the UI hides tool-arg "

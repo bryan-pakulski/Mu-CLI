@@ -18,8 +18,8 @@ Tests cover:
 import os
 import pytest
 import json
-from core.tools import execute_tool, TOOL_HANDLERS
-from core.workspace import FolderContext
+from mu.tools._dispatcher import execute_tool, TOOL_HANDLERS
+from mu.workspace.folder_context import FolderContext
 
 
 class TestSearchAndReplaceSingleMatch:

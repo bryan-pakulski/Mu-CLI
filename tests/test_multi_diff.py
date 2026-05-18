@@ -1,7 +1,7 @@
 import pytest
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse, MessagePart
-from core.tools import TOOLS
+from mu.tools.descriptors import TOOLS
 
 
 class MockUI:

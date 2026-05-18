@@ -2,7 +2,7 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from types import SimpleNamespace
 
-from ui.input import InputHandler, get_session_names
+from mu.ui.input import InputHandler, get_session_names
 
 
 def test_prompt_markup_hides_default_mode():
@@ -119,57 +119,47 @@ def test_shift_tab_keybinding_is_registered_for_yolo_toggle():
     assert any(len(keys) == 1 and keys[0] == "s-tab" for keys in bindings)
 
 
-def test_command_completion_covers_all_cli_commands_and_aliases():
+def test_command_completion_covers_curated_command_set():
+    """The autocomplete dict must contain every canonical command after the
+    alias cleanup. Dropped aliases (/exit /h /c /v /f /add /cf /dir /sys
+    /ls /rm /open /features /tools /splash /update /clear-workspace /cw)
+    are deliberately absent — `test_command_surface.py` pins THAT direction."""
     handler = InputHandler()
 
     expected_commands = {
+        # session
         "/help",
-        "/h",
-        "/clear",
-        "/c",
-        "/clearfiles",
-        "/cf",
-        "/clear-workspace",
-        "/cw",
-        "/view",
-        "/v",
         "/quit",
-        "/exit",
         "/q",
-        "/file",
-        "/f",
-        "/add",
-        "/folder",
-        "/dir",
+        "/clear",
+        "/history",
+        "/session",
+        "/continue",
+        # workspace
+        "/workspace",
+        # model & provider
         "/model",
         "/provider",
-        "/workspace",
-        "/update",
-        "/agentic",
-        "/mode",
-        "/research",
-        "/feature",
-        "/features",
-        "/tool",
-        "/tools",
-        "/system",
-        "/sys",
-        "/thinking",
-        "/list",
-        "/ls",
-        "/load",
-        "/open",
-        "/new",
-        "/delete",
-        "/rm",
-        "/stats",
-        "/splash",
+        "/ollama",
+        # variables
         "/set",
         "/get",
         "/unset",
         "/variables",
-        "/flush",
+        # modes & toggles
+        "/mode",
+        "/plan",
         "/yolo",
+        "/agentic",
+        "/thinking",
+        "/research",
+        # memory / tools / features
+        "/memory",
+        "/tool",
+        "/mcp",
+        "/feature",
+        # diagnostics
+        "/stats",
     }
 
     assert expected_commands.issubset(set(handler.command_completions.keys()))
@@ -192,11 +182,11 @@ def test_unset_completion_includes_all_keyword():
     assert "--all" in completion_texts
 
 
-def test_folder_completion_includes_clear_subcommand():
+def test_workspace_folder_completion_includes_clear_subcommand():
     handler = InputHandler()
     document = Document(
-        text="/folder c",
-        cursor_position=len("/folder c"),
+        text="/workspace folder c",
+        cursor_position=len("/workspace folder c"),
     )
     completions = list(
         handler.completer.get_completions(
@@ -211,7 +201,7 @@ def test_folder_completion_includes_clear_subcommand():
 
 def test_tool_enable_completion_suggests_tool_names(monkeypatch):
     monkeypatch.setattr(
-        "core.tools.TOOLS",
+        "mu.tools.descriptors.TOOLS",
         [SimpleNamespace(name="read_file"), SimpleNamespace(name="write_file")],
     )
     handler = InputHandler()
@@ -248,7 +238,9 @@ def test_research_completion_includes_status_and_sources():
     assert "sources" in completion_texts
 
 
-def test_memory_clear_completion_includes_scratch_alias():
+def test_memory_clear_completion_suggests_scratchpad():
+    """`/memory clear scr` → suggests `scratchpad` (the alias `scratch`
+    was removed in the cleanup pass)."""
     handler = InputHandler()
     document = Document(
         text="/memory clear scr",
@@ -261,8 +253,31 @@ def test_memory_clear_completion_includes_scratch_alias():
         )
     )
     completion_texts = {completion.text for completion in completions}
+    assert "scratchpad" in completion_texts
+    # `scratch` was an alias and is no longer offered.
+    assert "scratch" not in completion_texts
 
-    assert "scratch" in completion_texts
+
+def test_memory_list_completion_includes_layers():
+    """`/memory list <Tab>` should offer all 8 layer IDs plus the
+    stores (task, scratchpad, all)."""
+    handler = InputHandler()
+    document = Document(
+        text="/memory list ",
+        cursor_position=len("/memory list "),
+    )
+    completions = list(
+        handler.completer.get_completions(
+            document,
+            CompleteEvent(completion_requested=True),
+        )
+    )
+    completion_texts = {completion.text for completion in completions}
+    for target in (
+        "all", "task", "scratchpad",
+        "L0", "L1", "L1B", "L2", "L3", "L4", "L4B", "L5",
+    ):
+        assert target in completion_texts, f"/memory list {target!r} not suggested"
 
 
 def test_input_history_is_isolated_per_session():
@@ -335,7 +350,7 @@ def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
 
 
 def test_get_session_names_supports_session_directory_layout(tmp_path, monkeypatch):
-    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("mu.ui.input.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     (tmp_path / "sessions" / "alpha" / "session.json").write_text("{}", encoding="utf-8")
     (tmp_path / "sessions" / "beta").mkdir(parents=True)
@@ -346,8 +361,8 @@ def test_get_session_names_supports_session_directory_layout(tmp_path, monkeypat
     assert sessions == ["alpha", "beta"]
 
 
-def test_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
-    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+def test_session_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
+    monkeypatch.setattr("mu.ui.input.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "my_session").mkdir(parents=True)
     (tmp_path / "sessions" / "my_session" / "session.json").write_text(
         "{}",
@@ -355,7 +370,9 @@ def test_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
     )
 
     handler = InputHandler()
-    document = Document(text="/load my", cursor_position=len("/load my"))
+    document = Document(
+        text="/session load my", cursor_position=len("/session load my")
+    )
     completions = list(
         handler.completer.get_completions(
             document,

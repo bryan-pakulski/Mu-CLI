@@ -1,14 +1,10 @@
 import os
 import pytest
 import json
-from core.approval import build_approval_plan
-from core.tools import (
-    execute_tool,
-    get_modifications,
-    get_tool_descriptor,
-    serialize_tool_descriptor,
-)
-from core.workspace import FolderContext
+from mu.agent.approval import build_approval_plan
+from mu.tools._dispatcher import execute_tool
+from mu.tools.descriptors import get_modifications, get_tool_descriptor, serialize_tool_descriptor
+from mu.workspace.folder_context import FolderContext
 
 
 def test_batch_job_basic(tmp_path):
@@ -20,7 +16,7 @@ def test_batch_job_basic(tmp_path):
     dummy_file.write_text("hello batch")
 
     commands = [
-        {"tool_name": "get_current_time", "tool_args": {}},
+        {"tool_name": "list_dir", "tool_args": {"path": str(tmp_path)}},
         {"tool_name": "read_file", "tool_args": {"filename": str(dummy_file)}},
     ]
 
@@ -42,7 +38,7 @@ def test_batch_job_nested_prevention(tmp_path):
         {
             "tool_name": "batch_job",
             "tool_args": {
-                "commands": [{"tool_name": "get_current_time", "tool_args": {}}]
+                "commands": [{"tool_name": "list_dir", "tool_args": {}}]
             },
         }
     ]
@@ -141,7 +137,7 @@ def test_batch_job_partial_success_has_nested_children(tmp_path):
 def test_tool_descriptors_expose_execution_metadata():
     read_descriptor = get_tool_descriptor("read_file")
     batch_descriptor = get_tool_descriptor("batch_job")
-    payload = serialize_tool_descriptor("git_commit")
+    payload = serialize_tool_descriptor("bash")
 
     assert read_descriptor is not None
     assert read_descriptor.execution_kind == "read"

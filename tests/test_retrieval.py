@@ -1,9 +1,9 @@
 import json
 import time
 
-from core.retrieval import SemanticCodeIndex
-from core.tools import execute_tool
-from core.workspace import FolderContext
+from mu.retrieval.index import SemanticCodeIndex
+from mu.tools._dispatcher import execute_tool
+from mu.workspace.folder_context import FolderContext
 
 
 def _build_synthetic_repo(tmp_path):

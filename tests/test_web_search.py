@@ -1,8 +1,10 @@
 """Tests for web_search tool functionality."""
 import json
 import pytest
-from core.tools import web_search, execute_tool, TOOL_HANDLERS, TOOL_DESCRIPTORS
-from core.workspace import FolderContext
+from mu.tools._dispatcher import execute_tool, TOOL_HANDLERS
+from mu.tools.descriptors import TOOL_DESCRIPTORS
+from mu.tools.research.handlers import web_search
+from mu.workspace.folder_context import FolderContext
 
 
 def test_web_search_tool_definition_exists():
@@ -109,20 +111,24 @@ def test_web_search_num_results_bounds():
 
 
 def test_web_search_handler_registered():
-    """Test that _handle_web_search handler is properly registered."""
-    from core.tools import _handle_web_search
-    
-    ctx = FolderContext()
-    result = _handle_web_search({"query": ""}, ctx, None, None)
-    parsed = json.loads(result)
-    
-    assert "error" in parsed
-    assert parsed["error"] == "Query cannot be empty"
+    """The `@tool`-registered web_search handler is reachable via the new
+    dispatcher. Post-migration the handler lives in
+    `mu/tools/research/handlers.py`; an empty-query call surfaces the
+    "Query cannot be empty" error via the envelope."""
+    import mu.tools as _mu_tools
+
+    ctx = _mu_tools.build_tool_context(
+        folder_context=FolderContext(), ui=None, variables={}
+    )
+    envelope = _mu_tools.execute("web_search", {"query": ""}, ctx)
+    assert envelope["ok"] is False
+    assert envelope["message"] == "Query cannot be empty"
+    assert envelope["data"]["error"] == "Query cannot be empty"
 
 
 def test_web_search_duckduckgo_html_fallback(monkeypatch):
     """If DDGS returns nothing, fallback HTML parser should still return results."""
-    import core.tools as tools
+    import mu.tools.research.handlers as tools
 
     class FakeDDGS:
         def __enter__(self):

@@ -4,16 +4,10 @@ import argparse
 import json
 import os
 import re
-import shlex
-import subprocess
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt, IntPrompt, Confirm
 from rich.text import Text
@@ -23,25 +17,21 @@ from rich import box
 # Import from our new modular structure
 from providers.gemini import GeminiProvider
 from providers.ollama import OllamaProvider
+from utils.helpers import safe_markup
 from utils.logger import logger
 from providers.openai import OpenAIProvider
-from core.server import HeadlessUI, serve
-from core.session import SessionManager, Session, derive_feature_state_status
-from core.feature_mode import (
+from mu.session.session import SessionManager, Session, derive_feature_state_status
+from mu.feature.engine import (
     load_feature_plan,
     refresh_and_persist_feature_plan,
     save_feature_plan,
     summarize_feature_plan,
 )
-from core.tools import execute_tool
-from ui.rich_ui import RichUI
-from ui.gui_tui import run_gui_mode
+from mu.tools._dispatcher import execute_tool
+from mu.ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
-from utils.config import SESSION_DIR
-from utils.runtime_metrics import collect_context_layers
 
 console = Console()
-GITHUB_API_BASE = "https://api.github.com"
 
 
 def refresh_memory_hud(session, ui, *, force=False):
@@ -66,7 +56,7 @@ def print_mode_overview(session):
         )
 
     console.print(table)
-    console.print(f"[dim]Current mode: {current_mode}[/dim]")
+    console.print(f"[dim]Current mode: {safe_markup(current_mode)}[/dim]")
 
 
 def _research_tool_names():
@@ -353,9 +343,9 @@ def _feature_three_option_prompt(question, options, *, allow_prompt):
         raise ValueError("feature prompt requires exactly three options")
     if not allow_prompt:
         return choices[0][0]
-    console.print(f"[bold cyan]{question}[/bold cyan]")
+    console.print(f"[bold cyan]{safe_markup(question)}[/bold cyan]")
     for idx, (_, label) in enumerate(choices, start=1):
-        console.print(f"  {idx}. {label}")
+        console.print(f"  {idx}. {label}", markup=False)
     selected = IntPrompt.ask("Select option", choices=[1, 2, 3], default=1)
     return choices[selected - 1][0]
 
@@ -493,76 +483,103 @@ def build_stats_snapshot(session):
     return stats
 
 
+# Single source of truth for /help. Grouped by purpose. Aliases column
+# only lists the ONE alias that survived the cleanup (most commands have
+# no alias — /quit's /q is the only one kept for muscle memory).
+_HELP_GROUPS = [
+    (
+        "Session",
+        [
+            ("/help", "", "Show this menu"),
+            ("/quit", "/q", "Exit"),
+            ("/session [list|load|new|delete]", "", "Manage saved sessions"),
+            ("/clear", "", "Clear the terminal screen"),
+            ("/history [clear]", "", "Show conversation history; clear wipes it"),
+            ("/continue", "", "Resume last paused execution after Ctrl+C"),
+        ],
+    ),
+    (
+        "Workspace",
+        [
+            ("/workspace", "", "Show attached folders + staged files"),
+            ("/workspace folder <path>", "", "Attach a folder"),
+            ("/workspace folder remove <p>", "", "Detach a folder"),
+            ("/workspace folder clear", "", "Detach all folders"),
+            ("/workspace file <path>", "", "Stage a file for the next turn"),
+            ("/workspace file clear", "", "Drop staged files"),
+            ("/workspace clear", "", "Drop everything (folders + staged files)"),
+        ],
+    ),
+    (
+        "Model & provider",
+        [
+            ("/model [name]", "", "Show / change the model"),
+            ("/provider [name]", "", "Switch provider (gemini, ollama, openai)"),
+            ("/ollama [status|models|pull|options]", "", "Ollama-specific helpers"),
+        ],
+    ),
+    (
+        "Variables",
+        [
+            ("/set <key> <value>", "", "Set a session variable"),
+            ("/get <key>", "", "Get a session variable"),
+            ("/unset <key|--all>", "", "Unset a variable"),
+            ("/variables", "", "Show all variables"),
+        ],
+    ),
+    (
+        "Modes & toggles",
+        [
+            ("/mode <name>", "", "Switch agent mode (default|debug|feature|research|loop|security)"),
+            ("/plan [on|off|toggle]", "", "Toggle plan mode (read-only enforcement)"),
+            ("/yolo", "", "Toggle YOLO mode (auto-approve writes)"),
+            ("/agentic", "", "Toggle tool-calling mode"),
+            ("/thinking", "", "Toggle extended thinking / reasoning"),
+            ("/research [status|sources]", "", "Research workflow helpers"),
+        ],
+    ),
+    (
+        "Memory, tools, features",
+        [
+            ("/memory <status|list <target>|clear <target>>", "", "Inspect memory, scratchpad, or any layer (L1-L5)"),
+            ("/tool <enable|disable|list>", "", "Enable/disable tools or list all"),
+            ("/mcp [list|status|reload|debug <s>]", "", "Manage MCP servers"),
+            (
+                "/feature <list|new|load|delete|status|phases|create|show|move|block|review|archive|monitor>",
+                "",
+                "Manage feature-mode plans",
+            ),
+        ],
+    ),
+    (
+        "Extensions",
+        [
+            ("/skills [<name>|reload|enable <n>|disable <n>]", "", "Manage installed skills"),
+            ("/docs [<name>]", "", "Browse bundled documentation"),
+        ],
+    ),
+    (
+        "Diagnostics",
+        [
+            ("/stats", "", "Tokens, cost, memory, context — current snapshot"),
+            ("/help", "/h", "Show this menu"),
+        ],
+    ),
+]
+
+
 def print_help():
-    table = Table(title="Available Commands", box=box.SIMPLE)
-    table.add_column("Command", style="cyan", no_wrap=True)
-    table.add_column("Alias", style="magenta")
-    table.add_column("Description", style="white")
-
-    table.add_row("/clear", "", "Clear conversation history")
-    table.add_row("/new [name]", "", "Start a new conversation")
-    table.add_row("/delete <name>", "/rm", "Delete a saved conversation")
-    table.add_row("/file <path>", "/f", "Attach a file")
-    table.add_row("/clearfiles", "/cf", "Clear staged files")
-    table.add_row("/clear-workspace", "/cw", "Clear all workspace folders")
-    table.add_row(
-        "/folder <path>", "/dir", "Monitor a folder(s) for changes and use as context"
-    )
-    table.add_row(
-        "/memory <status|list|clear>", "", "Manage memory (e.g. clear scratch|task|all)"
-    )
-    table.add_row("/help", "", "Show this help menu")
-    table.add_row("/list", "/ls", "List saved conversations")
-    table.add_row("/load [name]", "/open", "Load a conversation")
-    table.add_row("/model [name]", "", "Show / change current model")
-    table.add_row("/get [key]", "", "Get a variable")
-    table.add_row("/yolo", "", "Toggle YOLO mode (no approvals)")
-    table.add_row("/set [key] [value]", "", "Set a variable")
-    table.add_row("/unset [key]", "", "Unset a variable (or --all)")
-    table.add_row(
-        "/flush", "", "Flush the collation buffer and inject context into the next turn"
-    )
-    table.add_row("/variables", "", "Show all variables")
-    table.add_row("/agentic", "", "Toggle Agentic (Tool Calling) mode")
-    table.add_row(
-        "/tool <enable/disable/list>",
-        "/tools",
-        "Enable/Disable a tool or list all available tools",
-    )
-    table.add_row(
-        "/mode <mode>",
-        "",
-        "Change the agentic strategy (default, debug, feature, research)",
-    )
-    table.add_row(
-        "/feature <list|new|load|delete|status|phases|exit|create|show|move|block|review|archive|monitor>",
-        "/features",
-        "Manage per-session feature plans and switch the active feature",
-    )
-    table.add_row(
-        "/research <status|sources|query>",
-        "",
-        "Research workflow commands (citation-first prompts, source review)",
-    )
-    table.add_row("/provider [name]", "", "Change the LLM provider (gemini, ollama)")
-    table.add_row(
-        "/update", "", "Attempt to update μCLI from the configured git remote"
-    )
-    table.add_row("/quit", "/q", "Exit")
-    table.add_row("/continue", "", "Resume last paused execution after Ctrl+C")
-    table.add_row(
-        "/stats",
-        "",
-        "Show runtime stats, token/cost totals, and feature progress",
-    )
-    table.add_row("/system <txt>", "/sys", "Update system prompt")
-    table.add_row("/thinking", "", "Toggle thinking mode")
-    table.add_row("/view", "", "View conversation history")
-    table.add_row("/workspace [clear]", "", "List or clear workspace metadata")
-
-    console.print(table)
+    for group_name, entries in _HELP_GROUPS:
+        table = Table(title=group_name, box=box.SIMPLE, show_header=False, padding=(0, 1))
+        table.add_column("Command", style="cyan", no_wrap=True)
+        table.add_column("Alias", style="magenta")
+        table.add_column("Description", style="white")
+        for cmd, alias, desc in entries:
+            table.add_row(cmd, alias, desc)
+        console.print(table)
     console.print(
-        "[dim]Tip: End a line with '\\' to continue typing on the next line.[/dim]"
+        "[dim]Tip: end a line with '\\' to continue typing on the next line. "
+        "Tab to autocomplete every command.[/dim]"
     )
 
 
@@ -615,11 +632,16 @@ def print_splash(session):
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
 """
-    # Add context warning if nearing token limit
+    # Total context (sum of all 7 layers) vs. the global cap. Using the
+    # total instead of just history tokens means the warning fires when
+    # heavy workspace files + skills + tool activity push us toward the
+    # cap, not only when conversation history gets long.
+    from utils.runtime_metrics import estimate_active_context_tokens
+
     context_limit = int(session.variables.get("context_token_limit", 256000) or 256000)
     trim_threshold = float(session.variables.get("context_trim_threshold", 0.85) or 0.85)
     trim_threshold = max(0.10, min(trim_threshold, 1.0))
-    context_tokens = int(session.session_manager.estimate_runtime_history_tokens() or 0)
+    context_tokens = int(estimate_active_context_tokens(session) or 0)
     threshold_tokens = int(context_limit * trim_threshold)
     if context_tokens >= threshold_tokens:
         info_grid += f"""
@@ -657,150 +679,6 @@ def init_provider(provider_name, model_name, ollama_host=None):
     return provider
 
 
-def _run_command(command, cwd=None):
-    return subprocess.run(
-        command,
-        cwd=cwd,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-
-def _parse_github_repo(remote_url):
-    if not remote_url:
-        return None
-    value = remote_url.strip()
-    if value.endswith(".git"):
-        value = value[:-4]
-
-    ssh_match = re.match(r"^git@github\.com:([^/]+)/([^/]+)$", value)
-    if ssh_match:
-        return f"{ssh_match.group(1)}/{ssh_match.group(2)}"
-
-    parsed = urllib.parse.urlparse(value)
-    if parsed.netloc.lower() != "github.com":
-        return None
-    path = parsed.path.strip("/")
-    parts = path.split("/")
-    if len(parts) < 2:
-        return None
-    return f"{parts[0]}/{parts[1]}"
-
-
-def fetch_latest_github_release(repo_slug):
-    url = f"{GITHUB_API_BASE}/repos/{repo_slug}/releases/latest"
-    request = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "mucli-updater",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=8) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    return {
-        "tag_name": str(payload.get("tag_name", "") or "").strip(),
-        "name": str(payload.get("name", "") or "").strip(),
-        "html_url": str(payload.get("html_url", "") or "").strip(),
-    }
-
-
-def get_release_update_status():
-    origin = _run_command(["git", "remote", "get-url", "origin"])
-    if origin.returncode != 0:
-        return {"ok": False, "message": "No git origin configured for update checks."}
-
-    repo_slug = _parse_github_repo(origin.stdout.strip())
-    if not repo_slug:
-        return {"ok": False, "message": "Origin is not a GitHub repository."}
-
-    try:
-        release = fetch_latest_github_release(repo_slug)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return {
-                "ok": False,
-                "message": "No published GitHub releases found for this repository.",
-            }
-        return {"ok": False, "message": f"Release lookup failed (HTTP {exc.code})."}
-    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        return {"ok": False, "message": f"Release lookup failed: {exc}"}
-
-    latest_tag = release.get("tag_name")
-    if not latest_tag:
-        return {"ok": False, "message": "Latest release did not include a tag."}
-
-    local_tags = _run_command(["git", "tag", "--points-at", "HEAD"])
-    if local_tags.returncode != 0:
-        return {"ok": False, "message": "Unable to inspect local git tags."}
-    head_tags = {tag.strip() for tag in local_tags.stdout.splitlines() if tag.strip()}
-
-    return {
-        "ok": True,
-        "repo": repo_slug,
-        "latest_release": release,
-        "head_tags": sorted(head_tags),
-        "update_available": latest_tag not in head_tags,
-    }
-
-
-def run_auto_update():
-    repo_root_result = _run_command(["git", "rev-parse", "--show-toplevel"])
-    if repo_root_result.returncode != 0:
-        return {
-            "ok": False,
-            "message": "Unable to locate git repository root for update.",
-            "steps": [],
-        }
-
-    repo_root = repo_root_result.stdout.strip()
-    steps = []
-
-    pull_result = _run_command(["git", "pull", "--ff-only"], cwd=repo_root)
-    steps.append(
-        {
-            "name": "git pull --ff-only",
-            "returncode": pull_result.returncode,
-            "stdout": pull_result.stdout.strip(),
-            "stderr": pull_result.stderr.strip(),
-        }
-    )
-    if pull_result.returncode != 0:
-        return {
-            "ok": False,
-            "message": "Update failed while pulling latest changes from git remote.",
-            "steps": steps,
-        }
-
-    requirements_path = os.path.join(repo_root, "requirements.txt")
-    if os.path.exists(requirements_path):
-        pip_result = _run_command(
-            [sys.executable, "-m", "pip", "install", "-r", requirements_path],
-            cwd=repo_root,
-        )
-        steps.append(
-            {
-                "name": f"{sys.executable} -m pip install -r requirements.txt",
-                "returncode": pip_result.returncode,
-                "stdout": pip_result.stdout.strip(),
-                "stderr": pip_result.stderr.strip(),
-            }
-        )
-        if pip_result.returncode != 0:
-            return {
-                "ok": False,
-                "message": "Git update succeeded, but dependency refresh failed.",
-                "steps": steps,
-            }
-
-    return {
-        "ok": True,
-        "message": "μCLI update completed successfully.",
-        "steps": steps,
-    }
-
-
 def select_provider_and_model(
     args_provider, args_model, ollama_host=None, allow_prompt=True
 ):
@@ -812,7 +690,7 @@ def select_provider_and_model(
             raise ValueError("A valid --provider is required in non-interactive mode.")
         console.print("\n[bold cyan]Available Providers:[/bold cyan]")
         for i, p in enumerate(providers, 1):
-            console.print(f" {i}. {p}")
+            console.print(f" {i}. {p}", markup=False)
         choice = IntPrompt.ask(
             "Select a provider", choices=[str(i) for i in range(1, len(providers) + 1)]
         )
@@ -843,9 +721,9 @@ def select_provider_and_model(
                 f"A valid --model is required for provider '{provider_name}' in "
                 "non-interactive mode."
             )
-        console.print(f"\n[bold cyan]Available Models for {provider_name}:[/bold cyan]")
+        console.print(f"\n[bold cyan]Available Models for {safe_markup(provider_name)}:[/bold cyan]")
         for i, m in enumerate(models, 1):
-            console.print(f" {i}. {m}")
+            console.print(f" {i}. {m}", markup=False)
 
         choice = IntPrompt.ask(
             "Select a model", choices=[str(i) for i in range(1, len(models) + 1)]
@@ -856,36 +734,147 @@ def select_provider_and_model(
     return provider
 
 
+def _safe_delete_session(session_manager, name: str, *, silent: bool = False) -> None:
+    """Drop a session at startup, bypassing the active-session guard.
+
+    `SessionManager.delete_session` refuses to remove the currently-
+    active session — but at startup `current_session_name` is just the
+    bootstrap default placeholder, the user hasn't loaded anything
+    yet. Temporarily clear it so any session can be deleted, then
+    restore (unless we just deleted the placeholder itself).
+
+    When `silent=True` the SessionManager's UI is detached for the
+    duration of the call so its `show_info("Deleted session: ...")`
+    print doesn't punch a hole through an active TUI render (the
+    interactive picker uses this)."""
+    prior_active = session_manager.current_session_name
+    prior_ui = getattr(session_manager, "ui", None)
+    session_manager.current_session_name = None
+    if silent:
+        session_manager.ui = None
+    try:
+        session_manager.delete_session(name)
+    finally:
+        if prior_active and prior_active != name:
+            session_manager.current_session_name = prior_active
+        if silent:
+            session_manager.ui = prior_ui
+
+
 def choose_session(session_manager):
+    """Interactive session picker at startup.
+
+    Prefers an arrow-key + key-shortcut picker (prompt-toolkit). Falls
+    back to a numbered IntPrompt menu when the TTY isn't suitable
+    (CI, weird shells, redirected stdin)."""
     sessions = session_manager.get_session_list()
     if not sessions:
         return "new", None
 
-    console.print("\n[bold cyan]Available Sessions:[/bold cyan]")
-    for i, s in enumerate(sessions, 1):
-        console.print(f" {i}. {s}")
-    console.print(f" {len(sessions) + 1}. [New Session]")
+    try:
+        from mu.ui.session_picker import run_interactive_picker
 
-    choice = IntPrompt.ask(
-        "Select a session", choices=[str(i) for i in range(1, len(sessions) + 2)]
-    )
+        action, name = run_interactive_picker(
+            sessions,
+            on_delete=lambda n: _safe_delete_session(session_manager, n, silent=True),
+        )
+    except Exception:
+        # Fall back to the numbered picker so non-TTY environments
+        # (CI, pipes) still work.
+        return _choose_session_numbered(session_manager)
 
-    if choice == len(sessions) + 1:
+    if action == "load":
+        return "load", name
+    if action == "new":
         from rich.prompt import Prompt
 
-        name = Prompt.ask(
+        raw = Prompt.ask(
             "Enter name for new session (optional, press enter for default)"
         )
-        return "new", name if name else None
-    else:
+        return "new", raw if raw else None
+    # "quit" — caller treats this as a clean exit.
+    raise SystemExit(0)
+
+
+def _choose_session_numbered(session_manager):
+    """Numbered fallback for environments where the prompt-toolkit picker
+    can't run. Same behavior as before: numbered list + delete sub-flow."""
+    while True:
+        sessions = session_manager.get_session_list()
+        if not sessions:
+            return "new", None
+
+        console.print("\n[bold cyan]Available Sessions:[/bold cyan]")
+        for i, s in enumerate(sessions, 1):
+            console.print(f" {i}. {s}", markup=False)
+        new_idx = len(sessions) + 1
+        delete_idx = len(sessions) + 2
+        console.print(f" {new_idx}. [bold green][New Session][/bold green]")
+        console.print(f" {delete_idx}. [bold red][Delete a session…][/bold red]")
+
+        choice = IntPrompt.ask(
+            "Select a session",
+            choices=[str(i) for i in range(1, delete_idx + 1)],
+        )
+
+        if choice == new_idx:
+            from rich.prompt import Prompt
+
+            name = Prompt.ask(
+                "Enter name for new session (optional, press enter for default)"
+            )
+            return "new", name if name else None
+        if choice == delete_idx:
+            _delete_session_flow(session_manager, sessions)
+            continue
         return "load", sessions[choice - 1]
+
+
+def _delete_session_flow(session_manager, sessions):
+    """Numbered prompt → confirm → delete. Used by the fallback picker."""
+    if not sessions:
+        return
+
+    console.print("\n[bold red]Delete a session[/bold red]")
+    for i, s in enumerate(sessions, 1):
+        console.print(f" {i}. {s}", markup=False)
+    cancel_idx = len(sessions) + 1
+    console.print(f" {cancel_idx}. [dim][Cancel][/dim]")
+
+    choice = IntPrompt.ask(
+        "Pick a session to delete",
+        choices=[str(i) for i in range(1, cancel_idx + 1)],
+    )
+    if choice == cancel_idx:
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
+    target = sessions[choice - 1]
+    from rich.prompt import Confirm
+
+    if not Confirm.ask(
+        f"Delete session [bold red]{target!r}[/bold red]? This cannot be undone.",
+        default=False,
+    ):
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
+    _safe_delete_session(session_manager, target)
 
 
 def sync_provider_settings(session):
     if isinstance(session.provider, OllamaProvider):
-        # Default Ollama host is http://localhost:11434
-        host = session.variables.get("ollama_host", "http://localhost:11434")
-        session.provider.host = host
+        # Respect a per-session override for ollama_host; otherwise let the
+        # provider's own resolution (OLLAMA_HOST env → OLLAMA_API_KEY hosted
+        # → localhost) stand.
+        host_override = session.variables.get("ollama_host")
+        if host_override:
+            session.provider.host = host_override
+            session.provider.invalidate_preflight()
+        # Bind variables so the provider picks up `/set ollama_num_ctx`
+        # etc. on the next call.
+        if hasattr(session.provider, "bind_session_variables"):
+            session.provider.bind_session_variables(session.variables)
 
 
 def build_session(args, ui, allow_prompt=True):
@@ -979,6 +968,30 @@ def build_session(args, ui, allow_prompt=True):
         session.variables["yolo"] = True
         session.session_manager.save_history(session.folder_context)
 
+    # Auto-load hooks.json and MCP servers from `.mu/`. Failures log a
+    # warning and continue — one bad config file should not block the REPL.
+    try:
+        from mu.agent.hooks_config import load_hooks_from_config
+
+        load_hooks_from_config()
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("hooks.json: load failed: %s", exc)
+    try:
+        import atexit as _atexit
+
+        from mu.mcp import close_all as _mcp_close_all
+        from mu.mcp import register_all as _mcp_register_all
+
+        session._mcp_clients = _mcp_register_all()
+        if session._mcp_clients:
+            # Make sure subprocess'd MCP servers don't outlive the REPL.
+            # The closure captures the list reference, so `/mcp reload`
+            # replacing `session._mcp_clients` is also picked up here.
+            _atexit.register(lambda: _mcp_close_all(session._mcp_clients))
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("mcp.json: load failed: %s", exc)
+        session._mcp_clients = []
+
     sync_provider_settings(session)
     return session
 
@@ -999,1394 +1012,31 @@ def serialize_command_result(session, command, ok=True, message=None, data=None)
 
 
 def handle_command(session, user_input, allow_prompt=True):
-    ui = session.ui
+    """Thin shim around `mu.commands.dispatch`.
+
+    Every slash command lives in `mu/commands/<module>.py`. This function
+    exists only to serialize the registry's `CommandResult` into the
+    dict shape callers (REPL loop, web UI, JSON output) expect.
+    """
     parts = user_input.split(" ", 1)
     cmd = parts[0].lower()
-    arg = parts[1] if len(parts) > 1 else ""
 
-    if cmd in ["/quit", "/exit", "/q"]:
-        if allow_prompt:
-            print("Goodbye!")
-        return serialize_command_result(
-            session, cmd, message="Goodbye!", data={"exit": True}
-        )
+    import mu.commands as _mu_commands
 
-    if cmd == "/continue":
-        paused_text = str(getattr(session, "paused_execution_text", "") or "").strip()
-        if not paused_text:
-            return serialize_command_result(
-                session,
-                cmd,
-                ok=False,
-                message="No paused execution to continue.",
-            )
-        if allow_prompt:
-            console.print("[dim]Resuming paused execution...[/dim]")
-        send_result = session.send_message(paused_text)
+    new_result = _mu_commands.dispatch(session, user_input, allow_prompt=allow_prompt)
+    if new_result is not None:
+        data = dict(new_result.data or {})
+        if new_result.exit:
+            data["exit"] = True
         return serialize_command_result(
             session,
             cmd,
-            ok=bool(send_result.get("ok", True)),
-            message="Resumed paused execution.",
-            data={"resumed_text": paused_text, "send_result": send_result},
+            ok=new_result.ok,
+            message=new_result.message,
+            data=data,
         )
 
-    if cmd in ["/help", "/h"]:
-        if allow_prompt:
-            print_help()
-        return serialize_command_result(session, cmd, data={"commands_help": True})
-
-    if cmd in ["/clear", "/c"]:
-        session.session_manager.clear_current_history()
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session, cmd, message="Conversation history cleared."
-        )
-
-    if cmd in ["/view", "/v"]:
-        if allow_prompt:
-            session.session_manager.view_history()
-        return serialize_command_result(
-            session,
-            cmd,
-            data={"history": session.session_manager.history},
-        )
-
-    if cmd in ["/file", "/f", "/add"]:
-        if not arg:
-            if ui:
-                ui.show_error("Usage: /file <path_to_file>")
-            return serialize_command_result(
-                session, cmd, ok=False, message="Usage: /file <path_to_file>"
-            )
-        session.add_file(arg)
-        return serialize_command_result(
-            session,
-            cmd,
-            message=f"Staged file: {arg}",
-            data={"staged_files": list(session.staged_files)},
-        )
-
-    if cmd in ["/clearfiles", "/cf"]:
-        session.clear_files()
-        return serialize_command_result(session, cmd, message="Staged files cleared.")
-
-    if cmd in ["/clear-workspace", "/cw"]:
-        session.folder_context.folders.clear()
-        session.folder_context.workspace_file_tree = None
-        session.session_manager.save_history(session.folder_context)
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session, cmd, message="Workspace folders cleared."
-        )
-
-    if cmd in ["/folder", "/dir"]:
-        if arg:
-            sub_parts = arg.split(" ", 1)
-            if sub_parts[0] == "clear":
-                session.folder_context.folders.clear()
-                session.folder_context.workspace_file_tree = None
-                session.session_manager.save_history(session.folder_context)
-                refresh_memory_hud(session, ui)
-                return serialize_command_result(
-                    session, cmd, message="Workspace folders cleared."
-                )
-            if sub_parts[0] == "remove" and len(sub_parts) > 1:
-                path_to_remove = sub_parts[1].strip("'\"")
-                removed = session.folder_context.remove_folder(path_to_remove)
-                if removed:
-                    if ui:
-                        ui.show_info(f"Removed folder from context: {path_to_remove}")
-                    session.session_manager.save_history(session.folder_context)
-                    refresh_memory_hud(session, ui)
-                    return serialize_command_result(
-                        session,
-                        cmd,
-                        message=f"Removed folder from context: {path_to_remove}",
-                    )
-                if ui:
-                    ui.show_error(f"Folder not found in context: {path_to_remove}")
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message=f"Folder not found in context: {path_to_remove}",
-                )
-
-            added = []
-            invalid = []
-            try:
-                paths = shlex.split(arg)
-            except ValueError:
-                paths = [arg.strip("'\"")]
-
-            for path in paths:
-                path = path.strip("'\"")
-                if session.folder_context.add_folder(path):
-                    added.append(path)
-                    if ui:
-                        ui.show_info(f"Added folder context: {path}")
-                    if len(session.folder_context.folders) == 1:
-                        try:
-                            os.chdir(session.folder_context.folders[0])
-                            if ui:
-                                ui.show_info(f"Switched workspace to: {os.getcwd()}")
-                        except Exception:
-                            pass
-                else:
-                    invalid.append(path)
-                    if ui:
-                        ui.show_error(f"Folder not found or invalid: {path}")
-
-            session.session_manager.save_history(session.folder_context)
-            if added and ui:
-                ui.show_info(
-                    "Files cached as initial context. Changes will be provided as diffs."
-                )
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                ok=not invalid,
-                message="Workspace folders updated.",
-                data={"added": added, "invalid": invalid},
-            )
-
-        if allow_prompt and not session.folder_context.folders:
-            console.print("[yellow]No folders currently monitored.[/yellow]")
-            console.print("Usage: /folder <path> OR /folder remove <path>")
-        else:
-            console.print(
-                f"[dim]Workspace folders: {session.folder_context.folders}[/dim]"
-            )
-
-        return serialize_command_result(
-            session,
-            cmd,
-            data={"folders": list(session.folder_context.folders)},
-        )
-
-    if cmd in ["/list", "/ls"]:
-        if allow_prompt:
-            session.session_manager.list_sessions()
-        return serialize_command_result(
-            session,
-            cmd,
-            data={"sessions": session.session_manager.get_session_list()},
-        )
-
-    if cmd in ["/new"]:
-        name = arg.strip() if arg else None
-        ollama_host = session.variables.get("ollama_host")
-        if not allow_prompt and not (
-            session.provider.name and session.provider.model_name
-        ):
-            return serialize_command_result(
-                session,
-                cmd,
-                ok=False,
-                message="Non-interactive mode requires an active provider/model to create a new session.",
-            )
-        if allow_prompt:
-            new_provider = select_provider_and_model(
-                None,
-                None,
-                ollama_host=ollama_host,
-                allow_prompt=allow_prompt,
-            )
-            session.provider = new_provider
-        session.session_manager.new_session(
-            name,
-            session.provider.name,
-            session.provider.model_name,
-        )
-        session.staged_files = []
-        session.sync_runtime_state()
-        if ui and hasattr(ui, "set_variables"):
-            ui.set_variables(session.variables)
-        if allow_prompt:
-            print_splash(session)
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session,
-            cmd,
-            message=f"Started new session: {session.session_manager.current_session_name}",
-        )
-
-    if cmd in ["/load", "/open"]:
-        if not arg:
-            if ui:
-                ui.show_error("Usage: /load <session_name>")
-            return serialize_command_result(
-                session, cmd, ok=False, message="Usage: /load <session_name>"
-            )
-        session.session_manager.switch_session(arg.strip())
-        session.staged_files = []
-        session.sync_runtime_state()
-        if ui and hasattr(ui, "set_variables"):
-            ui.set_variables(session.variables)
-        provider_config = session.session_manager.provider_config
-        if provider_config.get("provider") and provider_config.get("model"):
-            ollama_host = session.variables.get("ollama_host")
-            session.provider = init_provider(
-                provider_config["provider"],
-                provider_config["model"],
-                ollama_host,
-            )
-        sync_provider_settings(session)
-        if allow_prompt:
-            print_splash(session)
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session,
-            cmd,
-            message=f"Loaded session: {session.session_manager.current_session_name}",
-        )
-
-    if cmd in ["/delete", "/rm"]:
-        if not arg:
-            if ui:
-                ui.show_error("Usage: /delete <session_name>")
-            return serialize_command_result(
-                session, cmd, ok=False, message="Usage: /delete <session_name>"
-            )
-        session.session_manager.delete_session(arg.strip())
-        return serialize_command_result(
-            session, cmd, message=f"Deleted session request: {arg.strip()}"
-        )
-
-    if cmd in ["/system", "/sys"]:
-        if arg:
-            session.system_instruction = arg
-            if ui:
-                ui.show_info("System prompt updated.")
-            return serialize_command_result(
-                session, cmd, message="System prompt updated."
-            )
-        current = session.system_instruction if session.system_instruction else "None"
-        if allow_prompt:
-            console.print(f"[blue]Current System Prompt:\n{current}")
-        return serialize_command_result(
-            session, cmd, data={"system_instruction": current}
-        )
-
-    if cmd == "/model":
-        if not arg:
-            if not allow_prompt:
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="Non-interactive mode requires /model <name>.",
-                )
-            models = session.provider.get_available_models()
-            if models:
-                console.print("\n[bold cyan]Available Models:[/bold cyan]")
-                for i, model in enumerate(models, 1):
-                    console.print(f" {i}. {model}")
-                choice = IntPrompt.ask(
-                    "Select a model",
-                    choices=[str(i) for i in range(1, len(models) + 1)],
-                )
-                arg = models[int(choice) - 1]
-            else:
-                return serialize_command_result(
-                    session, cmd, ok=False, message="No models available."
-                )
-
-        session.provider.model_name = arg.strip()
-        session.session_manager.provider_config = {
-            "provider": session.provider.name,
-            "model": session.provider.model_name,
-        }
-        session.session_manager.save_history()
-        if ui:
-            ui.show_info(f"Model changed to: {session.provider.model_name}")
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session, cmd, message=f"Model changed to {session.provider.model_name}."
-        )
-
-    if cmd == "/provider":
-        if not arg and not allow_prompt:
-            return serialize_command_result(
-                session,
-                cmd,
-                ok=False,
-                message="Non-interactive mode requires /provider <name>.",
-            )
-        try:
-            ollama_host = session.variables.get("ollama_host")
-            session.provider = select_provider_and_model(
-                arg.strip() if arg else None,
-                session.provider.model_name if not allow_prompt else None,
-                ollama_host=ollama_host,
-                allow_prompt=allow_prompt,
-            )
-            session.session_manager.provider_config = {
-                "provider": session.provider.name,
-                "model": session.provider.model_name,
-            }
-            session.session_manager.save_history()
-            if ui:
-                ui.show_info("Provider changed successfully!")
-            if allow_prompt:
-                print_splash(session)
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session, cmd, message="Provider changed successfully."
-            )
-        except Exception as exc:
-            if ui:
-                ui.show_error(f"Failed to change provider: {exc}")
-            return serialize_command_result(session, cmd, ok=False, message=str(exc))
-
-    if cmd == "/set":
-        if not arg:
-            if ui:
-                ui.show_error("Usage: /set <key> <value>")
-            return serialize_command_result(
-                session, cmd, ok=False, message="Usage: /set <key> <value>"
-            )
-        if "=" in arg:
-            key, value = arg.split("=", 1)
-        elif " " in arg:
-            key, value = arg.split(" ", 1)
-        else:
-            if ui:
-                ui.show_error("Usage: /set <key> <value> OR /set <key>=<value>")
-            return serialize_command_result(
-                session,
-                cmd,
-                ok=False,
-                message="Usage: /set <key> <value> OR /set <key>=<value>",
-            )
-        key = key.strip()
-        value = value.strip()
-        try:
-            from utils.config import validate_and_cast
-
-            session.variables[key] = validate_and_cast(key, value)
-            session.session_manager.save_history(session.folder_context)
-            if ui:
-                ui.show_info(
-                    f"Set variable: {key} = {session.variables[key]} ({type(session.variables[key]).__name__})"
-                )
-            if key == "ollama_host":
-                sync_provider_settings(session)
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                message=f"Set variable: {key}",
-                data={"key": key, "value": session.variables[key]},
-            )
-        except ValueError as exc:
-            if ui:
-                ui.show_error(f"Error: {exc}")
-            return serialize_command_result(session, cmd, ok=False, message=str(exc))
-
-    if cmd == "/get":
-        key = arg.strip()
-        if not key:
-            if allow_prompt:
-                for variable_key, variable_value in session.variables.items():
-                    console.print(f"[blue]{variable_key}[/blue] = {variable_value}")
-            return serialize_command_result(
-                session, cmd, data={"variables": dict(session.variables)}
-            )
-        return serialize_command_result(
-            session,
-            cmd,
-            data={"key": key, "value": session.variables.get(key)},
-        )
-
-    if cmd == "/unset":
-        key = arg.strip()
-        if not key:
-            if ui:
-                ui.show_error("Usage: /unset <key> OR /unset --all")
-            return serialize_command_result(
-                session, cmd, ok=False, message="Usage: /unset <key> OR /unset --all"
-            )
-        if key == "--all":
-            session.variables.clear()
-            from utils.config import DEFAULT_VARIABLES
-
-            session.variables.update(DEFAULT_VARIABLES)
-            session.session_manager.save_history(session.folder_context)
-            sync_provider_settings(session)
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session, cmd, message="All variables reset to defaults."
-            )
-        if key in session.variables:
-            from utils.config import VARIABLE_SCHEMA
-
-            if key in VARIABLE_SCHEMA:
-                session.variables[key] = VARIABLE_SCHEMA[key]["default"]
-            else:
-                del session.variables[key]
-            session.session_manager.save_history(session.folder_context)
-            if key == "ollama_host":
-                sync_provider_settings(session)
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                message=f"Unset variable: {key}",
-                data={"key": key, "value": session.variables.get(key)},
-            )
-        return serialize_command_result(
-            session, cmd, ok=False, message=f"Variable '{key}' not found."
-        )
-
-    if cmd == "/flush":
-        if hasattr(session, "collation_buffer"):
-            count = len(session.collation_buffer.entries)
-            if count == 0:
-                if ui:
-                    ui.show_info("Collation buffer is empty.")
-                return serialize_command_result(
-                    session, cmd, message="Collation buffer is empty."
-                )
-            collated = session.collation_buffer.flush()
-            text = "### Collated Context Flushed by User:\n\n" + "\n\n".join(collated)
-            send_result = session.send_message(text)
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                message=f"Flushed {count} items from buffer into conversation history.",
-                data={"flushed_items": count, "send_result": send_result},
-            )
-
-    if cmd == "/variables":
-        if allow_prompt:
-            for variable_key, variable_value in session.variables.items():
-                console.print(
-                    f"[blue]{variable_key}[/blue] = [green]{variable_value}[/green]"
-                )
-        return serialize_command_result(
-            session, cmd, data={"variables": dict(session.variables)}
-        )
-
-    if cmd == "/research":
-        research_query = (arg or "").strip()
-        research_cmd = research_query.lower()
-
-        if research_cmd in {"status", ""}:
-            active_mode = str(session.variables.get("agent_mode", "default"))
-            sources = _extract_recent_sources(session.session_manager.history, limit=6)
-            return serialize_command_result(
-                session,
-                cmd,
-                message="Research status snapshot.",
-                data={
-                    "current_mode": active_mode,
-                    "available_tools": _research_tool_names(),
-                    "recent_sources": sources,
-                    "citation_policy": "When researching, include source URLs and cite claims.",
-                },
-            )
-
-        if research_cmd == "sources":
-            sources = _extract_recent_sources(session.session_manager.history, limit=20)
-            return serialize_command_result(
-                session,
-                cmd,
-                message="Collected recent research sources.",
-                data={"sources": sources},
-            )
-
-        if not research_query:
-            return serialize_command_result(
-                session,
-                cmd,
-                ok=False,
-                message="Usage: /research <status|sources|query>",
-            )
-        session.variables["agent_mode"] = "research"
-        session.session_manager.save_history(session.folder_context)
-        refresh_memory_hud(session, ui)
-        research_prompt = (
-            "Research request:\n"
-            f"{research_query}\n\n"
-            "Requirements:\n"
-            "- Prefer primary/official sources when possible.\n"
-            "- Include explicit source URLs.\n"
-            "- Clearly separate facts vs inference.\n"
-        )
-        send_result = session.send_message(research_prompt)
-        return serialize_command_result(
-            session,
-            cmd,
-            ok=bool(send_result.get("ok", True)),
-            message="Executed research query.",
-            data={"query": research_query, "send_result": send_result},
-        )
-
-    if cmd == "/mode":
-        valid_modes = list(AGENT_MODE_METADATA.keys())
-        if arg and arg.lower() in valid_modes:
-            session.variables["agent_mode"] = arg.lower()
-            session.session_manager.save_history(session.folder_context)
-            refresh_memory_hud(session, ui)
-            mode_meta = AGENT_MODE_METADATA[arg.lower()]
-            return serialize_command_result(
-                session,
-                cmd,
-                message=(
-                    f"Agent strategy set to: {arg.lower()} — "
-                    f"{mode_meta.get('description', '')} "
-                    f"({mode_meta.get('documentation', '')})"
-                ).strip(),
-                data={
-                    "current_mode": arg.lower(),
-                    "mode": {
-                        "name": arg.lower(),
-                        **mode_meta,
-                    },
-                    "available_modes": AGENT_MODE_METADATA,
-                },
-            )
-        if not arg:
-            if allow_prompt:
-                print_mode_overview(session)
-            return serialize_command_result(
-                session,
-                cmd,
-                message="Listed available agent modes.",
-                data={
-                    "current_mode": session.variables.get("agent_mode", "default"),
-                    "available_modes": AGENT_MODE_METADATA,
-                },
-            )
-        if allow_prompt:
-            print_mode_overview(session)
-        return serialize_command_result(
-            session,
-            cmd,
-            ok=False,
-            message=f"Unknown mode: {arg}",
-            data={
-                "current_mode": session.variables.get("agent_mode", "default"),
-                "available_modes": AGENT_MODE_METADATA,
-            },
-        )
-
-    if cmd == "/workspace":
-        workspace_arg = arg.strip().lower()
-        if workspace_arg == "clear":
-            session.folder_context.folders.clear()
-            session.folder_context.workspace_file_tree = None
-            session.session_manager.save_history(session.folder_context)
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session, cmd, message="Workspace folders cleared."
-            )
-
-        console.print("\n[bold cyan]Workspace Folders:[/bold cyan]")
-        console.print(session.folder_context.get_tree_map())
-        return serialize_command_result(
-            session,
-            cmd,
-            data={"folders": list(session.folder_context.folders)},
-        )
-
-    if cmd in ["/feature", "/features"]:
-        feature_parts = arg.split(" ", 1) if arg else ["list"]
-        feature_cmd = feature_parts[0].lower()
-        feature_arg = feature_parts[1].strip() if len(feature_parts) > 1 else ""
-
-        if feature_cmd in {"exit", "unload"}:
-            if not isinstance(session.session_manager.get_feature_state(), dict):
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="No active feature to exit.",
-                )
-            session.session_manager.clear_feature_state(session.folder_context)
-            session.sync_runtime_state()
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                message="Exited active feature context.",
-                data={
-                    "active_feature_id": session.session_manager.active_feature_id,
-                    "feature": session.session_manager.get_feature_state(),
-                },
-            )
-
-        if feature_cmd == "new":
-            if not feature_arg:
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="Usage: /feature new <feature_name>",
-                )
-            record = session.session_manager.create_feature_record(
-                feature_arg,
-                directory=_default_feature_directory(session, feature_arg),
-                feature_request=feature_arg,
-            )
-            session.sync_runtime_state()
-            markdown = build_feature_markdown(
-                {
-                    **record,
-                    "token_total": session.session_manager.token_counts.get("total", 0),
-                }
-            )
-            if allow_prompt:
-                console.print(Markdown(markdown))
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                message=f"Created feature: {record['feature_id']}",
-                data={
-                    "feature": record,
-                    "markdown": markdown,
-                    "features": session.session_manager.list_features(),
-                },
-            )
-
-        if feature_cmd in {"list", ""}:
-            features = [
-                refresh_feature_record(session, feature["feature_id"]) or feature
-                for feature in session.session_manager.list_features()
-            ]
-            if allow_prompt:
-                table = Table(title="Session Features", box=box.ROUNDED)
-                table.add_column("ID", style="cyan", no_wrap=True)
-                table.add_column("Current", style="yellow", justify="center")
-                table.add_column("Status", style="green")
-                table.add_column("Name", style="white")
-                table.add_column("Directory", style="magenta")
-                if features:
-                    for feature in features:
-                        table.add_row(
-                            feature.get("feature_id", ""),
-                            (
-                                "*"
-                                if feature.get("feature_id")
-                                == session.session_manager.active_feature_id
-                                else ""
-                            ),
-                            feature.get("status", "unknown"),
-                            feature.get("feature_name", ""),
-                            feature.get("directory", ""),
-                        )
-                else:
-                    table.add_row("-", "", "none", "No features saved", "")
-                console.print(table)
-            return serialize_command_result(
-                session,
-                cmd,
-                message="Listed session features.",
-                data={
-                    "features": features,
-                    "active_feature_id": session.session_manager.active_feature_id,
-                },
-            )
-
-        if feature_cmd == "load":
-            if not feature_arg:
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="Usage: /feature load <feature_id>",
-                )
-            record = refresh_feature_record(session, feature_arg)
-            if not isinstance(record, dict):
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message=f"Feature '{feature_arg}' not found.",
-                )
-            activated = session.session_manager.activate_feature(record["feature_id"])
-            session.sync_runtime_state()
-            markdown = build_feature_markdown(
-                {
-                    **activated,
-                    "token_total": session.session_manager.token_counts.get("total", 0),
-                }
-            )
-            if allow_prompt:
-                console.print(Markdown(markdown))
-            refresh_memory_hud(session, ui)
-            return serialize_command_result(
-                session,
-                cmd,
-                message=f"Loaded feature: {record['feature_id']}",
-                data={"feature": activated, "markdown": markdown},
-            )
-
-        if feature_cmd == "delete":
-            if not feature_arg:
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="Usage: /feature delete <feature_id>",
-                )
-            deleted = session.session_manager.delete_feature(feature_arg)
-            session.sync_runtime_state()
-            refresh_memory_hud(session, ui)
-            if not isinstance(deleted, dict):
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message=f"Feature '{feature_arg}' not found.",
-                )
-            return serialize_command_result(
-                session,
-                cmd,
-                message=f"Deleted feature: {deleted['feature_id']}",
-                data={"deleted_feature": deleted},
-            )
-
-        if feature_cmd == "help":
-            usage = (
-                "Feature workflow commands:\n"
-                "- /feature create plan <name>\n"
-                "- /feature create phase <title> | <goal>\n"
-                "- /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>\n"
-                "- /feature show <board|execution|reviews>\n"
-                "- /feature move <task_id> <status>\n"
-                "- /feature block <task_id> <reason>\n"
-                "- /feature review auto\n"
-                "- /feature review <task_id> <summary>\n"
-                "- /feature archive <task_id>\n"
-                "- /feature monitor [refresh_seconds] [iterations|continuous]\n"
-                "\nExamples:\n"
-                "- /feature create plan Checkout Cleanup\n"
-                "- /feature create phase API Hardening | Reduce flaky retries\n"
-                "- /feature create task 1 | Validate headers | Add strict parsing | Unit tests;Docs updated\n"
-                "- /feature move 1 in_progress\n"
-                "- /feature block 1 waiting_for_user_input\n"
-                "- /feature show board\n"
-                "- /feature monitor 1.0 10\n"
-            )
-            if allow_prompt:
-                console.print(Panel(usage, title="Feature Command Help", border_style="cyan"))
-            return serialize_command_result(session, cmd, message="Rendered feature help.", data={"usage": usage})
-
-        if feature_cmd == "create":
-            create_parts = feature_arg.split(" ", 1) if feature_arg else []
-            if len(create_parts) < 2:
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="Usage: /feature create <plan|phase|task> <args>",
-                )
-            create_kind = create_parts[0].lower().strip()
-            create_payload = create_parts[1].strip()
-            if create_kind == "plan":
-                mode_choice = _feature_prompt_with_logging(
-                    session,
-                    question="Select planning style",
-                    options=[
-                        ("balanced", "Balanced (Recommended): detail + speed"),
-                        ("fast", "Fast: minimal planning, rapid execution"),
-                        ("thorough", "Thorough: deep planning before coding"),
-                    ],
-                    prompt_id="plan_style",
-                    allow_prompt=allow_prompt,
-                    context={"feature_name": create_payload},
-                )
-                confirm_result = _feature_confirm_deny_edit_loop(
-                    session,
-                    label="plan request",
-                    value=create_payload,
-                    allow_prompt=allow_prompt,
-                    context={"kind": "plan_create"},
-                )
-                if confirm_result["decision"] == "deny":
-                    return serialize_command_result(
-                        session,
-                        cmd,
-                        ok=False,
-                        message="Plan creation cancelled. Re-run with a revised name.",
-                    )
-                response = _execute_feature_tool(
-                    session,
-                    "create_feature",
-                    {
-                        "feature_name": confirm_result["value"],
-                        "feature_request": confirm_result["value"],
-                        "design_plan": f"cli_planning_style={mode_choice}",
-                    },
-                )
-                ok = bool(response.get("ok"))
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=ok,
-                    message="Created feature plan shell." if ok else str(response.get("error", response)),
-                    data=response,
-                )
-            if create_kind == "phase":
-                phase_parts = [part.strip() for part in create_payload.split("|", 1)]
-                if len(phase_parts) != 2:
-                    return serialize_command_result(
-                        session, cmd, ok=False, message="Usage: /feature create phase <title> | <goal>"
-                    )
-                confirm_result = _feature_confirm_deny_edit_loop(
-                    session,
-                    label="phase title",
-                    value=phase_parts[0],
-                    allow_prompt=allow_prompt,
-                    context={"kind": "phase_create"},
-                )
-                if confirm_result["decision"] == "deny":
-                    return serialize_command_result(
-                        session,
-                        cmd,
-                        ok=False,
-                        message="Phase creation cancelled. Re-run with updated title/goal.",
-                    )
-                feature_state = session.session_manager.get_feature_state() or {}
-                plan = (feature_state.get("feature_plan") if isinstance(feature_state, dict) else {}) or {}
-                existing = list(plan.get("phases_meta", []))
-                next_id = len(existing) + 1
-                existing.append({"id": next_id, "title": confirm_result["value"], "goal": phase_parts[1], "order": next_id})
-                response = _execute_feature_tool(
-                    session,
-                    "create_phases",
-                    {"phases": existing, "replace_existing": True},
-                )
-                ok = bool(response.get("ok"))
-                return serialize_command_result(session, cmd, ok=ok, message="Phase created." if ok else str(response.get("error", response)), data=response)
-            if create_kind == "task":
-                task_parts = [part.strip() for part in create_payload.split("|")]
-                if len(task_parts) != 4:
-                    return serialize_command_result(
-                        session,
-                        cmd,
-                        ok=False,
-                        message="Usage: /feature create task <phase_id> | <title> | <overview> | <exit1;exit2>",
-                    )
-                exit_criteria = [item.strip() for item in task_parts[3].split(";") if item.strip()]
-                confirm_result = _feature_confirm_deny_edit_loop(
-                    session,
-                    label="task title",
-                    value=task_parts[1],
-                    allow_prompt=allow_prompt,
-                    context={"kind": "task_create", "phase_id": task_parts[0]},
-                )
-                if confirm_result["decision"] == "deny":
-                    return serialize_command_result(
-                        session,
-                        cmd,
-                        ok=False,
-                        message="Task creation cancelled. Re-run with an updated task payload.",
-                    )
-                response = _execute_feature_tool(
-                    session,
-                    "create_task",
-                    {
-                        "phase_id": int(task_parts[0]),
-                        "title": confirm_result["value"],
-                        "overview": task_parts[2],
-                        "exit_criteria": exit_criteria,
-                    },
-                )
-                ok = bool(response.get("ok"))
-                return serialize_command_result(session, cmd, ok=ok, message="Task created." if ok else str(response.get("error", response)), data=response)
-            return serialize_command_result(session, cmd, ok=False, message="Unknown create target. Use plan|phase|task.")
-
-        if feature_cmd == "show":
-            view = (feature_arg or "board").strip().lower()
-            feature = refresh_feature_record(session, None)
-            if not isinstance(feature, dict):
-                return serialize_command_result(session, cmd, ok=False, message="No feature selected.")
-            plan = feature.get("feature_plan", {}) if isinstance(feature.get("feature_plan"), dict) else {}
-            if view == "execution":
-                payload = _execute_feature_tool(session, "get_execution_state", {})
-                return serialize_command_result(session, cmd, message="Rendered execution view.", data=payload)
-            if view == "reviews":
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    message="Rendered review summaries.",
-                    data={"review_summaries": plan.get("review_summaries", []), "review_count": plan.get("review_count", 0)},
-                )
-            if view == "board":
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    message="Rendered board snapshot.",
-                    data={"active_tasks": plan.get("active_tasks", []), "execution": plan.get("execution", {})},
-                )
-            return serialize_command_result(session, cmd, ok=False, message="Unknown show target. Use board|execution|reviews.")
-
-        if feature_cmd == "move":
-            parts = feature_arg.split(" ", 1)
-            if len(parts) != 2:
-                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature move <task_id> <status>")
-            task_id = int(parts[0])
-            status = parts[1].strip()
-            args = {"task_id": task_id, "status": status}
-            if status == "completed":
-                feature = refresh_feature_record(session, None) or {}
-                plan = feature.get("feature_plan", {}) if isinstance(feature, dict) else {}
-                criteria = []
-                for task in plan.get("phases", []):
-                    if int(task.get("id", -1)) == task_id:
-                        criteria = list(task.get("exit_criteria", []))
-                        break
-                args["verified_exit_criteria"] = criteria
-            response = _execute_feature_tool(session, "update_task_status", args)
-            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Task moved." if response.get("ok") else str(response.get("error", response)), data=response)
-
-        if feature_cmd == "block":
-            parts = feature_arg.split(" ", 1)
-            if len(parts) != 2:
-                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature block <task_id> <reason>")
-            response = _execute_feature_tool(
-                session,
-                "block_task",
-                {"task_id": int(parts[0]), "reason": parts[1]},
-            )
-            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Task blocked." if response.get("ok") else str(response.get("error", response)), data=response)
-
-        if feature_cmd == "review":
-            if (feature_arg or "").strip().lower() == "auto":
-                response = _execute_feature_tool(session, "review_all_completed_tasks", {})
-                return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Auto-review completed tasks." if response.get("ok") else str(response.get("error", response)), data=response)
-            parts = feature_arg.split(" ", 1)
-            if len(parts) != 2:
-                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature review <task_id> <summary> OR /feature review auto")
-            response = _execute_feature_tool(
-                session,
-                "review_completed_tasks",
-                {"task_id": int(parts[0]), "summary": parts[1], "issues": []},
-            )
-            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Review recorded." if response.get("ok") else str(response.get("error", response)), data=response)
-
-        if feature_cmd == "archive":
-            if not feature_arg:
-                return serialize_command_result(session, cmd, ok=False, message="Usage: /feature archive <task_id>")
-            response = _execute_feature_tool(
-                session,
-                "archive_task",
-                {"task_id": int(feature_arg)},
-            )
-            return serialize_command_result(session, cmd, ok=bool(response.get("ok")), message="Task archived." if response.get("ok") else str(response.get("error", response)), data=response)
-
-        if feature_cmd == "monitor":
-            refresh_seconds = 2.0
-            if feature_arg:
-                try:
-                    refresh_seconds = max(0.5, float(feature_arg))
-                except ValueError:
-                    pieces = feature_arg.split()
-                    try:
-                        refresh_seconds = max(0.5, float(pieces[0]))
-                    except (ValueError, IndexError):
-                        return serialize_command_result(session, cmd, ok=False, message="Usage: /feature monitor [refresh_seconds] [iterations|continuous]")
-                    mode_arg = pieces[1].strip().lower() if len(pieces) > 1 else ""
-                else:
-                    mode_arg = ""
-            else:
-                mode_arg = ""
-            snapshots = []
-            if not allow_prompt:
-                iterations = 1
-            elif mode_arg == "continuous":
-                iterations = None
-            elif mode_arg:
-                try:
-                    iterations = max(1, int(mode_arg))
-                except ValueError:
-                    return serialize_command_result(session, cmd, ok=False, message="Usage: /feature monitor [refresh_seconds] [iterations|continuous]")
-            else:
-                iterations = 5
-            last_line = None
-            tick = 0
-            try:
-                while iterations is None or tick < iterations:
-                    payload = _execute_feature_tool(session, "get_execution_state", {})
-                    snapshots.append(payload)
-                    if allow_prompt:
-                        line = _monitor_compact_line(payload)
-                        if line != last_line:
-                            console.print(f"[cyan]{line}[/cyan]")
-                            last_line = line
-                    tick += 1
-                    if allow_prompt and (iterations is None or tick < iterations):
-                        time.sleep(refresh_seconds)
-            except KeyboardInterrupt:
-                if allow_prompt:
-                    console.print("[yellow]Monitor stopped by user.[/yellow]")
-            return serialize_command_result(
-                session,
-                cmd,
-                message="Rendered feature monitor.",
-                data={"snapshots": snapshots, "refresh_seconds": refresh_seconds, "mode": mode_arg or "fixed", "iterations": iterations if iterations is not None else "continuous"},
-            )
-
-        if feature_cmd in {"status", "phases"}:
-            feature = refresh_feature_record(session, feature_arg or None)
-            if not isinstance(feature, dict):
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="No feature selected.",
-                )
-            markdown = build_feature_markdown(
-                {
-                    **feature,
-                    "token_total": session.session_manager.token_counts.get("total", 0),
-                },
-                include_phases=feature_cmd == "phases",
-            )
-            if allow_prompt:
-                console.print(Markdown(markdown))
-            return serialize_command_result(
-                session,
-                cmd,
-                message=f"Rendered feature {feature_cmd}.",
-                data={"feature": feature, "markdown": markdown},
-            )
-
-        return serialize_command_result(
-            session,
-            cmd,
-            ok=False,
-            message=f"Unknown feature command: {feature_cmd}. Use '/feature help' for workflow-aligned guidance.",
-        )
-
-    if cmd in ["/tool", "/tools"]:
-        tool_parts = arg.split(" ", 1) if arg else ["list"]
-        tool_cmd = tool_parts[0].lower()
-        tool_name = tool_parts[1].strip() if len(tool_parts) > 1 else ""
-
-        if tool_cmd == "disable" and tool_name:
-            if tool_name not in session.disabled_tools:
-                session.disabled_tools.append(tool_name)
-            return serialize_command_result(
-                session, cmd, message=f"Tool '{tool_name}' disabled."
-            )
-        if tool_cmd == "enable" and tool_name:
-            if tool_name in session.disabled_tools:
-                session.disabled_tools.remove(tool_name)
-            return serialize_command_result(
-                session, cmd, message=f"Tool '{tool_name}' enabled."
-            )
-        if tool_cmd == "list":
-            from core.tools import TOOLS
-
-            if allow_prompt:
-                table = Table(title="Available Tools", box=box.ROUNDED, show_lines=True)
-                table.add_column("Tool", style="cyan", no_wrap=True)
-                table.add_column("Description", style="white", width=40)
-                table.add_column("Parameters", style="magenta")
-                table.add_column("Approval", style="yellow", justify="center")
-                table.add_column("Status", style="green", justify="center")
-
-                for tool in TOOLS:
-                    status = (
-                        "[red]OFF[/red]"
-                        if tool.name in session.disabled_tools
-                        else "[green]ON[/green]"
-                    )
-                    approval = "Yes" if tool.requires_approval else "No"
-                    params = []
-                    props = tool.parameters.get("properties", {})
-                    required = tool.parameters.get("required", [])
-                    for param_name, param_info in props.items():
-                        required_star = "[red]*[/red]" if param_name in required else ""
-                        param_type = param_info.get("type", "any")
-                        params.append(
-                            f"{param_name}{required_star} [dim]({param_type})[/dim]"
-                        )
-                    params_str = "\n".join(params) if params else "None"
-                    table.add_row(
-                        tool.name, tool.description, params_str, approval, status
-                    )
-                console.print(table)
-                console.print("[dim] [red]*[/red] indicates required parameter[/dim]")
-
-            tools_data = [
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                    "requires_approval": tool.requires_approval,
-                    "enabled": tool.name not in session.disabled_tools,
-                }
-                for tool in TOOLS
-            ]
-            return serialize_command_result(session, cmd, data={"tools": tools_data})
-
-        return serialize_command_result(
-            session,
-            cmd,
-            ok=False,
-            message=f"Usage: {cmd} <enable|disable|list> [toolname]",
-        )
-
-    if cmd == "/memory":
-        parts = user_input.split()
-        subcommand = parts[1].lower() if len(parts) > 1 else "status"
-
-        def build_memory_stats(store):
-            entries = list(store.entries)
-            total_hits = sum(int(entry.hits or 0) for entry in entries)
-            top_entries = sorted(
-                entries,
-                key=lambda entry: (int(entry.hits or 0), float(entry.updated_at or 0)),
-                reverse=True,
-            )[:3]
-            return {
-                "entries": len(entries),
-                "total_hits": total_hits,
-                "avg_hits": (total_hits / len(entries)) if entries else 0.0,
-                "top_entries": [entry.to_dict() for entry in top_entries],
-            }
-
-        if subcommand in ["status", "s"]:
-            task_stats = build_memory_stats(session.task_memory)
-            scratch_stats = build_memory_stats(session.turn_scratchpad)
-            layer_stats = collect_context_layers(session)
-            if allow_prompt:
-                table = Table(title="Memory Status", box=box.ROUNDED)
-                table.add_column("Type", style="cyan")
-                table.add_column("Entries", style="green", justify="right")
-                table.add_column("Hits", style="yellow", justify="right")
-                table.add_column("Avg Hits", style="magenta", justify="right")
-                table.add_column("Description", style="dim")
-
-                table.add_row(
-                    "Task Memory",
-                    str(task_stats["entries"]),
-                    str(task_stats["total_hits"]),
-                    f"{task_stats['avg_hits']:.2f}",
-                    "Longer-term task context",
-                )
-                table.add_row(
-                    "Scratchpad",
-                    str(scratch_stats["entries"]),
-                    str(scratch_stats["total_hits"]),
-                    f"{scratch_stats['avg_hits']:.2f}",
-                    "Short-term turn context",
-                )
-                console.print(table)
-
-                def print_top_entries(title, stats):
-                    console.print(f"[bold cyan]{title} Top Entries[/bold cyan]")
-                    if not stats["top_entries"]:
-                        console.print("[dim]No entries yet.[/dim]")
-                        return
-                    top_table = Table(box=box.SIMPLE)
-                    top_table.add_column("ID", style="dim", justify="right")
-                    top_table.add_column("Hits", style="yellow", justify="right")
-                    top_table.add_column("Tags", style="magenta")
-                    top_table.add_column("Source", style="blue")
-                    top_table.add_column("Preview", style="white")
-                    for entry in stats["top_entries"]:
-                        tags = ", ".join(entry.get("tags", [])) or "-"
-                        preview = str(entry.get("content", "")).replace("\n", " ").strip()
-                        if len(preview) > 90:
-                            preview = preview[:87] + "..."
-                        top_table.add_row(
-                            f"#{entry.get('id')}",
-                            str(entry.get("hits", 0)),
-                            tags,
-                            entry.get("source") or "-",
-                            preview or "(empty)",
-                        )
-                    console.print(top_table)
-
-                print_top_entries("Task Memory", task_stats)
-                print_top_entries("Scratchpad", scratch_stats)
-
-                layer_table = Table(
-                    title="Hierarchical Context Layers",
-                    box=box.SIMPLE,
-                )
-                layer_table.add_column("Layer", style="cyan")
-                layer_table.add_column("Name", style="white")
-                layer_table.add_column("Usage", style="yellow", justify="right")
-                layer_table.add_column("Fill", style="green", justify="right")
-                layer_table.add_column("Description", style="dim")
-                for layer in layer_stats:
-                    current = int(layer.get("current", 0) or 0)
-                    maximum = max(1, int(layer.get("maximum", 1) or 1))
-                    pct = min(100, int(round((current / maximum) * 100)))
-                    layer_table.add_row(
-                        str(layer.get("layer", "")),
-                        str(layer.get("name", "")),
-                        f"{current}/{maximum}",
-                        f"{pct}%",
-                        str(layer.get("description", "")),
-                    )
-                console.print(layer_table)
-            return serialize_command_result(
-                session,
-                cmd,
-                data={
-                    "task_memory_count": task_stats["entries"],
-                    "scratchpad_count": scratch_stats["entries"],
-                    "task_memory_stats": task_stats,
-                    "scratchpad_stats": scratch_stats,
-                    "context_layers": layer_stats,
-                },
-            )
-
-        if subcommand in ["list", "ls"]:
-            target = parts[2].lower() if len(parts) > 2 else "all"
-
-            def get_entries_data(store):
-                return [entry.to_dict() for entry in store.entries]
-
-            if allow_prompt:
-
-                def print_entries(store, title):
-                    if not store.entries:
-                        console.print(f"[dim]No entries in {title}.[/dim]")
-                        return
-                    table = Table(title=title, box=box.SIMPLE)
-                    table.add_column("ID", style="dim", justify="right")
-                    table.add_column("Hits", style="yellow", justify="right")
-                    table.add_column("Tags", style="yellow")
-                    table.add_column("Source", style="blue")
-                    table.add_column("Content")
-                    for entry in store.entries:
-                        tags = ", ".join(entry.tags) if entry.tags else "-"
-                        table.add_row(
-                            f"#{entry.id}",
-                            str(entry.hits),
-                            tags,
-                            entry.source or "-",
-                            entry.content,
-                        )
-                    console.print(table)
-
-                if target in ["all", "task"]:
-                    print_entries(session.task_memory, "Task Memory")
-                if target in ["all", "scratchpad"]:
-                    print_entries(session.turn_scratchpad, "Turn Scratchpad")
-
-            return serialize_command_result(
-                session,
-                cmd,
-                data={
-                    "task_memory": (
-                        get_entries_data(session.task_memory)
-                        if target in ["all", "task"]
-                        else []
-                    ),
-                    "scratchpad": (
-                        get_entries_data(session.turn_scratchpad)
-                        if target in ["all", "scratchpad"]
-                        else []
-                    ),
-                },
-            )
-
-        if subcommand == "clear":
-            target = parts[2].lower() if len(parts) > 2 else "all"
-            target_aliases = {
-                "scratch": "scratchpad",
-                "scratchpad": "scratchpad",
-                "task": "task",
-                "longterm": "task",
-                "long-term": "task",
-                "all": "all",
-            }
-            target = target_aliases.get(target, target)
-            msg_parts = []
-            if target in ["all", "task"]:
-                session.task_memory.clear()
-                msg_parts.append("Task memory")
-            if target in ["all", "scratchpad"]:
-                session.turn_scratchpad.clear()
-                msg_parts.append("Turn scratchpad")
-
-            if not msg_parts:
-                return serialize_command_result(
-                    session,
-                    cmd,
-                    ok=False,
-                    message="Usage: /memory clear [task|scratchpad|all]",
-                )
-
-            msg = " and ".join(msg_parts) + " cleared."
-            if allow_prompt:
-                console.print(f"[green]{msg}[/green]")
-            return serialize_command_result(session, cmd, message=msg)
-
-    if cmd == "/stats":
-        stats = build_stats_snapshot(session)
-        if allow_prompt:
-            refresh_memory_hud(session, ui, force=True)
-        return serialize_command_result(session, cmd, data=stats)
-
-    if cmd == "/thinking":
-        session.thinking = not session.thinking
-        console.print(f"[dim]Thinking mode: {session.thinking}[/dim]")
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session, cmd, message=f"Thinking mode: {session.thinking}"
-        )
-
-    if cmd == "/agentic":
-        session.agentic = not session.agentic
-        console.print(f"[dim]Agentic mode: {session.agentic}[/dim]")
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session, cmd, message=f"Agentic mode: {session.agentic}"
-        )
-
-    if cmd == "/yolo":
-        current = session.variables.get("yolo", False)
-        session.variables["yolo"] = not current
-        session.session_manager.save_history(session.folder_context)
-        console.print(f"[dim]YOLO mode: {session.variables['yolo']}[/dim]")
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(
-            session, cmd, message=f"YOLO mode: {session.variables['yolo']}"
-        )
-
-    if cmd == "/splash":
-        if allow_prompt:
-            print_splash(session)
-        refresh_memory_hud(session, ui)
-        return serialize_command_result(session, cmd, data={"splash": True})
-
-    if cmd == "/update":
-        if allow_prompt:
-            console.print("[dim]Running manual update (git pull + dependency refresh)...[/dim]")
-        update_result = run_auto_update()
-        if allow_prompt:
-            if update_result["ok"]:
-                ui.show_info(update_result["message"])
-            else:
-                ui.show_error(update_result["message"])
-            for step in update_result.get("steps", []):
-                status = "OK" if step["returncode"] == 0 else "FAILED"
-                console.print(f"[dim]{status} · {step['name']}[/dim]")
-                if step.get("stderr"):
-                    console.print(f"[dim]{step['stderr']}[/dim]")
-        return serialize_command_result(
-            session,
-            cmd,
-            ok=update_result["ok"],
-            message=update_result["message"],
-            data={"steps": update_result.get("steps", [])},
-        )
-
+    ui = session.ui
     if ui:
         ui.show_error(f"Unknown command: {cmd}")
     return serialize_command_result(
@@ -2417,36 +1067,9 @@ def main():
         help="Attach a workspace folder at startup. May be provided multiple times.",
     )
     parser.add_argument(
-        "--server",
-        action="store_true",
-        help="Run μCLI in HTTP server mode for API clients.",
-    )
-    parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Host interface for --server mode.",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Port for --server mode.",
-    )
-    parser.add_argument(
         "--yolo",
         action="store_true",
         help="Enable YOLO mode at startup.",
-    )
-    parser.add_argument(
-        "--gui",
-        action="store_true",
-        help="Launch full-screen terminal GUI.",
-    )
-    parser.add_argument(
-        "--gui-refresh",
-        type=float,
-        default=1.0,
-        help="Refresh interval (seconds) for --gui mode.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
@@ -2464,49 +1087,15 @@ def main():
         help="Initial system instruction",
     )
     args = parser.parse_args()
-    ui = HeadlessUI(auto_approve=args.yolo) if args.server else RichUI()
+    ui = RichUI()
 
     try:
-        session = build_session(args, ui, allow_prompt=not (args.server or args.gui))
+        session = build_session(args, ui, allow_prompt=True)
     except Exception as exc:
-        console.print(f"[red]Failed to initialize Session/Provider: {exc}[/red]")
+        console.print(f"[red]Failed to initialize Session/Provider: {safe_markup(exc)}[/red]")
         sys.exit(1)
 
-    if args.gui:
-        run_gui_mode(SESSION_DIR, refresh_seconds=args.gui_refresh)
-        return
-
-    if args.server:
-        serve(session, args.host, args.port, handle_command)
-        return
-
     print_splash(session)
-    release_status = get_release_update_status()
-    if release_status.get("ok") and release_status.get("update_available"):
-        release = release_status.get("latest_release", {})
-        tag = release.get("tag_name", "unknown")
-        release_url = release.get("html_url", "")
-        console.print(
-            f"[yellow]New μCLI release available: {tag} "
-            f"(repo: {release_status.get('repo')}).[/yellow]"
-        )
-        if release_url:
-            console.print(f"[dim]{release_url}[/dim]")
-        if Confirm.ask("Would you like to update now?", default=False):
-            update_result = run_auto_update()
-            if update_result["ok"]:
-                ui.show_info(update_result["message"])
-            else:
-                ui.show_error(update_result["message"])
-            for step in update_result.get("steps", []):
-                status = "OK" if step["returncode"] == 0 else "FAILED"
-                console.print(f"[dim]{status} · {step['name']}[/dim]")
-                if step.get("stderr"):
-                    console.print(f"[dim]{step['stderr']}[/dim]")
-    elif release_status.get("ok") and release_status.get("latest_release"):
-        latest_tag = release_status["latest_release"].get("tag_name", "")
-        if latest_tag:
-            console.print(f"[dim]μCLI is up to date ({latest_tag}).[/dim]")
     refresh_memory_hud(session, ui)
 
     while True:

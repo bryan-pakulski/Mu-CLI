@@ -1,95 +1,146 @@
-# OpenAI implementation
-import os
+# OpenAI provider with streaming, prompt-cache telemetry, reasoning effort,
+# and vision input. Uses the official `openai` Python SDK (Chat Completions
+# API). Tool-call deltas arrive in chunks; we forward them as
+# `tool_call_args_delta` events so the agent loop can render progress.
+import base64
 import json
-import urllib.request
-import urllib.error
-from typing import List, Dict, Any, Optional
+import os
+from typing import Any, Dict, Iterator, List, Optional
+
+from openai import OpenAI
+
 from .base import (
+    CacheHint,
+    FileReference,
+    ImageData,
     LLMProvider,
     Message,
     MessagePart,
     ProviderResponse,
-    FileReference,
+    StreamEvent,
     ToolDefinition,
 )
+
+
+_REASONING_MODEL_PREFIXES = ("o1", "o3", "o4", "gpt-5")
+
+
+def _is_reasoning_model(name: str) -> bool:
+    n = (name or "").lower()
+    return any(n.startswith(p) for p in _REASONING_MODEL_PREFIXES)
 
 
 class OpenAIProvider(LLMProvider):
     """Provider for OpenAI ChatGPT models."""
 
     API_KEY = os.getenv("OPENAI_API_KEY")
-    BASE_URL = "https://api.openai.com/v1/chat/completions"
+    BASE_URL = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
-    def __init__(self, model_name: str = ""):
-        if not self.API_KEY:
+    def __init__(self, model_name: str = "", api_key: Optional[str] = None):
+        if not api_key:
+            api_key = self.API_KEY
+        if not api_key:
             raise ValueError(
-                "OPENAI_API_KEY environment variable is required. Set it via: export OPENAI_API_KEY='your-key'"
+                "OPENAI_API_KEY environment variable is required. "
+                "Set it via: export OPENAI_API_KEY='your-key'"
             )
         super().__init__(model_name)
         self.name = "openai"
+        self._client = OpenAI(api_key=api_key, base_url=self.BASE_URL)
+
+    # ------------------------------------------------------------------ models
 
     def get_available_models(self) -> List[str]:
-        """Fetch available models from OpenAI API."""
         try:
-            req = urllib.request.Request(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {self.API_KEY}"},
-            )
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode("utf-8"))
-                return [model["id"] for model in data.get("data", [])]
+            return [m.id for m in self._client.models.list().data]
         except Exception:
-            # Return known OpenAI models if API call fails
-            return ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4-turbo"]
+            return ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+
+    # ------------------------------------------------------- message conversion
 
     def _convert_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
-        """Convert internal Message format to OpenAI format."""
-        openai_msgs = []
+        """Convert internal Message format to OpenAI Chat Completions format.
 
+        Tool calls and tool results require role/structure that differs from
+        plain text turns:
+          * assistant -> {"role": "assistant", "content": ..., "tool_calls": [...]}
+          * tool      -> {"role": "tool", "tool_call_id": "...", "content": "..."}
+        """
+
+        out: List[Dict[str, Any]] = []
         for msg in messages:
-            role_map = {
-                "user": "user",
-                "assistant": "assistant",
-                "system": "system",
-                "tool": "tool",
-            }
+            if msg.role == "tool":
+                # Emit one OpenAI tool message per tool_result part. OpenAI
+                # requires a tool_call_id to match the originating call.
+                for part in msg.parts:
+                    if part.type != "tool_result":
+                        continue
+                    payload = part.tool_result
+                    if isinstance(payload, (dict, list)):
+                        payload = json.dumps(payload, indent=2, sort_keys=True)
+                    out.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": part.tool_call_id or part.tool_name or "",
+                            "content": str(payload),
+                        }
+                    )
+                continue
 
-            role = role_map.get(msg.role, "user")
-            content_parts = []
+            role = "user" if msg.role == "user" else "assistant" if msg.role == "assistant" else msg.role
+            text_chunks: List[Dict[str, Any]] = []
+            tool_calls: List[Dict[str, Any]] = []
 
             for part in msg.parts:
                 if part.type == "text" and part.text:
-                    content_parts.append(part.text)
+                    text_chunks.append({"type": "text", "text": part.text})
+                elif part.type == "image_input" and part.image:
+                    b64 = base64.b64encode(part.image.data).decode("ascii")
+                    text_chunks.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{part.image.mime_type};base64,{b64}"},
+                        }
+                    )
                 elif part.type == "file" and part.file_ref:
-                    # For now, only text files are supported
-                    content_parts.append(f"[File: {part.file_ref.display_name}]")
-                elif part.type == "tool_result":
-                    tool_result = part.tool_result
-                    if isinstance(tool_result, (dict, list)):
-                        tool_result = json.dumps(tool_result, indent=2, sort_keys=True)
-                    content_parts.append(str(tool_result))
-                elif part.type == "tool_call":
-                    # OpenAI handles tool_calls differently in the response
-                    continue
+                    text_chunks.append(
+                        {"type": "text", "text": f"[File: {part.file_ref.display_name}]"}
+                    )
+                elif part.type == "tool_call" and role == "assistant":
+                    args = part.tool_args or {}
+                    tool_calls.append(
+                        {
+                            "id": part.tool_call_id or f"call_{len(tool_calls)}",
+                            "type": "function",
+                            "function": {
+                                "name": part.tool_name or "",
+                                "arguments": json.dumps(args, sort_keys=True),
+                            },
+                        }
+                    )
 
-            openai_msgs.append(
-                {
-                    "role": role,
-                    "content": (
-                        "\n".join(content_parts).strip() if content_parts else ""
-                    ),
-                }
-            )
+            entry: Dict[str, Any] = {"role": role}
+            if text_chunks:
+                if len(text_chunks) == 1 and text_chunks[0]["type"] == "text":
+                    entry["content"] = text_chunks[0]["text"]
+                else:
+                    entry["content"] = text_chunks
+            else:
+                entry["content"] = "" if role != "assistant" or not tool_calls else None
+            if tool_calls:
+                entry["tool_calls"] = tool_calls
+                # OpenAI requires content to be either string or null when tool_calls present
+                if entry.get("content") == "":
+                    entry["content"] = None
+            out.append(entry)
 
-        return openai_msgs
+        return out
 
     def _convert_tools(
         self, tools: Optional[List[ToolDefinition]]
     ) -> Optional[List[Dict[str, Any]]]:
-        """Convert internal ToolDefinition format to OpenAI format."""
         if not tools:
             return None
-
         return [
             {
                 "type": "function",
@@ -102,46 +153,157 @@ class OpenAIProvider(LLMProvider):
             for t in tools
         ]
 
-    def _parse_response(self, result: Dict[str, Any]) -> ProviderResponse:
-        """Parse OpenAI response into ProviderResponse format."""
-        usage = result.get("usage", {})
-        choices = result.get("choices", [])
+    # --------------------------------------------------------------- streaming
 
-        out_parts = []
-        text = ""
+    def stream(
+        self,
+        messages: List[Message],
+        system_prompt: Optional[str] = None,
+        thinking: bool = False,
+        tools: Optional[List[ToolDefinition]] = None,
+        cache_hint: Optional[CacheHint] = None,
+        reasoning_effort: Optional[str] = None,
+    ) -> Iterator[StreamEvent]:
 
-        if choices:
-            choice = choices[0]
-            message = choice.get("message", {})
+        model = self.model_name or "gpt-4o-mini"
 
-            if "content" in message and message["content"]:
-                text = message["content"]
-                out_parts.append(MessagePart(type="text", text=text))
+        openai_msgs = self._convert_messages(messages)
+        if system_prompt:
+            openai_msgs.insert(0, {"role": "system", "content": system_prompt})
 
-            # Handle tool calls
-            tool_calls = message.get("tool_calls", [])
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                try:
-                    args_dict = json.loads(func.get("arguments", "{}"))
-                except (json.JSONDecodeError, TypeError):
-                    args_dict = {}
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": openai_msgs,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
 
-                out_parts.append(
-                    MessagePart(
-                        type="tool_call",
-                        tool_name=func.get("name"),
-                        tool_args=args_dict,
+        tool_defs = self._convert_tools(tools)
+        if tool_defs:
+            payload["tools"] = tool_defs
+            payload["tool_choice"] = "auto"
+
+        if _is_reasoning_model(model):
+            effort = reasoning_effort or ("high" if thinking else "medium")
+            payload["reasoning_effort"] = effort
+
+        # OpenAI Chat Completions caches stable prefixes automatically; the
+        # `cache_hint` argument is informational here. We still rely on stable
+        # ordering: system prompt first, then tools, then history. That's the
+        # order callers already build.
+        _ = cache_hint  # explicitly unused
+
+        # ------------------------------------------------------ stream events
+
+        chunk_iter = self._client.chat.completions.create(**payload)
+
+        # Track partial tool calls. OpenAI uses per-index identifiers in deltas.
+        partial_calls: Dict[int, Dict[str, Any]] = {}
+        seen_ids: set = set()
+
+        try:
+            for chunk in chunk_iter:
+                # Usage chunk (only present when stream_options.include_usage)
+                if getattr(chunk, "usage", None) is not None:
+                    usage = chunk.usage
+                    cached = 0
+                    reasoning = 0
+                    details = getattr(usage, "prompt_tokens_details", None)
+                    if details is not None:
+                        cached = getattr(details, "cached_tokens", 0) or 0
+                    out_details = getattr(usage, "completion_tokens_details", None)
+                    if out_details is not None:
+                        reasoning = getattr(out_details, "reasoning_tokens", 0) or 0
+                    yield StreamEvent(
+                        kind="usage",
+                        input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                        output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                        total_tokens=getattr(usage, "total_tokens", 0) or 0,
+                        cached_tokens=cached,
+                        reasoning_tokens=reasoning,
                     )
-                )
 
-        return ProviderResponse(
-            text=text,
-            parts=out_parts,
-            input_tokens=usage.get("prompt_tokens", 0),
-            output_tokens=usage.get("completion_tokens", 0),
-            total_tokens=usage.get("total_tokens", 0),
-        )
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                # Reasoning content (where the SDK surfaces it)
+                rc = getattr(delta, "reasoning_content", None)
+                if rc:
+                    yield StreamEvent(kind="thinking_delta", text=rc)
+
+                if delta.content:
+                    yield StreamEvent(kind="text_delta", text=delta.content)
+
+                tcs = getattr(delta, "tool_calls", None) or []
+                for tc in tcs:
+                    idx = getattr(tc, "index", None)
+                    if idx is None:
+                        idx = len(partial_calls)
+                    state = partial_calls.setdefault(
+                        idx,
+                        {
+                            "id": None,
+                            "name": None,
+                            "args": [],
+                        },
+                    )
+                    if getattr(tc, "id", None):
+                        state["id"] = tc.id
+                    fn = getattr(tc, "function", None)
+                    if fn is not None:
+                        if getattr(fn, "name", None):
+                            state["name"] = fn.name
+                        args_chunk = getattr(fn, "arguments", None)
+                        if args_chunk:
+                            state["args"].append(args_chunk)
+
+                    cid = state["id"] or f"call_{idx}"
+                    if cid not in seen_ids and state["name"]:
+                        seen_ids.add(cid)
+                        yield StreamEvent(
+                            kind="tool_call_start",
+                            tool_name=state["name"],
+                            tool_call_id=cid,
+                        )
+                    if fn is not None and getattr(fn, "arguments", None):
+                        yield StreamEvent(
+                            kind="tool_call_args_delta",
+                            text=fn.arguments,
+                            tool_call_id=cid,
+                            tool_name=state["name"],
+                        )
+
+                if choice.finish_reason in ("tool_calls", "stop", "length"):
+                    # Finalize all known tool calls.
+                    for idx, state in sorted(partial_calls.items()):
+                        cid = state["id"] or f"call_{idx}"
+                        joined = "".join(state["args"]).strip()
+                        args: Dict[str, Any]
+                        if joined:
+                            try:
+                                parsed = json.loads(joined)
+                                args = parsed if isinstance(parsed, dict) else {"_value": parsed}
+                            except json.JSONDecodeError:
+                                args = {"_raw": joined}
+                        else:
+                            args = {}
+                        yield StreamEvent(
+                            kind="tool_call_complete",
+                            tool_name=state["name"],
+                            tool_args=args,
+                            tool_call_id=cid,
+                        )
+                    partial_calls.clear()
+                    seen_ids.clear()
+        except Exception as exc:
+            yield StreamEvent(kind="error", text=str(exc))
+            raise
+
+        yield StreamEvent(kind="done")
+
+    # ----------------------------------------------------- non-streaming path
 
     def generate(
         self,
@@ -150,54 +312,17 @@ class OpenAIProvider(LLMProvider):
         thinking: bool = False,
         tools: Optional[List[ToolDefinition]] = None,
     ) -> ProviderResponse:
-        """Send a chat request to OpenAI."""
-
-        if not self.model_name:
-            openai_model = "gpt-3.5-turbo"
-        else:
-            available = self.get_available_models()
-            if self.model_name not in available:
-                print(
-                    f"[Warning] Model '{self.model_name}' may not be available. Using anyway..."
-                )
-            openai_model = self.model_name
-
-        openai_messages = self._convert_messages(messages)
-
-        if system_prompt:
-            openai_messages.insert(0, {"role": "system", "content": system_prompt})
-
-        payload = {
-            "model": openai_model,
-            "messages": openai_messages,
-            "stream": False,
-        }
-
-        if tools:
-            tool_defs = self._convert_tools(tools)
-            if tool_defs:
-                payload["tools"] = tool_defs
-                payload["tool_choice"] = "auto"
-
-        req = urllib.request.Request(
-            self.BASE_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.API_KEY}",
-            },
+        return self.drain_stream(
+            self.stream(
+                messages=messages,
+                system_prompt=system_prompt,
+                thinking=thinking,
+                tools=tools,
+            )
         )
 
-        try:
-            with urllib.request.urlopen(req, timeout=60) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.URLError as e:
-            raise Exception(f"Failed to connect to OpenAI API: {e}")
-        except Exception as e:
-            raise Exception(f"Error communicating with OpenAI: {e}")
-
-        return self._parse_response(result)
+    # ----------------------------------------------------------------- files
 
     def upload_file(self, file_path: str, mime_type: str) -> Optional[FileReference]:
-        """OpenAI files endpoint is separate from chat API."""
+        """OpenAI files endpoint is separate from chat API; we return a local ref."""
         return FileReference(uri=file_path, mime_type=mime_type, display_name=file_path)

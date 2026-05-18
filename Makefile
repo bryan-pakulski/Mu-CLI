@@ -1,4 +1,4 @@
-.PHONY: format test
+.PHONY: format test run
 
 TEST_MUCLI_HOME ?= /tmp/mucli-test
 TEST_ENV = MUCLI_HOME=$(TEST_MUCLI_HOME) PYTHONPATH=.

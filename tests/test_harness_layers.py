@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 
-from core.approval import build_approval_plan
-from core.session import Session, SessionManager
-from core.tools import build_tool_context, execute_tool, serialize_tool_descriptor
-from core.workspace import FolderContext
+from mu.agent.approval import build_approval_plan
+from mu.session.session import Session, SessionManager
+from mu.tools._dispatcher import execute_tool
+from mu.tools.descriptors import build_tool_context, serialize_tool_descriptor
+from mu.workspace.folder_context import FolderContext
 from providers.base import MessagePart, ProviderResponse
 
 

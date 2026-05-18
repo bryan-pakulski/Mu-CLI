@@ -1,4 +1,4 @@
-from core.memory import ScratchpadStore, TaskMemoryStore
+from mu.memory.stores import ScratchpadStore, TaskMemoryStore
 
 
 def test_task_memory_save_search_and_summary():

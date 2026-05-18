@@ -155,9 +155,23 @@ class CitationManager:
         # Check for duplicate URLs
         if url in self._source_urls:
             return self._source_urls[url]
-        
+
+        # Coerce string → enum at the boundary. The type hint says
+        # `SourceType` but several call sites in core/tools.py pass
+        # plain strings ("web", "academic", ...) — those used to land
+        # in storage verbatim and crash any consumer that did
+        # `source.source_type.value`. Normalize here so every Source
+        # in storage carries a proper enum, regardless of caller.
+        if isinstance(source_type, str):
+            try:
+                source_type = SourceType(source_type.lower())
+            except ValueError:
+                source_type = SourceType.OTHER
+        elif not isinstance(source_type, SourceType):
+            source_type = SourceType.OTHER
+
         citation_id = self._next_id
-        
+
         # Calculate credibility score
         credibility_score = calculate_credibility_score(
             source_type,

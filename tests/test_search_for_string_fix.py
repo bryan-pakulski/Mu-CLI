@@ -1,8 +1,9 @@
 """Tests for search_for_string HTML unescaping, track_file, and sync_with_filesystem fixes."""
 import os
 import pytest
-from core.tools import search_for_string, write_file
-from core.workspace import FolderContext
+from mu.tools.file.handlers import write_file
+from mu.tools.workspace.handlers import search_for_string
+from mu.workspace.folder_context import FolderContext
 
 
 class TestHtmlUnescaping:

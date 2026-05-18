@@ -85,6 +85,31 @@ def tool(
 
     legacy = _import_legacy()
     build_descriptor = getattr(legacy, "_build_descriptor")
+    default_server_policy = getattr(legacy, "_default_server_policy")
+    default_result_mode = getattr(legacy, "_default_result_mode")
+
+    # Resolve "default" sentinels against the legacy fallbacks so migrated
+    # tools inherit the same descriptor shape as their original entries
+    # in TOOLS unless explicitly overridden.
+    resolved_server_policy = (
+        default_server_policy(name) if server_policy == "default" else server_policy
+    )
+    resolved_result_mode = (
+        default_result_mode(name) if result_mode == "default" else result_mode
+    )
+    resolved_preview_policy = (
+        ("optional" if requires_approval else "none")
+        if preview_policy == "default"
+        else preview_policy
+    )
+    # The legacy default for `execution_kind` matched the build-time
+    # logic in core/tools.py:TOOL_DESCRIPTORS: requires_approval → mutate,
+    # otherwise read. The historical "io" sentinel is treated the same.
+    resolved_execution_kind = (
+        ("mutate" if requires_approval else "read")
+        if execution_kind in ("io", "default")
+        else execution_kind
+    )
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         definition = ToolDefinition(
@@ -95,10 +120,10 @@ def tool(
         )
         descriptor = build_descriptor(
             definition,
-            execution_kind=execution_kind,
-            preview_policy=preview_policy,
-            server_policy=server_policy,
-            result_mode=result_mode,
+            execution_kind=resolved_execution_kind,
+            preview_policy=resolved_preview_policy,
+            server_policy=resolved_server_policy,
+            result_mode=resolved_result_mode,
             handler_key=name,
             error_mode=error_mode,
             summary_builder=summary_builder,
@@ -167,26 +192,27 @@ def unregister(name: str) -> bool:
 def execute(name: str, args: Dict[str, Any], context: ToolExecutionContext) -> Dict[str, Any]:
     """Run a tool and return a normalized envelope dict.
 
-    Delegates to the legacy `execute_tool` so the envelope contract,
-    approval-mode gating, telemetry, and edge-case handling all stay in
-    one place. Once the legacy module is removed, this function will own
-    the dispatch directly.
+    Calls the canonical `_dispatcher.dispatch(...)` directly. The legacy
+    `core.tools.execute_tool` is now a thin shim over the same function,
+    so callers get identical behavior regardless of which entry point
+    they use.
 
-    Legacy `execute_tool` returns a JSON string (so it can be inlined into
-    message history). We parse it back into a dict here because the new
-    agent loop wants structured access.
+    `dispatch` returns a JSON-encoded envelope string (the wire format
+    the agent loop inlines into message history). We parse it back into
+    a dict here because the new agent loop wants structured access.
     """
 
     import json as _json
 
-    legacy = _import_legacy()
     _ensure_legacy_loaded()
-    raw = legacy.execute_tool(
-        tool_name=name,
-        args=args,
-        folder_context=context.folder_context,
-        ui=context.ui,
-        variables=context.variables,
+    from ._dispatcher import dispatch
+
+    raw = dispatch(
+        name,
+        args,
+        context.folder_context,
+        context.ui,
+        context.variables,
         invocation_source=context.invocation_source,
         session=context.session,
     )
@@ -212,14 +238,15 @@ def execute(name: str, args: Dict[str, Any], context: ToolExecutionContext) -> D
 
 def execute_raw(name: str, args: Dict[str, Any], context: ToolExecutionContext) -> str:
     """Run a tool and return the raw JSON-string envelope (legacy contract)."""
-    legacy = _import_legacy()
     _ensure_legacy_loaded()
-    return legacy.execute_tool(
-        tool_name=name,
-        args=args,
-        folder_context=context.folder_context,
-        ui=context.ui,
-        variables=context.variables,
+    from ._dispatcher import dispatch
+
+    return dispatch(
+        name,
+        args,
+        context.folder_context,
+        context.ui,
+        context.variables,
         invocation_source=context.invocation_source,
         session=context.session,
     )
@@ -245,6 +272,69 @@ def _load_builtin_tools() -> None:
         import logging
         logging.getLogger("mucli").warning(
             "mu.tools: failed to load agent tool package: %s", exc
+        )
+    try:
+        from . import memory as _memory_tools  # noqa: F401 — registers save/search/list_{memory,scratchpad} + clear_scratchpad
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load memory tool package: %s", exc
+        )
+    try:
+        from . import workspace as _workspace_tools  # noqa: F401 — registers read_file, search_*, get_chunk, list_dir, retrieve_relevant_context, get_workspace_details
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load workspace tool package: %s", exc
+        )
+    try:
+        from . import file as _file_tools  # noqa: F401 — registers write_file, apply_diff, search_and_replace_file
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load file tool package: %s", exc
+        )
+    try:
+        from . import shell as _shell_tools  # noqa: F401 — registers bash + bash_{background,status,logs,kill,list}
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load shell tool package: %s", exc
+        )
+    try:
+        from . import research as _research_tools  # noqa: F401 — registers web/arxiv/reddit/SO/HN searches + url_grounding + read_document + doi_resolve
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load research tool package: %s", exc
+        )
+    try:
+        from . import skill as _skill_tools  # noqa: F401 — registers invoke_skill
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load skill tool package: %s", exc
+        )
+    try:
+        from . import feature as _feature_tools  # noqa: F401 — registers create_feature, create_phases, create_task, get_execution_state, block_task, resume_task, archive_task, review_*, propose/decide_task_diff, create/update/approve_feature_task, get_current_task, get_tasks, update_task_status, raise_blocker
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load feature tool package: %s", exc
+        )
+    try:
+        from . import security as _security_tools  # noqa: F401 — registers create_security_report + 8 audit-engine tools
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load security tool package: %s", exc
+        )
+    try:
+        from . import batch as _batch_tools  # noqa: F401 — registers batch_job + flush
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load batch tool package: %s", exc
         )
 
 

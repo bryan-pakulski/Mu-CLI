@@ -12,13 +12,7 @@ import time
 import pytest
 
 from core.background_tasks import BackgroundTaskRegistry, summarize_task
-from core.tools import (
-    _handle_bash_background,
-    _handle_bash_status,
-    _handle_bash_logs,
-    _handle_bash_kill,
-    _handle_bash_list,
-)
+import mu.tools as _mu_tools
 
 
 def _wait_until_done(task, timeout=5.0):
@@ -107,33 +101,48 @@ def test_summarize_task_carries_metadata():
 # ---------------------------------------------------------------- tool handlers
 
 
-class _FakeContext:
-    """Minimal `ToolExecutionContext` lookalike for the bg handlers — only
-    the `session.background_tasks` attribute is consulted."""
+def _ctx_with(registry):
+    """Build a `ToolExecutionContext` whose session exposes the given
+    BackgroundTaskRegistry — the bg `@tool` handlers read it as
+    `context.session.background_tasks`."""
+    session = type("S", (), {"background_tasks": registry})()
+    return _mu_tools.build_tool_context(
+        folder_context=None, ui=None, variables={}, session=session
+    )
 
-    def __init__(self, registry):
-        self.session = type("S", (), {"background_tasks": registry})()
+
+def _run(name, args, registry):
+    envelope = _mu_tools.execute(name, args, _ctx_with(registry))
+    assert envelope["ok"] is True or envelope["ok"] is False  # well-formed
+    return json.loads(envelope["message"])
 
 
 def test_bash_background_handler_returns_task_id():
     registry = BackgroundTaskRegistry()
-    result = json.loads(_handle_bash_background({"command": "echo hi"}, registry))
+    result = _run("bash_background", {"command": "echo hi"}, registry)
     assert "task_id" in result
     assert result["status"] in {"running", "completed"}
 
 
 def test_bash_status_handler_for_missing_task_reports_error():
+    """A missing task surfaces as a failure envelope. The legacy handler
+    returned `{"error": ...}` JSON; the new dispatcher unwraps that into
+    the standard envelope shape (`ok=False`, message + data.error)."""
     registry = BackgroundTaskRegistry()
-    result = json.loads(_handle_bash_status({"task_id": "bg-missing"}, registry))
-    assert "error" in result
+    envelope = _mu_tools.execute(
+        "bash_status", {"task_id": "bg-missing"}, _ctx_with(registry)
+    )
+    assert envelope["ok"] is False
+    assert "no such task" in envelope["message"]
+    assert envelope["data"].get("error", "").startswith("no such task")
 
 
 def test_bash_logs_filters_by_stream():
     registry = BackgroundTaskRegistry()
     task = registry.start("echo to-stdout && echo to-stderr >&2")
     _wait_until_done(task)
-    only_stderr = json.loads(
-        _handle_bash_logs({"task_id": task.task_id, "stream": "stderr"}, registry)
+    only_stderr = _run(
+        "bash_logs", {"task_id": task.task_id, "stream": "stderr"}, registry
     )
     assert "stderr" in only_stderr
     assert "stdout" not in only_stderr
@@ -144,7 +153,7 @@ def test_bash_list_handler_counts_tasks():
     registry = BackgroundTaskRegistry()
     registry.start("echo one")
     registry.start("echo two")
-    result = json.loads(_handle_bash_list({}, registry))
+    result = _run("bash_list", {}, registry)
     assert result["count"] == 2
 
 
@@ -152,7 +161,7 @@ def test_bash_kill_handler_marks_killed():
     registry = BackgroundTaskRegistry()
     task = registry.start("sleep 30")
     time.sleep(0.1)
-    result = json.loads(_handle_bash_kill({"task_id": task.task_id}, registry))
+    result = _run("bash_kill", {"task_id": task.task_id}, registry)
     assert result["status"] in {"killed", "failed"}
     assert result["killed"] is True
 

@@ -131,1175 +131,46 @@ def build_tool_context(
 # --- Tool Definitions (Schemas) ---
 
 TOOLS = [
-    ToolDefinition(
-        name="get_workspace_details",
-        description="Returns a string of the current workspace's path, files, and folders. Use this to discover the structure of the attached project.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="read_file",
-        description="Returns the whole file contents. Use this to read the code or text of a specific file.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "filename": {
-                    "type": "string",
-                    "description": "The absolute or relative path to the file.",
-                }
-            },
-            "required": ["filename"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="search_for_string",
-        description="Returns a list of all files that contain the string as well as the line number. Use this to find variable usages, function definitions, or specific text.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "string": {
-                    "type": "string",
-                    "description": "The exact text string to search for in the codebase.",
-                }
-            },
-            "required": ["string"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="search_references",
-        description="Searches the whole project workspace for references to a query string. Returns a list of matches with filepath, line_number, and a short context snippet (surrounding lines) for each match. This complements search_for_string by providing surrounding context lines.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The exact text string to search for across all workspace files.",
-                },
-                "context_lines": {
-                    "type": "integer",
-                    "description": "Number of context lines before and after each match (default 3).",
-                    "default": 3,
-                },
-            },
-            "required": ["query"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="retrieve_relevant_context",
-        description="Retrieve semantically relevant code snippets using indexed symbols, lexical overlap, recency, and git-diff weighting.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Natural-language or code query describing what context is needed.",
-                },
-                "top_k": {
-                    "type": "integer",
-                    "description": "Number of snippets to return.",
-                    "default": 5,
-                },
-                "filters": {
-                    "type": "object",
-                    "description": "Optional retrieval filters (e.g., path_prefix, extensions).",
-                },
-            },
-            "required": ["query"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="get_chunk",
-        description="Returns a string of the file contents between the start and end line numbers. Use this to read a specific portion of a large file.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    "description": "The absolute or relative path to the file.",
-                },
-                "start_line": {
-                    "type": "integer",
-                    "description": "The starting line number (1-indexed).",
-                },
-                "end_line": {
-                    "type": "integer",
-                    "description": "The ending line number.",
-                },
-            },
-            "required": ["file", "start_line", "end_line"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="list_dir",
-        description="Returns a list of files and directories in the specified path.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The directory path to list (defaults to current dir).",
-                }
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="write_file",
-        description="Creates or overwrites a file with the provided content.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "filename": {"type": "string", "description": "Path to the file."},
-                "content": {"type": "string", "description": "Content to write."},
-            },
-            "required": ["filename", "content"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="apply_diff",
-        description="Applies a unified diff to a file. This is a FALLBACK method. Use search_and_replace_file as the PRIMARY method for targeted code changes. Use apply_diff only for complex multi-file changes.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "filename": {"type": "string", "description": "Path to the file to modify."},
-                "diff": {
-                    "type": "string",
-                    "description": "The unified diff content to apply. MUST follow standard unified diff format: --- filename, +++ filename, @@ -L,C +L,C @@ headers, and +/-/space line markers.",
-                },
-            },
-            "required": ["filename", "diff"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="search_and_replace_file",
-        description="Search and replace text in a file using exact string matching. This is the PRIMARY method for targeted code modifications. Use apply_diff (unified diff) only as a fallback for complex multi-file changes.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "filename": {"type": "string", "description": "Path to the file."},
-                "search": {
-                    "type": "string",
-                    "description": "The exact text to search for in the file. Must match exactly including whitespace.",
-                },
-                "replace": {
-                    "type": "string",
-                    "description": "The text to replace the search match with.",
-                },
-                "expected_count": {
-                    "type": "integer",
-                    "description": "Optional expected number of matches. If provided and count differs, operation fails (safety check for disambiguation).",
-                },
-                "normalize_whitespace": {
-                    "type": "boolean",
-                    "description": "If True, normalize whitespace in search pattern (collapse multiple spaces, trim leading/trailing).",
-                    "default": False,
-                },
-                "dry_run": {
-                    "type": "boolean",
-                    "description": "If True, return preview of changes without modifying the file.",
-                    "default": False,
-                },
-            },
-            "required": ["filename", "search", "replace"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="batch_job",
-        description="Executes multiple tool calls in sequence. Returns the results of all calls in the order they were provided.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "commands": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "tool_name": {
-                                "type": "string",
-                                "description": "The name of the tool to execute.",
-                            },
-                            "tool_args": {"type": "object"},
-                        },
-                        "required": ["tool_name", "tool_args"],
-                    },
-                }
-            },
-            "required": ["commands"],
-        },
-        requires_approval=False,  # We will query the individual tools and only require a single approval
-    ),
-    ToolDefinition(
-        name="bash",
-        description="Executes a raw bash command in the attached workspace and returns combined STDOUT/STDERR.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The bash command to execute.",
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Optional working directory. Must be within the attached workspace.",
-                },
-                "timeout_seconds": {
-                    "type": "integer",
-                    "description": "Maximum seconds before terminating the command (default 120).",
-                    "default": 120,
-                },
-                "max_output_chars": {
-                    "type": "integer",
-                    "description": "Maximum combined output length to return (default 12000).",
-                    "default": 12000,
-                },
-            },
-            "required": ["command"],
-        },
-        requires_approval=True,
-    ),
+    # NOTE: get_workspace_details / read_file / search_for_string /
+    # search_references / retrieve_relevant_context / get_chunk / list_dir
+    # live in `mu/tools/workspace/handlers.py` as `@tool`-decorated
+    # functions. The underlying implementations remain in this module
+    # (see `read_file`, `search_for_string`, etc. below) for other call
+    # sites; the descriptors and dispatcher entries moved out.
+    # write_file / apply_diff / search_and_replace_file live in
+    # `mu/tools/file/handlers.py` as `@tool`-decorated functions.
+    # batch_job + flush live in `mu/tools/batch/handlers.py`.
+    # bash and the bash_{background,status,logs,kill,list} family live in
+    # `mu/tools/shell/handlers.py` as `@tool`-decorated functions.
     # ----------------------------------------------- security audit engine
-    ToolDefinition(
-        name="create_security_report",
-        description=(
-            "Open a security audit. Returns a scan_id and creates the persistence "
-            "directory at documentation/security_scan_<id>/. Call once at the "
-            "start of a security-mode session."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "Short title for the audit."},
-                "summary": {"type": "string", "description": "Optional scope / context."},
-            },
-            "required": ["title"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="add_security_finding",
-        description=(
-            "Record a HYPOTHESIS that the workspace has a specific vulnerability. "
-            "The finding is provisional until its PoC is verified. Severity is "
-            "one of: info, low, medium, high, critical."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "summary": {"type": "string"},
-                "vulnerability_class": {
-                    "type": "string",
-                    "description": "e.g. sql_injection, xss, path_traversal, deserialization, "
-                                   "command_injection, weak_crypto, hardcoded_secret, auth_bypass.",
-                },
-                "severity": {"type": "string", "enum": list(("info", "low", "medium", "high", "critical"))},
-                "affected_paths": {"type": "array", "items": {"type": "string"}},
-                "exploit_path": {
-                    "type": "string",
-                    "description": "Human-readable trace of how an attacker reaches the sink.",
-                },
-                "references": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["title", "severity"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="attach_security_proof",
-        description=(
-            "Attach an executable PoC to a finding. Must be a shell command run "
-            "from the workspace root that, when the vulnerability is present, "
-            "produces output containing ALL of the declared `expected_markers`. "
-            "The markers are checked literally — use unique strings ('PWNED-1234', "
-            "a fabricated secret, a stack-trace fragment) to avoid false positives."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "finding_id": {"type": "string"},
-                "command": {"type": "string"},
-                "expected_markers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Unique substrings that must appear in stdout+stderr when the exploit succeeds.",
-                },
-                "description": {"type": "string"},
-                "kind": {"type": "string", "default": "command"},
-            },
-            "required": ["finding_id", "command", "expected_markers"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="verify_security_proof",
-        description=(
-            "Execute the attached PoC and decide whether the exploit actually "
-            "triggers. Engine runs the command, captures output, and checks "
-            "that every declared `expected_marker` literally appears. Returns "
-            "ok=True only if all markers match. This is the anti-hallucination "
-            "gate — claims aren't believed without this passing."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "finding_id": {"type": "string"},
-                "timeout_seconds": {"type": "integer", "default": 60},
-            },
-            "required": ["finding_id"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="attach_remediation_patch",
-        description=(
-            "Attach a proposed patch (unified diff) to a finding whose PoC has "
-            "already been verified. Engine refuses if proof.verified is False."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "finding_id": {"type": "string"},
-                "description": {
-                    "type": "string",
-                    "description": "Defensive principle: parameterized queries, context-aware escaping, etc.",
-                },
-                "patch_diff": {
-                    "type": "string",
-                    "description": "Unified diff. Apply with `apply_diff` separately so the working tree is modified before remediation verification.",
-                },
-            },
-            "required": ["finding_id", "description", "patch_diff"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="verify_remediation",
-        description=(
-            "Re-run the original PoC against the now-patched workspace. The "
-            "exploit must no longer trigger (the markers must be absent). "
-            "Returns ok=True only when the patch actually closes the hole. "
-            "Apply the patch (via `apply_diff`) BEFORE calling this."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "finding_id": {"type": "string"},
-                "timeout_seconds": {"type": "integer", "default": 60},
-            },
-            "required": ["finding_id"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="approve_security_finding",
-        description=(
-            "Finalize a finding. HARD-GATED: refuses unless both `proof.verified` "
-            "and `remediation.verified` are True."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {"finding_id": {"type": "string"}},
-            "required": ["finding_id"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="refute_security_finding",
-        description=(
-            "Abandon a finding whose PoC couldn't be made to trigger after "
-            "multiple revisions. Records the failed hypothesis in the audit "
-            "trail rather than silently dropping it."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "finding_id": {"type": "string"},
-                "reason": {"type": "string"},
-            },
-            "required": ["finding_id", "reason"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="get_security_state",
-        description=(
-            "Return the current scan's summary: total findings, by-status and "
-            "by-severity counts, and the list of approved findings."
-        ),
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="bash_background",
-        description=(
-            "Start a long-running bash command in the background and return a "
-            "task_id you can poll with `bash_status` or read with `bash_logs`. "
-            "Use this for test watchers, dev servers, builds, or anything that "
-            "would block the synchronous `bash` tool for too long."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The bash command to run in the background.",
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Optional short label for the task (shown in /stats and logs).",
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Optional working directory. Must exist.",
-                },
-            },
-            "required": ["command"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="bash_status",
-        description=(
-            "Poll a background task's status (running/completed/failed/killed) "
-            "and the tail of its stdout/stderr."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "The task_id returned by `bash_background`.",
-                },
-                "tail_lines": {
-                    "type": "integer",
-                    "description": "Lines of stdout/stderr to include (default 20).",
-                    "default": 20,
-                },
-            },
-            "required": ["task_id"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="bash_logs",
-        description=(
-            "Read the tail of stdout / stderr from a background task. "
-            "Stream selector: 'stdout', 'stderr', or 'both'."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "The task_id returned by `bash_background`.",
-                },
-                "stream": {
-                    "type": "string",
-                    "description": "Which stream to read: 'stdout', 'stderr', or 'both'.",
-                    "default": "both",
-                },
-                "lines": {
-                    "type": "integer",
-                    "description": "Number of trailing lines to return (default 200).",
-                    "default": 200,
-                },
-            },
-            "required": ["task_id"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="bash_kill",
-        description="Terminate a background task. SIGTERM with a short grace, then SIGKILL.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "The task_id to kill.",
-                }
-            },
-            "required": ["task_id"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="bash_list",
-        description="List every background task in the session — running or completed.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="url_grounding",
-        description="Accesses a URL to gather additional context. Supports JavaScript-heavy websites.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL to access.",
-                }
-            },
-            "required": ["url"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="web_search",
-        description="Search the web using DuckDuckGo or Google Custom Search API. Returns search results with title, URL, snippet, and relevance score. Use this for research to find relevant information on the internet.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query string.",
-                },
-                "engine": {
-                    "type": "string",
-                    "description": "The search engine to use. Options: 'duckduckgo' (default) or 'google'.",
-                    "default": "duckduckgo",
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default 10, max 50).",
-                    "default": 10,
-                },
-            },
-            "required": ["query"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="arxiv_search",
-        description="Search arXiv for academic papers. Returns paper metadata including title, authors, abstract, arXiv ID, and PDF link. Use this for academic research to find scientific papers.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query for papers.",
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Optional arXiv category filter (e.g., 'cs.AI', 'physics', 'math.CO').",
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default 10, max 50).",
-                    "default": 10,
-                },
-                "date_range": {
-                    "type": "string",
-                    "description": "Optional date range filter (e.g., '2023-01-01 TO 2024-01-01').",
-                },
-            },
-            "required": ["query"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="doi_resolve",
-        description="Resolves a DOI (Digital Object Identifier) to retrieve publication metadata and access information. Use this to get detailed information about a specific academic paper from its DOI.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "doi": {
-                    "type": "string",
-                    "description": "The DOI to resolve (e.g., '10.1000/xyz123' or full URL 'https://doi.org/10.1000/xyz123').",
-                },
-                "format": {
-                    "type": "string",
-                    "description": "Output format - 'full' (complete metadata) or 'citation' (formatted citation). Default is 'full'.",
-                    "default": "full",
-                },
-            },
-            "required": ["doi"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="reddit_search",
-        description="Searches Reddit for relevant discussions and posts. Use this for finding community opinions, discussions, and user-generated content on various topics.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query string to find relevant Reddit posts.",
-                },
-                "subreddit": {
-                    "type": "string",
-                    "description": "Optional subreddit to limit the search to (e.g., 'programming', 'MachineLearning').",
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default 10, max 50).",
-                    "default": 10,
-                },
-            },
-            "required": ["query"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="stackoverflow_search",
-        description="Searches Stack Overflow for relevant questions and answers using the Stack Exchange API. Use this for finding programming solutions, debugging help, and technical discussions.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query string to find relevant Stack Overflow questions.",
-                },
-                "tag": {
-                    "type": "string",
-                    "description": "Optional tag to filter results (e.g., 'python', 'javascript').",
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default 10, max 50).",
-                    "default": 10,
-                },
-            },
-            "required": ["query"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="hackernews_search",
-        description="Searches Hacker News for relevant stories and discussions using the Algolia HN API. Use this for finding tech news, startup discussions, and community insights from the Hacker News community.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query string to find relevant Hacker News stories.",
-                },
-                "sort": {
-                    "type": "string",
-                    "description": "Sort order: 'relevance' (default) or 'date' for chronological order.",
-                    "enum": ["relevance", "date"],
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default 10, max 50).",
-                    "default": 10,
-                },
-            },
-            "required": ["query"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="read_document",
-        description=(
-            "Reads and parses documents like PDFs to gather additional "
-            "context. Accepts either a local filesystem path OR an http(s) "
-            "URL — URLs are fetched directly (no need to curl/download "
-            "first) and any successful URL fetch is auto-registered in the "
-            "citation engine."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "filename": {
-                    "type": "string",
-                    "description": (
-                        "Either a local path to the document or an http(s) "
-                        "URL (e.g. 'https://arxiv.org/pdf/2301.12345.pdf')."
-                    ),
-                }
-            },
-            "required": ["filename"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="flush",
-        description="Flushes the collation buffer and returns all the gathered context to the model. Use this when you have finished gathering all the necessary information and are ready to process it.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="save_memory",
-        description="Saves a short, important fact into the in-task memory store so it can be reused later without replaying large context.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The concise fact, decision, or reminder to store.",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional tags to help later retrieval.",
-                },
-                "source": {
-                    "type": "string",
-                    "description": "Optional note about where this memory came from.",
-                },
-            },
-            "required": ["content"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="save_scratchpad",
-        description="Saves a temporary note in the current turn scratchpad. Use this for short-lived plans or observations that do not need durable memory.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The temporary note to store for the current turn.",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional tags to help later retrieval during this turn.",
-                },
-                "source": {
-                    "type": "string",
-                    "description": "Optional source note for the scratchpad entry.",
-                },
-            },
-            "required": ["content"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="search_memory",
-        description="Searches the in-task memory store for previously saved facts.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search terms to match against memory content, tags, and sources.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of memory entries to return.",
-                    "default": 5,
-                },
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="search_scratchpad",
-        description="Searches turn-local scratchpad notes saved during the current task loop.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search terms to match against scratchpad content, tags, and sources.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of scratchpad entries to return.",
-                    "default": 5,
-                },
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="list_memory",
-        description="Lists the most recent in-task memory entries.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of memory entries to return.",
-                    "default": 10,
-                }
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="list_scratchpad",
-        description="Lists the most recent turn-local scratchpad entries.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of scratchpad entries to return.",
-                    "default": 10,
-                }
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="clear_scratchpad",
-        description="Clears the current turn scratchpad.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="create_feature",
-        description="Creates (or upserts) a feature shell from a confirmed design plan. Stage 1 of feature mode planning.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_name": {"type": "string"},
-                "feature_request": {"type": "string"},
-                "feature_id": {"type": "string"},
-                "design_plan": {"type": "string"},
-            },
-            "required": ["feature_name", "feature_request"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="create_phases",
-        description="Creates or replaces phases/epics for an active feature. Stage 2 of feature mode planning.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "replace_existing": {"type": "boolean", "default": True},
-                "phases": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "integer"},
-                            "title": {"type": "string"},
-                            "goal": {"type": "string"},
-                            "order": {"type": "integer"},
-                            "status": {"type": "string"},
-                        },
-                        "required": ["title", "goal"],
-                    },
-                },
-            },
-            "required": ["phases"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="create_task",
-        description="Creates a single task/ticket for an active feature phase. Stage 3 of feature mode planning.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "phase_id": {"type": "integer"},
-                "title": {"type": "string"},
-                "overview": {"type": "string"},
-                "design": {"type": "array", "items": {"type": "string"}},
-                "exit_criteria": {"type": "array", "items": {"type": "string"}},
-                "notes": {"type": "string"},
-            },
-            "required": ["title", "exit_criteria"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="get_execution_state",
-        description="Returns the phase/task execution cursor, including blocked tasks and next actionable work item.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-            },
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="block_task",
-        description="Moves a task to blocked with an explicit reason and optional user input request.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "task_id": {"type": "integer"},
-                "reason": {"type": "string"},
-                "requested_input": {"type": "string"},
-            },
-            "required": ["task_id", "reason"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="resume_task",
-        description="Moves a blocked task back to in_progress after required user input has been provided.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "task_id": {"type": "integer"},
-                "notes": {"type": "string"},
-            },
-            "required": ["task_id"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="review_completed_tasks",
-        description="Creates structured review records for completed tasks with categorized issues (bug/risk/enhancement).",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "task_id": {"type": "integer"},
-                "summary": {"type": "string"},
-                "limitations": {"type": "array", "items": {"type": "string"}},
-                "issues": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "string"},
-                            "title": {"type": "string"},
-                            "category": {
-                                "type": "string",
-                                "enum": ["bug", "risk", "enhancement"],
-                            },
-                            "details": {"type": "string"},
-                        },
-                        "required": ["title", "category"],
-                    },
-                },
-            },
-            "required": ["task_id", "summary"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="review_all_completed_tasks",
-        description="Auto-creates baseline review records for every completed task that does not yet have one.",
-        parameters={
-            "type": "object",
-            "properties": {"feature_id": {"type": "string"}},
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="propose_task_diff",
-        description="Creates a diff proposal for a review issue, requiring later user decision.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "review_id": {"type": "string"},
-                "issue_id": {"type": "string"},
-                "diff": {"type": "string"},
-            },
-            "required": ["review_id", "issue_id", "diff"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="decide_task_diff",
-        description="Stores user decision (approved/denied) for a proposed task diff.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "proposal_id": {"type": "string"},
-                "decision": {"type": "string", "enum": ["approved", "denied"]},
-                "reason": {"type": "string"},
-            },
-            "required": ["proposal_id", "decision"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="archive_task",
-        description="Archives an archive-ready task after review and diff decisions are complete.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_id": {"type": "string"},
-                "task_id": {"type": "integer"},
-            },
-            "required": ["task_id"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="create_feature_task",
-        description="Creates a structured feature implementation plan consisting of one or more tasks. Each task must include explicit exit_criteria. Stores metadata internally.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "feature_name": {
-                    "type": "string",
-                    "description": "Short feature name.",
-                },
-                "feature_request": {
-                    "type": "string",
-                    "description": "Full description of the feature request.",
-                },
-                "feature_id": {
-                    "type": "string",
-                    "description": "Optional stable identifier.",
-                },
-                "tasks": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "objectives": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                            "action_points": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                            "exit_criteria": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                            "notes": {"type": "string"},
-                        },
-                        "required": [
-                            "title",
-                            "objectives",
-                            "action_points",
-                            "exit_criteria",
-                        ],
-                    },
-                },
-            },
-            "required": ["feature_name", "feature_request", "tasks"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="update_feature_task",
-        description="Modifies the details of a task before approval.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "integer"},
-                "title": {"type": "string"},
-                "objectives": {"type": "array", "items": {"type": "string"}},
-                "action_points": {"type": "array", "items": {"type": "string"}},
-                "exit_criteria": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["task_id"],
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="approve_feature_task",
-        description="Approves the feature plan, allowing implementation to begin.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "approved": {"type": "boolean", "default": True},
-            },
-        },
-        requires_approval=True,
-    ),
-    ToolDefinition(
-        name="get_current_task",
-        description="Retrieves the currently active task in the feature plan.",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="get_tasks",
-        description="Retrieves all tasks in the feature plan (previous, current, and upcoming).",
-        parameters={"type": "object", "properties": {}},
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="update_task_status",
-        description="Updates the status of a specific task. Provide verified_exit_criteria incrementally as criteria are met; set status='completed' only after all task exit_criteria are verified.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "integer"},
-                "status": {
-                    "type": "string",
-                    "enum": [
-                        "pending",
-                        "not_started",
-                        "in_progress",
-                        "blocked",
-                        "completed",
-                        "archived",
-                    ],
-                },
-                "notes": {"type": "string"},
-                "verified_exit_criteria": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Exit criteria already verified for this task. Update incrementally as work progresses; must include every task exit criterion before completion.",
-                },
-                "directory": {"type": "string"},
-            },
-            "required": ["task_id", "status"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="raise_blocker",
-        description="Raises a structured blocker when the feature loop needs user input or an external decision before it can safely continue.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Short blocker summary shown to the user.",
-                },
-                "details": {
-                    "type": "string",
-                    "description": "Longer explanation of what is blocked and what has already been tried.",
-                },
-                "requested_input": {
-                    "type": "string",
-                    "description": "Describe the exact information or decision needed from the user.",
-                },
-                "questions": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional focused questions for the user to answer.",
-                },
-            },
-            "required": ["summary", "requested_input"],
-        },
-        requires_approval=False,
-    ),
-    ToolDefinition(
-        name="invoke_skill",
-        description=(
-            "Load the full body of an installed skill into context. Use after "
-            "seeing a skill name in the AVAILABLE SKILLS index that fits the "
-            "user's request but wasn't auto-expanded. Call once per skill needed."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Exact skill name from the AVAILABLE SKILLS index.",
-                }
-            },
-            "required": ["name"],
-        },
-        requires_approval=False,
-    ),
+    # The 9 security tools (create_security_report, add_security_finding,
+    # attach_security_proof, verify_security_proof, attach_remediation_patch,
+    # verify_remediation, approve_security_finding, refute_security_finding,
+    # get_security_state) register via `mu/tools/security/handlers.py`.
+    # Bodies still live in this file as `_handle_*` until
+    # `core/security_mode.py` itself relocates (Phase 6 namespace rename).
+    # (block above ends — every security ToolDefinition is now in
+    # mu/tools/security/handlers.py.)
+    # Research tools (url_grounding, web_search, arxiv_search,
+    # doi_resolve, reddit_search, stackoverflow_search,
+    # hackernews_search, read_document) live in
+    # `mu/tools/research/handlers.py` as `@tool`-decorated functions.
+    # `flush` lives in mu/tools/batch/handlers.py.
+    # NOTE: save_memory / search_memory / list_memory / save_scratchpad /
+    # search_scratchpad / list_scratchpad / clear_scratchpad live in
+    # `mu/tools/memory/handlers.py` as `@tool`-decorated functions.
+    # Feature-mode tools (create_feature, create_phases, create_task,
+    # get_execution_state, block_task, resume_task, review_*,
+    # propose/decide_task_diff, archive_task,
+    # create/update/approve_feature_task, get_current_task, get_tasks,
+    # update_task_status, raise_blocker) register via the `@tool`
+    # decorator in `mu/tools/feature/handlers.py`. Bodies still live in
+    # this file as `_handle_*` until `core/feature_mode.py` itself
+    # relocates (Phase 6 namespace rename).
+    # (block above ends here — every feature-mode ToolDefinition is now
+    # registered through `mu/tools/feature/handlers.py`.)
+    # invoke_skill lives in `mu/tools/skill/handlers.py` as a
+    # `@tool`-decorated function.
 ]
 _COLLATED_TOOL_NAMES = {
     "get_workspace_details",
@@ -1329,275 +200,26 @@ def _default_result_mode(tool_name: str) -> str:
 def _default_server_policy(tool_name: str) -> str:
     if tool_name in {
         "flush",
-        "save_memory",
-        "save_scratchpad",
-        "search_memory",
-        "search_scratchpad",
-        "list_memory",
-        "list_scratchpad",
-        "clear_scratchpad",
     }:
         return "session_only"
     return "allowed"
 
 
 TOOL_DESCRIPTOR_OVERRIDES = {
-    "get_workspace_details": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "parse_workspace_details",
-    },
-    "read_file": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "read_file_preview",
-    },
-    "search_for_string": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "parse_search_results",
-    },
-    "search_references": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "parse_search_results",
-    },
-    "get_chunk": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "chunk_preview",
-    },
-    "list_dir": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "summary_builder": "parse_list_dir",
-    },
-    "write_file": {
-        "execution_kind": "mutate",
-        "preview_policy": "required",
-    },
-    "apply_diff": {
-        "execution_kind": "mutate",
-        "preview_policy": "required",
-    },
-    "batch_job": {
-        "execution_kind": "composite",
-        "preview_policy": "optional",
-        "result_mode": "structured",
-    },
-    "bash": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "bash_background": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "create_security_report": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "server_policy": "session_only",
-    },
-    "add_security_finding": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "server_policy": "session_only",
-    },
-    "attach_security_proof": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "server_policy": "session_only",
-    },
-    "verify_security_proof": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-        "server_policy": "session_only",
-    },
-    "attach_remediation_patch": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "server_policy": "session_only",
-    },
-    "verify_remediation": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-        "server_policy": "session_only",
-    },
-    "approve_security_finding": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "server_policy": "session_only",
-    },
-    "refute_security_finding": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "server_policy": "session_only",
-    },
-    "get_security_state": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "server_policy": "session_only",
-    },
-    "bash_status": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "bash_logs": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "bash_kill": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "bash_list": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "url_grounding": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "web_search": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "arxiv_search": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "read_document": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "flush": {
-        "execution_kind": "control",
-        "preview_policy": "none",
-        "result_mode": "raw",
-    },
-    "save_memory": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
-    "save_scratchpad": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
-    "search_memory": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
-    "search_scratchpad": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
-    "list_memory": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
-    "list_scratchpad": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
-    "clear_scratchpad": {
-        "execution_kind": "memory",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
-    "create_feature": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "create_phases": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "create_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "get_execution_state": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "block_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "resume_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "review_completed_tasks": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "review_all_completed_tasks": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "propose_task_diff": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "decide_task_diff": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "archive_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "create_feature_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "update_feature_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "approve_feature_task": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "get_current_task": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "get_tasks": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-    },
-    "update_task_status": {
-        "execution_kind": "mutate",
-        "preview_policy": "optional",
-    },
-    "raise_blocker": {
-        "execution_kind": "control",
-        "preview_policy": "none",
-        "result_mode": "structured",
-        "server_policy": "session_only",
-        "summary_builder": "blocker_summary",
-    },
-    "invoke_skill": {
-        "execution_kind": "read",
-        "preview_policy": "none",
-        "result_mode": "raw",
-        "server_policy": "session_only",
-    },
+    # Workspace inspector metadata now lives with the `@tool` registrations
+    # in `mu/tools/workspace/handlers.py`.
+    # write_file / apply_diff / search_and_replace_file metadata lives
+    # with the `@tool` registrations in mu/tools/file/handlers.py.
+    # batch_job + flush metadata moved to mu/tools/batch/handlers.py.
+    # bash + bash_{background,status,logs,kill,list} metadata lives with
+    # the `@tool` registrations in mu/tools/shell/handlers.py.
+    # Security-mode tool metadata moved to mu/tools/security/handlers.py.
+    # url_grounding / web_search / arxiv_search / read_document
+    # metadata moved to mu/tools/research/handlers.py.
+    # Memory + scratchpad tool metadata now lives with their handlers in
+    # `mu/tools/memory/handlers.py` (see `@tool` decorator arguments).
+    # Feature-mode tool metadata moved to mu/tools/feature/handlers.py.
+    # invoke_skill metadata moved to mu/tools/skill/handlers.py.
 }
 
 TOOL_DESCRIPTORS = {
@@ -1636,12 +258,23 @@ TOOL_DESCRIPTORS = {
 
 
 def get_tool_definition(tool_name: str) -> ToolDefinition | None:
-    descriptor = TOOL_DESCRIPTORS.get(tool_name)
+    descriptor = get_tool_descriptor(tool_name)
     return descriptor.definition if descriptor else None
 
 
 def get_tool_descriptor(tool_name: str) -> ToolDescriptor | None:
-    return TOOL_DESCRIPTORS.get(tool_name)
+    descriptor = TOOL_DESCRIPTORS.get(tool_name)
+    if descriptor is not None:
+        return descriptor
+    # Tools migrated to `mu/tools/<group>/handlers.py` register through the
+    # `@tool` decorator and no longer appear in the legacy TOOL_DESCRIPTORS
+    # dict. Fall through to the unified registry so callers (approval
+    # plan, /tool list, harness layer tests, etc.) keep working.
+    try:
+        from mu import tools as _mut
+    except ImportError:
+        return None
+    return _mut.get(tool_name)
 
 
 def list_tool_descriptors() -> list[ToolDescriptor]:
@@ -1655,57 +288,25 @@ COLLATED_TOOLS = [
 ]
 
 
-def _check_bounds(filename: str, folder_context) -> bool:
-    """Validates if a file path is within the attached workspace folders and not ignored.
-
-    The secret-path denylist (see `core/secret_paths.py`) runs *before* the
-    workspace check and applies unconditionally, even when no workspace is
-    attached, so SSH keys / cloud creds / `.env*` files are never accessible.
-    """
-    from core.secret_paths import is_denied_path
-
-    # Secret-path denials are unconditional at the file layer — there is no
-    # override here. Workflows that legitimately need an excluded path can
-    # use bash with the explicit `security_allow_secret_paths` opt-in.
-    denied, reason = is_denied_path(filename)
-    if denied:
-        logger.warning(f"_check_bounds: blocked secret path {filename!r}: {reason}")
-        return False
-
-    if not folder_context or not folder_context.folders:
-        return True  # If no workspace attached, bypass boundary strictness
-
-    abs_path = os.path.abspath(os.path.expanduser(filename))
-
-    # Check if it's within any of the workspace folders
-    within_bounds = False
-    for f in folder_context.folders:
-        if abs_path.startswith(os.path.abspath(f)):
-            within_bounds = True
-            break
-
-    if not within_bounds:
-        return False
-
-    # Check if it's ignored
-    if folder_context.is_ignored(abs_path):
-        return False
-
-    return True
+# `_check_bounds` body moved to `mu/tools/_bounds.py:check_bounds`.
+# The alias is bound at the bottom of this file (after the bridge
+# `import mu.tools` triggers the full registry to populate) so that the
+# legacy name keeps working for in-file callers and external tests.
+def _check_bounds(filename, folder_context):
+    from mu.tools._bounds import check_bounds as _impl
+    global _check_bounds
+    _check_bounds = _impl
+    return _impl(filename, folder_context)
 
 
-def _scrub_and_annotate(text: str) -> str:
-    """Run output through the secret scrubber and append a notice if anything
-    was redacted, so the model knows the result was sanitized."""
-    if not isinstance(text, str) or not text:
-        return text
-    scrubbed, n = redact_secrets(text)
-    if n > 0:
-        scrubbed = (
-            f"{scrubbed}\n\n"
-            f"[security: redacted {n} secret(s) from output]"
-        )
-    return scrubbed
+# `_scrub_and_annotate` body moved to `mu/tools/_scrub.py:scrub_and_annotate`.
+# Lazy alias keeps the legacy underscored name working for in-file callers
+# (read_file, bash_command, get_chunk, search_for_string, search_references).
+def _scrub_and_annotate(text):
+    from mu.tools._scrub import scrub_and_annotate as _impl
+    global _scrub_and_annotate
+    _scrub_and_annotate = _impl
+    return _impl(text)
 
 
 def get_workspace_details(folder_context) -> str:
@@ -3462,190 +2063,32 @@ def get_modifications(
     return []
 
 
-def infer_tool_error_code(tool_name: str, result: Any) -> str | None:
-    raw_text = str(result or "")
-    lowered = raw_text.lower()
-
-    if not raw_text:
-        return None
-
-    if "disabled for this session" in lowered:
-        return "access_denied"
-    if "access denied" in lowered or "outside boundaries" in lowered:
-        return "access_denied"
-    if "nested batch_job not allowed" in lowered:
-        return "unsupported"
-    if "unknown tool" in lowered or "tool_name missing" in lowered:
-        return "not_found"
-    if "field '" in lowered and "required" in lowered:
-        return "invalid_args"
-    if "argument is empty" in lowered or "must be a list" in lowered:
-        return "invalid_args"
-    if (
-        "malformed patch" in lowered
-        or "'patch' utility not found" in lowered
-        or "patch: ****" in lowered
-        or "only garbage was found in the patch input" in lowered
-    ):
-        return "preview_failed"
-    if raw_text.startswith("Error"):
-        return "execution_failed"
-    return None
+# Envelope construction + normalization moved to `mu/tools/_envelope.py`.
+# The aliases are bound lazily on first call to avoid the
+# `mu.tools.__init__` registry mirror running before `TOOL_HANDLERS` /
+# `TOOL_DESCRIPTORS` are defined further down this file. (After the
+# bottom-of-file bridge import fires, `mu.tools` is fully loaded and
+# every subsequent call goes through the rebound `mu/tools/_envelope`
+# implementations directly.)
+def infer_tool_error_code(tool_name, result):
+    from mu.tools._envelope import infer_tool_error_code as _impl
+    global infer_tool_error_code
+    infer_tool_error_code = _impl
+    return _impl(tool_name, result)
 
 
-def _hint_lookup(tool_name: str, error_code: str | None) -> tuple[str | None, bool]:
-    """Lookup (hint, retryable) for an envelope. Imported lazily to keep
-    `core.tools` independent of `mu.tools._hints` at module load."""
-    if not error_code:
-        return None, False
-    try:
-        from mu.tools._hints import hint_for, retryable_for_code
-
-        return hint_for(tool_name, error_code), retryable_for_code(error_code)
-    except Exception:  # pragma: no cover — defensive
-        return None, False
+def _build_tool_envelope(**kwargs):
+    from mu.tools._envelope import _build_tool_envelope as _impl
+    global _build_tool_envelope
+    _build_tool_envelope = _impl
+    return _impl(**kwargs)
 
 
-def _build_tool_envelope(
-    *,
-    tool_name: str,
-    ok: bool,
-    message: str,
-    data: Any = None,
-    error_code: str | None = None,
-    artifacts: list | None = None,
-    telemetry: dict | None = None,
-    hint: str | None = None,
-    retryable: bool | None = None,
-) -> dict[str, Any]:
-    # If the caller didn't supply hint/retryable explicitly and the envelope
-    # represents a failure, derive them from the (tool, error_code) registry.
-    if not ok:
-        derived_hint, derived_retryable = _hint_lookup(tool_name, error_code)
-        if hint is None:
-            hint = derived_hint
-        if retryable is None:
-            retryable = derived_retryable
-    else:
-        if retryable is None:
-            retryable = False
-    return {
-        "ok": bool(ok),
-        "error_code": error_code,
-        "message": str(message or ""),
-        "data": data if data is not None else {},
-        "artifacts": artifacts or [],
-        "hint": hint,
-        "retryable": bool(retryable),
-        "telemetry": {
-            "tool_name": tool_name,
-            **(telemetry or {}),
-        },
-    }
-
-
-def _envelope_from_handler_result(tool_name: str, handler_result: Any) -> dict[str, Any]:
-    def _ensure_envelope_shape(payload: dict[str, Any]) -> dict[str, Any]:
-        out = dict(payload)
-        if "error_code" not in out:
-            out["error_code"] = None if out.get("ok") else infer_tool_error_code(tool_name, out)
-        if "message" not in out:
-            if isinstance(out.get("error"), str):
-                out["message"] = out.get("error", "")
-            elif out.get("ok"):
-                out["message"] = "ok"
-            else:
-                out["message"] = str(out.get("error") or "")
-        if "data" not in out:
-            out["data"] = {}
-        if "artifacts" not in out:
-            out["artifacts"] = []
-        # Backfill hint + retryable from the registry when missing. Tools
-        # that emit their own structured envelopes can override either
-        # value; we never clobber a non-None hint or an explicit retryable.
-        if not out.get("ok"):
-            derived_hint, derived_retryable = _hint_lookup(tool_name, out.get("error_code"))
-            if "hint" not in out or out.get("hint") is None:
-                out["hint"] = derived_hint
-            if "retryable" not in out:
-                out["retryable"] = derived_retryable
-        else:
-            out.setdefault("hint", None)
-            out.setdefault("retryable", False)
-        telemetry = out.get("telemetry")
-        out["telemetry"] = telemetry if isinstance(telemetry, dict) else {}
-        out["telemetry"].setdefault("tool_name", tool_name)
-        return out
-
-    if isinstance(handler_result, dict):
-        # Already envelope-compliant payload — backfill hint/retryable if
-        # the handler emitted an older 6-key envelope.
-        if {"ok", "error_code", "message", "data", "artifacts", "telemetry"}.issubset(
-            handler_result.keys()
-        ):
-            out = dict(handler_result)
-            if not out.get("ok"):
-                derived_hint, derived_retryable = _hint_lookup(
-                    tool_name, out.get("error_code")
-                )
-                if "hint" not in out or out.get("hint") is None:
-                    out["hint"] = derived_hint
-                if "retryable" not in out:
-                    out["retryable"] = derived_retryable
-            else:
-                out.setdefault("hint", None)
-                out.setdefault("retryable", False)
-            return out
-        if "ok" in handler_result:
-            return _ensure_envelope_shape(handler_result)
-        error_code = infer_tool_error_code(tool_name, json.dumps(handler_result))
-        return _build_tool_envelope(
-            tool_name=tool_name,
-            ok=error_code is None,
-            error_code=error_code,
-            message=json.dumps(handler_result, sort_keys=True),
-            data=handler_result,
-        )
-
-    raw_text = str(handler_result or "")
-    parsed_data = None
-    if raw_text:
-        try:
-            parsed = json.loads(raw_text)
-            if isinstance(parsed, dict):
-                if {"ok", "error_code", "message", "data", "artifacts", "telemetry"}.issubset(
-                    parsed.keys()
-                ):
-                    return parsed
-                if "ok" in parsed:
-                    return _ensure_envelope_shape(parsed)
-                # Tool-local structured JSON payload.
-                success_value = parsed.get("success")
-                parsed_error = parsed.get("error")
-                if success_value is not None or parsed_error:
-                    ok = bool(success_value) and not parsed_error
-                    error_code = None if ok else infer_tool_error_code(tool_name, parsed_error or raw_text)
-                    envelope = _build_tool_envelope(
-                        tool_name=tool_name,
-                        ok=ok,
-                        error_code=error_code,
-                        message=str(parsed_error or ("success" if ok else raw_text)),
-                        data=parsed,
-                    )
-                    envelope.update(parsed)
-                    return envelope
-            parsed_data = parsed
-        except Exception:
-            parsed_data = None
-
-    error_code = infer_tool_error_code(tool_name, raw_text)
-    return _build_tool_envelope(
-        tool_name=tool_name,
-        ok=error_code is None,
-        error_code=error_code,
-        message=raw_text,
-        data=parsed_data if isinstance(parsed_data, (dict, list)) else {},
-    )
+def _envelope_from_handler_result(tool_name, handler_result):
+    from mu.tools._envelope import _envelope_from_handler_result as _impl
+    global _envelope_from_handler_result
+    _envelope_from_handler_result = _impl
+    return _impl(tool_name, handler_result)
 
 
 def serialize_tool_descriptor(tool_name: str) -> dict | None:
@@ -3676,19 +2119,7 @@ def _path_arg_error(key: str) -> str:
     )
 
 
-def _handle_get_workspace_details(args, folder_context, ui, variables) -> str:
-    return get_workspace_details(folder_context)
-
-
-def _handle_flush(args, folder_context, ui, variables) -> str:
-    return "Buffer flushed."
-
-
-def _handle_memory_placeholder(message: str) -> Callable[..., str]:
-    def _handler(args, folder_context, ui, variables) -> str:
-        return message
-
-    return _handler
+# `_handle_flush` moved to `mu/tools/batch/handlers.py:flush`.
 
 
 def _legacy_handler(
@@ -3700,158 +2131,13 @@ def _legacy_handler(
     return _wrapped
 
 
-def _handle_read_file(args, folder_context, ui, variables) -> str:
-    return read_file(args.get("filename", ""), folder_context)
+# Workspace inspector handlers (get_workspace_details, read_file,
+# search_for_string, search_references, retrieve_relevant_context,
+# get_chunk, list_dir) moved to `mu/tools/workspace/handlers.py`.
 
 
-def _handle_search_for_string(args, folder_context, ui, variables) -> str:
-    return search_for_string(args.get("string", ""), folder_context)
-
-
-def _handle_search_references(args, folder_context, ui, variables) -> str:
-    return search_references(
-        args.get("query", ""),
-        folder_context,
-        context_lines=args.get("context_lines", 3),
-    )
-
-
-def _handle_retrieve_relevant_context(args, folder_context, ui, variables) -> str:
-    return retrieve_relevant_context(
-        args.get("query", ""),
-        folder_context,
-        top_k=args.get("top_k", 5),
-        filters=args.get("filters", {}),
-    )
-
-
-def _handle_get_chunk(args, folder_context, ui, variables) -> str:
-    return get_chunk(
-        args.get("file", ""),
-        args.get("start_line", 1),
-        args.get("end_line", 100),
-        folder_context,
-    )
-
-
-def _handle_list_dir(args, folder_context, ui, variables) -> str:
-    return list_dir(args.get("path", ""), folder_context)
-
-
-def _handle_invoke_skill(args, folder_context, ui, variables) -> str:
-    from mu.skills import get_skill, render_skills_expanded
-
-    name = str(args.get("name") or "").strip()
-    if not name:
-        return "Error: invoke_skill requires a non-empty `name` argument."
-    folders = list(getattr(folder_context, "folders", []) or [])
-    skill = get_skill(name, folders)
-    if skill is None:
-        return f"Error: no skill named {name!r} is installed."
-    return render_skills_expanded(skill)
-
-
-def _handle_write_file(args, folder_context, ui, variables) -> str:
-    return write_file(args.get("filename", ""), args.get("content", ""), folder_context)
-
-
-def _handle_bash(args, folder_context, ui, variables) -> str:
-    return bash_command(
-        args.get("command", ""),
-        folder_context,
-        cwd=args.get("cwd"),
-        timeout_seconds=args.get("timeout_seconds", 120),
-        max_output_chars=args.get("max_output_chars", 12000),
-    )
-
-
-# ----------------------------------------------------------- background bash
-
-
-def _bg_registry(context):
-    """Resolve the session's BackgroundTaskRegistry. Falls back to a process-
-    global one if no Session is bound (e.g. unit tests that call handlers
-    directly without going through a Session)."""
-    session = getattr(context, "session", None) if context is not None else None
-    if session is not None and hasattr(session, "background_tasks"):
-        return session.background_tasks
-    global _STANDALONE_BG_REGISTRY
-    try:
-        _STANDALONE_BG_REGISTRY
-    except NameError:
-        from core.background_tasks import BackgroundTaskRegistry
-        _STANDALONE_BG_REGISTRY = BackgroundTaskRegistry()
-    return _STANDALONE_BG_REGISTRY
-
-
-def _bg_handler(fn):
-    """Wrap a `(args, registry) -> str` handler into the
-    `(args, context) -> str` envelope expected by TOOL_HANDLERS."""
-
-    def _wrapped(args: dict, context: ToolExecutionContext) -> str:
-        registry = _bg_registry(context)
-        return fn(args, registry)
-
-    return _wrapped
-
-
-def _handle_bash_background(args: dict, registry) -> str:
-    from core.background_tasks import summarize_task
-    command = str(args.get("command", "") or "").strip()
-    if not command:
-        return json.dumps({"error": "command is required"})
-    try:
-        task = registry.start(
-            command,
-            name=str(args.get("name", "") or "") or None,
-            cwd=str(args.get("cwd", "") or "") or None,
-        )
-    except (ValueError, RuntimeError) as e:
-        return json.dumps({"error": str(e)})
-    summary = summarize_task(task, tail_lines=0)
-    summary["message"] = f"Background task started: {task.task_id}"
-    return json.dumps(summary, indent=2)
-
-
-def _handle_bash_status(args: dict, registry) -> str:
-    from core.background_tasks import summarize_task
-    task_id = str(args.get("task_id", "") or "").strip()
-    task = registry.get(task_id)
-    if task is None:
-        return json.dumps({"error": f"no such task: {task_id}"})
-    tail_lines = max(0, int(args.get("tail_lines", 20) or 20))
-    return json.dumps(summarize_task(task, tail_lines=tail_lines), indent=2)
-
-
-def _handle_bash_logs(args: dict, registry) -> str:
-    from core.background_tasks import tail as _tail
-    task_id = str(args.get("task_id", "") or "").strip()
-    task = registry.get(task_id)
-    if task is None:
-        return json.dumps({"error": f"no such task: {task_id}"})
-    stream = str(args.get("stream", "both") or "both").lower()
-    lines = max(1, int(args.get("lines", 200) or 200))
-    payload: dict = {"task_id": task_id, "status": task.status()}
-    if stream in ("stdout", "both"):
-        payload["stdout"] = _tail(task.stdout_buf, lines)
-    if stream in ("stderr", "both"):
-        payload["stderr"] = _tail(task.stderr_buf, lines)
-    return json.dumps(payload, indent=2)
-
-
-def _handle_bash_kill(args: dict, registry) -> str:
-    from core.background_tasks import summarize_task
-    task_id = str(args.get("task_id", "") or "").strip()
-    task = registry.kill(task_id)
-    if task is None:
-        return json.dumps({"error": f"no such task: {task_id}"})
-    return json.dumps(summarize_task(task, tail_lines=5), indent=2)
-
-
-def _handle_bash_list(args: dict, registry) -> str:
-    from core.background_tasks import summarize_task
-    tasks = [summarize_task(t, tail_lines=3) for t in registry.list()]
-    return json.dumps({"tasks": tasks, "count": len(tasks)}, indent=2)
+# invoke_skill handler lives in `mu/tools/skill/handlers.py`.
+# bash + bg-bash handlers live in `mu/tools/shell/handlers.py`.
 
 
 # ----------------------------------------------------------- security audit
@@ -4131,71 +2417,9 @@ def _handle_get_security_state(
     return json.dumps(summarize_report(report), indent=2)
 
 
-def _handle_apply_diff(args, folder_context, ui, variables) -> str:
-    return apply_diff(args.get("filename", ""), args.get("diff", ""), folder_context)
-
-
-def _handle_search_and_replace_file(args, folder_context, ui, variables) -> str:
-    return search_and_replace_file(
-        args.get("filename", ""), args.get("search", ""), args.get("replace", ""),
-        args.get("expected_count"), args.get("normalize_whitespace", False),
-        args.get("dry_run", False),
-        folder_context
-    )
-
-
-def _handle_url_grounding(args, folder_context, ui, variables) -> str:
-    return url_grounding(args.get("url", ""), folder_context)
-
-
-
-def _handle_web_search(args, folder_context, ui, variables) -> str:
-    return web_search(args.get("query", ""), args.get("engine", "duckduckgo"), args.get("num_results", 10), folder_context)
-
-
-
-def _handle_arxiv_search(args, folder_context, ui, variables) -> str:
-    return arxiv_search(args.get("query", ""), folder_context, args.get("max_results", 10), args.get("category", ""))
-
-
-def _handle_doi_resolve(args, folder_context, ui, variables) -> str:
-    return doi_resolve(args.get("doi", ""), args.get("format", "json"), folder_context)
-
-
-def _handle_reddit_search(args, folder_context, ui, variables) -> str:
-    return reddit_search(
-        args.get("query", ""),
-        subreddit=args.get("subreddit"),
-        sort=args.get("sort", "relevance"),
-        limit=args.get("num_results", args.get("max_results", 10)),
-        folder_context=folder_context,
-    )
-
-
-def _handle_stackoverflow_search(args, folder_context, ui, variables) -> str:
-    tags = args.get("tags")
-    if tags is None and args.get("tag"):
-        tags = [args.get("tag")]
-    return stackoverflow_search(
-        args.get("query", ""),
-        tags=tags,
-        sort=args.get("sort", "relevance"),
-        limit=args.get("num_results", args.get("max_results", 10)),
-        folder_context=folder_context,
-    )
-
-
-def _handle_hackernews_search(args, folder_context, ui, variables) -> str:
-    return hackernews_search(
-        args.get("query", ""),
-        sort=args.get("sort", "relevance"),
-        num_results=args.get("num_results", args.get("max_results", 10)),
-        folder_context=folder_context,
-    )
-
-
-def _handle_read_document(args, folder_context, ui, variables) -> str:
-    return read_document(args.get("filename", ""), folder_context)
+# Research handlers (url_grounding, web_search, arxiv_search,
+# doi_resolve, reddit_search, stackoverflow_search, hackernews_search,
+# read_document) live in `mu/tools/research/handlers.py`.
 
 
 def _handle_raise_blocker(args, folder_context, ui, variables) -> str:
@@ -5092,7 +3316,10 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     )
 
 
-def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
+# `_handle_batch_job` moved to `mu/tools/batch/handlers.py:batch_job`.
+# Body archived below in `_handle_batch_job_legacy_archive` for diff
+# history; never called.
+def _handle_batch_job_legacy_archive(args: dict, context: ToolExecutionContext) -> str:  # pragma: no cover
     commands = args.get("commands", [])
     if not isinstance(commands, list):
         return json.dumps(
@@ -5209,81 +3436,25 @@ def _handle_batch_job(args: dict, context: ToolExecutionContext) -> str:
 
 
 TOOL_HANDLERS: dict[str, Callable[[dict, ToolExecutionContext], str]] = {
-    "get_workspace_details": _legacy_handler(_handle_get_workspace_details),
-    "flush": _legacy_handler(_handle_flush),
-    "save_memory": _legacy_handler(
-        _handle_memory_placeholder("Memory save requested.")
-    ),
-    "save_scratchpad": _legacy_handler(
-        _handle_memory_placeholder("Scratchpad save requested.")
-    ),
-    "search_memory": _legacy_handler(
-        _handle_memory_placeholder("Memory search requested.")
-    ),
-    "search_scratchpad": _legacy_handler(
-        _handle_memory_placeholder("Scratchpad search requested.")
-    ),
-    "list_memory": _legacy_handler(
-        _handle_memory_placeholder("Memory listing requested.")
-    ),
-    "list_scratchpad": _legacy_handler(
-        _handle_memory_placeholder("Scratchpad listing requested.")
-    ),
-    "clear_scratchpad": _legacy_handler(
-        _handle_memory_placeholder("Scratchpad cleared.")
-    ),
-    "read_file": _legacy_handler(_handle_read_file),
-    "search_for_string": _legacy_handler(_handle_search_for_string),
-    "search_references": _legacy_handler(_handle_search_references),
-    "retrieve_relevant_context": _legacy_handler(_handle_retrieve_relevant_context),
-    "get_chunk": _legacy_handler(_handle_get_chunk),
-    "list_dir": _legacy_handler(_handle_list_dir),
-    "invoke_skill": _legacy_handler(_handle_invoke_skill),
-    "write_file": _legacy_handler(_handle_write_file),
-    "bash": _legacy_handler(_handle_bash),
-    "bash_background": _bg_handler(_handle_bash_background),
-    "bash_status": _bg_handler(_handle_bash_status),
-    "bash_logs": _bg_handler(_handle_bash_logs),
-    "bash_kill": _bg_handler(_handle_bash_kill),
-    "bash_list": _bg_handler(_handle_bash_list),
-    "create_security_report": _handle_create_security_report,
-    "add_security_finding": _handle_add_security_finding,
-    "attach_security_proof": _handle_attach_security_proof,
-    "verify_security_proof": _handle_verify_security_proof,
-    "attach_remediation_patch": _handle_attach_remediation_patch,
-    "verify_remediation": _handle_verify_remediation,
-    "approve_security_finding": _handle_approve_security_finding,
-    "refute_security_finding": _handle_refute_security_finding,
-    "get_security_state": _handle_get_security_state,
-    "apply_diff": _legacy_handler(_handle_apply_diff),
-    "url_grounding": _legacy_handler(_handle_url_grounding),
-    "read_document": _legacy_handler(_handle_read_document),
-    "web_search": _legacy_handler(_handle_web_search),
-    "arxiv_search": _legacy_handler(_handle_arxiv_search),
-    "doi_resolve": _legacy_handler(_handle_doi_resolve),
-    "reddit_search": _legacy_handler(_handle_reddit_search),
-    "stackoverflow_search": _legacy_handler(_handle_stackoverflow_search),
-    "hackernews_search": _legacy_handler(_handle_hackernews_search),
-    "create_feature": _handle_create_feature,
-    "create_phases": _handle_create_phases,
-    "create_task": _handle_create_task,
-    "get_execution_state": _handle_get_execution_state,
-    "block_task": _handle_block_task,
-    "resume_task": _handle_resume_task,
-    "review_completed_tasks": _handle_review_completed_tasks,
-    "review_all_completed_tasks": _handle_review_all_completed_tasks,
-    "propose_task_diff": _handle_propose_task_diff,
-    "decide_task_diff": _handle_decide_task_diff,
-    "archive_task": _handle_archive_task,
-    "create_feature_task": _handle_create_feature_task,
-    "update_feature_task": _handle_update_feature_task,
-    "approve_feature_task": _handle_approve_feature_task,
-    "get_current_task": _handle_get_current_task,
-    "get_tasks": _handle_get_tasks,
-    "update_task_status": _handle_update_task_status,
-    "raise_blocker": _legacy_handler(_handle_raise_blocker),
-    "batch_job": _handle_batch_job,
-    "search_and_replace_file": _legacy_handler(_handle_search_and_replace_file),
+    # Every tool now registers via the `@tool` decorator under
+    # `mu/tools/<group>/handlers.py`. The legacy `TOOL_HANDLERS` dict is
+    # kept for backward compatibility with code that mutates it directly
+    # (eg. some test fixtures) — the bridge in `mu/tools/__init__.py`
+    # mirrors new registrations into it at decoration time.
+    # Security-mode handlers (create_security_report, add_security_finding,
+    # attach_security_proof, verify_security_proof, attach_remediation_patch,
+    # verify_remediation, approve_security_finding, refute_security_finding,
+    # get_security_state) register via the `@tool` decorator in
+    # mu/tools/security/handlers.py.
+    # Feature-mode handlers (create_feature, create_phases, create_task,
+    # get_execution_state, block_task, resume_task, review_*,
+    # propose/decide_task_diff, archive_task, create/update/approve_feature_task,
+    # get_current_task, get_tasks, update_task_status, raise_blocker)
+    # register via the `@tool` decorator in mu/tools/feature/handlers.py.
+    # batch_job + flush register via the `@tool` decorator in
+    # mu/tools/batch/handlers.py.
+    # write_file / apply_diff / search_and_replace_file register via the
+    # `@tool` decorator in mu/tools/file/handlers.py.
 }
 
 
@@ -5297,137 +3468,36 @@ def execute_tool(
     invocation_source: str = "session",
     session: Any = None,
 ) -> str:
-    """Descriptor-backed dispatcher with argument validation."""
+    """Descriptor-backed dispatcher with argument validation.
 
-    descriptor = get_tool_descriptor(tool_name)
-    if not descriptor:
-        return json.dumps(
-            _build_tool_envelope(
-                tool_name=tool_name,
-                ok=False,
-                error_code="not_found",
-                message=f"Unknown tool: {tool_name}",
-            )
-        )
+    The body lives in `mu/tools/_dispatcher.py:dispatch`. This thin
+    shim preserves the legacy `from core.tools import execute_tool`
+    import path used by `Session._execute_tool_with_memory` and a
+    handful of tests.
+    """
+    from mu.tools._dispatcher import dispatch
 
-    if not isinstance(args, dict):
-        return json.dumps(
-            _build_tool_envelope(
-                tool_name=tool_name,
-                ok=False,
-                error_code="invalid_args",
-                message=(
-                    f"Error: Tool '{tool_name}' arguments must be an object/dict, "
-                    f"got {type(args).__name__}. Please re-issue the tool call with JSON object arguments."
-                ),
-            )
-        )
-
-    path_keys = ["filename", "file", "path"]
-    for key in path_keys:
-        if key in args and (not args[key] or str(args[key]).strip() == ""):
-            return json.dumps(
-                _build_tool_envelope(
-                    tool_name=tool_name,
-                    ok=False,
-                    error_code="invalid_args",
-                    message=_path_arg_error(key),
-                )
-            )
-
-    if tool_name == "apply_diff" and session is not None:
-        feature_state = (
-            session.session_manager.get_feature_state()
-            if hasattr(session, "session_manager")
-            else None
-        ) or {}
-        feature_plan = feature_state.get("feature_plan", {}) if isinstance(feature_state, dict) else {}
-        in_review_mode = bool(feature_plan.get("tasks_completed")) and (
-            str(feature_plan.get("review_status", "")).strip().lower() != "completed"
-        )
-        if in_review_mode:
-            proposal_id = str(args.get("proposal_id", "") or "").strip()
-            if not proposal_id:
-                return json.dumps(
-                    _build_tool_envelope(
-                        tool_name=tool_name,
-                        ok=False,
-                        error_code="invalid_args",
-                        message="Error: apply_diff in review mode requires proposal_id for an approved diff proposal.",
-                    )
-                )
-            metadata_path = str(feature_state.get("metadata_path", "") or "").strip()
-            if not metadata_path or not os.path.exists(metadata_path):
-                return json.dumps(
-                    _build_tool_envelope(
-                        tool_name=tool_name,
-                        ok=False,
-                        error_code="not_found",
-                        message="Error: Feature metadata not found for review-mode apply_diff.",
-                    )
-                )
-            plan = load_feature_plan(metadata_path)
-            proposal = next(
-                (item for item in plan.diff_proposals if item.id == proposal_id),
-                None,
-            )
-            if proposal is None or proposal.status != "approved":
-                return json.dumps(
-                    _build_tool_envelope(
-                        tool_name=tool_name,
-                        ok=False,
-                        error_code="access_denied",
-                        message=(
-                            "Error: apply_diff blocked in review mode. "
-                            "proposal_id must reference an approved diff proposal."
-                        ),
-                    )
-                )
-
-    handler = TOOL_HANDLERS.get(descriptor.handler_key)
-    if not handler:
-        return json.dumps(
-            _build_tool_envelope(
-                tool_name=tool_name,
-                ok=False,
-                error_code="not_found",
-                message=f"Error: No handler registered for tool '{tool_name}'.",
-            )
-        )
-
-    context = build_tool_context(
+    return dispatch(
+        tool_name,
+        args,
         folder_context,
         ui,
         variables,
         invocation_source=invocation_source,
         session=session,
     )
-    try:
-        raw_result = handler(args, context)
-        envelope = _envelope_from_handler_result(tool_name, raw_result)
-        if "execution_source" not in envelope.get("telemetry", {}):
-            envelope.setdefault("telemetry", {})["execution_source"] = invocation_source
-        return json.dumps(envelope, indent=2, sort_keys=True)
-    except Exception as exc:
-        hint = ""
-        if isinstance(exc, AttributeError) and "'str' object has no attribute 'get'" in str(
-            exc
-        ):
-            hint = (
-                " Hint: A string was used where an object was expected "
-                "(commonly malformed tool arguments like tasks)."
-            )
-        logger.error("Tool execution failed for %s: %s", tool_name, exc, exc_info=True)
-        return json.dumps(
-            _build_tool_envelope(
-                tool_name=tool_name,
-                ok=False,
-                error_code="execution_failed",
-                message=(
-                    f"Error: Tool '{tool_name}' failed with {type(exc).__name__}: {exc}."
-                    f"{hint} Please fix arguments and retry."
-                ),
-                telemetry={"execution_source": invocation_source},
-            ),
-            indent=2,
-        )
+
+
+# ============================================================================
+# Bottom-of-file: import `mu.tools`.
+#
+# Triggering the registry HERE — after every legacy TOOL_DESCRIPTORS,
+# TOOL_HANDLERS and TOOLS structure is populated — lets the `@tool`
+# decorators in `mu/tools/<group>/handlers.py` mirror their descriptors
+# back into the legacy maps without hitting a "partially initialized
+# module" circular-import error. Without this import, the @tool
+# registrations only happen when something else (eg. `core.session`)
+# imports `mu.tools` later in the program lifetime, which makes the
+# legacy `execute_tool` look like it has lost its handlers when tests
+# import `core.tools` directly.
+import mu.tools as _mu_tools_bridge  # noqa: E402, F401

@@ -86,13 +86,15 @@ def test_send_message_clears_flag(session):
 
     # We can't easily run a real send_message (needs a provider), but
     # the clear is the first thing it does — pin via source inspection.
+    # Body moved to `mu/agent/loop_body.py:run_turn` during Phase 4 of
+    # the refactor; source-inspect that target now.
     import inspect
 
-    from core import session as session_mod
+    from mu.agent import loop_body as loop_body_mod
 
-    source = inspect.getsource(session_mod.Session.send_message)
+    source = inspect.getsource(loop_body_mod.run_turn)
     # The clear must appear early — right after the initial logging line.
-    clear_pos = source.index("self._loop_blocker_raised = False")
+    clear_pos = source.index("session._loop_blocker_raised = False")
     info_pos = source.index("logger.info")
     assert clear_pos > info_pos
     # And before the agentic loop entry point (search for the `while`
@@ -107,10 +109,10 @@ def test_watchdog_branch_checks_blocker_flag_in_source():
     future refactor removes the check, this test flags it."""
     import inspect
 
-    from core import session as session_mod
+    from mu.agent import loop_body as loop_body_mod
 
-    # The watchdog branch lives in send_message.
-    source = inspect.getsource(session_mod.Session.send_message)
+    # The watchdog branch lives in run_turn (post-Phase-4 location).
+    source = inspect.getsource(loop_body_mod.run_turn)
     watchdog_pos = source.index("LOOP WATCHDOG")
     # The flag check must appear after the active-mode == "loop" test
     # but before the watchdog message append.

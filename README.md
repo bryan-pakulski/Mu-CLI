@@ -15,18 +15,37 @@ Terminal-first multi-provider coding assistant.
 git clone https://github.com/your-repo/Mu-CLI.git
 cd Mu-CLI
 pip install -r requirements.txt
+
+# Put `mucli` on your PATH so you can run it from any directory.
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/mucli.py" ~/.local/bin/mucli
 ```
+Ensure `~/.local/bin` is on your `PATH` (most distros add it automatically; if not, add `export PATH="$HOME/.local/bin:$PATH"` to your shell rc).
 
 ## Usage
+
+Run `mucli` to start. You'll get a session picker — choose `[+ New Session]` (or load a previous one; sessions persist under `~/.mucli/`). Then attach a workspace and prompt:
+
+```
+/workspace folder /path/to/your/repo
+explain how authentication works in this codebase
+```
+
+### Workflows
+- **Quick fix or question** — default mode. Just describe the change.
+- **Staged feature** — `/mode feature` breaks the work into approvable phases/tasks.
+- **Bug hunt** — `/mode debug` walks reproduce → locate → fix.
+- **Read-only investigation** — `/mode research` for citation-aware analysis with no edits.
+- **Long-horizon autonomous** — `/mode loop` to work a backlog unattended.
+
+### Useful CLI flags
 ```bash
-python mucli.py                                  # interactive REPL
-python mucli.py --provider openai --model gpt-4o # specific provider+model
-python mucli.py --workspace ./src                # attach a folder at startup
-python mucli.py --workspace ./a --workspace ./b  # multiple folders
-python mucli.py --session my-session             # load saved session non-interactively
-python mucli.py --yolo                           # auto-approve writes
-python mucli.py --debug                          # verbose logging
-python mucli.py --system "be concise"            # override system instruction
+mucli --workspace ./src                   # attach folder(s) at startup
+mucli --provider openai --model gpt-4o    # pick provider+model
+mucli --session my-session                # load a saved session non-interactively
+mucli --yolo                              # auto-approve writes
+mucli --system "be concise"               # override system instruction
+mucli --debug                             # verbose logging
 ```
 
 ## Key features
@@ -35,7 +54,7 @@ python mucli.py --system "be concise"            # override system instruction
 - Session save/load and multi-session workflows.
 - Feature mode with persistent plans under `documentation/feature_req_<id>/`.
 - Plan mode (`/plan`) — read-only tool enforcement.
-- Hooks (`.mu/hooks.json`) — shell-cmd hooks at five lifecycle points.
+- Hooks (`.mu/hooks.json`) — shell-cmd hooks at five lifecycle points; plus built-in Python hooks for plan-mode enforcement, secret-path guarding, auto-compaction, and usage tracking. See [documentation/hooks.md](documentation/hooks.md).
 - MCP support (`.mu/mcp.json`) — discover and register tools from any MCP server. See [documentation/mcp.md](documentation/mcp.md).
 - TodoWrite-style task tracking (`todo_write`, `todo_set_status`, `todo_list` tools).
 - Sub-agent spawning (`spawn_agent`) — isolated child sessions for focused side quests, depth-capped, plan-mode-aware.
@@ -77,26 +96,7 @@ The most common day-to-day commands — see [documentation/commands.md](document
 
 ## Configuration files
 
-`.mu/hooks.json` — shell-command hooks fired at lifecycle points:
-```json
-{
-  "hooks": [
-    {
-      "name": "log-tool-calls",
-      "point": "post_tool",
-      "command": "echo $MU_TOOL_NAME >> /tmp/tools.log"
-    },
-    {
-      "name": "deny-rm-rf",
-      "point": "pre_tool",
-      "command": "case \"$MU_TOOL_ARGS_JSON\" in *rm\\ -rf*) exit 1;; *) exit 0;; esac",
-      "on_failure": "short_circuit",
-      "message": "rm -rf detected; refuse"
-    }
-  ]
-}
-```
-Valid `point` values: `pre_provider_call`, `post_provider_call`, `pre_tool`, `post_tool`, `on_stop`. Exit 0 = continue; non-zero with `on_failure: short_circuit` at `pre_tool` denies the call.
+`.mu/hooks.json` — shell-command hooks fired at five lifecycle points (`pre_provider_call`, `post_provider_call`, `pre_tool`, `post_tool`, `on_stop`). Exit 0 = continue; non-zero with `on_failure: short_circuit` at `pre_tool` denies the call. Full reference, env vars, and the Python decorator path in [documentation/hooks.md](documentation/hooks.md).
 
 `.mu/mcp.json` — Model Context Protocol servers to auto-start:
 ```json
@@ -123,8 +123,7 @@ mu/
   session/        HistoryMixin (token-budget rolling, summarization)
   tools/          @tool decorator + legacy bridge (61 native + N MCP tools)
   ui/             Stream renderer
-
-providers/        Gemini, OpenAI, Ollama — all streaming, all cache-aware
+providers/        Gemini, OpenAI, Ollama
 core/             Session class (loop body) — migration in progress
 utils/            Config, metrics, citation manager, logger
 ```
@@ -135,8 +134,11 @@ See `documentation/`:
 - [`configuration.md`](documentation/configuration.md) — env vars, session variables, config files
 - [`skills.md`](documentation/skills.md) — declarative agent extensions
 - [`mcp.md`](documentation/mcp.md) — Model Context Protocol setup, auth, and management
+- [`hooks.md`](documentation/hooks.md) — lifecycle hooks (Python decorator + `.mu/hooks.json`)
+- [`security.md`](documentation/security.md) — full security model: workspace sandbox, secret filtering, approval flow, plan mode, sub-agent isolation, limitations
 - [`tooling_harness_architecture.md`](documentation/tooling_harness_architecture.md) — tool lifecycle
 - [`memory_guide.md`](documentation/memory_guide.md) — memory vs scratchpad
+- [`refactor_roadmap.md`](documentation/refactor_roadmap.md) — current `core/` ↔ `mu/` migration state, verified dead code, phased completion plan
 
 Agent modes (one doc per mode):
 - [`default_mode.md`](documentation/default_mode.md) — general coding workflow
@@ -150,5 +152,3 @@ Agent modes (one doc per mode):
 ```bash
 make test
 ```
-
-Tests cover the core loop, every provider, every research tool, the new `mu/` package (tools registry, command registry, hooks, plan mode, parallel dispatch, history mixin, TodoWrite, hooks config, MCP client + registry, AgentLoop façade), and the feature-mode state machine.

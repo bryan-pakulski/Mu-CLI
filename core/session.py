@@ -117,561 +117,39 @@ def derive_feature_state_status(feature_plan: dict | None) -> str:
 from mu.session.history import HistoryMixin
 
 
-class SessionManager(HistoryMixin):
-    def __init__(self, ui=None, session_name=None):
-        self.ui = ui
-        logger.info(f"Initializing SessionManager (session_name={session_name})")
-        self.current_session_name = DEFAULT_SESSION_NAME
-        self.history = []  # Stores standardized list of dicts representing messages
-        self.conversation_summary = ""
-        self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
-        self.collation_buffer = CollationBuffer()
-        self.summary_anchor = 0
-        self.folder_context = FolderContext()
-        self.task_memory = TaskMemoryStore()
-        self.turn_scratchpad = ScratchpadStore()
-        self.token_counts = {
-            "input": 0,
-            "output": 0,
-            "total": 0,
-            "total_cost": 0.0,
-            "cached": 0,
-            "reasoning": 0,
-        }
-        self.feature_state = None
-        self.feature_registry = {}
-        self.active_feature_id = None
-        self.variables = DEFAULT_VARIABLES.copy()
+class _HookAbort(Exception):
+    """Raised by `_provider_generate_with_retry` when a `pre_provider_call`
+    hook returns `HookResult(action="abort")`. Bypasses the retry wrapper
+    so the iteration loop can break out cleanly with the abort flag set.
+    """
 
-        if session_name:
-            self._load_session(session_name)
-        else:
-            self._load_session(DEFAULT_SESSION_NAME)
+    def __init__(self, reason: str | None = None):
+        super().__init__(reason or "Hook requested abort")
+        self.reason = reason
 
-    def _get_filepath(self, name):
-        return os.path.join(self._get_session_dir(name), "session.json")
 
-    def _get_session_dir(self, name):
-        return os.path.join(HISTORY_DIR, "sessions", name)
+def _hook_abort_envelope(tool_name: str, reason: str | None) -> dict:
+    """Synthetic tool-result envelope returned when a `pre_tool` hook
+    aborts. The model sees a clear refusal so it doesn't retry the tool
+    in a tight loop; the session's `_hook_abort_requested` flag causes
+    the agentic loop to exit cleanly after this iteration."""
+    return {
+        "ok": False,
+        "error_code": "hook_aborted",
+        "message": (
+            f"Tool '{tool_name}' was aborted by a hook: "
+            f"{reason or 'hook requested abort'}. The agent loop is exiting."
+        ),
+        "data": {"tool_name": tool_name, "reason": reason or ""},
+        "artifacts": [],
+        "telemetry": {"tool_name": tool_name, "hook_aborted": True},
+    }
 
-    def _load_session(self, name):
-        filepath = self._get_filepath(name)
-        legacy_filepath = os.path.join(HISTORY_DIR, f"{name}.json")
-        self.current_session_name = name
-        self.history = []
-        self.conversation_summary = ""
-        self.summary_anchor = 0
-        self.provider_config = {}
-        self.collation_buffer = CollationBuffer()
-        self.folder_context = FolderContext()
-        self.task_memory = TaskMemoryStore()
-        self.turn_scratchpad = ScratchpadStore()
-        self.variables.clear()
-        self.token_counts = {
-            "input": 0,
-            "output": 0,
-            "total": 0,
-            "total_cost": 0.0,
-            "cached": 0,
-            "reasoning": 0,
-        }
-        self.feature_state = None
-        self.feature_registry = {}
-        self.active_feature_id = None
-        self.variables.update(DEFAULT_VARIABLES)
 
-        data = self.read_session_data(name)
-        if data is not None:
-            try:
-                if isinstance(data, list):
-                    self.history = data
-                elif isinstance(data, dict):
-                    self.history = data.get("history", [])
-                    self.conversation_summary = str(
-                        data.get("conversation_summary", "") or ""
-                    )
-                    self.summary_anchor = data.get("summary_anchor", 0)
-                    self.provider_config = data.get("provider_config", {})
-                    self.collation_buffer = CollationBuffer.from_dict(
-                        data.get("collation_buffer", {})
-                    )
-                    self.folder_context.from_dict(data.get("folder_context", {}))
-                    self.task_memory = TaskMemoryStore.from_dict(
-                        data.get("task_memory", {})
-                    )
-                    self.turn_scratchpad = ScratchpadStore.from_dict(
-                        data.get("turn_scratchpad", {})
-                    )
-                    self.token_counts = data.get(
-                        "token_counts",
-                        {"input": 0, "output": 0, "total": 0, "total_cost": 0.0},
-                    )
-                    feature_state = data.get("feature_state")
-                    if isinstance(feature_state, dict):
-                        self.feature_state = feature_state
-                    self.feature_registry = {
-                        str(key): value
-                        for key, value in (
-                            data.get("feature_registry", {}) or {}
-                        ).items()
-                        if isinstance(value, dict)
-                    }
-                    self.active_feature_id = data.get("active_feature_id")
-                    if (
-                        self.feature_state is None
-                        and self.active_feature_id in self.feature_registry
-                    ):
-                        self.feature_state = deepcopy(
-                            self.feature_registry[self.active_feature_id]
-                        )
-
-                    saved_vars = data.get("variables", {})
-                    for k, v in saved_vars.items():
-                        try:
-                            self.variables[k] = validate_and_cast(k, v)
-                        except ValueError:
-                            # If saved data is corrupt or schema changed, keep default
-                            pass
-            except (json.JSONDecodeError, IOError):
-                self.history = []
-
-    def read_session_data(self, name):
-        filepath = self._get_filepath(name)
-        legacy_filepath = os.path.join(HISTORY_DIR, f"{name}.json")
-        source_filepath = filepath if os.path.exists(filepath) else legacy_filepath
-        if not os.path.exists(source_filepath):
-            return None
-        try:
-            with open(source_filepath, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return None
-
-    def get_session_history(self, name):
-        data = self.read_session_data(name)
-        if data is None:
-            return []
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            return data.get("history", [])
-        return []
-
-    def save_history(self, folder_context_obj=None):
-        logger.debug(f"Saving history for session: {self.current_session_name}")
-        filepath = self._get_filepath(self.current_session_name)
-        if folder_context_obj:
-            self.folder_context = folder_context_obj
-
-        try:
-            os.makedirs(self._get_session_dir(self.current_session_name), exist_ok=True)
-            data = {
-                "history": self.history,
-                "conversation_summary": self.conversation_summary,
-                "summary_anchor": self.summary_anchor,
-                "provider_config": self.provider_config,
-                "folder_context": self.folder_context.to_dict(),
-                "variables": self.variables,
-                "collation_buffer": self.collation_buffer.to_dict(),
-                "task_memory": self.task_memory.to_dict(),
-                "turn_scratchpad": self.turn_scratchpad.to_dict(),
-                "token_counts": self.token_counts,
-                "feature_state": self.feature_state,
-                "feature_registry": self.feature_registry,
-                "active_feature_id": self.active_feature_id,
-            }
-            with open(filepath, "w") as f:
-                json.dump(data, f, indent=2)
-        except IOError as e:
-            if self.ui:
-                self.ui.show_error(f"Warning: Could not save chat history: {e}")
-            logger.error(f"Failed to save history: {e}")
-
-    def get_feature_state(self):
-        return (
-            deepcopy(self.feature_state)
-            if isinstance(self.feature_state, dict)
-            else None
-        )
-
-    def get_feature_metadata_root(self) -> str:
-        return os.path.join(self._get_session_dir(self.current_session_name), "features")
-
-    def get_feature_metadata_path(self, feature_id: str) -> str:
-        return os.path.join(
-            self.get_feature_metadata_root(),
-            f"{_slugify_feature_id(feature_id)}.json",
-        )
-
-    def get_feature_metadata_index(self) -> dict[str, str]:
-        index = {}
-        for feature in self.feature_registry.values():
-            directory = str(feature.get("directory", "") or "").strip()
-            metadata_path = str(feature.get("metadata_path", "") or "").strip()
-            if directory and metadata_path:
-                index[directory] = metadata_path
-        return index
-
-    def list_features(self) -> list[dict]:
-        features = [deepcopy(feature) for feature in self.feature_registry.values()]
-        features.sort(
-            key=lambda feature: float(feature.get("updated_at", 0) or 0), reverse=True
-        )
-        return features
-
-    def get_feature(self, feature_id: str | None = None) -> dict | None:
-        resolved_feature_id = feature_id or self.active_feature_id
-        if not resolved_feature_id:
-            return None
-        feature = self.feature_registry.get(str(resolved_feature_id))
-        return deepcopy(feature) if isinstance(feature, dict) else None
-
-    def upsert_feature(self, feature: dict | None) -> dict | None:
-        if not isinstance(feature, dict):
-            return None
-        feature_id = str(
-            feature.get("feature_id")
-            or feature.get("id")
-            or feature.get("feature_name")
-            or ""
-        ).strip()
-        if not feature_id:
-            return None
-        feature_id = _slugify_feature_id(feature_id)
-        record = deepcopy(feature)
-        record["feature_id"] = feature_id
-        record["updated_at"] = float(
-            record.get("updated_at", time.time()) or time.time()
-        )
-        self.feature_registry[feature_id] = record
-        return deepcopy(record)
-
-    def activate_feature(self, feature_id: str) -> dict | None:
-        record = self.get_feature(feature_id)
-        if not record:
-            return None
-        self.active_feature_id = record["feature_id"]
-        self.feature_state = deepcopy(record)
-        self.save_history()
-        return deepcopy(record)
-
-    def delete_feature(self, feature_id: str) -> dict | None:
-        resolved_feature_id = _slugify_feature_id(feature_id)
-        record = self.feature_registry.pop(resolved_feature_id, None)
-        if not isinstance(record, dict):
-            return None
-        metadata_path = str(record.get("metadata_path", "") or "").strip()
-        if metadata_path and os.path.exists(metadata_path):
-            os.remove(metadata_path)
-        if self.active_feature_id == resolved_feature_id:
-            self.active_feature_id = None
-            self.feature_state = None
-        self.save_history()
-        return deepcopy(record)
-
-    def create_feature_record(
-        self,
-        feature_name: str,
-        *,
-        directory: str,
-        feature_request: str = "",
-    ) -> dict:
-        feature_id = self.allocate_feature_id(feature_name)
-        metadata_path = self.get_feature_metadata_path(feature_id)
-        os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-        record = {
-            "type": "feature",
-            "status": "draft",
-            "feature_id": feature_id,
-            "feature_name": feature_name.strip() or feature_id,
-            "directory": directory,
-            "metadata_path": metadata_path,
-            "feature_plan": {
-                "feature_id": feature_id,
-                "feature_name": feature_name.strip() or feature_id,
-                "feature_request": feature_request.strip()
-                or feature_name.strip()
-                or feature_id,
-                "directory": directory,
-                "metadata_path": metadata_path,
-                "approved": False,
-                "review_status": "pending",
-                "review_notes": "",
-                "overall_status": "not_started",
-                "phases_completed": False,
-                "phase_count": 0,
-                "phases": [],
-                "next_phase": None,
-            },
-            "blocker": None,
-            "updated_at": time.time(),
-        }
-        with open(metadata_path, "w", encoding="utf-8") as handle:
-            json.dump(record["feature_plan"], handle, indent=2)
-        self.upsert_feature(record)
-        self.active_feature_id = feature_id
-        self.feature_state = deepcopy(record)
-        self.save_history()
-        return deepcopy(record)
-
-    def allocate_feature_id(self, requested_id: str) -> str:
-        base = _slugify_feature_id(requested_id)
-        if base not in self.feature_registry:
-            return base
-        suffix = 2
-        while True:
-            candidate = f"{base}_{suffix}"
-            if candidate not in self.feature_registry:
-                return candidate
-            suffix += 1
-
-    def set_feature_state(self, state: dict | None, folder_context_obj=None):
-        if isinstance(state, dict):
-            # Re-derive status from feature_plan when caller did not provide
-            # an explicit status override.
-            feature_plan = state.get("feature_plan")
-            explicit_status = str(state.get("status", "") or "").strip()
-            should_derive = (not explicit_status) or explicit_status == "completed"
-            if isinstance(feature_plan, dict) and should_derive:
-                derived = derive_feature_state_status(feature_plan)
-                state = {**state, "status": derived}
-        self.feature_state = deepcopy(state) if isinstance(state, dict) else None
-        if isinstance(self.feature_state, dict):
-            record = self.upsert_feature(self.feature_state)
-            if record:
-                self.active_feature_id = record["feature_id"]
-        self.save_history(folder_context_obj)
-
-    def clear_feature_state(self, folder_context_obj=None):
-        self.feature_state = None
-        self.active_feature_id = None
-        self.save_history(folder_context_obj)
-
-    def switch_session(self, name):
-        logger.info(f"Switching to session: {name}")
-        self.save_history()
-        self._load_session(name)
-        if self.ui:
-            self.ui.show_info(f"Switched to session: '{name}'")
-        self.view_history()
-
-    def new_session(self, name=None, provider_name=None, model_name=None):
-        logger.info(
-            f"Creating new session: {name} (provider={provider_name}, model={model_name})"
-        )
-        self.save_history()
-        if not name:
-            name = f"chat_{int(time.time())}"
-        self.folder_context = FolderContext()
-        self.current_session_name = name
-        self.collation_buffer = CollationBuffer()
-        self.task_memory = TaskMemoryStore()
-        self.turn_scratchpad = ScratchpadStore()
-        self.feature_state = None
-        self.feature_registry = {}
-        self.active_feature_id = None
-        self.conversation_summary = ""
-        self.summary_anchor = 0
-        self.history = []
-        self.provider_config = {"provider": provider_name, "model": model_name}
-        self.token_counts = {
-            "input": 0,
-            "output": 0,
-            "total": 0,
-            "total_cost": 0.0,
-            "cached": 0,
-            "reasoning": 0,
-        }
-        self.variables.clear()
-        self.variables.update(DEFAULT_VARIABLES)
-        self.save_history()
-        if self.ui:
-            self.ui.show_info(f"Started new session: '{name}'")
-
-    def list_sessions(self):
-        logger.debug("Listing sessions")
-        if not os.path.exists(self._get_filepath(self.current_session_name)):
-            self.save_history()
-
-        files = glob.glob(os.path.join(HISTORY_DIR, "sessions", "*", "session.json"))
-        if self.ui:
-            # We might want a specific UI method for listing sessions
-            self.ui.show_info("\n=== Available Conversations ===")
-            for f in files:
-                name = os.path.basename(os.path.dirname(f))
-                indicator = "*" if name == self.current_session_name else " "
-                mod_time = datetime.fromtimestamp(os.path.getmtime(f)).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
-                self.ui.show_info(f" {indicator} {name:<20} ({mod_time})")
-
-    def get_session_list(self):
-        files = glob.glob(os.path.join(HISTORY_DIR, "sessions", "*", "session.json"))
-        sessions = []
-        for f in files:
-            sessions.append(os.path.basename(os.path.dirname(f)))
-        return sorted(sessions)
-
-    def delete_session(self, name):
-        logger.info(f"Deleting session: {name}")
-        if name == self.current_session_name:
-            if self.ui:
-                self.ui.show_error("Cannot delete active session.")
-            return
-
-        session_dir = self._get_session_dir(name)
-        if os.path.exists(session_dir):
-            shutil.rmtree(session_dir)
-            if self.ui:
-                self.ui.show_info(f"Deleted session: '{name}'")
-        else:
-            if self.ui:
-                self.ui.show_error(f"Session '{name}' not found.")
-
-    def rename_session(self, old_name: str, new_name: str) -> bool:
-        old_name = str(old_name or "").strip()
-        new_name = str(new_name or "").strip()
-        if not old_name or not new_name:
-            raise ValueError("Both old_name and new_name are required.")
-        if old_name == new_name:
-            return True
-
-        old_dir = self._get_session_dir(old_name)
-        new_dir = self._get_session_dir(new_name)
-        if not os.path.exists(old_dir):
-            raise FileNotFoundError(f"Session '{old_name}' not found.")
-        if os.path.exists(new_dir):
-            raise FileExistsError(f"Session '{new_name}' already exists.")
-
-        os.rename(old_dir, new_dir)
-        if self.current_session_name == old_name:
-            self.current_session_name = new_name
-            self.save_history()
-        if self.ui:
-            self.ui.show_info(f"Renamed session '{old_name}' to '{new_name}'.")
-        return True
-
-    def clear_current_history(self):
-        logger.info(f"Clearing history for session: {self.current_session_name}")
-        self.history = []
-        self.conversation_summary = ""
-        self.summary_anchor = 0
-        self.token_counts = {
-            "input": 0,
-            "output": 0,
-            "total": 0,
-            "total_cost": 0.0,
-            "cached": 0,
-            "reasoning": 0,
-        }
-        self.save_history()
-        if self.ui:
-            self.ui.show_info("Current chat history cleared.")
-
-    def reset_current_session_state(self):
-        logger.info(f"Resetting session state for session: {self.current_session_name}")
-        self.history = []
-        self.conversation_summary = ""
-        self.summary_anchor = 0
-        self.folder_context = FolderContext()
-        self.collation_buffer = CollationBuffer()
-        self.task_memory = TaskMemoryStore()
-        self.turn_scratchpad = ScratchpadStore()
-        self.token_counts = {
-            "input": 0,
-            "output": 0,
-            "total": 0,
-            "total_cost": 0.0,
-            "cached": 0,
-            "reasoning": 0,
-        }
-        self.feature_state = None
-        self.feature_registry = {}
-        self.active_feature_id = None
-
-        feature_root = self.get_feature_metadata_root()
-        if os.path.isdir(feature_root):
-            for entry in glob.glob(os.path.join(feature_root, "*.json")):
-                os.remove(entry)
-
-        self.save_history()
-
-    # History summarization & token-budget rolling moved to
-    # mu/session/history.py (HistoryMixin). See top of file for the import.
-
-    def view_history(self):
-        if not self.history:
-            if self.ui:
-                self.ui.show_info("No history in this session.")
-            return
-
-        if self.ui:
-            self.ui.show_info(f"\nConversation History ({self.current_session_name})\n")
-
-            for turn in self.history:
-                role = turn["role"]
-                for part in turn.get("parts", []):
-                    p_type = part.get("type")
-                    if p_type == "text":
-                        self.ui.render_message(role, part["text"])
-                    elif p_type == "file":
-                        mime = part.get("file_ref", {}).get("mime_type", "file")
-                        self.ui.show_info(f"[Attached File: {mime}]")
-                    elif p_type == "image_input":
-                        img = part.get("image", {}) or {}
-                        src = img.get("source") or img.get("mime_type", "image")
-                        self.ui.show_info(f"[Attached Image: {src}]")
-                    elif p_type == "tool_call":
-                        self.ui.show_info(f"  [Tool Call: {part.get('tool_name')}]")
-                    elif p_type == "tool_result":
-                        res_preview = str(part.get("tool_result", ""))[:50].replace(
-                            "\n", ""
-                        )
-                        self.ui.show_info(f"  [Tool Result: {res_preview}...]")
-
-    def compact_completed_turn(self):
-        """
-        Collapses the most recent agentic turn.
-        Identifies the last 'user' prompt and the last 'assistant' text response,
-        then removes all intermediate tool calls and results between them.
-        """
-        if len(self.history) < 2:
-            return
-
-        # 1. Find the index of the last 'user' message that started this turn
-        last_user_idx = -1
-        for i in range(len(self.history) - 1, -1, -1):
-            if self.history[i]["role"] == "user":
-                last_user_idx = i
-                break
-
-        if last_user_idx == -1:
-            return
-
-        # 2. Extract the final assistant text parts from the end of history
-        final_assistant_parts = []
-        for i in range(len(self.history) - 1, last_user_idx, -1):
-            if self.history[i]["role"] == "assistant":
-                # Collect text parts only
-                text_parts = [
-                    p for p in self.history[i]["parts"] if p["type"] == "text"
-                ]
-                if text_parts:
-                    # We reverse them back because we are iterating backwards
-                    final_assistant_parts = text_parts + final_assistant_parts
-                    # If we found the "final" response message, we stop looking for more text
-                    break
-
-        # 3. Reconstruct history
-        # Keep everything before the current turn
-        new_history = self.history[: last_user_idx + 1]
-
-        # Append the collapsed assistant response if we found text
-        if final_assistant_parts:
-            new_history.append({"role": "assistant", "parts": final_assistant_parts})
-
-        self.history = new_history
-        self.summary_anchor = min(self.summary_anchor, len(self.history))
+# SessionManager moved to `mu/session/manager.py` in Phase 5 of the
+# refactor. Re-exported here so the legacy `from core.session import
+# SessionManager` path stays valid for every existing caller and test.
+from mu.session.manager import SessionManager  # noqa: E402, F401
 
 
 class Session:
@@ -705,6 +183,13 @@ class Session:
         # paused intentionally — otherwise it would keep prodding the
         # model with "continue!" and burn tokens in a wedge loop.
         self._loop_blocker_raised: bool = False
+        # Flips to True when a hook returns HookResult(action="abort")
+        # at any fire site. The agentic loop checks this at its
+        # iteration boundary and exits cleanly with status
+        # "hook_aborted". `_hook_abort_reason` carries the payload from
+        # the aborting hook for the turn-response error field.
+        self._hook_abort_requested: bool = False
+        self._hook_abort_reason: str | None = None
         # Per-session usage tracker. Populated by the pre_tool /
         # post_tool hooks in `mu/agent/usage_tracker.py`. Surfaced via
         # `/stats`. Reset via `/stats clear`.
@@ -912,326 +397,71 @@ class Session:
         raw_result,
         structured_result,
     ):
-        if tool_name in {
-            "create_feature",
-            "create_phases",
-            "create_task",
-            "get_execution_state",
-            "block_task",
-            "resume_task",
-            "review_completed_tasks",
-            "review_all_completed_tasks",
-            "propose_task_diff",
-            "decide_task_diff",
-            "archive_task",
-            "create_feature_task",
-            "get_tasks",
-            "get_current_task",
-            "approve_feature_task",
-            "update_feature_task",
-            "update_task_status",
-        }:
-            data = {}
-            if isinstance(structured_result, dict):
-                data = structured_result.get("data", {}) or {}
-                if isinstance(data.get("plan"), dict):
-                    data = data["plan"]
-            if not isinstance(data, dict) or "feature_id" not in data:
-                data = self._parse_json_result(raw_result)
-                if isinstance(data.get("plan"), dict):
-                    data = data["plan"]
-            if isinstance(data, dict) and data.get("feature_id"):
-                is_plan_summary = any(
-                    key in data
-                    for key in (
-                        "metadata_path",
-                        "directory",
-                        "review_status",
-                        "phases",
-                        "tasks",
-                        "next_task",
-                        "next_phase",
-                    )
-                )
-                if is_plan_summary:
-                    self._set_feature_state(feature_plan=data)
-                elif tool_name in {"get_current_task", "get_tasks"}:
-                    metadata_path = str(
-                        (self.session_manager.get_feature_state() or {}).get(
-                            "metadata_path", ""
-                        )
-                        or ""
-                    ).strip()
-                    if metadata_path:
-                        self._refresh_feature_state(metadata_path)
-            return
+        """Feature-state writer. Body moved to
+        `mu/session/tools_glue.py:sync_feature_state_for_tool`."""
+        from mu.session.tools_glue import sync_feature_state_for_tool
 
-        if tool_name == "raise_blocker":
-            data = {}
-            if isinstance(structured_result, dict):
-                data = structured_result.get("data", {}) or {}
-            if not isinstance(data, dict) or not data.get("kind"):
-                data = self._parse_json_result(raw_result)
-            if isinstance(data, dict):
-                self._set_feature_state(status="awaiting_input", blocker=data)
-            # Signal the loop-mode watchdog that this pause is
-            # intentional — without this it would re-prompt the model
-            # with LOOP WATCHDOG every iteration, forcing repeated
-            # re-raises until budget is exhausted.
-            self._loop_blocker_raised = True
-            return
+        return sync_feature_state_for_tool(
+            self,
+            tool_name,
+            tool_args,
+            raw_result,
+            structured_result,
+        )
+
+    # Message helpers (`_build_messages_from_history`,
+    # `_summarize_message_parts`, `_message_has_thought_signature`,
+    # `_clip_preview`, `_prepare_runtime_history`) moved to
+    # `mu/session/messages.py`. Forwarders preserve the legacy method
+    # interface for the agent loop and tests.
 
     def _build_messages_from_history(
         self, recent_history_dicts, new_user_message_dict
     ) -> list[Message]:
-        messages = []
-        for msg_dict in recent_history_dicts + [new_user_message_dict]:
-            parts = []
-            for p in msg_dict.get("parts", []):
-                if p.get("type") == "text":
-                    parts.append(MessagePart(type="text", text=p["text"]))
-                elif p.get("type") == "file":
-                    fr_data = p.get("file_ref", {})
-                    fr = FileReference(
-                        uri=fr_data.get("uri"),
-                        mime_type=fr_data.get("mime_type"),
-                        display_name=fr_data.get("display_name"),
-                    )
-                    parts.append(MessagePart(type="file", file_ref=fr))
-                elif p.get("type") == "image_input":
-                    img_data = p.get("image", {}) or {}
-                    raw = img_data.get("data_b64") or ""
-                    try:
-                        import base64 as _b64
-                        decoded = _b64.b64decode(raw) if raw else b""
-                    except Exception:
-                        decoded = b""
-                    if decoded:
-                        parts.append(
-                            MessagePart(
-                                type="image_input",
-                                image=ImageData(
-                                    data=decoded,
-                                    mime_type=img_data.get("mime_type", "image/png"),
-                                    source=img_data.get("source"),
-                                ),
-                            )
-                        )
-                elif p.get("type") == "tool_call":
-                    parts.append(
-                        MessagePart(
-                            type="tool_call",
-                            tool_name=p["tool_name"],
-                            tool_args=p.get("tool_args", {}),
-                            thought_signature=p.get("thought_signature"),
-                        )
-                    )
-                elif p.get("type") == "tool_result":
-                    parts.append(
-                        MessagePart(
-                            type="tool_result",
-                            tool_name=p.get("tool_name", "tool"),
-                            tool_result=p.get("tool_result", ""),
-                            thought_signature=p.get("thought_signature"),
-                        )
-                    )
-            messages.append(Message(role=msg_dict["role"], parts=parts))
-        return messages
+        from mu.session.messages import build_messages_from_history
+
+        return build_messages_from_history(
+            recent_history_dicts, new_user_message_dict
+        )
 
     def _message_has_thought_signature(self, msg_dict: dict) -> bool:
-        for part in msg_dict.get("parts", []):
-            if part.get("thought_signature"):
-                return True
-        return False
+        from mu.session.messages import message_has_thought_signature
+
+        return message_has_thought_signature(msg_dict)
 
     def _summarize_message_parts(self, msg_dict: dict) -> str:
-        role = msg_dict.get("role", "message")
-        summaries = []
-        for part in msg_dict.get("parts", []):
-            p_type = part.get("type")
-            if p_type == "text":
-                text = str(part.get("text", "")).strip().replace("\n", " ")
-                if text:
-                    summaries.append(text[:120])
-            elif p_type == "tool_call":
-                summaries.append(
-                    f"tool_call:{part.get('tool_name')} args={_shorten_tool_args(part.get('tool_args', {}))}"
-                )
-            elif p_type == "tool_result":
-                raw_result = part.get("tool_result", "")
-                if isinstance(raw_result, dict):
-                    result = str(raw_result.get("summary") or raw_result.get("raw", ""))
-                else:
-                    result = str(raw_result)
-                result = result.strip().replace("\n", " ")
-                if len(result) > 140:
-                    result = f"{result[:137]}..."
-                summaries.append(f"tool_result:{part.get('tool_name')} => {result}")
-            elif p_type == "file":
-                fr = part.get("file_ref", {})
-                summaries.append(
-                    f"file:{fr.get('display_name', fr.get('uri', 'unknown'))}"
-                )
-            elif p_type == "image_input":
-                img = part.get("image", {}) or {}
-                source = img.get("source") or img.get("mime_type", "image")
-                summaries.append(f"image:{source}")
+        from mu.session.messages import summarize_message_parts
 
-        if not summaries:
-            return f"- {role}: [no serializable content]"
-        return f"- {role}: " + " | ".join(summaries)
+        return summarize_message_parts(msg_dict)
+
+    # Budget helpers (`_resolve_context_limit`, `_resolve_response_reserve`,
+    # `_compaction_token_budget`) moved to `mu/session/budgets.py`. These
+    # forwarders preserve the legacy method interface so existing call sites
+    # don't need to thread a `session` parameter around.
 
     def _resolve_context_limit(self) -> int:
-        """Pick the smaller of (user-set `context_token_limit`, real
-        provider window). Ollama models often have 4k-32k real windows
-        while the user-set default is 256k, so without this the compactor
-        never fires before the provider 400s with "prompt too long".
-        """
-        user_limit = max(
-            1024, int(self.variables.get("context_token_limit", 256000) or 256000)
-        )
-        provider_window: int | None = None
-        try:
-            provider_window = self.provider.effective_context_window(
-                self.provider.model_name
-            )
-        except Exception:
-            provider_window = None
-        if provider_window and provider_window > 0:
-            return min(user_limit, int(provider_window))
-        return user_limit
+        from mu.session.budgets import resolve_context_limit
+
+        return resolve_context_limit(self)
 
     def _resolve_response_reserve(self) -> int:
-        """How many tokens to leave free for the model's output.
+        from mu.session.budgets import resolve_response_reserve
 
-        Preferred source is the provider's `effective_response_reserve()`
-        — which reads `ollama_num_predict` / `max_tokens` / etc. — so the
-        reserve tracks the actual configured output cap instead of a
-        guessed constant. Only falls back to the `response_token_reserve`
-        session variable when the provider has no configured cap.
-        """
-        try:
-            provider_reserve = self.provider.effective_response_reserve(
-                self.provider.model_name
-            )
-        except Exception:
-            provider_reserve = None
-        if provider_reserve and provider_reserve > 0:
-            return int(provider_reserve)
-        raw = self.variables.get("response_token_reserve", 4096)
-        try:
-            return max(0, int(raw)) if raw is not None else 4096
-        except (TypeError, ValueError):
-            return 4096
+        return resolve_response_reserve(self)
 
     def _compaction_token_budget(self) -> int:
-        """The token ceiling the compactor targets for L5 (conversation
-        history) specifically.
+        from mu.session.budgets import compaction_token_budget
 
-        The global cap (`context_token_limit`, or the provider's actual
-        window when smaller) covers all 7 prompt layers PLUS the model's
-        response reserve. L5 gets whatever the cap minus the non-L5
-        layers (workspace files, skills, summary, goal context, recent
-        tool activity, retrieval snippets) leaves room for, with the
-        trim threshold applied to that residual.
-
-        Computing the non-L5 layer tokens here means a heavy AGENTS.md or
-        many auto-expanded skills tighten the compactor's threshold
-        instead of being silently piled on top of the L5 budget.
-        """
-        context_limit = self._resolve_context_limit()
-        trim_threshold = float(self.variables.get("context_trim_threshold", 0.85) or 0.85)
-        trim_threshold = max(0.10, min(trim_threshold, 1.0))
-        response_reserve = self._resolve_response_reserve()
-
-        non_l5_tokens = 0
-        try:
-            from utils.runtime_metrics import estimate_non_l5_context_tokens
-
-            non_l5_tokens = int(estimate_non_l5_context_tokens(self) or 0)
-        except Exception:
-            non_l5_tokens = 0
-
-        usable = max(1024, context_limit - response_reserve - non_l5_tokens)
-        return max(512, int(usable * trim_threshold))
+        return compaction_token_budget(self)
 
     def _prepare_runtime_history(
         self, turn_start_index: int | None = None
     ) -> list[dict]:
-        if self.session_manager.summary_anchor > len(self.session_manager.history):
-            self.session_manager.summary_anchor = 0
-        token_budget = self._compaction_token_budget()
-        start_index = len(self.session_manager.history)
-        running_tokens = 0
-        while start_index > self.session_manager.summary_anchor:
-            next_index = start_index - 1
-            next_tokens = self.session_manager._estimate_message_tokens(
-                self.session_manager.history[next_index]
-            )
-            if running_tokens + next_tokens > token_budget and next_index < len(
-                self.session_manager.history
-            ) - 1:
-                break
-            running_tokens += next_tokens
-            start_index = next_index
-        recent_history = self.session_manager.history[start_index:]
-        tool_window = max(0, int(self.variables.get("tool_context_window", 6)))
+        """History slicing + tool-window compression. Body moved to
+        `mu/session/messages.py:prepare_runtime_history`."""
+        from mu.session.messages import prepare_runtime_history
 
-        if turn_start_index is None:
-            return recent_history
-
-        start_in_recent = max(
-            0,
-            turn_start_index - start_index,
-        )
-        prefix = recent_history[:start_in_recent]
-        current_turn = recent_history[start_in_recent:]
-
-        tool_messages = [
-            msg for msg in current_turn if msg.get("role") in {"assistant", "tool"}
-        ]
-        if len(tool_messages) <= tool_window:
-            return recent_history
-
-        compressible_tool_messages = [
-            msg for msg in tool_messages if not self._message_has_thought_signature(msg)
-        ]
-        if len(compressible_tool_messages) <= tool_window:
-            return recent_history
-
-        keep_start = len(compressible_tool_messages) - tool_window
-        compressed_tool_count = 0
-        summarized_lines = []
-        compressed_turn = []
-
-        for msg in current_turn:
-            if msg.get("role") in {"assistant", "tool"}:
-                if self._message_has_thought_signature(msg):
-                    compressed_turn.append(msg)
-                    continue
-                if compressed_tool_count < keep_start:
-                    summarized_lines.append(self._summarize_message_parts(msg))
-                    compressed_tool_count += 1
-                    continue
-                compressed_tool_count += 1
-            compressed_turn.append(msg)
-
-        if summarized_lines:
-            summary_text = (
-                "LAYER 4 — Recent tool activity (compressed for budget).\n"
-                "Older tool call/result pairs from this turn were summarized.\n"
-                + "\n".join(summarized_lines)
-            )
-            compressed_turn.insert(
-                (
-                    1
-                    if compressed_turn and compressed_turn[0].get("role") == "user"
-                    else 0
-                ),
-                {"role": "system", "parts": [{"type": "text", "text": summary_text}]},
-            )
-
-        return prefix + compressed_turn
+        return prepare_runtime_history(self, turn_start_index)
 
     def _inject_conversation_summary(self, system_prompt: str) -> str:
         summary = str(
@@ -1406,61 +636,11 @@ class Session:
         return "".join(lines).strip()
 
     def _build_workspace_context_files(self) -> str:
-        """LAYER 1 — read any user-curated context files (AGENTS.md /
-        CLAUDE.md / MUCLI.md / .mu/CONTEXT.md) from each attached workspace
-        folder and concatenate them with provenance headers.
+        """LAYER 1 context-file aggregator. Body moved to
+        `mu/session/context.py:build_workspace_context_files`."""
+        from mu.session.context import build_workspace_context_files
 
-        Returns "" if there are no folders, no files match, or the feature
-        is disabled (`workspace_context_files = ""`).
-        """
-        if not self.folder_context or not self.folder_context.folders:
-            return ""
-        raw_names = str(
-            self.variables.get(
-                "workspace_context_files", "AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md"
-            )
-            or ""
-        )
-        candidates = [n.strip() for n in raw_names.split(",") if n.strip()]
-        if not candidates:
-            return ""
-        budget = max(
-            0, int(self.variables.get("workspace_context_max_chars", 8192) or 8192)
-        )
-        if budget == 0:
-            return ""
-        blocks: list[str] = []
-        used = 0
-        seen_paths: set[str] = set()
-        for folder in self.folder_context.folders:
-            for name in candidates:
-                path = os.path.normpath(os.path.join(folder, name))
-                if path in seen_paths:
-                    continue
-                seen_paths.add(path)
-                if not os.path.isfile(path):
-                    continue
-                try:
-                    with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                        body = fh.read().strip()
-                except OSError:
-                    continue
-                if not body:
-                    continue
-                header = f"### {os.path.relpath(path, folder)}  (from {folder})"
-                entry = f"{header}\n{body}"
-                remaining = budget - used
-                if remaining <= 0:
-                    break
-                if len(entry) > remaining:
-                    entry = entry[:remaining].rstrip() + "\n...[truncated]"
-                blocks.append(entry)
-                used += len(entry) + 2  # account for separator
-                if used >= budget:
-                    break
-            if used >= budget:
-                break
-        return "\n\n".join(blocks).strip()
+        return build_workspace_context_files(self)
 
     def _build_skills_block(self) -> str:
         """LAYER 1B — render the installed skills (from `mu/skills/`,
@@ -1497,90 +677,11 @@ class Session:
         )
 
     def _inject_hierarchical_context(self, system_prompt: str) -> str:
-        # Prepend a time-awareness banner so the model isn't guessing
-        # at the wall clock. Cheap (~25 tokens) and reflected in L0 of
-        # the /memory table via compose_base_system_prompt.
-        try:
-            from utils.runtime_metrics import _current_time_prelude
+        """Layered system-prompt assembly. Body moved to
+        `mu/session/context.py:inject_hierarchical_context`."""
+        from mu.session.context import inject_hierarchical_context
 
-            system_prompt = f"{_current_time_prelude()}\n\n{system_prompt}".strip()
-        except Exception:
-            pass
-
-        summary_limit = max(
-            0, int(self.variables.get("conversation_summary_char_limit", 8000) or 8000)
-        )
-        summary = str(getattr(self.session_manager, "conversation_summary", "") or "").strip()
-        if summary_limit and len(summary) > summary_limit:
-            summary = summary[-summary_limit:].lstrip()
-
-        goal_context = self._build_active_goal_context()
-        tool_context = self._build_recent_tool_context(
-            max_chars=max(0, int(self.variables.get("recent_tool_context_char_limit", 12000) or 12000))
-        )
-
-        layers = []
-        workspace_files = self._build_workspace_context_files()
-        if workspace_files:
-            ws_limit = max(
-                0,
-                int(self.variables.get("workspace_context_max_chars", 8192) or 8192),
-            )
-            layers.append(
-                "LAYER 1 — Workspace context files (user-curated, authoritative):\n"
-                f"[budget: {ws_limit} chars | eviction: truncate-after-budget]\n"
-                + workspace_files
-            )
-        skills_block = self._build_skills_block()
-        if skills_block:
-            sk_limit = max(
-                0, int(self.variables.get("skills_max_chars", 6144) or 6144)
-            )
-            layers.append(
-                "LAYER 1B — Installed skills (compact index; bodies auto-load on trigger or via `invoke_skill`):\n"
-                f"[budget: {sk_limit} chars | eviction: drop-tail after auto-expand]\n"
-                + skills_block
-            )
-        if summary:
-            layers.append(
-                "LAYER 2 — Conversation summary:\n"
-                f"[budget: {summary_limit} chars | eviction: keep newest]\n{summary}"
-            )
-        if goal_context:
-            layers.append("LAYER 3 — Active task plan / current goal:\n" + goal_context)
-        if tool_context:
-            tool_limit = max(
-                0,
-                int(self.variables.get("recent_tool_context_char_limit", 12000) or 12000),
-            )
-            layers.append(
-                "LAYER 4 — Recent tool activity (latest first):\n"
-                f"[budget: {tool_limit} chars | eviction: drop oldest tool records]\n"
-                + tool_context
-            )
-        retrieved_context = str(getattr(self, "_pending_retrieved_context", "") or "").strip()
-        if retrieved_context:
-            retrieval_limit = max(
-                1,
-                int(self.variables.get("retrieval_context_char_limit", 5000) or 5000),
-            )
-            if len(retrieved_context) > retrieval_limit:
-                retrieved_context = retrieved_context[:retrieval_limit].rstrip()
-            layers.append(
-                "LAYER 4B — Retrieved workspace snippets:\n"
-                f"[budget: {retrieval_limit} chars | eviction: drop lowest-ranked snippets]\n"
-                + retrieved_context
-            )
-        layers.append(
-            "LAYER 5 — Current turn:\nAlways prioritize the live user message and current turn tool results over older context."
-        )
-        if not layers:
-            return system_prompt
-        return (
-            f"{system_prompt}\n\n"
-            "Hierarchical runtime context (layered with independent budgets/eviction):\n"
-            + "\n\n".join(layers)
-        )
+        return inject_hierarchical_context(self, system_prompt)
 
     def _render_tool_result(self, result) -> str:
         if isinstance(result, dict):
@@ -1593,10 +694,9 @@ class Session:
         return str(result)
 
     def _clip_preview(self, text: str, limit: int = 240) -> str:
-        text = str(text or "").strip()
-        if len(text) <= limit:
-            return text
-        return f"{text[: limit - 3]}..."
+        from mu.session.messages import clip_preview
+
+        return clip_preview(text, limit)
 
     def _parse_search_results(self, raw_result: str) -> dict:
         matches = []
@@ -1768,109 +868,38 @@ class Session:
         *,
         execution_source: str = "session",
     ):
-        envelope, unwrapped_raw = self._unwrap_tool_envelope(raw_result)
-        raw_text = str(unwrapped_raw)
-        error_code = (
-            envelope.get("error_code")
-            if isinstance(envelope, dict)
-            else infer_tool_error_code(tool_name, raw_text)
+        """Structured-envelope builder. Body moved to
+        `mu/session/tools_glue.py:build_structured_tool_result`."""
+        from mu.session.tools_glue import build_structured_tool_result
+
+        return build_structured_tool_result(
+            self,
+            tool_name,
+            tool_args,
+            raw_result,
+            execution_source=execution_source,
         )
-        structured = {
-            "tool_name": tool_name,
-            "ok": bool(envelope.get("ok")) if isinstance(envelope, dict) else error_code is None,
-            "summary": self._clip_preview(raw_text, 220),
-            "args": _shorten_tool_args(tool_args),
-            "raw": raw_text,
-            "error_code": error_code,
-            "error": (
-                None
-                if error_code is None
-                else {
-                    "code": error_code,
-                    "message": self._clip_preview(raw_text, 220),
-                }
-            ),
-            "data": {},
-            "modified_files": [],
-            "artifacts": [],
-            "telemetry": {
-                "execution_source": execution_source,
-                "delivery_mode": "structured",
-                "raw_char_count": len(raw_text),
-                "raw_line_count": len(raw_text.splitlines()),
-            },
-        }
-        if isinstance(envelope, dict):
-            structured["telemetry"]["tool_envelope"] = envelope
 
-        if tool_name == "read_file":
-            structured["data"] = {
-                "filename": tool_args.get("filename", ""),
-                "char_count": len(raw_text),
-                "line_count": len(raw_text.splitlines()),
-                "preview": self._clip_preview(raw_text, 240),
-            }
-        elif tool_name == "get_chunk":
-            structured["data"] = {
-                "file": tool_args.get("file", ""),
-                "start_line": tool_args.get("start_line"),
-                "end_line": tool_args.get("end_line"),
-                "line_count": len(raw_text.splitlines()),
-                "preview": self._clip_preview(raw_text, 240),
-            }
-        elif tool_name == "search_for_string":
-            structured["data"] = {
-                "query": tool_args.get("string", ""),
-                **self._parse_search_results(raw_text),
-            }
-        elif tool_name == "list_dir":
-            structured["data"] = self._parse_list_dir(
-                raw_text, tool_args.get("path", "")
-            )
-        elif tool_name == "get_workspace_details":
-            structured["data"] = self._parse_workspace_details(raw_text)
-        elif tool_name in {"write_file", "apply_diff"}:
-            filename = tool_args.get("filename", "")
-            structured["data"] = {
-                "filename": filename,
-                "changed_file": filename,
-            }
-            if filename:
-                structured["modified_files"] = [filename]
-        elif tool_name in {
-            "create_feature",
-            "create_phases",
-            "create_task",
-            "get_execution_state",
-            "block_task",
-            "resume_task",
-            "review_completed_tasks",
-            "review_all_completed_tasks",
-            "propose_task_diff",
-            "decide_task_diff",
-            "archive_task",
-            "create_feature_task",
-            "update_feature_task",
-            "approve_feature_task",
-            "get_current_task",
-            "get_tasks",
-            "update_task_status",
-            "raise_blocker",
-        }:
-            structured["data"] = self._parse_json_result(raw_text)
-        elif tool_name in {
-            "save_memory",
-            "search_memory",
-            "list_memory",
-            "save_scratchpad",
-            "search_scratchpad",
-            "list_scratchpad",
-            "clear_scratchpad",
-            "flush",
-        }:
-            structured["data"] = {"preview": self._clip_preview(raw_text, 220)}
-
-        return structured
+    def _record_hook_abort(self, point: str, abort_result) -> None:
+        """Stamp the abort flag + reason. Called whenever a hook returns
+        `HookResult(action="abort")` at any fire site. The agentic loop
+        reads `_hook_abort_requested` at its iteration boundary and
+        exits cleanly with status `"hook_aborted"`."""
+        reason = abort_result.payload
+        if reason is None:
+            reason = "Hook requested abort"
+        reason_str = str(reason)
+        # First abort wins — don't let a later abort clobber the original
+        # cause within the same turn.
+        if not self._hook_abort_requested:
+            self._hook_abort_requested = True
+            self._hook_abort_reason = reason_str
+            logger.info(f"Hook abort at {point}: {reason_str}")
+            if self.ui is not None:
+                try:
+                    self.ui.show_info(f"⏹  Hook abort ({point}): {reason_str}")
+                except Exception:
+                    pass
 
     def _execute_tool_with_memory(
         self,
@@ -1879,97 +908,16 @@ class Session:
         *,
         invocation_source: str = "session",
     ):
-        # --- pre_tool hooks: plan mode, sandbox, custom user hooks. -------
-        from mu.agent.hooks import HookContext, default_registry
-        # Side-effect imports — ensure built-in hooks (plan_mode, compactor)
-        # have registered before we fire.
-        import mu.agent.plan_mode  # noqa: F401
-        import mu.agent.compactor  # noqa: F401
-        import mu.agent.secret_guard  # noqa: F401 — registers bash secret-guard hook
+        """Hook-fire dispatch around the canonical executor. Body moved
+        to `mu/session/tools_glue.py:execute_tool_with_memory`."""
+        from mu.session.tools_glue import execute_tool_with_memory
 
-        pre_ctx = HookContext(
-            point="pre_tool",
-            session=self,
-            variables=self.variables,
-            tool_name=tool_name,
-            tool_args=tool_args,
-        )
-        short = default_registry.first_short_circuit("pre_tool", pre_ctx)
-        if short is not None:
-            return short.payload
-
-        feature_violation = self._feature_doc_tool_violation(tool_name, tool_args)
-        if feature_violation:
-            return f"Error: {feature_violation}"
-
-        if tool_name == "save_memory":
-            entry = self.task_memory.save(
-                tool_args.get("content", ""),
-                tags=tool_args.get("tags", []),
-                source=tool_args.get("source", ""),
-            )
-            return f"Saved memory #{entry.id} with tags={entry.tags}."
-
-        if tool_name == "save_scratchpad":
-            entry = self.turn_scratchpad.save(
-                tool_args.get("content", ""),
-                tags=tool_args.get("tags", []),
-                source=tool_args.get("source", ""),
-            )
-            return f"Saved scratchpad note #{entry.id} with tags={entry.tags}."
-
-        if tool_name == "search_memory":
-            entries = self.task_memory.search(
-                tool_args.get("query", ""),
-                limit=int(tool_args.get("limit", 5) or 5),
-            )
-            return self.task_memory.format_results(entries)
-
-        if tool_name == "search_scratchpad":
-            entries = self.turn_scratchpad.search(
-                tool_args.get("query", ""),
-                limit=int(tool_args.get("limit", 5) or 5),
-            )
-            return self.turn_scratchpad.format_results(entries)
-
-        if tool_name == "list_memory":
-            entries = self.task_memory.list_entries(
-                limit=int(tool_args.get("limit", 10) or 10)
-            )
-            return self.task_memory.format_results(entries)
-
-        if tool_name == "list_scratchpad":
-            entries = self.turn_scratchpad.list_entries(
-                limit=int(tool_args.get("limit", 10) or 10)
-            )
-            return self.turn_scratchpad.format_results(entries)
-
-        if tool_name == "clear_scratchpad":
-            self.turn_scratchpad.clear()
-            return "Turn scratchpad cleared."
-
-        result = execute_tool(
+        return execute_tool_with_memory(
+            self,
             tool_name,
             tool_args,
-            self.folder_context,
-            self.ui,
-            self.variables,
             invocation_source=invocation_source,
-            session=self,
         )
-
-        # --- post_tool hooks ---------------------------------------------
-        post_ctx = HookContext(
-            point="post_tool",
-            session=self,
-            variables=self.variables,
-            tool_name=tool_name,
-            tool_args=tool_args,
-            tool_result=result,
-            metadata=pre_ctx.metadata,
-        )
-        default_registry.fire("post_tool", post_ctx)
-        return result
 
     def _prompt_tool_choice(
         self, prompt_text: str, choices: list[str], default: str
@@ -2058,137 +1006,57 @@ class Session:
                 f"  [retryable {error_code}] {hint[:200]}"
             )
 
+    # Retry helpers moved to `mu/agent/retry.py`. Static-method
+    # forwarders preserve the legacy `Session._is_transient_provider_error`
+    # interface used by `_HookAbort` handling and tests.
+
     @staticmethod
     def _is_transient_provider_error(error: Exception) -> bool:
-        message = str(error or "").lower()
-        transient_markers = (
-            "timeout",
-            "timed out",
-            "temporarily unavailable",
-            "temporary failure",
-            "rate limit",
-            "429",
-            "502",
-            "503",
-            "504",
-            "connection reset",
-            "connection aborted",
-            "network",
-            "econnreset",
-            "service unavailable",
-            "try again",
-            "overloaded",
-            "capacity",
-            "server error",
-            "internal server error",
-            "bad gateway",
-            "gateway timeout",
-            "server is",
-        )
-        if any(marker in message for marker in transient_markers):
-            return True
-        status = Session._extract_http_status_code(message)
-        if status is not None:
-            return Session._is_retryable_http_status(status)
-        return False
+        from mu.agent.retry import is_transient_provider_error
+
+        return is_transient_provider_error(error)
 
     @staticmethod
     def _extract_http_status_code(message: str) -> int | None:
-        patterns = (
-            r"http error[: ]+(\d{3})",
-            r"status_code[=: ]+(\d{3})",
-            r"\b(?:http\s*)?(\d{3})\b",
-        )
-        for pattern in patterns:
-            match = re.search(pattern, message)
-            if not match:
-                continue
-            try:
-                code = int(match.group(1))
-                if 100 <= code <= 599:
-                    return code
-            except (TypeError, ValueError):
-                continue
-        return None
+        from mu.agent.retry import extract_http_status_code
+
+        return extract_http_status_code(message)
 
     @staticmethod
     def _is_retryable_http_status(status_code: int) -> bool:
-        # Retry only commonly transient HTTP errors.
-        return status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+        from mu.agent.retry import _RETRYABLE_HTTP_STATUS
+
+        return status_code in _RETRYABLE_HTTP_STATUS
+
+    # Loop-detection helpers moved to `mu/agent/loop_detection.py`.
+    # Static-method forwarders preserve the legacy `Session.<method>`
+    # call sites used by the iteration loop and tests.
 
     @staticmethod
     def _coarse_tool_args(tool_args):
-        """Build a stable, coarse-grained representation of tool args for loop pattern checks."""
-        if isinstance(tool_args, dict):
-            coarse = {}
-            for key in sorted(tool_args.keys()):
-                val = tool_args.get(key)
-                if isinstance(val, str):
-                    coarse[key] = f"str:{hashlib.sha1(val.encode('utf-8')).hexdigest()[:10]}"
-                elif isinstance(val, (int, float, bool)) or val is None:
-                    coarse[key] = val
-                elif isinstance(val, list):
-                    coarse[key] = [Session._coarse_tool_args(item) for item in val[:8]]
-                elif isinstance(val, dict):
-                    coarse[key] = Session._coarse_tool_args(val)
-                else:
-                    coarse[key] = type(val).__name__
-            return coarse
-        if isinstance(tool_args, list):
-            return [Session._coarse_tool_args(item) for item in tool_args[:8]]
-        if isinstance(tool_args, str):
-            return f"str:{hashlib.sha1(tool_args.encode('utf-8')).hexdigest()[:10]}"
-        if isinstance(tool_args, (int, float, bool)) or tool_args is None:
-            return tool_args
-        return type(tool_args).__name__
+        from mu.agent.loop_detection import coarse_tool_args
+
+        return coarse_tool_args(tool_args)
 
     @staticmethod
     def _tool_call_fingerprint(tool_name: str, tool_args, *, pattern_only: bool = False) -> str:
-        name = str(tool_name or "").strip().lower() or "tool"
-        payload_source = (
-            Session._coarse_tool_args(tool_args or {}) if pattern_only else (tool_args or {})
-        )
-        try:
-            payload = json.dumps(
-                payload_source,
-                sort_keys=True,
-                default=str,
-                separators=(",", ":"),
-            )
-        except (TypeError, ValueError):
-            payload = str(payload_source)
-        digest = hashlib.sha1(f"{name}|{payload}".encode("utf-8")).hexdigest()[:12]
-        return f"{name}:{digest}" if not pattern_only else f"{name}~{digest}"
+        from mu.agent.loop_detection import tool_call_fingerprint
+
+        return tool_call_fingerprint(tool_name, tool_args, pattern_only=pattern_only)
 
     @staticmethod
     def _track_tool_for_loop_detection(tool_name: str, tool_args) -> bool:
-        """Ignore bookkeeping tools that can repeat during normal feature progression."""
-        name = str(tool_name or "").strip().lower()
-        return name not in {
-            "create_feature",
-            "create_phases",
-            "create_task",
-            "update_task",
-            "update_phases",
-            "review_task",
-            "review_all_completed_tasks",
-            "review_completed_tasks",
-            "update_task_status",
-            "get_execution_state",
-            "get_tasks",
-            "get_current_task",
-        }
+        from mu.agent.loop_detection import track_tool_for_loop_detection
+
+        return track_tool_for_loop_detection(tool_name, tool_args)
 
     @staticmethod
     def _is_repeated_tool_sequence(
         sequence_history: list[str], repeat_threshold: int = 3
     ) -> bool:
-        if len(sequence_history) < repeat_threshold:
-            return False
-        tail = sequence_history[-repeat_threshold:]
-        if not all(tail):
-            return False
-        return len(set(tail)) == 1
+        from mu.agent.loop_detection import is_repeated_tool_sequence
+
+        return is_repeated_tool_sequence(sequence_history, repeat_threshold)
 
     def _provider_generate_with_retry(
         self,
@@ -2199,110 +1067,16 @@ class Session:
         tools,
     ):
         """Call the provider with exponential-backoff retry on transient
-        failures (429, 503, timeouts, transient network errors).
+        failures. Body moved to `mu/agent/retry.py:provider_generate_with_retry`."""
+        from mu.agent.retry import provider_generate_with_retry
 
-        Bounded by a cumulative-wait budget
-        (`provider_retry_max_total_wait_seconds`, default 120s) so the
-        agent can't stall forever on a flapping endpoint. A hard
-        `provider_max_retries` ceiling (default 30) is kept as a
-        safety belt against pathological 0-delay loops.
-
-        Backoff schedule with defaults (base=0.4, max=30, budget=120):
-            attempt 1: ~0.4s   (total ~0.4s)
-            attempt 2: ~0.8s   (total ~1.2s)
-            attempt 3: ~1.6s   (total ~2.8s)
-            attempt 4: ~3.2s   (total ~6.0s)
-            attempt 5: ~6.4s   (total ~12.4s)
-            attempt 6: ~12.8s  (total ~25.2s)
-            attempt 7: ~25.6s  (total ~50.8s)
-            attempt 8: 30s capped
-            ...stops once cumulative >= 120s.
-        """
-        base_delay = float(
-            self.variables.get("provider_retry_base_delay", 0.4) or 0.4
+        return provider_generate_with_retry(
+            self,
+            messages=messages,
+            system_prompt=system_prompt,
+            thinking=thinking,
+            tools=tools,
         )
-        max_delay = float(
-            self.variables.get("provider_retry_max_delay", 30.0) or 30.0
-        )
-        total_budget_s = float(
-            self.variables.get("provider_retry_max_total_wait_seconds", 120.0)
-            or 120.0
-        )
-        max_attempts = max(
-            1, int(self.variables.get("provider_max_retries", 30) or 30)
-        )
-
-        # Build a streaming renderer that forwards text deltas to the UI in
-        # real time. Falls back gracefully for UIs that do not implement the
-        # streaming callbacks; in that case it just accumulates silently.
-        from mu.ui.stream import build_default_renderer
-        from mu.agent.hooks import HookContext, default_registry
-        import mu.agent.compactor  # noqa: F401 — registers auto-compaction hook
-        import mu.agent.plan_mode  # noqa: F401 — registers plan-mode pre_tool hook
-        import mu.agent.usage_tracker  # noqa: F401 — registers per-session usage hooks
-        import mu.agent.secret_guard  # noqa: F401 — registers bash secret-guard hook
-
-        attempt = 0
-        elapsed = 0.0
-
-        while True:
-            try:
-                pre_ctx = HookContext(
-                    point="pre_provider_call",
-                    session=self,
-                    variables=self.variables,
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    tools=tools,
-                )
-                default_registry.fire("pre_provider_call", pre_ctx)
-
-                renderer = build_default_renderer(self.ui)
-                events = self.provider.stream(
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    thinking=thinking,
-                    tools=tools,
-                )
-                response = renderer.consume(self.provider, events)
-                post_ctx = HookContext(
-                    point="post_provider_call",
-                    session=self,
-                    variables=self.variables,
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    response=response,
-                )
-                default_registry.fire("post_provider_call", post_ctx)
-                return response
-            except Exception as exc:
-                if not self._is_transient_provider_error(exc):
-                    raise
-                if elapsed >= total_budget_s or attempt >= max_attempts:
-                    # Budget exhausted — bubble the error up so the
-                    # outer turn loop can surface a clear failure
-                    # instead of stalling forever.
-                    if self.ui:
-                        self.ui.show_error(
-                            f"Provider retry budget exhausted "
-                            f"({attempt} attempts, {elapsed:.1f}s slept). Aborting."
-                        )
-                    raise
-                attempt += 1
-                # Exponential backoff with jitter, capped at max_delay.
-                delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
-                delay += random.uniform(0, min(1.0, delay * 0.25))
-                # Don't oversleep past the remaining budget.
-                remaining = max(0.0, total_budget_s - elapsed)
-                delay = max(0.05, min(delay, remaining))
-                if self.ui:
-                    self.ui.show_info(
-                        f"Transient provider error; retry {attempt} "
-                        f"in {delay:.1f}s ({elapsed:.1f}s of "
-                        f"{total_budget_s:.0f}s budget used)."
-                    )
-                time.sleep(delay)
-                elapsed += delay
 
     def _request_tool_approval(
         self,
@@ -2405,960 +1179,7 @@ class Session:
         }
 
     def send_message(self, text):
-        logger.info(f"Sending message: {text[:100]}...")
-        self.paused_execution_text = None
-        self._loop_blocker_raised = False  # fresh turn — last turn's pause doesn't apply
-        self.sync_runtime_state()
-        if self.variables.get("scratchpad_enabled", True):
-            self.turn_scratchpad.max_entries = max(
-                1,
-                int(
-                    self.variables.get(
-                        "scratchpad_max_entries", self.turn_scratchpad.max_entries
-                    )
-                ),
-            )
-            self.turn_scratchpad.clear()
+        """Body moved to `mu/agent/loop_body.py:run_turn`."""
+        from mu.agent.loop_body import run_turn
 
-        parts = list(self.staged_files)
-        effective_text = text
-        active_mode = str(self.variables.get("agent_mode", "default")).lower()
-        if text and active_mode == "feature":
-            effective_text = self._build_feature_mode_prompt(text)
-        elif text and active_mode == "loop":
-            effective_text = self._build_loop_mode_prompt(text)
-        if active_mode == "loop":
-            self._ensure_loop_goal_persistence()
-        if effective_text:
-            parts.append({"type": "text", "text": effective_text})
-
-        new_user_message = {"role": "user", "parts": parts}
-
-        if text and self.ui:
-            self.ui.render_message("user", text)
-
-        workspace_context = ""
-        self._pending_retrieved_context = ""
-
-        if self.folder_context.folders:
-            retrieval_query = effective_text or text
-            self._pending_retrieved_context = self._build_retrieved_workspace_context(
-                retrieval_query
-            )
-            # Let tools auto discover workspace content as needed
-            if self.agentic:
-                active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
-                tool_desc_str = "\n".join(
-                    [f"{t.name} - {t.description}" for t in active_tools]
-                )
-
-                agent_mode = str(self.variables.get("agent_mode", "default")).lower()
-                default_mode_instruction = AGENTIC_MODES.get(
-                    agent_mode, AGENTIC_MODES["default"]
-                )
-                mode_instruction = str(
-                    self.variables.get(
-                        f"agentic_mode_prompt_{agent_mode}",
-                        default_mode_instruction,
-                    )
-                    or default_mode_instruction
-                )
-                agentic_system_base = str(
-                    self.variables.get(
-                        "agentic_system_base_override", AGENTIC_SYSTEM_BASE
-                    )
-                    or AGENTIC_SYSTEM_BASE
-                )
-
-                # Providers automatically generated tool prompts so don't need to be embedded into the system prompt
-                workspace_context = f"{agentic_system_base}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
-            else:
-                logger.debug(
-                    f"Using agent_mode={self.variables.get('agent_mode', 'default')}"
-                )
-
-                if self.ui:
-                    with self.ui.show_status(
-                        "Scanning monitored folders for changes..."
-                    ):
-                        if self._pending_retrieved_context:
-                            workspace_context = (
-                                "### RETRIEVAL-FIRST WORKSPACE CONTEXT\n"
-                                "Ranked snippets were selected from semantic index scoring.\n"
-                                f"{self._pending_retrieved_context}"
-                            )
-                        else:
-                            folder_initial_xml = (
-                                self.folder_context.get_initial_context_xml()
-                            )
-                            folder_diff_xml = self.folder_context.get_context_diff_xml()
-                            workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
-
-        base_system_prompt = self.system_instruction
-        if active_mode == "feature":
-            base_system_prompt += (
-                "\n\nFEATURE MODE SYSTEM PROMPT\n"
-                "You are in Feature Plan Engine mode. "
-                "Use the staged feature-task engine for this request. Start with create_feature, then create_phases, then create_task for each ticket. "
-                "Do not create alternate planning documents and do not begin code implementation until the user has reviewed and approved the plan. "
-                "Every task must include explicit EXIT CRITERIA and tasks can be marked completed only after all exit criteria are verified. "
-                "Continuously update verified_exit_criteria via update_task_status as each criterion is met so progress remains explicit. "
-                "Step through one task at a time until completion; never work multiple tasks simultaneously. "
-                "Use get_execution_state to choose the next actionable phase/task, use block_task if external input is required, and resume_task when user unblock context arrives. "
-                "Use review_all_completed_tasks/review_completed_tasks/propose_task_diff/decide_task_diff/archive_task for review-and-archive flow after implementation completes. "
-                "gather read-only context first, use save_scratchpad for temporary phase notes, call flush before acting on collected context, and call raise_blocker when blocked on user input. "
-                "You must use save_memory for durable facts/decisions and reuse search_memory/list_memory before re-deriving context in long loops. "
-                "You must use save_scratchpad/list_scratchpad within each turn to track in-flight plans as context grows. "
-                "Do not stall on status-only updates: unless blocked or awaiting explicit approval/decision, continue implementation autonomously until all phases and tasks are completed."
-            )
-        elif active_mode == "loop":
-            loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
-            base_system_prompt += (
-                "\n\nLOOP MODE SYSTEM PROMPT\n"
-                "You are executing a long-horizon autonomous loop. "
-                "Work continuously in increments (plan -> execute -> verify -> continue) until stopped by the user. "
-                "Maintain a visible task list via `todo_write` and `todo_set_status` so the user can see your plan at any time. "
-                "Exactly one todo should be in_progress at a time. "
-                "At each increment, provide a concise timeline update: attempted action, outcome, evidence, and next step. "
-                "Use save_memory for durable findings and save_scratchpad for short-lived planning. "
-                "For focused side-quests that would clutter loop context (deep research, isolated refactors), delegate via `spawn_agent` with a tight tools whitelist."
-            )
-            if loop_goal:
-                base_system_prompt += f"\nLocked loop goal: {loop_goal}"
-        if workspace_context:
-            base_system_prompt += f"\n\n{workspace_context}"
-        self.session_manager.roll_history_summary_to_token_budget(
-            self._compaction_token_budget(),
-            keep_recent=4,
-        )
-        # Tell the auto-compaction hook we've already rolled this turn so it
-        # doesn't double-roll inside the iteration loop. Cleared in
-        # `_collect_turn_response` when the turn finishes.
-        self._history_rolled_this_turn = True
-        self._pending_user_text = effective_text or text or ""
-        base_system_prompt = self._inject_hierarchical_context(base_system_prompt)
-
-        recent_history = self._prepare_runtime_history()
-        messages = self._build_messages_from_history(recent_history, new_user_message)
-
-        initial_history_len = len(self.session_manager.history)
-        self.session_manager.history.append(new_user_message)
-        self.session_manager.save_history()
-        self.staged_files = []
-        turn_start_index = len(self.session_manager.history) - 1
-
-        max_iterations = self.variables.get("max_iterations", 50)
-        iteration = 0
-        active_tools = [t for t in TOOLS if t.name not in self.disabled_tools]
-
-        total_in = 0
-        total_out = 0
-        total_cost = 0.0
-
-        logger.info(f"Starting agentic loop (max_iterations={max_iterations})")
-        provider_bad_request_retried = False
-        exact_tool_sequence_history: list[str] = []
-        pattern_tool_sequence_history: list[str] = []
-        loop_detection_enabled = bool(
-            self.variables.get("loop_detection_enabled", True)
-        )
-        loop_detection_repeat_threshold = max(
-            2,
-            int(self.variables.get("loop_detection_repeat_threshold", 3) or 3),
-        )
-
-        while iteration < max_iterations:
-            iteration += 1
-            logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
-            current_tool_name = None
-            current_tool_args = None
-            iteration_tool_exact_fingerprints: list[str] = []
-            iteration_tool_pattern: list[str] = []
-
-            try:
-                dynamic_system_prompt = base_system_prompt
-                if self.variables.get("memory_enabled", True):
-                    self.task_memory.max_entries = max(
-                        1,
-                        int(
-                            self.variables.get(
-                                "memory_max_entries", self.task_memory.max_entries
-                            )
-                        ),
-                    )
-                    memory_summary = self.task_memory.render_summary(
-                        limit=int(self.variables.get("memory_summary_limit", 8))
-                    )
-                    if memory_summary:
-                        dynamic_system_prompt += (
-                            "\n\nLAYER 3 — Persisted working memory snapshot:\n"
-                            f"{memory_summary}"
-                        )
-                if self.variables.get("scratchpad_enabled", True):
-                    scratchpad_summary = self.turn_scratchpad.render_summary(limit=8)
-                    if scratchpad_summary:
-                        dynamic_system_prompt += (
-                            "\n\nLAYER 3 — Turn scratchpad snapshot:\n"
-                            f"{scratchpad_summary}"
-                        )
-
-                if self.ui and hasattr(self.ui, "build_live_status"):
-                    status_msg = self.ui.build_live_status(
-                        self,
-                        self.provider.model_name,
-                        iteration,
-                        max_iterations,
-                    )
-                else:
-                    status_msg = (
-                        f"Generating ({self.provider.model_name}) it {iteration}/{max_iterations}"
-                        f" | {build_live_status_line(self)}"
-                    )
-                if self.ui:
-                    with self.ui.show_status(status_msg):
-                        response = self._provider_generate_with_retry(
-                            messages=messages,
-                            system_prompt=dynamic_system_prompt,
-                            thinking=self.thinking,
-                            tools=active_tools
-                            if (self.folder_context.folders and self.agentic)
-                            else None,
-                        )
-                else:
-                    response = self._provider_generate_with_retry(
-                        messages=messages,
-                        system_prompt=dynamic_system_prompt,
-                        thinking=self.thinking,
-                        tools=active_tools
-                        if (self.folder_context.folders and self.agentic)
-                        else None,
-                    )
-
-                logger.debug(
-                    f"Provider response received. Tokens: In {response.input_tokens}, Out {response.output_tokens}"
-                )
-
-                ai_parts_archive = []
-                has_tool_call = False
-                has_text = False
-
-                for part in response.parts:
-                    if part.type == "text" and part.text:
-                        has_text = True
-                        if self.ui:
-                            self.ui.render_message(
-                                "assistant", part.text, self.provider.model_name
-                            )
-                        logger.debug(f"Assistant text: {part.text[:200]}...")
-                        ai_parts_archive.append({"type": "text", "text": part.text})
-
-                    elif part.type == "image_inline" and part.inline_data:
-                        display_image_in_terminal(self.session_manager.current_session_name, part.inline_data, save=True)
-                        ai_parts_archive.append(
-                            {
-                                "type": "text",
-                                "text": "[Image Generated and Saved locally]",
-                            }
-                        )
-
-                    elif part.type == "tool_call":
-                        has_tool_call = True
-                        ai_parts_archive.append(
-                            {
-                                "type": "tool_call",
-                                "tool_name": part.tool_name,
-                                "tool_args": part.tool_args,
-                                "thought_signature": part.thought_signature,
-                            }
-                        )
-                        if self.ui and active_mode != "loop":
-                            self.ui.show_info(
-                                f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
-                            )
-                        logger.info(
-                            f"Tool call: {part.tool_name} with args {part.tool_args}"
-                        )
-
-                if ai_parts_archive:
-                    self.session_manager.history.append(
-                        {
-                            "role": "assistant",
-                            "parts": ai_parts_archive,
-                        }
-                    )
-
-                self.session_manager.token_counts["input"] += response.input_tokens
-                self.session_manager.token_counts["output"] += response.output_tokens
-                self.session_manager.token_counts["total"] += response.total_tokens
-                self.session_manager.token_counts["cached"] = (
-                    self.session_manager.token_counts.get("cached", 0)
-                    + getattr(response, "cached_tokens", 0)
-                )
-                self.session_manager.token_counts["reasoning"] = (
-                    self.session_manager.token_counts.get("reasoning", 0)
-                    + getattr(response, "reasoning_tokens", 0)
-                )
-
-                total_in += response.input_tokens
-                total_out += response.output_tokens
-
-                est_cost = calculate_cost(
-                    self.provider.model_name,
-                    response.input_tokens,
-                    response.output_tokens,
-                )
-                cost_str = ""
-                if est_cost is not None:
-                    total_cost += est_cost
-                    self.session_manager.token_counts["total_cost"] += est_cost
-                    cost_str = (
-                        f"| Est. Cost: ${est_cost:.5f} (Total: ${total_cost:.5f})"
-                    )
-
-                if self.ui:
-                    self.ui.show_info(
-                        f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | Total {response.total_tokens} {cost_str}"
-                    )
-
-                if not has_tool_call:
-                    if not has_text:
-                        logger.warning("Assistant provided empty response. Nudging.")
-
-                        nudge_msg = {
-                            "role": "user",
-                            "parts": [
-                                {"type": "text", "text": NUDGE_EMPTY_RESPONSE}
-                            ],
-                        }
-                        self.session_manager.history.append(nudge_msg)
-                        messages = self._build_messages_from_history(
-                            self._prepare_runtime_history(),
-                            {"role": "system", "parts": []},
-                        )[:-1]
-                        continue
-
-                    if active_mode == "loop" and iteration < max_iterations:
-                        if self._loop_blocker_raised:
-                            # The agent already raised a blocker this
-                            # turn — pausing intentionally. Don't poke
-                            # it; let the loop finalize so the user can
-                            # respond. Without this gate the watchdog
-                            # would re-prompt every iteration, burning
-                            # tokens while the model repeats the
-                            # blocker message.
-                            logger.info(
-                                "Loop mode: blocker raised; skipping watchdog continue."
-                            )
-                            if self.ui:
-                                self.ui.show_info(
-                                    "Loop paused — blocker raised. "
-                                    "Provide the requested input, set a new loop goal, or /mode default."
-                                )
-                            # Fall through to the normal finalize path
-                            # below (no `continue`).
-                        else:
-                            logger.info(
-                                "Loop mode watchdog: assistant stopped without tool calls; issuing autonomous continue nudge."
-                            )
-                            watchdog_msg = {
-                                "role": "user",
-                                "parts": [
-                                    {
-                                        "type": "text",
-                                        "text": (
-                                            "LOOP WATCHDOG: Continue autonomous loop execution now. "
-                                            "Re-plan the next increment, execute concrete actions with tools, "
-                                            "verify outcomes, and proceed without waiting for user confirmation. "
-                                            "Only pause if blocked, and if blocked call raise_blocker with exact unblock requirements."
-                                        ),
-                                    }
-                                ],
-                            }
-                            self.session_manager.history.append(watchdog_msg)
-                            messages = self._build_messages_from_history(
-                                self._prepare_runtime_history(),
-                                {"role": "system", "parts": []},
-                            )[:-1]
-                            continue
-
-                    if self.ui:
-                        self.ui.show_info(
-                            f"Final session tokens: In {total_in} | Out {total_out} | Total {total_in + total_out} | Total Est. Cost: ${total_cost:.5f}"
-                        )
-
-                    logger.info("Agentic loop finished (no tool calls).")
-
-                    if (
-                        str(self.variables.get("agent_mode", "default")).lower()
-                        == "feature"
-                        and self.session_manager.get_feature_state()
-                    ):
-                        self._set_feature_state()
-
-                    if self.variables.get("compact_history", False):
-                        if self.ui:
-                            self.ui.show_info(
-                                "[dim]Compacting turn history (removing tool metadata)...[/dim]"
-                            )
-                            self.session_manager.compact_completed_turn()
-                        logger.debug("History compacted.")
-
-                    self.session_manager.save_history(self.folder_context)
-                    return self._collect_turn_response(
-                        initial_history_len,
-                        status="completed",
-                        total_in=total_in,
-                        total_out=total_out,
-                        total_cost=total_cost,
-                    )
-
-                strict_mode = self.variables.get("strict_mode", False)
-                tool_result_parts = []
-                tool_calls = [p for p in response.parts if p.type == "tool_call"]
-
-                approval_plans = collect_approval_plans(
-                    tool_calls,
-                    self.folder_context,
-                    strict_mode=strict_mode,
-                    yolo=self.variables.get("yolo", False),
-                )
-
-                # Show bulk diffs if multiple
-                if len(approval_plans) > 1:
-                    if self.ui:
-                        self.ui.show_info(
-                            f"\n[bold yellow]Turn contains {len(approval_plans)} modifications requiring approval.[/bold yellow]"
-                        )
-                    for approval_plan in approval_plans.values():
-                        for modification in approval_plan.modifications:
-                            if modification.can_render_diff:
-                                if self.ui:
-                                    self.ui.show_diff(
-                                        modification.filename,
-                                        modification.original_content,
-                                        modification.modified_content,
-                                    )
-
-                # --- PHASE 1: approval + decision (serial, in input order) ----
-                # Walk every tool call once. For each, record either an
-                # `early_result` (denied / preview-failed / etc.) OR mark it
-                # `pending` so the parallel execution phase below will run it.
-                pending_executions: list[int] = []  # indices to execute
-                early_results: dict[int, Any] = {}  # i -> pre-resolved result string
-
-                for i, part in enumerate(tool_calls):
-                    current_tool_name = part.tool_name
-                    current_tool_args = part.tool_args
-                    if self._track_tool_for_loop_detection(
-                        part.tool_name, part.tool_args
-                    ):
-                        iteration_tool_exact_fingerprints.append(
-                            self._tool_call_fingerprint(part.tool_name, part.tool_args)
-                        )
-                        iteration_tool_pattern.append(
-                            self._tool_call_fingerprint(
-                                part.tool_name, part.tool_args, pattern_only=True
-                            )
-                        )
-                    approval_plan = approval_plans.get(i)
-                    needs_approval = approval_plan is not None
-                    if needs_approval:
-                        result = None
-                        auto_approved = bool(
-                            self.variables.get("yolo", False)
-                            and approval_plan.can_approve
-                        )
-
-                        if approval_plan.preview_error and self.ui:
-                            for modification in approval_plan.modifications:
-                                if modification.preview_error:
-                                    self.ui.show_error(
-                                        f"Cannot show diff for {modification.filename}: {modification.preview_error}"
-                                    )
-                                    logger.error(
-                                        f"Diff error for {modification.filename}: {modification.preview_error}"
-                                    )
-                                    break
-
-                        if (
-                            approval_plan.error_code == "preview_failed"
-                            and approval_plan.preview_error
-                        ):
-                            if self.ui:
-                                self.ui.show_info(
-                                    f"  [yellow]Auto-retrying malformed patch for {part.tool_name}...[/yellow]"
-                                )
-                            result = (
-                                "Error: Malformed patch detected. Please ensure your diff is correctly "
-                                f"formatted. Check hunk headers and context.\n{approval_plan.preview_error}"
-                            )
-                            logger.warning(
-                                f"Malformed patch detected for {part.tool_name}: {approval_plan.preview_error}"
-                            )
-
-                        # Show diffs if not already shown in bulk pre-calculation
-                        if result is None and not auto_approved and len(approval_plans) <= 1:
-                            for modification in approval_plan.modifications:
-                                if modification.can_render_diff:
-                                    if self.ui:
-                                        self.ui.show_diff(
-                                            modification.filename,
-                                            modification.original_content,
-                                            modification.modified_content,
-                                        )
-
-                        # Shorten args for display
-                        display_args = _shorten_tool_args(part.tool_args)
-
-                        # Add count info to prompt if multiple
-                        count_info = (
-                            f" ({i + 1}/{len(tool_calls)})"
-                            if len(tool_calls) > 1
-                            else ""
-                        )
-
-                        if result is None and not auto_approved:
-                            choice, reason = self._request_tool_approval(
-                                approval_plan=approval_plan,
-                                display_args=display_args,
-                                count_info=count_info,
-                            )
-                            if choice == "n":
-                                result = "User denied this tool call."
-                                logger.info(
-                                    f"Tool call {part.tool_name} denied by user."
-                                )
-                            elif choice == "e":
-                                result = f"User denied this tool call. Reason: {reason}"
-                                logger.info(
-                                    f"Tool call {part.tool_name} denied by user with explanation: {reason}"
-                                )
-                            else:
-                                auto_approved = True  # user said yes — defer to exec phase
-
-                        if result is not None:
-                            early_results[i] = result
-                        elif auto_approved:
-                            pending_executions.append(i)
-                    else:
-                        # No approval needed — defer to exec phase.
-                        pending_executions.append(i)
-
-                # --- PHASE 2: execute pending calls (parallel for safe tools, serial for others) ---
-                exec_results: dict[int, Any] = {}
-                if pending_executions:
-                    from mu.agent.parallel import (
-                        PARALLEL_SAFE_TOOLS,
-                        ToolCall as _ParTC,
-                        execute_calls as _exec_calls,
-                    )
-
-                    parallel_indices: list[int] = []
-                    serial_indices: list[int] = []
-                    for i in pending_executions:
-                        part = tool_calls[i]
-                        # `flush` must be serial (it reads the collation
-                        # buffer, which is populated by the post-processing
-                        # phase below for each preceding call).
-                        if part.tool_name == "flush":
-                            serial_indices.append(i)
-                        elif part.tool_name in PARALLEL_SAFE_TOOLS:
-                            parallel_indices.append(i)
-                        else:
-                            serial_indices.append(i)
-
-                    # Parallel batch — preserves input-order results.
-                    if parallel_indices:
-                        par_calls = [
-                            _ParTC(
-                                tool_name=tool_calls[i].tool_name,
-                                tool_args=tool_calls[i].tool_args or {},
-                                tool_call_id=str(i),
-                                thought_signature=tool_calls[i].thought_signature,
-                            )
-                            for i in parallel_indices
-                        ]
-                        max_concurrency = max(
-                            1,
-                            int(
-                                self.variables.get("parallel_tool_concurrency", 4) or 4
-                            ),
-                        )
-
-                        # If two or more of the parallel calls are sub-agent
-                        # spawns, replace the streaming per-call logs with a
-                        # live progress panel. Hooked up via
-                        # `self._subagent_progress`, which `spawn_agent` reads
-                        # to register/update/close its row.
-                        spawn_count = sum(
-                            1
-                            for i in parallel_indices
-                            if tool_calls[i].tool_name == "spawn_agent"
-                        )
-                        live_progress_ctx = None
-                        live = None
-                        rich_console = getattr(self.ui, "console", None) if self.ui else None
-                        if spawn_count >= 2 and rich_console is not None:
-                            try:
-                                from mu.ui.progress import SubagentProgressTracker
-                                from rich.live import Live
-
-                                tracker = SubagentProgressTracker()
-                                self._subagent_progress = tracker
-                                live = Live(
-                                    get_renderable=tracker.render_panel,
-                                    console=rich_console,
-                                    refresh_per_second=4,
-                                    transient=False,
-                                )
-                                live.start()
-                                live_progress_ctx = tracker
-                            except Exception as _exc:  # pragma: no cover — defensive
-                                logger.debug(
-                                    "Live progress panel unavailable: %s", _exc
-                                )
-                                live = None
-
-                        if len(par_calls) > 1 and self.ui and live is None:
-                            # Only show the one-liner when we're NOT using the
-                            # live panel (otherwise it pollutes the panel area).
-                            self.ui.show_info(
-                                f"⚡ Dispatching {len(par_calls)} tool call(s) in "
-                                f"parallel (max_concurrency={max_concurrency})."
-                            )
-
-                        try:
-                            par_results = _exec_calls(
-                                par_calls,
-                                lambda tc: self._execute_tool_with_memory(
-                                    tc.tool_name, tc.tool_args
-                                ),
-                                max_concurrency=max_concurrency,
-                            )
-                        finally:
-                            if live is not None:
-                                try:
-                                    live.stop()
-                                except Exception:
-                                    pass
-                            self._subagent_progress = None
-                        for idx, pr in zip(parallel_indices, par_results):
-                            if pr.error is not None:
-                                logger.warning(
-                                    "Parallel tool %s raised %s",
-                                    tool_calls[idx].tool_name,
-                                    pr.error,
-                                )
-                                exec_results[idx] = f"Error: {pr.error}"
-                            else:
-                                exec_results[idx] = pr.result
-
-                    # Serial calls (executed in their original input order).
-                    for idx in serial_indices:
-                        part = tool_calls[idx]
-                        if part.tool_name == "flush":
-                            # Flush is finalised inside the post-processing
-                            # phase below so it can read the freshly written
-                            # collation buffer. Placeholder result here.
-                            exec_results[idx] = None
-                            continue
-                        exec_results[idx] = self._execute_tool_with_memory(
-                            part.tool_name, part.tool_args
-                        )
-
-                # --- PHASE 3: post-processing (serial, in input order) -----------
-                for i, part in enumerate(tool_calls):
-                    current_tool_name = part.tool_name
-                    current_tool_args = part.tool_args
-                    if i in early_results:
-                        result = early_results[i]
-                    else:
-                        result = exec_results.get(i)
-
-                    source_result = result
-                    raw_result = source_result
-                    logger.debug(
-                        f"Tool result ({part.tool_name}): {_sanitize_for_log(raw_result)}"
-                    )
-                    # Surface retryable failures to the live UI with the
-                    # registered hint. The model already sees the structured
-                    # envelope in its next turn; this is for the human.
-                    self._announce_retryable_failure(part.tool_name, raw_result)
-                    # --- Collation Logic ---
-                    is_flush = part.tool_name == "flush"
-                    should_collate = (
-                        part.tool_name in COLLATED_TOOLS
-                        and self.variables.get("collation_enabled", True)
-                        and len(tool_calls) > 1
-                    )
-
-                    if is_flush:
-                        collated_data = self.collation_buffer.flush()
-                        if not collated_data:
-                            raw_result = "No data in collation buffer to flush."
-                        else:
-                            raw_result = "--- Flushed Context ---\n" + "\n\n".join(
-                                collated_data
-                            )
-                        if self.ui:
-                            self.ui.show_info(
-                                f"  [Flushed {len(collated_data)} items from buffer]"
-                            )
-                    elif should_collate:
-                        # Don't collate if there was an error
-                        if raw_result and not str(raw_result).startswith("Error"):
-                            self.collation_buffer.add(
-                                part.tool_name, part.tool_args, raw_result
-                            )
-                            count = len(self.collation_buffer.entries)
-                            raw_result = (
-                                f"Stored '{part.tool_name}' result in collation buffer. "
-                                f"{count} item(s) currently pending. "
-                                "Continue gathering or call 'flush' when ready to receive all context."
-                            )
-                        if self.ui and active_mode != "loop":
-                            self.ui.show_info(f"  [Collated: {part.tool_name}]")
-                        else:
-                            # If it's an error, don't collate it, let the model see the error immediately
-                            if self.ui:
-                                self.ui.show_tool_result(
-                                    self._render_tool_result(raw_result)
-                                )
-                    else:
-                        if self.ui and active_mode != "loop":
-                            self.ui.show_tool_result(
-                                self._render_tool_result(raw_result)
-                            )
-
-                    if self.ui and hasattr(self.ui, "emit_tool_trace"):
-                        self.ui.emit_tool_trace(
-                            part.tool_name,
-                            part.tool_args,
-                            source_result,
-                            raw_result,
-                        )
-
-                    # --- End Collation Logic ---
-                    if self.variables.get("structured_tool_results", True):
-                        if raw_result != source_result:
-                            _, unwrapped_source = self._unwrap_tool_envelope(
-                                source_result
-                            )
-                            source_text = str(unwrapped_source)
-                            result = self._build_structured_tool_result(
-                                part.tool_name,
-                                part.tool_args,
-                                raw_result,
-                                execution_source="session",
-                            )
-                            result["data"] = {
-                                "collated": True,
-                                "pending_items": len(self.collation_buffer.entries),
-                                "source_char_count": len(source_text),
-                                "source_line_count": len(source_text.splitlines()),
-                            }
-                            result["telemetry"].update(
-                                {
-                                    "delivery_mode": "collated",
-                                    "visible_char_count": len(str(raw_result)),
-                                }
-                            )
-                        else:
-                            result = self._build_structured_tool_result(
-                                part.tool_name,
-                                part.tool_args,
-                                source_result,
-                                execution_source="session",
-                            )
-                    else:
-                        result = raw_result
-
-                    self._sync_feature_state_for_tool(
-                        part.tool_name,
-                        part.tool_args,
-                        source_result,
-                        result,
-                    )
-                    tool_result_parts.append(
-                        {
-                            "type": "tool_result",
-                            "tool_name": part.tool_name,
-                            "tool_result": result,
-                            "thought_signature": part.thought_signature,
-                        }
-                    )
-                    current_tool_name = None
-                    current_tool_args = None
-
-                tool_result_msg = {"role": "tool", "parts": tool_result_parts}
-                self.session_manager.history.append(tool_result_msg)
-                self.session_manager.save_history(self.folder_context)
-
-                if loop_detection_enabled and iteration_tool_exact_fingerprints:
-                    exact_seq = " -> ".join(iteration_tool_exact_fingerprints)
-                    pattern_seq = " -> ".join(iteration_tool_pattern)
-                    exact_tool_sequence_history.append(exact_seq)
-                    pattern_tool_sequence_history.append(pattern_seq)
-
-                    exact_loop_detected = self._is_repeated_tool_sequence(
-                        exact_tool_sequence_history,
-                        repeat_threshold=loop_detection_repeat_threshold,
-                    )
-                    pattern_loop_detected = self._is_repeated_tool_sequence(
-                        pattern_tool_sequence_history,
-                        repeat_threshold=loop_detection_repeat_threshold,
-                    )
-
-                    if exact_loop_detected or pattern_loop_detected:
-                        loop_kind = "exact" if exact_loop_detected else "pattern"
-                        warning_text = (
-                            "Loop detection triggered: repeated tool-call sequence "
-                            f"detected {loop_detection_repeat_threshold}x ({loop_kind})."
-                        )
-                        if self.ui:
-                            self.ui.show_error(warning_text)
-                        logger.warning(warning_text)
-                        loop_break_msg = {
-                            "role": "user",
-                            "parts": [
-                                {
-                                    "type": "text",
-                                    "text": (
-                                        "LOOP DETECTED: You repeated the same tool-call sequence three times. "
-                                        "You MUST break out now. Do NOT repeat this sequence again. "
-                                        "Take a materially different action: apply a concrete code change, "
-                                        "run a different validation path, or raise_blocker with exact missing requirements. "
-                                        "Then explain what changed and why this breaks the loop."
-                                    ),
-                                }
-                            ],
-                        }
-                        self.session_manager.history.append(loop_break_msg)
-                        self.session_manager.save_history(self.folder_context)
-                        messages = self._build_messages_from_history(
-                            self._prepare_runtime_history(turn_start_index),
-                            {"role": "system", "parts": []},
-                        )[:-1]
-                        continue
-
-                messages = self._build_messages_from_history(
-                    self._prepare_runtime_history(turn_start_index),
-                    {"role": "system", "parts": []},
-                )[:-1]
-
-            except KeyboardInterrupt:
-                if self.ui:
-                    self.ui.show_info("\nAgentic loop interrupted by user.")
-                logger.warning("Agentic loop interrupted by user.")
-                self.paused_execution_text = str(text or "")
-                self.session_manager.history.append(
-                    {
-                        "role": "tool",
-                        "parts": [
-                            {
-                                "type": "tool_result",
-                                "tool_name": "system",
-                                "tool_result": "User interrupted execution.",
-                            }
-                        ],
-                    }
-                )
-                self.session_manager.save_history(self.folder_context)
-                if self.session_manager.get_feature_state():
-                    self._set_feature_state(status="interrupted")
-                return self._collect_turn_response(
-                    initial_history_len,
-                    status="interrupted",
-                    total_in=total_in,
-                    total_out=total_out,
-                    total_cost=total_cost,
-                    error="User interrupted execution.",
-                )
-            except Exception as e:
-                traceback_text = traceback.format_exc()
-                tool_context = ""
-                if current_tool_name:
-                    tool_context = (
-                        f" | Last tool: {current_tool_name}("
-                        f"{_shorten_tool_args(current_tool_args or {})})"
-                    )
-                if self.ui:
-                    self.ui.show_error(f"API Error during agentic loop: {e}{tool_context}")
-                    self.ui.show_error(
-                        "Traceback (most recent call last):\n"
-                        + "\n".join(traceback_text.strip().splitlines()[-8:])
-                    )
-                logger.error(f"Error in agentic loop: {e}", exc_info=True)
-
-                status_code = self._extract_http_status_code(str(e).lower())
-                if (
-                    not provider_bad_request_retried
-                    and not current_tool_name
-                    and status_code is not None
-                    and 400 <= status_code < 500
-                    and status_code not in {408, 409, 425, 429}
-                ):
-                    provider_bad_request_retried = True
-                    self.session_manager.history = self.session_manager.history[:initial_history_len]
-                    self.session_manager.summary_anchor = min(
-                        self.session_manager.summary_anchor,
-                        len(self.session_manager.history),
-                    )
-                    self.session_manager.history.append(new_user_message)
-                    self.session_manager.save_history(self.folder_context)
-                    messages = self._build_messages_from_history(
-                        self._prepare_runtime_history(),
-                        new_user_message,
-                    )
-                    iteration -= 1
-                    if self.ui:
-                        self.ui.show_info(
-                            f"Provider returned HTTP {status_code}. Rolled back the current turn and retrying once."
-                        )
-                    continue
-
-                choice = self._provider_error_recovery_choice()
-                if choice == "rollback_retry":
-                    self.session_manager.history = self.session_manager.history[: turn_start_index + 1]
-                    self.session_manager.summary_anchor = min(
-                        self.session_manager.summary_anchor,
-                        len(self.session_manager.history),
-                    )
-                    self.session_manager.save_history(self.folder_context)
-                    messages = self._build_messages_from_history(
-                        self._prepare_runtime_history(turn_start_index),
-                        {"role": "system", "parts": []},
-                    )[:-1]
-                    iteration -= 1
-                    continue
-                if choice == "retry":
-                    iteration -= 1  # Decrement so the next loop run tries the same step
-                    continue
-
-                self.session_manager.save_history(self.folder_context)
-                if self.session_manager.get_feature_state():
-                    self._set_feature_state(status="error")
-                return self._collect_turn_response(
-                    initial_history_len,
-                    status="error",
-                    total_in=total_in,
-                    total_out=total_out,
-                    total_cost=total_cost,
-                    error=f"{e}{tool_context}",
-                )
-
-        self.session_manager.save_history(self.folder_context)
-        self.paused_execution_text = None
-        if self.session_manager.get_feature_state():
-            self._set_feature_state(status="max_iterations_reached")
-        return self._collect_turn_response(
-            initial_history_len,
-            status="max_iterations_reached",
-            total_in=total_in,
-            total_out=total_out,
-            total_cost=total_cost,
-            error=(
-                f"Reached maximum iterations ({max_iterations}) without a final "
-                "assistant response."
-            ),
-        )
+        return run_turn(self, text)

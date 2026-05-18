@@ -132,3 +132,73 @@ def test_hook_points_are_canonical():
         "on_stop",
     }
     assert set(HOOK_POINTS) == expected
+
+
+# ---------------------------------------------------------- abort signal
+
+
+def test_fire_with_signals_extracts_short_circuit_and_abort_in_priority_order():
+    reg = HookRegistry()
+
+    @reg.register("pre_tool", priority=20)
+    def aborter(ctx):
+        return HookResult(action="abort", payload="time to stop")
+
+    @reg.register("pre_tool", priority=10)
+    def blocker(ctx):
+        if ctx.tool_name == "write_file":
+            return HookResult(action="short_circuit", payload={"blocked": True})
+        return None
+
+    results, short, abort = reg.fire_with_signals(
+        "pre_tool", HookContext(point="pre_tool", tool_name="write_file")
+    )
+    assert short is not None and short.payload == {"blocked": True}
+    assert abort is not None and abort.payload == "time to stop"
+    # All non-None results returned in firing order (priority asc).
+    assert len(results) == 2
+
+
+def test_fire_with_signals_returns_none_for_missing_signals():
+    reg = HookRegistry()
+
+    @reg.register("post_tool")
+    def benign(ctx):
+        return {"observed": ctx.tool_name}
+
+    results, short, abort = reg.fire_with_signals(
+        "post_tool", HookContext(point="post_tool", tool_name="read_file")
+    )
+    assert short is None
+    assert abort is None
+    assert results and results[0].data == {"observed": "read_file"}
+
+
+def test_fire_with_signals_short_circuit_does_not_mask_later_abort():
+    """short_circuit and abort are independent — having one must not
+    cause the helper to skip the other."""
+    reg = HookRegistry()
+
+    @reg.register("pre_tool", priority=5)
+    def first_short(ctx):
+        return HookResult(action="short_circuit", payload="nope")
+
+    @reg.register("pre_tool", priority=15)
+    def then_abort(ctx):
+        return HookResult(action="abort", payload="stop after this")
+
+    _, short, abort = reg.fire_with_signals(
+        "pre_tool", HookContext(point="pre_tool", tool_name="x")
+    )
+    assert short is not None and short.payload == "nope"
+    assert abort is not None and abort.payload == "stop after this"
+
+
+def test_fire_with_signals_empty_registry_returns_no_signals():
+    reg = HookRegistry()
+    results, short, abort = reg.fire_with_signals(
+        "on_stop", HookContext(point="on_stop")
+    )
+    assert results == []
+    assert short is None
+    assert abort is None

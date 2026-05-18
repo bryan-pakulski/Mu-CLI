@@ -211,6 +211,30 @@ class HookRegistry:
                 return result
         return None
 
+    def fire_with_signals(
+        self, point: HookPoint, ctx: HookContext
+    ) -> Tuple[List[HookResult], Optional[HookResult], Optional[HookResult]]:
+        """Fire `point` and return (all_results, first_short_circuit, first_abort).
+
+        Hooks fire in priority order; the first short_circuit and the
+        first abort are extracted into their own slots so the caller
+        doesn't have to walk the list. `short_circuit` is only acted on
+        at `pre_tool`; `abort` is a stop-the-loop signal honored
+        anywhere (the caller wires it to a session flag the agent loop
+        checks at its iteration boundary).
+        """
+        results = self.fire(point, ctx)
+        short: Optional[HookResult] = None
+        abort: Optional[HookResult] = None
+        for result in results:
+            if short is None and result.action == "short_circuit":
+                short = result
+            if abort is None and result.action == "abort":
+                abort = result
+            if short is not None and abort is not None:
+                break
+        return results, short, abort
+
 
 # A module-level registry. The default loop wiring reads from here so most
 # callers don't need to pass a registry around.

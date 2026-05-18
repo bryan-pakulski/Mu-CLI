@@ -1,7 +1,8 @@
 import os
 import json
 import pytest
-from core.tools import search_references, _handle_search_references
+from core.tools import search_references
+import mu.tools as _mu_tools
 from core.workspace import FolderContext
 
 
@@ -119,7 +120,10 @@ def test_no_folder_context():
 
 
 def test_handler_delegates_correctly(tmp_path):
-    """_handle_search_references passes args to search_references correctly."""
+    """The `@tool`-registered `search_references` handler forwards args
+    to the underlying implementation. Post-migration the handler lives
+    in `mu/tools/workspace/handlers.py`; we exercise it through the
+    public `mu.tools.execute` dispatcher."""
     ctx = FolderContext()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -128,8 +132,12 @@ def test_handler_delegates_correctly(tmp_path):
     src = workspace / "handler_test.py"
     src.write_text("line a\nFINDME\nline c\n")
 
-    result = _handle_search_references({"query": "FINDME", "context_lines": 1}, ctx, None, None)
-    payload = json.loads(result)
+    tool_ctx = _mu_tools.build_tool_context(folder_context=ctx, ui=None, variables={})
+    envelope = _mu_tools.execute(
+        "search_references", {"query": "FINDME", "context_lines": 1}, tool_ctx
+    )
+    assert envelope["ok"] is True
+    payload = json.loads(envelope["message"])
 
     assert payload["count"] == 1
     assert "FINDME" in payload["results"][0]["context_snippet"]

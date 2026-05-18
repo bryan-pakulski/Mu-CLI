@@ -1113,8 +1113,10 @@ def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):
         can_approve=True,
         modifications=[],
     )
+    # The agent loop body moved to `mu/agent/loop_body.py` in Phase 4,
+    # so patch the binding at the new home.
     monkeypatch.setattr(
-        "core.session.collect_approval_plans",
+        "mu.agent.loop_body.collect_approval_plans",
         lambda tool_calls, folder_context, strict_mode=False, yolo=False: {
             0: approval_plan,
             1: approval_plan,

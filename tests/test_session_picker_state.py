@@ -159,7 +159,7 @@ def test_safe_delete_session_silent_mode_detaches_ui(tmp_path, monkeypatch):
     import mucli
     from mu.session.session import SessionManager
 
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     Path(tmp_path, "sessions", "alpha", "session.json").write_text("{}", encoding="utf-8")
 
@@ -193,7 +193,7 @@ def test_safe_delete_session_loud_mode_keeps_ui_attached(tmp_path, monkeypatch):
     import mucli
     from mu.session.session import SessionManager
 
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     Path(tmp_path, "sessions", "alpha", "session.json").write_text("{}", encoding="utf-8")
 
@@ -231,7 +231,7 @@ def test_choose_session_falls_back_to_numbered_picker_in_headless(
     import mucli
     from mu.session.session import SessionManager
 
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     Path(tmp_path, "sessions", "alpha", "session.json").write_text("{}", encoding="utf-8")
     sm = SessionManager()

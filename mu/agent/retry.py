@@ -121,13 +121,12 @@ def provider_generate_with_retry(
     exception, and re-raises the last transient exception once the
     budget or attempt cap is exhausted.
     """
-    # Lazy imports to keep this module cheap at import time.
+    # Lazy import to keep this module cheap at import time. Built-in
+    # hooks (compactor, plan_mode, secret_guard, usage_tracker) are
+    # auto-registered at `mu.agent` package load — no need to import
+    # them here.
     from mu.ui.stream import build_default_renderer
-    import mu.agent.compactor  # noqa: F401 — registers auto-compaction hook
-    import mu.agent.plan_mode  # noqa: F401 — registers plan-mode pre_tool hook
-    import mu.agent.usage_tracker  # noqa: F401 — registers per-session usage hooks
-    import mu.agent.secret_guard  # noqa: F401 — registers bash secret-guard hook
-    from mu.session.session import _HookAbort
+    from mu.session.helpers import _HookAbort
 
     base_delay = float(
         session.variables.get("provider_retry_base_delay", 0.4) or 0.4

@@ -1,4 +1,4 @@
-# Session and SessionManager (history state)
+# Session class — per-turn state container + agent-loop entry.
 import os
 import json
 import time
@@ -24,15 +24,14 @@ from mu.tools._dispatcher import execute_tool
 from mu.tools._envelope import infer_tool_error_code
 from mu.tools.descriptors import TOOLS, COLLATED_TOOLS
 # Importing `mu.tools` triggers `@tool`-decorator registrations
-# (spawn_agent, todo_write, todo_set_status, todo_list, ...) which mirror
-# into `mu.tools.descriptors.TOOLS` / `TOOL_DESCRIPTORS` / `TOOL_HANDLERS` so the
-# legacy Session loop sees them in `active_tools`.
+# (every tool in mu/tools/<group>/handlers.py) which mirror into
+# `mu.tools.descriptors.TOOLS` / `TOOL_DESCRIPTORS` /
+# `mu.tools._dispatcher.TOOL_HANDLERS` so the Session loop sees them.
 import mu.tools  # noqa: F401
 from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.runtime_metrics import build_live_status_line
 from utils.config import (
-    HISTORY_DIR,
     DEFAULT_SESSION_NAME,
     calculate_cost,
     AGENTIC_SYSTEM_BASE,
@@ -43,109 +42,24 @@ from utils.config import (
 )
 
 
-def _sanitize_for_log(data):
-    """Truncates large data for logging."""
-    if isinstance(data, str) and len(data) > 1000:
-        return f"{data[:500]}... [TRUNCATED {len(data)-1000} chars] ...{data[-500:]}"
-    return data
-
-
-def _shorten_tool_args(args: dict) -> dict:
-    """Shortens long string arguments (like 'content' or 'diff') for display."""
-    if not args:
-        return {}
-    if not isinstance(args, dict):
-        return {"_raw_args": str(args)}
-    shortened = args.copy()
-    for key in ["content", "diff"]:
-        if (
-            key in shortened
-            and isinstance(shortened[key], str)
-            and len(shortened[key]) > 100
-        ):
-            shortened[key] = f"({len(shortened[key])} chars)"
-    return shortened
-
-
-def _safe_feature_path_prefix(path: str) -> str:
-    normalized = os.path.abspath(path)
-    return normalized if normalized.endswith(os.sep) else f"{normalized}{os.sep}"
-
-
-def _slugify_feature_id(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower()).strip("_")
-    return slug or "feature"
-
-
-def derive_feature_state_status(feature_plan: dict | None) -> str:
-    """Derive the feature status from the feature plan summary dict.
-
-    This is the canonical state machine for feature status:
-    - awaiting_approval: not yet approved
-    - in_progress: approved and has active tasks
-    - running: approved but no task activity detected
-    - completed: all phases done, all tasks completed/archived, or review_status == "completed"
-    """
-    if not isinstance(feature_plan, dict):
-        return "running"
-    if not feature_plan.get("approved", False):
-        return "awaiting_approval"
-    if feature_plan.get("review_status") == "completed":
-        return "completed"
-    # Check if any tasks are in progress or blocked → in_progress
-    tasks = feature_plan.get("tasks") or []
-    if isinstance(tasks, list):
-        for task in tasks:
-            if isinstance(task, dict) and task.get("status") in ("in_progress", "blocked"):
-                return "in_progress"
-    # All phases completed and next_phase is None → completed
-    if (
-        feature_plan.get("phases_completed")
-        and feature_plan.get("next_phase") is None
-    ):
-        return "completed"
-    # Approved with non-archived tasks → in_progress
-    active_tasks = [t for t in tasks if isinstance(t, dict) and t.get("status") not in ("archived", None)]
-    if active_tasks:
-        return "in_progress"
-    return "running"
-
-
+# Shared helpers live in `mu/session/helpers.py` (extracted to break the
+# circular-import cycle with `mu/agent/loop_body.py` and
+# `mu/session/manager.py`). Re-exported here so `mucli` and tests that
+# import these names from `mu.session.session` keep working.
+from mu.session.helpers import (
+    _HookAbort,
+    _hook_abort_envelope,
+    _safe_feature_path_prefix,
+    _sanitize_for_log,
+    _shorten_tool_args,
+    _slugify_feature_id,
+    derive_feature_state_status,
+)
 from mu.session.history import HistoryMixin
 
 
-class _HookAbort(Exception):
-    """Raised by `_provider_generate_with_retry` when a `pre_provider_call`
-    hook returns `HookResult(action="abort")`. Bypasses the retry wrapper
-    so the iteration loop can break out cleanly with the abort flag set.
-    """
-
-    def __init__(self, reason: str | None = None):
-        super().__init__(reason or "Hook requested abort")
-        self.reason = reason
-
-
-def _hook_abort_envelope(tool_name: str, reason: str | None) -> dict:
-    """Synthetic tool-result envelope returned when a `pre_tool` hook
-    aborts. The model sees a clear refusal so it doesn't retry the tool
-    in a tight loop; the session's `_hook_abort_requested` flag causes
-    the agentic loop to exit cleanly after this iteration."""
-    return {
-        "ok": False,
-        "error_code": "hook_aborted",
-        "message": (
-            f"Tool '{tool_name}' was aborted by a hook: "
-            f"{reason or 'hook requested abort'}. The agent loop is exiting."
-        ),
-        "data": {"tool_name": tool_name, "reason": reason or ""},
-        "artifacts": [],
-        "telemetry": {"tool_name": tool_name, "hook_aborted": True},
-    }
-
-
-# SessionManager moved to `mu/session/manager.py` in Phase 5 of the
-# refactor. Re-exported here so the legacy `from mu.session.session import
-# SessionManager` path stays valid for every existing caller and test.
+# `SessionManager` lives in `mu/session/manager.py`. Re-exported here
+# so `from mu.session.session import SessionManager` keeps working.
 from mu.session.manager import SessionManager  # noqa: E402, F401
 
 
@@ -409,7 +323,7 @@ class Session:
     # Message helpers (`_build_messages_from_history`,
     # `_summarize_message_parts`, `_message_has_thought_signature`,
     # `_clip_preview`, `_prepare_runtime_history`) moved to
-    # `mu/session/messages.py`. Forwarders preserve the legacy method
+    # `mu/session/messages.py`. Forwarders preserve the bound-method
     # interface for the agent loop and tests.
 
     def _build_messages_from_history(
@@ -433,7 +347,7 @@ class Session:
 
     # Budget helpers (`_resolve_context_limit`, `_resolve_response_reserve`,
     # `_compaction_token_budget`) moved to `mu/session/budgets.py`. These
-    # forwarders preserve the legacy method interface so existing call sites
+    # forwarders preserve the bound-method interface so existing call sites
     # don't need to thread a `session` parameter around.
 
     def _resolve_context_limit(self) -> int:
@@ -1004,7 +918,7 @@ class Session:
             )
 
     # Retry helpers moved to `mu/agent/retry.py`. Static-method
-    # forwarders preserve the legacy `Session._is_transient_provider_error`
+    # forwarders preserve the `Session._is_transient_provider_error`
     # interface used by `_HookAbort` handling and tests.
 
     @staticmethod
@@ -1026,7 +940,7 @@ class Session:
         return status_code in _RETRYABLE_HTTP_STATUS
 
     # Loop-detection helpers moved to `mu/agent/loop_detection.py`.
-    # Static-method forwarders preserve the legacy `Session.<method>`
+    # Static-method forwarders preserve the `Session.<method>`
     # call sites used by the iteration loop and tests.
 
     @staticmethod

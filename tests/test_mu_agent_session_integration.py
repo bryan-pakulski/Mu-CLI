@@ -32,7 +32,7 @@ class _Provider(LLMProvider):
 
 @pytest.fixture
 def session(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(_Provider("dummy"), False, "system", sm)
     fc = FolderContext()
@@ -292,7 +292,7 @@ def test_send_message_exits_cleanly_with_hook_aborted_status(tmp_path, monkeypat
     from mu.agent.hooks import HookResult
 
     # Fresh session so the test doesn't inherit prior abort state.
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(_Provider("dummy"), False, "system", sm)
     fc = FolderContext()

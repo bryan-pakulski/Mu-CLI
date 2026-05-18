@@ -1,6 +1,6 @@
 """Slash command for workspace management.
 
-Subsumes the legacy `/folder`, `/file`, `/clearfiles`, and `/workspace`
+Replaces the older `/folder`, `/file`, `/clearfiles`, and `/workspace`
 commands under one grouped surface:
 
     /workspace                        — show attached folders + staged files
@@ -34,7 +34,7 @@ def _emit_error(session: Any, body: str, allow_prompt: bool) -> None:
 
 
 def _refresh_hud(session: Any) -> None:
-    """Best-effort: refresh the memory HUD if the legacy helper is reachable."""
+    """Best-effort: refresh the memory HUD if the session exposes the helper."""
     try:
         from mucli import refresh_memory_hud
 

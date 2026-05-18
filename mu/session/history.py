@@ -29,24 +29,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-
-def _shorten_tool_args(args: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Match `mu.session.session._shorten_tool_args` exactly so the summary
-    output is byte-identical to the pre-extraction format.
-    """
-    if not args:
-        return {}
-    if not isinstance(args, dict):
-        return {"_raw_args": str(args)}
-    shortened = args.copy()
-    for key in ["content", "diff"]:
-        if (
-            key in shortened
-            and isinstance(shortened[key], str)
-            and len(shortened[key]) > 100
-        ):
-            shortened[key] = f"({len(shortened[key])} chars)"
-    return shortened
+from .helpers import _shorten_tool_args
 
 
 class HistoryMixin:

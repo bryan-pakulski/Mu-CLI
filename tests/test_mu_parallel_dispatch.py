@@ -61,7 +61,7 @@ class _Provider(LLMProvider):
 
 
 def _make_session(tmp_path, provider, monkeypatch, yolo=True):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(provider, False, "system", sm)
     fc = FolderContext()

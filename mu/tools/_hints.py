@@ -5,7 +5,7 @@ guiding the model toward a fix. The hints live in this module so they
 are:
   * easy to audit and extend (one dict, one entry per case);
   * decoupled from `core/tools.py` (so new tools registered via
-    `@tool` can contribute hints without touching legacy code);
+    `@tool` can contribute hints without touching the registry);
   * skippable — if no specific hint matches, a generic per-code
     fallback is used.
 

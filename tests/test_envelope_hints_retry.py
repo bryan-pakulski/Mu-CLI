@@ -153,7 +153,7 @@ class _DummyProvider(LLMProvider):
 
 @pytest.fixture
 def session(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(_DummyProvider("dummy"), False, "system", sm, ui=_RecordingUI())
     return sess

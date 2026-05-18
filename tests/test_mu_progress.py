@@ -235,7 +235,7 @@ def test_two_concurrent_spawns_register_in_tracker_attached_to_session(
 ):
     """The tracker installed by the Session loop must capture each child's
     opening, update, and closing."""
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     provider = _ScriptedProvider(n_spawns=2)
     sm = SessionManager()
     session = Session(provider, False, "system", sm)
@@ -277,7 +277,7 @@ def test_two_concurrent_spawns_register_in_tracker_attached_to_session(
 def test_single_spawn_does_not_open_live_panel(tmp_path, monkeypatch):
     """The live panel only kicks in for batches of 2+ spawns. A single
     spawn should still bubble its per-tool logs normally (no tracker)."""
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     provider = _ScriptedProvider(n_spawns=1)
     sm = SessionManager()
     session = Session(provider, False, "system", sm)
@@ -294,7 +294,7 @@ def test_single_spawn_does_not_open_live_panel(tmp_path, monkeypatch):
 
 def test_tracker_cleared_after_parallel_batch(tmp_path, monkeypatch):
     """After the batch completes, the session must NOT have a stale tracker."""
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     provider = _ScriptedProvider(n_spawns=3)
     sm = SessionManager()
     session = Session(provider, False, "system", sm)

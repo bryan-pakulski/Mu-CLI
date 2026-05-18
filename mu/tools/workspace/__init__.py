@@ -11,9 +11,9 @@ workspace folders:
   * `get_chunk`              — read a line range of a file
   * `list_dir`               — list files in a directory
 
-The underlying implementations still live in `core/tools.py` for now;
-this module hosts the descriptors and `@tool` registrations so the new
-agent loop sees them via `mu.tools` rather than the legacy bridge.
+All seven implementations + their `@tool` registrations live in
+`handlers.py` (positional-signature bodies + thin `_<name>_tool(args,
+context)` wrappers carrying the registration metadata).
 """
 
 from . import handlers  # noqa: F401 — registers 7 tools at import time

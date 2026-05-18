@@ -1,7 +1,7 @@
 """`invoke_skill` `@tool` handler.
 
 Loads the full body of an installed skill into the model's context.
-Port of the legacy `_handle_invoke_skill` in `core/tools.py` — body
+Skill-invocation handler — body
 unchanged, just rewrapped to read the workspace folders from the new
 context shape.
 """

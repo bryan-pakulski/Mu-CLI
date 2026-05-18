@@ -488,7 +488,7 @@ def test_provider_generate_with_retry_does_not_retry_non_transient_errors():
 def test_provider_bad_request_rolls_back_current_turn_and_retries_once(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     class MisconfiguredOllamaProvider(LLMProvider):
         def __init__(self):
             super().__init__("ollama")
@@ -530,7 +530,7 @@ def test_provider_bad_request_rolls_back_current_turn_and_retries_once(
 def test_single_tool_call_returns_immediate_structured_result(tmp_path, monkeypatch):
     sample = tmp_path / "sample.txt"
     sample.write_text("important line\n" * 50)
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
 
     class SequencedProvider(LLMProvider):
         def __init__(self):
@@ -584,7 +584,7 @@ def test_single_tool_call_returns_immediate_structured_result(tmp_path, monkeypa
 
 
 def test_memory_round_trip_via_session_manager(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
 
     sm = SessionManager(session_name="memory_test")
     entry = sm.task_memory.save("Important fact", tags=["fact"], source="unit-test")
@@ -723,7 +723,7 @@ def test_send_message_feature_mode_injects_phased_plan_guidance(tmp_path):
 
 
 def test_feature_mode_blocks_direct_feature_plan_access(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-md-block")
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.folder_context.add_folder(str(tmp_path))
@@ -752,7 +752,7 @@ def test_feature_mode_blocks_direct_feature_plan_access(tmp_path, monkeypatch):
 
 
 def test_sync_feature_state_tracks_feature_plan_tool_results(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-state-tool-sync")
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.folder_context.add_folder(str(tmp_path))
@@ -834,7 +834,7 @@ def test_loop_mode_watchdog_reprompts_when_model_quits_early():
 
 
 def test_get_current_task_sync_does_not_drop_feature_metadata(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-state-current-task")
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.folder_context.add_folder(str(tmp_path))
@@ -878,7 +878,7 @@ def test_get_current_task_sync_does_not_drop_feature_metadata(tmp_path, monkeypa
 
 
 def test_wrapped_plan_payloads_update_feature_state(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-state-wrapped-plan")
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.folder_context.add_folder(str(tmp_path))
@@ -938,7 +938,7 @@ def test_wrapped_plan_payloads_update_feature_state(tmp_path, monkeypatch):
 def test_sync_feature_state_refreshes_after_feature_task_status_change(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="feature-state-refresh")
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.folder_context.add_folder(str(tmp_path))
@@ -1015,7 +1015,7 @@ def test_summarize_feature_plan_uses_task_status_for_task_counts(tmp_path):
 
 
 def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
 
     class SequencedProvider(LLMProvider):
         def __init__(self):
@@ -1142,7 +1142,7 @@ def test_mid_loop_yolo_toggle_skips_remaining_approvals(tmp_path, monkeypatch):
 
 
 def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
 
     class SequencedProvider(LLMProvider):
         def __init__(self):
@@ -1212,7 +1212,7 @@ def test_send_message_persists_feature_state_to_session_json(tmp_path, monkeypat
 
 
 def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
 
     class SequencedProvider(LLMProvider):
         def __init__(self):
@@ -1282,7 +1282,7 @@ def test_create_feature_plan_tool_stores_metadata_outside_repo(tmp_path, monkeyp
 
 
 def test_session_manager_can_rename_session(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager(session_name="rename-src")
     sm.new_session(name="rename-src", provider_name="dummy", model_name="dummy")
     sm.new_session(name="rename-dst", provider_name="dummy", model_name="dummy")

@@ -99,7 +99,7 @@ class RichUI:
         the next Live start."""
         return None
 
-    # -------------------------------------------------- legacy render_message
+    # -------------------------------------------------- render_message
 
     def render_message(self, role, content, model_name=None):
         local_now = datetime.now().astimezone()

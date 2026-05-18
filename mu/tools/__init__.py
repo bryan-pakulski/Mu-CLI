@@ -9,17 +9,11 @@ The registry exposes three primary operations:
     list_tools(*, disabled=set()) -> list[ToolDefinition]        # enumerate tools
     get(name) -> ToolDescriptor | None                           # introspect
 
-The registry is populated from two sources:
-
-  1. **Legacy bridge.** At import time we pull every ToolDescriptor and
-     handler from `core/tools.py` into this registry. That preserves the
-     61-tool surface while the per-domain migration is in progress.
-
-  2. **@tool-decorated handlers.** New tools register here directly. They
-     coexist with legacy tools and use the same envelope contract.
-
-The new `@tool` decorator produces a `ToolDescriptor` with the same shape as
-the legacy code, so callers don't need to know which path a tool came from.
+Every tool registers via the `@tool` decorator in its handler module.
+The decorator stores the descriptor in `_REGISTRY` and the handler in
+`_HANDLERS`, and mirrors both into `mu.tools.descriptors.TOOLS` /
+`TOOL_DESCRIPTORS` and `mu.tools._dispatcher.TOOL_HANDLERS` so list-
+style and dict-style consumers both see registrations.
 """
 
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set
@@ -49,9 +43,8 @@ _LEGACY_LOADED = False
 
 
 def _ensure_legacy_loaded() -> None:
-    """Pull any descriptors/handlers that may have been registered before
-    this module finished initializing (defensive; with the unified
-    registry both maps are populated by the `@tool` decorator now)."""
+    """Defensive resync — copy any descriptor/handler that registered
+    via `@tool` before this module finished its first import."""
     global _LEGACY_LOADED
     if _LEGACY_LOADED:
         return
@@ -94,9 +87,9 @@ def tool(
     default_server_policy = getattr(desc, "_default_server_policy")
     default_result_mode = getattr(desc, "_default_result_mode")
 
-    # Resolve "default" sentinels against the legacy fallbacks so migrated
-    # tools inherit the same descriptor shape as their original entries
-    # in TOOLS unless explicitly overridden.
+    # Resolve "default" sentinels against the descriptor-module fallbacks
+    # so every tool gets a complete descriptor shape unless explicitly
+    # overridden.
     resolved_server_policy = (
         default_server_policy(name) if server_policy == "default" else server_policy
     )
@@ -108,9 +101,8 @@ def tool(
         if preview_policy == "default"
         else preview_policy
     )
-    # The legacy default for `execution_kind` matched the build-time
-    # logic in core/tools.py:TOOL_DESCRIPTORS: requires_approval → mutate,
-    # otherwise read. The historical "io" sentinel is treated the same.
+    # Default `execution_kind`: requires_approval → mutate, otherwise read.
+    # The "io" sentinel maps to the same default.
     resolved_execution_kind = (
         ("mutate" if requires_approval else "read")
         if execution_kind in ("io", "default")

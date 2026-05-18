@@ -32,7 +32,7 @@ class _Provider(LLMProvider):
 
 @pytest.fixture
 def session(tmp_path, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     return Session(_Provider("dummy"), False, "system", SessionManager())
 
 

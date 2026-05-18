@@ -14,8 +14,6 @@ before doing anything. Two checks, in order:
      and not match the workspace's `.gitignore`. When no workspace is
      attached, this check is bypassed (the denylist is still the floor).
 
-The legacy entry point at `mu.tools._bounds.check_bounds` re-exports
-`check_bounds` so callers that imported the underscored name keep working.
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ estimated history size crosses a threshold.
 Threshold is configurable via `session.variables["context_trim_threshold"]`
 (default 0.85). When the estimated history token count exceeds
 `context_token_limit * threshold`, the compactor invokes the existing
-roll path with `keep_recent=4` (same as the legacy loop).
+roll path with `keep_recent=4`.
 """
 
 from __future__ import annotations
@@ -24,12 +24,10 @@ logger = logging.getLogger("mucli")
 
 
 def _compact_history(ctx: HookContext) -> Optional[HookResult]:
-    # The legacy `Session.send_message()` already calls
-    # `roll_history_summary_to_token_budget()` once before entering its
-    # iteration loop. Within a single turn we therefore want exactly one
-    # auto-compaction pass. Suppress this hook when the session reports it
-    # has already rolled this turn (legacy path); fire normally otherwise
-    # (callers that don't enter through `send_message`).
+    # `run_turn` calls `roll_history_summary_to_token_budget()` once
+    # before entering its iteration loop. Within a single turn we
+    # therefore want exactly one auto-compaction pass — suppress
+    # this hook when the session already rolled this turn.
     session = ctx.session
     if session is None:
         return None

@@ -1421,7 +1421,7 @@ def get_tasks(args: Dict[str, Any], context) -> str:
     summary_builder="blocker_summary",
 )
 def raise_blocker(args: Dict[str, Any], context) -> str:
-    """`_handle_raise_blocker` uses the legacy 4-arg shape; adapt."""
+    """`_handle_raise_blocker` uses a 4-arg signature; adapt to (args, context)."""
     return _handle_raise_blocker(
         args, context.folder_context, context.ui, context.variables
     )

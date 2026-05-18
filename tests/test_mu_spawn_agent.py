@@ -46,7 +46,7 @@ class _ScriptedProvider(LLMProvider):
 
 
 def _build_parent(tmp_path, provider, monkeypatch):
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     parent = Session(provider, False, "system", sm)
     fc = FolderContext()

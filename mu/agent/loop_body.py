@@ -7,11 +7,8 @@ model emits a final response or hits `max_iterations`, dispatches
 tool calls (including parallel batches), and returns a structured
 turn-response dict.
 
-For the long history of this body see `core/session.py` — it lived
-on `Session.send_message` until Phase 4 of the refactor, where it
-was extracted verbatim. `Session.send_message` is now a 3-line
-forwarder to here; the body itself uses `session.` rather than
-`self.` for every state access.
+`Session.send_message` is a 3-line forwarder into `run_turn` here;
+the body uses `session.<attr>` for every state access.
 
 The control flow:
 
@@ -62,34 +59,18 @@ from utils.logger import logger
 from utils.runtime_metrics import build_live_status_line
 
 
-# Three symbols in `core/session.py` are still consumed by the body
-# (`_HookAbort`, `_shorten_tool_args`, `_hook_abort_envelope`). The
-# obvious `from mu.session.session import …` would force a circular import
-# at module-load time — core/session.py imports `run_turn` from us via
-# `Session.send_message`. Instead, we bind them on first call to
-# `run_turn`; by then core/session.py has fully loaded because the
-# `from mu.agent.loop_body import run_turn` lives inside the
-# `send_message` body, not at module top.
-_HookAbort = None  # bound by _bind_session_symbols on first run_turn
-_shorten_tool_args = None
-_hook_abort_envelope = None
-_sanitize_for_log = None
-
-
-def _bind_session_symbols():
-    global _HookAbort, _shorten_tool_args, _hook_abort_envelope, _sanitize_for_log
-    if _HookAbort is not None:
-        return
-    from mu.session import session as _session
-
-    _HookAbort = _session._HookAbort
-    _shorten_tool_args = _session._shorten_tool_args
-    _hook_abort_envelope = _session._hook_abort_envelope
-    _sanitize_for_log = _session._sanitize_for_log
+# Shared symbols extracted to `mu/session/helpers.py` so this top-level
+# import is safe: helpers.py has no Session/SessionManager dependencies
+# and so doesn't trigger the loop_body ↔ session.py cycle.
+from mu.session.helpers import (
+    _HookAbort,
+    _hook_abort_envelope,
+    _sanitize_for_log,
+    _shorten_tool_args,
+)
 
 
 def run_turn(session, text):
-    _bind_session_symbols()
     logger.info(f"Sending message: {text[:100]}...")
     session.paused_execution_text = None
     session._loop_blocker_raised = False  # fresh turn — last turn's pause doesn't apply

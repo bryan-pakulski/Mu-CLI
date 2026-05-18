@@ -2,8 +2,7 @@
 
 The handlers route through `context.session.{task_memory,turn_scratchpad}`.
 A fallback in-process store keeps unit tests that pass `session=None`
-working — the legacy short-circuit in `Session._execute_tool_with_memory`
-used to provide this implicitly via the session reference.
+working without a full session scaffold.
 """
 
 from typing import Any, Dict, Optional

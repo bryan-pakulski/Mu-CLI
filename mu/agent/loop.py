@@ -1,22 +1,17 @@
-"""Public AgentLoop façade.
+"""Public AgentLoop wrapper.
 
-This is the canonical entry point for running an agentic turn. Today it
-delegates to the legacy `mu.session.session.Session.send_message`, which still
-houses the production loop body (loop detection, approval batching,
-collation buffer, hierarchical context layers, loop-mode watchdog —
-~700 LOC of dense interdependent state). The façade exists so that:
+Typed entry point for running a single agentic turn. `run_turn(text)`
+calls `Session.send_message(text)` (whose body lives in
+`mu/agent/loop_body.py:run_turn`) and wraps the raw dict result in a
+`TurnResult`. `stop(reason)` fires the `on_stop` hook and asks the
+session to halt its loop.
 
-  * New callers depend on `mu.agent.AgentLoop` rather than reaching into
-    `mu.session.session` directly.
-  * Hooks fire from the same module they live in (pre/post tool, pre/post
-    provider) — already wired into `Session._execute_tool_with_memory`
-    and `Session._provider_generate_with_retry`.
-  * Future replacement of the loop body lands here, in a single class,
-    rather than as a sweeping refactor across `core/session.py`.
-
-The constructor accepts a Session because the legacy class owns the
-full state (history, folder context, memory stores, feature plan, UI).
-Once the body migrates, those attributes will move with it.
+The constructor takes a `Session` because the per-turn state lives
+there (history, folder context, memory stores, feature plan, UI).
+Hooks (`pre_provider_call` / `post_provider_call` / `pre_tool` /
+`post_tool`) fire from inside the loop body and the provider retry
+wrapper — this façade just adds typed wrapping + the on_stop hook
+point.
 """
 
 from __future__ import annotations
@@ -49,7 +44,7 @@ class TurnResult:
 
 
 class AgentLoop:
-    """Public façade around the agent's per-turn execution.
+    """Typed wrapper around `Session.send_message`.
 
     Use:
 
@@ -57,8 +52,9 @@ class AgentLoop:
         result = loop.run_turn("explain this file")
 
     Hooks (`pre_provider_call`, `post_provider_call`, `pre_tool`,
-    `post_tool`, `on_stop`) fire from the legacy `Session` methods today.
-    They will continue firing identically once the loop body moves here.
+    `post_tool`, `on_stop`) fire from the loop body and provider retry
+    wrapper; this class adds typed wrapping plus the on_stop hook point
+    via `stop()`.
     """
 
     def __init__(self, session: Any, *, registry=None) -> None:

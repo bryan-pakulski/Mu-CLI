@@ -21,7 +21,7 @@ def session_manager(tmp_path, monkeypatch):
     reads `mu.session.session.HISTORY_DIR` (imported once at module load) so
     we monkeypatch that single name."""
     (tmp_path / "sessions").mkdir()
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
     return SessionManager()
 
 

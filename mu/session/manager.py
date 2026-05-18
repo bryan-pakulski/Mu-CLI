@@ -5,7 +5,6 @@ accounting, feature-mode registry, and the on-disk JSON store at
 `~/.mucli/sessions/<name>/session.json`. Inherits the
 token-budget-aware history-roll helpers from `HistoryMixin`.
 
-Relocated here from `core/session.py` in Phase 5 of the refactor.
 `mu.session.session.SessionManager` re-exports this class for backward
 compatibility — callers that import via the old path still work.
 
@@ -36,48 +35,18 @@ from utils.config import (
 )
 from utils.logger import logger
 
+import utils.config as _config
+
+from .helpers import _slugify_feature_id, derive_feature_state_status
 from .history import HistoryMixin
 
 
-# `HISTORY_DIR` is read dynamically from `mu.session.session` so test
-# monkeypatches against that target drive the SessionManager's
-# persistence path. The session module imports HISTORY_DIR from
-# `utils.config` and exposes it as a module attribute; tests rebind
-# that attribute, and SessionManager reads through it each time.
 def _history_dir() -> str:
-    """Resolve the active HISTORY_DIR. Reads `mu.session.session.HISTORY_DIR`
-    so test monkeypatches against that target still drive the
-    SessionManager's persistence path."""
-    from mu.session import session as _session
-    return _session.HISTORY_DIR
-
-
-# These helpers live in `mu/session/session.py`; lazy-bind on first
-# use so this module's import is cheap and dodges any circular-import
-# concern with the session module (which imports SessionManager from
-# here).
-_derive_feature_state_status = None
-_slugify_feature_id_fn = None
-
-
-def _bind_helpers():
-    global _derive_feature_state_status, _slugify_feature_id_fn
-    if _derive_feature_state_status is not None:
-        return
-    from mu.session import session as _session
-
-    _derive_feature_state_status = _session.derive_feature_state_status
-    _slugify_feature_id_fn = _session._slugify_feature_id
-
-
-def derive_feature_state_status(feature_plan):
-    _bind_helpers()
-    return _derive_feature_state_status(feature_plan)
-
-
-def _slugify_feature_id(value):
-    _bind_helpers()
-    return _slugify_feature_id_fn(value)
+    """Resolve the active HISTORY_DIR via `utils.config.HISTORY_DIR`.
+    Read dynamically (not `from utils.config import HISTORY_DIR`) so
+    `monkeypatch.setattr("utils.config.HISTORY_DIR", ...)` reaches
+    this code path during tests."""
+    return _config.HISTORY_DIR
 
 
 class SessionManager(HistoryMixin):

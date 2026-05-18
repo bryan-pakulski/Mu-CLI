@@ -13,10 +13,10 @@ preserving:
   * **Collation ordering** — collated results are appended to the
     collation buffer in input order, not completion order.
 
-`execute_calls()` is the thin coordinator used by `AgentLoop` or by
-callers wiring parallel execution into the legacy `Session.agentic_step`.
-It accepts an arbitrary `execute_one` callable so it can be tested
-without needing a full Session.
+`execute_calls()` is the thin coordinator used by `loop_body.run_turn`
+when the model issues multiple parallelizable tool calls in one
+provider response. It accepts an arbitrary `execute_one` callable so
+it can be tested without needing a full Session.
 """
 
 from __future__ import annotations
@@ -136,9 +136,9 @@ def execute_calls(
     """Sync wrapper around `execute_calls_async`.
 
     Starts (or reuses) an event loop. Suitable to call from synchronous
-    code paths such as the legacy `Session.agentic_step`. If we are
-    already inside a running loop (which would be unusual here), fall
-    back to running on a fresh loop in a worker thread.
+    code paths (the agent turn body is synchronous). If we are already
+    inside a running loop, fall back to running on a fresh loop in a
+    worker thread.
     """
     if not calls:
         return []

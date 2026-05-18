@@ -43,24 +43,7 @@ from typing import Any, List, Optional
 
 from providers.base import FileReference, ImageData, Message, MessagePart
 
-
-def _shorten_tool_args(args: dict) -> dict:
-    """Mirror of `mu.session.session._shorten_tool_args` to avoid a circular
-    import. Replaces long string args (`content`, `diff`) with a
-    placeholder for display purposes."""
-    if not args:
-        return {}
-    if not isinstance(args, dict):
-        return {"_raw_args": str(args)}
-    shortened = args.copy()
-    for key in ("content", "diff"):
-        if (
-            key in shortened
-            and isinstance(shortened[key], str)
-            and len(shortened[key]) > 100
-        ):
-            shortened[key] = f"({len(shortened[key])} chars)"
-    return shortened
+from .helpers import _shorten_tool_args
 
 
 def build_messages_from_history(

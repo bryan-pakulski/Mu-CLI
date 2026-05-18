@@ -1,6 +1,6 @@
 """Slash command for saved-session management.
 
-Replaces the legacy `/list`, `/load`, `/new`, `/delete` commands. The
+Replaces the earlier `/list`, `/load`, `/new`, `/delete` commands. The
 sub-commands group related operations:
 
     /session              — show active session + available sessions

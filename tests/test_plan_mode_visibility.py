@@ -32,7 +32,7 @@ def session(tmp_path, monkeypatch):
     # Isolate from any default-session state other tests might have
     # persisted in the shared MUCLI_HOME — the `/plan on` test below saves
     # `plan_mode=True` and that state would otherwise leak across runs.
-    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     return Session(_DummyProvider("dummy"), False, "system", sm)
 

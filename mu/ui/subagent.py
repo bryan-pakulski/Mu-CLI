@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 
 def _extract_tool_name(text: str) -> Optional[str]:
-    """Parse the tool name out of the legacy 'Running tool: X(args)' format.
+    """Parse the tool name out of the 'Running tool: X(args)' UI format.
 
     The Session loop emits:
         f"🔨 Running tool: {tool_name}({shortened_args})"

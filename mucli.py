@@ -797,7 +797,7 @@ def choose_session(session_manager):
 
 
 def _choose_session_numbered(session_manager):
-    """Legacy fallback for environments where the prompt-toolkit picker
+    """Numbered fallback for environments where the prompt-toolkit picker
     can't run. Same behavior as before: numbered list + delete sub-flow."""
     while True:
         sessions = session_manager.get_session_list()
@@ -1016,7 +1016,7 @@ def handle_command(session, user_input, allow_prompt=True):
 
     Every slash command lives in `mu/commands/<module>.py`. This function
     exists only to serialize the registry's `CommandResult` into the
-    legacy dict shape callers (REPL loop, web UI, JSON output) expect.
+    dict shape callers (REPL loop, web UI, JSON output) expect.
     """
     parts = user_input.split(" ", 1)
     cmd = parts[0].lower()

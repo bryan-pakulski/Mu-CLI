@@ -53,14 +53,8 @@ def execute_tool_with_memory(
     # Local imports to dodge cold-import overhead — these modules are
     # not always loaded when tools_glue itself is imported.
     from mu.tools._dispatcher import execute_tool
-    from mu.session.session import _hook_abort_envelope
+    from mu.session.helpers import _hook_abort_envelope
     from mu.agent.hooks import HookContext, default_registry
-
-    # Side-effect imports — ensure built-in hooks (plan_mode, compactor,
-    # usage_tracker, secret_guard) have registered before we fire.
-    import mu.agent.plan_mode  # noqa: F401
-    import mu.agent.compactor  # noqa: F401
-    import mu.agent.secret_guard  # noqa: F401
 
     pre_ctx = HookContext(
         point="pre_tool",
@@ -166,7 +160,8 @@ def build_structured_tool_result(
     tree, etc.). For un-recognized tools, `data` is left empty and the
     raw text-preview lives in `summary`."""
     from mu.tools._envelope import infer_tool_error_code
-    from mu.session.messages import clip_preview, _shorten_tool_args
+    from mu.session.helpers import _shorten_tool_args
+    from mu.session.messages import clip_preview
 
     envelope, unwrapped_raw = session._unwrap_tool_envelope(raw_result)
     raw_text = str(unwrapped_raw)

@@ -1,7 +1,7 @@
 """Live progress tracker for parallel sub-agent dispatch.
 
 When the parent agent issues multiple `spawn_agent` calls in one turn,
-the legacy per-call "🔨 Running tool: X" log lines flood the terminal —
+per-call "🔨 Running tool: X" log lines flood the terminal —
 each child can fire dozens of those during its run.
 
 `SubagentProgressTracker` replaces that stream with a compact in-place

@@ -5,7 +5,7 @@ Validates that features properly transition through:
 """
 import json
 import pytest
-from core.session import derive_feature_state_status
+from mu.session.session import derive_feature_state_status
 
 
 class TestDeriveFeatureStateStatus:

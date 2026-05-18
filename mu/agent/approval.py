@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
-from core.tools import get_modifications, infer_tool_error_code, tool_requires_approval
+from mu.tools._envelope import infer_tool_error_code
+from mu.tools.descriptors import get_modifications, tool_requires_approval
 
 
 @dataclass(frozen=True)

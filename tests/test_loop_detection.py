@@ -1,4 +1,4 @@
-from core.session import Session
+from mu.session.session import Session
 from utils.config import DEFAULT_VARIABLES
 
 

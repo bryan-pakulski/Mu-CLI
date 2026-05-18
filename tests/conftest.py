@@ -4,16 +4,16 @@
 - Cleans up FolderContext snapshots to prevent memory accumulation.
 """
 import pytest
-from core.retrieval import SemanticCodeIndex
-from core.tools import _RETRIEVAL_INDEX
-from core.workspace import FolderContext
+from mu.retrieval.index import SemanticCodeIndex
+from mu.retrieval.index import RETRIEVAL_INDEX as _RETRIEVAL_INDEX
+from mu.workspace.folder_context import FolderContext
 
 
 @pytest.fixture(autouse=True)
 def _reset_global_singletons():
     """Reset module-level singletons that accumulate state across tests.
 
-    The SemanticCodeIndex singleton (_RETRIEVAL_INDEX in core.tools) indexes
+    The SemanticCodeIndex singleton (_RETRIEVAL_INDEX in mu.tools) indexes
     workspace files and caches them in .documents. Without resetting, state
     from one test leaks into the next, causing memory growth and flaky tests.
     """

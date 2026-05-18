@@ -11,17 +11,17 @@ from typing import List
 import pytest
 
 import mucli
-from core.session import SessionManager
+from mu.session.session import SessionManager
 
 
 @pytest.fixture
 def session_manager(tmp_path, monkeypatch):
     """Sandboxed SessionManager rooted at a per-test temp dir so the
     real `~/.mucli/sessions/` stays out of these tests. SessionManager
-    reads `core.session.HISTORY_DIR` (imported once at module load) so
+    reads `mu.session.session.HISTORY_DIR` (imported once at module load) so
     we monkeypatch that single name."""
     (tmp_path / "sessions").mkdir()
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
     return SessionManager()
 
 

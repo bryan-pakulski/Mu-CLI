@@ -57,7 +57,7 @@ from .._envelope import _build_tool_envelope, _envelope_from_handler_result
 )
 def batch_job(args: Dict[str, Any], context) -> str:
     from .._dispatcher import dispatch
-    from core.tools import get_tool_descriptor
+    from mu.tools.descriptors import get_tool_descriptor
 
     commands = args.get("commands", [])
     if not isinstance(commands, list):

@@ -6,29 +6,30 @@ validation, path-emptiness gating, feature-mode review-gate enforcement
 for `apply_diff`, then invokes the registered handler and wraps the
 result in the canonical envelope.
 
-The function returns a JSON-encoded envelope string (the wire format
-the agent loop has used since day one). `mu.tools.execute(...)` parses
-that back into a dict for callers that want structured access; the
-legacy `core.tools.execute_tool(...)` re-exports `dispatch` so existing
-callers keep working.
+The function returns a JSON-encoded envelope string. `mu.tools.execute(...)`
+parses that back into a dict for callers that want structured access;
+`execute_tool` re-exports `dispatch` as the legacy callable signature.
 
-Several dependencies are still in `core/tools.py` and resolved lazily
-to avoid the circular-import problem at module load:
-  * `get_tool_descriptor` / `get_tool_definition` / `TOOL_HANDLERS`
-  * `build_tool_context`
-  * The feature-mode `load_feature_plan` lookup for the apply_diff gate.
+`TOOL_HANDLERS` is the bridge dict the `@tool` decorator mirrors into
+at decoration time, kept for back-compat with test fixtures that mutate
+it directly. The canonical handler registry lives in `mu/tools/__init__.py`.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from utils.logger import logger
 
 from ._envelope import _build_tool_envelope, _envelope_from_handler_result
+
+
+# =================================================================== handler registry
+
+
+TOOL_HANDLERS: dict[str, Callable[[dict, Any], str]] = {}
 
 
 def _path_arg_error(key: str) -> str:
@@ -86,7 +87,7 @@ def _apply_diff_review_gate(
             message="Error: Feature metadata not found for review-mode apply_diff.",
         )
 
-    from core.feature_mode import load_feature_plan
+    from mu.feature.engine import load_feature_plan
 
     plan = load_feature_plan(metadata_path)
     proposal = next(
@@ -106,22 +107,12 @@ def _apply_diff_review_gate(
 
 
 def _resolve_handler(descriptor) -> Optional[Any]:
-    """Resolve the handler for a tool, checking the legacy bridge first
-    and falling back to the new `_HANDLERS` registry.
-
-    Lookup order: legacy `core.tools.TOOL_HANDLERS` (bridged @tool
-    registrations are mirrored here at decoration time) → new
-    `mu.tools._HANDLERS` (canonical registry, populated by the @tool
-    decorator). Returns None if the tool has no registered handler in
-    either map."""
-    from core import tools as _core_tools
-
-    handler = _core_tools.TOOL_HANDLERS.get(descriptor.handler_key)
+    """Resolve the handler for a tool, checking the bridge dict first
+    and falling back to the canonical `mu.tools._HANDLERS` registry."""
+    handler = TOOL_HANDLERS.get(descriptor.handler_key)
     if handler is not None:
         return handler
 
-    # New-registry fallback. Use the in-module dicts directly to avoid
-    # the lazy-loader running another mirror pass.
     from . import _HANDLERS, _ensure_legacy_loaded
 
     _ensure_legacy_loaded()
@@ -144,7 +135,7 @@ def dispatch(
     feature-mode `apply_diff` review gate, invokes the handler, and
     returns a JSON-encoded envelope string.
     """
-    from core.tools import get_tool_descriptor, build_tool_context
+    from mu.tools.descriptors import get_tool_descriptor, build_tool_context
 
     descriptor = get_tool_descriptor(tool_name)
     if not descriptor:
@@ -245,4 +236,26 @@ def dispatch(
         )
 
 
-__all__ = ["dispatch"]
+def execute_tool(
+    tool_name: str,
+    args: dict,
+    folder_context,
+    ui=None,
+    variables: dict = None,
+    *,
+    invocation_source: str = "session",
+    session: Any = None,
+) -> str:
+    """Legacy-compatible alias for `dispatch`."""
+    return dispatch(
+        tool_name,
+        args,
+        folder_context,
+        ui,
+        variables,
+        invocation_source=invocation_source,
+        session=session,
+    )
+
+
+__all__ = ["TOOL_HANDLERS", "dispatch", "execute_tool"]

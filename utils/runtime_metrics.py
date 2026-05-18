@@ -23,7 +23,7 @@ def collect_feature_progress(session):
         return {"state": feature_state, "plan": None, "progress": None}
 
     try:
-        from core.feature_mode import (
+        from mu.feature.engine import (
             refresh_and_persist_feature_plan,
             summarize_feature_plan,
         )

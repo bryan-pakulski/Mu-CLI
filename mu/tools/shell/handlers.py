@@ -1,16 +1,18 @@
 """Shell + background-task `@tool` handlers.
 
-The synchronous `bash` runs through `core.tools.bash_command`. The bg
-family routes through `BackgroundTaskRegistry` on the session (or a
-process-local fallback so the tools still work in session-less unit
-tests). Implementations stay in `core/` for now; this module is the
-registration surface.
+The synchronous `bash` runs in-process; the bg family routes through
+`BackgroundTaskRegistry` on the session (or a process-local fallback
+so the tools still work in session-less unit tests).
 """
 
 import json
+import subprocess
 from typing import Any, Dict
 
 from mu.tools import tool
+from mu.tools._bounds import check_bounds as _check_bounds
+from mu.tools._scrub import scrub_and_annotate as _scrub_and_annotate
+from utils.logger import logger
 
 
 # ---------------------------------------------------------------- bg registry resolver
@@ -21,20 +23,78 @@ _STANDALONE_BG_REGISTRY = None
 
 def _bg_registry(context):
     """Resolve the session's `BackgroundTaskRegistry`. Falls back to a
-    process-global one if no Session is bound (mirrors the legacy
-    `_bg_registry` in `core/tools.py`)."""
+    process-global one if no Session is bound."""
     session = getattr(context, "session", None) if context is not None else None
     if session is not None and hasattr(session, "background_tasks"):
         return session.background_tasks
     global _STANDALONE_BG_REGISTRY
     if _STANDALONE_BG_REGISTRY is None:
-        from core.background_tasks import BackgroundTaskRegistry
+        from mu.tools.shell.background import BackgroundTaskRegistry
 
         _STANDALONE_BG_REGISTRY = BackgroundTaskRegistry()
     return _STANDALONE_BG_REGISTRY
 
 
 # ---------------------------------------------------------------- bash (synchronous)
+
+
+def bash_command(
+    command: str,
+    folder_context,
+    *,
+    cwd: str | None = None,
+    timeout_seconds: int = 120,
+    max_output_chars: int = 12000,
+) -> str:
+    """Executes a raw bash command in the workspace."""
+    command = str(command or "").strip()
+    if not command:
+        return "Error: command is required."
+
+    if not folder_context or not folder_context.folders:
+        return "Error: No workspace attached."
+
+    workdir = str(cwd or folder_context.folders[0]).strip()
+    if not _check_bounds(workdir, folder_context):
+        logger.warning(f"bash_command: Access denied or path ignored: {workdir}")
+        return f"Error: Access denied or path ignored. '{workdir}'"
+
+    timeout_seconds = max(1, int(timeout_seconds or 120))
+    max_output_chars = max(512, int(max_output_chars or 12000))
+
+    try:
+        process = subprocess.run(
+            ["bash", "-lc", command],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            cwd=workdir,
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial = f"{exc.stdout or ''}\n{exc.stderr or ''}".strip()
+        if len(partial) > max_output_chars:
+            partial = partial[:max_output_chars]
+        return (
+            f"Error: Command timed out after {timeout_seconds} seconds.\n"
+            f"{partial}".strip()
+        )
+    except Exception as exc:
+        logger.error(f"bash_command: Error executing command {command!r}: {exc}")
+        return f"Error executing bash command: {exc}"
+
+    chunks = []
+    if process.stdout:
+        chunks.append(f"STDOUT:\n{process.stdout.rstrip()}")
+    if process.stderr:
+        chunks.append(f"STDERR:\n{process.stderr.rstrip()}")
+    if not chunks:
+        chunks.append("Command executed with no output.")
+    chunks.append(f"Exit code: {process.returncode}")
+    output = "\n\n".join(chunks)
+
+    if len(output) > max_output_chars:
+        output = output[:max_output_chars] + "\n\n...[TRUNCATED]..."
+    return _scrub_and_annotate(output)
 
 
 @tool(
@@ -79,9 +139,7 @@ def _bg_registry(context):
     execution_kind="mutate",
     preview_policy="optional",
 )
-def bash(args: Dict[str, Any], context) -> str:
-    from core.tools import bash_command
-
+def _bash_tool(args: Dict[str, Any], context) -> str:
     return bash_command(
         args.get("command", ""),
         context.folder_context,
@@ -127,7 +185,7 @@ def bash(args: Dict[str, Any], context) -> str:
     preview_policy="optional",
 )
 def bash_background(args: Dict[str, Any], context) -> str:
-    from core.background_tasks import summarize_task
+    from mu.tools.shell.background import summarize_task
 
     registry = _bg_registry(context)
     command = str(args.get("command", "") or "").strip()
@@ -172,7 +230,7 @@ def bash_background(args: Dict[str, Any], context) -> str:
     preview_policy="none",
 )
 def bash_status(args: Dict[str, Any], context) -> str:
-    from core.background_tasks import summarize_task
+    from mu.tools.shell.background import summarize_task
 
     registry = _bg_registry(context)
     task_id = str(args.get("task_id", "") or "").strip()
@@ -216,7 +274,7 @@ def bash_status(args: Dict[str, Any], context) -> str:
     preview_policy="none",
 )
 def bash_logs(args: Dict[str, Any], context) -> str:
-    from core.background_tasks import tail as _tail
+    from mu.tools.shell.background import tail as _tail
 
     registry = _bg_registry(context)
     task_id = str(args.get("task_id", "") or "").strip()
@@ -253,7 +311,7 @@ def bash_logs(args: Dict[str, Any], context) -> str:
     preview_policy="optional",
 )
 def bash_kill(args: Dict[str, Any], context) -> str:
-    from core.background_tasks import summarize_task
+    from mu.tools.shell.background import summarize_task
 
     registry = _bg_registry(context)
     task_id = str(args.get("task_id", "") or "").strip()
@@ -272,7 +330,7 @@ def bash_kill(args: Dict[str, Any], context) -> str:
     preview_policy="none",
 )
 def bash_list(args: Dict[str, Any], context) -> str:
-    from core.background_tasks import summarize_task
+    from mu.tools.shell.background import summarize_task
 
     registry = _bg_registry(context)
     tasks = [summarize_task(t, tail_lines=3) for t in registry.list()]

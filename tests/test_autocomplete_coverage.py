@@ -14,7 +14,7 @@ from prompt_toolkit.document import Document
 
 import pytest
 
-from ui.input import InputHandler
+from mu.ui.input import InputHandler
 from utils.config import DEFAULT_VARIABLES
 
 

@@ -12,7 +12,7 @@ This file pins that every subcommand reads from the real engine.
 import pytest
 
 import mu.commands as mc
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse
 from utils.citation_manager import (
     SourceType,
@@ -266,7 +266,7 @@ def test_research_autocomplete_lists_subcommands():
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
 
-    from ui.input import InputHandler
+    from mu.ui.input import InputHandler
 
     handler = InputHandler()
     doc = Document(text="/research ", cursor_position=len("/research "))

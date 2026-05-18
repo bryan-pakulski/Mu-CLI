@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from core.background_tasks import BackgroundTaskRegistry, summarize_task
+from mu.tools.shell.background import BackgroundTaskRegistry, summarize_task
 import mu.tools as _mu_tools
 
 
@@ -181,7 +181,8 @@ def test_plan_mode_blocks_bash_background():
 
 def test_tool_definitions_registered():
     """Every bash_* tool must show up in TOOLS and have a handler."""
-    from core.tools import TOOLS, TOOL_HANDLERS
+    from mu.tools._dispatcher import TOOL_HANDLERS
+    from mu.tools.descriptors import TOOLS
 
     names = {t.name for t in TOOLS}
     for n in (

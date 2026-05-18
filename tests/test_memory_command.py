@@ -10,7 +10,7 @@ Specifically:
 import pytest
 
 import mu.commands as mc
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from mu.commands.memory import LIST_TARGETS, memory_cmd
 from providers.base import LLMProvider, ProviderResponse
 

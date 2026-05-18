@@ -17,7 +17,7 @@ from typing import Optional
 
 import pytest
 
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse
 
 

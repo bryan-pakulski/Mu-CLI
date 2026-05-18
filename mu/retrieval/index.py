@@ -225,3 +225,9 @@ class SemanticCodeIndex:
             if rel:
                 changed.add(os.path.abspath(os.path.join(root, rel)))
         return changed
+
+
+
+# Process-wide singleton — workspace tools (`retrieve_relevant_context`) and
+# `Session` share this instance so the index isn't rebuilt per call.
+RETRIEVAL_INDEX = SemanticCodeIndex()

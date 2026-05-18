@@ -111,7 +111,7 @@ def test_stats_command_emits_summary_line(monkeypatch):
 
 
 def test_show_status_returns_a_context_manager_that_routes_deltas():
-    from ui.rich_ui import RichUI, _GenerationLive
+    from mu.ui.rich_ui import RichUI, _GenerationLive
 
     ui = RichUI()
     cm = ui.show_status("Generating it 1/5")
@@ -121,7 +121,7 @@ def test_show_status_returns_a_context_manager_that_routes_deltas():
 def test_generation_live_routes_text_through_append_text(monkeypatch):
     """Inside the CM, `stream_assistant_delta` calls `_GenerationLive.append_text`
     instead of falling through to `console.print`."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     ui = RichUI()
     # Avoid actually starting a Rich Live (writes to TTY).
@@ -149,7 +149,7 @@ def test_generation_live_routes_text_through_append_text(monkeypatch):
 
 
 def test_generation_live_thinking_buffered_separately(monkeypatch):
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     ui = RichUI()
     monkeypatch.setattr("rich.live.Live.start", lambda self: None)
@@ -165,7 +165,7 @@ def test_generation_live_thinking_buffered_separately(monkeypatch):
 
 
 def test_generation_live_tool_calls_logged(monkeypatch):
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     ui = RichUI()
     monkeypatch.setattr("rich.live.Live.start", lambda self: None)
@@ -183,7 +183,7 @@ def test_generation_live_status_footer_renderable(monkeypatch):
     """The rendered Group must end with the status footer (so it stays at
     the bottom). We can't see the rendered output directly, but we can
     verify the renderable shape."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
     from rich.console import Group
 
     ui = RichUI()
@@ -211,7 +211,7 @@ def test_generation_live_final_render_drops_status_footer(monkeypatch):
     is also `transient=True` so this only matters defensively, but keep
     the rule so the rendered Group never carries the "Generating ... it
     N/1000 | ..." line into scrollback."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
     from rich.spinner import Spinner
 
     ui = RichUI()
@@ -240,7 +240,7 @@ def test_generation_live_is_transient_so_streamed_region_clears(monkeypatch):
     properly-styled Markdown re-render (see next test), so leaving the
     raw plain-text region in scrollback would mean every turn shows the
     answer twice — once unrendered, once rendered."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     captured = {}
 
@@ -267,14 +267,14 @@ def test_generation_live_reemits_markdown_on_exit(monkeypatch):
     text must then be re-printed through `render_response` so it lands
     in scrollback as a rendered Markdown block — not as raw `**bold**`
     or `# header` characters."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     monkeypatch.setattr("rich.live.Live.start", lambda self: None)
     monkeypatch.setattr("rich.live.Live.stop", lambda self: None)
     monkeypatch.setattr("rich.live.Live.update", lambda self, renderable: None)
 
     render_calls: list = []
-    import ui.render as _render
+    import mu.ui.render as _render
 
     def _spy(text):
         render_calls.append(text)
@@ -298,7 +298,7 @@ def test_generation_live_emits_thinking_block_as_dim_italic(monkeypatch):
     as a separate dim-italic block before the assistant text, not mixed
     in via render_response (markdown rendering on partial reasoning
     looks erratic)."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
     from rich.text import Text
 
     monkeypatch.setattr("rich.live.Live.start", lambda self: None)
@@ -328,7 +328,7 @@ def test_generation_live_emits_thinking_block_as_dim_italic(monkeypatch):
 
 
 def test_generation_live_clears_streamed_flag_on_enter_then_sets_on_delta(monkeypatch):
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     ui = RichUI()
     monkeypatch.setattr("rich.live.Live.start", lambda self: None)
@@ -350,7 +350,7 @@ def test_show_status_compat_update_method(monkeypatch):
     """The YOLO watcher used to call `status.update(new_message)` on the
     old `console.status` return value. Our new `_GenerationLive` exposes
     the same `update()` method for that compat path."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     ui = RichUI()
     monkeypatch.setattr("rich.live.Live.start", lambda self: None)

@@ -9,7 +9,7 @@ import pytest
 
 from mu.agent import AgentLoop, TurnResult, default_registry
 from mu.agent.hooks import HookContext, HookSpec
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 
 
@@ -32,7 +32,7 @@ class _Provider(LLMProvider):
 
 @pytest.fixture
 def session(tmp_path, monkeypatch):
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
     return Session(_Provider("dummy"), False, "system", SessionManager())
 
 

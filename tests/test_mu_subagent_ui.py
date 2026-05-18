@@ -7,8 +7,8 @@ frozen REPL.
 
 import pytest
 
-from core.session import Session, SessionManager
-from core.workspace import FolderContext
+from mu.session.session import Session, SessionManager
+from mu.workspace.folder_context import FolderContext
 from mu.tools import build_tool_context, execute
 from mu.ui.subagent import SubagentUI
 from providers.base import LLMProvider, MessagePart, ProviderResponse
@@ -192,7 +192,7 @@ class _ScriptedProvider(LLMProvider):
 
 
 def _build_parent(tmp_path, provider, ui, monkeypatch):
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
     parent = Session(provider, False, "system", SessionManager(), ui=ui)
     fc = FolderContext()
     fc.add_folder(str(tmp_path))

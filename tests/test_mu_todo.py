@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from core.memory import ScratchpadStore
+from mu.memory.stores import ScratchpadStore
 from mu.tools import build_tool_context, execute
 import mu.tools.task.todo as todo
 

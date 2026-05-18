@@ -52,8 +52,8 @@ def execute_tool_with_memory(
     """
     # Local imports to dodge cold-import overhead — these modules are
     # not always loaded when tools_glue itself is imported.
-    from core.tools import execute_tool
-    from core.session import _hook_abort_envelope
+    from mu.tools._dispatcher import execute_tool
+    from mu.session.session import _hook_abort_envelope
     from mu.agent.hooks import HookContext, default_registry
 
     # Side-effect imports — ensure built-in hooks (plan_mode, compactor,

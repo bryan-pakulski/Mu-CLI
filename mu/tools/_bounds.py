@@ -14,7 +14,7 @@ before doing anything. Two checks, in order:
      and not match the workspace's `.gitignore`. When no workspace is
      attached, this check is bypassed (the denylist is still the floor).
 
-The legacy entry point at `core.tools._check_bounds` re-exports
+The legacy entry point at `mu.tools._bounds.check_bounds` re-exports
 `check_bounds` so callers that imported the underscored name keep working.
 """
 
@@ -32,7 +32,7 @@ def check_bounds(filename: str, folder_context: Any) -> bool:
     Refuses denylisted secret paths unconditionally, then (if a workspace
     is attached) enforces folder containment and `.gitignore` filtering.
     """
-    from core.secret_paths import is_denied_path
+    from mu.security.secret_paths import is_denied_path
 
     # Secret-path denials are unconditional at the file layer — there is
     # no override here. Bash callers that legitimately need a denylisted

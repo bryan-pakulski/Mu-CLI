@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 from rich.console import Console
 
-from core.feature_mode import STATUS_NOT_STARTED, create_feature_plan, update_feature_plan_metadata
-from core.workspace import FolderContext
-from ui.rich_ui import RichUI
+from mu.feature.engine import STATUS_NOT_STARTED, create_feature_plan, update_feature_plan_metadata
+from mu.workspace.folder_context import FolderContext
+from mu.ui.rich_ui import RichUI
 from utils.runtime_metrics import build_live_status_line
 
 

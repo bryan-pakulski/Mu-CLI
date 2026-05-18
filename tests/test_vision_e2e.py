@@ -13,7 +13,7 @@ storage), so per-provider conversion can emit them as inline images.
 
 import base64
 
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import ImageData, LLMProvider, MessagePart, ProviderResponse
 
 

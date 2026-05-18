@@ -6,7 +6,7 @@ from . import CommandResult, command
 
 
 def _list_tools(session: Any, allow_prompt: bool) -> CommandResult:
-    from core.tools import TOOLS
+    from mu.tools.descriptors import TOOLS
 
     if allow_prompt:
         ui = getattr(session, "ui", None)

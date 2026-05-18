@@ -2,7 +2,7 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from types import SimpleNamespace
 
-from ui.input import InputHandler, get_session_names
+from mu.ui.input import InputHandler, get_session_names
 
 
 def test_prompt_markup_hides_default_mode():
@@ -201,7 +201,7 @@ def test_workspace_folder_completion_includes_clear_subcommand():
 
 def test_tool_enable_completion_suggests_tool_names(monkeypatch):
     monkeypatch.setattr(
-        "core.tools.TOOLS",
+        "mu.tools.descriptors.TOOLS",
         [SimpleNamespace(name="read_file"), SimpleNamespace(name="write_file")],
     )
     handler = InputHandler()
@@ -350,7 +350,7 @@ def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
 
 
 def test_get_session_names_supports_session_directory_layout(tmp_path, monkeypatch):
-    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("mu.ui.input.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     (tmp_path / "sessions" / "alpha" / "session.json").write_text("{}", encoding="utf-8")
     (tmp_path / "sessions" / "beta").mkdir(parents=True)
@@ -362,7 +362,7 @@ def test_get_session_names_supports_session_directory_layout(tmp_path, monkeypat
 
 
 def test_session_load_completion_suggests_saved_session_names(tmp_path, monkeypatch):
-    monkeypatch.setattr("ui.input.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("mu.ui.input.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "my_session").mkdir(parents=True)
     (tmp_path / "sessions" / "my_session" / "session.json").write_text(
         "{}",

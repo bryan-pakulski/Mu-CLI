@@ -1,13 +1,13 @@
 """Public AgentLoop façade.
 
 This is the canonical entry point for running an agentic turn. Today it
-delegates to the legacy `core.session.Session.send_message`, which still
+delegates to the legacy `mu.session.session.Session.send_message`, which still
 houses the production loop body (loop detection, approval batching,
 collation buffer, hierarchical context layers, loop-mode watchdog —
 ~700 LOC of dense interdependent state). The façade exists so that:
 
   * New callers depend on `mu.agent.AgentLoop` rather than reaching into
-    `core.session` directly.
+    `mu.session.session` directly.
   * Hooks fire from the same module they live in (pre/post tool, pre/post
     provider) — already wired into `Session._execute_tool_with_memory`
     and `Session._provider_generate_with_retry`.

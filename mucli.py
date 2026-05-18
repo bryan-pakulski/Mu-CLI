@@ -20,15 +20,15 @@ from providers.ollama import OllamaProvider
 from utils.helpers import safe_markup
 from utils.logger import logger
 from providers.openai import OpenAIProvider
-from core.session import SessionManager, Session, derive_feature_state_status
-from core.feature_mode import (
+from mu.session.session import SessionManager, Session, derive_feature_state_status
+from mu.feature.engine import (
     load_feature_plan,
     refresh_and_persist_feature_plan,
     save_feature_plan,
     summarize_feature_plan,
 )
-from core.tools import execute_tool
-from ui.rich_ui import RichUI
+from mu.tools._dispatcher import execute_tool
+from mu.ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA
 
 console = Console()
@@ -772,7 +772,7 @@ def choose_session(session_manager):
         return "new", None
 
     try:
-        from ui.session_picker import run_interactive_picker
+        from mu.ui.session_picker import run_interactive_picker
 
         action, name = run_interactive_picker(
             sessions,

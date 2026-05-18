@@ -1,8 +1,10 @@
 """Tests for web_search tool functionality."""
 import json
 import pytest
-from core.tools import web_search, execute_tool, TOOL_HANDLERS, TOOL_DESCRIPTORS
-from core.workspace import FolderContext
+from mu.tools._dispatcher import execute_tool, TOOL_HANDLERS
+from mu.tools.descriptors import TOOL_DESCRIPTORS
+from mu.tools.research.handlers import web_search
+from mu.workspace.folder_context import FolderContext
 
 
 def test_web_search_tool_definition_exists():
@@ -126,7 +128,7 @@ def test_web_search_handler_registered():
 
 def test_web_search_duckduckgo_html_fallback(monkeypatch):
     """If DDGS returns nothing, fallback HTML parser should still return results."""
-    import core.tools as tools
+    import mu.tools.research.handlers as tools
 
     class FakeDDGS:
         def __enter__(self):

@@ -9,7 +9,7 @@ This lets users define harness-aware project conventions once and have
 the model honor them on every turn without re-prompting.
 """
 
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse
 
 

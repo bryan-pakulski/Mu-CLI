@@ -6,7 +6,7 @@ accounting, feature-mode registry, and the on-disk JSON store at
 token-budget-aware history-roll helpers from `HistoryMixin`.
 
 Relocated here from `core/session.py` in Phase 5 of the refactor.
-`core.session.SessionManager` re-exports this class for backward
+`mu.session.session.SessionManager` re-exports this class for backward
 compatibility — callers that import via the old path still work.
 
 Tests: `tests/test_session.py` (load/save/switch/delete),
@@ -26,9 +26,9 @@ import time
 from copy import deepcopy
 from typing import Any
 
-from core.collation import CollationBuffer
-from core.memory import ScratchpadStore, TaskMemoryStore
-from core.workspace import FolderContext
+from mu.agent.collation import CollationBuffer
+from mu.memory.stores import ScratchpadStore, TaskMemoryStore
+from mu.workspace.folder_context import FolderContext
 from utils.config import (
     DEFAULT_SESSION_NAME,
     DEFAULT_VARIABLES,
@@ -39,25 +39,23 @@ from utils.logger import logger
 from .history import HistoryMixin
 
 
-# `HISTORY_DIR` is read dynamically from `core.session` so the
-# pre-Phase-5 `monkeypatch.setattr("core.session.HISTORY_DIR", ...)`
-# pattern used by 27 tests across the suite keeps working without
-# bulk rewrites. The legacy module imports HISTORY_DIR from
+# `HISTORY_DIR` is read dynamically from `mu.session.session` so test
+# monkeypatches against that target drive the SessionManager's
+# persistence path. The session module imports HISTORY_DIR from
 # `utils.config` and exposes it as a module attribute; tests rebind
-# that attribute, and SessionManager reads through the legacy module
-# each time it needs the path.
+# that attribute, and SessionManager reads through it each time.
 def _history_dir() -> str:
-    """Resolve the active HISTORY_DIR. Reads `core.session.HISTORY_DIR`
+    """Resolve the active HISTORY_DIR. Reads `mu.session.session.HISTORY_DIR`
     so test monkeypatches against that target still drive the
     SessionManager's persistence path."""
-    from core import session as _session
+    from mu.session import session as _session
     return _session.HISTORY_DIR
 
 
-# These helpers live in `core/session.py` and stay there for now;
-# lazy-bind on first use so this module's import is cheap and dodges
-# any circular-import concern with core/session.py (which itself
-# re-exports SessionManager from here).
+# These helpers live in `mu/session/session.py`; lazy-bind on first
+# use so this module's import is cheap and dodges any circular-import
+# concern with the session module (which imports SessionManager from
+# here).
 _derive_feature_state_status = None
 _slugify_feature_id_fn = None
 
@@ -66,7 +64,7 @@ def _bind_helpers():
     global _derive_feature_state_status, _slugify_feature_id_fn
     if _derive_feature_state_status is not None:
         return
-    from core import session as _session
+    from mu.session import session as _session
 
     _derive_feature_state_status = _session.derive_feature_state_status
     _slugify_feature_id_fn = _session._slugify_feature_id

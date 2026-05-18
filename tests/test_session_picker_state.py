@@ -8,7 +8,7 @@ state machine; the shell is verified manually + indirectly via the
 
 import pytest
 
-from ui.session_picker import NEW_SESSION, SessionPickerState
+from mu.ui.session_picker import NEW_SESSION, SessionPickerState
 
 
 def _state(*sessions: str) -> SessionPickerState:
@@ -140,7 +140,7 @@ def test_interactive_picker_uses_full_screen_mode():
     in pytest."""
     import inspect
 
-    from ui import session_picker
+    from mu.ui import session_picker
 
     source = inspect.getsource(session_picker.run_interactive_picker)
     assert "full_screen=True" in source, (
@@ -157,9 +157,9 @@ def test_safe_delete_session_silent_mode_detaches_ui(tmp_path, monkeypatch):
     from pathlib import Path
 
     import mucli
-    from core.session import SessionManager
+    from mu.session.session import SessionManager
 
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     Path(tmp_path, "sessions", "alpha", "session.json").write_text("{}", encoding="utf-8")
 
@@ -191,9 +191,9 @@ def test_safe_delete_session_loud_mode_keeps_ui_attached(tmp_path, monkeypatch):
     from pathlib import Path
 
     import mucli
-    from core.session import SessionManager
+    from mu.session.session import SessionManager
 
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     Path(tmp_path, "sessions", "alpha", "session.json").write_text("{}", encoding="utf-8")
 
@@ -229,9 +229,9 @@ def test_choose_session_falls_back_to_numbered_picker_in_headless(
     from pathlib import Path
 
     import mucli
-    from core.session import SessionManager
+    from mu.session.session import SessionManager
 
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path))
     (tmp_path / "sessions" / "alpha").mkdir(parents=True)
     Path(tmp_path, "sessions", "alpha", "session.json").write_text("{}", encoding="utf-8")
     sm = SessionManager()
@@ -240,7 +240,7 @@ def test_choose_session_falls_back_to_numbered_picker_in_headless(
     def _boom(*a, **kw):
         raise RuntimeError("no tty for prompt-toolkit")
 
-    monkeypatch.setattr("ui.session_picker.run_interactive_picker", _boom)
+    monkeypatch.setattr("mu.ui.session_picker.run_interactive_picker", _boom)
     # Fallback uses IntPrompt — return 1 (load alpha).
     monkeypatch.setattr("mucli.IntPrompt.ask", lambda *a, **kw: 1)
 

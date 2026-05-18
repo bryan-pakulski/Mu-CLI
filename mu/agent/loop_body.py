@@ -45,9 +45,11 @@ import time
 import traceback
 from typing import Any
 
-from core.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
-from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
-from core.tools import COLLATED_TOOLS, TOOLS, execute_tool, infer_tool_error_code
+from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
+from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
+from mu.tools._dispatcher import execute_tool
+from mu.tools._envelope import infer_tool_error_code
+from mu.tools.descriptors import COLLATED_TOOLS, TOOLS
 from providers.base import FileReference, ImageData, Message, MessagePart
 from utils.config import (
     AGENTIC_MODES,
@@ -62,7 +64,7 @@ from utils.runtime_metrics import build_live_status_line
 
 # Three symbols in `core/session.py` are still consumed by the body
 # (`_HookAbort`, `_shorten_tool_args`, `_hook_abort_envelope`). The
-# obvious `from core.session import …` would force a circular import
+# obvious `from mu.session.session import …` would force a circular import
 # at module-load time — core/session.py imports `run_turn` from us via
 # `Session.send_message`. Instead, we bind them on first call to
 # `run_turn`; by then core/session.py has fully loaded because the
@@ -78,7 +80,7 @@ def _bind_session_symbols():
     global _HookAbort, _shorten_tool_args, _hook_abort_envelope, _sanitize_for_log
     if _HookAbort is not None:
         return
-    from core import session as _session
+    from mu.session import session as _session
 
     _HookAbort = _session._HookAbort
     _shorten_tool_args = _session._shorten_tool_args

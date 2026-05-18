@@ -30,7 +30,7 @@ def scrub_and_annotate(text: Any) -> Any:
     """Redact known secret patterns from `text` and, when anything was
     redacted, append a `[security: redacted N secret(s) from output]`
     trailer so the model knows the result was sanitized."""
-    from core.secret_paths import redact_secrets
+    from mu.security.secret_paths import redact_secrets
 
     if not isinstance(text, str) or not text:
         return text

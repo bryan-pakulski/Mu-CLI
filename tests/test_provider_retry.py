@@ -11,7 +11,7 @@ from typing import List, Optional
 
 import pytest
 
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse
 
 
@@ -79,7 +79,7 @@ def transient_classifier(monkeypatch):
         return isinstance(exc, ConnectionError)
 
     monkeypatch.setattr(
-        "core.session.Session._is_transient_provider_error", _is_transient
+        "mu.session.session.Session._is_transient_provider_error", _is_transient
     )
 
 

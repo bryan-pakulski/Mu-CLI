@@ -1,6 +1,6 @@
 import os
 import pytest
-from core.workspace import FolderContext
+from mu.workspace.folder_context import FolderContext
 
 
 def test_workspace_tree_map(tmp_path):

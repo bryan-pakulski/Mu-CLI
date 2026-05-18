@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 
 
 def _shorten_tool_args(args: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Match `core.session._shorten_tool_args` exactly so the summary
+    """Match `mu.session.session._shorten_tool_args` exactly so the summary
     output is byte-identical to the pre-extraction format.
     """
     if not args:

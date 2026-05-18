@@ -9,7 +9,7 @@ import pytest
 
 import mu.commands as mc
 import mu.tools as mu_tools
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from mu.mcp import close_all, register_all
 from providers.base import LLMProvider, ProviderResponse
 

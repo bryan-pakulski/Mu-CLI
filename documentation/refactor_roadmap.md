@@ -11,32 +11,28 @@ dead code, and proposes phased completion steps with risk levels.
 
 ## Where things are today
 
-### Production tree (LOC counts)
+### Production tree (post-refactor)
 
-| Path | LOC | Role |
-| --- | ---: | --- |
-| `mucli.py` | ~1,100 | CLI entry point: arg parsing, REPL bootstrap, slash-command dispatch fallback |
-| `core/session.py` | **3,488** | Legacy: `SessionManager` + `Session` (agent loop body) |
-| `core/tools.py` | **5,433** | Legacy: 27 tools wired into `TOOL_HANDLERS` + 55 `_handle_*` functions |
-| `core/feature_mode.py` | 990 | Feature plan engine (data model + state machine) |
-| `core/security_mode.py` | 585 | Security audit engine |
-| `core/workspace.py` | 454 | `FolderContext` (workspace sandbox + gitignore) |
-| `core/secret_paths.py` | 290 | Denylist + secret scrubber |
-| `core/background_tasks.py` | 245 | `BackgroundTaskRegistry` |
-| `core/retrieval.py` | 227 | `SemanticCodeIndex` |
-| `core/memory.py` | 185 | `TaskMemoryStore` + `ScratchpadStore` |
-| `core/approval.py` | 154 | `build_approval_plan` |
-| `core/collation.py` | 108 | `CollationBuffer` |
-| `mu/agent/*` | 1,175 | New: hooks (251), parallel (232), usage tracker (187), secret guard hook (170), plan-mode hook (130), loop façade (105), compactor (89), hooks_config (233) |
-| `mu/tools/*` | ~470 | New: registry bridge (263), `_hints` (148), `spawn_agent`, `todo_*` |
-| `mu/session/*` | ~310 | `HistoryMixin` (261) + 20-line lazy shim for `SessionManager` |
-| `mu/commands/*` | — | Slash-command registry with `@command` decorator (complete migration) |
-| `mu/mcp/*` | — | MCP stdio client + auto-registry (new code, no legacy equivalent) |
-| `mu/ui/*` | — | `SubagentUI`, `SubagentProgressTracker`, stream renderer |
-| `mu/skills/*` | — | Bundled skills (markdown) |
-| `providers/*` | — | OpenAI, Gemini, Ollama, base classes |
-| `ui/*` | — | `RichUI`, `InputHandler`, `render`, `session_picker` |
-| `utils/*` | — | `config`, `runtime_metrics`, `token_estimator`, `citation_manager`, `anti_detection`, `secret_paths` (re-export), `helpers`, `logger` |
+The `core/` and `ui/` directories are gone — everything lives under `mu/`
+plus the orthogonal `providers/`, `utils/`, and `mucli.py` entry point.
+
+| Path | Role |
+| --- | --- |
+| `mucli.py` | CLI entry point: arg parsing, REPL bootstrap, slash-command dispatch fallback |
+| `mu/session/*` | `Session` (agent loop body) + `SessionManager` + `HistoryMixin` + per-turn context/messages/budgets/tools_glue |
+| `mu/tools/*` | `@tool`-decorated handlers grouped by domain (memory, workspace, file, shell, research, security, feature, agent, batch, task) + dispatcher + bounds/envelope/scrub helpers + `legacy.py` (the un-decomposed monolith: 27 `TOOLS` descriptors, 55 `_handle_*` bodies, `execute_tool`, `get_modifications`, `infer_tool_error_code`, `tool_requires_approval`, retrieval-index global) |
+| `mu/agent/*` | Agent loop scaffolding: loop_body, hooks registry, parallel dispatch, retry/loop-detection, approval, collation, secret guard, plan mode, compactor, usage tracker |
+| `mu/feature/engine.py` | Feature plan engine (data model + state machine) |
+| `mu/security/{engine,secret_paths}.py` | Security audit engine + always-on denylist & scrubber |
+| `mu/workspace/folder_context.py` | `FolderContext` (workspace sandbox + gitignore) |
+| `mu/retrieval/index.py` | `SemanticCodeIndex` |
+| `mu/memory/stores.py` | `TaskMemoryStore` + `ScratchpadStore` |
+| `mu/commands/*` | Slash-command registry with `@command` decorator |
+| `mu/mcp/*` | MCP stdio client + auto-registry |
+| `mu/ui/*` | `RichUI`, `InputHandler`, `render`, `session_picker`, `SubagentUI`, `SubagentProgressTracker`, stream renderer |
+| `mu/skills/*` | Bundled skills (markdown) |
+| `providers/*` | OpenAI, Gemini, Ollama, base classes |
+| `utils/*` | `config`, `runtime_metrics`, `token_estimator`, `citation_manager`, `anti_detection`, `helpers`, `logger` |
 
 ### Verified dead code
 
@@ -53,7 +49,7 @@ listing and confuse new readers.
 | Surface | Status | The smoking-gun comment |
 | --- | --- | --- |
 | `mu/session/manager.py` | 20-line `__getattr__` shim re-exporting `SessionManager` from `core/session.py` | "The class body still lives in `core/session.py` while the legacy loop exists. The physical move … will happen as part of the step-7 cutover" |
-| `mu/agent/loop.py` | 105 LOC façade; delegates `run_turn` to `Session.send_message` | "Today it delegates to the legacy `core.session.Session.send_message`, which still houses the production loop body" |
+| `mu/agent/loop.py` | 105 LOC façade; delegates `run_turn` to `Session.send_message` | "Today it delegates to the legacy `mu.session.session.Session.send_message`, which still houses the production loop body" |
 | `mu/tools/__init__.py` | Bridge registry: 263 LOC wraps `core/tools.py` via `@tool` decorator. Only **2** new tools live in `mu/tools/`: `spawn_agent`, `todo_*` | Comment: "transitional surface: it mirrors the legacy registry in `core/tools.py`" |
 | `core/__init__.py` | Empty (0 LOC) — no shim re-exports masking migrations | — |
 
@@ -184,10 +180,10 @@ shell (`execute_tool`, `_check_bounds`, the envelope helpers,
 1. ✅ **`_check_bounds` → `mu/tools/_bounds.py`** — body moved; legacy
    underscored name re-exported via a lazy alias to dodge the
    circular-import that arose when `mu.tools` loaded before
-   `core.tools.TOOL_HANDLERS` was defined.
+   `mu.tools._dispatcher.TOOL_HANDLERS` was defined.
 2. ✅ **`execute_tool` → `mu/tools/_dispatcher.py:dispatch`** — body
    moved. `mu.tools.execute(...)` now calls `dispatch` directly
-   instead of routing back through `core.tools.execute_tool`. The
+   instead of routing back through `mu.tools._dispatcher.execute_tool`. The
    legacy entry point is a thin shim. Added a bottom-of-file
    `import mu.tools` to `core/tools.py` so the registry mirror fires
    after the legacy maps are populated.
@@ -269,7 +265,7 @@ What landed:
    (`test_loop_blocker_halts_watchdog.py`,
    `test_mu_agent_session_integration.py::test_send_message_resets_abort_flag_each_turn`)
    updated to inspect `mu.agent.loop_body.run_turn`.
-5. ✅ One test that monkeypatched `core.session.collect_approval_plans`
+5. ✅ One test that monkeypatched `mu.session.session.collect_approval_plans`
    updated to patch `mu.agent.loop_body.collect_approval_plans`.
 
 What's intentionally **not** done in this phase:
@@ -306,7 +302,7 @@ deletable.
 20-line `__getattr__` shim that's been there since Phase 0 is gone;
 the real class body is what gets imported. `core/session.py`
 re-exports it via `from mu.session.manager import SessionManager` so
-the legacy `from core.session import SessionManager` path keeps
+the legacy `from mu.session.session import SessionManager` path keeps
 working for the 100+ test+production call sites.
 
 What landed:
@@ -322,12 +318,12 @@ What landed:
    lazy-bound from `core/session.py` (where they still live as
    module-level helpers) to dodge the circular-import concern.
 5. ✅ `HISTORY_DIR` is read through a `_history_dir()` indirection
-   that re-resolves `core.session.HISTORY_DIR` at every call. This
-   keeps the existing `monkeypatch.setattr("core.session.HISTORY_DIR", …)`
+   that re-resolves `mu.session.session.HISTORY_DIR` at every call. This
+   keeps the existing `monkeypatch.setattr("mu.session.session.HISTORY_DIR", …)`
    pattern in 27 tests working without bulk-rewrites. Tests that
    want to migrate to the new path can use
    `monkeypatch.setattr("mu.session.manager._history_dir", …)` (or
-   patch `core.session.HISTORY_DIR` since the indirection reads
+   patch `mu.session.session.HISTORY_DIR` since the indirection reads
    it dynamically either way).
 
 What's intentionally **not** done:
@@ -368,21 +364,63 @@ shims total 163 LOC across all nine modules. Test status: 994 passed
 After downstream consumers migrate to the new `mu.X` import paths,
 the shim files can be deleted in a future cleanup.
 
-### Phase 7 — Consolidate `ui/` and `mu/ui/` (🟡 medium)
+### Phase 7 — Consolidate `ui/` and `mu/ui/` (🟡 medium) — ✅ **done**
 
-Today both directories exist:
-- `ui/` has `RichUI`, `InputHandler`, `render`, `session_picker`
-- `mu/ui/` has `SubagentUI`, `SubagentProgressTracker`, stream renderer
+Direction chosen: move everything to `mu/ui/`, drop top-level `ui/` —
+consistent with the rest of the migration. Five files moved verbatim:
 
-Either:
-- Move everything to `mu/ui/`, drop top-level `ui/` (consistent), or
-- Keep top-level `ui/` as the UI surface and move `mu/ui/*` up to it
-  (no `mu/ui/` reduces nesting).
+| Old | New | LOC |
+| --- | --- | ---: |
+| `ui/base.py` | `mu/ui/base.py` | 40 |
+| `ui/render.py` | `mu/ui/render.py` | 81 |
+| `ui/input.py` | `mu/ui/input.py` | 752 |
+| `ui/rich_ui.py` | `mu/ui/rich_ui.py` | 834 |
+| `ui/session_picker.py` | `mu/ui/session_picker.py` | 278 |
 
-The first is more consistent with the broader migration direction.
-Pick one and execute; both work. Tests: `tests/test_rich_ui.py`,
-`tests/test_input.py`, `tests/test_mu_subagent_ui.py`,
-`tests/test_mu_progress.py`, `tests/test_streaming_ui.py`.
+Each `ui/<name>.py` is now an ~8-LOC re-export shim. The 5 new
+`mu/ui/` modules join the existing `progress.py`, `stream.py`,
+`subagent.py` — a single coherent UI package.
+
+Three tests had to be updated because their `monkeypatch.setattr`
+targets pointed at module-internal bindings (`ui.input.HISTORY_DIR`,
+`ui.render.render_response`). With the body moved, the canonical
+patch target is the new `mu.ui.*` path; the shim's separate namespace
+won't reach the function's bare-name lookup. Two patches in
+`test_input.py` and one in `test_streaming_unified_live.py` were
+retargeted.
+
+Test status: 994 passed / 10 failed — exact pre-Phase-7 baseline,
+zero regressions.
+
+### Phase 8 — Eliminate `core/` and `ui/` entirely (✅ done)
+
+Final cleanup. Three sub-steps:
+
+1. **Rewrite all importers off the 14 shims** (Phase 6/7 left behind):
+   52 files updated by mechanical regex pass to import from the canonical
+   `mu.X` location.
+2. **Move the two remaining substantive files**:
+   - `core/session.py` (1,185 LOC) → `mu/session/session.py`
+   - `core/tools.py` (3,503 LOC) → `mu/tools/legacy.py` (kept as a
+     single file — the proper decomposition of the 55 `_handle_*`
+     bodies into per-group `handlers.py` modules is future work, not
+     required for the directory cleanup)
+3. **Delete everything legacy**: the 14 shims, the original
+   `core/session.py`, the original `core/tools.py`, the empty
+   `core/__init__.py` and `ui/__init__.py`, and finally `rmdir` both
+   directories.
+
+In total ~80 import-path rewrites across 40+ files, plus a cosmetic pass
+that retargeted ~20 stale docstring/comment references to the new
+`mu.session.session` / `mu.tools` paths.
+
+`mu/session/manager.py` now reads `HISTORY_DIR` dynamically from
+`mu.session.session` (was `core.session`); the indirection that lets
+tests `monkeypatch.setattr("mu.session.session.HISTORY_DIR", ...)`
+is preserved.
+
+Test status: 994 passed / 10 failed — exact pre-Phase-8 baseline,
+zero regressions. `core/` and `ui/` no longer exist on disk.
 
 ## Out of scope
 
@@ -404,7 +442,8 @@ These are not refactor candidates — they're current code:
 | 4 — Move loop body | 🔴 | ~1,000 | ✅ done (verbatim move; param ownership refactor deferred) | A day in prod | Phase 3 |
 | 5 — Move SessionManager | 🟡 | ~600 | ✅ done (557 LOC + lazy HISTORY_DIR proxy) | Half-day | Phase 4 |
 | 6 — Namespace rename | ✅ per module | 3,238 | ✅ done (9 modules + 5 new subpackages; shims preserve back-compat) | None | — |
-| 7 — Consolidate UI | 🟡 | ~600 | ☐ pending | None | — |
+| 7 — Consolidate UI | 🟡 | 1,985 | ✅ done (5 files moved to `mu/ui/`; shims preserve back-compat; 3 test patches retargeted) | None | — |
+| 8 — Final `core/` + `ui/` removal | ✅ | ~4,700 | ✅ done (Session + tools.py relocated to `mu/`; 14 shims + both legacy dirs deleted; ~80 imports rewritten) | None | Phase 7 |
 
 Sequencing: 0 → (1 ∥ 6) → 2 → 3 → 4 → 5 → 7. Phase 1 and Phase 6 can
 run in parallel since they touch disjoint code.

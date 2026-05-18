@@ -46,7 +46,7 @@ def _store(context):
         return _FALLBACK_STORE
     except NameError:
         pass
-    from core.memory import ScratchpadStore
+    from mu.memory.stores import ScratchpadStore
     _FALLBACK_STORE = ScratchpadStore()
     return _FALLBACK_STORE
 

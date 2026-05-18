@@ -106,7 +106,7 @@ def test_research_sources_handles_legacy_string_type():
     string source_type (pre-fix data, pickled state, etc.),
     `/research sources` must NOT crash."""
     import mu.commands as mc
-    from core.session import Session, SessionManager
+    from mu.session.session import Session, SessionManager
     from providers.base import LLMProvider, ProviderResponse
     from utils.citation_manager import get_citation_manager
 

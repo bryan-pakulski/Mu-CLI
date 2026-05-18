@@ -1,18 +1,13 @@
 import os
 import pytest
 import json
-from core.tools import (
-    _check_bounds,
-    read_file,
-    web_search,
-    stackoverflow_search,
-    _handle_create_feature_task,
-    ToolExecutionContext,
-    execute_tool,
-    TOOL_HANDLERS,
-    TOOLS,
-)
-from core.workspace import FolderContext
+from mu.tools._dispatcher import execute_tool, TOOL_HANDLERS
+from mu.tools.descriptors import ToolExecutionContext, TOOLS
+from mu.tools._bounds import check_bounds as _check_bounds
+from mu.tools.feature.handlers import _handle_create_feature_task
+from mu.tools.research.handlers import stackoverflow_search, web_search
+from mu.tools.workspace.handlers import read_file
+from mu.workspace.folder_context import FolderContext
 
 
 class _FeatureSessionManagerStub:
@@ -280,7 +275,7 @@ def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
     def _raise_import_error(query: str, max_results: int):
         raise ImportError("forced missing ddgs")
 
-    monkeypatch.setattr("core.tools._ddgs_text_search", _raise_import_error)
+    monkeypatch.setattr("mu.tools.research.handlers._ddgs_text_search", _raise_import_error)
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
 
     payload = json.loads(web_search("privacy search", engine="duckduckgo", num_results=3))

@@ -1,4 +1,4 @@
-from core.feature_mode import (
+from mu.feature.engine import (
     STATUS_ARCHIVED,
     STATUS_BLOCKED,
     STATUS_COMPLETED,

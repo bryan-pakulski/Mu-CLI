@@ -4,14 +4,14 @@ These pin the small bits of arg coercion the handlers do (e.g. mapping
 `tag` → `tags=[tag]`, defaulting `sort`, falling back from `num_results`
 to `max_results`). After the Phase 1.5 migration the handlers live in
 `mu/tools/research/handlers.py` and are exercised through
-`mu.tools.execute`; the impls are monkey-patched on `core.tools` so we
+`mu.tools.execute`; the impls are monkey-patched on `mu.tools` so we
 see the args the handler actually forwarded.
 """
 
 import json
 
 import mu.tools as _mu_tools
-from core.workspace import FolderContext
+from mu.workspace.folder_context import FolderContext
 
 
 def _ctx(folder_context):
@@ -21,7 +21,7 @@ def _ctx(folder_context):
 
 
 def test_reddit_handler_argument_wiring(monkeypatch):
-    import core.tools as tools
+    import mu.tools.research.handlers as tools
 
     captured = {}
 
@@ -52,7 +52,7 @@ def test_reddit_handler_argument_wiring(monkeypatch):
 
 
 def test_stackoverflow_handler_argument_wiring(monkeypatch):
-    import core.tools as tools
+    import mu.tools.research.handlers as tools
 
     captured = {}
 
@@ -83,7 +83,7 @@ def test_stackoverflow_handler_argument_wiring(monkeypatch):
 
 
 def test_hackernews_handler_argument_wiring(monkeypatch):
-    import core.tools as tools
+    import mu.tools.research.handlers as tools
 
     captured = {}
 

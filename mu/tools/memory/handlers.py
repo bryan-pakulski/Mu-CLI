@@ -40,7 +40,7 @@ def _fallback_task_memory():
     """
     global _FALLBACK_TASK_MEMORY
     if _FALLBACK_TASK_MEMORY is None:
-        from core.memory import TaskMemoryStore
+        from mu.memory.stores import TaskMemoryStore
 
         _FALLBACK_TASK_MEMORY = TaskMemoryStore()
     return _FALLBACK_TASK_MEMORY
@@ -49,7 +49,7 @@ def _fallback_task_memory():
 def _fallback_scratchpad():
     global _FALLBACK_SCRATCHPAD
     if _FALLBACK_SCRATCHPAD is None:
-        from core.memory import ScratchpadStore
+        from mu.memory.stores import ScratchpadStore
 
         _FALLBACK_SCRATCHPAD = ScratchpadStore()
     return _FALLBACK_SCRATCHPAD

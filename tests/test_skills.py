@@ -8,7 +8,7 @@ system prompt as a labelled AVAILABLE SKILLS block and via the
 
 import os
 
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from mu.skills import (
     Skill,
     _parse_skill_md,
@@ -335,7 +335,8 @@ def test_skills_slash_command_disable_unknown_fails():
 
 
 def test_invoke_skill_tool_handler_returns_body():
-    from core.tools import TOOL_HANDLERS, build_tool_context
+    from mu.tools._dispatcher import TOOL_HANDLERS
+    from mu.tools.descriptors import build_tool_context
 
     ctx = build_tool_context(folder_context=type("FC", (), {"folders": []})())
     handler = TOOL_HANDLERS["invoke_skill"]
@@ -346,7 +347,8 @@ def test_invoke_skill_tool_handler_returns_body():
 
 
 def test_invoke_skill_tool_handler_unknown_name_errors():
-    from core.tools import TOOL_HANDLERS, build_tool_context
+    from mu.tools._dispatcher import TOOL_HANDLERS
+    from mu.tools.descriptors import build_tool_context
 
     ctx = build_tool_context(folder_context=type("FC", (), {"folders": []})())
     handler = TOOL_HANDLERS["invoke_skill"]

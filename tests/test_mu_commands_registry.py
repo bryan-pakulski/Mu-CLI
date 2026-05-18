@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import mu.commands as mc
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse
 
 
@@ -189,13 +189,14 @@ def test_help_includes_legacy_and_registry_commands(session):
 
 def test_system_and_flush_commands_are_gone(session):
     """Sanity-pin: /system and /flush were dropped (the flush *tool*
-    survives in core.tools for the model)."""
+    survives in mu.tools for the model)."""
     assert mc.dispatch(session, "/system", allow_prompt=False) is None
     assert mc.dispatch(session, "/system override", allow_prompt=False) is None
     assert mc.dispatch(session, "/flush", allow_prompt=False) is None
 
     # The `flush` tool must still be registered for the model to call.
-    from core.tools import TOOLS, TOOL_HANDLERS
+    from mu.tools._dispatcher import TOOL_HANDLERS
+    from mu.tools.descriptors import TOOLS
 
     assert any(t.name == "flush" for t in TOOLS), "flush tool definition removed"
     assert "flush" in TOOL_HANDLERS, "flush tool handler removed"

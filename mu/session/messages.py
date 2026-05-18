@@ -45,7 +45,7 @@ from providers.base import FileReference, ImageData, Message, MessagePart
 
 
 def _shorten_tool_args(args: dict) -> dict:
-    """Mirror of `core.session._shorten_tool_args` to avoid a circular
+    """Mirror of `mu.session.session._shorten_tool_args` to avoid a circular
     import. Replaces long string args (`content`, `diff`) with a
     placeholder for display purposes."""
     if not args:

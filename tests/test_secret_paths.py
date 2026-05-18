@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from core.secret_paths import (
+from mu.security.secret_paths import (
     extract_paths_from_command,
     is_denied_path,
 )

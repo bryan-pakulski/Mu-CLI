@@ -5,6 +5,6 @@ so the new agent loop can depend on `mu.tools.*` without reaching into
 `core.*` directly.
 """
 
-from core.tools import ToolExecutionContext, build_tool_context
+from mu.tools.descriptors import ToolExecutionContext, build_tool_context
 
 __all__ = ["ToolExecutionContext", "build_tool_context"]

@@ -29,11 +29,18 @@ from providers.base import ToolDefinition
 from ._context import ToolExecutionContext, build_tool_context  # re-exports
 
 
-# ToolDescriptor lives in legacy `core.tools` for now; we re-export it so
-# that consumers of `mu.tools` don't reach into `core` directly.
-def _import_legacy():
-    from core import tools as _legacy  # noqa: WPS433 — intentional late import
-    return _legacy
+def _import_registry():
+    """Late-import `mu.tools.descriptors` to avoid a circular import on first
+    decoration (descriptors imports nothing from this module, but the
+    `@tool` decorator runs at import time of every `<group>/handlers.py`)."""
+    from mu.tools import descriptors as _desc  # noqa: WPS433 — intentional late import
+    return _desc
+
+
+def _import_dispatcher():
+    """Late-import `mu.tools._dispatcher` for the `TOOL_HANDLERS` mirror."""
+    from mu.tools import _dispatcher as _disp  # noqa: WPS433
+    return _disp
 
 
 _REGISTRY: Dict[str, "ToolDescriptor"] = {}
@@ -42,19 +49,17 @@ _LEGACY_LOADED = False
 
 
 def _ensure_legacy_loaded() -> None:
-    """Lazily import legacy registry on first use.
-
-    Done lazily to avoid circular import problems: `core/tools.py` does
-    its own heavy work at import time and may itself want to register
-    callbacks against the new registry in the future.
-    """
+    """Pull any descriptors/handlers that may have been registered before
+    this module finished initializing (defensive; with the unified
+    registry both maps are populated by the `@tool` decorator now)."""
     global _LEGACY_LOADED
     if _LEGACY_LOADED:
         return
-    legacy = _import_legacy()
-    for name, descriptor in getattr(legacy, "TOOL_DESCRIPTORS", {}).items():
+    desc = _import_registry()
+    disp = _import_dispatcher()
+    for name, descriptor in getattr(desc, "TOOL_DESCRIPTORS", {}).items():
         _REGISTRY.setdefault(name, descriptor)
-    for name, handler in getattr(legacy, "TOOL_HANDLERS", {}).items():
+    for name, handler in getattr(disp, "TOOL_HANDLERS", {}).items():
         _HANDLERS.setdefault(name, handler)
     _LEGACY_LOADED = True
 
@@ -83,10 +88,11 @@ def tool(
     value through the same envelope builder the legacy harness uses.
     """
 
-    legacy = _import_legacy()
-    build_descriptor = getattr(legacy, "_build_descriptor")
-    default_server_policy = getattr(legacy, "_default_server_policy")
-    default_result_mode = getattr(legacy, "_default_result_mode")
+    desc = _import_registry()
+    disp = _import_dispatcher()
+    build_descriptor = getattr(desc, "_build_descriptor")
+    default_server_policy = getattr(desc, "_default_server_policy")
+    default_result_mode = getattr(desc, "_default_result_mode")
 
     # Resolve "default" sentinels against the legacy fallbacks so migrated
     # tools inherit the same descriptor shape as their original entries
@@ -130,13 +136,14 @@ def tool(
         )
         _REGISTRY[name] = descriptor
         _HANDLERS[name] = func
-        # Mirror into the legacy maps too so old code finds the new tool.
-        legacy.TOOL_DESCRIPTORS[name] = descriptor
-        legacy.TOOL_HANDLERS[name] = func
-        # Append to TOOLS so list-style consumers (UI, system prompt) see it.
-        existing = {t.name for t in legacy.TOOLS}
+        # Mirror into the descriptor/dispatcher tables so callers that
+        # introspect those maps (TOOL_HANDLERS-mutating tests, UI/system
+        # prompt iterating TOOLS) see new registrations.
+        desc.TOOL_DESCRIPTORS[name] = descriptor
+        disp.TOOL_HANDLERS[name] = func
+        existing = {t.name for t in desc.TOOLS}
         if name not in existing:
-            legacy.TOOLS.append(definition)
+            desc.TOOLS.append(definition)
         return func
 
     return decorator
@@ -166,23 +173,24 @@ def list_descriptors() -> List["ToolDescriptor"]:
 
 
 def unregister(name: str) -> bool:
-    """Remove a tool from both this registry and the legacy mirrors.
+    """Remove a tool from this registry and the descriptor/dispatcher mirrors.
 
     Returns True if the tool existed and was removed. Used by `/mcp reload`
     to drop stale MCP tools before re-registering from a fresh handshake.
     """
-    legacy = _import_legacy()
+    desc = _import_registry()
+    disp = _import_dispatcher()
     found = False
     if name in _REGISTRY:
         del _REGISTRY[name]
         found = True
     _HANDLERS.pop(name, None)
-    if hasattr(legacy, "TOOL_DESCRIPTORS"):
-        legacy.TOOL_DESCRIPTORS.pop(name, None)
-    if hasattr(legacy, "TOOL_HANDLERS"):
-        legacy.TOOL_HANDLERS.pop(name, None)
-    if hasattr(legacy, "TOOLS"):
-        legacy.TOOLS[:] = [t for t in legacy.TOOLS if t.name != name]
+    if hasattr(desc, "TOOL_DESCRIPTORS"):
+        desc.TOOL_DESCRIPTORS.pop(name, None)
+    if hasattr(disp, "TOOL_HANDLERS"):
+        disp.TOOL_HANDLERS.pop(name, None)
+    if hasattr(desc, "TOOLS"):
+        desc.TOOLS[:] = [t for t in desc.TOOLS if t.name != name]
     return found
 
 
@@ -193,7 +201,7 @@ def execute(name: str, args: Dict[str, Any], context: ToolExecutionContext) -> D
     """Run a tool and return a normalized envelope dict.
 
     Calls the canonical `_dispatcher.dispatch(...)` directly. The legacy
-    `core.tools.execute_tool` is now a thin shim over the same function,
+    `mu.tools._dispatcher.execute_tool` is now a thin shim over the same function,
     so callers get identical behavior regardless of which entry point
     they use.
 

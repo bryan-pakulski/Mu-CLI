@@ -9,10 +9,10 @@
 
 import pytest
 
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from mu.commands.mode import plan_cmd
 from providers.base import LLMProvider, ProviderResponse
-from ui.input import InputHandler
+from mu.ui.input import InputHandler
 from utils.runtime_metrics import build_live_status_line, collect_runtime_metrics
 
 
@@ -32,7 +32,7 @@ def session(tmp_path, monkeypatch):
     # Isolate from any default-session state other tests might have
     # persisted in the shared MUCLI_HOME — the `/plan on` test below saves
     # `plan_mode=True` and that state would otherwise leak across runs.
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     return Session(_DummyProvider("dummy"), False, "system", sm)
 

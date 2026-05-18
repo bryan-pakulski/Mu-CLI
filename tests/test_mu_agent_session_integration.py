@@ -13,8 +13,8 @@ import os
 
 import pytest
 
-from core.session import Session, SessionManager
-from core.workspace import FolderContext
+from mu.session.session import Session, SessionManager
+from mu.workspace.folder_context import FolderContext
 from mu.agent.hooks import HookContext, HookSpec, default_registry
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 
@@ -32,7 +32,7 @@ class _Provider(LLMProvider):
 
 @pytest.fixture
 def session(tmp_path, monkeypatch):
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(_Provider("dummy"), False, "system", sm)
     fc = FolderContext()
@@ -251,7 +251,7 @@ def test_pre_provider_call_abort_raises_hook_abort_and_sets_flag(session):
     retry it as a transient error) when a `pre_provider_call` hook
     aborts. The flag is set; the provider is never invoked."""
     from mu.agent.hooks import HookResult
-    from core.session import _HookAbort
+    from mu.session.session import _HookAbort
 
     provider_calls = {"count": 0}
     original_stream = session.provider.stream
@@ -292,7 +292,7 @@ def test_send_message_exits_cleanly_with_hook_aborted_status(tmp_path, monkeypat
     from mu.agent.hooks import HookResult
 
     # Fresh session so the test doesn't inherit prior abort state.
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(_Provider("dummy"), False, "system", sm)
     fc = FolderContext()
@@ -328,7 +328,7 @@ def test_send_message_resets_abort_flag_each_turn(session):
     # reset by reading the source so a refactor that drops the reset
     # gets caught.
     import inspect
-    from core import session as session_mod
+    from mu.session import session as session_mod
 
     # Body moved to `mu/agent/loop_body.py:run_turn` during Phase 4.
     from mu.agent import loop_body as loop_body_mod

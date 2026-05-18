@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from core.session import Session, SessionManager
-from core.tools import _build_tool_envelope, _envelope_from_handler_result
-from core.workspace import FolderContext
+from mu.session.session import Session, SessionManager
+from mu.tools._envelope import _build_tool_envelope, _envelope_from_handler_result
+from mu.workspace.folder_context import FolderContext
 from mu.tools._hints import hint_for, retryable_for_code
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 
@@ -153,7 +153,7 @@ class _DummyProvider(LLMProvider):
 
 @pytest.fixture
 def session(tmp_path, monkeypatch):
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(_DummyProvider("dummy"), False, "system", sm, ui=_RecordingUI())
     return sess
@@ -268,7 +268,7 @@ def test_announcer_silent_on_non_envelope_string(session):
 def test_real_tool_call_produces_envelope_with_hint(tmp_path):
     """A read_file call against a missing path should produce a failure
     envelope where the model can see the hint."""
-    from core.tools import execute_tool
+    from mu.tools._dispatcher import execute_tool
 
     fc = FolderContext()
     fc.add_folder(str(tmp_path))

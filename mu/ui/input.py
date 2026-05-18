@@ -191,7 +191,7 @@ class _MCPServerNameCompleter(Completer):
 class DynamicToolCompleter(Completer):
     def get_completions(self, document, complete_event):
         try:
-            from core.tools import TOOLS
+            from mu.tools.descriptors import TOOLS
 
             tool_names = sorted({tool.name for tool in TOOLS if getattr(tool, "name", "")})
         except Exception:

@@ -16,7 +16,7 @@ Config (`.mu/mcp.json` in the working directory):
 
 Each tool surfaced by a server is registered as `mcp__<server>__<tool>`
 in the mu.tools registry so collisions across servers are impossible.
-The legacy `core.tools.TOOLS` list is also updated so the existing
+The legacy `mu.tools.descriptors.TOOLS` list is also updated so the existing
 system-prompt rendering picks them up.
 
 Lifecycle: `register_all()` opens every configured client and registers

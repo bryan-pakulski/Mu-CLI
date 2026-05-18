@@ -30,7 +30,7 @@ from providers.base import (
 def _make_rich_ui_with_recording_console():
     """RichUI with its `console.print` swapped for a list-recorder, so we
     can assert exactly what hit stdout in what order."""
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     ui = RichUI()
     captured = []
@@ -51,7 +51,7 @@ def _make_rich_ui_with_recording_console():
 
 
 def test_richui_exposes_streaming_methods():
-    from ui.rich_ui import RichUI
+    from mu.ui.rich_ui import RichUI
 
     ui = RichUI()
     for method in (
@@ -127,7 +127,7 @@ def test_render_message_renders_panel_without_streaming():
     ui, captured = _make_rich_ui_with_recording_console()
     # Suppress render_response's recursive print path to keep the assert
     # focused on the header line.
-    with patch("ui.rich_ui.render_response"):
+    with patch("mu.ui.rich_ui.render_response"):
         ui.render_message("assistant", "hi", model_name="gpt-4o")
     print_lines = [t for (k, t, kw) in captured if k == "print"]
     assert any("Assistant" in line and "gpt-4o" in line for line in print_lines)
@@ -188,7 +188,7 @@ def test_streaming_disabled_falls_back_to_panel_render():
     ui.set_variables({"streaming_enabled": False})
     ui.stream_assistant_delta("ignored")
     captured.clear()
-    with patch("ui.rich_ui.render_response"):
+    with patch("mu.ui.rich_ui.render_response"):
         ui.render_message("assistant", "ignored", model_name="m")
     print_lines = [t for (k, t, kw) in captured if k == "print"]
     # The legacy panel header fires.

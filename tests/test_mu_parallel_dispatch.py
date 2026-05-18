@@ -19,8 +19,8 @@ import time
 
 import pytest
 
-from core.session import Session, SessionManager
-from core.workspace import FolderContext
+from mu.session.session import Session, SessionManager
+from mu.workspace.folder_context import FolderContext
 from mu.agent.parallel import PARALLEL_SAFE_TOOLS, is_parallel_safe
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 
@@ -61,7 +61,7 @@ class _Provider(LLMProvider):
 
 
 def _make_session(tmp_path, provider, monkeypatch, yolo=True):
-    monkeypatch.setattr("core.session.HISTORY_DIR", str(tmp_path / "history"))
+    monkeypatch.setattr("mu.session.session.HISTORY_DIR", str(tmp_path / "history"))
     sm = SessionManager()
     sess = Session(provider, False, "system", sm)
     fc = FolderContext()

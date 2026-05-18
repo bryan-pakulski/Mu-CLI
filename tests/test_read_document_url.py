@@ -13,8 +13,8 @@ import io
 
 import pytest
 
-from core import tools as tools_mod
-from core.tools import read_document
+from mu.tools.research import handlers as tools_mod
+from mu.tools.research.handlers import read_document
 from utils.citation_manager import (
     SourceType,
     get_citation_manager,
@@ -234,7 +234,7 @@ def test_read_document_local_path_path_still_works(tmp_path):
         def is_ignored(self, _p):
             return False
 
-    # _check_bounds in core.tools needs a folder_context with .folders;
+    # _check_bounds in mu.tools needs a folder_context with .folders;
     # supply one rooted at the temp dir.
     out = read_document(str(pdf_path), folder_context=_FC())
     # Either real text or empty (blank synthesized page) — but NOT an

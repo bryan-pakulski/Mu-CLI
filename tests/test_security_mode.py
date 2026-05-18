@@ -21,7 +21,7 @@ import os
 
 import pytest
 
-from core.security_mode import (
+from mu.security.engine import (
     SEVERITY_LEVELS,
     SecurityFinding,
     SecurityProof,
@@ -277,7 +277,7 @@ def test_security_mode_registered_in_agentic_modes():
 
 
 def test_security_mode_in_mode_choices_for_autocomplete():
-    from ui.input import MODE_CHOICES
+    from mu.ui.input import MODE_CHOICES
 
     assert "security" in MODE_CHOICES
 
@@ -295,7 +295,8 @@ def test_plan_mode_blocks_security_verification_tools():
 
 
 def test_all_security_tools_registered_in_tools_module():
-    from core.tools import TOOLS, TOOL_HANDLERS
+    from mu.tools._dispatcher import TOOL_HANDLERS
+    from mu.tools.descriptors import TOOLS
 
     expected = {
         "create_security_report",
@@ -345,7 +346,7 @@ def test_handlers_drive_full_audit_lifecycle(workspace):
     """Walk a finding from create → add → proof attach → verify → patch
     attach → verify remediation → approve — all through the tool handlers.
     Smoke test for the integration boundary."""
-    from core.tools import (
+    from mu.tools.security.handlers import (
         _handle_add_security_finding,
         _handle_approve_security_finding,
         _handle_attach_remediation_patch,
@@ -417,7 +418,7 @@ def test_handlers_drive_full_audit_lifecycle(workspace):
 
 
 def test_handlers_refuse_approval_without_dual_verification(workspace):
-    from core.tools import (
+    from mu.tools.security.handlers import (
         _handle_add_security_finding,
         _handle_approve_security_finding,
         _handle_attach_security_proof,

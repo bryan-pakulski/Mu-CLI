@@ -1,9 +1,9 @@
 import os
 import json
 import pytest
-from core.tools import search_references
+from mu.tools.workspace.handlers import search_references
 import mu.tools as _mu_tools
-from core.workspace import FolderContext
+from mu.workspace.folder_context import FolderContext
 
 
 def test_basic_search_with_context(tmp_path):

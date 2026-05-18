@@ -5,10 +5,10 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 
 import mu.commands as mc
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from mu.commands.variables import LAYER_BUDGET_VARS
 from providers.base import LLMProvider, ProviderResponse
-from ui.input import InputHandler
+from mu.ui.input import InputHandler
 
 
 class _DummyProvider(LLMProvider):

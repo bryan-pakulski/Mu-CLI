@@ -15,7 +15,7 @@ import pytest
 import mu.commands as mc
 # Importing the tracker registers its hooks on import.
 import mu.agent.usage_tracker  # noqa: F401
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from mu.agent.hooks import HookContext, default_registry
 from providers.base import LLMProvider, ProviderResponse
 
@@ -233,7 +233,7 @@ def test_stats_autocomplete_includes_clear():
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
 
-    from ui.input import InputHandler
+    from mu.ui.input import InputHandler
 
     handler = InputHandler()
     doc = Document(text="/stats ", cursor_position=len("/stats "))

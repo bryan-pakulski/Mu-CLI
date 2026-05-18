@@ -11,8 +11,14 @@ import sys
 import pytest
 
 import mu.tools as mut
-from core import tools as legacy
-from core.workspace import FolderContext
+from mu.tools import descriptors as legacy
+from mu.tools._dispatcher import TOOL_HANDLERS as _DISP_HANDLERS
+from mu.workspace.folder_context import FolderContext
+
+
+# Convenience: expose TOOL_HANDLERS on the descriptors-aliased namespace
+# so the assertions reading `legacy.TOOL_HANDLERS` still resolve.
+legacy.TOOL_HANDLERS = _DISP_HANDLERS
 
 
 def test_list_tools_includes_legacy_set():

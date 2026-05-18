@@ -54,7 +54,7 @@ HTTP-only or relies on those subsystems, this client won't drive it.
 │   4. Send `notifications/initialized`                                │
 │   5. Request `tools/list` → parse MCPTool[]                          │
 │   6. Register each tool as `mcp__<server>__<tool>` in mu.tools       │
-│   7. Tool also appended to legacy core.tools.TOOLS for system prompt │
+│   7. Tool also appended to legacy mu.tools.descriptors.TOOLS for system prompt │
 └──────────────────────────────────────────────────────────────────────┘
                                 ↓
 ┌──────────────────────────────────────────────────────────────────────┐

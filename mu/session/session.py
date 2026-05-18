@@ -12,23 +12,20 @@ from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
 
-from core.approval import build_approval_prompt, collect_approval_plans, ApprovalPlan
-from core.collation import CollationBuffer
-from core.feature_mode import refresh_and_persist_feature_plan, summarize_feature_plan
-from core.memory import ScratchpadStore, TaskMemoryStore
-from core.retrieval import SemanticCodeIndex
-from core.tools import _RETRIEVAL_INDEX
-from core.workspace import FolderContext
+from mu.agent.approval import build_approval_prompt, collect_approval_plans, ApprovalPlan
+from mu.agent.collation import CollationBuffer
+from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
+from mu.memory.stores import ScratchpadStore, TaskMemoryStore
+from mu.retrieval.index import SemanticCodeIndex
+from mu.retrieval.index import RETRIEVAL_INDEX as _RETRIEVAL_INDEX
+from mu.workspace.folder_context import FolderContext
 from providers.base import LLMProvider, Message, MessagePart, FileReference, ImageData
-from core.tools import (
-    TOOLS,
-    COLLATED_TOOLS,
-    execute_tool,
-    infer_tool_error_code,
-)
+from mu.tools._dispatcher import execute_tool
+from mu.tools._envelope import infer_tool_error_code
+from mu.tools.descriptors import TOOLS, COLLATED_TOOLS
 # Importing `mu.tools` triggers `@tool`-decorator registrations
 # (spawn_agent, todo_write, todo_set_status, todo_list, ...) which mirror
-# into `core.tools.TOOLS` / `TOOL_DESCRIPTORS` / `TOOL_HANDLERS` so the
+# into `mu.tools.descriptors.TOOLS` / `TOOL_DESCRIPTORS` / `TOOL_HANDLERS` so the
 # legacy Session loop sees them in `active_tools`.
 import mu.tools  # noqa: F401
 from utils.logger import logger
@@ -147,7 +144,7 @@ def _hook_abort_envelope(tool_name: str, reason: str | None) -> dict:
 
 
 # SessionManager moved to `mu/session/manager.py` in Phase 5 of the
-# refactor. Re-exported here so the legacy `from core.session import
+# refactor. Re-exported here so the legacy `from mu.session.session import
 # SessionManager` path stays valid for every existing caller and test.
 from mu.session.manager import SessionManager  # noqa: E402, F401
 
@@ -204,7 +201,7 @@ class Session:
             "approvals": {"approved": 0, "denied": 0},
             "errors": {},  # error_code → count
         }
-        from core.background_tasks import BackgroundTaskRegistry
+        from mu.tools.shell.background import BackgroundTaskRegistry
         self.background_tasks = BackgroundTaskRegistry()
 
         self.sync_runtime_state()

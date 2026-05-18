@@ -20,7 +20,7 @@ import pytest
 
 import mu.commands as mc
 from mucli import _HELP_GROUPS
-from ui.input import InputHandler
+from mu.ui.input import InputHandler
 
 
 # Set of commands the test should ignore — these are intentional escape

@@ -8,7 +8,7 @@ resumed prompt being a duplicate that the model treats as already-done.
 
 import pytest
 
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, Message, MessagePart, ProviderResponse
 
 

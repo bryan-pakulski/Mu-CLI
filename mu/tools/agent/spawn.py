@@ -175,9 +175,9 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
         )
 
     # ------------------------------------------------------- build child Session
-    # Local imports avoid a load-time cycle with `core.session` (which itself
+    # Local imports avoid a load-time cycle with `mu.session.session` (which itself
     # imports from `mu.*`).
-    from core.session import Session, SessionManager
+    from mu.session.session import Session, SessionManager
 
     max_iterations = int(args.get("max_iterations") or _DEFAULT_MAX_ITERATIONS)
     if max_iterations <= 0:
@@ -252,7 +252,7 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     requested_tools = args.get("tools")
     disabled: list = []
     if requested_tools:
-        from core.tools import TOOLS
+        from mu.tools.descriptors import TOOLS
 
         all_tool_names = {t.name for t in TOOLS}
         allowed = {str(name) for name in requested_tools} | {"flush"}

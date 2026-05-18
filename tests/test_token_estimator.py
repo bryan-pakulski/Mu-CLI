@@ -3,7 +3,7 @@
 import pytest
 
 import utils.token_estimator as te
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, ProviderResponse
 from utils.runtime_metrics import collect_context_layers
 

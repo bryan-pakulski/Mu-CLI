@@ -1,14 +1,10 @@
 import os
 import pytest
 import json
-from core.approval import build_approval_plan
-from core.tools import (
-    execute_tool,
-    get_modifications,
-    get_tool_descriptor,
-    serialize_tool_descriptor,
-)
-from core.workspace import FolderContext
+from mu.agent.approval import build_approval_plan
+from mu.tools._dispatcher import execute_tool
+from mu.tools.descriptors import get_modifications, get_tool_descriptor, serialize_tool_descriptor
+from mu.workspace.folder_context import FolderContext
 
 
 def test_batch_job_basic(tmp_path):

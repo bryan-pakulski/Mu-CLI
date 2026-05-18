@@ -13,7 +13,7 @@ import json
 import pytest
 
 import mu.tools as mt
-from core.memory import ScratchpadStore, TaskMemoryStore
+from mu.memory.stores import ScratchpadStore, TaskMemoryStore
 
 
 # ---------------------------------------------------------- registration
@@ -45,7 +45,7 @@ def test_legacy_core_tools_no_longer_has_memory_descriptors():
     descriptors for the 7 memory tools. The registry still surfaces them
     (via the @tool decorator in mu/tools/memory/handlers.py) — verifying
     the descriptor's home module is the new package, not the legacy one."""
-    from core import tools as legacy
+    from mu.tools import descriptors as legacy
 
     for name in REGISTERED_MEMORY_TOOLS:
         # Legacy module no longer holds a separate ToolDefinition for these.

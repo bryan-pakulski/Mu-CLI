@@ -3,7 +3,7 @@
 import pytest
 
 import mu.commands as mc
-from core.session import Session, SessionManager
+from mu.session.session import Session, SessionManager
 from mu.commands.docs import (
     _docs_root,
     _resolve_doc,

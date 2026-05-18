@@ -127,7 +127,7 @@ def provider_generate_with_retry(
     import mu.agent.plan_mode  # noqa: F401 — registers plan-mode pre_tool hook
     import mu.agent.usage_tracker  # noqa: F401 — registers per-session usage hooks
     import mu.agent.secret_guard  # noqa: F401 — registers bash secret-guard hook
-    from core.session import _HookAbort
+    from mu.session.session import _HookAbort
 
     base_delay = float(
         session.variables.get("provider_retry_base_delay", 0.4) or 0.4

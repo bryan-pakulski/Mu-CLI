@@ -7,7 +7,7 @@ count. Over-matching is the failure mode we care most about.
 
 import pytest
 
-from core.secret_paths import redact_secrets
+from mu.security.secret_paths import redact_secrets
 
 
 def _redacted(text):

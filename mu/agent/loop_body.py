@@ -102,7 +102,7 @@ def run_turn(session, text):
 
     new_user_message = {"role": "user", "parts": parts}
 
-    if text and session.ui:
+    if text and session.ui and session.variables.get("verbose", False):
         session.ui.render_message("user", text)
 
     workspace_context = ""
@@ -361,6 +361,10 @@ def run_turn(session, text):
                         }
                     )
                     if session.ui and active_mode != "loop":
+                        # Always emit; RichUI silences this when verbose=False.
+                        # SubagentUI consumes the message to drive its
+                        # per-tool progress tracker, so this MUST keep firing
+                        # regardless of how the parent terminal renders it.
                         session.ui.show_info(
                             f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                         )

@@ -38,3 +38,11 @@ class BaseUI(ABC):
     def show_tool_result(self, result_str):
         """Display the result of a tool execution with appropriate color-coding."""
         pass
+
+    def run_quiz(self, questions):
+        """Launch an interactive quiz for the given questions and return
+        a `{qid: submitted_value}` dict. Default implementation raises so
+        callers fall back to chat-flow Q&A — concrete UIs override."""
+        raise NotImplementedError(
+            "run_quiz is not implemented for this UI; fall back to chat-flow."
+        )

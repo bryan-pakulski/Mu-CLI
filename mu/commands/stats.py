@@ -54,6 +54,39 @@ def yolo_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
     )
 
 
+@command(
+    "/verbose",
+    help=(
+        "Toggle verbose rendering. When OFF (default) the UI hides tool-arg "
+        "dumps, per-turn token lines, result previews, the compaction notice, "
+        "and the user-echo panel. The compact `→ tool_name` indicator stays."
+    ),
+)
+def verbose_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
+    arg = (args or "").strip().lower()
+    current = bool(session.variables.get("verbose", False))
+    if arg in ("", "toggle"):
+        new_value = not current
+    elif arg in ("on", "true", "1", "yes", "enable"):
+        new_value = True
+    elif arg in ("off", "false", "0", "no", "disable"):
+        new_value = False
+    else:
+        return CommandResult(
+            ok=False,
+            message=f"Unknown /verbose argument: {args!r}. Use 'on', 'off', or 'toggle'.",
+        )
+    session.variables["verbose"] = new_value
+    if hasattr(session, "session_manager") and hasattr(session, "folder_context"):
+        session.session_manager.save_history(session.folder_context)
+    _emit_toggle_banner(session, "📢 Verbose rendering", new_value)
+    return CommandResult(
+        ok=True,
+        message=f"Verbose rendering: {'ON' if new_value else 'OFF'}",
+        data={"verbose": new_value},
+    )
+
+
 def _fmt_age(seconds: float) -> str:
     seconds = max(0.0, float(seconds or 0.0))
     if seconds < 60:

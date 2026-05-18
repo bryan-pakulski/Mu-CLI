@@ -50,6 +50,22 @@ WRITE_TOOLS: Set[str] = {
     # if the verification itself is read-only-ish).
     "verify_security_proof",
     "verify_remediation",
+    # Teacher-mode mutators (course state, file-system artifact writes,
+    # subprocess grading invocations).
+    "create_course",
+    "record_diagnostic",
+    "propose_curriculum",
+    "approve_curriculum",
+    "start_lesson",
+    "present_concept",
+    "assign_exercise",
+    "submit_assignment",
+    "grade_assignment",
+    "decide_next",
+    "record_dialog_turn",
+    "close_dialog",
+    "complete_module",
+    "finalize_course",
 }
 
 

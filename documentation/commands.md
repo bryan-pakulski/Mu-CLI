@@ -52,6 +52,7 @@ workflow, tools, and quality bar.
 | `research` | Exploration and explanation with citations and credibility weighting. | [research_mode.md](research_mode.md) |
 | `loop` | Long-horizon autonomous loop with goal lock and timeline output. | [loop_mode.md](loop_mode.md) |
 | `security` | Security audit gated on verified PoC + verified patch. | [security_mode.md](security_mode.md) |
+| `teacher` | Structured course engine — diagnose → curriculum → per-lesson grade loop. | [teacher_mode.md](teacher_mode.md) |
 
 ## Files and workspace
 
@@ -138,6 +139,26 @@ for the engine model.
 | `/feature archive <task-id>` | Archive a completed-and-reviewed task. |
 | `/feature monitor` | Watch progress in real time. |
 | `/feature help` | Inline help. |
+
+## Teacher mode
+
+`/teach` manages teacher-mode courses. Works from any mode (e.g. for
+`/teach status` peeks); the agent only drives lessons while `/mode
+teacher` is active. See [teacher_mode.md](teacher_mode.md) for the
+engine model.
+
+| Subcommand | Description |
+| --- | --- |
+| `/teach` or `/teach list` | List courses for this workspace. |
+| `/teach new <subject>` | Create a new course. Doesn't auto-switch mode — run `/mode teacher` next. |
+| `/teach load <id>` | Activate an existing course. |
+| `/teach exit` (alias: `unload`) | Clear the active course without deleting it. |
+| `/teach status` | Current module/lesson, progress %, average score. |
+| `/teach next` | Next pending lesson hint. |
+| `/teach grades` | Markdown table of every graded assignment. |
+| `/teach curriculum` | Render the syllabus. |
+| `/teach delete <id>` | Delete a course (irreversible). |
+| `/teach help` | Inline help. |
 
 ## Research
 

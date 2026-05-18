@@ -145,6 +145,7 @@ def _load_command_modules() -> None:
     from . import memory  # noqa: F401 — registers /memory
     from . import research  # noqa: F401 — registers /research
     from . import feature  # noqa: F401 — registers /feature
+    from . import teach  # noqa: F401 — registers /teach
 
 
 _load_command_modules()

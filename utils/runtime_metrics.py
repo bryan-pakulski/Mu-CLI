@@ -139,7 +139,19 @@ def collect_runtime_metrics(session):
         "yolo": {"enabled": bool(session.variables.get("yolo", False))},
         "plan": {"enabled": bool(session.variables.get("plan_mode", False))},
         "feature": collect_feature_progress(session),
+        "teacher": collect_teacher_progress(session),
     }
+
+
+def collect_teacher_progress(session):
+    """Return the teacher-state record (with course_metrics) or None."""
+    session_manager = getattr(session, "session_manager", None)
+    if session_manager is None or not hasattr(session_manager, "get_teacher_state"):
+        return None
+    record = session_manager.get_teacher_state()
+    if not isinstance(record, dict):
+        return None
+    return record
 
 
 def _chars_to_tokens(text: str, model: str) -> int:
@@ -447,5 +459,18 @@ def build_live_status_line(session):
             phase_pct = 100
 
         parts.extend([f"P:{phase_pct:>3}%", f"O:{overall_pct:>3}%"])
+
+    teacher_state = metrics.get("teacher") or {}
+    teacher_metrics = teacher_state.get("metrics") if isinstance(teacher_state, dict) else None
+    if isinstance(teacher_metrics, dict) and teacher_metrics.get("total_lessons"):
+        subject = str(teacher_state.get("subject", "course"))[:20]
+        module_idx = int(teacher_metrics.get("current_module_index", 0) or 0)
+        lesson_idx = int(teacher_metrics.get("current_lesson_index_in_module", 0) or 0)
+        overall_pct = int(teacher_metrics.get("overall_pct", 0) or 0)
+        avg = int(teacher_metrics.get("average_score_pct", 0) or 0)
+        if module_idx and lesson_idx:
+            parts.append(f"📚 {subject} M{module_idx}/L{lesson_idx} {overall_pct:>3}% avg{avg:>3}%")
+        else:
+            parts.append(f"📚 {subject} {overall_pct:>3}% avg{avg:>3}%")
 
     return " ".join(parts)

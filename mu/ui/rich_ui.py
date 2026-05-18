@@ -191,7 +191,35 @@ class RichUI:
         self.console.print(Text(str(message), style="red"))
 
     def show_info(self, message):
-        self.console.print(Text(str(message), style="blue"))
+        text = str(message)
+        if self._is_silenced_in_compact_mode(text):
+            return
+        self.console.print(Text(text, style="blue"))
+
+    def _is_silenced_in_compact_mode(self, text: str) -> bool:
+        """Filter noisy diagnostic messages when verbose rendering is off.
+
+        Compact mode (the default) hides per-turn token lines, the
+        post-iteration final-totals line, the compaction notice, the
+        full tool-args echo, and the collated-tool indicator. The
+        compact streaming `→ tool_name` indicator stays — it comes
+        from `stream_tool_call`, not from `show_info`.
+        """
+        variables = self._variables or {}
+        if variables.get("verbose", False):
+            return False
+        stripped = text.lstrip()
+        if stripped.startswith("🔨 Running tool:"):
+            return True
+        if stripped.startswith("Tokens:"):
+            return True
+        if stripped.startswith("Final session tokens:"):
+            return True
+        if "Compacting turn history" in stripped:
+            return True
+        if stripped.startswith("[Collated:"):
+            return True
+        return False
 
     def build_meter(
         self,
@@ -661,6 +689,12 @@ class RichUI:
 
     def show_tool_result(self, result_str):
         """Displays the tool result preview with green for success and red for Error:."""
+        variables = self._variables or {}
+        if not variables.get("verbose", False):
+            # Compact mode: tool results are silent — the `→ tool_name`
+            # streaming indicator already showed the call. Errors still
+            # surface because `show_error` is a separate channel.
+            return
         res_preview = str(result_str).replace("\n", " ")[:60]
         char_count = len(str(result_str))
         color = (
@@ -671,6 +705,14 @@ class RichUI:
         self.console.print(
             f"[{color}]  ↳ Result: {safe_markup(res_preview)}... ({char_count} chars)[/{color}]"
         )
+
+    def run_quiz(self, questions):
+        """Launch the live quiz UI. On any failure (no TTY, prompt-toolkit
+        bail, etc.) we re-raise so the caller can fall back to chat-flow
+        question/answer."""
+        from mu.ui.quiz_picker import run_interactive_quiz
+
+        return run_interactive_quiz(questions)
 
 
 class _GenerationLive:

@@ -117,17 +117,51 @@ def _url_grounding_tool(args: Dict[str, Any], context) -> str:
 _DDGS_HARD_TIMEOUT = 20.0
 
 
+def _run_with_timeout(func, *, timeout: float, label: str):
+    """Run `func()` on a daemon thread; raise TimeoutError after `timeout`.
+
+    Uses raw `threading.Thread(daemon=True)` rather than
+    `concurrent.futures.ThreadPoolExecutor` on purpose: the executor's
+    `with` block (or `shutdown(wait=True)`) blocks waiting for the
+    worker to finish even after `future.result(timeout=...)` raises.
+    With a daemon thread we leave the hung thread in the background and
+    return immediately — it won't keep the process alive on exit, and
+    in a long-running REPL it just gets garbage-collected the next time
+    the underlying request times out at the HTTP layer.
+    """
+    import threading
+
+    result_box: list = []
+    error_box: list = []
+
+    def _runner() -> None:
+        try:
+            result_box.append(func())
+        except BaseException as exc:  # noqa: BLE001
+            error_box.append(exc)
+
+    thread = threading.Thread(target=_runner, daemon=True, name=label)
+    thread.start()
+    thread.join(timeout=timeout)
+    if thread.is_alive():
+        raise TimeoutError(
+            f"{label} did not return within {timeout:.0f}s"
+        )
+    if error_box:
+        raise error_box[0]
+    if not result_box:
+        raise RuntimeError(f"{label} returned without a value")
+    return result_box[0]
+
+
 def _ddgs_text_search(query: str, max_results: int):
     """Run a DDGS text search with a hard wall-clock timeout.
 
     The `ddgs` library does NOT plumb a timeout to its underlying HTTP
     layer in every release, so a flaky DDG endpoint can hang the call
-    indefinitely. We dispatch the call to a daemon thread and wait at
-    most `_DDGS_HARD_TIMEOUT` seconds; on timeout we raise so the
-    caller falls through to the HTML and InstantAnswer fallbacks
-    (which both have explicit httpx/urllib timeouts).
+    indefinitely. We dispatch the call to a daemon thread; on timeout
+    the caller falls through to the HTML and InstantAnswer fallbacks.
     """
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
     def _do_search() -> list[dict]:
         from ddgs import DDGS
@@ -135,19 +169,17 @@ def _ddgs_text_search(query: str, max_results: int):
         with DDGS() as ddg:
             return list(ddg.text(query, max_results=max_results))
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(_do_search)
-        try:
-            return future.result(timeout=_DDGS_HARD_TIMEOUT)
-        except FuturesTimeout as exc:
-            # Cancel the underlying request best-effort; the thread is
-            # daemon so the process can exit even if the request never
-            # returns. The caller handles the exception and falls back.
-            future.cancel()
-            raise TimeoutError(
-                f"ddgs.text() did not return within {_DDGS_HARD_TIMEOUT:.0f}s "
-                f"for query {query!r}"
-            ) from exc
+    try:
+        return _run_with_timeout(
+            _do_search, timeout=_DDGS_HARD_TIMEOUT, label=f"ddgs.text({query!r})"
+        )
+    except TimeoutError as exc:
+        # Surface as a TimeoutError so the caller's broad `except Exception`
+        # handles it identically to other transient failures.
+        raise TimeoutError(
+            f"ddgs.text() did not return within {_DDGS_HARD_TIMEOUT:.0f}s "
+            f"for query {query!r}"
+        ) from exc
 
 
 _WEB_SEARCH_HARD_TIMEOUT = 60.0
@@ -158,39 +190,41 @@ def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, fo
 
     Bounded by `_WEB_SEARCH_HARD_TIMEOUT` so even pathological combinations
     of slow fallbacks (DNS hang on every endpoint, etc.) can't freeze the
-    chat indefinitely.
+    chat indefinitely. Runs on a daemon thread; on timeout the daemon is
+    abandoned (it cleans up on its own) and a structured error envelope
+    is returned to the agent.
     """
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
     def _run() -> str:
         return _web_search_impl(query, engine, num_results, folder_context)
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(_run)
-        try:
-            return future.result(timeout=_WEB_SEARCH_HARD_TIMEOUT)
-        except FuturesTimeout:
-            future.cancel()
-            logger.warning(
-                "web_search: hard timeout (%.0fs) for query %r — every fallback hung.",
-                _WEB_SEARCH_HARD_TIMEOUT,
-                query,
-            )
-            return json.dumps(
-                {
-                    "query": query,
-                    "engine": engine,
-                    "error": (
-                        f"web_search timed out after {_WEB_SEARCH_HARD_TIMEOUT:.0f}s. "
-                        "All search backends were unresponsive — try again, "
-                        "or use a different engine via engine='google' if "
-                        "GOOGLE_SEARCH_API_KEY is set."
-                    ),
-                    "num_results": 0,
-                    "urls_used": [],
-                    "results": [],
-                }
-            )
+    try:
+        return _run_with_timeout(
+            _run,
+            timeout=_WEB_SEARCH_HARD_TIMEOUT,
+            label=f"web_search({query!r})",
+        )
+    except TimeoutError:
+        logger.warning(
+            "web_search: hard timeout (%.0fs) for query %r — every fallback hung.",
+            _WEB_SEARCH_HARD_TIMEOUT,
+            query,
+        )
+        return json.dumps(
+            {
+                "query": query,
+                "engine": engine,
+                "error": (
+                    f"web_search timed out after {_WEB_SEARCH_HARD_TIMEOUT:.0f}s. "
+                    "All search backends were unresponsive — try again, "
+                    "or use a different engine via engine='google' if "
+                    "GOOGLE_SEARCH_API_KEY is set."
+                ),
+                "num_results": 0,
+                "urls_used": [],
+                "results": [],
+            }
+        )
 
 
 def _web_search_impl(query: str, engine: str = "duckduckgo", num_results: int = 10, folder_context=None) -> str:

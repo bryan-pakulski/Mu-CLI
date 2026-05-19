@@ -80,9 +80,51 @@ def _load_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         except ImportError:
             pass
 
+    _queue_session_resumption_briefing(session)
+
     msg = f"Loaded session: {session.session_manager.current_session_name}"
     _emit(session, msg, allow_prompt)
     return CommandResult(ok=True, message=msg)
+
+
+def _queue_session_resumption_briefing(session: Any) -> None:
+    """If the loaded session has active teacher / feature state, brief
+    the next-turn agent so it picks up where the previous session left
+    off without asking the user to re-explain."""
+    if not hasattr(session, "queue_resumption_briefing"):
+        return
+    sm = session.session_manager
+    name = sm.current_session_name
+    fragments = [f"You just loaded session **{name}**."]
+
+    teacher_state = sm.get_teacher_state() if hasattr(sm, "get_teacher_state") else None
+    if isinstance(teacher_state, dict):
+        course_id = teacher_state.get("course_id") or ""
+        subject = teacher_state.get("subject") or ""
+        status = teacher_state.get("status") or ""
+        metrics = teacher_state.get("metrics") or {}
+        fragments.append(
+            f"ACTIVE COURSE: `{course_id}` (subject: {subject!r}, status: "
+            f"{status}, progress: {metrics.get('lessons_completed', 0)}/"
+            f"{metrics.get('total_lessons', 0)} lessons, avg "
+            f"{metrics.get('average_score_pct', 0)}%). Run /teach status if "
+            "you need a finer-grained snapshot before resuming."
+        )
+
+    feature_state = sm.get_feature_state() if hasattr(sm, "get_feature_state") else None
+    if isinstance(feature_state, dict):
+        feature_id = feature_state.get("feature_id") or ""
+        feature_name = feature_state.get("feature_name") or ""
+        status = feature_state.get("status") or ""
+        fragments.append(
+            f"ACTIVE FEATURE: `{feature_id}` (name: {feature_name!r}, "
+            f"status: {status}). Call get_current_task to see the next "
+            "actionable item; do NOT re-plan from scratch."
+        )
+
+    if len(fragments) <= 1:
+        return  # only the session-name line; not worth briefing
+    session.queue_resumption_briefing("\n".join(fragments))
 
 
 def _new_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:

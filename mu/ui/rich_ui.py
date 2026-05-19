@@ -744,6 +744,93 @@ class RichUI:
 
         return run_interactive_quiz(questions)
 
+    def ask_user_choice(
+        self,
+        question,
+        options,
+        *,
+        multi_select=False,
+        description="",
+        allow_other=False,
+    ):
+        """Run the multi-choice prompt picker. On TTY failure, falls back
+        to a numbered prompt on stdin/stdout so headless contexts still
+        get a useful response shape."""
+        try:
+            from mu.ui.choice_prompt import run_interactive_choice_prompt
+
+            return run_interactive_choice_prompt(
+                question,
+                list(options),
+                multi_select=bool(multi_select),
+                description=str(description or ""),
+                allow_other=bool(allow_other),
+            )
+        except Exception:
+            return self._fallback_choice_prompt(
+                question,
+                list(options),
+                multi_select=bool(multi_select),
+                description=str(description or ""),
+                allow_other=bool(allow_other),
+            )
+
+    def _fallback_choice_prompt(
+        self, question, options, *, multi_select, description, allow_other=False
+    ):
+        """Numbered-list prompt for when prompt-toolkit can't drive the TTY."""
+        other_index = len(options) + 1 if allow_other else None
+        try:
+            self.console.print(f"\n[bold]{safe_markup(question)}[/bold]")
+            if description:
+                self.console.print(f"[dim]{safe_markup(description)}[/dim]")
+            for i, option in enumerate(options, start=1):
+                self.console.print(f"  {i}. {safe_markup(option)}")
+            if other_index is not None:
+                self.console.print(
+                    f"  {other_index}. [italic dim]Other (type your own)…[/italic dim]"
+                )
+            if multi_select:
+                self.console.print(
+                    "[dim]Enter comma-separated numbers (e.g. 1,3) or blank to cancel:[/dim]"
+                )
+            else:
+                self.console.print(
+                    "[dim]Enter a number, or blank to cancel:[/dim]"
+                )
+            raw = input("> ").strip()
+        except Exception:
+            return {"selected": [], "other_text": "", "cancelled": True}
+        if not raw:
+            return {"selected": [], "other_text": "", "cancelled": True}
+        picks: list[str] = []
+        wants_other = False
+        for token in raw.split(","):
+            token = token.strip()
+            if not token.isdigit():
+                continue
+            idx = int(token) - 1
+            if other_index is not None and idx == other_index - 1:
+                wants_other = True
+                if not multi_select:
+                    break
+                continue
+            if 0 <= idx < len(options):
+                picks.append(options[idx])
+            if not multi_select and picks:
+                break
+        other_text = ""
+        if wants_other:
+            try:
+                other_text = input(f"Other ({question.rstrip('?:')}): ").strip()
+            except Exception:
+                other_text = ""
+        return {
+            "selected": picks,
+            "other_text": other_text,
+            "cancelled": not picks and not other_text,
+        }
+
 
 class _GenerationLive:
     """Context manager that owns a single Rich Live region for one agent

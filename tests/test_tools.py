@@ -10,6 +10,14 @@ from mu.tools.workspace.handlers import read_file
 from mu.workspace.folder_context import FolderContext
 
 
+@pytest.fixture(autouse=True)
+def _isolate_feature_writes(tmp_path, monkeypatch):
+    """Feature handlers fall back to `os.getcwd()` for the workspace
+    root. Chdir into tmp_path so `documentation/feature_req_*` dirs
+    land in /tmp instead of the repo."""
+    monkeypatch.chdir(tmp_path)
+
+
 class _FeatureSessionManagerStub:
     def __init__(self, metadata_path: str):
         self._metadata_path = metadata_path

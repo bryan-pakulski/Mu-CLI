@@ -88,6 +88,13 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self._pending_user_text = ""
+        # One-shot system-prompt briefings queued by load/switch commands.
+        # Drained at the top of every agent turn so the model knows it
+        # just resumed an in-flight course / feature / session and can
+        # re-orient without the user re-explaining state. See
+        # `queue_resumption_briefing` below + the drain site in
+        # `mu.agent.loop_body`.
+        self._pending_resumption_briefings: list[str] = []
         self.paused_execution_text: str | None = None
         # Flips to True when `raise_blocker` fires inside the agentic
         # loop. The loop-mode watchdog reads it to know the agent
@@ -593,6 +600,37 @@ class Session:
         from mu.session.context import inject_hierarchical_context
 
         return inject_hierarchical_context(self, system_prompt)
+
+    def queue_resumption_briefing(self, briefing: str) -> None:
+        """Add a one-shot resumption note to the next agent turn.
+
+        Used by /teach load, /feature load, and session-switch paths to
+        tell the agent it just resumed in-flight state: which course /
+        feature is active, where the user was last, what's pending. The
+        briefing flushes into the next turn's system prompt and then
+        clears — it never accumulates.
+        """
+        text = (briefing or "").strip()
+        if not text:
+            return
+        if not hasattr(self, "_pending_resumption_briefings"):
+            self._pending_resumption_briefings = []
+        self._pending_resumption_briefings.append(text)
+
+    def _drain_resumption_briefings(self) -> str:
+        """Drain queued resumption briefings into a formatted block for
+        the system prompt. Returns an empty string if none are queued."""
+        briefings = getattr(self, "_pending_resumption_briefings", None) or []
+        if not briefings:
+            return ""
+        self._pending_resumption_briefings = []
+        body = "\n\n".join(briefings)
+        return (
+            "## RESUMPTION CONTEXT\n"
+            "You just resumed in-flight work. Orient against this state "
+            "before responding — do NOT ask the user to re-explain.\n\n"
+            f"{body}"
+        )
 
     def _render_tool_result(self, result) -> str:
         if isinstance(result, dict):

@@ -1,3 +1,5 @@
+import pytest
+
 from mu.feature.engine import (
     STATUS_BLOCKED,
     STATUS_COMPLETED,
@@ -11,6 +13,12 @@ from mu.feature.engine import (
     recalculate_phase_statuses,
     transition_task_status,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_feature_writes(tmp_path, monkeypatch):
+    """Same isolation as test_feature_mode_phase_one — see that file."""
+    monkeypatch.chdir(tmp_path)
 
 
 def test_execution_snapshot_tracks_next_phase_and_task(tmp_path):

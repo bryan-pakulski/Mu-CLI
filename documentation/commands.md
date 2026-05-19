@@ -172,6 +172,12 @@ engine model.
 | `/research stats` | Breakdown by source type + credibility-tier histogram. |
 | `/research clear` | Wipe the citation engine. Useful when starting a new research topic. |
 
+## Shell escape
+
+| Command | Description |
+| --- | --- |
+| `/bash <cmd>` (aliases `/sh`, `/!`) | Run a shell command in the active workspace folder and print stdout/stderr. User-facing convenience — distinct from the agent's `bash` tool. Bounded by a 60s timeout. Not for interactive commands (vim, less); use Ctrl+Z to suspend mucli for those. |
+
 ## Diagnostics
 
 | Command | Description |

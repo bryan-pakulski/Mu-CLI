@@ -12,6 +12,14 @@ from mu.session.session import Session, SessionManager
 from providers.base import LLMProvider, MessagePart, ProviderResponse
 
 
+@pytest.fixture(autouse=True)
+def _isolate_feature_writes(tmp_path, monkeypatch):
+    """Feature plans default their workspace root to `os.getcwd()`.
+    Chdir to tmp_path so any `documentation/feature_req_*` directory
+    created during a test lands in /tmp instead of the repo."""
+    monkeypatch.chdir(tmp_path)
+
+
 class DummyProvider(LLMProvider):
     def get_available_models(self):
         return ["dummy"]

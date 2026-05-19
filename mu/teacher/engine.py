@@ -131,8 +131,13 @@ class LectureTurn:
       comprehension question. The engine counts these against
       `min_lecture_checks` so the lecturer can't just monologue and
       claim comprehension was confirmed.
-    - `learner_response` — the learner's answer to a check or
-      a question they raised mid-lecture.
+    - `learner_response` — the learner's answer to a check.
+    - `learner_question` — the learner interrupted the planned lecture
+      with a question. The agent SHOULD address it in the very next
+      `agent_explanation` turn (covered by the transcript so post-hoc
+      review can verify the interrupt was honored). Doesn't count
+      against `min_lecture_checks` — that gate enforces agent-driven
+      checks, not learner-driven ones.
     """
 
     turn_index: int
@@ -202,6 +207,32 @@ class CourseEvent:
     created_at: float = field(default_factory=time.time)
 
 
+REVIEW_PENDING = "pending"
+REVIEW_DONE = "done"
+REVIEW_SKIPPED = "skipped"
+
+
+@dataclass
+class ScheduledReview:
+    """A spaced-repetition checkpoint scheduled against a finished lesson.
+
+    Tracks: when it's due (in terms of `lessons_completed_count` on the
+    course), the original lesson it reviews, and the result once the
+    learner has taken it. The engine surfaces due reviews via
+    `due_reviews(course)` so the agent can fold them into the next-lesson
+    flow without breaking the canonical lesson list.
+    """
+
+    review_id: str
+    source_lesson_id: str
+    due_at_lesson_count: int
+    status: str = REVIEW_PENDING
+    score_pct: int | None = None
+    completed_at: float | None = None
+    notes: str = ""
+    created_at: float = field(default_factory=time.time)
+
+
 @dataclass
 class Course:
     course_id: str
@@ -217,6 +248,13 @@ class Course:
     current_lesson_id: str | None = None
     current_assignment_id: str | None = None
     event_log: list[CourseEvent] = field(default_factory=list)
+    # ---- spaced review ---------------------------------------------
+    # `lessons_completed_count` increments every time a lesson transitions
+    # to LESSON_COMPLETED. `scheduled_reviews` holds pending review
+    # checkpoints keyed off that counter; `due_reviews(course)` returns
+    # the ones whose `due_at_lesson_count` is <= the current counter.
+    lessons_completed_count: int = 0
+    scheduled_reviews: list[ScheduledReview] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -308,9 +346,12 @@ def _course_from_dict(data: dict[str, Any]) -> Course:
         current_module_id=data.get("current_module_id"),
         current_lesson_id=data.get("current_lesson_id"),
         current_assignment_id=data.get("current_assignment_id"),
+        lessons_completed_count=int(data.get("lessons_completed_count", 0) or 0),
         created_at=data.get("created_at", time.time()),
         updated_at=data.get("updated_at", time.time()),
     )
+    for raw in data.get("scheduled_reviews", []):
+        course.scheduled_reviews.append(ScheduledReview(**raw))
     for raw in data.get("modules", []):
         course.modules.append(Module(**raw))
     for raw in data.get("lessons", []):
@@ -424,9 +465,15 @@ def advance_lesson_status(course: Course, lesson_id: str, to_status: str) -> Les
         entity_id=lesson.lesson_id,
         payload={"from": lesson.status, "to": to_status},
     )
+    previous_status = lesson.status
     lesson.status = to_status
     if to_status == LESSON_REMEDIATING:
         lesson.remediation_count += 1
+    # Bump the course-wide completion counter so scheduled reviews
+    # have a stable tick to schedule against. Idempotent — only fires
+    # when a lesson FIRST enters the completed state.
+    if to_status == LESSON_COMPLETED and previous_status != LESSON_COMPLETED:
+        course.lessons_completed_count += 1
     return lesson
 
 
@@ -626,6 +673,36 @@ def start_lecture(course: Course, lesson_id: str, *, plan: str = "") -> Lesson:
     return lesson
 
 
+MIN_EXPLANATION_CHARS_BEFORE_CHECK = 80
+
+
+def _has_substantive_explanation_since_last_check(lesson: Lesson) -> bool:
+    """True iff at least one `agent_explanation` with length >=
+    `MIN_EXPLANATION_CHARS_BEFORE_CHECK` exists between the lesson's most
+    recent `agent_check` (or the lecture start) and the present moment.
+
+    Used to refuse `agent_check` turns that would otherwise let the
+    agent ask blind. The minimum length is a heuristic against
+    one-line placeholder explanations like "covered intro" — real
+    teaching content runs at least a sentence.
+    """
+    start = 0
+    # Find the most recent agent_check; the window we care about starts
+    # right after it. If there's no prior check, the window is the whole
+    # lecture so far.
+    for idx in range(len(lesson.lecture_turns) - 1, -1, -1):
+        if lesson.lecture_turns[idx].role == "agent_check":
+            start = idx + 1
+            break
+    for turn in lesson.lecture_turns[start:]:
+        if (
+            turn.role == "agent_explanation"
+            and len(turn.content) >= MIN_EXPLANATION_CHARS_BEFORE_CHECK
+        ):
+            return True
+    return False
+
+
 def record_lecture_turn(
     course: Course,
     lesson_id: str,
@@ -643,16 +720,38 @@ def record_lecture_turn(
             f"(lesson {lesson_id!r} is {lesson.status!r}); "
             "call start_lecture first"
         )
-    if role not in {"agent_explanation", "agent_check", "learner_response"}:
+    if role not in {
+        "agent_explanation",
+        "agent_check",
+        "learner_response",
+        "learner_question",
+    }:
         raise ValueError(
             "lecture turn role must be one of "
-            "'agent_explanation' | 'agent_check' | 'learner_response', "
-            f"got {role!r}"
+            "'agent_explanation' | 'agent_check' | 'learner_response' "
+            f"| 'learner_question', got {role!r}"
         )
+    cleaned = str(content or "").strip()
+    if role == "agent_check":
+        # Force "explain first, then ask". Walk back from the new check
+        # to the previous `agent_check` (or lecture start). At least one
+        # `agent_explanation` of substantive length must sit in that
+        # window — otherwise the agent is asking blind.
+        if not _has_substantive_explanation_since_last_check(lesson):
+            raise ValueError(
+                "record_lecture_turn(role='agent_check') refused: there is "
+                "no `agent_explanation` of at least "
+                f"{MIN_EXPLANATION_CHARS_BEFORE_CHECK} characters between "
+                "the last `agent_check` (or the lecture start) and now. "
+                "Explain the concept first (and SAY it to the learner in "
+                "chat — `record_lecture_turn(agent_explanation, content=…)` "
+                "is the transcript record, NOT a substitute for actually "
+                "teaching), then ask the check."
+            )
     turn = LectureTurn(
         turn_index=len(lesson.lecture_turns),
         role=role,
-        content=str(content or "").strip(),
+        content=cleaned,
         comprehension_signal=comprehension_signal,
     )
     lesson.lecture_turns.append(turn)
@@ -754,6 +853,7 @@ def _write_lecture_transcript(course: Course, lesson: Lesson) -> None:
             "agent_explanation": "**Agent (teach)**",
             "agent_check": "**Agent (check)**",
             "learner_response": "**Learner**",
+            "learner_question": "**Learner (interrupt)**",
         }.get(turn.role, f"**{turn.role}**")
         lines.append(f"{speaker} ({turn.turn_index}): {turn.content}")
         if turn.comprehension_signal:
@@ -772,6 +872,119 @@ def _write_lecture_transcript(course: Course, lesson: Lesson) -> None:
                 lines.append(f"  - {gap}")
     with open(os.path.join(target_dir, f"{lesson.lesson_id}.md"), "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines))
+
+
+# --- spaced review --------------------------------------------------------
+
+
+def schedule_review(
+    course: Course,
+    *,
+    source_lesson_id: str,
+    after_n_lessons: int,
+    review_id: str | None = None,
+    notes: str = "",
+) -> ScheduledReview:
+    """Queue a spaced-review checkpoint for `source_lesson_id`.
+
+    The checkpoint becomes due once `course.lessons_completed_count`
+    has advanced by `after_n_lessons` from now. Refuses unless the
+    source lesson exists. Idempotent on `review_id` — if one already
+    exists, that one is returned unchanged.
+    """
+    if after_n_lessons < 1:
+        raise ValueError(
+            f"after_n_lessons must be >= 1 (got {after_n_lessons}); "
+            "a review needs at least one intervening lesson to be a 'review'."
+        )
+    lesson = find_lesson(course, source_lesson_id)
+    if lesson is None:
+        raise ValueError(f"source lesson {source_lesson_id!r} not found")
+    chosen_id = _storage.slugify(
+        review_id or f"review_{source_lesson_id}_{int(time.time() * 1000)}"
+    )
+    for existing in course.scheduled_reviews:
+        if existing.review_id == chosen_id:
+            return existing
+    review = ScheduledReview(
+        review_id=chosen_id,
+        source_lesson_id=source_lesson_id,
+        due_at_lesson_count=course.lessons_completed_count + int(after_n_lessons),
+        notes=str(notes or "").strip(),
+    )
+    course.scheduled_reviews.append(review)
+    add_event(
+        course,
+        kind="review_scheduled",
+        entity="review",
+        entity_id=review.review_id,
+        payload={
+            "source_lesson_id": source_lesson_id,
+            "due_at_lesson_count": review.due_at_lesson_count,
+            "after_n_lessons": after_n_lessons,
+        },
+    )
+    return review
+
+
+def due_reviews(course: Course) -> list[ScheduledReview]:
+    """Return reviews whose `due_at_lesson_count` has already passed,
+    sorted by due-date so the oldest debt comes back first."""
+    pending = [
+        r for r in course.scheduled_reviews
+        if r.status == REVIEW_PENDING
+        and r.due_at_lesson_count <= course.lessons_completed_count
+    ]
+    pending.sort(key=lambda r: r.due_at_lesson_count)
+    return pending
+
+
+def find_review(course: Course, review_id: str) -> ScheduledReview | None:
+    for review in course.scheduled_reviews:
+        if review.review_id == review_id:
+            return review
+    return None
+
+
+def complete_review(
+    course: Course,
+    review_id: str,
+    *,
+    score_pct: int,
+    notes: str = "",
+    skipped: bool = False,
+) -> ScheduledReview:
+    """Mark a scheduled review as taken (or explicitly skipped).
+
+    Refuses if the review is already done — re-taking is a separate
+    scheduled item; callers should `schedule_review` again with a
+    fresh interval if they want a repeat.
+    """
+    review = find_review(course, review_id)
+    if review is None:
+        raise ValueError(f"review {review_id!r} not found")
+    if review.status != REVIEW_PENDING:
+        raise ValueError(
+            f"review {review_id!r} already finalized (status: {review.status!r}). "
+            "Schedule a fresh review with schedule_review if you want a repeat."
+        )
+    review.score_pct = max(0, min(100, int(score_pct)))
+    review.status = REVIEW_SKIPPED if skipped else REVIEW_DONE
+    review.completed_at = time.time()
+    if notes:
+        review.notes = (review.notes + "\n" if review.notes else "") + notes.strip()
+    add_event(
+        course,
+        kind="review_completed",
+        entity="review",
+        entity_id=review.review_id,
+        payload={
+            "score_pct": review.score_pct,
+            "skipped": skipped,
+            "source_lesson_id": review.source_lesson_id,
+        },
+    )
+    return review
 
 
 # --- metrics for HUD ------------------------------------------------------
@@ -839,23 +1052,31 @@ __all__ = [
     "LectureTurn",
     "Lesson",
     "Module",
+    "REVIEW_DONE",
+    "REVIEW_PENDING",
+    "REVIEW_SKIPPED",
     "RubricItem",
+    "ScheduledReview",
     "VerificationSpec",
     "add_event",
     "advance_lesson_status",
     "close_socratic_dialog",
+    "complete_review",
     "conclude_lecture",
     "course_metrics",
     "create_course",
     "decide_next",
+    "due_reviews",
     "find_assignment",
     "find_lesson",
     "find_module",
+    "find_review",
     "is_valid_lesson_transition",
     "load_course",
     "next_pending_lesson",
     "record_dialog_turn",
     "record_lecture_turn",
     "save_course",
+    "schedule_review",
     "start_lecture",
 ]

@@ -46,3 +46,23 @@ class BaseUI(ABC):
         raise NotImplementedError(
             "run_quiz is not implemented for this UI; fall back to chat-flow."
         )
+
+    def ask_user_choice(
+        self,
+        question,
+        options,
+        *,
+        multi_select=False,
+        description="",
+        allow_other=False,
+    ):
+        """Prompt the user to pick one (or many) of `options` and return
+        `{"selected": [...], "other_text": str, "cancelled": bool}`.
+        When `allow_other` is True the picker offers an extra "Other"
+        entry that opens a free-form text prompt. Default implementation
+        raises so callers fall back to chat-flow Q&A — concrete UIs
+        override with a real interactive picker."""
+        raise NotImplementedError(
+            "ask_user_choice is not implemented for this UI; "
+            "fall back to chat-flow."
+        )

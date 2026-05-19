@@ -35,22 +35,30 @@ from mu.teacher.engine import (
     LESSON_REMEDIATING,
     Lesson,
     Module,
+    REVIEW_DONE,
+    REVIEW_PENDING,
+    REVIEW_SKIPPED,
     RubricItem,
+    ScheduledReview,
     VerificationSpec,
     advance_lesson_status,
     close_socratic_dialog,
+    complete_review,
     conclude_lecture,
     course_metrics,
     create_course,
     decide_next,
+    due_reviews,
     find_assignment,
     find_lesson,
+    find_review,
     is_valid_lesson_transition,
     load_course,
     next_pending_lesson,
     record_dialog_turn,
     record_lecture_turn,
     save_course,
+    schedule_review,
     start_lecture,
 )
 
@@ -173,14 +181,158 @@ def test_record_lecture_turn_validates_role(isolated_workspace):
         record_lecture_turn(course, "l1", role="not_a_role", content="x")
 
 
+def test_record_lecture_turn_accepts_learner_question(isolated_workspace):
+    """Mid-lecture interrupts: the learner can ask a question outside
+    the agent's planned check rhythm; the engine accepts it as a
+    distinct role and tracks it in the transcript."""
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    turn = record_lecture_turn(
+        course, "l1", role="learner_question",
+        content="Wait — does malloc zero the memory?",
+    )
+    assert turn.role == "learner_question"
+    lesson = find_lesson(course, "l1")
+    assert lesson.lecture_turns[-1].role == "learner_question"
+
+
+def test_agent_check_refused_without_prior_explanation(isolated_workspace):
+    """The engine forces 'explain, then check' cadence. Asking a
+    comprehension question without first recording a substantive
+    explanation in the same window is refused."""
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    with pytest.raises(ValueError, match="no `agent_explanation`"):
+        record_lecture_turn(
+            course, "l1", role="agent_check",
+            content="What does malloc return?",
+        )
+
+
+def test_agent_check_refused_when_explanation_too_short(isolated_workspace):
+    """A tiny placeholder explanation ("covered intro") shouldn't unlock
+    the check gate — the rule wants real teaching content."""
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    record_lecture_turn(
+        course, "l1", role="agent_explanation", content="covered intro",
+    )
+    with pytest.raises(ValueError, match="no `agent_explanation`"):
+        record_lecture_turn(
+            course, "l1", role="agent_check", content="ok so what now?",
+        )
+
+
+def test_agent_check_allowed_after_substantive_explanation(isolated_workspace):
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    record_lecture_turn(
+        course, "l1", role="agent_explanation",
+        content=(
+            "malloc(size_t n) allocates n bytes of uninitialized memory and "
+            "returns a void* pointer to the start of the block, or NULL on "
+            "failure. The pointer must be released via free() — there is no "
+            "garbage collector in C."
+        ),
+    )
+    # Substantive explanation precedes — check is allowed.
+    record_lecture_turn(
+        course, "l1", role="agent_check",
+        content="What does malloc return on failure?",
+    )
+    lesson = find_lesson(course, "l1")
+    assert lesson.lecture_turns[-1].role == "agent_check"
+
+
+def test_second_check_requires_fresh_explanation(isolated_workspace):
+    """After explanation→check→response, the agent can't just chain
+    another check without explaining the next chunk first."""
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    long_explanation = (
+        "malloc(size_t n) returns a void* and may return NULL on failure. "
+        "Always check the return value before dereferencing. There is no "
+        "garbage collector — pair every malloc with exactly one free."
+    )
+    record_lecture_turn(course, "l1", role="agent_explanation", content=long_explanation)
+    record_lecture_turn(course, "l1", role="agent_check", content="What does malloc return?")
+    record_lecture_turn(course, "l1", role="learner_response", content="a void pointer")
+    # Now try another check without a new explanation chunk — must refuse.
+    with pytest.raises(ValueError, match="no `agent_explanation`"):
+        record_lecture_turn(
+            course, "l1", role="agent_check",
+            content="And what about free()?",
+        )
+    # Add a substantive explanation for the second chunk; now the check
+    # is allowed.
+    record_lecture_turn(
+        course, "l1", role="agent_explanation",
+        content=(
+            "free(ptr) releases the block that malloc handed back. Calling "
+            "free on a NULL pointer is a no-op; calling it twice on the same "
+            "non-NULL pointer is undefined behaviour."
+        ),
+    )
+    record_lecture_turn(
+        course, "l1", role="agent_check", content="What happens if you free twice?",
+    )
+
+
+def test_learner_question_does_not_count_toward_min_checks(isolated_workspace):
+    """`conclude_lecture` requires `min_lecture_checks` agent_check
+    turns. learner_question is a separate role and must NOT be
+    counted, otherwise the agent could skip checks by relying on the
+    learner's curiosity."""
+    course = _seed_course()
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    start_lecture(course, "l1")
+    # Default min_lecture_checks=2. Record 2 learner_question turns but
+    # zero agent_check turns; conclude_lecture should still refuse.
+    record_lecture_turn(course, "l1", role="agent_explanation", content="malloc...")
+    record_lecture_turn(course, "l1", role="learner_question", content="q1?")
+    record_lecture_turn(course, "l1", role="agent_explanation", content="ans1")
+    record_lecture_turn(course, "l1", role="learner_question", content="q2?")
+    record_lecture_turn(course, "l1", role="agent_explanation", content="ans2")
+    with pytest.raises(ValueError, match="agent_check.* turns required"):
+        conclude_lecture(course, "l1", comprehension_pct=90, gaps=[])
+
+
+_EXPLANATION_A = (
+    "First chunk: malloc(n) returns void* to an uninitialised block of n "
+    "bytes, or NULL on failure. Check the return before dereferencing."
+)
+_EXPLANATION_B = (
+    "Second chunk: free(ptr) releases the block. Pair every malloc with "
+    "exactly one free. Calling free on NULL is a no-op; calling it twice "
+    "on the same non-NULL pointer is undefined behaviour."
+)
+
+
+def _two_check_lecture(course):
+    """Drive a lesson through two explain→check→response cycles. The
+    new gate requires substantive explanations before each check, so
+    helper tests share this scaffold."""
+    record_lecture_turn(course, "l1", role="agent_explanation", content=_EXPLANATION_A)
+    record_lecture_turn(course, "l1", role="agent_check", content="What does malloc return on failure?")
+    record_lecture_turn(course, "l1", role="learner_response", content="NULL")
+    record_lecture_turn(course, "l1", role="agent_explanation", content=_EXPLANATION_B)
+    record_lecture_turn(course, "l1", role="agent_check", content="What happens if you free twice?")
+    record_lecture_turn(course, "l1", role="learner_response", content="undefined behaviour")
+
+
 def test_conclude_lecture_refuses_below_min_checks(isolated_workspace):
     course = _seed_course()
     advance_lesson_status(course, "l1", LESSON_PRESENTING)
     start_lecture(course, "l1")
     # Only one agent_check; default min_lecture_checks is 2.
-    record_lecture_turn(course, "l1", role="agent_explanation", content="malloc returns void*")
-    record_lecture_turn(course, "l1", role="agent_check", content="What does it return?")
-    record_lecture_turn(course, "l1", role="learner_response", content="void pointer", comprehension_signal="on track")
+    record_lecture_turn(course, "l1", role="agent_explanation", content=_EXPLANATION_A)
+    record_lecture_turn(course, "l1", role="agent_check", content="What does it return on failure?")
+    record_lecture_turn(course, "l1", role="learner_response", content="NULL", comprehension_signal="on track")
     with pytest.raises(ValueError, match="agent_check.* turns required"):
         conclude_lecture(course, "l1", comprehension_pct=90, gaps=[])
 
@@ -189,10 +341,7 @@ def test_conclude_lecture_refuses_below_comprehension_threshold(isolated_workspa
     course = _seed_course()
     advance_lesson_status(course, "l1", LESSON_PRESENTING)
     start_lecture(course, "l1")
-    record_lecture_turn(course, "l1", role="agent_check", content="q1?")
-    record_lecture_turn(course, "l1", role="learner_response", content="a1")
-    record_lecture_turn(course, "l1", role="agent_check", content="q2?")
-    record_lecture_turn(course, "l1", role="learner_response", content="a2")
+    _two_check_lecture(course)
     # Default threshold is 60. comprehension_pct=40 < 60 → refusal.
     with pytest.raises(ValueError, match="below threshold"):
         conclude_lecture(course, "l1", comprehension_pct=40, gaps=["X"])
@@ -202,9 +351,7 @@ def test_conclude_lecture_advances_to_assigned(isolated_workspace):
     course = _seed_course()
     advance_lesson_status(course, "l1", LESSON_PRESENTING)
     start_lecture(course, "l1")
-    for _ in range(2):
-        record_lecture_turn(course, "l1", role="agent_check", content="q?")
-        record_lecture_turn(course, "l1", role="learner_response", content="a")
+    _two_check_lecture(course)
     lesson = conclude_lecture(
         course, "l1", comprehension_pct=85, gaps=["pointer arithmetic"], summary="solid"
     )
@@ -218,9 +365,7 @@ def test_conclude_lecture_can_stay_lecturing_when_not_ready(isolated_workspace):
     course = _seed_course()
     advance_lesson_status(course, "l1", LESSON_PRESENTING)
     start_lecture(course, "l1")
-    for _ in range(2):
-        record_lecture_turn(course, "l1", role="agent_check", content="q?")
-        record_lecture_turn(course, "l1", role="learner_response", content="a")
+    _two_check_lecture(course)
     lesson = conclude_lecture(
         course, "l1", comprehension_pct=80, gaps=[], ready_for_assignment=False
     )
@@ -229,13 +374,90 @@ def test_conclude_lecture_can_stay_lecturing_when_not_ready(isolated_workspace):
     assert lesson.lecture_concluded is True
 
 
+def test_schedule_review_refuses_unknown_lesson(isolated_workspace):
+    course = _seed_course()
+    with pytest.raises(ValueError, match="source lesson"):
+        schedule_review(course, source_lesson_id="not_a_lesson", after_n_lessons=2)
+
+
+def test_schedule_review_refuses_zero_interval(isolated_workspace):
+    course = _seed_course()
+    with pytest.raises(ValueError, match="after_n_lessons must be >= 1"):
+        schedule_review(course, source_lesson_id="l1", after_n_lessons=0)
+
+
+def test_due_reviews_empty_until_counter_advances(isolated_workspace):
+    course = _seed_course()
+    schedule_review(course, source_lesson_id="l1", after_n_lessons=2)
+    # No lessons completed yet; nothing's due.
+    assert due_reviews(course) == []
+    # Manually bump the counter to simulate two finished lessons.
+    course.lessons_completed_count += 2
+    assert len(due_reviews(course)) == 1
+
+
+def test_advance_to_completed_bumps_counter(isolated_workspace):
+    course = _seed_course()
+    assert course.lessons_completed_count == 0
+    advance_lesson_status(course, "l1", LESSON_PRESENTING)
+    advance_lesson_status(course, "l1", LESSON_ASSIGNED)
+    advance_lesson_status(course, "l1", LESSON_GRADED)
+    advance_lesson_status(course, "l1", LESSON_COMPLETED)
+    assert course.lessons_completed_count == 1
+    # Idempotent — re-completing doesn't double-bump (the transition
+    # table forbids completed→completed anyway, but the guard is here).
+
+
+def test_complete_review_records_score_and_status(isolated_workspace):
+    course = _seed_course()
+    r = schedule_review(course, source_lesson_id="l1", after_n_lessons=2)
+    course.lessons_completed_count += 2
+    finalized = complete_review(course, r.review_id, score_pct=85)
+    assert finalized.status == REVIEW_DONE
+    assert finalized.score_pct == 85
+    assert finalized.completed_at is not None
+    # The completed review is no longer in due_reviews.
+    assert due_reviews(course) == []
+
+
+def test_complete_review_skipped_path(isolated_workspace):
+    course = _seed_course()
+    r = schedule_review(course, source_lesson_id="l1", after_n_lessons=1)
+    course.lessons_completed_count += 1
+    finalized = complete_review(course, r.review_id, score_pct=0, skipped=True)
+    assert finalized.status == REVIEW_SKIPPED
+    assert due_reviews(course) == []
+
+
+def test_complete_review_refuses_double_complete(isolated_workspace):
+    course = _seed_course()
+    r = schedule_review(course, source_lesson_id="l1", after_n_lessons=1)
+    course.lessons_completed_count += 1
+    complete_review(course, r.review_id, score_pct=90)
+    with pytest.raises(ValueError, match="already finalized"):
+        complete_review(course, r.review_id, score_pct=80)
+
+
+def test_scheduled_reviews_survive_disk_round_trip(isolated_workspace):
+    course = _seed_course()
+    r = schedule_review(
+        course, source_lesson_id="l1", after_n_lessons=3, notes="weak on pointers"
+    )
+    course.lessons_completed_count = 5
+    save_course(course)
+    reloaded = load_course(course.course_id)
+    assert reloaded is not None
+    assert reloaded.lessons_completed_count == 5
+    assert len(reloaded.scheduled_reviews) == 1
+    assert reloaded.scheduled_reviews[0].review_id == r.review_id
+    assert reloaded.scheduled_reviews[0].notes == "weak on pointers"
+
+
 def test_lecture_round_trip_through_disk(isolated_workspace):
     course = _seed_course()
     advance_lesson_status(course, "l1", LESSON_PRESENTING)
     start_lecture(course, "l1", plan="malloc + free")
-    for _ in range(2):
-        record_lecture_turn(course, "l1", role="agent_check", content="q?")
-        record_lecture_turn(course, "l1", role="learner_response", content="a")
+    _two_check_lecture(course)
     conclude_lecture(course, "l1", comprehension_pct=80, gaps=["arithmetic"])
     save_course(course)
     reloaded = load_course(course.course_id)
@@ -243,8 +465,10 @@ def test_lecture_round_trip_through_disk(isolated_workspace):
     assert lesson is not None
     assert lesson.status == LESSON_ASSIGNED
     assert lesson.lecture_concluded is True
-    assert len(lesson.lecture_turns) == 4
-    assert lesson.lecture_turns[0].role == "agent_check"
+    # Two explain→check→response cycles = 6 turns.
+    assert len(lesson.lecture_turns) == 6
+    assert lesson.lecture_turns[0].role == "agent_explanation"
+    assert lesson.lecture_turns[1].role == "agent_check"
 
 
 def test_advance_lesson_status_rejects_invalid(isolated_workspace):

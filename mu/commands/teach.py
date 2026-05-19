@@ -187,11 +187,77 @@ def _load(session: Any, rest: str) -> CommandResult:
     session.session_manager.active_course_id = course.course_id
     session.session_manager.teacher_state = dict(record)
     session.session_manager.save_history(fc)
+    _queue_course_resumption_briefing(session, course)
     return CommandResult(
         ok=True,
         message=f"Loaded course `{course.course_id}` ({course.subject}).",
         data={"course": record},
     )
+
+
+def _queue_course_resumption_briefing(session: Any, course: Course) -> None:
+    """Tell the next-turn agent that it just resumed an in-flight course.
+
+    Includes: subject, status, current lesson, latest grade, and the
+    next pending action. The model uses this to skip re-asking the
+    user where they were and pick up the lesson loop directly.
+    """
+    if not hasattr(session, "queue_resumption_briefing"):
+        return
+    metrics = course_metrics(course)
+    nxt = next_pending_lesson(course)
+    lines = [
+        f"You just resumed teacher-mode course **{course.course_id}** "
+        f"(subject: {course.subject!r}, target_level: {course.target_level}).",
+        f"Course status: {course.status}.",
+        f"Progress: {metrics['lessons_completed']}/{metrics['total_lessons']} "
+        f"lessons completed ({metrics['overall_pct']}%); "
+        f"average grade {metrics['average_score_pct']}%.",
+    ]
+    if course.current_lesson_id:
+        current = find_lesson(course, course.current_lesson_id)
+        if current is not None:
+            lines.append(
+                f"Current lesson: `{current.lesson_id}` — {current.title!r} "
+                f"(status: {current.status})."
+            )
+    if nxt is not None and (
+        course.current_lesson_id is None or nxt.lesson_id != course.current_lesson_id
+    ):
+        lines.append(
+            f"Next pending lesson: `{nxt.lesson_id}` — {nxt.title!r} "
+            f"(status: {nxt.status})."
+        )
+    # Surface the most recent graded assignment so the agent has
+    # something concrete to reference.
+    latest_grade = None
+    for a in reversed(course.assignments):
+        if a.grade is not None:
+            latest_grade = a
+            break
+    if latest_grade is not None and latest_grade.grade is not None:
+        verdict = "passed" if latest_grade.grade.passed else "failed"
+        lines.append(
+            f"Most recent grade: assignment `{latest_grade.assignment_id}` "
+            f"scored {latest_grade.grade.score_pct}% ({verdict})."
+        )
+    # Action hint based on the current state.
+    if course.status == "diagnosing":
+        lines.append("ACTION: finish the diagnostic and call propose_curriculum.")
+    elif course.status == "curriculum_proposed":
+        lines.append(
+            "ACTION: the learner needs to call approve_curriculum before the "
+            "lesson loop can begin."
+        )
+    elif course.status == "completed":
+        lines.append("ACTION: course is complete. Surface the report card.")
+    elif nxt is not None:
+        lines.append(
+            f"ACTION: start the next pending lesson with start_lesson("
+            f"lesson_id='{nxt.lesson_id}'). For non-trivial topics, run the "
+            f"lecture phase before assigning."
+        )
+    session.queue_resumption_briefing("\n".join(lines))
 
 
 def _exit(session: Any) -> CommandResult:

@@ -69,6 +69,8 @@ WRITE_TOOLS: Set[str] = {
     "close_dialog",
     "complete_module",
     "finalize_course",
+    "schedule_review",
+    "complete_review",
 }
 
 

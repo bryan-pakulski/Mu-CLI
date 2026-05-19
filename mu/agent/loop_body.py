@@ -204,6 +204,12 @@ def run_turn(session, text):
     # `_collect_turn_response` when the turn finishes.
     session._history_rolled_this_turn = True
     session._pending_user_text = effective_text or text or ""
+    # Resumption briefings: queued by /teach load, /feature load, and
+    # session-switch paths. Drained here so the agent's next provider
+    # call sees them once, then the queue clears.
+    resumption_block = session._drain_resumption_briefings()
+    if resumption_block:
+        base_system_prompt = f"{base_system_prompt}\n\n{resumption_block}"
     base_system_prompt = session._inject_hierarchical_context(base_system_prompt)
 
     recent_history = session._prepare_runtime_history()

@@ -530,11 +530,13 @@ _HELP_GROUPS = [
     (
         "Modes & toggles",
         [
-            ("/mode <name>", "", "Switch agent mode (default|debug|feature|research|loop|security)"),
+            ("/mode <name>", "", "Switch agent mode (default|debug|feature|research|loop|security|teacher)"),
             ("/plan [on|off|toggle]", "", "Toggle plan mode (read-only enforcement)"),
             ("/yolo", "", "Toggle YOLO mode (auto-approve writes)"),
             ("/agentic", "", "Toggle tool-calling mode"),
             ("/thinking", "", "Toggle extended thinking / reasoning"),
+            ("/verbose [on|off|toggle]", "", "Toggle verbose rendering (tool dumps, token lines, etc.)"),
+            ("/show-thinking [on|off|toggle]", "", "Toggle display of reasoning deltas"),
             ("/research [status|sources]", "", "Research workflow helpers"),
         ],
     ),
@@ -549,6 +551,17 @@ _HELP_GROUPS = [
                 "",
                 "Manage feature-mode plans",
             ),
+            (
+                "/teach <list|new|load|exit|status|next|grades|curriculum|delete|help>",
+                "/t",
+                "Manage teacher-mode courses",
+            ),
+        ],
+    ),
+    (
+        "Shell escape",
+        [
+            ("/bash <cmd>", "/sh /!", "Run a shell command in the workspace folder (60s timeout)"),
         ],
     ),
     (
@@ -568,8 +581,59 @@ _HELP_GROUPS = [
 ]
 
 
+def _curated_commands() -> set[str]:
+    """Set of leading command names mentioned in the curated _HELP_GROUPS.
+    Used by the auto-discovery safety net to find commands that are
+    registered but missing from the curated layout."""
+    covered: set[str] = set()
+    for _, entries in _HELP_GROUPS:
+        for cmd, alias, _desc in entries:
+            head = cmd.split()[0] if cmd else ""
+            if head.startswith("/"):
+                covered.add(head)
+            for token in (alias or "").replace(",", " ").split():
+                token = token.strip()
+                if token.startswith("/"):
+                    covered.add(token)
+    return covered
+
+
+def _uncurated_commands_section():
+    """Build an extra `(group_name, entries)` tuple for commands that are
+    registered via `@command` but never made it into `_HELP_GROUPS`.
+
+    Catches regressions where someone adds a slash command but forgets
+    to update the curated list — the entry shows up under "Other"
+    instead of being invisible.
+    """
+    from mu.commands import list_commands
+
+    covered = _curated_commands()
+    rows: list[tuple[str, str, str]] = []
+    seen_specs: set[int] = set()
+    for spec in list_commands():
+        if id(spec) in seen_specs:
+            continue
+        seen_specs.add(id(spec))
+        primary = spec.names[0]
+        if primary in covered:
+            continue
+        if any(alias in covered for alias in spec.names):
+            continue
+        aliases = " ".join(spec.names[1:]) if len(spec.names) > 1 else ""
+        rows.append((primary, aliases, spec.help or ""))
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r[0])
+    return ("Other", rows)
+
+
 def print_help():
-    for group_name, entries in _HELP_GROUPS:
+    groups = list(_HELP_GROUPS)
+    extra = _uncurated_commands_section()
+    if extra is not None:
+        groups.append(extra)
+    for group_name, entries in groups:
         table = Table(title=group_name, box=box.SIMPLE, show_header=False, padding=(0, 1))
         table.add_column("Command", style="cyan", no_wrap=True)
         table.add_column("Alias", style="magenta")
@@ -958,6 +1022,16 @@ def build_session(args, ui, allow_prompt=True):
         ui=ui,
         debug=args.debug,
     )
+
+    # If the session we just loaded has in-flight teacher / feature
+    # state, queue a resumption briefing so the agent's first turn
+    # knows what's already running without making the user re-explain.
+    try:
+        from mu.commands.session import _queue_session_resumption_briefing
+
+        _queue_session_resumption_briefing(session)
+    except ImportError:
+        pass
 
     if args.workspace:
         for workspace in args.workspace:

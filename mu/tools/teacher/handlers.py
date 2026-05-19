@@ -42,18 +42,22 @@ from mu.teacher.engine import (
     add_event,
     advance_lesson_status,
     close_socratic_dialog,
+    complete_review,
     conclude_lecture,
     course_metrics,
     create_course,
     decide_next,
+    due_reviews,
     find_assignment,
     find_lesson,
     find_module,
+    find_review,
     load_course,
     next_pending_lesson,
     record_dialog_turn,
     record_lecture_turn,
     save_course,
+    schedule_review,
     start_lecture,
 )
 from mu.teacher.grading import grade as grade_assignment_payload
@@ -617,7 +621,8 @@ def present_concept_tool(args: dict[str, Any], context) -> str:
         "Begin the back-and-forth lecture phase for the active lesson. "
         "Optionally include a `plan` string outlining what you'll cover. "
         "Follow up with record_lecture_turn for each agent_explanation, "
-        "agent_check, and learner_response. Conclude with conclude_lecture."
+        "agent_check, learner_response, and learner_question (the last "
+        "for mid-lecture interrupts). Conclude with conclude_lecture."
     ),
     parameters={
         "type": "object",
@@ -670,12 +675,36 @@ def start_lecture_tool(args: dict[str, Any], context) -> str:
 @tool(
     name="record_lecture_turn",
     description=(
-        "Append one turn (agent_explanation | agent_check | learner_response) "
-        "to the active lesson's lecture. Use `agent_explanation` when "
-        "you're presenting material, `agent_check` when you pause to ask a "
-        "comprehension question, and `learner_response` for what the "
-        "learner said. The engine counts `agent_check` turns against "
-        "`min_lecture_checks` so monologuing isn't allowed."
+        "Append one turn (agent_explanation | agent_check | learner_response "
+        "| learner_question) to the active lesson's lecture.\n"
+        "\n"
+        "**CRITICAL — `record_lecture_turn` is a TRANSCRIPT RECORDER, not a "
+        "way to skip teaching.** When you record an `agent_explanation`, "
+        "the `content` you pass MUST be the same explanation you SAY to "
+        "the learner in chat the same turn. Do not log placeholder text "
+        "like 'covered the control plane' — write the actual teaching "
+        "content as it appears in chat. The learner only sees what you "
+        "say; the transcript only sees what you record. They must match.\n"
+        "\n"
+        "Roles:\n"
+        "  • `agent_explanation` when you're presenting material. Must be "
+        "the literal explanation you just delivered in chat.\n"
+        "  • `agent_check` when you pause to ask a comprehension question. "
+        "**The engine refuses this** unless at least one `agent_explanation` "
+        "of substantial length (~80+ chars) sits between the previous "
+        "`agent_check` and now — i.e. you must explain before you ask. "
+        "Don't ask blind.\n"
+        "  • `learner_response` for the learner's reply to a check.\n"
+        "  • `learner_question` when the LEARNER interrupted your planned "
+        "lecture with a question of their own. Record this BEFORE answering "
+        "so the transcript captures the interrupt point; then follow with an "
+        "`agent_explanation` turn addressing it before resuming the planned "
+        "chunks. learner_question does NOT count toward `min_lecture_checks` "
+        "(that gate enforces agent-initiated checks).\n"
+        "\n"
+        "The engine counts `agent_check` turns so monologuing isn't allowed; "
+        "the explain-before-check rule prevents the opposite failure (asking "
+        "before teaching). Both gates work together."
     ),
     parameters={
         "type": "object",
@@ -683,7 +712,12 @@ def start_lecture_tool(args: dict[str, Any], context) -> str:
             "lesson_id": {"type": "string"},
             "role": {
                 "type": "string",
-                "enum": ["agent_explanation", "agent_check", "learner_response"],
+                "enum": [
+                    "agent_explanation",
+                    "agent_check",
+                    "learner_response",
+                    "learner_question",
+                ],
             },
             "content": {"type": "string"},
             "comprehension_signal": {
@@ -1478,16 +1512,180 @@ def raise_teacher_blocker_tool(args: dict[str, Any], context) -> str:
     return _ok(payload)
 
 
+# ----- spaced review --------------------------------------------------
+
+
+@tool(
+    name="schedule_review",
+    description=(
+        "Queue a spaced-repetition checkpoint for a finished lesson. The "
+        "review fires after `after_n_lessons` more lessons have been "
+        "completed — so a value of 3 means 'check the learner can still "
+        "do this concept three lessons from now'. Use after concluding a "
+        "lesson with a non-perfect grade, after a remediation, or at the "
+        "end of a module's worth of lessons. The agent is responsible "
+        "for surfacing due reviews via get_due_reviews and complete_review "
+        "once the learner has answered."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "source_lesson_id": {"type": "string"},
+            "after_n_lessons": {
+                "type": "integer",
+                "description": (
+                    "How many MORE lessons must complete before this review "
+                    "comes due. 2–5 is the sweet spot — close enough that "
+                    "the concept is still fresh-ish, far enough that "
+                    "actual retention is being tested."
+                ),
+            },
+            "review_id": {
+                "type": "string",
+                "description": "Optional explicit slug; auto-generated otherwise.",
+            },
+            "notes": {
+                "type": "string",
+                "description": (
+                    "Optional context: why this review is being scheduled "
+                    "(e.g. 'learner barely passed; recheck pointer arithmetic')."
+                ),
+            },
+        },
+        "required": ["source_lesson_id", "after_n_lessons"],
+    },
+    requires_approval=False,
+)
+def schedule_review_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        review = schedule_review(
+            course,
+            source_lesson_id=_storage.slugify(str(args.get("source_lesson_id", "")).strip()),
+            after_n_lessons=int(args.get("after_n_lessons", 0)),
+            review_id=str(args.get("review_id") or "").strip() or None,
+            notes=str(args.get("notes", "") or ""),
+        )
+        _persist(session, course)
+        return _ok(
+            {
+                "review_id": review.review_id,
+                "source_lesson_id": review.source_lesson_id,
+                "due_at_lesson_count": review.due_at_lesson_count,
+                "current_lesson_count": course.lessons_completed_count,
+            }
+        )
+    except Exception as exc:
+        return _err(str(exc))
+
+
+@tool(
+    name="get_due_reviews",
+    description=(
+        "Return spaced-review checkpoints whose due-date has passed. "
+        "Surface these to the learner — at the start of a lesson is the "
+        "natural spot, or at module boundaries. Empty list means "
+        "nothing's due. Each review has `source_lesson_id` so you can "
+        "re-issue the original lesson's exercise as a review prompt; "
+        "after grading, call complete_review with the score."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+    },
+    requires_approval=False,
+    execution_kind="read",
+)
+def get_due_reviews_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        items = [
+            {
+                "review_id": r.review_id,
+                "source_lesson_id": r.source_lesson_id,
+                "due_at_lesson_count": r.due_at_lesson_count,
+                "lessons_overdue_by": max(
+                    0, course.lessons_completed_count - r.due_at_lesson_count
+                ),
+                "notes": r.notes,
+            }
+            for r in due_reviews(course)
+        ]
+        return _ok(
+            {
+                "due_reviews": items,
+                "current_lesson_count": course.lessons_completed_count,
+                "total_scheduled": len(course.scheduled_reviews),
+            }
+        )
+    except Exception as exc:
+        return _err(str(exc))
+
+
+@tool(
+    name="complete_review",
+    description=(
+        "Finalize a spaced-review checkpoint after the learner has answered. "
+        "Pass the score the learner achieved (0–100). If the learner skipped "
+        "or you decided to defer it, set skipped=true — the review is still "
+        "marked complete, but the audit trail records the choice. Schedule "
+        "a fresh review with schedule_review if you want a retake."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "review_id": {"type": "string"},
+            "score_pct": {"type": "integer"},
+            "skipped": {"type": "boolean", "default": False},
+            "notes": {
+                "type": "string",
+                "description": (
+                    "Optional post-mortem: what did the learner still "
+                    "remember, what gaps showed up."
+                ),
+            },
+        },
+        "required": ["review_id", "score_pct"],
+    },
+    requires_approval=True,
+)
+def complete_review_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        review = complete_review(
+            course,
+            str(args.get("review_id", "")).strip(),
+            score_pct=int(args.get("score_pct", 0)),
+            notes=str(args.get("notes", "") or ""),
+            skipped=bool(args.get("skipped", False)),
+        )
+        _persist(session, course)
+        return _ok(
+            {
+                "review_id": review.review_id,
+                "status": review.status,
+                "score_pct": review.score_pct,
+            }
+        )
+    except Exception as exc:
+        return _err(str(exc))
+
+
 __all__ = [
     "approve_curriculum_tool",
     "assign_exercise_tool",
     "close_dialog_tool",
     "complete_module_tool",
+    "complete_review_tool",
     "conclude_lecture_tool",
     "create_course_tool",
     "decide_next_tool",
     "finalize_course_tool",
     "get_course_state_tool",
+    "get_due_reviews_tool",
     "grade_assignment_tool",
     "present_concept_tool",
     "propose_curriculum_tool",
@@ -1495,6 +1693,7 @@ __all__ = [
     "record_diagnostic_tool",
     "record_dialog_turn_tool",
     "record_lecture_turn_tool",
+    "schedule_review_tool",
     "start_lecture_tool",
     "start_lesson_tool",
     "submit_assignment_tool",

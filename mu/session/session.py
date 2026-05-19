@@ -396,6 +396,17 @@ class Session:
 
     def _build_active_goal_context(self) -> str:
         sections = []
+        # session_goal is the mode-agnostic, top-level pinned ask. It
+        # renders FIRST so it survives every compaction and reminds the
+        # model what the user originally wanted across long runs.
+        session_goal = str(self.variables.get("session_goal", "") or "").strip()
+        if session_goal:
+            sections.append(f"- session_goal (pinned): {session_goal}")
+            sections.append(
+                "- session_goal_policy: every meaningful action should advance "
+                "this goal. If a sub-task drifts off, pause and re-anchor. "
+                "Use /goal clear when the user signals the goal has shifted."
+            )
         loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
         if loop_goal and str(self.variables.get("agent_mode", "default")).lower() == "loop":
             sections.append(f"- loop_goal: {loop_goal}")
@@ -433,6 +444,29 @@ class Session:
         if scratch:
             sections.append("\nScratchpad snapshot:\n" + scratch)
         return "\n".join(sections).strip()
+
+    def _ensure_session_goal_persistence(self) -> None:
+        """Mirror the live `session_goal` variable into task_memory once
+        per goal value so compaction can never erase the user's original
+        top-level ask. Mode-agnostic — runs every turn for every mode.
+
+        Idempotent: searches existing memory for the goal text first and
+        only writes if absent. The variable is always the source of
+        truth for L3 rendering; the memory entry is a durable audit
+        trace and a recovery hatch if the variable ever gets cleared
+        accidentally.
+        """
+        session_goal = str(self.variables.get("session_goal", "") or "").strip()
+        if not session_goal:
+            return
+        existing = self.task_memory.search("session goal", limit=12)
+        if any(session_goal in str(entry.content or "") for entry in existing):
+            return
+        self.task_memory.save(
+            f"Locked session goal: {session_goal}",
+            tags=["session", "goal", "locked"],
+            source="session_goal",
+        )
 
     def _ensure_loop_goal_persistence(self) -> None:
         if str(self.variables.get("agent_mode", "default")).lower() != "loop":

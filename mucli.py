@@ -537,6 +537,7 @@ _HELP_GROUPS = [
             ("/thinking", "", "Toggle extended thinking / reasoning"),
             ("/verbose [on|off|toggle]", "", "Toggle verbose rendering (tool dumps, token lines, etc.)"),
             ("/show-thinking [on|off|toggle]", "", "Toggle display of reasoning deltas"),
+            ("/goal [<text>|clear|show]", "", "Pin top-level task into L3; survives compaction"),
             ("/research [status|sources]", "", "Research workflow helpers"),
         ],
     ),

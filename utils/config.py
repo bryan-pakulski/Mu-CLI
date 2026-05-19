@@ -44,6 +44,10 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": False,
     },  # When False (default), hide tool-arg dumps, token lines, result previews, "Compacting turn history" notices, and user-echo panels. The compact inline "→ tool_name" indicator stays so progress is still visible.
+    "session_goal": {
+        "type": str,
+        "default": "",
+    },  # The user's pinned top-level task for the session. Rendered in L3 of the system prompt every turn so the model retains direction even after compaction rewrites L2. Set with /goal <text> or the set_session_goal tool; clear with /goal clear. Survives history compaction because it's a variable, not part of the history list, and is mirrored into task_memory for audit.
     "show_thinking": {
         "type": bool,
         "default": True,
@@ -293,6 +297,7 @@ TOOL SURFACE:
 - Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)` for per-session task plans the user can see.
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
 - Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
+- Goal pinning: `set_session_goal(goal, clear=False)` pins the user's top-level task into L3 of every system prompt so direction survives history compaction. Call when the user states a multi-step task (e.g. "refactor auth", "teach me Perl") — pin it immediately. Replace by calling again; clear with `clear=true`. The user can also `/goal <text>` manually. If you ever notice the pinned goal differs from the user's current ask, pause and confirm before overwriting.
 - Interactive user prompts: `ask_user_choice(question, options, multi_select=False, allow_other=False, description="")` blocks for a full-screen multiple-choice picker. Use when there are 2–8 plausible answers and free-form chat would be slower (disambiguation, quiz questions, refactor approach picks). Set `multi_select=true` for select-all-that-apply. Set `allow_other=true` for clarifying questions where your options might miss a case — the picker adds an "Other (type your own)…" entry that opens a text prompt; the prose answer comes back in `other_text`. Result is `{selected: [...labels], other_text: str, cancelled: bool}` — empty + cancelled means the user wants to fall back to chat.
 
 WHEN TO USE SUBAGENTS:

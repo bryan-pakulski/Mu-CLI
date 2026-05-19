@@ -1,4 +1,10 @@
-"""Handlers for `ask_user_choice`."""
+"""Handlers for agent-facing user-interaction tools.
+
+Currently:
+  * `ask_user_choice` — block for a multiple-choice prompt.
+  * `set_session_goal` — pin (or replace, or clear) the user's
+    top-level task so it survives history compaction.
+"""
 
 from __future__ import annotations
 
@@ -197,4 +203,112 @@ def ask_user_choice_tool(args: dict[str, Any], context) -> str:
     )
 
 
-__all__ = ["ask_user_choice_tool"]
+@tool(
+    name="set_session_goal",
+    description=(
+        "Pin (or replace, or clear) the user's top-level task so it "
+        "survives history compaction. The pinned goal renders in L3 of "
+        "every turn's system prompt across all modes — the L2 "
+        "conversation summary gets rewritten as the run grows, but the "
+        "pinned goal does NOT. Call this when:\n"
+        "  • The user just stated a multi-step task ('refactor the auth "
+        "layer', 'teach me Perl', 'audit this codebase for SQL "
+        "injection'). Pin it immediately so you don't drift mid-run.\n"
+        "  • The user's focus shifts (call again with the new text — "
+        "replaces the previous goal).\n"
+        "  • The current top-level task is finished and a new one "
+        "hasn't started yet — pass `clear=true` to remove the pin.\n"
+        "\n"
+        "The user can also set it manually with `/goal <text>` and "
+        "inspect with `/goal show`. This tool gives YOU the same lever "
+        "so a forgotten `/goal` isn't fatal. Goal text should be a "
+        "concise one-line summary of the request — full sentences are "
+        "fine but keep it ≤ ~200 chars for L3 budget."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "goal": {
+                "type": "string",
+                "description": (
+                    "The concise one-line summary of the user's top-level "
+                    "task. Required unless `clear=true`."
+                ),
+            },
+            "clear": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Set to true to clear the pinned goal instead of "
+                    "setting one. Ignores the `goal` field when true."
+                ),
+            },
+        },
+    },
+    requires_approval=False,
+    execution_kind="mutate",
+)
+def set_session_goal_tool(args: dict[str, Any], context) -> str:
+    session = getattr(context, "session", None)
+    if session is None:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "set_session_goal requires an active session.",
+            },
+            indent=2,
+        )
+    clear = bool(args.get("clear", False))
+    if clear:
+        previous = str(session.variables.get("session_goal", "") or "").strip()
+        session.variables["session_goal"] = ""
+        try:
+            session.session_manager.save_history(session.folder_context)
+        except Exception:
+            pass
+        return json.dumps(
+            {
+                "ok": True,
+                "cleared": True,
+                "previous_goal": previous,
+            },
+            indent=2,
+        )
+    goal = str(args.get("goal", "") or "").strip()
+    if not goal:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": (
+                    "set_session_goal requires a non-empty `goal` string. "
+                    "Pass clear=true if you mean to remove the pin."
+                ),
+            },
+            indent=2,
+        )
+    previous = str(session.variables.get("session_goal", "") or "").strip()
+    session.variables["session_goal"] = goal
+    try:
+        session.session_manager.save_history(session.folder_context)
+    except Exception:
+        pass
+    # Mirror into task_memory immediately so the durable audit catches
+    # the goal even if the loop body doesn't run between this tool call
+    # and the next compaction.
+    if hasattr(session, "_ensure_session_goal_persistence"):
+        try:
+            session._ensure_session_goal_persistence()
+        except Exception:
+            pass
+    return json.dumps(
+        {
+            "ok": True,
+            "goal": goal,
+            "previous_goal": previous,
+            "replaced": bool(previous and previous != goal),
+        },
+        indent=2,
+    )
+
+
+__all__ = ["ask_user_choice_tool", "set_session_goal_tool"]

@@ -97,6 +97,9 @@ def run_turn(session, text):
         effective_text = session._build_loop_mode_prompt(text)
     if active_mode == "loop":
         session._ensure_loop_goal_persistence()
+    # Mode-agnostic: every turn, mirror the pinned session_goal into
+    # task_memory so it survives history compaction.
+    session._ensure_session_goal_persistence()
     if effective_text:
         parts.append({"type": "text", "text": effective_text})
 

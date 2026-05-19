@@ -510,6 +510,9 @@ class InputHandler:
             "/thinking": None,
             "/verbose": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
             "/show-thinking": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
+            "/goal": NestedCompleter.from_nested_dict(
+                {"set": None, "clear": None, "show": None, "help": None}
+            ),
             # /bash takes a free-form shell command — no useful completion list.
             "/bash": None,
             "/sh": None,

@@ -94,6 +94,31 @@ workflow, tools, and quality bar.
 
 The collation buffer is drained by the model via the `flush` tool — there is no user-facing flush command.
 
+### Pinning the session goal
+
+Long-running tasks routinely drift after history compaction rewrites the
+L2 conversation summary — the model loses sight of what the user
+originally asked for. `/goal` pins the top-level ask into L3 of every
+turn's system prompt across **every** mode. L3 survives compaction
+because it's rebuilt from variables, not the history list. The pin is
+also mirrored into `task_memory` with a `goal:locked` tag for durable
+audit so it's recoverable if you ever clear the variable accidentally.
+
+| Command | Description |
+| --- | --- |
+| `/goal` | Show the current pinned goal (or "none pinned"). |
+| `/goal <text>` | Set / replace the pinned goal. Bare form — no `set` keyword required. |
+| `/goal set <text>` | Explicit set form. |
+| `/goal clear` | Remove the pin. The task_memory audit trail entries stay. |
+| `/goal show` | Show the current pinned goal (explicit form). |
+| `/goal help` | Inline help. |
+
+The agent can also self-pin via the `set_session_goal(goal, clear=False)`
+tool — useful when the model detects a multi-step task and the user
+forgot to run `/goal` manually. The tool description tells the model to
+pin immediately on multi-step asks, replace when focus shifts, and
+clear with `clear=true` when the top-level task is finished.
+
 ## Documentation
 
 | Command | Description |

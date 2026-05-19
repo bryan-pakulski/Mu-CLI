@@ -168,3 +168,66 @@ def test_web_search_duckduckgo_html_fallback(monkeypatch):
 
     assert parsed["num_results"] >= 1
     assert parsed["results"][0]["title"] == "Example title"
+
+
+def test_web_search_does_not_freeze_on_hanging_ddgs(monkeypatch):
+    """Regression guard for the parallel-tool freeze: when ddgs.text()
+    hangs forever, web_search must return inside its hard timeout
+    instead of blocking the agent loop.
+
+    The bug we're guarding against: an earlier version wrapped the
+    timeout in `with ThreadPoolExecutor(...) as pool:`, which calls
+    `pool.shutdown(wait=True)` on exit and blocks waiting for the
+    hung worker thread to finish. We now use a daemon `threading.Thread`
+    so the timeout actually unblocks the caller.
+    """
+    import time
+    import mu.tools.research.handlers as tools
+
+    # Speed up the timeouts so this test stays cheap.
+    monkeypatch.setattr(tools, "_DDGS_HARD_TIMEOUT", 0.5)
+    monkeypatch.setattr(tools, "_WEB_SEARCH_HARD_TIMEOUT", 3.0)
+
+    class HangingDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def text(self, query, max_results=10):
+            # Block until the test interpreter dies — exactly what the
+            # real DDG endpoint did when it stopped responding.
+            time.sleep(3600)
+
+    def _no_html_fallback(*args, **kwargs):
+        # Pretend the HTML scraper finds nothing so we exercise the
+        # full fallback chain too.
+        class _Empty:
+            text = "<html></html>"
+
+            def raise_for_status(self):
+                return None
+
+        return _Empty()
+
+    def _no_instant_answer(*args, **kwargs):
+        raise RuntimeError("instant answer endpoint also unreachable")
+
+    monkeypatch.setattr("ddgs.DDGS", HangingDDGS)
+    monkeypatch.setattr("httpx.get", _no_html_fallback)
+    monkeypatch.setattr("urllib.request.urlopen", _no_instant_answer)
+    monkeypatch.setattr(tools, "register_source", lambda **kwargs: "cite_1")
+
+    started = time.monotonic()
+    result = web_search("hanging query", "duckduckgo", 5, None)
+    elapsed = time.monotonic() - started
+
+    # The outer timeout is 3.0s — generous slack lets the test pass under
+    # heavy CI load while still failing fast if the freeze regressed.
+    assert elapsed < 8.0, f"web_search blocked for {elapsed:.1f}s — freeze regressed"
+    parsed = json.loads(result)
+    # Either we hit the outer timeout (results=[], error set) or the
+    # inner ddgs timeout fired and the fallback chain returned empty
+    # results — both are acceptable; the contract is "do not freeze."
+    assert parsed["num_results"] == 0

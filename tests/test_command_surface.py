@@ -125,6 +125,28 @@ def test_help_only_lists_real_commands():
     )
 
 
+def test_every_registered_command_appears_in_help():
+    """Catch regressions where a slash command is added via @command but
+    never made it into the curated /help layout or the auto-discovery
+    safety net at the bottom of `print_help`. If this test fails, either
+    add the command to `_HELP_GROUPS` in mucli.py or accept that the
+    auto-discovery "Other" section will catch it."""
+    from mucli import _curated_commands, _uncurated_commands_section
+
+    curated = _curated_commands()
+    extra = _uncurated_commands_section() or ("Other", [])
+    extra_names = {row[0] for row in extra[1]}
+
+    registry_primaries = {spec.names[0] for spec in mc.list_commands()}
+    surfaced = curated | extra_names
+    missing = registry_primaries - surfaced - _INTENTIONALLY_HIDDEN
+    assert not missing, (
+        f"These registered commands never show up in /help: {sorted(missing)}. "
+        "Add them to `_HELP_GROUPS` in mucli.py — or, if intentional, to "
+        "`_INTENTIONALLY_HIDDEN` in this test."
+    )
+
+
 _DROPPED_ALIASES = {
     "/exit",
     # NOTE: /h was previously in this set but was reinstated as a /help

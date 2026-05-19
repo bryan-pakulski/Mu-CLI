@@ -1,11 +1,20 @@
 from types import SimpleNamespace
 
+import pytest
 from rich.console import Console
 
 from mu.feature.engine import STATUS_NOT_STARTED, create_feature_plan, update_feature_plan_metadata
 from mu.workspace.folder_context import FolderContext
 from mu.ui.rich_ui import RichUI
 from utils.runtime_metrics import build_live_status_line
+
+
+@pytest.fixture(autouse=True)
+def _isolate_feature_writes(tmp_path, monkeypatch):
+    """Feature plans default their workspace root to `os.getcwd()`.
+    Chdir to tmp_path so any `documentation/feature_req_*` directory
+    created during a test lands in /tmp instead of the repo."""
+    monkeypatch.chdir(tmp_path)
 
 
 def _build_session(**overrides):

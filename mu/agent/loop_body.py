@@ -97,12 +97,15 @@ def run_turn(session, text):
         effective_text = session._build_loop_mode_prompt(text)
     if active_mode == "loop":
         session._ensure_loop_goal_persistence()
+    # Mode-agnostic: every turn, mirror the pinned session_goal into
+    # task_memory so it survives history compaction.
+    session._ensure_session_goal_persistence()
     if effective_text:
         parts.append({"type": "text", "text": effective_text})
 
     new_user_message = {"role": "user", "parts": parts}
 
-    if text and session.ui:
+    if text and session.ui and session.variables.get("verbose", False):
         session.ui.render_message("user", text)
 
     workspace_context = ""
@@ -204,6 +207,12 @@ def run_turn(session, text):
     # `_collect_turn_response` when the turn finishes.
     session._history_rolled_this_turn = True
     session._pending_user_text = effective_text or text or ""
+    # Resumption briefings: queued by /teach load, /feature load, and
+    # session-switch paths. Drained here so the agent's next provider
+    # call sees them once, then the queue clears.
+    resumption_block = session._drain_resumption_briefings()
+    if resumption_block:
+        base_system_prompt = f"{base_system_prompt}\n\n{resumption_block}"
     base_system_prompt = session._inject_hierarchical_context(base_system_prompt)
 
     recent_history = session._prepare_runtime_history()
@@ -361,6 +370,10 @@ def run_turn(session, text):
                         }
                     )
                     if session.ui and active_mode != "loop":
+                        # Always emit; RichUI silences this when verbose=False.
+                        # SubagentUI consumes the message to drive its
+                        # per-tool progress tracker, so this MUST keep firing
+                        # regardless of how the parent terminal renders it.
                         session.ui.show_info(
                             f"🔨 Running tool: {part.tool_name}({_shorten_tool_args(part.tool_args)})"
                         )

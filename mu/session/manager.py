@@ -73,6 +73,9 @@ class SessionManager(HistoryMixin):
         self.feature_state = None
         self.feature_registry = {}
         self.active_feature_id = None
+        self.teacher_state = None
+        self.teacher_registry = {}
+        self.active_course_id = None
         self.variables = DEFAULT_VARIABLES.copy()
 
         if session_name:
@@ -110,6 +113,9 @@ class SessionManager(HistoryMixin):
         self.feature_state = None
         self.feature_registry = {}
         self.active_feature_id = None
+        self.teacher_state = None
+        self.teacher_registry = {}
+        self.active_course_id = None
         self.variables.update(DEFAULT_VARIABLES)
 
         data = self.read_session_data(name)
@@ -155,6 +161,26 @@ class SessionManager(HistoryMixin):
                     ):
                         self.feature_state = deepcopy(
                             self.feature_registry[self.active_feature_id]
+                        )
+
+                    teacher_state = data.get("teacher_state")
+                    if isinstance(teacher_state, dict):
+                        self.teacher_state = teacher_state
+                    self.teacher_registry = {
+                        str(key): value
+                        for key, value in (
+                            data.get("teacher_registry", {}) or {}
+                        ).items()
+                        if isinstance(value, dict)
+                    }
+                    self.active_course_id = data.get("active_course_id")
+                    if (
+                        self.teacher_state is None
+                        and self.active_course_id
+                        and self.active_course_id in self.teacher_registry
+                    ):
+                        self.teacher_state = deepcopy(
+                            self.teacher_registry[self.active_course_id]
                         )
 
                     saved_vars = data.get("variables", {})
@@ -211,6 +237,9 @@ class SessionManager(HistoryMixin):
                 "feature_state": self.feature_state,
                 "feature_registry": self.feature_registry,
                 "active_feature_id": self.active_feature_id,
+                "teacher_state": self.teacher_state,
+                "teacher_registry": self.teacher_registry,
+                "active_course_id": self.active_course_id,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -379,6 +408,65 @@ class SessionManager(HistoryMixin):
         self.active_feature_id = None
         self.save_history(folder_context_obj)
 
+    # -------------------------------------------------- teacher mode
+
+    def get_teacher_state(self) -> dict | None:
+        return (
+            deepcopy(self.teacher_state)
+            if isinstance(self.teacher_state, dict)
+            else None
+        )
+
+    def list_courses(self) -> list[dict]:
+        courses = [deepcopy(course) for course in self.teacher_registry.values()]
+        courses.sort(
+            key=lambda course: float(course.get("updated_at", 0) or 0), reverse=True
+        )
+        return courses
+
+    def get_course(self, course_id: str | None = None) -> dict | None:
+        resolved = course_id or self.active_course_id
+        if not resolved:
+            return None
+        record = self.teacher_registry.get(str(resolved))
+        return deepcopy(record) if isinstance(record, dict) else None
+
+    def upsert_teacher_course(self, record: dict | None) -> dict | None:
+        if not isinstance(record, dict):
+            return None
+        course_id = str(record.get("course_id") or record.get("id") or "").strip()
+        if not course_id:
+            return None
+        stored = deepcopy(record)
+        stored["course_id"] = course_id
+        stored["updated_at"] = float(stored.get("updated_at", time.time()) or time.time())
+        self.teacher_registry[course_id] = stored
+        return deepcopy(stored)
+
+    def activate_course(self, course_id: str) -> dict | None:
+        record = self.get_course(course_id)
+        if not record:
+            return None
+        self.active_course_id = record["course_id"]
+        self.teacher_state = deepcopy(record)
+        self.save_history()
+        return deepcopy(record)
+
+    def clear_teacher_state(self, folder_context_obj=None):
+        self.teacher_state = None
+        self.active_course_id = None
+        self.save_history(folder_context_obj)
+
+    def delete_course(self, course_id: str) -> dict | None:
+        record = self.teacher_registry.pop(str(course_id), None)
+        if not isinstance(record, dict):
+            return None
+        if self.active_course_id == course_id:
+            self.active_course_id = None
+            self.teacher_state = None
+        self.save_history()
+        return deepcopy(record)
+
     def switch_session(self, name):
         logger.info(f"Switching to session: {name}")
         self.save_history()
@@ -402,6 +490,9 @@ class SessionManager(HistoryMixin):
         self.feature_state = None
         self.feature_registry = {}
         self.active_feature_id = None
+        self.teacher_state = None
+        self.teacher_registry = {}
+        self.active_course_id = None
         self.conversation_summary = ""
         self.summary_anchor = 0
         self.history = []
@@ -520,6 +611,9 @@ class SessionManager(HistoryMixin):
         self.feature_state = None
         self.feature_registry = {}
         self.active_feature_id = None
+        self.teacher_state = None
+        self.teacher_registry = {}
+        self.active_course_id = None
 
         feature_root = self.get_feature_metadata_root()
         if os.path.isdir(feature_root):

@@ -88,6 +88,13 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self._pending_user_text = ""
+        # One-shot system-prompt briefings queued by load/switch commands.
+        # Drained at the top of every agent turn so the model knows it
+        # just resumed an in-flight course / feature / session and can
+        # re-orient without the user re-explaining state. See
+        # `queue_resumption_briefing` below + the drain site in
+        # `mu.agent.loop_body`.
+        self._pending_resumption_briefings: list[str] = []
         self.paused_execution_text: str | None = None
         # Flips to True when `raise_blocker` fires inside the agentic
         # loop. The loop-mode watchdog reads it to know the agent
@@ -389,6 +396,17 @@ class Session:
 
     def _build_active_goal_context(self) -> str:
         sections = []
+        # session_goal is the mode-agnostic, top-level pinned ask. It
+        # renders FIRST so it survives every compaction and reminds the
+        # model what the user originally wanted across long runs.
+        session_goal = str(self.variables.get("session_goal", "") or "").strip()
+        if session_goal:
+            sections.append(f"- session_goal (pinned): {session_goal}")
+            sections.append(
+                "- session_goal_policy: every meaningful action should advance "
+                "this goal. If a sub-task drifts off, pause and re-anchor. "
+                "Use /goal clear when the user signals the goal has shifted."
+            )
         loop_goal = str(self.variables.get("loop_goal", "") or "").strip()
         if loop_goal and str(self.variables.get("agent_mode", "default")).lower() == "loop":
             sections.append(f"- loop_goal: {loop_goal}")
@@ -426,6 +444,29 @@ class Session:
         if scratch:
             sections.append("\nScratchpad snapshot:\n" + scratch)
         return "\n".join(sections).strip()
+
+    def _ensure_session_goal_persistence(self) -> None:
+        """Mirror the live `session_goal` variable into task_memory once
+        per goal value so compaction can never erase the user's original
+        top-level ask. Mode-agnostic — runs every turn for every mode.
+
+        Idempotent: searches existing memory for the goal text first and
+        only writes if absent. The variable is always the source of
+        truth for L3 rendering; the memory entry is a durable audit
+        trace and a recovery hatch if the variable ever gets cleared
+        accidentally.
+        """
+        session_goal = str(self.variables.get("session_goal", "") or "").strip()
+        if not session_goal:
+            return
+        existing = self.task_memory.search("session goal", limit=12)
+        if any(session_goal in str(entry.content or "") for entry in existing):
+            return
+        self.task_memory.save(
+            f"Locked session goal: {session_goal}",
+            tags=["session", "goal", "locked"],
+            source="session_goal",
+        )
 
     def _ensure_loop_goal_persistence(self) -> None:
         if str(self.variables.get("agent_mode", "default")).lower() != "loop":
@@ -593,6 +634,37 @@ class Session:
         from mu.session.context import inject_hierarchical_context
 
         return inject_hierarchical_context(self, system_prompt)
+
+    def queue_resumption_briefing(self, briefing: str) -> None:
+        """Add a one-shot resumption note to the next agent turn.
+
+        Used by /teach load, /feature load, and session-switch paths to
+        tell the agent it just resumed in-flight state: which course /
+        feature is active, where the user was last, what's pending. The
+        briefing flushes into the next turn's system prompt and then
+        clears — it never accumulates.
+        """
+        text = (briefing or "").strip()
+        if not text:
+            return
+        if not hasattr(self, "_pending_resumption_briefings"):
+            self._pending_resumption_briefings = []
+        self._pending_resumption_briefings.append(text)
+
+    def _drain_resumption_briefings(self) -> str:
+        """Drain queued resumption briefings into a formatted block for
+        the system prompt. Returns an empty string if none are queued."""
+        briefings = getattr(self, "_pending_resumption_briefings", None) or []
+        if not briefings:
+            return ""
+        self._pending_resumption_briefings = []
+        body = "\n\n".join(briefings)
+        return (
+            "## RESUMPTION CONTEXT\n"
+            "You just resumed in-flight work. Orient against this state "
+            "before responding — do NOT ask the user to re-explain.\n\n"
+            f"{body}"
+        )
 
     def _render_tool_result(self, result) -> str:
         if isinstance(result, dict):

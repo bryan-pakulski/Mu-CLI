@@ -336,6 +336,20 @@ def _load_builtin_tools() -> None:
         logging.getLogger("mucli").warning(
             "mu.tools: failed to load batch tool package: %s", exc
         )
+    try:
+        from . import teacher as _teacher_tools  # noqa: F401 — registers create_course + 15 teacher-engine tools
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load teacher tool package: %s", exc
+        )
+    try:
+        from . import prompt as _prompt_tools  # noqa: F401 — registers ask_user_choice
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load prompt tool package: %s", exc
+        )
 
 
 _load_builtin_tools()

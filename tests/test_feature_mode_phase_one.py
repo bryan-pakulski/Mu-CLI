@@ -1,3 +1,5 @@
+import pytest
+
 from mu.feature.engine import (
     STATUS_ARCHIVED,
     STATUS_BLOCKED,
@@ -9,6 +11,15 @@ from mu.feature.engine import (
     load_feature_plan,
     transition_task_status,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_feature_writes(tmp_path, monkeypatch):
+    """The feature engine resolves its workspace root from `os.getcwd()`
+    when `folder_context=None`. Chdir into the per-test tmp_path so the
+    `documentation/feature_req_<id>/` directories land in /tmp instead
+    of the repo's `documentation/`."""
+    monkeypatch.chdir(tmp_path)
 
 
 def test_create_feature_plan_populates_phase_and_event_foundation(tmp_path):

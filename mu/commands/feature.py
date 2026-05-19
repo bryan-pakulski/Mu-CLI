@@ -199,11 +199,74 @@ def _load(session: Any, feature_id: str, allow_prompt: bool) -> CommandResult:
     )
     _print_markdown(session, markdown, allow_prompt)
     _refresh_hud(session)
+    _queue_feature_resumption_briefing(session, activated)
     return CommandResult(
         ok=True,
         message=f"Loaded feature: {record['feature_id']}",
         data={"feature": activated, "markdown": markdown},
     )
+
+
+def _queue_feature_resumption_briefing(session: Any, record: dict) -> None:
+    """Tell the next-turn agent that it just resumed a feature plan.
+
+    The model otherwise asks the user "what were we working on?" — a
+    waste when the engine already knows. Surfaces the in-flight task,
+    most recent status, and any blocker so the agent can pick up the
+    implementation loop directly.
+    """
+    if not hasattr(session, "queue_resumption_briefing"):
+        return
+    if not isinstance(record, dict):
+        return
+    feature_id = str(record.get("feature_id") or "").strip()
+    feature_name = str(record.get("feature_name") or feature_id or "").strip()
+    status = str(record.get("status") or "").strip() or "unknown"
+    lines = [
+        f"You just resumed feature-mode plan **{feature_id}** "
+        f"(name: {feature_name!r}).",
+        f"Plan status: {status}.",
+    ]
+    plan = record.get("feature_plan") or {}
+    if isinstance(plan, dict):
+        tasks = plan.get("tasks") or []
+        if isinstance(tasks, list) and tasks:
+            in_progress = [
+                t for t in tasks
+                if isinstance(t, dict) and t.get("status") == "in_progress"
+            ]
+            blocked = [
+                t for t in tasks
+                if isinstance(t, dict) and t.get("status") == "blocked"
+            ]
+            completed = [
+                t for t in tasks
+                if isinstance(t, dict) and t.get("status") == "completed"
+            ]
+            lines.append(
+                f"Tasks: {len(completed)}/{len(tasks)} completed, "
+                f"{len(in_progress)} in progress, {len(blocked)} blocked."
+            )
+            if in_progress:
+                t = in_progress[0]
+                lines.append(
+                    f"Current task: `{t.get('id', '?')}` — {t.get('title', '')!r}."
+                )
+            if blocked:
+                t = blocked[0]
+                lines.append(
+                    f"Blocked task: `{t.get('id', '?')}` — reason: "
+                    f"{t.get('blocked_reason', '(none)')!r}."
+                )
+    blocker = record.get("blocker")
+    if isinstance(blocker, dict) and blocker:
+        summary = blocker.get("summary", "(no summary)")
+        lines.append(f"Outstanding blocker: {summary!r}.")
+    lines.append(
+        "ACTION: call get_current_task and continue the feature loop. Do NOT "
+        "re-plan from scratch — the plan, phases, and tasks are persisted."
+    )
+    session.queue_resumption_briefing("\n".join(lines))
 
 
 def _delete(session: Any, feature_id: str, allow_prompt: bool) -> CommandResult:

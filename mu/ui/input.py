@@ -27,6 +27,7 @@ MODE_PROMPT_STYLES = {
     "feature": "mode-feature",
     "research": "mode-research",
     "security": "mode-security",
+    "teacher": "mode-teacher",
 }
 
 def _mode_choices():
@@ -370,6 +371,22 @@ class InputHandler:
             }
         )
 
+        teach_completer = NestedCompleter.from_nested_dict(
+            {
+                "list": None,
+                "new": None,
+                "load": None,
+                "delete": None,
+                "exit": None,
+                "unload": None,
+                "status": None,
+                "next": None,
+                "grades": None,
+                "curriculum": None,
+                "help": None,
+            }
+        )
+
         try:
             from mu.commands.memory import LIST_TARGETS as _MEMORY_LIST_TARGETS
         except ImportError:
@@ -491,11 +508,22 @@ class InputHandler:
             "/yolo": None,
             "/agentic": None,
             "/thinking": None,
+            "/verbose": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
+            "/show-thinking": NestedCompleter.from_nested_dict({"on": None, "off": None, "toggle": None}),
+            "/goal": NestedCompleter.from_nested_dict(
+                {"set": None, "clear": None, "show": None, "help": None}
+            ),
+            # /bash takes a free-form shell command — no useful completion list.
+            "/bash": None,
+            "/sh": None,
+            "/!": None,
             "/research": research_completer,
             # memory / tools
             "/memory": memory_completer,
             "/tool": tool_command_completer,
             "/feature": feature_completer,
+            "/teach": teach_completer,
+            "/t": teach_completer,
             # diagnostics
             "/stats": NestedCompleter.from_nested_dict({"clear": None}),
             # skills

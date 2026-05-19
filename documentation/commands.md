@@ -52,6 +52,7 @@ workflow, tools, and quality bar.
 | `research` | Exploration and explanation with citations and credibility weighting. | [research_mode.md](research_mode.md) |
 | `loop` | Long-horizon autonomous loop with goal lock and timeline output. | [loop_mode.md](loop_mode.md) |
 | `security` | Security audit gated on verified PoC + verified patch. | [security_mode.md](security_mode.md) |
+| `teacher` | Structured course engine — diagnose → curriculum → per-lesson grade loop. | [teacher_mode.md](teacher_mode.md) |
 
 ## Files and workspace
 
@@ -92,6 +93,31 @@ workflow, tools, and quality bar.
 | `/memory clear <target>` | Wipe a store. Targets: `task`, `scratchpad`, `all`. |
 
 The collation buffer is drained by the model via the `flush` tool — there is no user-facing flush command.
+
+### Pinning the session goal
+
+Long-running tasks routinely drift after history compaction rewrites the
+L2 conversation summary — the model loses sight of what the user
+originally asked for. `/goal` pins the top-level ask into L3 of every
+turn's system prompt across **every** mode. L3 survives compaction
+because it's rebuilt from variables, not the history list. The pin is
+also mirrored into `task_memory` with a `goal:locked` tag for durable
+audit so it's recoverable if you ever clear the variable accidentally.
+
+| Command | Description |
+| --- | --- |
+| `/goal` | Show the current pinned goal (or "none pinned"). |
+| `/goal <text>` | Set / replace the pinned goal. Bare form — no `set` keyword required. |
+| `/goal set <text>` | Explicit set form. |
+| `/goal clear` | Remove the pin. The task_memory audit trail entries stay. |
+| `/goal show` | Show the current pinned goal (explicit form). |
+| `/goal help` | Inline help. |
+
+The agent can also self-pin via the `set_session_goal(goal, clear=False)`
+tool — useful when the model detects a multi-step task and the user
+forgot to run `/goal` manually. The tool description tells the model to
+pin immediately on multi-step asks, replace when focus shifts, and
+clear with `clear=true` when the top-level task is finished.
 
 ## Documentation
 
@@ -139,6 +165,26 @@ for the engine model.
 | `/feature monitor` | Watch progress in real time. |
 | `/feature help` | Inline help. |
 
+## Teacher mode
+
+`/teach` manages teacher-mode courses. Works from any mode (e.g. for
+`/teach status` peeks); the agent only drives lessons while `/mode
+teacher` is active. See [teacher_mode.md](teacher_mode.md) for the
+engine model.
+
+| Subcommand | Description |
+| --- | --- |
+| `/teach` or `/teach list` | List courses for this workspace. |
+| `/teach new <subject>` | Create a new course. Doesn't auto-switch mode — run `/mode teacher` next. |
+| `/teach load <id>` | Activate an existing course. |
+| `/teach exit` (alias: `unload`) | Clear the active course without deleting it. |
+| `/teach status` | Current module/lesson, progress %, average score. |
+| `/teach next` | Next pending lesson hint. |
+| `/teach grades` | Markdown table of every graded assignment. |
+| `/teach curriculum` | Render the syllabus. |
+| `/teach delete <id>` | Delete a course (irreversible). |
+| `/teach help` | Inline help. |
+
 ## Research
 
 | Command | Description |
@@ -150,6 +196,12 @@ for the engine model.
 | `/research bibliography` (also `biblio`/`bib`) | Compile the markdown bibliography block (`[^n]:` footnotes with credibility ratings) ready to paste into a report. |
 | `/research stats` | Breakdown by source type + credibility-tier histogram. |
 | `/research clear` | Wipe the citation engine. Useful when starting a new research topic. |
+
+## Shell escape
+
+| Command | Description |
+| --- | --- |
+| `/bash <cmd>` (aliases `/sh`, `/!`) | Run a shell command in the active workspace folder and print stdout/stderr. User-facing convenience — distinct from the agent's `bash` tool. Bounded by a 60s timeout. Not for interactive commands (vim, less); use Ctrl+Z to suspend mucli for those. |
 
 ## Diagnostics
 

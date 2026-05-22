@@ -1162,7 +1162,54 @@ class Session:
         }
 
     def send_message(self, text):
-        """Body moved to `mu/agent/loop_body.py:run_turn`."""
+        """Body moved to `mu/agent/loop_body.py:run_turn`.
+
+        Wraps the turn in a `finally` that strips the pinned
+        `session_goal`. Rationale: a pinned goal grounds the model
+        for the duration of a SINGLE multi-iteration turn (where it
+        survives the L2 conversation-summary compaction); once that
+        turn finishes, the goal would otherwise bias every
+        subsequent unrelated request. End-of-turn clearing keeps
+        the goal load-bearing exactly where it should be — within
+        the turn — and out of the way afterwards.
+        """
         from mu.agent.loop_body import run_turn
 
-        return run_turn(self, text)
+        try:
+            return run_turn(self, text)
+        finally:
+            self._strip_session_goal_after_turn()
+
+    def _strip_session_goal_after_turn(self) -> None:
+        """Clear `session_goal` at the end of every agent turn.
+
+        The variable is the only thing that gets reset — the durable
+        `task_memory` audit entry (saved by
+        `_ensure_session_goal_persistence`) stays as history. So
+        `/memory search` can still surface the original ask, but L3
+        no longer renders it after the turn completes.
+
+        Safe to call even when no goal was set — it's a no-op then.
+        """
+        current = str(self.variables.get("session_goal", "") or "").strip()
+        if not current:
+            return
+        self.variables["session_goal"] = ""
+        # Clear the explicit flag so future modes' defaults apply
+        # cleanly on the next turn. (See
+        # `show_thinking_explicit` for the same pattern.)
+        try:
+            self.session_manager.save_history(self.folder_context)
+        except Exception:
+            pass
+        # Tell the UI so the user has a clear breadcrumb that the
+        # pin auto-released — handy when /goal status surprises them.
+        ui = getattr(self, "ui", None)
+        if ui is not None and hasattr(ui, "show_info"):
+            try:
+                ui.show_info(
+                    f"🎯 Session goal cleared (was: {current!r}). "
+                    "Use /goal <text> to pin a new one."
+                )
+            except Exception:
+                pass

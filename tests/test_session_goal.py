@@ -318,3 +318,99 @@ def test_session_goal_mentioned_in_system_base():
     from utils.config import AGENTIC_SYSTEM_BASE
 
     assert "set_session_goal" in AGENTIC_SYSTEM_BASE
+
+
+# --------------------------------------- end-of-turn auto-clear
+
+
+def test_strip_session_goal_after_turn_clears_set_goal(session):
+    """The pinned goal must clear at end of turn so it can't bias
+    the next unrelated request."""
+    session.variables["session_goal"] = "Refactor the auth layer"
+    session._strip_session_goal_after_turn()
+    assert session.variables["session_goal"] == ""
+
+
+def test_strip_session_goal_after_turn_is_noop_when_empty(session):
+    """No-op when no goal is set — calling unconditionally in
+    `send_message`'s finally block is safe."""
+    session.variables["session_goal"] = ""
+    session._strip_session_goal_after_turn()
+    assert session.variables["session_goal"] == ""
+
+
+def test_strip_session_goal_preserves_task_memory_audit(session):
+    """The durable mirror in task_memory survives the end-of-turn
+    clear — `/memory search` can still surface what the user once
+    asked for."""
+    session.variables["session_goal"] = "Audit the auth code"
+    # Mirror into task_memory like the per-iteration drain does.
+    session._ensure_session_goal_persistence()
+    assert any(
+        "Audit the auth code" in str(e.content)
+        for e in session.task_memory.entries
+    )
+    # Strip — only the variable clears.
+    session._strip_session_goal_after_turn()
+    assert session.variables["session_goal"] == ""
+    assert any(
+        "Audit the auth code" in str(e.content)
+        for e in session.task_memory.entries
+    )
+
+
+def test_strip_emits_ui_breadcrumb(session):
+    """A breadcrumb message lands in the UI when the goal clears
+    so the user has a visible signal that the auto-clear ran."""
+    notes: list[str] = []
+
+    class _RecorderUI:
+        def show_info(self, msg):
+            notes.append(str(msg))
+
+    session.ui = _RecorderUI()
+    session.variables["session_goal"] = "Ship the migration"
+    session._strip_session_goal_after_turn()
+    assert any("cleared" in m.lower() and "Ship the migration" in m for m in notes)
+
+
+def test_send_message_strips_goal_in_finally(session, monkeypatch):
+    """Wrap `run_turn` so we control the body and verify the
+    `finally` clears the goal regardless of how the turn ends."""
+
+    def _fake_run_turn(_sess, _text):
+        return {"status": "completed"}
+
+    monkeypatch.setattr("mu.agent.loop_body.run_turn", _fake_run_turn)
+    session.variables["session_goal"] = "Pinned for this turn"
+    session.send_message("hello")
+    assert session.variables["session_goal"] == ""
+
+
+def test_send_message_strips_goal_even_when_run_turn_raises(session, monkeypatch):
+    """The `finally` clears the goal even if the agent loop blows
+    up — otherwise a crash mid-turn would leave a stale pin
+    behind for the next user message."""
+
+    def _crashing_run_turn(_sess, _text):
+        raise RuntimeError("simulated crash")
+
+    monkeypatch.setattr("mu.agent.loop_body.run_turn", _crashing_run_turn)
+    session.variables["session_goal"] = "Goal that should still clear"
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        session.send_message("hello")
+    assert session.variables["session_goal"] == ""
+
+
+def test_send_message_preserves_normal_return(session, monkeypatch):
+    """Wrapping `run_turn` in try/finally must NOT alter the
+    returned payload."""
+
+    expected = {"status": "completed", "tokens": 42}
+
+    def _fake_run_turn(_sess, _text):
+        return expected
+
+    monkeypatch.setattr("mu.agent.loop_body.run_turn", _fake_run_turn)
+    result = session.send_message("hi")
+    assert result is expected

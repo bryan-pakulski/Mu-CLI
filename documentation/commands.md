@@ -96,28 +96,33 @@ The collation buffer is drained by the model via the `flush` tool — there is n
 
 ### Pinning the session goal
 
-Long-running tasks routinely drift after history compaction rewrites the
-L2 conversation summary — the model loses sight of what the user
-originally asked for. `/goal` pins the top-level ask into L3 of every
-turn's system prompt across **every** mode. L3 survives compaction
-because it's rebuilt from variables, not the history list. The pin is
-also mirrored into `task_memory` with a `goal:locked` tag for durable
-audit so it's recoverable if you ever clear the variable accidentally.
+Long-running multi-iteration turns routinely drift after the L2
+conversation summary gets compacted mid-turn — the model loses sight
+of what the user originally asked for. `/goal` pins the top-level ask
+into L3 of every iteration's system prompt across **every** mode. L3
+survives compaction because it's rebuilt from variables, not the
+history list. The pin is also mirrored into `task_memory` with a
+`goal:locked` tag for durable audit.
+
+**Lifecycle**: the goal applies to the CURRENT turn — it auto-clears
+at end of turn so a stale pin can't bias an unrelated next request.
+Set a fresh goal at the start of each multi-step task.
 
 | Command | Description |
 | --- | --- |
 | `/goal` | Show the current pinned goal (or "none pinned"). |
 | `/goal <text>` | Set / replace the pinned goal. Bare form — no `set` keyword required. |
 | `/goal set <text>` | Explicit set form. |
-| `/goal clear` | Remove the pin. The task_memory audit trail entries stay. |
+| `/goal clear` | Remove the pin before the turn ends. The task_memory audit trail entries stay. |
 | `/goal show` | Show the current pinned goal (explicit form). |
 | `/goal help` | Inline help. |
 
 The agent can also self-pin via the `set_session_goal(goal, clear=False)`
 tool — useful when the model detects a multi-step task and the user
-forgot to run `/goal` manually. The tool description tells the model to
-pin immediately on multi-step asks, replace when focus shifts, and
-clear with `clear=true` when the top-level task is finished.
+forgot to run `/goal` manually. The tool description tells the model
+to pin immediately on multi-step asks at the start of a turn. Since
+the variable auto-clears at end of turn, the model doesn't need to
+remember to `clear=true` for the common case.
 
 ## Documentation
 

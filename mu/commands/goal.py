@@ -27,7 +27,8 @@ from . import CommandResult, command
 
 
 _HELP_TEXT = """\
-/goal — pin the top-level session ask so it survives history compaction.
+/goal — pin the top-level ask so the model stays oriented through a
+single multi-iteration turn.
 
   /goal                Show the current session goal.
   /goal <text>         Set / replace the session goal.
@@ -36,13 +37,17 @@ _HELP_TEXT = """\
   /goal show           Show the current session goal.
   /goal help           This help.
 
-The pinned goal renders in L3 of every turn's system prompt across all
-modes (default, debug, feature, research, loop, security, teacher), so
-the model retains direction even after long runs roll history into the
-L2 summary and the original wording is lost. The goal is also mirrored
-into task_memory with a `goal:locked` tag for durable audit.
+LIFECYCLE: the goal renders in L3 of every iteration's system prompt
+WITHIN a single turn — so the model retains direction even when the
+L2 conversation summary gets compacted mid-turn. When the turn
+finishes, the goal **automatically clears** so it can't bias the next,
+unrelated request. Set a fresh goal before the next multi-step task
+if you want the same scaffolding.
 
-The agent can also self-pin with the `set_session_goal` tool when it
+The goal is also mirrored into task_memory with a `goal:locked` tag
+for durable audit — clearing the variable doesn't erase that history.
+
+The agent can self-pin via the `set_session_goal` tool when it
 detects a multi-step task — handy if you forget to set one manually.
 """
 

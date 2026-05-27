@@ -1,10 +1,51 @@
 # Teacher Mode
 
-A structured course engine that turns the agent into a coach for a new
-skill (e.g. "teach me Perl", "how do I use Kubernetes"). Switch in via
-`/mode teacher`. Course management is independent of the mode: `/teach
-new <subject>` works from any mode and creates a course; `/mode teacher`
-is what lets the agent actually drive lessons against it.
+A one-on-one tutoring engine. The agent runs an in-depth diagnostic up
+front to learn how the user actually learns (modality, pace, jargon
+tolerance, motivation, analogy anchors, personality), keeps that
+`learner_profile` injected into every model turn, and continuously
+refines it via `update_learner_profile` as the course progresses.
+Generic, off-the-shelf teaching is treated as a failure mode — every
+explanation, example, and exercise should reflect the specific learner
+in front of the agent.
+
+Switch in via `/mode teacher`. Course management is independent of the
+mode: `/teach new <subject>` works from any mode and creates a course;
+`/mode teacher` is what lets the agent actually drive lessons against
+it.
+
+## Architecture: watcher, not narrator
+
+The agent teaches in chat. A watcher subsystem
+(`mu/teacher/watcher.py`) classifies each assistant message and each
+learner message into structured engine events
+(`agent_explanation`, `agent_check`, `learner_response`,
+`learner_question`) and writes them into the course transcript
+automatically. The agent does NOT call any `record_lecture_turn`-style
+tool — those tools were removed from the agent's surface to stop the
+agent from fabricating a transcript that doesn't match what the user
+actually saw.
+
+Two consequences:
+
+- **One explanation per assistant message.** The watcher records at
+  most one `agent_explanation` per message. A second explanation in
+  the same message is dropped and an "end the message after one check
+  and wait for the learner" feedback note is surfaced. The agent can't
+  bulldoze the lecture.
+- **Multiple-choice always uses the interactive picker.** Discrete-
+  option comprehension checks must go through `ask_user_choice`
+  (in-lecture) or `assign_exercise(kind="multiple-choice", ...)`
+  (graded). The watcher detects inline `A) … B) … C) …` patterns in
+  assistant messages and surfaces feedback telling the agent to redo
+  the check through the picker. Inline letter options bypass the TUI
+  entirely and feel nothing like a tutor.
+- **Comprehension signals come from real learner replies.** When the
+  watcher classifies a learner_response with signal
+  `on track | partial | confused`, those are derived from the actual
+  user message — not numbers the agent typed. `conclude_lecture` is
+  auto-fired by the watcher when the rolling comprehension score meets
+  the lesson threshold.
 
 The hard contract: a lesson is COMPLETE only when its assignment passes
 verification. For code/quiz kinds the engine runs a verify command and
@@ -23,7 +64,13 @@ The teacher engine is the only source of truth for course progress.
 | Tool | Role |
 | --- | --- |
 | `create_course` | Open a new course. Status begins as `diagnosing`. |
-| `record_diagnostic` | Save strengths / gaps / goals after a short Q&A with the learner. Required before propose_curriculum. |
+| `record_diagnostic` | Save the full learner profile after the upfront Q&A: strengths, gaps, goals, modality, pace, jargon_tolerance, motivation, background, personality, anchors, notes. Required before `propose_curriculum`. |
+| `update_learner_profile` | Mid-course profile refinement. Call when an observed pattern (analogy lands, new stumbling block, pace needs adjustment, etc.) should change how subsequent lessons are taught. List fields are merged, scalars overwrite; every call appends to `calibration_history`. |
+
+> **Note**: `present_concept`, `start_lecture`, `record_lecture_turn`,
+> and `conclude_lecture` are no longer exposed to the agent. The
+> watcher fires them internally based on the chat content. They remain
+> as engine functions only.
 | `propose_curriculum` | Replace the modules + lessons with a proposed curriculum. Flips status to `curriculum_proposed`. |
 | `approve_curriculum` | Learner-side approval. Unlocks the lesson loop; refuses unless status is `curriculum_proposed`. |
 | `start_lesson` | Set the current lesson and flip its status to `presenting`. |
@@ -44,12 +91,36 @@ The teacher engine is the only source of truth for course progress.
 
 ## Phases
 
-### Phase 1 — Diagnose (3–5 short questions)
+### Phase 1 — Deep diagnostic (8–15 questions, conversational)
+
+This phase is the foundation of every subsequent lesson. Spend real
+time here. Ask in small batches, not a wall of questions.
 
 1. `create_course` with the subject.
-2. Ask the learner ~3 calibration questions (prior experience, related
-   languages, target use-case). Keep them concrete and quick.
-3. `record_diagnostic` with what you learned.
+2. **Prior experience** in the subject AND adjacent fields. Specific
+   languages, tools, or domains they're already fluent in — these
+   become analogy anchors.
+3. **Motivation and goal.** Why are they learning this? What does
+   "done" look like, specifically?
+4. **Learning modality.** Analogies / hands-on / formal definitions /
+   worked examples / visual / socratic — ask, but also infer from how
+   they answer your earlier questions.
+5. **Pace.** Deep mastery or get-functional-fast?
+6. **Jargon tolerance.** Plain-English-first or precise-terms-up-front?
+   Probe with one or two field-specific terms.
+7. **Personality cues.** Terse vs chatty; pushback vs gentle; humor.
+   Match their register.
+8. **Known anchors.** Concepts they cite confidently in answers — log
+   them; later lessons hang new material on these.
+9. **Past stumbling blocks.** Something in this or an adjacent field
+   they tried to learn and bounced off — and why. Highest-value
+   single data point you'll capture.
+10. `record_diagnostic` with EVERY field you have evidence for. Don't
+    propose a curriculum until this is in — the engine refuses.
+
+The profile is then auto-injected into the agent's system prompt on
+every turn, and refined mid-course via `update_learner_profile` when
+patterns emerge.
 
 ### Phase 2 — Curriculum proposal
 
@@ -61,25 +132,27 @@ The teacher engine is the only source of truth for course progress.
 Repeat until the course is complete.
 
 1. `start_lesson(next_lesson_id)`.
-2. `present_concept` — ≤ 3 sentences. The headline / hook.
-3. **Lecture phase** (the prep stage — covers the concept with
-   back-and-forth Q&A before the hands-on exercise):
-   1. `start_lecture(lesson_id, plan)` — opens the lecture.
-   2. Cover the material in small chunks. After each chunk:
-      - `record_lecture_turn(role="agent_explanation", content="...")` — what you just covered
-      - `record_lecture_turn(role="agent_check", content="comprehension question")`
-      - The learner answers. Record it:
-        `record_lecture_turn(role="learner_response", content="...", comprehension_signal="on track | confused | partial")`
-   3. Use the learner's answers to decide whether to dig deeper,
-      clarify, or move on. If they're wrong or partial, address the
-      gap BEFORE moving on.
-   4. `conclude_lecture(comprehension_pct, gaps, summary)` when the
-      topic is genuinely covered AND there are ≥ `min_lecture_checks`
-      `agent_check` turns. The engine refuses if either threshold
-      isn't met — keep lecturing.
-   Skip the lecture phase ONLY when the diagnostic showed the learner
+2. **Open the lesson with a ≤3-sentence concept brief in chat.** No
+   tool call — just write the headline / hook to the learner.
+3. **Cover the material in chat, one chunk per assistant message:**
+   1. Write ONE explanation chunk (examples, definitions, snippets
+      tuned to the learner's profile).
+   2. Ask ONE comprehension check question at the end of the same
+      message.
+   3. **End the message.** Wait for the learner's reply.
+   4. The watcher classifies the learner's reply into a
+      `learner_response` with `comprehension_signal` (on track /
+      partial / confused). React: re-explain gaps when partial or
+      confused; move forward when on track.
+   5. Mid-lecture interrupts (the learner asks a question instead of
+      answering) are auto-classified as `learner_question`. Answer
+      before returning to your planned chunk.
+   The watcher auto-fires `start_lecture` on the first substantive
+   explanation and auto-fires `conclude_lecture` when comprehension
+   across recorded responses clears the lesson threshold. Skip
+   chunked teaching ONLY when the diagnostic showed the learner
    already knows this concept (e.g. a C++ programmer learning C
-   pointer syntax — most of it is review). Then go straight to (4).
+   pointer syntax). Acknowledge in one line and go straight to (4).
 4. `assign_exercise` — pick the SMALLEST exercise that proves the
    concept. Pick the kind to match the topic:
    - **code**: `fix-broken-code` (you write a broken file via
@@ -129,31 +202,56 @@ the learner already knows.
 
 ## Live quiz UI
 
-For `multiple-choice` and `fill-blank` assignments the engine launches a
-full-screen prompt-toolkit Application via `session.ui.run_quiz`. Arrow
-keys navigate; Enter submits the current question and reveals
-correctness with the question's `explanation`; `→` advances; `←`
-reviews (read-only after submit); `q` / `Esc` exits early. When
-prompt-toolkit can't drive the TTY (CI, redirected stdin) the engine
-falls back to chat-flow Q&A — the picker is a polish layer, not a
-requirement.
+For `multiple-choice` and `fill-blank` assignments, `assign_exercise`
+tries to launch a full-screen prompt-toolkit Application via
+`session.ui.run_quiz` immediately at assignment time. Arrow keys
+navigate; Enter submits and reveals correctness with the question's
+`explanation`; `→` advances; `←` reviews (read-only after submit); `q`
+/ `Esc` exits early.
+
+The tool result contains a `live_quiz_launch` envelope so the agent
+knows whether the launch actually succeeded:
+
+```json
+{
+  "attempted": true,
+  "launched": false,
+  "reason": "no UI with run_quiz available — ...",
+  "questions_shown": 0,
+  "answers_collected": 0
+}
+```
+
+When prompt-toolkit can't drive the TTY (CI, redirected stdin, headless
+runtime), `launched=false` with a concrete `reason`. The agent must
+read this field and either narrate the real outcome or fall back to
+chat-flow Q&A — narrating "Quiz launched!" without verifying the
+envelope is treated as a bug.
 
 ## Operating principles
 
+- **Personal, not generic.** Every explanation reaches for this
+  learner's specific background and modality. The auto-injected
+  LEARNER PROFILE block is the guardrail — re-read it before each
+  lecture chunk.
 - **Teach by doing.** Concept briefs are ≤ 3 sentences. Every concept
   is followed by an assignment.
 - **Small steps.** Lessons are 5–15 minutes of learner time, not 90.
 - **Ask, don't tell.** Whenever you could explain, ask the learner to
   predict. Then reveal.
+- **Continuously calibrate.** The diagnostic profile is a hypothesis,
+  not gospel. When an analogy lands, a stumbling block emerges, or
+  pace/jargon tolerance is off, call `update_learner_profile` with the
+  observation and the delta.
 - **Verifiable assignments only.** If you can't write a `verify_cmd`,
   expected_answer, or rubric_keywords that pass/fail objectively, fall
   back to `socratic-dialog` with concrete `required_concepts` so the
   engine still enforces coverage.
 - **Honest grading.** A failed assignment is data, not a problem.
   Remediate, don't paper over.
-- **Memory discipline.** `save_memory` durable facts about the learner
-  (preferred analogies, sticking points, language background) — future
-  lessons benefit.
+- **Memory discipline.** `save_memory` durable facts that should
+  outlive this course (preferred analogies, language background, deep
+  stumbling blocks). Future courses for the same person pre-load them.
 
 ## Output artifacts
 

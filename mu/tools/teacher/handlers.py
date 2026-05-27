@@ -356,17 +356,70 @@ def create_course_tool(args: dict[str, Any], context) -> str:
 @tool(
     name="record_diagnostic",
     description=(
-        "Save the learner's diagnostic profile (prior experience, gaps, "
-        "goals) after a short Q&A. Required before propose_curriculum."
+        "Save the learner's diagnostic profile after the upfront Q&A. "
+        "Required before propose_curriculum. Captures not just prior "
+        "experience/gaps/goals but also HOW the learner learns: preferred "
+        "modalities, pace, jargon tolerance, motivation, analogy anchors "
+        "from adjacent fields, and personality cues. Every field is "
+        "optional — fill what you've actually heard. Lessons reference "
+        "this profile on every turn, so be specific."
     ),
     parameters={
         "type": "object",
         "properties": {
             "course_id": {"type": "string"},
-            "strengths": {"type": "array", "items": {"type": "string"}},
-            "gaps": {"type": "array", "items": {"type": "string"}},
-            "goals": {"type": "array", "items": {"type": "string"}},
-            "notes": {"type": "string"},
+            "strengths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Things the learner already knows well in or near this subject.",
+            },
+            "gaps": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Specific things they don't know yet that the course must cover.",
+            },
+            "goals": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "What they want to be able to do after the course (be concrete).",
+            },
+            "modality": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Preferred learning modalities — pick from: analogy, hands-on, visual, socratic, worked-example, formal-definition, story. Multi-select fine.",
+            },
+            "pace": {
+                "type": "string",
+                "enum": ["slow", "moderate", "fast"],
+                "description": "How fast they want to move through material.",
+            },
+            "jargon_tolerance": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "How comfortable they are with field-specific terminology and notation up front.",
+            },
+            "motivation": {
+                "type": "string",
+                "description": "Why they're learning this — career, curiosity, specific project, exam, etc.",
+            },
+            "background": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Other fields/languages/tools they know well — used as analogy anchors (e.g. 'Python', 'electrical engineering', 'piano').",
+            },
+            "personality": {
+                "type": "string",
+                "description": "Tone cues — terse vs chatty, likes being pushed back / gentle, humor preferences, anything that should shape voice.",
+            },
+            "anchors": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Specific concepts they spontaneously cited as known/comfortable — useful for grounding new ideas.",
+            },
+            "notes": {
+                "type": "string",
+                "description": "Free-form catch-all for everything else worth remembering.",
+            },
         },
     },
     requires_approval=False,
@@ -375,22 +428,153 @@ def record_diagnostic_tool(args: dict[str, Any], context) -> str:
     try:
         session = _session_from_context(context)
         course = _load_active_course(session, context, args.get("course_id"))
-        course.learner_profile = {
+        profile: dict[str, Any] = {
             "strengths": [str(x) for x in (args.get("strengths") or [])],
             "gaps": [str(x) for x in (args.get("gaps") or [])],
             "goals": [str(x) for x in (args.get("goals") or [])],
             "notes": str(args.get("notes", "") or ""),
+            "modality": [str(x) for x in (args.get("modality") or [])],
+            "pace": str(args.get("pace", "") or ""),
+            "jargon_tolerance": str(args.get("jargon_tolerance", "") or ""),
+            "motivation": str(args.get("motivation", "") or ""),
+            "background": [str(x) for x in (args.get("background") or [])],
+            "personality": str(args.get("personality", "") or ""),
+            "anchors": [str(x) for x in (args.get("anchors") or [])],
+            "stumbling_blocks": [],
             "recorded_at": time.time(),
+            "calibration_history": [],
         }
+        course.learner_profile = profile
         add_event(
             course,
             kind="diagnostic_recorded",
             entity="course",
             entity_id=course.course_id,
-            payload=dict(course.learner_profile),
+            payload=dict(profile),
         )
         record = _persist(session, course)
-        return _ok({"course": record, "learner_profile": course.learner_profile})
+        return _ok({"course": record, "learner_profile": profile})
+    except Exception as exc:
+        return _err(str(exc))
+
+
+@tool(
+    name="update_learner_profile",
+    description=(
+        "Update the learner profile mid-course when you observe a pattern. "
+        "Call this when an analogy lands particularly well, the learner "
+        "prefers a different pace than originally set, a new stumbling "
+        "block emerges, or any other personality / learning-style signal "
+        "shifts. Only pass fields you actually want to change — list "
+        "fields are MERGED (existing items kept, new items appended, "
+        "deduped); scalar fields OVERWRITE. Every call appends a "
+        "calibration_history entry with the observation that triggered "
+        "the update so the audit trail is preserved."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "course_id": {"type": "string"},
+            "observation": {
+                "type": "string",
+                "description": "What you saw that prompted the update (e.g. 'learner answered the cooking-recipe analogy correctly within seconds — analogy-driven works'). Required.",
+            },
+            "strengths": {"type": "array", "items": {"type": "string"}},
+            "gaps": {"type": "array", "items": {"type": "string"}},
+            "goals": {"type": "array", "items": {"type": "string"}},
+            "modality": {"type": "array", "items": {"type": "string"}},
+            "pace": {"type": "string", "enum": ["slow", "moderate", "fast"]},
+            "jargon_tolerance": {"type": "string", "enum": ["low", "medium", "high"]},
+            "motivation": {"type": "string"},
+            "background": {"type": "array", "items": {"type": "string"}},
+            "personality": {"type": "string"},
+            "anchors": {"type": "array", "items": {"type": "string"}},
+            "stumbling_blocks": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Concrete patterns where the learner is getting stuck (e.g. 'confuses references and pointers').",
+            },
+            "notes": {"type": "string"},
+        },
+        "required": ["observation"],
+    },
+    requires_approval=False,
+)
+def update_learner_profile_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context, args.get("course_id"))
+        observation = str(args.get("observation", "") or "").strip()
+        if not observation:
+            return _err("observation is required — describe what you saw.")
+
+        profile = dict(course.learner_profile or {})
+        list_fields = (
+            "strengths",
+            "gaps",
+            "goals",
+            "modality",
+            "background",
+            "anchors",
+            "stumbling_blocks",
+        )
+        scalar_fields = (
+            "pace",
+            "jargon_tolerance",
+            "motivation",
+            "personality",
+            "notes",
+        )
+
+        deltas: dict[str, Any] = {}
+        for field_name in list_fields:
+            incoming = args.get(field_name)
+            if incoming is None:
+                continue
+            existing = list(profile.get(field_name) or [])
+            for item in incoming:
+                item_str = str(item).strip()
+                if item_str and item_str not in existing:
+                    existing.append(item_str)
+            profile[field_name] = existing
+            deltas[field_name] = existing
+
+        for field_name in scalar_fields:
+            incoming = args.get(field_name)
+            if incoming is None:
+                continue
+            new_value = str(incoming).strip()
+            if not new_value:
+                continue
+            profile[field_name] = new_value
+            deltas[field_name] = new_value
+
+        history = list(profile.get("calibration_history") or [])
+        history.append(
+            {
+                "at": time.time(),
+                "observation": observation,
+                "deltas": deltas,
+            }
+        )
+        profile["calibration_history"] = history
+
+        course.learner_profile = profile
+        add_event(
+            course,
+            kind="learner_profile_updated",
+            entity="course",
+            entity_id=course.course_id,
+            payload={"observation": observation, "deltas": deltas},
+        )
+        record = _persist(session, course)
+        return _ok(
+            {
+                "course": record,
+                "learner_profile": profile,
+                "deltas": deltas,
+            }
+        )
     except Exception as exc:
         return _err(str(exc))
 
@@ -569,236 +753,6 @@ def start_lesson_tool(args: dict[str, Any], context) -> str:
         course.current_lesson_id = lesson.lesson_id
         record = _persist(session, course)
         return _ok({"course": record, "lesson": asdict(lesson)})
-    except Exception as exc:
-        return _err(str(exc))
-
-
-@tool(
-    name="present_concept",
-    description=(
-        "Record the agent's ≤3-sentence concept brief for the active lesson "
-        "and advance lesson status from 'presenting' to 'assigned'-ready. "
-        "Pair with assign_exercise next."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "lesson_id": {"type": "string"},
-            "brief": {"type": "string"},
-        },
-        "required": ["lesson_id", "brief"],
-    },
-    requires_approval=False,
-)
-def present_concept_tool(args: dict[str, Any], context) -> str:
-    try:
-        session = _session_from_context(context)
-        course = _load_active_course(session, context)
-        lesson_id = _storage.slugify(str(args.get("lesson_id", "")).strip())
-        lesson = find_lesson(course, lesson_id)
-        if lesson is None:
-            return _not_found_err("lesson", lesson_id, [l.lesson_id for l in course.lessons])
-        lesson.concept_brief = str(args.get("brief", "")).strip()
-        add_event(
-            course,
-            kind="concept_presented",
-            entity="lesson",
-            entity_id=lesson.lesson_id,
-            payload={"length": len(lesson.concept_brief)},
-        )
-        _persist(session, course)
-        return _ok({"lesson": asdict(lesson)})
-    except Exception as exc:
-        return _err(str(exc))
-
-
-# ----- lecture phase ----------------------------------------------------
-
-
-@tool(
-    name="start_lecture",
-    description=(
-        "Begin the back-and-forth lecture phase for the active lesson. "
-        "Optionally include a `plan` string outlining what you'll cover. "
-        "Follow up with record_lecture_turn for each agent_explanation, "
-        "agent_check, learner_response, and learner_question (the last "
-        "for mid-lecture interrupts). Conclude with conclude_lecture."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "lesson_id": {"type": "string"},
-            "plan": {
-                "type": "string",
-                "description": "Optional outline of the topics you'll cover.",
-            },
-            "min_lecture_checks": {
-                "type": "integer",
-                "description": (
-                    "Minimum `agent_check` turns required before "
-                    "conclude_lecture is allowed. Defaults to 2."
-                ),
-            },
-            "lecture_comprehension_threshold": {
-                "type": "integer",
-                "description": (
-                    "Minimum comprehension_pct required to advance to "
-                    "the assignment phase. Defaults to 60."
-                ),
-            },
-        },
-        "required": ["lesson_id"],
-    },
-    requires_approval=False,
-)
-def start_lecture_tool(args: dict[str, Any], context) -> str:
-    try:
-        session = _session_from_context(context)
-        course = _load_active_course(session, context)
-        lesson_id = _storage.slugify(str(args.get("lesson_id", "")).strip())
-        lesson = find_lesson(course, lesson_id)
-        if lesson is None:
-            return _not_found_err("lesson", lesson_id, [l.lesson_id for l in course.lessons])
-        if "min_lecture_checks" in args:
-            lesson.min_lecture_checks = max(0, int(args["min_lecture_checks"]))
-        if "lecture_comprehension_threshold" in args:
-            lesson.lecture_comprehension_threshold = max(
-                0, min(100, int(args["lecture_comprehension_threshold"]))
-            )
-        start_lecture(course, lesson_id, plan=str(args.get("plan", "") or ""))
-        _persist(session, course)
-        return _ok({"lesson": asdict(find_lesson(course, lesson_id))})
-    except Exception as exc:
-        return _err(str(exc))
-
-
-@tool(
-    name="record_lecture_turn",
-    description=(
-        "Append one turn (agent_explanation | agent_check | learner_response "
-        "| learner_question) to the active lesson's lecture.\n"
-        "\n"
-        "**CRITICAL — `record_lecture_turn` is a TRANSCRIPT RECORDER, not a "
-        "way to skip teaching.** When you record an `agent_explanation`, "
-        "the `content` you pass MUST be the same explanation you SAY to "
-        "the learner in chat the same turn. Do not log placeholder text "
-        "like 'covered the control plane' — write the actual teaching "
-        "content as it appears in chat. The learner only sees what you "
-        "say; the transcript only sees what you record. They must match.\n"
-        "\n"
-        "Roles:\n"
-        "  • `agent_explanation` when you're presenting material. Must be "
-        "the literal explanation you just delivered in chat.\n"
-        "  • `agent_check` when you pause to ask a comprehension question. "
-        "**The engine refuses this** unless at least one `agent_explanation` "
-        "of substantial length (~80+ chars) sits between the previous "
-        "`agent_check` and now — i.e. you must explain before you ask. "
-        "Don't ask blind.\n"
-        "  • `learner_response` for the learner's reply to a check.\n"
-        "  • `learner_question` when the LEARNER interrupted your planned "
-        "lecture with a question of their own. Record this BEFORE answering "
-        "so the transcript captures the interrupt point; then follow with an "
-        "`agent_explanation` turn addressing it before resuming the planned "
-        "chunks. learner_question does NOT count toward `min_lecture_checks` "
-        "(that gate enforces agent-initiated checks).\n"
-        "\n"
-        "The engine counts `agent_check` turns so monologuing isn't allowed; "
-        "the explain-before-check rule prevents the opposite failure (asking "
-        "before teaching). Both gates work together."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "lesson_id": {"type": "string"},
-            "role": {
-                "type": "string",
-                "enum": [
-                    "agent_explanation",
-                    "agent_check",
-                    "learner_response",
-                    "learner_question",
-                ],
-            },
-            "content": {"type": "string"},
-            "comprehension_signal": {
-                "type": "string",
-                "description": (
-                    "Optional per-turn note: 'on track' | 'confused' | "
-                    "'partial' | etc. Influences gap analysis."
-                ),
-            },
-        },
-        "required": ["lesson_id", "role", "content"],
-    },
-    requires_approval=False,
-)
-def record_lecture_turn_tool(args: dict[str, Any], context) -> str:
-    try:
-        session = _session_from_context(context)
-        course = _load_active_course(session, context)
-        turn = record_lecture_turn(
-            course,
-            _storage.slugify(str(args.get("lesson_id", "")).strip()),
-            role=str(args.get("role", "")).strip(),
-            content=str(args.get("content", "")).strip(),
-            comprehension_signal=(
-                str(args.get("comprehension_signal")).strip()
-                if args.get("comprehension_signal")
-                else None
-            ),
-        )
-        _persist(session, course)
-        return _ok({"turn": asdict(turn)})
-    except Exception as exc:
-        return _err(str(exc))
-
-
-@tool(
-    name="conclude_lecture",
-    description=(
-        "Close out the lecture phase with an honest comprehension score "
-        "and a list of gaps. Refuses unless the lesson has met its "
-        "min_lecture_checks and comprehension_pct >= the configured "
-        "threshold. Set ready_for_assignment=false to keep lecturing "
-        "without advancing (e.g. comprehension was weak; you want "
-        "another pass)."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "lesson_id": {"type": "string"},
-            "comprehension_pct": {"type": "integer"},
-            "summary": {"type": "string"},
-            "gaps": {"type": "array", "items": {"type": "string"}},
-            "ready_for_assignment": {"type": "boolean", "default": True},
-        },
-        "required": ["lesson_id", "comprehension_pct"],
-    },
-    requires_approval=True,
-)
-def conclude_lecture_tool(args: dict[str, Any], context) -> str:
-    try:
-        session = _session_from_context(context)
-        course = _load_active_course(session, context)
-        lesson_id = _storage.slugify(str(args.get("lesson_id", "")).strip())
-        lesson = conclude_lecture(
-            course,
-            lesson_id,
-            comprehension_pct=int(args.get("comprehension_pct", 0)),
-            summary=str(args.get("summary", "") or ""),
-            gaps=[str(g) for g in (args.get("gaps") or [])],
-            ready_for_assignment=bool(args.get("ready_for_assignment", True)),
-        )
-        _persist(session, course)
-        return _ok(
-            {
-                "lesson_id": lesson_id,
-                "status": lesson.status,
-                "comprehension_pct": lesson.lecture_comprehension_pct,
-                "gaps": lesson.lecture_gaps,
-                "ready_for_assignment": lesson.status == LESSON_ASSIGNED,
-            }
-        )
     except Exception as exc:
         return _err(str(exc))
 
@@ -1002,13 +956,69 @@ def assign_exercise_tool(args: dict[str, Any], context) -> str:
             entity_id=assignment_id,
             payload={"kind": assignment.kind, "artifact_count": len(artifacts)},
         )
+
+        # Live quiz UI: if this is a quiz-kind assignment with the live
+        # UI flag set, try to launch the quiz right now so the tool
+        # result reflects what actually happened. The agent's narration
+        # then matches reality ("quiz launched" vs "fell back to chat
+        # flow because no TTY"). Failure here is non-fatal: the
+        # grade_assignment path remains as a retry surface.
+        launch_envelope = {
+            "attempted": False,
+            "launched": False,
+            "reason": None,
+            "questions_shown": 0,
+            "answers_collected": 0,
+        }
+        is_quiz_kind = assignment.kind in {"multiple-choice", "fill-blank"}
+        if is_quiz_kind and spec.use_live_quiz_ui:
+            launch_envelope["attempted"] = True
+            ui = getattr(session, "ui", None) or getattr(context, "ui", None)
+            quiz_questions = (assignment.submission or {}).get("quiz_questions") or []
+            if ui is None or not hasattr(ui, "run_quiz"):
+                launch_envelope["reason"] = (
+                    "no UI with run_quiz available — assignment was created but "
+                    "the live quiz did not launch; the learner will need to "
+                    "answer in chat or grade_assignment will retry."
+                )
+            elif not quiz_questions:
+                launch_envelope["reason"] = (
+                    "no quiz_questions provided on the assignment — supply them "
+                    "to assign_exercise or the live quiz cannot launch."
+                )
+            else:
+                try:
+                    submitted = ui.run_quiz(quiz_questions)
+                    if isinstance(submitted, dict) and submitted:
+                        existing = assignment.submission or {}
+                        assignment.submission = {**existing, "answers": submitted}
+                        assignment.status = ASSIGNMENT_SUBMITTED
+                        launch_envelope["launched"] = True
+                        launch_envelope["questions_shown"] = len(quiz_questions)
+                        launch_envelope["answers_collected"] = len(submitted)
+                    else:
+                        launch_envelope["reason"] = (
+                            "quiz UI returned no answers — the learner may have "
+                            "cancelled (q/Esc) or the picker fell back to chat-flow."
+                        )
+                except NotImplementedError:
+                    launch_envelope["reason"] = (
+                        "ui.run_quiz is not implemented on the active UI — "
+                        "fell back to chat-flow."
+                    )
+                except Exception as exc:
+                    launch_envelope["reason"] = (
+                        f"quiz UI raised {type(exc).__name__}: {exc}"
+                    )
+
         _persist(session, course)
         return _ok(
             {
                 "assignment_id": assignment_id,
                 "lesson_id": lesson_id,
                 "artifact_paths": artifacts,
-                "live_quiz": spec.use_live_quiz_ui and assignment.kind in {"multiple-choice", "fill-blank"},
+                "live_quiz": is_quiz_kind and spec.use_live_quiz_ui,
+                "live_quiz_launch": launch_envelope,
             }
         )
     except Exception as exc:
@@ -1680,21 +1690,18 @@ __all__ = [
     "close_dialog_tool",
     "complete_module_tool",
     "complete_review_tool",
-    "conclude_lecture_tool",
     "create_course_tool",
     "decide_next_tool",
     "finalize_course_tool",
     "get_course_state_tool",
     "get_due_reviews_tool",
     "grade_assignment_tool",
-    "present_concept_tool",
     "propose_curriculum_tool",
     "raise_teacher_blocker_tool",
     "record_diagnostic_tool",
     "record_dialog_turn_tool",
-    "record_lecture_turn_tool",
+    "update_learner_profile_tool",
     "schedule_review_tool",
-    "start_lecture_tool",
     "start_lesson_tool",
     "submit_assignment_tool",
 ]

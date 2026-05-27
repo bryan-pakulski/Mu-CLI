@@ -523,9 +523,9 @@ class SessionManager(HistoryMixin):
             for f in files:
                 name = os.path.basename(os.path.dirname(f))
                 indicator = "*" if name == self.current_session_name else " "
-                mod_time = datetime.fromtimestamp(os.path.getmtime(f)).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
+                mod_time = datetime.datetime.fromtimestamp(
+                    os.path.getmtime(f)
+                ).strftime("%Y-%m-%d %H:%M")
                 self.ui.show_info(f" {indicator} {name:<20} ({mod_time})")
 
     def get_session_list(self):

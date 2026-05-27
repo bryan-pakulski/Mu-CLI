@@ -806,12 +806,20 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
     active session — but at startup `current_session_name` is just the
     bootstrap default placeholder, the user hasn't loaded anything
     yet. Temporarily clear it so any session can be deleted, then
-    restore (unless we just deleted the placeholder itself).
+    restore.
+
+    If we just deleted the session named in `prior_active`, fall back
+    to `DEFAULT_SESSION_NAME` instead of leaving `current_session_name`
+    as `None` — downstream calls (`save_history`, `new_session`, …)
+    build paths from this and crash on `None`.
 
     When `silent=True` the SessionManager's UI is detached for the
     duration of the call so its `show_info("Deleted session: ...")`
     print doesn't punch a hole through an active TUI render (the
-    interactive picker uses this)."""
+    interactive picker uses this).
+    """
+    from utils.config import DEFAULT_SESSION_NAME as _DEFAULT_SESSION_NAME
+
     prior_active = session_manager.current_session_name
     prior_ui = getattr(session_manager, "ui", None)
     session_manager.current_session_name = None
@@ -822,6 +830,8 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
     finally:
         if prior_active and prior_active != name:
             session_manager.current_session_name = prior_active
+        else:
+            session_manager.current_session_name = _DEFAULT_SESSION_NAME
         if silent:
             session_manager.ui = prior_ui
 
@@ -1167,7 +1177,7 @@ def main():
     try:
         session = build_session(args, ui, allow_prompt=True)
     except Exception as exc:
-        console.print(f"[red]Failed to initialize Session/Provider: {safe_markup(exc)}[/red]")
+        console.print(f"[red]Failed to initialize Session/Provider: {safe_markup(str(exc))}[/red]")
         sys.exit(1)
 
     print_splash(session)

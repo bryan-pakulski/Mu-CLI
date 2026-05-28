@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}μcli{% if session_active %} — {{ session_name }}{% endif %}{% endblock %}
+{% block body %}
+{% if not session_active %}
+<div class="welcome-shell" x-data>
+    {% include "fragments/welcome.html" %}
+</div>
+{% else %}
+<div class="app"
+     x-data
+     :class="{ 'mode-teacher': $store.mode.active === 'teacher' }">
+    <header class="header">
+        <div class="brand">μcli</div>
+        <div class="crumb"
+             :title="'session: ' + ($store.sessions.current || '{{ session_name }}') + ' · {{ provider }}/{{ model }}'">
+            <span x-text="$store.sessions.current || '{{ session_name }}'" style="color:var(--text);font-weight:500;"></span>
+            <span class="meta">{{ provider }}·{{ model }}</span>
+        </div>
+        <div class="spacer"></div>
+
+        <!-- Mode picker: collapsed dropdown rather than vertical sidebar list.
+             Shows the active mode + opens a popover to switch. -->
+        <div class="mode-picker" x-data="{ open: false }"
+             @click.outside="open = false"
+             @keydown.escape.window="open = false">
+            <button class="mode-pill" @click="open = !open"
+                    :class="{ open: open }"
+                    title="Switch agent mode"
+                    aria-haspopup="listbox" :aria-expanded="open">
+                <span class="label">mode</span>
+                <span class="value mono" x-text="$store.mode.active"></span>
+                <span class="caret">▾</span>
+            </button>
+            <div class="mode-popout" x-show="open"
+                 x-transition.opacity.duration.150ms
+                 role="listbox">
+                <template x-for="m in $store.mode.modes" :key="m.name">
+                    <button class="mode-option" :class="{ active: m.is_current }"
+                            @click="$store.mode.set(m.name); open = false"
+                            :title="m.description || m.name">
+                        <div class="mode-name">
+                            <span x-text="m.display_name"></span>
+                            <span class="mode-key mono muted" x-text="m.name"></span>
+                        </div>
+                        <div class="mode-desc" x-text="m.description"></div>
+                    </button>
+                </template>
+            </div>
+        </div>
+
+        <div class="util" title="Token totals for this session">
+            <span x-text="'tok·' + ($store.tokens.total || 0)"></span>
+        </div>
+        <button class="icon-btn" @click="$store.inspector.openDrawer()"
+                title="Workspace · memory · stats · settings"
+                aria-label="Open inspector">⚙</button>
+        <button class="icon-btn" @click="$store.theme.toggle()"
+                title="Toggle light/dark theme"
+                aria-label="Toggle theme">
+            <span x-text="$store.theme.current === 'dark' ? '☾' : '☼'"></span>
+        </button>
+        <button @click="$store.sessions.deactivate()"
+                title="Leave this session and return to the picker">leave</button>
+    </header>
+
+    <aside class="sidebar">
+        <h3>Sessions</h3>
+        <template x-for="s in $store.sessions.list" :key="s.name">
+            <div class="nav-item"
+                 :class="{
+                    active: s.name === $store.chat.currentName,
+                    loaded: $store.sessions.isLoaded(s.name),
+                    busy: $store.sessions.isBusy(s.name)
+                 }"
+                 @click="s.name !== $store.chat.currentName && $store.sessions.switchTo(s.name)"
+                 :title="(s.name === $store.chat.currentName ? s.name + ' (focused)' : 'Switch to ' + s.name)
+                    + (s.modified_at ? ' — last modified ' + s.modified_at : '')
+                    + ($store.sessions.isBusy(s.name) ? ' · turn in flight' : '')
+                    + ($store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName ? ' · loaded' : '')">
+                <!-- Status dot: busy → pulsing accent; loaded → solid muted; cold → empty. -->
+                <span class="dot"
+                      :class="{
+                        busy: $store.sessions.isBusy(s.name),
+                        loaded: $store.sessions.isLoaded(s.name) && !$store.sessions.isBusy(s.name)
+                      }"
+                      aria-hidden="true"></span>
+                <span class="name" x-text="s.name"></span>
+                <!-- Unload (only meaningful for loaded background sessions). -->
+                <span class="u"
+                      x-show="$store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName"
+                      @click.stop="$store.sessions.unload(s.name)"
+                      title="Drop this session from memory (file is preserved)">⌫</span>
+                <span class="x"
+                      @click.stop="$store.confirm.ask('Delete session \'' + s.name + '\'?', $event, () => $store.sessions.remove(s.name), {danger:true})"
+                      title="Delete session (asks first)">×</span>
+            </div>
+        </template>
+        <div class="nav-action" @click="$store.sessions.deactivate()"
+             title="Leave this session and return to the welcome picker">+ new</div>
+    </aside>
+
+    <main class="main">
+        <div class="chat-column">
+            {% include "fragments/chat.html" %}
+        </div>
+        {% include "fragments/teacher_panel.html" %}
+    </main>
+
+    {% include "fragments/inspector.html" %}
+
+    <!-- Cursor-anchored confirmation popover. Replaces window.confirm()
+         so destructive actions don't pop a native modal that blocks the
+         whole page; just a small bubble next to where the user clicked. -->
+    <div class="confirm-pop"
+         x-show="$store.confirm.open"
+         x-transition.opacity.duration.120ms
+         :style="`left:${$store.confirm.x}px; top:${$store.confirm.y}px;`"
+         @click.outside="$store.confirm.cancel()"
+         @keydown.escape.window="$store.confirm.cancel()"
+         @keydown.enter.window="$store.confirm.open && $store.confirm.confirm()"
+         role="dialog">
+        <div class="confirm-message" x-text="$store.confirm.message"></div>
+        <div class="confirm-actions">
+            <button @click="$store.confirm.cancel()">cancel</button>
+            <button class="primary" :class="{ danger: $store.confirm.danger }"
+                    @click="$store.confirm.confirm()">confirm</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

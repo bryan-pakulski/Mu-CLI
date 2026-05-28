@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}μcli{% endblock %}</title>
+    <!-- Set theme BEFORE first paint to avoid the dark→light flash on
+         reload when the user has picked light. The body class is also
+         used to swap the highlight.js stylesheets below. -->
+    <script>
+    (function () {
+        try {
+            var saved = localStorage.getItem('mucli-theme');
+            var sys = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)
+                ? 'light' : 'dark';
+            var theme = (saved === 'light' || saved === 'dark') ? saved : sys;
+            document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+    </script>
+    <link id="hljs-dark" rel="stylesheet" href="/static/vendor/highlight-github-dark.min.css">
+    <link id="hljs-light" rel="alternate stylesheet" href="/static/vendor/highlight-github-light.min.css">
+    <link rel="stylesheet" href="/static/css/app.css">
+    <script src="/static/vendor/marked.min.js"></script>
+    <script src="/static/vendor/highlight.min.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script src="/static/vendor/htmx.min.js" defer></script>
+    <script src="/static/vendor/alpine.min.js" defer></script>
+</head>
+<body>
+    {% block body %}{% endblock %}
+</body>
+</html>

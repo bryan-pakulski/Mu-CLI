@@ -1,0 +1,132 @@
+<div class="welcome" x-data="welcomeView()" x-init="load()">
+    <h1>μcli</h1>
+    <p class="lede">
+        Pick a session below to resume, or create a new one.
+        Providers read credentials from
+        <code>OPENAI_API_KEY</code>,
+        <code>GEMINI_API_KEY</code>,
+        <code>OLLAMA_HOST</code>.
+    </p>
+
+    <div x-show="sessions.length">
+        <h4>Existing</h4>
+        <div class="session-list">
+            <template x-for="s in sessions" :key="s.name">
+                <div class="row">
+                    <span class="name" x-text="s.name"
+                          :title="'last modified: ' + (s.modified_at || '')"></span>
+                    <span class="meta" x-text="s.modified_at"></span>
+                    <button class="subtle" @click="load_session(s.name)"
+                            :title="'Load session ' + s.name">load</button>
+                    <button @click="$store.confirm.ask('Delete session \'' + s.name + '\'?', $event, () => remove(s.name), {danger:true})"
+                            title="Delete session (asks first)">delete</button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <h4>Create new</h4>
+    <form @submit.prevent="createSession()">
+        <div class="form-row">
+            <label>name</label>
+            <input type="text" x-model="form.name" placeholder="my-project" required>
+        </div>
+        <div class="form-row">
+            <label>provider</label>
+            <select x-model="form.provider" @change="loadModels()" required>
+                <option value="">—</option>
+                <template x-for="p in providers" :key="p.name">
+                    <option :value="p.name" x-text="p.name + (p.configured ? '' : ' (unconfigured)')"></option>
+                </template>
+            </select>
+        </div>
+        <div class="form-row" x-show="form.provider">
+            <label>model</label>
+            <select x-model="form.model" x-show="models.length" required>
+                <option value="">—</option>
+                <template x-for="m in models" :key="m">
+                    <option :value="m" x-text="m"></option>
+                </template>
+            </select>
+            <input type="text" x-model="form.model" x-show="!models.length"
+                   placeholder="gpt-4o-mini" required>
+        </div>
+        <div x-show="modelError" style="color:var(--text-dim);font-size:11.5px;margin-top:-4px;margin-bottom:8px;"
+             x-text="'could not list models: ' + modelError + ' — type one above.'"></div>
+        <div class="actions">
+            <span class="err" x-text="error"></span>
+            <button type="submit" class="primary">create & load</button>
+        </div>
+    </form>
+</div>
+
+<script>
+function welcomeView() {
+    return {
+        sessions: [],
+        providers: [],
+        models: [],
+        modelError: null,
+        error: null,
+        form: { name: "", provider: "", model: "" },
+        async load() {
+            const [sR, pR] = await Promise.all([
+                fetch("/api/sessions"),
+                fetch("/api/providers"),
+            ]);
+            this.sessions = (await sR.json()).sessions || [];
+            this.providers = (await pR.json()).providers || [];
+        },
+        async loadModels() {
+            this.models = [];
+            this.modelError = null;
+            this.form.model = "";
+            if (!this.form.provider) return;
+            try {
+                const r = await fetch(`/api/providers/${this.form.provider}/models`);
+                const d = await r.json();
+                this.models = d.models || [];
+                this.modelError = d.error || null;
+            } catch (e) { this.modelError = String(e); }
+        },
+        async load_session(name) {
+            this.error = null;
+            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}/load`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({}),
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                this.error = d.detail || `load failed (${r.status})`;
+                return;
+            }
+            location.reload();
+        },
+        async createSession() {
+            this.error = null;
+            const r = await fetch("/api/sessions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: this.form.name,
+                    provider: this.form.provider,
+                    model: this.form.model,
+                    activate: true,
+                }),
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                this.error = d.detail || `create failed (${r.status})`;
+                return;
+            }
+            location.reload();
+        },
+        async remove(name) {
+            // Caller dispatches via $store.confirm.ask so no native popup.
+            await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+            this.load();
+        },
+    };
+}
+</script>

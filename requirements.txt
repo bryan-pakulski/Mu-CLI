@@ -11,3 +11,7 @@ ddgs
 beautifulsoup4
 httpx
 tiktoken
+fastapi
+uvicorn[standard]
+jinja2
+sse-starlette

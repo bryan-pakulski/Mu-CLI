@@ -1,0 +1,218 @@
+<div class="chat-history">
+    <template x-for="t in $store.chat.turns" :key="t.id">
+        <div class="turn-wrap">
+
+            <!-- user / assistant message bubbles -->
+            <template x-if="t.role === 'user' || t.role === 'assistant'">
+                <div :class="'msg ' + t.role + (t.streaming ? ' streaming' : '')">
+                    <div class="role" x-text="t.role"></div>
+                    <div class="body" x-html="t.html"></div>
+                </div>
+            </template>
+
+            <!-- collapsed trace block: tool calls, thinking, results -->
+            <template x-if="t.role === 'trace'">
+                <div class="trace" :class="{ open: t.open, running: t.running }">
+                    <div class="trace-header"
+                         @click="t.open = !t.open"
+                         :aria-expanded="t.open"
+                         role="button"
+                         tabindex="0"
+                         @keydown.enter.prevent="t.open = !t.open"
+                         @keydown.space.prevent="t.open = !t.open">
+                        <span class="caret">›</span>
+                        <span class="label" x-text="t.running ? 'thinking' : 'trace'"></span>
+                        <span class="summary" x-text="summarizeTrace(t)"></span>
+                        <span x-show="t.running" class="thinking-dots" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                        </span>
+                    </div>
+                    <div class="trace-events"
+                         x-show="t.open"
+                         x-transition.opacity.duration.180ms>
+                        <template x-for="ev in t.events" :key="ev.id">
+                            <div :class="'trace-event te-' + ev.kind">
+                                <div class="te-line">
+                                    <span class="te-label" x-text="eventLabel(ev)"></span>
+                                    <span class="te-name" x-show="ev.name" x-text="ev.name || ''"></span>
+                                </div>
+                                <div class="te-text" x-show="ev.text" x-text="ev.text || ''"></div>
+                                <pre class="te-json"
+                                     x-show="ev.jsonHtml"
+                                     x-html="ev.jsonHtml || ''"></pre>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <!-- standalone error -->
+            <template x-if="t.role === 'error'">
+                <div class="msg error">
+                    <div class="role" x-text="t.role"></div>
+                    <div class="body" x-html="t.html"></div>
+                </div>
+            </template>
+
+            <!-- standalone info (live-mirror notices etc.) -->
+            <template x-if="t.role === 'info'">
+                <div class="msg info">
+                    <div class="role" x-text="t.role"></div>
+                    <div class="body" x-html="t.html"></div>
+                </div>
+            </template>
+
+            <!-- resolved prompt: the breadcrumb left behind after the
+                 live inline prompt card is dismissed. Quiet record so
+                 scrolling back shows what was asked + what was picked. -->
+            <template x-if="t.role === 'prompt_resolved'">
+                <div class="msg prompt-resolved" :class="{ cancelled: t.cancelled }">
+                    <div class="resolved-meta">
+                        <span class="resolved-kind"
+                              x-text="t.cancelled ? 'cancelled' : 'decided'"></span>
+                        <span class="resolved-shape"
+                              x-show="t.shape"
+                              x-text="t.shape.replace('_', ' ')"></span>
+                    </div>
+                    <div class="resolved-q markdown" x-html="t.titleHtml"></div>
+                    <div class="resolved-a" x-show="!t.cancelled">
+                        <span class="arrow">→</span>
+                        <span class="answer markdown" x-html="t.answerHtml"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    <!-- Inline pending prompts: each entry in the prompts queue renders
+         as its own chat item. They sit at the bottom of the chat flow
+         instead of a centered modal so the rest of the conversation
+         stays visible and the user can scroll history while answering. -->
+    <template x-for="item in $store.prompts.queue" :key="item.id">
+        <div class="msg prompt"
+             x-data="promptModal()"
+             x-effect="sync(item)"
+             @keydown.escape.window="cancel()">
+            <div class="role">awaiting input</div>
+            <div class="prompt-body">
+                <h4 class="title markdown" x-html="titleHtml()"></h4>
+                <div class="desc markdown"
+                     x-show="!!description"
+                     x-html="descriptionHtml()"></div>
+
+                <!-- choice / choices -->
+                <div class="options" x-show="['choice','choices'].includes(shape)">
+                    <template x-for="(opt, idx) in (prompt.options || prompt.choices || [])" :key="idx">
+                        <label>
+                            <input :type="multi ? 'checkbox' : 'radio'" :name="'opt-' + item.id"
+                                   :value="optValue(opt)" x-model="value">
+                            <span x-html="optLabelHtml(opt)"></span>
+                        </label>
+                    </template>
+                    <label x-show="prompt.allow_other">
+                        <input :type="multi ? 'checkbox' : 'radio'" :name="'opt-' + item.id"
+                               value="__other__" x-model="value">
+                        <input type="text" placeholder="other…"
+                               x-model="otherText"
+                               style="margin-left:8px;flex:1;width:auto;">
+                    </label>
+                </div>
+
+                <!-- input -->
+                <input type="text" x-show="shape === 'input'"
+                       x-model="text"
+                       :placeholder="prompt.default || ''">
+
+                <!-- confirm -->
+                <div class="desc" x-show="shape === 'confirm'">
+                    <strong x-text="prompt.message || ''"></strong>
+                </div>
+
+                <!-- quiz -->
+                <div x-show="shape === 'quiz'" class="quiz">
+                    <template x-for="(q, qi) in (prompt.questions || [])"
+                              :key="q.qid || q.id || ('q' + qi)">
+                        <div class="quiz-q">
+                            <div class="quiz-prompt markdown"
+                                 x-html="renderMarkdownInline(q.prompt || q.question || '')"></div>
+                            <div class="options" x-show="q.kind !== 'fill_blank'">
+                                <template x-for="(opt, oi) in (q.options || [])" :key="oi">
+                                    <label>
+                                        <!-- name MUST be scoped per-card AND per-question so two
+                                             concurrent quiz prompts don't share radio groups. -->
+                                        <input type="radio"
+                                               :name="'quiz-' + id + '-' + (q.qid || q.id || qi)"
+                                               :value="quizOptionValue(opt)"
+                                               @change="answers[q.qid || q.id || q.prompt] = $event.target.value">
+                                        <span x-html="renderMarkdownInline(quizOptionLabel(opt))"></span>
+                                    </label>
+                                </template>
+                            </div>
+                            <input type="text" x-show="q.kind === 'fill_blank'"
+                                   :placeholder="q.placeholder || 'your answer…'"
+                                   @input="answers[q.qid || q.id || q.prompt] = $event.target.value">
+                        </div>
+                    </template>
+                </div>
+
+                <!-- tool_approval -->
+                <div x-show="shape === 'tool_approval'">
+                    <div class="desc">
+                        tool:
+                        <strong x-text="prompt.tool_name || '(unknown tool)'"></strong>
+                        <span x-show="prompt.risk"
+                              style="margin-left:8px;color:var(--err);font-family:var(--mono);font-size:11.5px;letter-spacing:1px;text-transform:uppercase;"
+                              x-text="prompt.risk"></span>
+                    </div>
+                    <pre class="diff-pane" x-text="formatArgs(prompt.tool_args)"></pre>
+                    <label style="display:flex;gap:8px;margin-top:8px;color:var(--text-soft);font-size:13px;cursor:pointer;">
+                        <input type="checkbox" x-model="remember" style="width:auto;accent-color:var(--accent);">
+                        <span>remember for this session</span>
+                    </label>
+                </div>
+
+                <!-- diff -->
+                <div x-show="shape === 'diff'">
+                    <pre class="diff-pane" x-text="prompt.diff || ''"></pre>
+                </div>
+
+                <div class="actions">
+                    <button @click="cancel()">cancel</button>
+                    <button class="primary"
+                            @click="submit()"
+                            x-text="okLabel()"></button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <div x-show="$store.chat.turns.length === 0 && $store.prompts.queue.length === 0"
+         class="empty-state">
+        <h2>READY</h2>
+        <p>Type below to start. <code>/help</code> lists commands.</p>
+    </div>
+</div>
+<div class="composer">
+    <form @submit.prevent="$store.chat.send($refs.input.value); $refs.input.value=''; $refs.input.style.height='auto'">
+        <textarea
+            x-ref="input"
+            placeholder="Ask anything. / for commands. Enter to send, Shift+Enter for newline."
+            @input="autoSize($el)"
+            @keydown="if ($event.key==='Enter' && !$event.shiftKey) { $event.preventDefault(); $store.chat.send($refs.input.value); $refs.input.value=''; $el.style.height='auto'; }"
+        ></textarea>
+        <button type="submit" class="primary send-btn">send</button>
+    </form>
+    <div class="hint">
+        <span x-show="$store.chat.busy && $store.prompts.queue.length === 0" class="busy">
+            <span class="thinking-dots inline" aria-hidden="true">
+                <span></span><span></span><span></span>
+            </span>
+            <span style="margin-left:6px;">generating</span>
+        </span>
+        <span x-show="$store.prompts.queue.length > 0" class="busy" style="color:var(--accent);">
+            ↑ awaiting your input above
+        </span>
+        <span x-show="$store.chat.connected === false" class="down">reconnecting…</span>
+        <span x-show="$store.chat.externalActive" class="shared">↻ shared with another mucli process</span>
+    </div>
+</div>

@@ -224,6 +224,12 @@ class SessionManager(HistoryMixin):
         try:
             os.makedirs(self._get_session_dir(self.current_session_name), exist_ok=True)
             data = {
+                # Cross-process write attribution. The GUI's file watcher
+                # uses this to tell its OWN writes apart from concurrent
+                # TUI writes on the same session.json. Safe to ignore on
+                # load — it's just a marker.
+                "__writer_pid__": os.getpid(),
+                "__writer_at__": time.time(),
                 "history": self.history,
                 "conversation_summary": self.conversation_summary,
                 "summary_anchor": self.summary_anchor,

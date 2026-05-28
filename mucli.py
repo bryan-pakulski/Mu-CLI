@@ -765,7 +765,10 @@ def select_provider_and_model(
     if not provider:
         raise ValueError(f"Unknown provider: {provider_name}")
 
-    models = provider.get_available_models()
+    models = sorted(
+        provider.get_available_models() or [],
+        key=lambda m: str(m).lower(),
+    )
     model_name = args_model
 
     if not models:
@@ -1158,6 +1161,27 @@ def main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the browser GUI in the background (frees the terminal). Default port 30311.",
+    )
+    parser.add_argument(
+        "--gui-stop",
+        action="store_true",
+        help="Stop the running GUI daemon and exit.",
+    )
+    parser.add_argument(
+        "--gui-foreground",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Port for --gui (default 30311).",
+    )
+    parser.add_argument(
         "--system",
         type=str,
         default="""You are a helpful assistant, answer all questions succinctly.
@@ -1172,6 +1196,24 @@ def main():
         help="Initial system instruction",
     )
     args = parser.parse_args()
+
+    if args.gui_stop:
+        from mu.gui.launcher import stop_gui
+
+        sys.exit(stop_gui())
+
+    if args.gui:
+        from mu.gui.launcher import run_gui
+
+        try:
+            run_gui(args, build_session)
+        except Exception as exc:
+            console.print(
+                f"[red]Failed to launch GUI: {safe_markup(str(exc))}[/red]"
+            )
+            sys.exit(1)
+        return
+
     ui = RichUI()
 
     try:

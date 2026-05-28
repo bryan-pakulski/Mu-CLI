@@ -1,0 +1,260 @@
+<div class="inspector"
+     :class="{ open: $store.inspector.open }"
+     x-show="$store.inspector.open"
+     x-transition.opacity.duration.180ms
+     @keydown.escape.window="$store.inspector.close()">
+
+    <header class="inspector-head">
+        <nav class="inspector-tabs" role="tablist">
+            <button :class="{ active: $store.inspector.tab === 'workspace' }"
+                    @click="$store.inspector.setTab('workspace')"
+                    role="tab">workspace</button>
+            <button :class="{ active: $store.inspector.tab === 'memory' }"
+                    @click="$store.inspector.setTab('memory')"
+                    role="tab">memory</button>
+            <button :class="{ active: $store.inspector.tab === 'stats' }"
+                    @click="$store.inspector.setTab('stats')"
+                    role="tab">stats</button>
+            <button :class="{ active: $store.inspector.tab === 'settings' }"
+                    @click="$store.inspector.setTab('settings')"
+                    role="tab">settings</button>
+        </nav>
+        <button class="icon-btn" @click="$store.inspector.close()"
+                aria-label="Close inspector" title="Close (Esc)">×</button>
+    </header>
+
+    <div class="inspector-body">
+
+        <!-- workspace -->
+        <section x-show="$store.inspector.tab === 'workspace'">
+            <h4 title="Folders attached to the active session. The agent indexes them for retrieval and respects their .gitignore.">attached folders</h4>
+            <div class="kv-list" x-show="$store.inspector.workspace.folders.length">
+                <template x-for="p in $store.inspector.workspace.folders" :key="p">
+                    <div class="kv-row">
+                        <span class="kv-key mono" x-text="p" :title="p"></span>
+                        <button class="icon-btn"
+                                @click="$store.confirm.ask('Detach \'' + p + '\'?', $event, () => $store.inspector.removeWorkspace(p))"
+                                title="Detach this folder from the session (asks first)">×</button>
+                    </div>
+                </template>
+            </div>
+            <div class="empty-row" x-show="!$store.inspector.workspace.folders.length"
+                 title="No folders attached — the agent has nothing indexed for this session yet.">
+                no folders attached
+            </div>
+            <h4 style="margin-top:24px;"
+                title="Attach a folder so the agent can read its files. Absolute paths or ~-relative paths both work.">attach</h4>
+            <form @submit.prevent="$store.inspector.addWorkspace()" class="inline-form">
+                <input type="text"
+                       x-model="$store.inspector.workspace.newPath"
+                       placeholder="/absolute/path or ~/relative"
+                       title="Absolute or ~-prefixed path to a directory">
+                <button type="submit" class="primary"
+                        title="Attach the folder (validates it exists)">attach</button>
+            </form>
+            <p class="muted"
+               title="The working directory the GUI server was launched from.">
+                cwd: <span class="mono" x-text="$store.inspector.workspace.cwd"></span>
+            </p>
+        </section>
+
+        <!-- memory -->
+        <section x-show="$store.inspector.tab === 'memory'">
+            <form @submit.prevent="$store.inspector.searchMemory()" class="inline-form">
+                <input type="text"
+                       x-model="$store.inspector.memory.query"
+                       placeholder="search task memory…"
+                       title="Full-text search across task memory content + tags. Empty query restores the full list.">
+                <button type="submit"
+                        title="Run search">search</button>
+                <button type="button"
+                        @click="$store.inspector.memory.query=''; $store.inspector.loadMemory()"
+                        title="Clear the query and show all entries">clear</button>
+            </form>
+
+            <div x-show="$store.inspector.memory.results !== null">
+                <h4 x-text="`results (${($store.inspector.memory.results || []).length})`"
+                    title="Search-scored entries (term in content/tags/source)"></h4>
+                <template x-for="e in $store.inspector.memory.results || []" :key="e.id">
+                    <div class="mem-entry" :data-id="e.id">
+                        <div class="mem-head">
+                            <span class="mono" x-text="'#' + e.id"></span>
+                            <template x-for="tag in e.tags" :key="tag">
+                                <span class="tag" x-text="tag"></span>
+                            </template>
+                            <span class="muted mono"
+                                  x-text="e.hits + ' hits'"
+                                  :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"
+                                  style="margin-left:auto;"></span>
+                            <button class="icon-btn"
+                                    @click="$store.confirm.ask('Delete memory #' + e.id + '?', $event, () => $store.inspector.deleteMemory(e.id), {danger:true})"
+                                    title="Delete this memory entry (asks first)">×</button>
+                        </div>
+                        <div class="mem-body" x-text="e.content"></div>
+                    </div>
+                </template>
+            </div>
+
+            <div x-show="$store.inspector.memory.results === null">
+                <div class="row-between">
+                    <h4 x-text="`task memory (${$store.inspector.memory.taskMemory.length})`"
+                        title="Durable cross-turn memory. The agent uses save_memory / search_memory to read + write."></h4>
+                    <button @click="$store.confirm.ask('Clear ALL task memory?', $event, () => $store.inspector.clearMemory(), {danger:true})"
+                            class="muted-btn"
+                            title="Drop every task memory entry (asks first)"
+                            x-show="$store.inspector.memory.taskMemory.length">clear all</button>
+                </div>
+                <template x-for="e in $store.inspector.memory.taskMemory" :key="e.id">
+                    <div class="mem-entry">
+                        <div class="mem-head">
+                            <span class="mono" x-text="'#' + e.id"></span>
+                            <template x-for="tag in e.tags" :key="tag">
+                                <span class="tag" x-text="tag"></span>
+                            </template>
+                            <span class="muted mono"
+                                  x-text="e.hits + ' hits'"
+                                  :title="'Updated ' + new Date(e.updated_at * 1000).toLocaleString()"
+                                  style="margin-left:auto;"></span>
+                            <button class="icon-btn"
+                                    @click="$store.confirm.ask('Delete memory #' + e.id + '?', $event, () => $store.inspector.deleteMemory(e.id), {danger:true})"
+                                    title="Delete this memory entry (asks first)">×</button>
+                        </div>
+                        <div class="mem-body" x-text="e.content"></div>
+                    </div>
+                </template>
+                <div class="empty-row" x-show="!$store.inspector.memory.taskMemory.length"
+                     title="Nothing saved yet — the agent populates task memory when it saves findings.">no task memory yet</div>
+
+                <h4 style="margin-top:24px;"
+                    x-text="`scratchpad (${$store.inspector.memory.scratchpad.length})`"
+                    title="Per-turn scratchpad — wiped between turns. The agent uses it for in-flight planning."></h4>
+                <template x-for="e in $store.inspector.memory.scratchpad" :key="e.id">
+                    <div class="mem-entry">
+                        <div class="mem-head">
+                            <span class="mono" x-text="'#' + e.id"></span>
+                            <template x-for="tag in e.tags" :key="tag">
+                                <span class="tag" x-text="tag"></span>
+                            </template>
+                        </div>
+                        <div class="mem-body" x-text="e.content"></div>
+                    </div>
+                </template>
+                <div class="empty-row" x-show="!$store.inspector.memory.scratchpad.length"
+                     title="Cleared at the start of every turn.">scratchpad empty</div>
+            </div>
+        </section>
+
+        <!-- stats -->
+        <section x-show="$store.inspector.tab === 'stats'">
+            <div x-show="$store.inspector.stats && $store.inspector.stats.active">
+                <div class="stat">
+                    <div class="stat-key">session</div>
+                    <div class="stat-val mono" x-text="$store.inspector.stats?.name"></div>
+                </div>
+                <div class="stat">
+                    <div class="stat-key">provider · model</div>
+                    <div class="stat-val mono"
+                         x-text="($store.inspector.stats?.provider || '') + ' · ' + ($store.inspector.stats?.model || '')"></div>
+                </div>
+                <div class="stat">
+                    <div class="stat-key">mode</div>
+                    <div class="stat-val mono" x-text="$store.inspector.stats?.agent_mode"></div>
+                </div>
+                <h4 style="margin-top:20px;">tokens</h4>
+                <div class="stat-grid">
+                    <div><div class="stat-key">input</div><div class="stat-val mono"  x-text="$store.inspector.stats?.tokens?.input || 0"></div></div>
+                    <div><div class="stat-key">output</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.output || 0"></div></div>
+                    <div><div class="stat-key">total</div><div class="stat-val mono"  x-text="$store.inspector.stats?.tokens?.total || 0"></div></div>
+                    <div><div class="stat-key">cached</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.cached || 0"></div></div>
+                </div>
+                <h4 style="margin-top:20px;">cost (estimate)</h4>
+                <div class="stat-val mono large"
+                     x-text="'$' + (($store.inspector.stats?.estimated_cost_usd || 0).toFixed(4))"></div>
+                <h4 style="margin-top:20px;">other</h4>
+                <div class="stat-grid">
+                    <div><div class="stat-key">history</div><div class="stat-val mono" x-text="$store.inspector.stats?.history_length"></div></div>
+                    <div><div class="stat-key">task mem</div><div class="stat-val mono" x-text="$store.inspector.stats?.task_memory_size"></div></div>
+                    <div><div class="stat-key">scratch</div><div class="stat-val mono" x-text="$store.inspector.stats?.scratchpad_size"></div></div>
+                </div>
+                <p class="muted" style="margin-top:24px;">refresh: <button class="muted-btn" @click="$store.inspector.loadStats()">↻</button></p>
+            </div>
+            <div class="empty-row" x-show="!$store.inspector.stats?.active">no active session</div>
+        </section>
+
+        <!-- settings (variables) — collapsible submenus per category -->
+        <section x-show="$store.inspector.tab === 'settings'">
+            <input type="text"
+                   x-model="$store.inspector.varFilter"
+                   placeholder="filter variables…"
+                   title="Substring filter on variable name. Auto-expands groups that contain matches."
+                   style="margin-bottom:12px;">
+
+            <template x-for="group in $store.inspector.filteredVariables()" :key="group.name">
+                <div class="var-group"
+                     :class="{ open: $store.inspector.isGroupOpen(group.name) }">
+                    <button class="var-group-head"
+                            @click="$store.inspector.toggleGroup(group.name)"
+                            :title="'Toggle ' + group.name + ' (' + group.variables.length + ' items)'"
+                            :aria-expanded="$store.inspector.isGroupOpen(group.name)">
+                        <span class="caret">›</span>
+                        <span class="var-group-name" x-text="group.name"></span>
+                        <span class="var-group-count mono muted"
+                              x-text="group.variables.length"></span>
+                    </button>
+                    <div class="var-group-body"
+                         x-show="$store.inspector.isGroupOpen(group.name)"
+                         x-transition.opacity.duration.150ms>
+                        <template x-for="v in group.variables" :key="v.key">
+                            <div class="var-row"
+                                 :class="{ 'is-default': v.is_default }"
+                                 :title="v.help
+                                    ? (v.help + ' — default: ' + JSON.stringify(v.default))
+                                    : (v.key + ' — default: ' + JSON.stringify(v.default))">
+                                <div class="var-head">
+                                    <span class="var-key mono" x-text="v.key"></span>
+                                    <span class="var-type mono muted" x-text="v.type"
+                                          :title="'type: ' + v.type"></span>
+                                    <span class="var-help-glyph muted"
+                                          x-show="v.help"
+                                          aria-hidden="true"
+                                          :title="v.help">?</span>
+                                    <button class="icon-btn"
+                                            x-show="!v.is_default"
+                                            @click="$store.confirm.ask('Reset ' + v.key + ' to ' + JSON.stringify(v.default) + '?', $event, () => $store.inspector.resetVariable(v.key))"
+                                            title="Reset to default (asks first)">↺</button>
+                                </div>
+                                <!-- bool: toggle -->
+                                <label class="var-bool" x-show="v.type === 'bool'"
+                                       :title="v.help || v.key">
+                                    <input type="checkbox"
+                                           :checked="!!v.value"
+                                           @change="$store.inspector.setVariable(v.key, $event.target.checked)">
+                                    <span x-text="v.value ? 'on' : 'off'"></span>
+                                </label>
+                                <!-- int/float: number input -->
+                                <input type="number"
+                                       x-show="v.type === 'int' || v.type === 'float'"
+                                       :value="v.value"
+                                       :step="v.type === 'int' ? 1 : 0.01"
+                                       :title="v.help || v.key"
+                                       @change="$store.inspector.setVariable(v.key, $event.target.value)">
+                                <!-- str: text input -->
+                                <input type="text"
+                                       x-show="v.type === 'str'"
+                                       :value="v.value"
+                                       :title="v.help || v.key"
+                                       @change="$store.inspector.setVariable(v.key, $event.target.value)">
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <div class="empty-row"
+                 x-show="$store.inspector.varFilter && $store.inspector.filteredVariables().length === 0"
+                 title="No variable name matches the current filter.">
+                no matches
+            </div>
+        </section>
+    </div>
+</div>

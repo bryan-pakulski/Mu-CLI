@@ -18,6 +18,24 @@
             <span class="fb-current mono" x-text="$store.fileBrowser.path"></span>
         </div>
 
+        <div class="fb-toolbar">
+            <button class="fb-new-folder"
+                    x-show="!$store.fileBrowser.creatingFolder"
+                    @click="$store.fileBrowser.startCreateFolder()"
+                    title="Create new folder">+ folder</button>
+            <div class="fb-create-folder" x-show="$store.fileBrowser.creatingFolder">
+                <input type="text"
+                       class="fb-folder-input"
+                       x-model="$store.fileBrowser.newFolderName"
+                       @keydown.enter="$store.fileBrowser.confirmCreateFolder()"
+                       @keydown.escape="$store.fileBrowser.cancelCreateFolder()"
+                       placeholder="folder name"
+                       x-effect="if ($store.fileBrowser.creatingFolder) $nextTick(() => $el.focus())" />
+                <button class="fb-create-confirm" @click="$store.fileBrowser.confirmCreateFolder()">✓</button>
+                <button class="fb-create-cancel" @click="$store.fileBrowser.cancelCreateFolder()">✕</button>
+            </div>
+        </div>
+
         <div class="fb-entries">
             <template x-for="e in $store.fileBrowser.entries" :key="e.path">
                 <div class="fb-entry"

@@ -1268,6 +1268,40 @@ document.addEventListener("alpine:init", () => {
             if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " K";
             return (bytes / 1048576).toFixed(1) + " M";
         },
+
+        // --- create folder ---
+        creatingFolder: false,
+        newFolderName: "",
+
+        startCreateFolder() {
+            this.creatingFolder = true;
+            this.newFolderName = "";
+        },
+        async confirmCreateFolder() {
+            const name = (this.newFolderName || "").trim();
+            if (!name) { this.cancelCreateFolder(); return; }
+            try {
+                const r = await fetch("/api/browse/mkdir", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ path: this.path, name }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    alert(d.detail || `create folder failed (${r.status})`);
+                    return;
+                }
+                this.creatingFolder = false;
+                this.newFolderName = "";
+                await this.navigate(this.path);
+            } catch (e) {
+                console.error("fileBrowser.confirmCreateFolder", e);
+            }
+        },
+        cancelCreateFolder() {
+            this.creatingFolder = false;
+            this.newFolderName = "";
+        },
     });
 
     Alpine.store("inspector", {

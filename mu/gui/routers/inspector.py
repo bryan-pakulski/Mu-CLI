@@ -333,6 +333,49 @@ async def browse_directory(path: str = "") -> Dict[str, Any]:
     }
 
 
+@router.post("/browse/mkdir")
+async def mkdir_directory(
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Create a new directory under the given parent path.
+
+    No session required — this is a pure filesystem operation,
+    mirroring the read-only ``/browse`` endpoint.
+    """
+    parent = str(payload.get("path") or "").strip()
+    name = str(payload.get("name") or "").strip()
+
+    if not parent:
+        raise HTTPException(status_code=400, detail="path is required")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    # Reject path traversal in either field
+    if ".." in parent.split(os.sep) or ".." in name.split(os.sep):
+        raise HTTPException(status_code=400, detail="path traversal not allowed")
+
+    # Reject slashes in the folder name (must be a single segment)
+    if os.sep in name or (os.altsep and os.altsep in name):
+        raise HTTPException(status_code=400, detail="name must not contain path separators")
+
+    target = os.path.abspath(os.path.join(os.path.expanduser(parent), name))
+
+    if not os.path.isdir(os.path.expanduser(parent)):
+        raise HTTPException(status_code=400, detail=f"parent directory does not exist: {parent}")
+
+    if os.path.exists(target):
+        raise HTTPException(status_code=409, detail=f"already exists: {target}")
+
+    try:
+        os.makedirs(target, exist_ok=False)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"permission denied: {target}")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"ok": True, "path": target}
+
+
 # ----- memory -------------------------------------------------------------
 
 

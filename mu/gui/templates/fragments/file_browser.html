@@ -1,0 +1,49 @@
+<!-- Filesystem browser modal — shared by the workspace folder picker
+     and the chat file-attach button. Mode "folder" shows a "select this
+     folder" button; mode "file" lets you click individual files. -->
+<div class="file-browser-backdrop"
+     x-show="$store.fileBrowser.open"
+     x-transition.opacity.duration.150ms
+     @click.self="$store.fileBrowser.cancel()">
+    <div class="file-browser"
+         @keydown.escape.window="$store.fileBrowser.open && $store.fileBrowser.cancel()">
+        <div class="fb-head">
+            <span class="fb-title"
+                  x-text="$store.fileBrowser.mode === 'folder' ? 'Select folder' : 'Select file'"></span>
+            <button class="icon-btn" @click="$store.fileBrowser.cancel()" title="Close">×</button>
+        </div>
+
+        <div class="fb-path">
+            <button class="fb-up" @click="$store.fileBrowser.up()" title="Go up">↑</button>
+            <span class="fb-current mono" x-text="$store.fileBrowser.path"></span>
+        </div>
+
+        <div class="fb-entries">
+            <template x-for="e in $store.fileBrowser.entries" :key="e.path">
+                <div class="fb-entry"
+                     :class="{ 'is-dir': e.is_dir }"
+                     @click="$store.fileBrowser.select(e)"
+                     @dblclick="e.is_dir && $store.fileBrowser.navigate(e.path)">
+                    <span class="fb-icon" x-text="e.is_dir ? '📁' : '📄'"></span>
+                    <span class="fb-name" x-text="e.name"></span>
+                    <span class="fb-size mono muted"
+                          x-show="!e.is_dir && e.size !== null"
+                          x-text="$store.fileBrowser.formatSize(e.size)"></span>
+                </div>
+            </template>
+            <div class="fb-empty muted"
+                 x-show="!$store.fileBrowser.loading && !$store.fileBrowser.entries.length">
+                empty directory
+            </div>
+        </div>
+
+        <div class="fb-actions">
+            <button @click="$store.fileBrowser.cancel()">cancel</button>
+            <button class="primary"
+                    x-show="$store.fileBrowser.mode === 'folder'"
+                    @click="$store.fileBrowser.selectCurrent()">
+                select this folder
+            </button>
+        </div>
+    </div>
+</div>

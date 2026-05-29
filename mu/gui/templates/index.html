@@ -4,11 +4,12 @@
 {% if not session_active %}
 <div class="welcome-shell" x-data>
     {% include "fragments/welcome.html" %}
+    {% include "fragments/file_browser.html" %}
 </div>
 {% else %}
 <div class="app"
      x-data
-     :class="{ 'mode-teacher': $store.mode.active === 'teacher' }">
+     :class="{ 'has-panel': $store.mode.panelModes.includes($store.mode.active) }">
     <header class="header">
         <div class="brand">μcli</div>
         <div class="crumb"
@@ -35,14 +36,16 @@
                  x-transition.opacity.duration.150ms
                  role="listbox">
                 <template x-for="m in $store.mode.modes" :key="m.name">
-                    <button class="mode-option" :class="{ active: m.is_current }"
-                            @click="$store.mode.set(m.name); open = false"
-                            :title="m.description || m.name">
+                    <button class="mode-option"
+                            :class="{ active: m.is_current, disabled: m.disabled }"
+                            @click="!m.disabled && ($store.mode.set(m.name), open = false)"
+                            :title="m.disabled ? 'Requires a workspace — add one in the inspector' : (m.description || m.name)"
+                            :disabled="m.disabled">
                         <div class="mode-name">
                             <span x-text="m.display_name"></span>
                             <span class="mode-key mono muted" x-text="m.name"></span>
                         </div>
-                        <div class="mode-desc" x-text="m.description"></div>
+                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace' : m.description"></div>
                     </button>
                 </template>
             </div>
@@ -51,6 +54,13 @@
         <div class="util" title="Token totals for this session">
             <span x-text="'tok·' + ($store.tokens.total || 0)"></span>
         </div>
+        <button class="yolo-toggle"
+                :class="{ active: $store.yolo.active }"
+                @click="$store.yolo.toggle()"
+                :title="$store.yolo.active ? 'YOLO mode ON — no tool approvals. Click to disable.' : 'YOLO mode OFF — tools require approval. Click to enable.'">
+            <span class="yolo-label">yolo</span>
+            <span class="yolo-dot"></span>
+        </button>
         <button class="icon-btn" @click="$store.inspector.openDrawer()"
                 title="Workspace · memory · stats · settings"
                 aria-label="Open inspector">⚙</button>
@@ -104,9 +114,15 @@
             {% include "fragments/chat.html" %}
         </div>
         {% include "fragments/teacher_panel.html" %}
+        {% include "fragments/feature_panel.html" %}
+        {% include "fragments/research_panel.html" %}
+        {% include "fragments/security_panel.html" %}
+        {% include "fragments/loop_panel.html" %}
+        {% include "fragments/debug_panel.html" %}
     </main>
 
     {% include "fragments/inspector.html" %}
+    {% include "fragments/file_browser.html" %}
 
     <!-- Cursor-anchored confirmation popover. Replaces window.confirm()
          so destructive actions don't pop a native modal that blocks the

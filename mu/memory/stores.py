@@ -14,6 +14,7 @@ class MemoryEntry:
     content: str
     tags: List[str] = field(default_factory=list)
     source: str = ""
+    kind: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     hits: int = 0
@@ -24,6 +25,7 @@ class MemoryEntry:
             "content": self.content,
             "tags": self.tags,
             "source": self.source,
+            "kind": self.kind,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "hits": self.hits,
@@ -36,6 +38,7 @@ class MemoryEntry:
             content=str(data.get("content", "")),
             tags=list(data.get("tags", [])),
             source=str(data.get("source", "")),
+            kind=str(data.get("kind", "")),
             created_at=float(data.get("created_at", time.time())),
             updated_at=float(data.get("updated_at", time.time())),
             hits=int(data.get("hits", 0)),
@@ -82,6 +85,7 @@ class BaseNoteStore:
         content: str,
         tags: List[str] | None = None,
         source: str = "",
+        kind: str = "",
     ) -> MemoryEntry:
         tags = [str(tag).strip().lower() for tag in (tags or []) if str(tag).strip()]
         content = str(content or "").strip()
@@ -99,6 +103,8 @@ class BaseNoteStore:
             existing.hits += 1
             if source and not existing.source:
                 existing.source = source
+            if kind and not existing.kind:
+                existing.kind = kind
             return existing
 
         entry = MemoryEntry(
@@ -106,6 +112,7 @@ class BaseNoteStore:
             content=content,
             tags=tags,
             source=source,
+            kind=kind,
         )
         self._next_id += 1
         self.entries.append(entry)

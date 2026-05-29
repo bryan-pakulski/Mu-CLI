@@ -295,13 +295,19 @@ document.addEventListener("alpine:init", () => {
         },
         async loadHistory(name) {
             const target = name || this.currentName;
-            const slot = this._slot(target);
             try {
                 const url = target
                     ? `/api/sessions/current/history?session_name=${encodeURIComponent(target)}`
                     : "/api/sessions/current/history";
                 const r = await fetch(url);
                 const data = await r.json();
+                // At boot, target may be null (currentName is unset until
+                // sessions.load() runs). Key the slot by the server's
+                // returned name so the history lands where the proxy
+                // getters will look once sessions.load syncs currentName.
+                const key = target || data.name || null;
+                const slot = this._slot(key);
+                if (!this.currentName && data.name) this.currentName = data.name;
                 slot.turns = [];
                 let traceForTurn = null;
                 for (const turn of data.turns || []) {
@@ -409,8 +415,9 @@ document.addEventListener("alpine:init", () => {
                 // browser has never rendered before, only resident in
                 // the daemon's cache).
                 Alpine.store("chat").loadHistory(name);
+                // mode.load() refreshes the active mode's panel store
+                // via panelModes — no explicit teacher/feature call needed.
                 Alpine.store("mode").load();
-                if (Alpine.store("teacher")) Alpine.store("teacher").load();
                 return;
             }
             // Not loaded yet — POST /load (which is idempotent).
@@ -429,7 +436,6 @@ document.addEventListener("alpine:init", () => {
             Alpine.store("chat").focus(name);
             await Alpine.store("chat").loadHistory(name);
             await Alpine.store("mode").load();
-            if (Alpine.store("teacher")) await Alpine.store("teacher").load();
         },
         async remove(name) {
             await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
@@ -450,21 +456,31 @@ document.addEventListener("alpine:init", () => {
     Alpine.store("mode", {
         active: "default",
         modes: [],
+        // Modes that own a dedicated side-panel template. The layout
+        // toggles its `.has-panel` shell class against this list so the
+        // chat column reserves room only when something will fill it.
+        panelModes: ["teacher", "feature", "research", "security", "loop", "debug"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
             this.modes = data.modes || [];
             this.active = data.current || "default";
-            // Mode-specific side-effect: refresh teacher panel data so
-            // the layout is correct the instant the user lands in
-            // teacher mode (no extra click required).
-            if (this.active === "teacher" && Alpine.store("teacher")) {
-                Alpine.store("teacher").load();
-            }
+            // Mode-specific side-effect: refresh the panel store for
+            // the active mode so the layout has data the instant the
+            // user lands here (no extra click).
+            const store = this.panelModes.includes(this.active)
+                ? Alpine.store(this.active)
+                : null;
+            if (store && typeof store.load === "function") store.load();
         },
         async set(name) {
             const r = await fetch(`/api/modes/${name}`, { method: "POST" });
-            if (r.ok) this.active = name;
+            if (r.ok) {
+                this.active = name;
+            } else {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("chat").addInfo(d.detail || `mode switch failed (${r.status})`);
+            }
             await this.load();
         },
     });
@@ -530,6 +546,32 @@ document.addEventListener("alpine:init", () => {
     });
 
     Alpine.store("tokens", { input: 0, output: 0, total: 0, total_cost: 0 });
+
+    Alpine.store("yolo", {
+        active: false,
+        async load() {
+            try {
+                const r = await fetch("/api/variables");
+                const d = await r.json();
+                for (const g of (d.groups || [])) {
+                    for (const v of (g.variables || [])) {
+                        if (v.key === "yolo") { this.active = !!v.value; return; }
+                    }
+                }
+            } catch (e) { console.error("yolo.load", e); }
+        },
+        async toggle() {
+            const next = !this.active;
+            try {
+                const r = await fetch("/api/variables/yolo", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ value: next }),
+                });
+                if (r.ok) this.active = next;
+            } catch (e) { console.error("yolo.toggle", e); }
+        },
+    });
 
     Alpine.store("theme", {
         // Initialised from the data-theme attribute the pre-paint
@@ -666,6 +708,456 @@ document.addEventListener("alpine:init", () => {
         },
     });
 
+    Alpine.store("feature", {
+        // Active feature plan summary from /api/feature/state. Same load
+        // triggers as the teacher store: page boot, mode flip, turn_complete
+        // SSE, session_updated SSE.
+        plan: null,
+        features: [],
+        active: false,
+        loaded: false,
+        metadataPath: null,
+        openSections: {
+            events: false,
+            reviews: false,
+        },
+        // Per-phase collapse state. Defaults open for the in-progress
+        // phase, closed otherwise; the load() hook sets initial values.
+        openPhases: {},
+        // The task whose drill-down is currently expanded (one at a time).
+        expandedTaskId: null,
+        // Drag-and-drop transfer state.
+        dragTaskId: null,
+
+        async load() {
+            try {
+                const r = await fetch("/api/feature/state");
+                const d = await r.json();
+                this.active = !!d.active;
+                this.plan = d.plan || null;
+                this.features = d.features || [];
+                this.metadataPath = d.metadata_path || null;
+                // Seed open/closed defaults for new phases without
+                // disturbing whatever the user has already toggled.
+                const phases = (this.plan && this.plan.phase_columns) || [];
+                for (const phase of phases) {
+                    const key = String(phase.id);
+                    if (this.openPhases[key] === undefined) {
+                        const status = (phase.status || "").toLowerCase();
+                        // Open whichever phase is currently in flight;
+                        // leave done/pending phases closed.
+                        this.openPhases[key] = status === "in_progress"
+                            || status === "blocked";
+                    }
+                }
+                this.loaded = true;
+            } catch (e) {
+                console.error("feature.load", e);
+            }
+        },
+        toggleSection(name) {
+            this.openSections[name] = !this.openSections[name];
+        },
+        togglePhase(id) {
+            const key = String(id);
+            this.openPhases[key] = !this.openPhases[key];
+        },
+        isPhaseOpen(id) {
+            return !!this.openPhases[String(id)];
+        },
+        toggleTask(id) {
+            this.expandedTaskId = this.expandedTaskId === id ? null : id;
+        },
+        isTaskExpanded(id) {
+            return this.expandedTaskId === id;
+        },
+
+        // ---- view helpers ----
+        statusGlyph(status) {
+            switch ((status || "").toLowerCase()) {
+                case "completed":   return "✓";
+                case "in_progress": return "◐";
+                case "blocked":     return "⚠";
+                case "archived":    return "✕";
+                case "pending":
+                case "not_started": return "○";
+                default:            return "·";
+            }
+        },
+        formatTimestamp(unix) {
+            if (!unix || typeof unix !== "number") return "";
+            try { return new Date(unix * 1000).toLocaleString(); }
+            catch (e) { return ""; }
+        },
+        // The agent's "current" task is the in_progress one (if any), else
+        // the next actionable. summarize_feature_plan ships this as
+        // `execution.next_task`; surface both via one accessor.
+        currentTask() {
+            if (!this.plan) return null;
+            const exec = this.plan.execution || {};
+            if (exec.next_task) return exec.next_task;
+            const active = this.plan.active_tasks || [];
+            return active.length ? active[0] : null;
+        },
+        phaseColumns() {
+            return (this.plan && this.plan.phase_columns) || [];
+        },
+        progressPct() {
+            if (!this.plan || !this.plan.task_count) return 0;
+            return Math.round(
+                ((this.plan.tasks_completed_count || 0) /
+                    (this.plan.task_count || 1)) * 100
+            );
+        },
+        // The backend's summary uses `tasks_completed` as a bool; derive
+        // the count from the task list so the progress bar makes sense.
+        tasksCompletedCount() {
+            if (!this.plan) return 0;
+            return (this.plan.phases || []).filter(
+                t => (t.status || "").toLowerCase() === "completed"
+            ).length;
+        },
+        recentEvents(limit = 5) {
+            if (!this.plan || !this.plan.event_log) return [];
+            return this.plan.event_log.slice(-limit).reverse();
+        },
+        reviews() {
+            if (!this.plan) return [];
+            return this.plan.review_records || [];
+        },
+        // ---- mutating actions ----
+        async transitionTask(taskId, toStatus) {
+            if (!taskId || !toStatus) return;
+            try {
+                const r = await fetch(
+                    `/api/feature/tasks/${taskId}/transition`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ to_status: toStatus }),
+                    }
+                );
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    Alpine.store("chat").addInfo(
+                        `feature: cannot move task #${taskId} to ${toStatus} — ${data.detail || r.status}`
+                    );
+                }
+            } catch (e) {
+                console.error("feature.transitionTask", e);
+            } finally {
+                await this.load();
+            }
+        },
+        async toggleExitCriterion(taskId, idx) {
+            if (!taskId && taskId !== 0) return;
+            try {
+                const r = await fetch(
+                    `/api/feature/tasks/${taskId}/exit-criteria/${idx}/toggle`,
+                    { method: "POST" }
+                );
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    console.warn("toggleExitCriterion", r.status, data.detail);
+                }
+            } catch (e) {
+                console.error("feature.toggleExitCriterion", e);
+            } finally {
+                await this.load();
+            }
+        },
+        isVerified(task, criterion) {
+            return (task.verified_exit_criteria || []).includes(criterion);
+        },
+        async switchFeature(featureId) {
+            if (!featureId) return;
+            await Alpine.store("chat").send(`/feature load ${featureId}`);
+        },
+    });
+
+    Alpine.store("research", {
+        sources: [],
+        sourceCount: 0,
+        bibliography: "",
+        findings: [],
+        findingCount: 0,
+        active: false,
+        loaded: false,
+        openSections: {
+            sources: true,
+            bibliography: false,
+            findings: true,
+        },
+        // Client-side filter: selected source types (empty = show all).
+        typeFilter: [],
+        // Client-side credibility threshold slider (0 = no filter).
+        credibilityMin: 0,
+        // Which source row is expanded for detail.
+        expandedSourceId: null,
+
+        async load() {
+            try {
+                const r = await fetch("/api/research/state");
+                const d = await r.json();
+                this.active = !!d.active;
+                this.sources = d.sources || [];
+                this.sourceCount = d.source_count || 0;
+                this.bibliography = d.bibliography || "";
+                this.findings = d.findings || [];
+                this.findingCount = d.finding_count || 0;
+                this.loaded = true;
+            } catch (e) {
+                console.error("research.load", e);
+            }
+        },
+        toggleSection(name) {
+            this.openSections[name] = !this.openSections[name];
+        },
+        toggleType(type) {
+            const i = this.typeFilter.indexOf(type);
+            if (i >= 0) this.typeFilter.splice(i, 1);
+            else this.typeFilter.push(type);
+        },
+        isTypeActive(type) {
+            return this.typeFilter.length === 0 || this.typeFilter.includes(type);
+        },
+        toggleSource(id) {
+            this.expandedSourceId = this.expandedSourceId === id ? null : id;
+        },
+        isSourceExpanded(id) {
+            return this.expandedSourceId === id;
+        },
+        filteredSources() {
+            return this.sources.filter(s => {
+                if (this.typeFilter.length && !this.typeFilter.includes(s.source_type)) return false;
+                if (this.credibilityMin > 0 && (s.credibility_score || 0) < this.credibilityMin) return false;
+                return true;
+            });
+        },
+        sourceTypes() {
+            const types = new Set(this.sources.map(s => s.source_type));
+            return [...types].sort();
+        },
+        credibilityPct(score) {
+            return Math.round((score || 0) * 100);
+        },
+        formatTimestamp(unix) {
+            if (!unix || typeof unix !== "number") return "";
+            try { return new Date(unix * 1000).toLocaleString(); }
+            catch (e) { return ""; }
+        },
+        async copyBibliography() {
+            try {
+                await navigator.clipboard.writeText(this.bibliography);
+            } catch (e) {
+                console.warn("clipboard write failed", e);
+            }
+        },
+    });
+
+    Alpine.store("security", {
+        report: null,
+        findings: [],
+        summary: null,
+        active: false,
+        loaded: false,
+        openSections: {
+            findings: true,
+            stats: false,
+        },
+        severityFilter: [],
+        expandedFindingId: null,
+
+        async load() {
+            try {
+                const r = await fetch("/api/security/state");
+                const d = await r.json();
+                this.active = !!d.active;
+                this.report = d.report || null;
+                this.findings = d.findings || [];
+                this.summary = d.summary || null;
+                this.loaded = true;
+            } catch (e) {
+                console.error("security.load", e);
+            }
+        },
+        toggleSection(name) {
+            this.openSections[name] = !this.openSections[name];
+        },
+        toggleSeverity(sev) {
+            const i = this.severityFilter.indexOf(sev);
+            if (i >= 0) this.severityFilter.splice(i, 1);
+            else this.severityFilter.push(sev);
+        },
+        isSeverityActive(sev) {
+            return this.severityFilter.length === 0 || this.severityFilter.includes(sev);
+        },
+        toggleFinding(id) {
+            this.expandedFindingId = this.expandedFindingId === id ? null : id;
+        },
+        isFindingExpanded(id) {
+            return this.expandedFindingId === id;
+        },
+        filteredFindings() {
+            if (!this.severityFilter.length) return this.findings;
+            return this.findings.filter(f => this.severityFilter.includes(f.severity));
+        },
+        severities() {
+            const s = new Set(this.findings.map(f => f.severity));
+            const order = ["critical", "high", "medium", "low", "info"];
+            return order.filter(sev => s.has(sev));
+        },
+        statusGlyph(status) {
+            switch ((status || "").toLowerCase()) {
+                case "approved":              return "✓";
+                case "exploit_verified":
+                case "remediation_verified":  return "◐";
+                case "refuted":               return "✕";
+                case "proof_attached":
+                case "remediation_attached":  return "◔";
+                case "new":                   return "○";
+                default:                      return "·";
+            }
+        },
+        severityColor(sev) {
+            switch ((sev || "").toLowerCase()) {
+                case "critical": return "var(--err)";
+                case "high":     return "#e0af68";
+                case "medium":   return "#ff9e64";
+                case "low":      return "#7aa2f7";
+                case "info":     return "var(--text-dimmer)";
+                default:         return "var(--text-dim)";
+            }
+        },
+        formatTimestamp(unix) {
+            if (!unix || typeof unix !== "number") return "";
+            try { return new Date(unix * 1000).toLocaleString(); }
+            catch (e) { return ""; }
+        },
+        async approveFinding(findingId) {
+            try {
+                const r = await fetch(
+                    `/api/security/findings/${findingId}/approve`,
+                    { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+                );
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("chat").addInfo(`security: cannot approve ${findingId} — ${d.detail || r.status}`);
+                }
+            } catch (e) {
+                console.error("security.approve", e);
+            } finally {
+                await this.load();
+            }
+        },
+        async refuteFinding(findingId, reason) {
+            try {
+                const r = await fetch(
+                    `/api/security/findings/${findingId}/refute`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ reason: reason || "" }),
+                    }
+                );
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("chat").addInfo(`security: cannot refute ${findingId} — ${d.detail || r.status}`);
+                }
+            } catch (e) {
+                console.error("security.refute", e);
+            } finally {
+                await this.load();
+            }
+        },
+    });
+
+    Alpine.store("loop", {
+        loopGoal: "",
+        loopActive: false,
+        loopFeatures: [],
+        backlog: [],
+        memory: [],
+        active: false,
+        loaded: false,
+        openSections: { backlog: true, features: false, memory: false },
+
+        async load() {
+            try {
+                const r = await fetch("/api/loop/state");
+                const d = await r.json();
+                this.active = !!d.active;
+                this.loopGoal = d.loop_goal || "";
+                this.loopActive = !!d.loop_active;
+                this.loopFeatures = d.loop_features || [];
+                this.backlog = d.backlog || [];
+                this.memory = d.memory || [];
+                this.loaded = true;
+            } catch (e) { console.error("loop.load", e); }
+        },
+        toggleSection(name) { this.openSections[name] = !this.openSections[name]; },
+        statusGlyph(status) {
+            switch ((status || "").toLowerCase()) {
+                case "completed": return "✓";
+                case "in_progress": return "◐";
+                case "blocked": return "⚠";
+                default: return "○";
+            }
+        },
+        formatTimestamp(unix) {
+            if (!unix || typeof unix !== "number") return "";
+            try { return new Date(unix * 1000).toLocaleString(); }
+            catch (e) { return ""; }
+        },
+    });
+
+    Alpine.store("debug", {
+        debugTarget: "",
+        hypotheses: [],
+        suspects: [],
+        findings: [],
+        scratchpadCount: 0,
+        active: false,
+        loaded: false,
+        openSections: { hypotheses: true, suspects: true, findings: false },
+        expandedHypothesisId: null,
+
+        async load() {
+            try {
+                const r = await fetch("/api/debug/state");
+                const d = await r.json();
+                this.active = !!d.active;
+                this.debugTarget = d.debug_target || "";
+                this.hypotheses = d.hypotheses || [];
+                this.suspects = d.suspects || [];
+                this.findings = d.findings || [];
+                this.scratchpadCount = d.scratchpad_count || 0;
+                this.loaded = true;
+            } catch (e) { console.error("debug.load", e); }
+        },
+        toggleSection(name) { this.openSections[name] = !this.openSections[name]; },
+        toggleHypothesis(id) {
+            this.expandedHypothesisId = this.expandedHypothesisId === id ? null : id;
+        },
+        isHypothesisExpanded(id) {
+            return this.expandedHypothesisId === id;
+        },
+        statusGlyph(status) {
+            switch ((status || "").toLowerCase()) {
+                case "confirmed": return "✓";
+                case "supported": return "◐";
+                case "disproved": return "✕";
+                case "untested":  return "○";
+                default:          return "·";
+            }
+        },
+        formatTimestamp(unix) {
+            if (!unix || typeof unix !== "number") return "";
+            try { return new Date(unix * 1000).toLocaleString(); }
+            catch (e) { return ""; }
+        },
+    });
+
     Alpine.store("confirm", {
         // Small inline confirm-popover anchored near the click coords.
         // Replaces window.confirm() so we don't pop a native modal that
@@ -702,6 +1194,79 @@ document.addEventListener("alpine:init", () => {
         cancel() {
             this._onConfirm = null;
             this.open = false;
+        },
+    });
+
+    Alpine.store("fileBrowser", {
+        open: false,
+        mode: "folder",       // "folder" or "file"
+        path: "",
+        parent: "",
+        entries: [],
+        loading: false,
+        _onSelect: null,
+
+        async show(mode, onSelect, startPath) {
+            this.mode = mode || "folder";
+            this._onSelect = typeof onSelect === "function" ? onSelect : null;
+            this.open = true;
+            await this.navigate(startPath || "~");
+        },
+        async navigate(path) {
+            this.loading = true;
+            try {
+                const r = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    console.warn("browse failed:", d.detail || r.status);
+                    return;
+                }
+                const d = await r.json();
+                this.path = d.path;
+                this.parent = d.parent;
+                this.entries = d.entries || [];
+            } catch (e) {
+                console.error("fileBrowser.navigate", e);
+            } finally {
+                this.loading = false;
+            }
+        },
+        up() {
+            if (this.parent && this.parent !== this.path) this.navigate(this.parent);
+        },
+        select(entry) {
+            if (entry.is_dir && this.mode === "file") {
+                this.navigate(entry.path);
+                return;
+            }
+            if (entry.is_dir && this.mode === "folder") {
+                this.navigate(entry.path);
+                return;
+            }
+            // File selected in file mode
+            if (!entry.is_dir && this.mode === "file") {
+                const cb = this._onSelect;
+                this._onSelect = null;
+                this.open = false;
+                if (cb) cb(entry.path);
+            }
+        },
+        selectCurrent() {
+            if (this.mode !== "folder") return;
+            const cb = this._onSelect;
+            this._onSelect = null;
+            this.open = false;
+            if (cb) cb(this.path);
+        },
+        cancel() {
+            this._onSelect = null;
+            this.open = false;
+        },
+        formatSize(bytes) {
+            if (bytes === null || bytes === undefined) return "";
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " K";
+            return (bytes / 1048576).toFixed(1) + " M";
         },
     });
 
@@ -911,31 +1476,47 @@ function highlightInScope(selector) {
 }
 
 function bootSSE() {
+    let hasConnectedBefore = false;
     const source = new EventSource("/api/events");
     source.onopen = () => {
         const chat = Alpine.store("chat");
         chat.connected = true;
         chat.lastOpenAt = Date.now();
+        // On reconnect (not initial boot), re-sync state in case we
+        // missed events while the connection was down. This handles the
+        // common case of session switch causing a brief SSE drop.
+        if (hasConnectedBefore) {
+            chat.loadHistory();
+            Alpine.store("sessions").load();
+            refreshActivePanel();
+        }
+        hasConnectedBefore = true;
     };
     source.onmessage = (ev) => {
         let data;
         try { data = JSON.parse(ev.data); } catch { return; }
-        // 'hello' is a no-op marker — its purpose is just to make
-        // onopen fire promptly. Drop without routing.
         if (data && data.kind === "hello") return;
         routeEvent(data);
     };
     source.addEventListener("ping", () => {});
     source.onerror = () => {
         const chat = Alpine.store("chat");
-        // EventSource flaps during auto-reconnect — only flip to
-        // disconnected if we've gone more than 3s since the last
-        // open. That gives the browser a window to recover quietly.
         const sinceOpen = chat.lastOpenAt ? Date.now() - chat.lastOpenAt : Infinity;
         if (sinceOpen > 3000) {
             chat.connected = false;
         }
     };
+}
+
+// Refresh the panel store for whichever mode is currently active.
+// Called after turn_complete / session_updated so the side-panel
+// reflects state the agent just changed. Quiet no-op when the active
+// mode has no panel store.
+function refreshActivePanel() {
+    const mode = Alpine.store("mode");
+    if (!mode || !mode.panelModes || !mode.panelModes.includes(mode.active)) return;
+    const store = Alpine.store(mode.active);
+    if (store && typeof store.load === "function") store.load();
 }
 
 function routeEvent(ev) {
@@ -984,9 +1565,9 @@ function routeEvent(ev) {
             }
             slot.busy = false;
             chat.finishTurn(name);
-            if (isFocused && Alpine.store("mode").active === "teacher" && Alpine.store("teacher")) {
-                Alpine.store("teacher").load();
-            }
+            // Refresh the active panel store so kanban/curriculum/etc.
+            // reflect whatever the just-finished turn changed.
+            if (isFocused) refreshActivePanel();
             break;
         case "command_result":
             chat.addInfo(
@@ -995,6 +1576,10 @@ function routeEvent(ev) {
             );
             slot.busy = false;
             chat.finishTurn(name);
+            // Slash commands like /feature new mutate the session's
+            // panel state without triggering a model turn, so the
+            // turn_complete hook never fires. Refresh here too.
+            if (isFocused) refreshActivePanel();
             break;
         case "diff":
             chat.addInfo(`diff proposed: ${ev.filename}`, null, name);
@@ -1006,9 +1591,7 @@ function routeEvent(ev) {
                 { standalone: true }, name
             );
             chat.loadHistory(name);
-            if (isFocused && Alpine.store("mode").active === "teacher" && Alpine.store("teacher")) {
-                Alpine.store("teacher").load();
-            }
+            if (isFocused) refreshActivePanel();
             break;
     }
 }
@@ -1313,11 +1896,11 @@ document.addEventListener("DOMContentLoaded", () => {
     bootSSE();
     Alpine.store("chat").loadHistory();
     Alpine.store("sessions").load();
+    // mode.load() preloads the active mode's panel store via panelModes —
+    // the panel populates the instant the user lands in a panel mode,
+    // no extra mode-flip round-trip needed.
     Alpine.store("mode").load();
-    // Preload teacher state once on boot so the panel populates the
-    // instant the user lands in teacher mode (instead of after the
-    // first mode-flip round-trip).
-    if (Alpine.store("teacher")) Alpine.store("teacher").load();
+    Alpine.store("yolo").load();
     setInterval(() => Alpine.store("sessions").load(), 5000);
     // Live clock: bump while ANY session's turn is in flight so the
     // running trace header re-renders its elapsed time. (One global tick

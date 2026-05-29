@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import glob
 import json
@@ -160,18 +161,37 @@ async def create_session(request: Request, payload: Dict[str, Any]):
             detail=f"Session '{name}' already exists. Load it instead.",
         )
 
+    workspace = str(payload.get("workspace") or "").strip()
+    if workspace:
+        workspace = os.path.expanduser(workspace)
+        if not os.path.isdir(workspace):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Workspace path is not a directory: {workspace}",
+            )
+
     if not activate:
+        data: Dict[str, Any] = {
+            "history": [],
+            "provider_config": {"provider": provider, "model": model},
+        }
+        if workspace:
+            data["folder_context"] = {"folders": [workspace]}
         path = os.path.join(_config.HISTORY_DIR, "sessions", name)
         os.makedirs(path, exist_ok=True)
         with open(os.path.join(path, "session.json"), "w") as fh:
-            json.dump(
-                {"history": [], "provider_config": {"provider": provider, "model": model}},
-                fh,
-                indent=2,
-            )
+            json.dump(data, fh, indent=2)
         return {"ok": True, "name": name, "active": False}
 
-    return await load_session(name, request, payload={"provider": provider, "model": model})
+    result = await load_session(name, request, payload={"provider": provider, "model": model})
+
+    if workspace:
+        session = request.app.state.session_by_name(name)
+        if session:
+            session.folder_context.add_folder(workspace)
+            session.session_manager.save_history(session.folder_context)
+
+    return result
 
 
 @router.post("/{name}/load")
@@ -204,7 +224,9 @@ async def load_session(name: str, request: Request, payload: Dict[str, Any] | No
             )
 
     try:
-        state.load_session(name=name, provider=provider, model=model)
+        await asyncio.to_thread(
+            state.load_session, name=name, provider=provider, model=model
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"ok": True, "name": name, "active": True, "loaded": True}

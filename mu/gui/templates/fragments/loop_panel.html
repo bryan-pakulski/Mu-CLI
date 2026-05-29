@@ -1,0 +1,105 @@
+<aside class="mode-panel"
+       data-mode="loop"
+       x-show="$store.mode.active === 'loop'"
+       x-transition.opacity.duration.200ms>
+
+    <!-- empty state -->
+    <div class="panel-empty" x-show="!$store.loop.loopGoal && !$store.loop.backlog.length">
+        <h3>no loop active</h3>
+        <p class="muted">Set a goal with <code>/goal &lt;text&gt;</code> then let the agent loop autonomously.</p>
+    </div>
+
+    <!-- header: goal + active status -->
+    <div class="panel-head" x-show="$store.loop.loopGoal || $store.loop.backlog.length">
+        <div class="panel-subject" x-text="$store.loop.loopGoal || '(no goal set)'"></div>
+        <div class="panel-meta mono muted">
+            <span class="tag"
+                  :style="$store.loop.loopActive ? 'background: var(--accent-soft); color: var(--accent)' : ''"
+                  x-text="$store.loop.loopActive ? 'active' : 'paused'"></span>
+            <span x-text="$store.loop.backlog.length + ' tasks'"></span>
+        </div>
+    </div>
+
+    <!-- backlog (todos) -->
+    <section class="panel-section"
+             x-show="$store.loop.backlog.length"
+             :class="{ open: $store.loop.openSections.backlog }">
+        <button class="panel-section-head"
+                @click="$store.loop.toggleSection('backlog')"
+                :aria-expanded="$store.loop.openSections.backlog">
+            <span class="caret">›</span>
+            <span class="panel-section-name">backlog</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.loop.backlog.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.loop.openSections.backlog"
+             x-transition.opacity.duration.150ms>
+            <template x-for="item in $store.loop.backlog" :key="item.id">
+                <div class="loop-todo-row">
+                    <span class="status-glyph"
+                          x-text="$store.loop.statusGlyph(item.status)"></span>
+                    <span class="loop-todo-text" x-text="item.content"></span>
+                    <span class="tag mono muted" x-text="item.status"></span>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- spawned features -->
+    <section class="panel-section"
+             x-show="$store.loop.loopFeatures.length"
+             :class="{ open: $store.loop.openSections.features }">
+        <button class="panel-section-head"
+                @click="$store.loop.toggleSection('features')"
+                :aria-expanded="$store.loop.openSections.features">
+            <span class="caret">›</span>
+            <span class="panel-section-name">spawned features</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.loop.loopFeatures.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.loop.openSections.features"
+             x-transition.opacity.duration.150ms>
+            <template x-for="(feat, i) in $store.loop.loopFeatures" :key="i">
+                <div class="loop-feature-row">
+                    <span class="mono" x-text="typeof feat === 'string' ? feat : (feat.id || feat.feature_id || JSON.stringify(feat))"></span>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- memory snapshot -->
+    <section class="panel-section"
+             x-show="$store.loop.memory.length"
+             :class="{ open: $store.loop.openSections.memory }">
+        <button class="panel-section-head"
+                @click="$store.loop.toggleSection('memory')"
+                :aria-expanded="$store.loop.openSections.memory">
+            <span class="caret">›</span>
+            <span class="panel-section-name">memory</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.loop.memory.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.loop.openSections.memory"
+             x-transition.opacity.duration.150ms>
+            <template x-for="m in $store.loop.memory" :key="m.id">
+                <div class="finding-entry">
+                    <div class="finding-head">
+                        <span class="mono muted" x-text="'#' + m.id"></span>
+                        <template x-for="tag in (m.tags || [])" :key="tag">
+                            <span class="tag" x-text="tag"></span>
+                        </template>
+                    </div>
+                    <div class="finding-body" x-text="m.content"></div>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- footnote -->
+    <div class="panel-footnote muted mono" x-show="$store.loop.loaded">
+        <span x-text="$store.loop.backlog.length + ' todos'"></span>
+        <span x-show="$store.loop.loopFeatures.length"
+              x-text="' · ' + $store.loop.loopFeatures.length + ' features'"></span>
+    </div>
+
+</aside>

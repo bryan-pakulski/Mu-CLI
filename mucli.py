@@ -811,18 +811,15 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
     yet. Temporarily clear it so any session can be deleted, then
     restore.
 
-    If we just deleted the session named in `prior_active`, fall back
-    to `DEFAULT_SESSION_NAME` instead of leaving `current_session_name`
-    as `None` — downstream calls (`save_history`, `new_session`, …)
-    build paths from this and crash on `None`.
+    If we just deleted the session named in `prior_active`, leave
+    `current_session_name` empty — the caller (choose_session) will
+    prompt for a new one.
 
     When `silent=True` the SessionManager's UI is detached for the
     duration of the call so its `show_info("Deleted session: ...")`
     print doesn't punch a hole through an active TUI render (the
     interactive picker uses this).
     """
-    from utils.config import DEFAULT_SESSION_NAME as _DEFAULT_SESSION_NAME
-
     prior_active = session_manager.current_session_name
     prior_ui = getattr(session_manager, "ui", None)
     session_manager.current_session_name = None
@@ -834,7 +831,7 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
         if prior_active and prior_active != name:
             session_manager.current_session_name = prior_active
         else:
-            session_manager.current_session_name = _DEFAULT_SESSION_NAME
+            session_manager.current_session_name = ""
         if silent:
             session_manager.ui = prior_ui
 
@@ -1051,6 +1048,30 @@ def build_session(args, ui, allow_prompt=True):
         for workspace in args.workspace:
             session.folder_context.add_folder(workspace)
         session.session_manager.save_history(session.folder_context)
+    elif not session.folder_context.folders and allow_prompt:
+        try:
+            from prompt_toolkit import prompt as _pt_prompt
+            from prompt_toolkit.completion import PathCompleter as _PathCompleter
+
+            console.print(
+                "[dim]Workspace folder (optional — press enter to skip)\n"
+                "Without a workspace the agent runs in chat-only mode[/dim]"
+            )
+            ws_path = _pt_prompt(
+                "workspace> ",
+                completer=_PathCompleter(expanduser=True, only_directories=True),
+                default="",
+            ).strip()
+        except (ImportError, EOFError, KeyboardInterrupt):
+            ws_path = ""
+        if ws_path:
+            ws_path = os.path.expanduser(ws_path)
+            if os.path.isdir(ws_path):
+                session.folder_context.add_folder(ws_path)
+                session.session_manager.save_history(session.folder_context)
+                console.print(f"[dim]workspace → {ws_path}[/dim]")
+            else:
+                console.print(f"[yellow]not a directory: {ws_path} — skipping[/yellow]")
 
     if args.yolo:
         session.variables["yolo"] = True

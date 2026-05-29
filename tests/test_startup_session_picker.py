@@ -167,13 +167,11 @@ def test_delete_then_no_sessions_left_returns_new(session_manager, monkeypatch):
     assert session_manager.get_session_list() == []
 
 
-def test_delete_works_even_for_bootstrap_default_active(session_manager, monkeypatch):
-    """`delete_session` normally refuses the active session, but at
-    startup `current_session_name` is just the bootstrap placeholder
-    'default' — the user hasn't actually loaded anything. The picker
-    bypasses the guard so users aren't stuck with an orphan 'default'."""
-    _make_session_dir(session_manager, "default")
-    assert session_manager.current_session_name == "default"
+def test_delete_works_when_no_active_session(session_manager, monkeypatch):
+    """Deleting a session works even when `current_session_name` is empty
+    (no session loaded yet at startup)."""
+    _make_session_dir(session_manager, "old_session")
+    assert session_manager.current_session_name == ""
     delete_menu_idx = 1 + 2
 
     calls = iter([delete_menu_idx, 1])
@@ -182,7 +180,7 @@ def test_delete_works_even_for_bootstrap_default_active(session_manager, monkeyp
 
     action, name = mucli.choose_session(session_manager)
     assert action == "new"
-    assert "default" not in session_manager.get_session_list()
+    assert "old_session" not in session_manager.get_session_list()
 
 
 # ----------------------------------------------- delete helper directly

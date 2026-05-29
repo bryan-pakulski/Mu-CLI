@@ -1,9 +1,10 @@
-<aside class="teacher-panel"
+<aside class="mode-panel"
+       data-mode="teacher"
        x-show="$store.mode.active === 'teacher'"
        x-transition.opacity.duration.200ms>
 
     <!-- empty state when no course is active -->
-    <div class="teacher-empty" x-show="!$store.teacher.course">
+    <div class="panel-empty" x-show="!$store.teacher.course">
         <h3>no course active</h3>
         <p class="muted">In chat: <code>/teach new &lt;subject&gt;</code> to start one,
         or <code>/teach load &lt;id&gt;</code> to resume.</p>
@@ -22,9 +23,9 @@
     </div>
 
     <!-- header summary -->
-    <div class="teacher-head" x-show="$store.teacher.course">
-        <div class="teacher-subject" x-text="$store.teacher.course && $store.teacher.course.subject"></div>
-        <div class="teacher-meta mono muted">
+    <div class="panel-head" x-show="$store.teacher.course">
+        <div class="panel-subject" x-text="$store.teacher.course && $store.teacher.course.subject"></div>
+        <div class="panel-meta mono muted">
             <span class="tag" x-text="$store.teacher.course && $store.teacher.course.status"></span>
             <span x-text="($store.teacher.course && $store.teacher.course.lessons_completed_count || 0)
                 + ' / ' + ($store.teacher.course && $store.teacher.course.lesson_total || 0)
@@ -51,22 +52,22 @@
     </div>
 
     <!-- learner profile -->
-    <section class="teacher-section"
+    <section class="panel-section"
              x-show="$store.teacher.course"
              :class="{ open: $store.teacher.openSections.profile }">
-        <button class="teacher-section-head"
+        <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('profile')"
                 :aria-expanded="$store.teacher.openSections.profile">
             <span class="caret">›</span>
-            <span class="teacher-section-name">learner</span>
-            <span class="teacher-section-count mono muted"
+            <span class="panel-section-name">learner</span>
+            <span class="panel-section-count mono muted"
                   x-show="$store.teacher.course
                           && $store.teacher.course.learner_profile
                           && $store.teacher.course.learner_profile.recorded_at"
                   x-text="$store.teacher.formatTimestamp(
                             ($store.teacher.course.learner_profile || {}).recorded_at)"></span>
         </button>
-        <div class="teacher-section-body" x-show="$store.teacher.openSections.profile"
+        <div class="panel-section-body" x-show="$store.teacher.openSections.profile"
              x-transition.opacity.duration.150ms>
             <template x-if="$store.teacher.course && $store.teacher.course.learner_profile && Object.keys($store.teacher.course.learner_profile).length">
                 <div class="learner-grid">
@@ -113,18 +114,18 @@
     </section>
 
     <!-- curriculum tree -->
-    <section class="teacher-section"
+    <section class="panel-section"
              x-show="$store.teacher.course"
              :class="{ open: $store.teacher.openSections.curriculum }">
-        <button class="teacher-section-head"
+        <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('curriculum')"
                 :aria-expanded="$store.teacher.openSections.curriculum">
             <span class="caret">›</span>
-            <span class="teacher-section-name">curriculum</span>
-            <span class="teacher-section-count mono muted"
+            <span class="panel-section-name">curriculum</span>
+            <span class="panel-section-count mono muted"
                   x-text="($store.teacher.course && $store.teacher.course.lessons || []).length + ' lessons'"></span>
         </button>
-        <div class="teacher-section-body" x-show="$store.teacher.openSections.curriculum"
+        <div class="panel-section-body" x-show="$store.teacher.openSections.curriculum"
              x-transition.opacity.duration.150ms>
             <div class="curriculum-tree"
                  x-show="$store.teacher.course && ($store.teacher.course.modules || []).length">
@@ -173,19 +174,19 @@
     </section>
 
     <!-- current lesson detail -->
-    <section class="teacher-section"
+    <section class="panel-section"
              x-show="$store.teacher.course && $store.teacher.currentLesson()"
              :class="{ open: $store.teacher.openSections.current }">
-        <button class="teacher-section-head"
+        <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('current')"
                 :aria-expanded="$store.teacher.openSections.current">
             <span class="caret">›</span>
-            <span class="teacher-section-name">current lesson</span>
-            <span class="teacher-section-count mono muted"
+            <span class="panel-section-name">current lesson</span>
+            <span class="panel-section-count mono muted"
                   x-show="$store.teacher.currentLesson()"
                   x-text="$store.teacher.currentLesson() && $store.teacher.currentLesson().lesson_id"></span>
         </button>
-        <div class="teacher-section-body" x-show="$store.teacher.openSections.current"
+        <div class="panel-section-body" x-show="$store.teacher.openSections.current"
              x-transition.opacity.duration.150ms>
             <template x-if="$store.teacher.currentLesson()">
                 <div class="current-lesson">
@@ -220,18 +221,18 @@
     </section>
 
     <!-- all assignments (not just graded) -->
-    <section class="teacher-section"
+    <section class="panel-section"
              x-show="$store.teacher.course && $store.teacher.allAssignments().length"
              :class="{ open: $store.teacher.openSections.assignments }">
-        <button class="teacher-section-head"
+        <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('assignments')"
                 :aria-expanded="$store.teacher.openSections.assignments">
             <span class="caret">›</span>
-            <span class="teacher-section-name">assignments</span>
-            <span class="teacher-section-count mono muted"
+            <span class="panel-section-name">assignments</span>
+            <span class="panel-section-count mono muted"
                   x-text="$store.teacher.allAssignments().length"></span>
         </button>
-        <div class="teacher-section-body" x-show="$store.teacher.openSections.assignments"
+        <div class="panel-section-body" x-show="$store.teacher.openSections.assignments"
              x-transition.opacity.duration.150ms>
             <template x-for="a in $store.teacher.allAssignments()" :key="a.assignment_id">
                 <div class="grade-row"
@@ -259,18 +260,18 @@
     </section>
 
     <!-- scheduled reviews -->
-    <section class="teacher-section"
+    <section class="panel-section"
              x-show="$store.teacher.course && $store.teacher.scheduledReviews().length"
              :class="{ open: $store.teacher.openSections.reviews }">
-        <button class="teacher-section-head"
+        <button class="panel-section-head"
                 @click="$store.teacher.toggleSection('reviews')"
                 :aria-expanded="$store.teacher.openSections.reviews">
             <span class="caret">›</span>
-            <span class="teacher-section-name">reviews</span>
-            <span class="teacher-section-count mono muted"
+            <span class="panel-section-name">reviews</span>
+            <span class="panel-section-count mono muted"
                   x-text="$store.teacher.scheduledReviews().length"></span>
         </button>
-        <div class="teacher-section-body" x-show="$store.teacher.openSections.reviews"
+        <div class="panel-section-body" x-show="$store.teacher.openSections.reviews"
              x-transition.opacity.duration.150ms>
             <template x-for="(r, i) in $store.teacher.scheduledReviews()" :key="i">
                 <div class="review-row">
@@ -285,7 +286,7 @@
     </section>
 
     <!-- diagnostic footer: where the data came from -->
-    <div class="teacher-footnote muted mono"
+    <div class="panel-footnote muted mono"
          x-show="$store.teacher.coursePath"
          :title="'Course data read from ' + $store.teacher.coursePath"
          x-text="'↳ ' + $store.teacher.coursePath"></div>

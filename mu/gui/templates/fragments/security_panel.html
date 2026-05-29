@@ -1,0 +1,189 @@
+<aside class="mode-panel"
+       data-mode="security"
+       x-show="$store.mode.active === 'security'"
+       x-transition.opacity.duration.200ms>
+
+    <!-- empty state -->
+    <div class="panel-empty" x-show="!$store.security.report">
+        <h3>no scan active</h3>
+        <p class="muted">In chat: <code>/security scan &lt;title&gt;</code> to start an audit.</p>
+    </div>
+
+    <!-- header: scan id, title, severity distribution -->
+    <div class="panel-head" x-show="$store.security.report">
+        <div class="panel-subject"
+             x-text="$store.security.report && $store.security.report.title"></div>
+        <div class="panel-meta mono muted">
+            <span class="mono" x-text="$store.security.report && $store.security.report.scan_id"></span>
+            <span class="tag" x-text="$store.security.report && $store.security.report.status"></span>
+            <span x-text="($store.security.report && $store.security.report.findings_total || 0) + ' findings'"></span>
+        </div>
+        <!-- severity distribution bar -->
+        <div class="severity-bar"
+             x-show="$store.security.summary && $store.security.summary.by_severity">
+            <template x-for="sev in ['critical','high','medium','low','info']" :key="sev">
+                <div class="severity-segment"
+                     x-show="$store.security.summary.by_severity[sev]"
+                     :style="'flex: ' + ($store.security.summary.by_severity[sev] || 0) + '; background: ' + $store.security.severityColor(sev)"
+                     :title="sev + ': ' + ($store.security.summary.by_severity[sev] || 0)"></div>
+            </template>
+        </div>
+    </div>
+
+    <!-- findings list -->
+    <section class="panel-section"
+             x-show="$store.security.findings.length"
+             :class="{ open: $store.security.openSections.findings }">
+        <button class="panel-section-head"
+                @click="$store.security.toggleSection('findings')"
+                :aria-expanded="$store.security.openSections.findings">
+            <span class="caret">›</span>
+            <span class="panel-section-name">findings</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.security.filteredFindings().length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.security.openSections.findings"
+             x-transition.opacity.duration.150ms>
+            <!-- severity filter chips -->
+            <div class="source-filters"
+                 x-show="$store.security.severities().length > 1">
+                <template x-for="sev in $store.security.severities()" :key="sev">
+                    <button class="severity-chip"
+                            :class="{ active: $store.security.isSeverityActive(sev) }"
+                            :style="$store.security.isSeverityActive(sev) ? 'border-color: ' + $store.security.severityColor(sev) + '; color: ' + $store.security.severityColor(sev) : ''"
+                            @click="$store.security.toggleSeverity(sev)"
+                            x-text="sev"></button>
+                </template>
+            </div>
+
+            <!-- finding rows -->
+            <ul class="finding-list">
+                <template x-for="f in $store.security.filteredFindings()" :key="f.finding_id">
+                    <li class="finding-item"
+                        :class="{ expanded: $store.security.isFindingExpanded(f.finding_id) }">
+                        <div class="finding-row"
+                             @click="$store.security.toggleFinding(f.finding_id)">
+                            <span class="severity-dot"
+                                  :style="'background: ' + $store.security.severityColor(f.severity)"></span>
+                            <span class="status-glyph"
+                                  x-text="$store.security.statusGlyph(f.status)"></span>
+                            <span class="finding-title" x-text="f.title"></span>
+                            <span class="finding-badges mono muted">
+                                <span x-show="f.has_proof"
+                                      :style="f.proof_verified ? 'color: var(--ok, #9ece6a)' : ''"
+                                      x-text="f.proof_verified ? 'PoC ✓' : 'PoC'"></span>
+                                <span x-show="f.has_remediation"
+                                      :style="f.remediation_verified ? 'color: var(--ok, #9ece6a)' : ''"
+                                      x-text="f.remediation_verified ? 'fix ✓' : 'fix'"></span>
+                            </span>
+                        </div>
+
+                        <!-- drill-down detail -->
+                        <div class="finding-detail"
+                             x-show="$store.security.isFindingExpanded(f.finding_id)"
+                             x-transition.opacity.duration.120ms>
+                            <div class="finding-meta-grid">
+                                <div class="finding-meta-row">
+                                    <span class="finding-meta-key">id</span>
+                                    <span class="mono" x-text="f.finding_id"></span>
+                                </div>
+                                <div class="finding-meta-row">
+                                    <span class="finding-meta-key">severity</span>
+                                    <span :style="'color: ' + $store.security.severityColor(f.severity)"
+                                          x-text="f.severity"></span>
+                                </div>
+                                <div class="finding-meta-row">
+                                    <span class="finding-meta-key">class</span>
+                                    <span x-text="f.vulnerability_class || '—'"></span>
+                                </div>
+                                <div class="finding-meta-row">
+                                    <span class="finding-meta-key">status</span>
+                                    <span x-text="f.status"></span>
+                                </div>
+                            </div>
+
+                            <p class="finding-summary"
+                               x-show="f.summary"
+                               x-text="f.summary"></p>
+
+                            <div class="finding-paths"
+                                 x-show="(f.affected_paths || []).length">
+                                <h5>affected</h5>
+                                <template x-for="p in f.affected_paths" :key="p">
+                                    <div class="mono" x-text="p" style="font-size:11.5px;padding:1px 0;"></div>
+                                </template>
+                            </div>
+
+                            <!-- proof section -->
+                            <div class="finding-proof" x-show="f.has_proof">
+                                <h5>proof of concept</h5>
+                                <pre class="proof-cmd" x-show="f.proof_command"><code x-text="f.proof_command"></code></pre>
+                                <p class="muted" x-show="f.proof_description" x-text="f.proof_description"></p>
+                                <span class="mono muted" x-show="f.proof_verified_at"
+                                      x-text="'verified ' + $store.security.formatTimestamp(f.proof_verified_at)"></span>
+                            </div>
+
+                            <!-- remediation section -->
+                            <div class="finding-remediation" x-show="f.has_remediation">
+                                <h5>remediation</h5>
+                                <p class="muted" x-show="f.remediation_description" x-text="f.remediation_description"></p>
+                                <pre class="patch-diff" x-show="f.patch_diff"><code x-text="f.patch_diff"></code></pre>
+                                <span class="mono muted" x-show="f.remediation_verified_at"
+                                      x-text="'verified ' + $store.security.formatTimestamp(f.remediation_verified_at)"></span>
+                            </div>
+
+                            <!-- actions: approve / refute -->
+                            <div class="finding-actions"
+                                 x-show="f.status !== 'approved' && f.status !== 'refuted'">
+                                <button class="finding-action-btn approve"
+                                        x-show="f.proof_verified && f.remediation_verified"
+                                        @click.stop="$store.confirm.ask(
+                                            'Approve finding ' + f.finding_id + '?',
+                                            $event,
+                                            () => $store.security.approveFinding(f.finding_id)
+                                        )">approve</button>
+                                <button class="finding-action-btn refute"
+                                        @click.stop="$store.confirm.ask(
+                                            'Refute finding ' + f.finding_id + '?',
+                                            $event,
+                                            () => $store.security.refuteFinding(f.finding_id, 'refuted via GUI')
+                                        )">refute</button>
+                            </div>
+                        </div>
+                    </li>
+                </template>
+            </ul>
+        </div>
+    </section>
+
+    <!-- scan stats -->
+    <section class="panel-section"
+             x-show="$store.security.summary"
+             :class="{ open: $store.security.openSections.stats }">
+        <button class="panel-section-head"
+                @click="$store.security.toggleSection('stats')"
+                :aria-expanded="$store.security.openSections.stats">
+            <span class="caret">›</span>
+            <span class="panel-section-name">stats</span>
+        </button>
+        <div class="panel-section-body" x-show="$store.security.openSections.stats"
+             x-transition.opacity.duration.150ms>
+            <div class="scan-stats">
+                <template x-for="[status, count] in Object.entries($store.security.summary.by_status || {})" :key="status">
+                    <div class="scan-stat-row">
+                        <span class="status-glyph" x-text="$store.security.statusGlyph(status)"></span>
+                        <span x-text="status"></span>
+                        <span class="mono muted" x-text="count"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </section>
+
+    <!-- footnote -->
+    <div class="panel-footnote muted mono"
+         x-show="$store.security.report && $store.security.report.metadata_path"
+         :title="'Report read from ' + ($store.security.report && $store.security.report.metadata_path)"
+         x-text="'↳ ' + ($store.security.report && $store.security.report.metadata_path)"></div>
+
+</aside>

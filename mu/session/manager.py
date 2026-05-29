@@ -29,7 +29,6 @@ from mu.agent.collation import CollationBuffer
 from mu.memory.stores import ScratchpadStore, TaskMemoryStore
 from mu.workspace.folder_context import FolderContext
 from utils.config import (
-    DEFAULT_SESSION_NAME,
     DEFAULT_VARIABLES,
     validate_and_cast,
 )
@@ -53,10 +52,10 @@ class SessionManager(HistoryMixin):
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
         logger.info(f"Initializing SessionManager (session_name={session_name})")
-        self.current_session_name = DEFAULT_SESSION_NAME
-        self.history = []  # Stores standardized list of dicts representing messages
+        self.current_session_name = session_name or ""
+        self.history = []
         self.conversation_summary = ""
-        self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
+        self.provider_config = {}
         self.collation_buffer = CollationBuffer()
         self.summary_anchor = 0
         self.folder_context = FolderContext()
@@ -80,8 +79,6 @@ class SessionManager(HistoryMixin):
 
         if session_name:
             self._load_session(session_name)
-        else:
-            self._load_session(DEFAULT_SESSION_NAME)
 
     def _get_filepath(self, name):
         return os.path.join(self._get_session_dir(name), "session.json")
@@ -216,6 +213,9 @@ class SessionManager(HistoryMixin):
         return []
 
     def save_history(self, folder_context_obj=None):
+        if not self.current_session_name:
+            logger.debug("save_history skipped — no session name set")
+            return
         logger.debug(f"Saving history for session: {self.current_session_name}")
         filepath = self._get_filepath(self.current_session_name)
         if folder_context_obj:
@@ -519,7 +519,7 @@ class SessionManager(HistoryMixin):
 
     def list_sessions(self):
         logger.debug("Listing sessions")
-        if not os.path.exists(self._get_filepath(self.current_session_name)):
+        if self.current_session_name and not os.path.exists(self._get_filepath(self.current_session_name)):
             self.save_history()
 
         files = glob.glob(os.path.join(_history_dir(), "sessions", "*", "session.json"))

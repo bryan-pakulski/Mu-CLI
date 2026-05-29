@@ -1,0 +1,120 @@
+<aside class="mode-panel"
+       data-mode="debug"
+       x-show="$store.mode.active === 'debug'"
+       x-transition.opacity.duration.200ms>
+
+    <!-- empty state -->
+    <div class="panel-empty" x-show="!$store.debug.hypotheses.length && !$store.debug.debugTarget && !$store.debug.findings.length">
+        <h3>no debug state</h3>
+        <p class="muted">Start debugging in chat. The agent will populate hypotheses
+        and suspect locations as it investigates.</p>
+    </div>
+
+    <!-- header: debug target -->
+    <div class="panel-head"
+         x-show="$store.debug.debugTarget || $store.debug.hypotheses.length || $store.debug.findings.length">
+        <div class="panel-subject"
+             x-text="$store.debug.debugTarget || 'debugging'"></div>
+        <div class="panel-meta mono muted">
+            <span x-text="$store.debug.hypotheses.length + ' hypotheses'"></span>
+            <span x-show="$store.debug.suspects.length"
+                  x-text="' · ' + $store.debug.suspects.length + ' suspects'"></span>
+        </div>
+    </div>
+
+    <!-- hypothesis stack -->
+    <section class="panel-section"
+             x-show="$store.debug.hypotheses.length"
+             :class="{ open: $store.debug.openSections.hypotheses }">
+        <button class="panel-section-head"
+                @click="$store.debug.toggleSection('hypotheses')"
+                :aria-expanded="$store.debug.openSections.hypotheses">
+            <span class="caret">›</span>
+            <span class="panel-section-name">hypotheses</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.debug.hypotheses.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.debug.openSections.hypotheses"
+             x-transition.opacity.duration.150ms>
+            <template x-for="h in $store.debug.hypotheses" :key="h.id">
+                <div class="hypothesis-item"
+                     :class="{ expanded: $store.debug.isHypothesisExpanded(h.id) }"
+                     @click="$store.debug.toggleHypothesis(h.id)">
+                    <div class="hypothesis-row">
+                        <span class="status-glyph"
+                              :class="{
+                                  'hyp-confirmed': h.status === 'confirmed',
+                                  'hyp-disproved': h.status === 'disproved',
+                                  'hyp-supported': h.status === 'supported'
+                              }"
+                              x-text="$store.debug.statusGlyph(h.status)"></span>
+                        <span class="hypothesis-text" x-text="h.content"></span>
+                        <span class="tag mono muted" x-text="h.status"></span>
+                    </div>
+                    <div class="hypothesis-detail"
+                         x-show="$store.debug.isHypothesisExpanded(h.id)"
+                         x-transition.opacity.duration.120ms>
+                        <div class="mono muted" x-show="h.source" x-text="'source: ' + h.source"></div>
+                        <div class="mono muted" x-text="$store.debug.formatTimestamp(h.updated_at)"></div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- suspect locations -->
+    <section class="panel-section"
+             x-show="$store.debug.suspects.length"
+             :class="{ open: $store.debug.openSections.suspects }">
+        <button class="panel-section-head"
+                @click="$store.debug.toggleSection('suspects')"
+                :aria-expanded="$store.debug.openSections.suspects">
+            <span class="caret">›</span>
+            <span class="panel-section-name">suspects</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.debug.suspects.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.debug.openSections.suspects"
+             x-transition.opacity.duration.150ms>
+            <template x-for="s in $store.debug.suspects" :key="s.id">
+                <div class="suspect-row">
+                    <span class="mono" x-text="s.content"></span>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- past root causes / findings -->
+    <section class="panel-section"
+             x-show="$store.debug.findings.length"
+             :class="{ open: $store.debug.openSections.findings }">
+        <button class="panel-section-head"
+                @click="$store.debug.toggleSection('findings')"
+                :aria-expanded="$store.debug.openSections.findings">
+            <span class="caret">›</span>
+            <span class="panel-section-name">past findings</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.debug.findings.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.debug.openSections.findings"
+             x-transition.opacity.duration.150ms>
+            <template x-for="f in $store.debug.findings" :key="f.id">
+                <div class="finding-entry">
+                    <div class="finding-head">
+                        <span class="mono muted" x-text="'#' + f.id"></span>
+                        <template x-for="tag in (f.tags || [])" :key="tag">
+                            <span class="tag" x-text="tag"></span>
+                        </template>
+                    </div>
+                    <div class="finding-body" x-text="f.content"></div>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- footnote -->
+    <div class="panel-footnote muted mono" x-show="$store.debug.loaded">
+        <span x-text="$store.debug.scratchpadCount + ' scratchpad entries'"></span>
+    </div>
+
+</aside>

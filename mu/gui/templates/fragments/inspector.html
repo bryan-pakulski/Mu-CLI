@@ -49,6 +49,9 @@
                        x-model="$store.inspector.workspace.newPath"
                        placeholder="/absolute/path or ~/relative"
                        title="Absolute or ~-prefixed path to a directory">
+                <button type="button"
+                        @click="$store.fileBrowser.show('folder', (p) => { $store.inspector.workspace.newPath = p })"
+                        title="Browse for a folder">browse</button>
                 <button type="submit" class="primary"
                         title="Attach the folder (validates it exists)">attach</button>
             </form>

@@ -1,0 +1,227 @@
+<aside class="mode-panel"
+       data-mode="feature"
+       x-show="$store.mode.active === 'feature'"
+       x-transition.opacity.duration.200ms>
+
+    <!-- empty state -->
+    <div class="panel-empty" x-show="!$store.feature.plan">
+        <h3>no feature active</h3>
+        <p class="muted">In chat: <code>/feature new &lt;name&gt;</code> to start a plan,
+        or <code>/feature load &lt;id&gt;</code> to resume.</p>
+        <div class="feature-list" x-show="($store.feature.features || []).length">
+            <h4>features in registry</h4>
+            <template x-for="f in $store.feature.features" :key="f.feature_id">
+                <div class="feature-row"
+                     @click="$store.confirm.ask(
+                         'Load feature \'' + f.feature_id + '\'?',
+                         $event,
+                         () => $store.feature.switchFeature(f.feature_id)
+                     )"
+                     :title="'Load feature ' + f.feature_id">
+                    <span class="mono" x-text="f.feature_id"></span>
+                    <span x-text="f.feature_name"></span>
+                    <span class="tag" x-text="f.status || '?'"></span>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- header -->
+    <div class="panel-head" x-show="$store.feature.plan">
+        <div class="panel-subject"
+             x-text="$store.feature.plan && ($store.feature.plan.feature_name || $store.feature.plan.feature_id)"></div>
+        <div class="panel-meta mono muted">
+            <span class="mono" x-text="$store.feature.plan && $store.feature.plan.feature_id"></span>
+            <span class="tag" x-text="$store.feature.plan && $store.feature.plan.overall_status"></span>
+            <span x-text="$store.feature.tasksCompletedCount()
+                + ' / ' + ($store.feature.plan && $store.feature.plan.task_count || 0)
+                + ' tasks'"></span>
+            <span class="blocker-badge"
+                  x-show="$store.feature.plan
+                          && $store.feature.plan.execution
+                          && ($store.feature.plan.execution.blocked_tasks || []).length"
+                  x-text="(($store.feature.plan.execution && $store.feature.plan.execution.blocked_tasks) || []).length + ' blocked'"></span>
+        </div>
+        <div class="module-progress"
+             x-show="$store.feature.plan && $store.feature.plan.task_count">
+            <div class="module-progress-bar"
+                 :style="'width: ' + (
+                    ($store.feature.tasksCompletedCount() * 100) /
+                    (($store.feature.plan && $store.feature.plan.task_count) || 1)
+                 ) + '%;'"></div>
+        </div>
+        <div class="feature-strip"
+             x-show="($store.feature.features || []).length > 1">
+            <template x-for="f in $store.feature.features" :key="f.feature_id">
+                <button class="course-chip"
+                        :class="{ active: f.is_active }"
+                        @click="!f.is_active && $store.confirm.ask(
+                            'Switch to feature \'' + f.feature_id + '\'?',
+                            $event,
+                            () => $store.feature.switchFeature(f.feature_id)
+                        )"
+                        :title="f.feature_id + ' (' + (f.status || '?') + ')'">
+                    <span class="mono" x-text="f.feature_id"></span>
+                </button>
+            </template>
+        </div>
+    </div>
+
+    <!-- vertical phase kanban: each phase is a collapsible row, tasks
+         stack inside, click a task to drill into its detail -->
+    <div class="phase-kanban" x-show="$store.feature.plan">
+        <div class="empty-row"
+             x-show="!$store.feature.phaseColumns().length">
+            no phases proposed yet
+        </div>
+        <template x-for="phase in $store.feature.phaseColumns()" :key="phase.id">
+            <section class="phase"
+                     :class="{ open: $store.feature.isPhaseOpen(phase.id) }"
+                     :data-phase-id="phase.id"
+                     @dragover.prevent="$event.currentTarget.classList.add('drop-target')"
+                     @dragleave="$event.currentTarget.classList.remove('drop-target')"
+                     @drop.prevent="(() => {
+                        $event.currentTarget.classList.remove('drop-target');
+                        const tid = $store.feature.dragTaskId;
+                        $store.feature.dragTaskId = null;
+                        if (tid === null || tid === undefined) return;
+                        const target = (phase.status === 'completed') ? 'completed' : 'in_progress';
+                        $store.feature.transitionTask(tid, target);
+                     })()">
+                <button class="phase-head"
+                        @click="$store.feature.togglePhase(phase.id)"
+                        :aria-expanded="$store.feature.isPhaseOpen(phase.id)">
+                    <span class="caret">›</span>
+                    <span class="status-glyph"
+                          x-text="$store.feature.statusGlyph(phase.status)"></span>
+                    <span class="phase-title" x-text="phase.title"></span>
+                    <span class="phase-count mono muted"
+                          x-show="phase.tasks.length"
+                          x-text="phase.tasks.length"></span>
+                </button>
+                <div class="phase-body"
+                     x-show="$store.feature.isPhaseOpen(phase.id)"
+                     x-transition.opacity.duration.150ms>
+                    <p class="phase-goal muted" x-show="phase.goal" x-text="phase.goal"></p>
+                    <ul class="task-list">
+                        <template x-for="task in phase.tasks" :key="task.id">
+                            <li class="task"
+                                :class="{
+                                    expanded: $store.feature.isTaskExpanded(task.id),
+                                    'is-current': (task.status || '').toLowerCase() === 'in_progress',
+                                    'is-blocked': (task.status || '').toLowerCase() === 'blocked',
+                                    'is-done': (task.status || '').toLowerCase() === 'completed'
+                                }">
+                                <div class="task-row"
+                                     draggable="true"
+                                     @click="$store.feature.toggleTask(task.id)"
+                                     @dragstart="$store.feature.dragTaskId = task.id; $event.currentTarget.classList.add('dragging')"
+                                     @dragend="$event.currentTarget.classList.remove('dragging')"
+                                     :title="task.title + ' [' + task.status + ']'">
+                                    <span class="status-glyph"
+                                          x-text="$store.feature.statusGlyph(task.status)"></span>
+                                    <span class="task-id mono muted" x-text="'#' + task.id"></span>
+                                    <span class="task-title" x-text="task.title"></span>
+                                    <span class="task-progress mono muted"
+                                          x-show="(task.exit_criteria || []).length"
+                                          x-text="(task.verified_exit_criteria || []).length + '/' + (task.exit_criteria || []).length"></span>
+                                </div>
+                                <!-- drill-down: only the expanded task -->
+                                <div class="task-detail"
+                                     x-show="$store.feature.isTaskExpanded(task.id)"
+                                     x-transition.opacity.duration.120ms>
+                                    <div class="task-objectives"
+                                         x-show="(task.objectives || []).length">
+                                        <h5>objectives</h5>
+                                        <ul>
+                                            <template x-for="obj in (task.objectives || [])" :key="obj">
+                                                <li x-text="obj"></li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                    <div class="task-criteria"
+                                         x-show="(task.exit_criteria || []).length">
+                                        <h5>exit criteria</h5>
+                                        <ul class="exit-criteria-list">
+                                            <template x-for="(crit, idx) in (task.exit_criteria || [])" :key="idx">
+                                                <li class="exit-criteria-item"
+                                                    :class="{ verified: $store.feature.isVerified(task, crit) }"
+                                                    @click.stop="$store.feature.toggleExitCriterion(task.id, idx)">
+                                                    <span class="status-glyph"
+                                                          x-text="$store.feature.isVerified(task, crit) ? '✓' : '○'"></span>
+                                                    <span x-text="crit"></span>
+                                                </li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                    <div class="task-blocker"
+                                         x-show="task.blocked_reason">
+                                        <h5>blocked</h5>
+                                        <p x-text="task.blocked_reason"></p>
+                                    </div>
+                                </div>
+                            </li>
+                        </template>
+                        <li class="task-empty muted mono"
+                            x-show="!phase.tasks.length">—</li>
+                    </ul>
+                </div>
+            </section>
+        </template>
+    </div>
+
+    <!-- event log -->
+    <section class="panel-section"
+             x-show="$store.feature.plan && $store.feature.recentEvents().length"
+             :class="{ open: $store.feature.openSections.events }">
+        <button class="panel-section-head"
+                @click="$store.feature.toggleSection('events')"
+                :aria-expanded="$store.feature.openSections.events">
+            <span class="caret">›</span>
+            <span class="panel-section-name">events</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.feature.plan && $store.feature.plan.event_count"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.feature.openSections.events"
+             x-transition.opacity.duration.150ms>
+            <template x-for="(ev, i) in $store.feature.recentEvents()" :key="ev.id || i">
+                <div class="event-row">
+                    <span class="mono muted small"
+                          x-text="$store.feature.formatTimestamp(ev.created_at)"></span>
+                    <span class="mono" x-text="ev.actor || 'system'"></span>
+                    <span x-text="ev.kind + ' · ' + ev.entity + (ev.entity_id !== undefined ? ' ' + ev.entity_id : '')"></span>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- review records -->
+    <section class="panel-section"
+             x-show="$store.feature.plan && $store.feature.reviews().length"
+             :class="{ open: $store.feature.openSections.reviews }">
+        <button class="panel-section-head"
+                @click="$store.feature.toggleSection('reviews')"
+                :aria-expanded="$store.feature.openSections.reviews">
+            <span class="caret">›</span>
+            <span class="panel-section-name">reviews</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.feature.reviews().length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.feature.openSections.reviews"
+             x-transition.opacity.duration.150ms>
+            <template x-for="r in $store.feature.reviews()" :key="r.id">
+                <div class="review-row">
+                    <span class="mono" x-text="'#' + r.task_id"></span>
+                    <span class="muted" x-text="r.summary"></span>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- diagnostic footer -->
+    <div class="panel-footnote muted mono"
+         x-show="$store.feature.metadataPath"
+         :title="'Plan data read from ' + $store.feature.metadataPath"
+         x-text="'↳ ' + $store.feature.metadataPath"></div>
+
+</aside>

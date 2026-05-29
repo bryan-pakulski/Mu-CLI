@@ -69,6 +69,7 @@ def run_server_foreground(args, build_session, *, port: int) -> None:
     """Run uvicorn in the current process. Used by the daemon child."""
     app = create_app(args=args, build_session_fn=build_session, port=port)
 
+    import signal
     import uvicorn
 
     config = uvicorn.Config(
@@ -80,6 +81,24 @@ def run_server_foreground(args, build_session, *, port: int) -> None:
         loop="asyncio",
     )
     server = uvicorn.Server(config)
+
+    # Ensure SIGTERM triggers a clean shutdown. Uvicorn installs its own
+    # handlers inside server.run(), but when the process is a detached
+    # daemon (start_new_session=True) those handlers can miss the signal
+    # if the event loop is blocked on a thread join. This pre-handler
+    # sets the flag that makes uvicorn's next loop iteration exit.
+    _orig_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def _shutdown_handler(signum, frame):
+        server.should_exit = True
+        if callable(_orig_sigterm) and _orig_sigterm not in (
+            signal.SIG_DFL,
+            signal.SIG_IGN,
+        ):
+            _orig_sigterm(signum, frame)
+
+    signal.signal(signal.SIGTERM, _shutdown_handler)
+
     try:
         server.run()
     finally:

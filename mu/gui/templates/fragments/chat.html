@@ -200,6 +200,15 @@
             @input="autoSize($el)"
             @keydown="if ($event.key==='Enter' && !$event.shiftKey) { $event.preventDefault(); $store.chat.send($refs.input.value); $refs.input.value=''; $el.style.height='auto'; }"
         ></textarea>
+        <button type="button" class="icon-btn attach-btn"
+                @click="$store.fileBrowser.show('file', (path) => {
+                    const ta = $refs.input;
+                    const prefix = ta.value && !ta.value.endsWith(' ') && !ta.value.endsWith('\n') ? ' ' : '';
+                    ta.value += prefix + '[file:' + path + ']';
+                    ta.dispatchEvent(new Event('input'));
+                    ta.focus();
+                })"
+                title="Attach a file">📎</button>
         <button type="submit" class="primary send-btn">send</button>
     </form>
     <div class="hint">

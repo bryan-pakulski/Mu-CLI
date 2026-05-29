@@ -288,6 +288,51 @@ async def remove_workspace(
     }
 
 
+# ----- browse (filesystem navigator for folder/file pickers) ---------------
+
+
+@router.get("/browse")
+async def browse_directory(path: str = "") -> Dict[str, Any]:
+    """List the contents of a directory for the folder/file picker.
+
+    Returns entries sorted: directories first (alpha), then files (alpha).
+    No session required — this is a pure filesystem read.
+    """
+    target = os.path.expanduser(path) if path else os.path.expanduser("~")
+    target = os.path.abspath(target)
+
+    if not os.path.isdir(target):
+        raise HTTPException(status_code=400, detail=f"not a directory: {target}")
+
+    entries: list[Dict[str, Any]] = []
+    try:
+        for name in os.listdir(target):
+            if name.startswith("."):
+                continue
+            full = os.path.join(target, name)
+            try:
+                stat = os.stat(full)
+                is_dir = os.path.isdir(full)
+                entries.append({
+                    "name": name,
+                    "path": full,
+                    "is_dir": is_dir,
+                    "size": stat.st_size if not is_dir else None,
+                })
+            except OSError:
+                continue
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"permission denied: {target}")
+
+    entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+
+    return {
+        "path": target,
+        "parent": os.path.dirname(target),
+        "entries": entries,
+    }
+
+
 # ----- memory -------------------------------------------------------------
 
 

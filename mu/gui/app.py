@@ -33,10 +33,15 @@ from .deps import require_session  # re-exported
 from .prompts import PromptStore
 from .routers import (
     chat,
+    debug as debug_router,
+    feature as feature_router,
     inspector,
+    loop as loop_router,
     modes,
     prompts as prompts_router,
     providers as providers_router,
+    research as research_router,
+    security as security_router,
     sessions,
     teacher as teacher_router,
 )
@@ -151,6 +156,11 @@ def create_app(
     app.include_router(prompts_router.router, prefix="/api/prompts", tags=["prompts"])
     app.include_router(inspector.router, prefix="/api", tags=["inspector"])
     app.include_router(teacher_router.router, prefix="/api/teacher", tags=["teacher"])
+    app.include_router(feature_router.router, prefix="/api/feature", tags=["feature"])
+    app.include_router(research_router.router, prefix="/api/research", tags=["research"])
+    app.include_router(security_router.router, prefix="/api/security", tags=["security"])
+    app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
+    app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
     app.include_router(chat.events_router, tags=["events"])
 
     @app.get("/", response_class=HTMLResponse)

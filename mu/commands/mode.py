@@ -98,6 +98,19 @@ def mode_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRe
 
     if arg and arg.lower() in AGENT_MODE_METADATA:
         chosen = arg.lower()
+        if chosen != "default":
+            fc = getattr(session, "folder_context", None)
+            folders = getattr(fc, "folders", []) if fc else []
+            sm_fc = getattr(session.session_manager, "folder_context", None)
+            sm_folders = getattr(sm_fc, "folders", []) if sm_fc else []
+            if not folders and not sm_folders:
+                return CommandResult(
+                    ok=False,
+                    message=(
+                        f"Mode '{chosen}' requires a workspace. "
+                        "Add one with /workspace folder <path> first."
+                    ),
+                )
         session.variables["agent_mode"] = chosen
         fc = getattr(session, "folder_context", None)
         session.session_manager.save_history(fc)

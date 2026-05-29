@@ -32,7 +32,6 @@ from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.runtime_metrics import build_live_status_line
 from utils.config import (
-    DEFAULT_SESSION_NAME,
     calculate_cost,
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,

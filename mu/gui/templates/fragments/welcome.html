@@ -53,6 +53,18 @@
         </div>
         <div x-show="modelError" style="color:var(--text-dim);font-size:11.5px;margin-top:-4px;margin-bottom:8px;"
              x-text="'could not list models: ' + modelError + ' — type one above.'"></div>
+        <div class="form-row">
+            <label>workspace</label>
+            <div style="display:flex;gap:4px;flex:1;">
+                <input type="text" x-model="form.workspace" placeholder="~/my-project (optional)" style="flex:1;">
+                <button type="button" class="subtle" style="flex-shrink:0;padding:8px 10px;"
+                        @click="$store.fileBrowser.show('folder', (p) => { form.workspace = p })"
+                        title="Browse for folder">browse</button>
+            </div>
+        </div>
+        <p style="color:var(--text-dim);font-size:11.5px;line-height:1.5;margin:-4px 0 12px 0;">
+            Without a workspace the agent runs in chat-only mode.
+        </p>
         <div class="actions">
             <span class="err" x-text="error"></span>
             <button type="submit" class="primary">create & load</button>
@@ -68,7 +80,7 @@ function welcomeView() {
         models: [],
         modelError: null,
         error: null,
-        form: { name: "", provider: "", model: "" },
+        form: { name: "", provider: "", model: "", workspace: "" },
         async load() {
             const [sR, pR] = await Promise.all([
                 fetch("/api/sessions"),
@@ -105,15 +117,17 @@ function welcomeView() {
         },
         async createSession() {
             this.error = null;
+            const body = {
+                name: this.form.name,
+                provider: this.form.provider,
+                model: this.form.model,
+                activate: true,
+            };
+            if (this.form.workspace.trim()) body.workspace = this.form.workspace.trim();
             const r = await fetch("/api/sessions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    name: this.form.name,
-                    provider: this.form.provider,
-                    model: this.form.model,
-                    activate: true,
-                }),
+                body: JSON.stringify(body),
             });
             if (!r.ok) {
                 const d = await r.json().catch(() => ({}));

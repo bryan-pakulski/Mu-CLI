@@ -339,3 +339,55 @@ async def toggle_exit_criterion(
         "criterion_index": idx,
         "verified": criterion in (task.verified_exit_criteria or []),
     }
+
+
+@router.delete("/{feature_id}")
+async def delete_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Delete a feature from the registry. Refuses if the feature is
+    currently active (loaded) — the user must unload it first."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+
+    if sm.active_feature_id == feature_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Feature '{feature_id}' is currently loaded — unload it first.",
+        )
+
+    record = (sm.feature_registry or {}).get(feature_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        sm.delete_feature(feature_id)
+
+    return {"ok": True, "features": _features_list(sm)}
+
+
+@router.post("/{feature_id}/unload")
+async def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Unload the active feature plan. Clears active_feature_id and
+    feature_state so the feature list view is shown again."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+
+    if sm.active_feature_id != feature_id:
+        if (sm.feature_registry or {}).get(feature_id) is None:
+            raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Feature '{feature_id}' is not the active feature.",
+        )
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        sm.active_feature_id = None
+        sm.feature_state = None
+        sm.save_history()
+
+    return {"ok": True, "features": _features_list(sm)}

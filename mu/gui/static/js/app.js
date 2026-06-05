@@ -6,6 +6,7 @@
 //   mode       — agent mode tabs (default/debug/feature/...)
 //   prompts    — pending blocking-prompt queue (modal)
 //   tokens     — running token meter
+//   toast      — ephemeral notifications (error/success/info)
 //
 // Bootstrap order is in DOMContentLoaded at the bottom.
 
@@ -21,6 +22,9 @@ document.addEventListener("alpine:init", () => {
         // Connection status (SSE) is a global concern, not per-session.
         connected: null,
         lastOpenAt: 0,
+        _renderRaf: 0,
+        _scrollRaf: 0,
+        _highlightRaf: 0,
 
         // ---------- per-session slot management ----------------------
 
@@ -140,16 +144,24 @@ document.addEventListener("alpine:init", () => {
             }
             if (!t) return;
             t.text += text;
-            t.html = renderMarkdown(t.text);
+            if (this._renderRaf) cancelAnimationFrame(this._renderRaf);
+            const turnRef = t;
+            this._renderRaf = requestAnimationFrame(() => {
+                turnRef.html = renderMarkdown(turnRef.text);
+                this._renderRaf = 0;
+            });
             if (!name || name === this.currentName) this.scroll();
         },
         endAssistant(turn_id, name) {
             const slot = this._slot(name);
             const t = this._findById(slot, turn_id) || this._lastByRole(slot, "assistant");
             if (!t) return;
+            if (this._renderRaf) { cancelAnimationFrame(this._renderRaf); this._renderRaf = 0; }
+            if (this._scrollRaf) { cancelAnimationFrame(this._scrollRaf); this._scrollRaf = 0; }
+            if (this._highlightRaf) { cancelAnimationFrame(this._highlightRaf); this._highlightRaf = 0; }
             t.streaming = false;
             t.html = renderMarkdown(t.text);
-            if (!name || name === this.currentName) queueMicrotask(highlightAll);
+            if (!name || name === this.currentName) highlightAll();
         },
 
         // ---------- trace events -------------------------------------
@@ -261,7 +273,9 @@ document.addEventListener("alpine:init", () => {
         // ---------- send + history -----------------------------------
 
         scroll() {
-            queueMicrotask(() => {
+            if (this._scrollRaf) return;
+            this._scrollRaf = requestAnimationFrame(() => {
+                this._scrollRaf = 0;
                 const el = document.querySelector(".chat-history");
                 if (el) el.scrollTop = el.scrollHeight;
             });
@@ -438,7 +452,13 @@ document.addEventListener("alpine:init", () => {
             await Alpine.store("mode").load();
         },
         async remove(name) {
-            await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || `Delete failed (${r.status})`, "error");
+                return;
+            }
+            Alpine.store("toast").show(`Session '${name}' deleted`, "success");
             await this.load();
         },
         async unload(name) {
@@ -450,6 +470,20 @@ document.addEventListener("alpine:init", () => {
         async deactivate() {
             await fetch("/api/sessions/active", { method: "DELETE" });
             location.reload();
+        },
+    });
+
+    // ── Toast notifications ──────────────────────────────────
+    Alpine.store("toast", {
+        messages: [],
+        _nextId: 0,
+        show(msg, type = "info", ms = 4000) {
+            const id = this._nextId++;
+            this.messages.push({ id, msg, type });
+            if (ms > 0) setTimeout(() => this.dismiss(id), ms);
+        },
+        dismiss(id) {
+            this.messages = this.messages.filter(m => m.id !== id);
         },
     });
 
@@ -728,6 +762,8 @@ document.addEventListener("alpine:init", () => {
         expandedTaskId: null,
         // Drag-and-drop transfer state.
         dragTaskId: null,
+        // Search/filter query for the feature list.
+        searchQuery: '',
 
         async load() {
             try {
@@ -868,6 +904,55 @@ document.addEventListener("alpine:init", () => {
         },
         isVerified(task, criterion) {
             return (task.verified_exit_criteria || []).includes(criterion);
+        },
+        filteredFeatures() {
+            const q = (this.searchQuery || '').toLowerCase().trim();
+            if (!q) return this.features || [];
+            return (this.features || []).filter(f =>
+                (f.feature_id || '').toLowerCase().includes(q) ||
+                (f.feature_name || '').toLowerCase().includes(q) ||
+                (f.status || '').toLowerCase().includes(q)
+            );
+        },
+        async deleteFeature(featureId) {
+            if (!featureId) return;
+            try {
+                const r = await fetch(`/api/feature/${encodeURIComponent(featureId)}`, {
+                    method: "DELETE",
+                });
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(
+                        data.detail || `Delete failed (${r.status})`, "error"
+                    );
+                    return;
+                }
+                Alpine.store("toast").show(`Feature '${featureId}' deleted`, "success");
+                await this.load();
+            } catch (e) {
+                console.error("feature.deleteFeature", e);
+                Alpine.store("toast").show("Delete failed — network error", "error");
+            }
+        },
+        async unloadFeature(featureId) {
+            if (!featureId) return;
+            try {
+                const r = await fetch(`/api/feature/${encodeURIComponent(featureId)}/unload`, {
+                    method: "POST",
+                });
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(
+                        data.detail || `Unload failed (${r.status})`, "error"
+                    );
+                    return;
+                }
+                Alpine.store("toast").show(`Feature '${featureId}' unloaded`, "success");
+                await this.load();
+            } catch (e) {
+                console.error("feature.unloadFeature", e);
+                Alpine.store("toast").show("Unload failed — network error", "error");
+            }
         },
         async switchFeature(featureId) {
             if (!featureId) return;

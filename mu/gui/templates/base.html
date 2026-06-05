@@ -31,5 +31,29 @@
 </head>
 <body>
     {% block body %}{% endblock %}
+    <!-- Confirm popover (anchored near click) -->
+    <div class="confirm-pop"
+         x-show="$store.confirm.open"
+         x-transition
+         :style="'left:' + $store.confirm.x + 'px;top:' + $store.confirm.y + 'px'"
+         @click.outside="$store.confirm.cancel()"
+         @keydown.escape.window="$store.confirm.cancel()">
+        <div class="confirm-message" x-text="$store.confirm.message"></div>
+        <div class="confirm-actions">
+            <button @click="$store.confirm.cancel()">Cancel</button>
+            <button :class="{ danger: $store.confirm.danger }"
+                    @click="$store.confirm.confirm()">Confirm</button>
+        </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" x-data>
+        <template x-for="m in $store.toast.messages" :key="m.id">
+            <div class="toast" :class="'toast--' + m.type" x-transition>
+                <span x-text="m.msg"></span>
+                <button class="toast__close" @click="$store.toast.dismiss(m.id)">&times;</button>
+            </div>
+        </template>
+    </div>
 </body>
 </html>

@@ -145,7 +145,7 @@ function welcomeView() {
                 return;
             }
             Alpine.store("toast").show(`Session '${name}' deleted`, "success");
-            this.load();
+            location.reload();
         },
     };
 }

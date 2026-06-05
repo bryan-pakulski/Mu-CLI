@@ -43,6 +43,7 @@ from .routers import (
     research as research_router,
     security as security_router,
     sessions,
+    skills as skills_router,
     teacher as teacher_router,
 )
 from .watcher import SessionWatcher
@@ -161,6 +162,7 @@ def create_app(
     app.include_router(security_router.router, prefix="/api/security", tags=["security"])
     app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
     app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
+    app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(chat.events_router, tags=["events"])
 
     @app.get("/", response_class=HTMLResponse)

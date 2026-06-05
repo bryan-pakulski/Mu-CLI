@@ -186,6 +186,12 @@
 
         <!-- settings (variables) — collapsible submenus per category -->
         <section x-show="$store.inspector.tab === 'settings'">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3);">
+                <button class="primary" style="font-size:12px;padding:5px 14px;"
+                        @click="$store.skills.openModal()"
+                        title="Manage skills — enable, disable, edit, create">skills</button>
+            </div>
+
             <input type="text"
                    x-model="$store.inspector.varFilter"
                    placeholder="filter variables…"

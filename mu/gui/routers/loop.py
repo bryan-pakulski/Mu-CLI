@@ -11,7 +11,8 @@ import logging
 import time
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -87,3 +88,28 @@ async def get_loop_state(request: Request) -> Dict[str, Any]:
         "backlog": backlog,
         "memory": memory,
     }
+
+
+class BacklogItemBody(BaseModel):
+    content: str
+    status: str = "pending"
+
+
+@router.post("/backlog")
+async def add_backlog_item(request: Request, body: BacklogItemBody) -> Dict[str, Any]:
+    """Add a new todo item to the loop backlog (scratchpad)."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+
+    tags = ["todo", f"status:{body.status}"]
+    lock = request.app.state.session_lock_for()
+    with lock:
+        entry = sm.turn_scratchpad.save(content, tags=tags, source="gui", kind="todo")
+        sm.save_history()
+
+    return {"ok": True, "id": entry.id}

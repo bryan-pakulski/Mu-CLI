@@ -15,13 +15,20 @@
                 ? 'light' : 'dark';
             var theme = (saved === 'light' || saved === 'dark') ? saved : sys;
             document.documentElement.setAttribute('data-theme', theme);
+            // Flip hljs sheets as soon as they appear in the DOM.
+            document.addEventListener('DOMContentLoaded', function () {
+                var d = document.getElementById('hljs-dark');
+                var l = document.getElementById('hljs-light');
+                if (d) d.disabled = (theme === 'light');
+                if (l) l.disabled = (theme === 'dark');
+            });
         } catch (e) {
             document.documentElement.setAttribute('data-theme', 'dark');
         }
     })();
     </script>
     <link id="hljs-dark" rel="stylesheet" href="/static/vendor/highlight-github-dark.min.css">
-    <link id="hljs-light" rel="alternate stylesheet" href="/static/vendor/highlight-github-light.min.css">
+    <link id="hljs-light" rel="stylesheet" href="/static/vendor/highlight-github-light.min.css" disabled>
     <link rel="stylesheet" href="/static/css/app.css">
     <script src="/static/vendor/marked.min.js"></script>
     <script src="/static/vendor/highlight.min.js"></script>

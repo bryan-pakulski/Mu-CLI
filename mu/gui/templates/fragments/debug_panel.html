@@ -4,7 +4,7 @@
        x-transition.opacity.duration.200ms>
 
     <!-- empty state -->
-    <div class="panel-empty" x-show="!$store.debug.hypotheses.length && !$store.debug.debugTarget && !$store.debug.findings.length">
+    <div class="panel-empty" x-show="!$store.debug.hypotheses.length && !$store.debug.debugTarget && !$store.debug.findings.length && !$store.debug.notes.length && !$store.debug.suspects.length">
         <h3>no debug state</h3>
         <p class="muted">Start debugging in chat. The agent will populate hypotheses
         and suspect locations as it investigates.</p>
@@ -12,7 +12,7 @@
 
     <!-- header: debug target -->
     <div class="panel-head"
-         x-show="$store.debug.debugTarget || $store.debug.hypotheses.length || $store.debug.findings.length">
+         x-show="$store.debug.debugTarget || $store.debug.hypotheses.length || $store.debug.findings.length || $store.debug.notes.length || $store.debug.suspects.length">
         <div class="panel-subject"
              x-text="$store.debug.debugTarget || 'debugging'"></div>
         <div class="panel-meta mono muted">
@@ -79,6 +79,34 @@
             <template x-for="s in $store.debug.suspects" :key="s.id">
                 <div class="suspect-row">
                     <span class="mono" x-text="s.content"></span>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- scratchpad notes (unclassified entries) -->
+    <section class="panel-section"
+             x-show="$store.debug.notes.length"
+             :class="{ open: $store.debug.openSections.notes }">
+        <button class="panel-section-head"
+                @click="$store.debug.toggleSection('notes')"
+                :aria-expanded="$store.debug.openSections.notes">
+            <span class="caret">›</span>
+            <span class="panel-section-name">notes</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.debug.notes.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.debug.openSections.notes"
+             x-transition.opacity.duration.150ms>
+            <template x-for="n in $store.debug.notes" :key="n.id">
+                <div class="finding-entry">
+                    <div class="finding-head">
+                        <span class="mono muted" x-text="'#' + n.id"></span>
+                        <template x-for="tag in (n.tags || [])" :key="tag">
+                            <span class="tag" x-text="tag"></span>
+                        </template>
+                    </div>
+                    <div class="finding-body" x-text="n.content"></div>
                 </div>
             </template>
         </div>

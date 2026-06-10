@@ -360,17 +360,23 @@ Delegation:
 - For self-contained side-quests that would bloat context (deep codebase research, large multi-file refactors), issue `spawn_agent` calls in parallel — 4 of them in one turn run concurrently capped at `parallel_tool_concurrency` (default 4). Children inherit folder context but have isolated history.""",
     "debug": """WORKFLOW (Debugging):
 
+SCRATCHPAD TAGGING — the GUI debug panel reads scratchpad tags to populate its sections. You MUST tag entries so the panel stays in sync:
+- Hypotheses: `save_scratchpad` with tags=["hypothesis"]. Add "supported", "disproved", or "confirmed" as a second tag when status changes.
+- Suspect locations: `save_scratchpad` with tags=["suspect"] — file:line or function name.
+- General notes (repro steps, bisect state): `save_scratchpad` with descriptive tags (e.g. ["repro"], ["bisect"]).
+- Durable findings: `save_memory` with tags=["debug", "root-cause"] plus the file path / module.
+
 0. **Recall.** Call `search_memory` with the error string / file path / suspect symbol. If this bug or a sibling has been seen before, start from that fix — do not re-derive.
 
-1. **Reproduce, deterministically.** Get the failing command via `bash` and capture full stderr. If the user gave a vague repro, narrow it: minimum command, minimum input, single failing test (`pytest path::test_x -xvs`, `cargo test -- name --nocapture`, `node --inspect-brk`). Write the repro to `save_scratchpad` so it survives across iterations.
+1. **Reproduce, deterministically.** Get the failing command via `bash` and capture full stderr. If the user gave a vague repro, narrow it: minimum command, minimum input, single failing test (`pytest path::test_x -xvs`, `cargo test -- name --nocapture`, `node --inspect-brk`). Write the repro to `save_scratchpad` (tags=["repro"]) so it survives across iterations.
 
-2. **Locate.** `search_for_string` for the exact error message — that lands you on the emit site fast. Then `search_references` on the failing function / symbol to map call sites. `retrieve_relevant_context` if the error is symptomatic (timeout, wrong result) rather than a literal string.
+2. **Locate.** `search_for_string` for the exact error message — that lands you on the emit site fast. Then `search_references` on the failing function / symbol to map call sites. `retrieve_relevant_context` if the error is symptomatic (timeout, wrong result) rather than a literal string. Save suspect locations via `save_scratchpad` with tags=["suspect"].
 
 3. **Inspect the actual code, in parallel.** Issue `read_file` on the emit site + `read_file` on direct callers + `read_file` on tests covering the symbol — all in one turn (parallel reads). Read full functions, not snippets.
 
-4. **Hypothesize root cause.** Distinguish *symptom* from *cause*. The line that raises is rarely the bug. Walk the call stack upstream. For dependency / library bugs, `stackoverflow_search` or `web_search` with the exact error string + library version.
+4. **Hypothesize root cause.** Distinguish *symptom* from *cause*. The line that raises is rarely the bug. Walk the call stack upstream. Save each hypothesis via `save_scratchpad` with tags=["hypothesis"]. For dependency / library bugs, `stackoverflow_search` or `web_search` with the exact error string + library version.
 
-5. **Bisect when stuck.** If the cause isn't obvious after step 4, use `bash` to bisect: `git log --oneline` for recent changes, `git bisect start/good/bad` for a binary search, or comment-out / early-return chunks to isolate. Save the bisect range to scratchpad.
+5. **Bisect when stuck.** If the cause isn't obvious after step 4, use `bash` to bisect: `git log --oneline` for recent changes, `git bisect start/good/bad` for a binary search, or comment-out / early-return chunks to isolate. Save the bisect range to scratchpad (tags=["bisect"]).
 
 6. **Fix surgically.** Prefer `search_and_replace_file` with 3-5 lines of context for one-off bugs; `apply_diff` for multi-hunk changes. Don't refactor surrounding code — fix the bug, ship.
 
@@ -378,8 +384,9 @@ Delegation:
    - Re-run the exact failing reproducer — must now pass.
    - Run the WHOLE test file (or wider suite) — your fix must not have broken siblings.
    - For race conditions / flake suspects, run the test 10× via `bash` to confirm.
+   - Update hypothesis status: `save_scratchpad` with tags=["hypothesis", "confirmed"] or tags=["hypothesis", "disproved"].
 
-8. **Persist the lesson.** `save_memory` with: the symptom signature, the actual root cause, the fix. Tag with the file path / module. Future sessions hit `search_memory` first (step 0) and skip the rediscovery.""",
+8. **Persist the lesson.** `save_memory` with tags=["debug", "root-cause"] plus the file path / module: the symptom signature, the actual root cause, the fix. Future sessions hit `search_memory` first (step 0) and skip the rediscovery.""",
     "feature": """WORKFLOW (Feature Task Engine):
 
 Hard rules:

@@ -8,6 +8,7 @@ sessions can run turns in parallel without blocking each other.
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import threading
 from typing import Any, Dict, Optional
@@ -17,6 +18,8 @@ from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
 events_router = APIRouter()
+
+_agent_threads: Dict[str, int] = {}
 
 
 def _resolve_session(request: Request, name: Optional[str]):
@@ -43,12 +46,16 @@ def _run_send(
     *,
     lock: threading.Lock,
     busy: threading.Event,
+    session_name: str = "",
 ):
+    _agent_threads[session_name] = threading.current_thread().ident
     busy.set()
     try:
         with lock:
             try:
                 result = session.send_message(text)
+            except KeyboardInterrupt:
+                result = {"status": "interrupted", "error": "User interrupted execution."}
             except Exception as exc:
                 result = {"status": "error", "error": str(exc)}
             try:
@@ -58,6 +65,7 @@ def _run_send(
             return result
     finally:
         busy.clear()
+        _agent_threads.pop(session_name, None)
 
 
 @router.get("/commands")
@@ -236,7 +244,7 @@ async def send_message(request: Request, payload: Dict[str, Any]):
     lock = request.app.state.session_lock_for(name)
 
     def _run():
-        return _run_send(session, text, lock=lock, busy=busy)
+        return _run_send(session, text, lock=lock, busy=busy, session_name=name)
 
     async def _drive():
         try:
@@ -263,17 +271,16 @@ async def interrupt(request: Request, payload: Optional[Dict[str, Any]] = None):
     if payload:
         session_name = (payload.get("session_name") or "").strip() or None
     session = _resolve_session(request, session_name)
-    interrupted = False
-    for attr in ("interrupt", "request_interrupt", "cancel_current_turn"):
-        method = getattr(session, attr, None)
-        if callable(method):
-            try:
-                method()
-                interrupted = True
-                break
-            except Exception:
-                pass
-    return {"ok": interrupted}
+    name = session.session_manager.current_session_name
+
+    tid = _agent_threads.get(name)
+    if tid is None:
+        return {"ok": False, "detail": "No turn in flight for this session."}
+
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_ulong(tid), ctypes.py_object(KeyboardInterrupt)
+    )
+    return {"ok": res == 1}
 
 
 def _summarize_result(result: Any) -> Dict[str, Any]:
@@ -294,7 +301,14 @@ async def stream_events(request: Request):
 
     async def generator():
         try:
-            yield {"event": "message", "data": json.dumps({"kind": "hello"})}
+            busy_names = [
+                n for n, evt in request.app.state.session_busy.items()
+                if evt.is_set()
+            ]
+            yield {"event": "message", "data": json.dumps({
+                "kind": "hello",
+                "busy": busy_names,
+            })}
             for pending in request.app.state.prompts.pending():
                 yield {
                     "event": "message",

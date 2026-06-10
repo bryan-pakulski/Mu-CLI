@@ -270,11 +270,18 @@
                 <span></span><span></span><span></span>
             </span>
             <span style="margin-left:6px;">generating</span>
+            <button class="interrupt-btn"
+                    @click="$store.chat.interrupt()"
+                    title="Interrupt — pause execution (like Ctrl-C in TUI). Use /continue to resume.">stop</button>
         </span>
         <span x-show="$store.prompts.queue.length > 0" class="busy" style="color:var(--accent);">
             ↑ awaiting your input above
         </span>
-        <span x-show="$store.chat.connected === false" class="down">reconnecting…</span>
+        <span x-show="$store.chat.connected === false" class="down">
+            reconnecting…
+            <button style="margin-left:8px;font-size:11px;padding:2px 8px;"
+                    @click="location.reload()">reload</button>
+        </span>
         <span x-show="$store.chat.externalActive" class="shared">↻ shared with another mucli process</span>
     </div>
 </div>

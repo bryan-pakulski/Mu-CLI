@@ -362,6 +362,22 @@ document.addEventListener("alpine:init", () => {
                 slot.busy = false;
             }
         },
+        async interrupt() {
+            const name = this.currentName;
+            try {
+                const r = await fetch("/api/chat/interrupt", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_name: name }),
+                });
+                const d = await r.json();
+                if (d.ok) {
+                    Alpine.store("toast").show("Interrupted — type /continue to resume or enter a new prompt", "info");
+                }
+            } catch (e) {
+                console.error("interrupt", e);
+            }
+        },
         async loadHistory(name) {
             const target = name || this.currentName;
             try {
@@ -456,8 +472,13 @@ document.addEventListener("alpine:init", () => {
             this.current = data.current;
             this.loaded = data.loaded || [];
             this.busy = data.busy || [];
-            // First load — sync the chat store's focus pointer.
             const chat = Alpine.store("chat");
+            // Sync server-reported busy into chat slots so the UI shows
+            // "generating" after a page refresh mid-turn.
+            for (const name of this.busy) {
+                chat._slot(name).busy = true;
+            }
+            // First load — sync the chat store's focus pointer.
             if (!chat.currentName && this.current) chat.focus(this.current);
         },
         isLoaded(name) { return (this.loaded || []).includes(name); },
@@ -1086,6 +1107,73 @@ document.addEventListener("alpine:init", () => {
             applyTheme(this.current);
             // Re-highlight existing code blocks after the stylesheet swap.
             queueMicrotask(rehighlightAll);
+        },
+    });
+
+    Alpine.store("layout", {
+        sidebarOpen: true,
+        panelOpen: true,
+        sidebarWidth: 220,
+        panelWidth: 360,
+        _dragging: null,
+
+        init() {
+            try {
+                const saved = JSON.parse(localStorage.getItem("mucli-layout") || "{}");
+                if (saved.sidebarOpen === false) this.sidebarOpen = false;
+                if (saved.panelOpen === false) this.panelOpen = false;
+                if (saved.sidebarWidth > 0) this.sidebarWidth = saved.sidebarWidth;
+                if (saved.panelWidth > 0) this.panelWidth = saved.panelWidth;
+            } catch (e) {}
+        },
+        _persist() {
+            try {
+                localStorage.setItem("mucli-layout", JSON.stringify({
+                    sidebarOpen: this.sidebarOpen,
+                    panelOpen: this.panelOpen,
+                    sidebarWidth: this.sidebarWidth,
+                    panelWidth: this.panelWidth,
+                }));
+            } catch (e) {}
+        },
+        toggleSidebar() {
+            this.sidebarOpen = !this.sidebarOpen;
+            this._persist();
+        },
+        togglePanel() {
+            this.panelOpen = !this.panelOpen;
+            this._persist();
+        },
+        startDrag(which, e) {
+            e.preventDefault();
+            this._dragging = which;
+            const app = document.querySelector(".app");
+            document.body.classList.add("resizing");
+            const self = this;
+            const onMove = (me) => {
+                if (!app) return;
+                if (which === "sidebar") {
+                    const w = Math.max(140, Math.min(500, me.clientX));
+                    app.style.setProperty("--sidebar-w", w + "px");
+                    self._dragVal = w;
+                } else if (which === "panel") {
+                    const w = Math.max(240, Math.min(700, window.innerWidth - me.clientX));
+                    app.style.setProperty("--panel-w", w + "px");
+                    self._dragVal = w;
+                }
+            };
+            const onUp = () => {
+                document.body.classList.remove("resizing");
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                if (which === "sidebar" && self._dragVal) self.sidebarWidth = self._dragVal;
+                if (which === "panel" && self._dragVal) self.panelWidth = self._dragVal;
+                self._dragging = null;
+                self._dragVal = null;
+                self._persist();
+            };
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
         },
     });
 
@@ -1767,11 +1855,12 @@ document.addEventListener("alpine:init", () => {
         debugTarget: "",
         hypotheses: [],
         suspects: [],
+        notes: [],
         findings: [],
         scratchpadCount: 0,
         active: false,
         loaded: false,
-        openSections: { hypotheses: true, suspects: true, findings: false },
+        openSections: { hypotheses: true, suspects: true, notes: true, findings: false },
         expandedHypothesisId: null,
 
         async load() {
@@ -1782,6 +1871,7 @@ document.addEventListener("alpine:init", () => {
                 this.debugTarget = d.debug_target || "";
                 this.hypotheses = d.hypotheses || [];
                 this.suspects = d.suspects || [];
+                this.notes = d.notes || [];
                 this.findings = d.findings || [];
                 this.scratchpadCount = d.scratchpad_count || 0;
                 this.loaded = true;
@@ -2181,7 +2271,14 @@ function bootSSE() {
     source.onmessage = (ev) => {
         let data;
         try { data = JSON.parse(ev.data); } catch { return; }
-        if (data && data.kind === "hello") return;
+        if (data && data.kind === "hello") {
+            const busyNames = data.busy || [];
+            const chat = Alpine.store("chat");
+            for (const name of busyNames) {
+                chat._slot(name).busy = true;
+            }
+            return;
+        }
         routeEvent(data);
     };
     source.addEventListener("ping", () => {});
@@ -2251,6 +2348,12 @@ function routeEvent(ev) {
             }
             slot.busy = false;
             chat.finishTurn(name);
+            if (ev.result && ev.result.status === "interrupted") {
+                chat.addInfo(
+                    "Execution paused. Type `/continue` to resume, or enter a new prompt.",
+                    null, name
+                );
+            }
             // Refresh the active panel store so kanban/curriculum/etc.
             // reflect whatever the just-finished turn changed.
             if (isFocused) refreshActivePanel();
@@ -2581,6 +2684,7 @@ function rehighlightAll() {
 
 document.addEventListener("DOMContentLoaded", () => {
     applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+    Alpine.store("layout").init();
     bootSSE();
     Alpine.store("chat").loadHistory();
     Alpine.store("sessions").load();

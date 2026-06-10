@@ -57,6 +57,7 @@ from utils.config import (
 from utils.helpers import display_image_in_terminal, get_safe_mime_type
 from utils.logger import logger
 from utils.runtime_metrics import build_live_status_line
+from utils.token_estimator import estimate_tokens
 
 
 # Shared symbols extracted to `mu/session/helpers.py` so this top-level
@@ -68,6 +69,81 @@ from mu.session.helpers import (
     _sanitize_for_log,
     _shorten_tool_args,
 )
+
+
+def _estimate_messages_tokens(messages) -> int:
+    """Cheap token estimate for a list of Message objects."""
+    total = 0
+    for msg in messages:
+        for part in msg.parts:
+            if part.text:
+                total += estimate_tokens(part.text)
+            elif part.tool_result is not None:
+                total += estimate_tokens(str(part.tool_result))
+            elif part.tool_args is not None:
+                total += estimate_tokens(json.dumps(part.tool_args))
+    return total
+
+
+def _preflight_context_check(session, system_prompt, messages):
+    """Emergency-compact history if the assembled prompt exceeds the
+    provider's context window.
+
+    The normal compaction pass (``roll_history_summary_to_token_budget``)
+    fires *before* the system prompt is finalized — resumption briefings,
+    hierarchical context injection, and per-iteration memory/scratchpad
+    layers all grow the prompt after that pass.  This pre-flight check
+    runs right before the provider call with the *actual* prompt and
+    messages, and triggers a second compaction if the total would
+    overflow.
+
+    Returns (system_prompt, messages) — unchanged if within budget,
+    or with rebuilt messages after emergency compaction.
+    """
+    from mu.session.budgets import resolve_context_limit, resolve_response_reserve
+
+    context_limit = resolve_context_limit(session)
+    response_reserve = resolve_response_reserve(session)
+    max_prompt = context_limit - response_reserve
+
+    prompt_tokens = estimate_tokens(system_prompt)
+    msg_tokens = _estimate_messages_tokens(messages)
+    total = prompt_tokens + msg_tokens
+
+    if total <= max_prompt:
+        return system_prompt, messages
+
+    overshoot = total - max_prompt
+    logger.warning(
+        "Pre-flight context check: estimated %d tokens "
+        "(limit %d, reserve %d, max_prompt %d) — %d over. "
+        "Emergency compaction triggered.",
+        total, context_limit, response_reserve, max_prompt, overshoot,
+    )
+    emergency_budget = max(512, max_prompt - prompt_tokens)
+    try:
+        session._history_rolled_this_turn = False
+        session.session_manager.roll_history_summary_to_token_budget(
+            int(emergency_budget * 0.85),
+            keep_recent=2,
+        )
+        session._history_rolled_this_turn = True
+    except Exception as exc:
+        logger.warning("Emergency compaction failed: %s", exc)
+        return system_prompt, messages
+
+    recent_history = session._prepare_runtime_history()
+    messages = session._build_messages_from_history(
+        recent_history,
+        {"role": "system", "parts": []},
+    )[:-1]
+
+    new_msg_tokens = _estimate_messages_tokens(messages)
+    logger.info(
+        "Emergency compaction complete: messages went from %d to %d tokens.",
+        msg_tokens, new_msg_tokens,
+    )
+    return system_prompt, messages
 
 
 def _active_teacher_lesson(session):
@@ -495,6 +571,10 @@ def run_turn(session, text):
                         "\n\nLAYER 3 — Turn scratchpad snapshot:\n"
                         f"{scratchpad_summary}"
                     )
+
+            dynamic_system_prompt, messages = _preflight_context_check(
+                session, dynamic_system_prompt, messages,
+            )
 
             if session.ui and hasattr(session.ui, "build_live_status"):
                 status_msg = session.ui.build_live_status(

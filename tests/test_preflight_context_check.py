@@ -1,0 +1,173 @@
+"""Test the pre-flight context overflow check in loop_body.py.
+
+The pre-flight check catches prompt overflows that slip past the initial
+compaction pass — e.g. when resumption briefings, hierarchical context,
+or per-iteration memory/scratchpad layers grow the system prompt after
+the initial ``roll_history_summary_to_token_budget`` call.
+"""
+
+import json
+from typing import Optional
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from mu.agent.loop_body import (
+    _estimate_messages_tokens,
+    _preflight_context_check,
+)
+from providers.base import Message, MessagePart
+
+
+# --------------------------------------------------------- helpers
+
+
+def _make_messages(texts):
+    """Build a list of Message objects from a list of strings."""
+    msgs = []
+    for t in texts:
+        msgs.append(Message(role="user", parts=[MessagePart(type="text", text=t)]))
+    return msgs
+
+
+def _stub_session(context_limit=8192, response_reserve=2048):
+    """Create a mock session with the budget helpers wired up."""
+    session = MagicMock()
+    session.variables = {
+        "context_token_limit": context_limit,
+    }
+
+    # Wire up budget resolution
+    provider = MagicMock()
+    provider.effective_context_window.return_value = context_limit
+    provider.effective_response_reserve.return_value = response_reserve
+    session.provider = provider
+
+    # Track compaction calls
+    session._history_rolled_this_turn = True
+    session.session_manager = MagicMock()
+    session.session_manager.roll_history_summary_to_token_budget = MagicMock(
+        return_value=True
+    )
+
+    # After compaction, rebuild returns shorter messages
+    short_history = [{"role": "user", "parts": [{"type": "text", "text": "hi"}]}]
+    session._prepare_runtime_history.return_value = short_history
+    session._build_messages_from_history.return_value = _make_messages(["hi", ""])
+
+    return session
+
+
+# --------------------------------------------------------- token estimation
+
+
+def test_estimate_messages_tokens_text():
+    msgs = _make_messages(["hello world", "foo bar"])
+    tokens = _estimate_messages_tokens(msgs)
+    assert tokens > 0
+
+
+def test_estimate_messages_tokens_tool_result():
+    msg = Message(
+        role="tool",
+        parts=[
+            MessagePart(
+                type="tool_result",
+                tool_result="some result text here",
+                tool_name="test",
+            )
+        ],
+    )
+    tokens = _estimate_messages_tokens([msg])
+    assert tokens > 0
+
+
+def test_estimate_messages_tokens_tool_args():
+    msg = Message(
+        role="assistant",
+        parts=[
+            MessagePart(
+                type="tool_call",
+                tool_name="read_file",
+                tool_args={"path": "/some/file.py"},
+            )
+        ],
+    )
+    tokens = _estimate_messages_tokens([msg])
+    assert tokens > 0
+
+
+def test_estimate_messages_tokens_empty():
+    assert _estimate_messages_tokens([]) == 0
+
+
+# --------------------------------------------------------- pre-flight check
+
+
+def test_within_budget_returns_unchanged():
+    session = _stub_session(context_limit=100_000, response_reserve=4096)
+    system_prompt = "You are a helpful assistant."
+    messages = _make_messages(["hello"])
+
+    result_prompt, result_msgs = _preflight_context_check(
+        session, system_prompt, messages
+    )
+
+    assert result_prompt is system_prompt
+    assert result_msgs is messages
+    session.session_manager.roll_history_summary_to_token_budget.assert_not_called()
+
+
+def test_over_budget_triggers_emergency_compaction():
+    session = _stub_session(context_limit=100, response_reserve=20)
+    # 80 tokens of max_prompt, but we'll send way more
+    big_prompt = "x " * 500  # ~500 tokens
+    big_messages = _make_messages(["y " * 500])
+
+    result_prompt, result_msgs = _preflight_context_check(
+        session, big_prompt, big_messages
+    )
+
+    # Compaction should have been called
+    session.session_manager.roll_history_summary_to_token_budget.assert_called_once()
+    call_args = session.session_manager.roll_history_summary_to_token_budget.call_args
+    budget = call_args[0][0]
+    assert budget > 0
+    assert call_args[1]["keep_recent"] == 2
+
+    # Messages should have been rebuilt
+    assert result_msgs is not big_messages
+    # System prompt unchanged (only messages get compacted)
+    assert result_prompt is big_prompt
+
+
+def test_compaction_failure_returns_original():
+    session = _stub_session(context_limit=100, response_reserve=20)
+    session.session_manager.roll_history_summary_to_token_budget.side_effect = (
+        RuntimeError("compaction broke")
+    )
+    big_prompt = "x " * 500
+    big_messages = _make_messages(["y " * 500])
+
+    result_prompt, result_msgs = _preflight_context_check(
+        session, big_prompt, big_messages
+    )
+
+    # Should return originals on failure
+    assert result_prompt is big_prompt
+    assert result_msgs is big_messages
+
+
+def test_history_rolled_flag_management():
+    """The check temporarily clears _history_rolled_this_turn so the
+    compactor can fire, then restores it."""
+    session = _stub_session(context_limit=100, response_reserve=20)
+    session._history_rolled_this_turn = True
+
+    big_prompt = "x " * 500
+    big_messages = _make_messages(["y " * 500])
+
+    _preflight_context_check(session, big_prompt, big_messages)
+
+    # After successful compaction, flag should be set back to True
+    assert session._history_rolled_this_turn is True

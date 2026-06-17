@@ -28,7 +28,7 @@ VARIABLE_SCHEMA = {
     },  # Agent mode, determines the initial system prompt
     "ollama_host": {
         "type": str,
-        "default": "https://ollama.com",
+        "default": "",
     },  # Ollama server host
     "strict_mode": {"type": bool, "default": False},  # Forces approval for all tools
     "max_iterations": {

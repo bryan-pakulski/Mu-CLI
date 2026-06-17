@@ -956,8 +956,10 @@ def build_session(args, ui, allow_prompt=True):
     session_manager = SessionManager(ui=ui, session_name=args.session)
     if ui and hasattr(ui, "set_variables"):
         ui.set_variables(session_manager.variables)
-
-    ollama_host = session_manager.variables.get("ollama_host")
+    
+    # Let automatic selection occur in provider class
+    host_str = session_manager.variables.get("ollama_host")
+    ollama_host = host_str if host_str != "" else None
 
     if allow_prompt and not args.session:
         action, session_name = choose_session(session_manager)

@@ -149,7 +149,10 @@ document.addEventListener("alpine:init", () => {
             if (!t) return;
             t.streaming = false;
             t.html = renderMarkdown(t.text);
-            if (!name || name === this.currentName) queueMicrotask(highlightAll);
+            if (!name || name === this.currentName) {
+                queueMicrotask(highlightAll);
+                queueMicrotask(() => typesetMathInScope(".msg.assistant .body"));
+            }
         },
 
         // ---------- trace events -------------------------------------
@@ -368,6 +371,7 @@ document.addEventListener("alpine:init", () => {
                 if (!name || name === this.currentName) {
                     this.scroll();
                     queueMicrotask(highlightAll);
+                    queueMicrotask(() => typesetMathInScope(".msg.assistant .body"));
                 }
             } catch (err) {
                 console.error("history", err);
@@ -1509,6 +1513,40 @@ function highlightInScope(selector) {
     });
 }
 
+// --- MathJax math typesetting ---------------------------------------------
+// MathJax is loaded (vendored) in base.html with startup.typeset=false, so
+// the only place math gets typeset is where we ask it to. We scope each
+// call to a subtree (the freshly-rendered assistant turn, the modal, the
+// reloaded history) rather than re-scanning the whole document — that
+// keeps streaming responsive and avoids re-typesetting stable turns.
+//
+// `skipHtmlTags:['pre','code',...]` in the MathJax config keeps `$` inside
+// code blocks from being mistaken for math delimiters, so this is safe to
+// run over a turn that mixes prose math and fenced code.
+let _mathjaxBusy = Promise.resolve();
+function typesetMath(elements) {
+    const mj = window.MathJax;
+    if (!mj || typeof mj.typesetPromise !== "function") return;
+    if (!elements || !elements.length) return;
+    // Serialize calls so a streaming delta doesn't kick off overlapping
+    // typesets on the same node (MathJax chokes if a node is mid-typeset
+    // when another typeset starts on it).
+    _mathjaxBusy = _mathjaxBusy.then(() => {
+        try {
+            return mj.typesetPromise(elements);
+        } catch (e) {
+            console.warn("typesetMath", e);
+        }
+    });
+}
+// Convenience: typeset everything inside a selector. Used after a full
+// history reload or modal mount where we don't have a node ref handy.
+function typesetMathInScope(selector) {
+    if (typeof window.MathJax === "undefined") return;
+    const nodes = document.querySelectorAll(selector);
+    if (nodes.length) typesetMath(Array.from(nodes));
+}
+
 function bootSSE() {
     let hasConnectedBefore = false;
     const source = new EventSource("/api/events");
@@ -1750,6 +1788,7 @@ function promptModal() {
             // Apply syntax highlighting to any code fences in the
             // freshly-rendered title/description/options.
             queueMicrotask(() => highlightInScope(".modal"));
+            queueMicrotask(() => typesetMathInScope(".modal"));
         },
 
         title() {

@@ -377,7 +377,7 @@ class OllamaProvider(LLMProvider):
             )
             with urllib.request.urlopen(req, timeout=self.request_timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
-            return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+            return [m.get("name", "") for m in data.get("models", [])]
         except urllib.error.URLError as exc:
             raise _classify_url_error(self.host, exc)
         except (json.JSONDecodeError, OSError) as exc:

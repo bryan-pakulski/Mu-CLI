@@ -11,6 +11,64 @@ from utils.helpers import safe_markup
 
 console = Console()
 
+# --- LaTeX → Unicode (TUI) -------------------------------------------------
+# pylatexenc converts LaTeX math fragments to readable Unicode/plain text so
+# Rich's Markdown renderer (which has no math support) shows something sane
+# instead of raw `$\frac{...}$`.  Code spans are protected — `$` inside code
+# is never touched.
+_L2T = None
+
+
+def _get_l2t():
+    """Lazily build the LatexNodes2Text converter; False if pylatexenc missing."""
+    global _L2T
+    if _L2T is None:
+        try:
+            from pylatexenc.latex2text import LatexNodes2Text
+            _L2T = LatexNodes2Text()
+        except ImportError:
+            _L2T = False
+    return _L2T
+
+
+# Order matters: $$...$$ before $...$; \(...\) and \[...\] after.
+_MATH_RE = re.compile(
+    r"(\$\$.+?\$\$"      # $$...$$  display
+    r"|\$[^\$\n]+?\$"    # $...$    inline (no newline, no nested $)
+    r"|\\\(.+?\\\)"      # \(...\)  inline
+    r"|\\\[.+?\\\])",    # \[...\]  display
+    re.DOTALL,
+)
+
+
+def _latex_repl(match):
+    l2t = _get_l2t()
+    if not l2t:
+        return match.group(0)
+    expr = match.group(0)
+    is_display = expr.startswith("$$") or expr.startswith("\\[")
+    try:
+        out = l2t.latex_to_text(expr)
+    except Exception:
+        return expr
+    out = out.strip()
+    if is_display:
+        return "\n\n" + out + "\n\n"
+    return out
+
+
+def latex_to_unicode(text):
+    """Convert LaTeX math in prose to Unicode; leave inline ``code`` spans intact."""
+    # Split out inline code spans (`...`) so $ inside code is never converted.
+    pieces = re.split(r"(`[^`\n]+`)", text)
+    rendered = []
+    for piece in pieces:
+        if piece.startswith("`") and piece.endswith("`") and len(piece) > 1:
+            rendered.append(piece)
+        else:
+            rendered.append(_MATH_RE.sub(_latex_repl, piece))
+    return "".join(rendered)
+
 
 def render_response(text):
     """
@@ -74,6 +132,7 @@ def render_response(text):
                 print_code_panel(content.strip(), lang, title)
         else:
             body = part.strip()
+            body = latex_to_unicode(body)
             try:
                 console.print(Markdown(body))
             except MarkupError:

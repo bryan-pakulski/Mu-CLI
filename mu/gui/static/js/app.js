@@ -6,6 +6,7 @@
 //   mode       — agent mode tabs (default/debug/feature/...)
 //   prompts    — pending blocking-prompt queue (modal)
 //   tokens     — running token meter
+//   toast      — ephemeral notifications (error/success/info)
 //
 // Bootstrap order is in DOMContentLoaded at the bottom.
 
@@ -21,6 +22,9 @@ document.addEventListener("alpine:init", () => {
         // Connection status (SSE) is a global concern, not per-session.
         connected: null,
         lastOpenAt: 0,
+        _renderRaf: 0,
+        _scrollRaf: 0,
+        _highlightRaf: 0,
 
         // ---------- per-session slot management ----------------------
 
@@ -140,13 +144,21 @@ document.addEventListener("alpine:init", () => {
             }
             if (!t) return;
             t.text += text;
-            t.html = renderMarkdown(t.text);
+            if (this._renderRaf) cancelAnimationFrame(this._renderRaf);
+            const turnRef = t;
+            this._renderRaf = requestAnimationFrame(() => {
+                turnRef.html = renderMarkdown(turnRef.text);
+                this._renderRaf = 0;
+            });
             if (!name || name === this.currentName) this.scroll();
         },
         endAssistant(turn_id, name) {
             const slot = this._slot(name);
             const t = this._findById(slot, turn_id) || this._lastByRole(slot, "assistant");
             if (!t) return;
+            if (this._renderRaf) { cancelAnimationFrame(this._renderRaf); this._renderRaf = 0; }
+            if (this._scrollRaf) { cancelAnimationFrame(this._scrollRaf); this._scrollRaf = 0; }
+            if (this._highlightRaf) { cancelAnimationFrame(this._highlightRaf); this._highlightRaf = 0; }
             t.streaming = false;
             t.html = renderMarkdown(t.text);
             if (!name || name === this.currentName) {
@@ -232,6 +244,61 @@ document.addEventListener("alpine:init", () => {
             if (!name || name === this.currentName) this.scroll();
         },
 
+        addCommandResult(result, name) {
+            const slot = this._slot(name);
+            this._closeTrace(slot);
+            const ok = result && result.ok;
+            const cmd = (result && result.command) || "/command";
+            const msg = (result && result.message) || "";
+            const data = (result && result.data) || {};
+
+            let body = "";
+            let preformatted = false;
+            if (data.stdout || data.stderr) {
+                const parts = [];
+                if (data.stdout) parts.push(data.stdout.replace(/\n+$/, ""));
+                if (data.stderr) parts.push(data.stderr.replace(/\n+$/, ""));
+                body = parts.join("\n");
+                preformatted = true;
+            } else if (data.sessions) {
+                const active = data.active || "";
+                body = data.sessions.map(s =>
+                    (s === active ? "▸ " : "  ") + s
+                ).join("\n");
+                preformatted = true;
+            } else if (data.folders || data.staged_files) {
+                const lines = [];
+                if (data.folders && data.folders.length) {
+                    lines.push(...data.folders.map(f => "  " + f));
+                }
+                if (data.staged_files && data.staged_files.length) {
+                    lines.push(...data.staged_files.map(f => "  " + f));
+                }
+                body = lines.length ? lines.join("\n") : msg;
+                preformatted = lines.length > 0;
+            } else if (data.tools) {
+                body = data.tools.map(t =>
+                    (t.enabled ? "  " : "✗ ") + t.name
+                ).join("\n");
+                preformatted = true;
+            } else if (msg) {
+                body = msg;
+            }
+
+            slot.turns.push({
+                id: this._id("cmd"),
+                role: "command",
+                ok,
+                command: cmd,
+                message: msg,
+                data,
+                body,
+                html: body ? renderMarkdown(body) : "",
+                isPreformatted: preformatted,
+            });
+            if (!name || name === this.currentName) this.scroll();
+        },
+
         addPromptResolved(record, name) {
             const slot = this._slot(name);
             const cancelled = !!(record && record.cancelled);
@@ -264,7 +331,9 @@ document.addEventListener("alpine:init", () => {
         // ---------- send + history -----------------------------------
 
         scroll() {
-            queueMicrotask(() => {
+            if (this._scrollRaf) return;
+            this._scrollRaf = requestAnimationFrame(() => {
+                this._scrollRaf = 0;
                 const el = document.querySelector(".chat-history");
                 if (el) el.scrollTop = el.scrollHeight;
             });
@@ -294,6 +363,22 @@ document.addEventListener("alpine:init", () => {
             } catch (err) {
                 this.addError(`Network error: ${err}`, name);
                 slot.busy = false;
+            }
+        },
+        async interrupt() {
+            const name = this.currentName;
+            try {
+                const r = await fetch("/api/chat/interrupt", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_name: name }),
+                });
+                const d = await r.json();
+                if (d.ok) {
+                    Alpine.store("toast").show("Interrupted — type /continue to resume or enter a new prompt", "info");
+                }
+            } catch (e) {
+                console.error("interrupt", e);
             }
         },
         async loadHistory(name) {
@@ -391,8 +476,13 @@ document.addEventListener("alpine:init", () => {
             this.current = data.current;
             this.loaded = data.loaded || [];
             this.busy = data.busy || [];
-            // First load — sync the chat store's focus pointer.
             const chat = Alpine.store("chat");
+            // Sync server-reported busy into chat slots so the UI shows
+            // "generating" after a page refresh mid-turn.
+            for (const name of this.busy) {
+                chat._slot(name).busy = true;
+            }
+            // First load — sync the chat store's focus pointer.
             if (!chat.currentName && this.current) chat.focus(this.current);
         },
         isLoaded(name) { return (this.loaded || []).includes(name); },
@@ -442,7 +532,13 @@ document.addEventListener("alpine:init", () => {
             await Alpine.store("mode").load();
         },
         async remove(name) {
-            await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || `Delete failed (${r.status})`, "error");
+                return;
+            }
+            Alpine.store("toast").show(`Session '${name}' deleted`, "success");
             await this.load();
         },
         async unload(name) {
@@ -454,6 +550,272 @@ document.addEventListener("alpine:init", () => {
         async deactivate() {
             await fetch("/api/sessions/active", { method: "DELETE" });
             location.reload();
+        },
+    });
+
+    // ── Toast notifications ──────────────────────────────────
+    Alpine.store("toast", {
+        messages: [],
+        _nextId: 0,
+        show(msg, type = "info", ms = 4000) {
+            const id = this._nextId++;
+            this.messages.push({ id, msg, type });
+            if (ms > 0) setTimeout(() => this.dismiss(id), ms);
+        },
+        dismiss(id) {
+            this.messages = this.messages.filter(m => m.id !== id);
+        },
+    });
+
+    // ── Slash command completion ───────────────────────────────
+    //
+    // Multi-level: command → subcommand → dynamic args (sessions,
+    // features, files, etc.). Mirrors the TUI's SlashCommandCompleter
+    // tree from mu/ui/input.py.
+
+    Alpine.store("cmdComplete", {
+        commands: [],
+        visible: false,
+        items: [],
+        selectedIdx: 0,
+        _dynCache: {},
+        _subTree: {
+            "/history":       { subs: ["clear", "show"] },
+            "/session":       { subs: ["list", "load", "new", "delete"],
+                                dynamic: { load: "sessions", delete: "sessions" } },
+            "/workspace":     { subs: ["folder", "file", "clear"],
+                                nested: {
+                                    folder: { subs: ["remove", "clear"],
+                                              dynamic: { remove: "path_dir", "": "path_dir" } },
+                                    file:   { subs: ["clear"],
+                                              dynamic: { "": "path_file" } },
+                                } },
+            "/model":         { dynamic: { "": "models" } },
+            "/provider":      { subs: ["gemini", "ollama", "openai"] },
+            "/ollama":        { subs: ["status", "models", "options", "pull"] },
+            "/set":           { subs: ["layer"], dynamic: { "": "variables", layer: "layer_ids" } },
+            "/get":           { dynamic: { "": "variables", layer: "layer_ids" },
+                                subs: ["layer"] },
+            "/unset":         { dynamic: { "": "variables" }, subs: ["--all"] },
+            "/mode":          { dynamic: { "": "modes" } },
+            "/plan":          { subs: ["on", "off", "toggle"] },
+            "/verbose":       { subs: ["on", "off", "toggle"] },
+            "/show-thinking": { subs: ["on", "off", "toggle"] },
+            "/goal":          { subs: ["set", "clear", "show", "help"] },
+            "/research":      { subs: ["status", "sources", "show", "bibliography",
+                                       "biblio", "bib", "stats", "clear"] },
+            "/memory":        { subs: ["status", "list", "clear"],
+                                nested: {
+                                    list:  { dynamic: { "": "memory_targets" } },
+                                    clear: { subs: ["task", "scratchpad", "all"] },
+                                } },
+            "/tool":          { subs: ["list", "enable", "disable"],
+                                dynamic: { enable: "tools", disable: "tools" } },
+            "/feature":       { subs: ["list", "show", "new", "load", "delete",
+                                       "status", "phases", "exit", "unload"],
+                                dynamic: { load: "features", delete: "features",
+                                           status: "features", phases: "features" } },
+            "/teach":         { subs: ["list", "new", "load", "delete", "exit",
+                                       "unload", "status", "next", "grades",
+                                       "curriculum", "help"] },
+            "/t":             { subs: ["list", "new", "load", "delete", "exit",
+                                       "unload", "status", "next", "grades",
+                                       "curriculum", "help"] },
+            "/stats":         { subs: ["clear"] },
+            "/skills":        { dynamic: { "": "skills" } },
+            "/docs":          { dynamic: { "": "docs" } },
+            "/mcp":           { subs: ["list", "status", "reload", "debug"],
+                                dynamic: { debug: "mcp" } },
+        },
+
+        async load() {
+            try {
+                const r = await fetch("/api/chat/commands");
+                const data = await r.json();
+                this.commands = (data.commands || []).map(c => ({
+                    name: c.names[0],
+                    aliases: c.names.slice(1),
+                    help: c.help,
+                }));
+            } catch (e) { console.error("cmdComplete.load", e); }
+        },
+
+        async _fetchDynamic(kind) {
+            if (kind.startsWith("path_")) return null;
+            if (this._dynCache[kind]) return this._dynCache[kind];
+            try {
+                const r = await fetch(`/api/chat/completions?kind=${encodeURIComponent(kind)}`);
+                const data = await r.json();
+                this._dynCache[kind] = data.items || [];
+                return this._dynCache[kind];
+            } catch (e) { return []; }
+        },
+
+        async _fetchPath(prefix, dirsOnly) {
+            const parts = prefix.split("/");
+            const dir = parts.length > 1 ? parts.slice(0, -1).join("/") || "/" : ".";
+            const partial = parts[parts.length - 1] || "";
+            try {
+                const r = await fetch(`/api/browse?path=${encodeURIComponent(dir)}`);
+                if (!r.ok) return [];
+                const data = await r.json();
+                return (data.entries || [])
+                    .filter(e => dirsOnly ? e.is_dir : true)
+                    .filter(e => !partial || e.name.toLowerCase().startsWith(partial.toLowerCase()))
+                    .map(e => ({ label: e.name + (e.is_dir ? "/" : ""), value: e.path + (e.is_dir ? "/" : ""), isPath: true }));
+            } catch (e) { return []; }
+        },
+
+        async _addDynItems(items, kind, query, prefix, level) {
+            if (kind.startsWith("path_")) {
+                const pathItems = await this._fetchPath(query, kind === "path_dir");
+                for (const p of pathItems) {
+                    items.push({ label: p.label, desc: "", value: prefix + p.value, level, isPath: true });
+                }
+            } else {
+                const dynItems = await this._fetchDynamic(kind);
+                if (dynItems) {
+                    for (const d of dynItems) {
+                        if (d.toLowerCase().startsWith(query)) {
+                            items.push({ label: d, desc: "", value: prefix + d, level });
+                        }
+                    }
+                }
+            }
+        },
+
+        async update(text) {
+            if (!text.startsWith("/")) { this.close(); return; }
+
+            const parts = text.split(/\s+/);
+            const cmd = parts[0];
+
+            // Level 0: completing the command name itself (no space typed yet)
+            if (parts.length === 1) {
+                const q = cmd.toLowerCase();
+                this.items = this.commands
+                    .filter(c => c.name.toLowerCase().startsWith(q) ||
+                                 c.aliases.some(a => a.toLowerCase().startsWith(q)))
+                    .map(c => ({ label: c.name, desc: c.help, value: c.name, level: 0 }));
+                this.selectedIdx = 0;
+                this.visible = this.items.length > 0;
+                return;
+            }
+
+            const tree = this._subTree[cmd];
+            if (!tree) { this.close(); return; }
+
+            // Level 1: completing the subcommand or first arg
+            if (parts.length === 2) {
+                const q = parts[1].toLowerCase();
+                const items = [];
+
+                if (tree.subs) {
+                    for (const s of tree.subs) {
+                        if (s.toLowerCase().startsWith(q)) {
+                            items.push({ label: s, desc: "", value: cmd + " " + s, level: 1 });
+                        }
+                    }
+                }
+
+                if (tree.dynamic && tree.dynamic[""] !== undefined) {
+                    await this._addDynItems(items, tree.dynamic[""], q, cmd + " ", 1);
+                }
+
+                this.items = items;
+                this.selectedIdx = 0;
+                this.visible = items.length > 0;
+                return;
+            }
+
+            const sub = parts[1].toLowerCase();
+
+            // Level 2+: nested subcommand trees (e.g. /workspace folder → remove/clear)
+            if (parts.length >= 3 && tree.nested) {
+                const nested = tree.nested[sub];
+                if (nested) {
+                    if (parts.length === 3) {
+                        const q = parts[2].toLowerCase();
+                        const items = [];
+                        if (nested.subs) {
+                            for (const s of nested.subs) {
+                                if (s.toLowerCase().startsWith(q)) {
+                                    items.push({ label: s, desc: "", value: cmd + " " + parts[1] + " " + s, level: 2 });
+                                }
+                            }
+                        }
+                        const nDynKey = nested.dynamic && (nested.dynamic[parts[2]] !== undefined ? parts[2] : nested.dynamic[""] !== undefined ? "" : null);
+                        if (nDynKey !== null && nested.dynamic) {
+                            const kind = nested.dynamic[nDynKey];
+                            await this._addDynItems(items, kind, q, cmd + " " + parts[1] + " ", 2);
+                        }
+                        this.items = items;
+                        this.selectedIdx = 0;
+                        this.visible = items.length > 0;
+                        return;
+                    }
+                    if (parts.length === 4 && nested.dynamic) {
+                        const subSub = parts[2].toLowerCase();
+                        const kind = nested.dynamic[subSub];
+                        if (kind) {
+                            const items = [];
+                            await this._addDynItems(items, kind, parts[3].toLowerCase(), cmd + " " + parts[1] + " " + parts[2] + " ", 3);
+                            this.items = items;
+                            this.selectedIdx = 0;
+                            this.visible = items.length > 0;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Dynamic arg after a subcommand (e.g. /session load <name>,
+            // /tool enable <name>, /feature load <id>)
+            if (parts.length === 3 && tree.dynamic) {
+                const kind = tree.dynamic[sub];
+                if (kind) {
+                    const items = [];
+                    await this._addDynItems(items, kind, parts[2].toLowerCase(), cmd + " " + parts[1] + " ", 2);
+                    this.items = items;
+                    this.selectedIdx = 0;
+                    this.visible = items.length > 0;
+                    return;
+                }
+            }
+
+            // No matches at this depth
+            this.close();
+        },
+
+        close() {
+            this.visible = false;
+            this.items = [];
+            this.selectedIdx = 0;
+        },
+        moveUp() {
+            const len = this.items.length;
+            if (len) this.selectedIdx = (this.selectedIdx - 1 + len) % len;
+        },
+        moveDown() {
+            const len = this.items.length;
+            if (len) this.selectedIdx = (this.selectedIdx + 1) % len;
+        },
+        accept(textarea) {
+            if (!this.items.length) return;
+            const item = this.items[this.selectedIdx];
+            const hasMore = item.level === 0 && this._subTree[item.value];
+            const isDir = item.isPath && item.value.endsWith("/");
+            textarea.value = item.value + (item.isPath ? "" : " ");
+            textarea.dispatchEvent(new Event("input"));
+            if (hasMore || isDir) {
+                this.update(textarea.value);
+            } else {
+                this.close();
+            }
+        },
+        invalidateCache(kind) {
+            if (kind) delete this._dynCache[kind];
+            else this._dynCache = {};
         },
     });
 
@@ -572,8 +934,169 @@ document.addEventListener("alpine:init", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ value: next }),
                 });
-                if (r.ok) this.active = next;
+                if (r.ok) {
+                    this.active = next;
+                    Alpine.store("toast").show(
+                        next ? "YOLO ON — auto-approving tools" : "YOLO OFF — tools require approval",
+                        next ? "info" : "success",
+                    );
+                    if (next) this._autoApprovePending();
+                }
             } catch (e) { console.error("yolo.toggle", e); }
+        },
+        _autoApprovePending() {
+            const prompts = Alpine.store("prompts");
+            const chat = Alpine.store("chat");
+            const currentName = chat.currentName;
+            if (!currentName) return;
+            const pending = prompts.queue.filter(item => {
+                if (!item.prompt || item.prompt.shape !== "tool_approval") return false;
+                return item.session_name === currentName;
+            });
+            for (const item of pending) {
+                chat.addPromptResolved({
+                    shape: "tool_approval",
+                    title: "approve tool call",
+                    answer: `auto-approved \`${item.prompt.tool_name || "tool"}\` (yolo)`,
+                    toolName: item.prompt.tool_name || "",
+                    cancelled: false,
+                }, item.session_name);
+                prompts.answer(item.id, { approved: true, remember: false });
+            }
+        },
+    });
+
+    // ── Skills management ─────────────────────────────────────
+    Alpine.store("skills", {
+        list: [],
+        loaded: false,
+        modalOpen: false,
+        view: "list",
+        editing: null,
+        form: { name: "", description: "", trigger: "", body: "", scope: "global" },
+
+        async load() {
+            try {
+                const r = await fetch("/api/skills");
+                if (!r.ok) return;
+                const data = await r.json();
+                this.list = data.skills || [];
+                this.loaded = true;
+            } catch (e) { console.error("skills.load", e); }
+        },
+        enabledCount() {
+            return this.list.filter(s => s.enabled).length;
+        },
+        openModal() {
+            this.view = "list";
+            this.editing = null;
+            this.modalOpen = true;
+            this.load();
+        },
+        closeModal() {
+            this.modalOpen = false;
+            this.view = "list";
+            this.editing = null;
+        },
+        startCreate() {
+            this.form = { name: "", description: "", trigger: "", body: "", scope: "global" };
+            this.editing = null;
+            this.view = "edit";
+        },
+        startEdit(skill) {
+            this.form = {
+                name: skill.name,
+                description: skill.description || "",
+                trigger: skill.trigger || "",
+                body: skill.body || "",
+                scope: skill.source.includes("/.mu/skills/") && !skill.source.includes(
+                    (typeof process !== "undefined" ? process.env.HOME : "~") + "/.mu/skills/"
+                ) ? "workspace" : "global",
+            };
+            this.editing = skill.name;
+            this.view = "edit";
+        },
+        backToList() {
+            this.view = "list";
+            this.editing = null;
+        },
+        async toggle(name) {
+            const skill = this.list.find(s => s.name === name);
+            if (!skill) return;
+            const action = skill.enabled ? "disable" : "enable";
+            try {
+                const r = await fetch(`/api/skills/${encodeURIComponent(name)}/${action}`, { method: "POST" });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || `${action} failed`, "error");
+                    return;
+                }
+                const data = await r.json();
+                this.list = data.skills || this.list;
+            } catch (e) {
+                console.error("skills.toggle", e);
+            }
+        },
+        async save() {
+            const f = this.form;
+            if (!f.name.trim()) {
+                Alpine.store("toast").show("Skill name is required", "error");
+                return;
+            }
+            try {
+                const r = await fetch("/api/skills/save", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(f),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || "Save failed", "error");
+                    return;
+                }
+                const data = await r.json();
+                this.list = data.skills || this.list;
+                Alpine.store("toast").show(
+                    `Skill '${f.name}' saved (${f.scope})`, "success",
+                );
+                this.view = "list";
+                this.editing = null;
+            } catch (e) {
+                console.error("skills.save", e);
+                Alpine.store("toast").show("Save failed", "error");
+            }
+        },
+        async deleteSkill(name) {
+            try {
+                const r = await fetch(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || "Delete failed", "error");
+                    return;
+                }
+                const data = await r.json();
+                this.list = data.skills || this.list;
+                Alpine.store("toast").show(`Skill '${name}' deleted`, "info");
+                if (this.editing === name) {
+                    this.view = "list";
+                    this.editing = null;
+                }
+            } catch (e) {
+                console.error("skills.delete", e);
+                Alpine.store("toast").show("Delete failed", "error");
+            }
+        },
+        async reload() {
+            try {
+                const r = await fetch("/api/skills/reload", { method: "POST" });
+                if (!r.ok) return;
+                const data = await r.json();
+                this.list = data.skills || [];
+                Alpine.store("toast").show(`${this.list.length} skills reloaded`, "success");
+            } catch (e) { console.error("skills.reload", e); }
+        },
+        isBuiltin(skill) {
+            return skill.source && !skill.source.includes("/.mu/skills/");
         },
     });
 
@@ -588,6 +1111,73 @@ document.addEventListener("alpine:init", () => {
             applyTheme(this.current);
             // Re-highlight existing code blocks after the stylesheet swap.
             queueMicrotask(rehighlightAll);
+        },
+    });
+
+    Alpine.store("layout", {
+        sidebarOpen: true,
+        panelOpen: true,
+        sidebarWidth: 220,
+        panelWidth: 360,
+        _dragging: null,
+
+        init() {
+            try {
+                const saved = JSON.parse(localStorage.getItem("mucli-layout") || "{}");
+                if (saved.sidebarOpen === false) this.sidebarOpen = false;
+                if (saved.panelOpen === false) this.panelOpen = false;
+                if (saved.sidebarWidth > 0) this.sidebarWidth = saved.sidebarWidth;
+                if (saved.panelWidth > 0) this.panelWidth = saved.panelWidth;
+            } catch (e) {}
+        },
+        _persist() {
+            try {
+                localStorage.setItem("mucli-layout", JSON.stringify({
+                    sidebarOpen: this.sidebarOpen,
+                    panelOpen: this.panelOpen,
+                    sidebarWidth: this.sidebarWidth,
+                    panelWidth: this.panelWidth,
+                }));
+            } catch (e) {}
+        },
+        toggleSidebar() {
+            this.sidebarOpen = !this.sidebarOpen;
+            this._persist();
+        },
+        togglePanel() {
+            this.panelOpen = !this.panelOpen;
+            this._persist();
+        },
+        startDrag(which, e) {
+            e.preventDefault();
+            this._dragging = which;
+            const app = document.querySelector(".app");
+            document.body.classList.add("resizing");
+            const self = this;
+            const onMove = (me) => {
+                if (!app) return;
+                if (which === "sidebar") {
+                    const w = Math.max(140, Math.min(500, me.clientX));
+                    app.style.setProperty("--sidebar-w", w + "px");
+                    self._dragVal = w;
+                } else if (which === "panel") {
+                    const w = Math.max(240, Math.min(700, window.innerWidth - me.clientX));
+                    app.style.setProperty("--panel-w", w + "px");
+                    self._dragVal = w;
+                }
+            };
+            const onUp = () => {
+                document.body.classList.remove("resizing");
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                if (which === "sidebar" && self._dragVal) self.sidebarWidth = self._dragVal;
+                if (which === "panel" && self._dragVal) self.panelWidth = self._dragVal;
+                self._dragging = null;
+                self._dragVal = null;
+                self._persist();
+            };
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
         },
     });
 
@@ -732,6 +1322,8 @@ document.addEventListener("alpine:init", () => {
         expandedTaskId: null,
         // Drag-and-drop transfer state.
         dragTaskId: null,
+        // Search/filter query for the feature list.
+        searchQuery: '',
 
         async load() {
             try {
@@ -873,9 +1465,122 @@ document.addEventListener("alpine:init", () => {
         isVerified(task, criterion) {
             return (task.verified_exit_criteria || []).includes(criterion);
         },
+        showArchived: false,
+        filteredFeatures() {
+            const q = (this.searchQuery || '').toLowerCase().trim();
+            const all = this.features || [];
+            const visible = all.filter(f => this.showArchived ? f.archived : !f.archived);
+            if (!q) return visible;
+            return visible.filter(f =>
+                (f.feature_id || '').toLowerCase().includes(q) ||
+                (f.feature_name || '').toLowerCase().includes(q) ||
+                (f.status || '').toLowerCase().includes(q)
+            );
+        },
+        archivedCount() {
+            return (this.features || []).filter(f => f.archived).length;
+        },
+        async _action(featureId, path, method, verb) {
+            if (!featureId) return;
+            try {
+                const r = await fetch(`/api/feature/${encodeURIComponent(featureId)}${path}`, { method });
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(data.detail || `${verb} failed (${r.status})`, "error");
+                    return;
+                }
+                Alpine.store("toast").show(`Feature '${featureId}' ${verb.toLowerCase()}d`, "success");
+                await this.load();
+            } catch (e) {
+                console.error(`feature.${verb}`, e);
+                Alpine.store("toast").show(`${verb} failed — network error`, "error");
+            }
+        },
+        async deleteFeature(id)    { return this._action(id, "",           "DELETE", "Delete");    },
+        async unloadFeature(id)    { return this._action(id, "/unload",    "POST",   "Unload");    },
+        async loadFeature(id)      { return this._action(id, "/load",      "POST",   "Load");      },
+        async archiveFeature(id)   { return this._action(id, "/archive",   "POST",   "Archive");   },
+        async unarchiveFeature(id) { return this._action(id, "/unarchive", "POST",   "Unarchive"); },
+        async approveFeature(id)   { return this._action(id, "/approve",   "POST",   "Approve");   },
         async switchFeature(featureId) {
             if (!featureId) return;
-            await Alpine.store("chat").send(`/feature load ${featureId}`);
+            await this.loadFeature(featureId);
+        },
+
+        showCreateModal: false,
+        createForm: { name: '', request: '', directory: '', phases: [] },
+        openCreateModal() {
+            this.showCreateModal = true;
+            this.createForm = { name: '', request: '', directory: '', phases: [] };
+        },
+        closeCreateModal() {
+            this.showCreateModal = false;
+            this.createForm = { name: '', request: '', directory: '', phases: [] };
+        },
+        addPhase() {
+            if (!this.createForm) return;
+            this.createForm.phases.push({ title: '', goal: '', tasks: [] });
+        },
+        removePhase(idx) {
+            if (!this.createForm) return;
+            this.createForm.phases.splice(idx, 1);
+        },
+        addTask(phaseIdx) {
+            if (!this.createForm) return;
+            this.createForm.phases[phaseIdx].tasks.push({
+                title: '', objectives: [''], exit_criteria: [''],
+            });
+        },
+        removeTask(phaseIdx, taskIdx) {
+            if (!this.createForm) return;
+            this.createForm.phases[phaseIdx].tasks.splice(taskIdx, 1);
+        },
+        addListItem(phaseIdx, taskIdx, field) {
+            if (!this.createForm) return;
+            this.createForm.phases[phaseIdx].tasks[taskIdx][field].push('');
+        },
+        removeListItem(phaseIdx, taskIdx, field, itemIdx) {
+            if (!this.createForm) return;
+            this.createForm.phases[phaseIdx].tasks[taskIdx][field].splice(itemIdx, 1);
+        },
+        async submitCreateFeature() {
+            const form = this.createForm;
+            if (!form || !(form.name || '').trim()) {
+                Alpine.store('toast').show('Feature name is required', 'error');
+                return;
+            }
+            const payload = {
+                feature_name: form.name.trim(),
+                feature_request: (form.request || '').trim(),
+                directory: (form.directory || '').trim(),
+                phases: (form.phases || []).filter(p => (p.title || '').trim()).map(p => ({
+                    title: p.title.trim(),
+                    goal: (p.goal || '').trim(),
+                    tasks: (p.tasks || []).filter(t => (t.title || '').trim()).map(t => ({
+                        title: t.title.trim(),
+                        objectives: (t.objectives || []).map(o => o.trim()).filter(Boolean),
+                        exit_criteria: (t.exit_criteria || []).map(c => c.trim()).filter(Boolean),
+                    })),
+                })),
+            };
+            try {
+                const r = await fetch('/api/feature/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store('toast').show(d.detail || `Create failed (${r.status})`, 'error');
+                    return;
+                }
+                const d = await r.json();
+                Alpine.store('toast').show(`Feature '${d.feature_id}' created`, 'success');
+                this.closeCreateModal();
+                await this.load();
+            } catch (e) {
+                Alpine.store('toast').show('Create failed — network error', 'error');
+            }
         },
     });
 
@@ -1113,17 +1818,53 @@ document.addEventListener("alpine:init", () => {
             try { return new Date(unix * 1000).toLocaleString(); }
             catch (e) { return ""; }
         },
+
+        expandedItemId: null,
+        toggleItem(id) { this.expandedItemId = this.expandedItemId === id ? null : id; },
+        isItemExpanded(id) { return this.expandedItemId === id; },
+
+        showAddItem: false,
+        newItemContent: '',
+        newItemStatus: 'pending',
+        openAddItem() {
+            this.showAddItem = true;
+            this.newItemContent = '';
+            this.newItemStatus = 'pending';
+        },
+        closeAddItem() { this.showAddItem = false; },
+        async addBacklogItem() {
+            const content = (this.newItemContent || '').trim();
+            if (!content) return;
+            try {
+                const r = await fetch('/api/loop/backlog', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content, status: this.newItemStatus }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store('toast').show(d.detail || `Add failed (${r.status})`, 'error');
+                    return;
+                }
+                Alpine.store('toast').show('Backlog item added', 'success');
+                this.closeAddItem();
+                await this.load();
+            } catch (e) {
+                Alpine.store('toast').show('Add failed — network error', 'error');
+            }
+        },
     });
 
     Alpine.store("debug", {
         debugTarget: "",
         hypotheses: [],
         suspects: [],
+        notes: [],
         findings: [],
         scratchpadCount: 0,
         active: false,
         loaded: false,
-        openSections: { hypotheses: true, suspects: true, findings: false },
+        openSections: { hypotheses: true, suspects: true, notes: true, findings: false },
         expandedHypothesisId: null,
 
         async load() {
@@ -1134,6 +1875,7 @@ document.addEventListener("alpine:init", () => {
                 this.debugTarget = d.debug_target || "";
                 this.hypotheses = d.hypotheses || [];
                 this.suspects = d.suspects || [];
+                this.notes = d.notes || [];
                 this.findings = d.findings || [];
                 this.scratchpadCount = d.scratchpad_count || 0;
                 this.loaded = true;
@@ -1567,7 +2309,14 @@ function bootSSE() {
     source.onmessage = (ev) => {
         let data;
         try { data = JSON.parse(ev.data); } catch { return; }
-        if (data && data.kind === "hello") return;
+        if (data && data.kind === "hello") {
+            const busyNames = data.busy || [];
+            const chat = Alpine.store("chat");
+            for (const name of busyNames) {
+                chat._slot(name).busy = true;
+            }
+            return;
+        }
         routeEvent(data);
     };
     source.addEventListener("ping", () => {});
@@ -1637,21 +2386,29 @@ function routeEvent(ev) {
             }
             slot.busy = false;
             chat.finishTurn(name);
+            if (ev.result && ev.result.status === "interrupted") {
+                chat.addInfo(
+                    "Execution paused. Type `/continue` to resume, or enter a new prompt.",
+                    null, name
+                );
+            }
             // Refresh the active panel store so kanban/curriculum/etc.
             // reflect whatever the just-finished turn changed.
             if (isFocused) refreshActivePanel();
             break;
         case "command_result":
-            chat.addInfo(
-                `/${(ev.result && ev.result.command) || "command"}: ${(ev.result && ev.result.message) || ""}`,
-                null, name
-            );
+            chat.addCommandResult(ev.result, name);
             slot.busy = false;
             chat.finishTurn(name);
+            Alpine.store("cmdComplete").invalidateCache();
             // Slash commands like /feature new mutate the session's
             // panel state without triggering a model turn, so the
             // turn_complete hook never fires. Refresh here too.
-            if (isFocused) refreshActivePanel();
+            if (isFocused) {
+                refreshActivePanel();
+                Alpine.store("yolo").load();
+                Alpine.store("skills").load();
+            }
             break;
         case "diff":
             chat.addInfo(`diff proposed: ${ev.filename}`, null, name);
@@ -1966,6 +2723,7 @@ function rehighlightAll() {
 
 document.addEventListener("DOMContentLoaded", () => {
     applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
+    Alpine.store("layout").init();
     bootSSE();
     Alpine.store("chat").loadHistory();
     Alpine.store("sessions").load();
@@ -1974,6 +2732,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // no extra mode-flip round-trip needed.
     Alpine.store("mode").load();
     Alpine.store("yolo").load();
+    Alpine.store("skills").load();
+    Alpine.store("cmdComplete").load();
     setInterval(() => Alpine.store("sessions").load(), 5000);
     // Live clock: bump while ANY session's turn is in flight so the
     // running trace header re-renders its elapsed time. (One global tick

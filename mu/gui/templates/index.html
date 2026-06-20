@@ -9,8 +9,19 @@
 {% else %}
 <div class="app"
      x-data
-     :class="{ 'has-panel': $store.mode.panelModes.includes($store.mode.active) }">
+     :class="{
+        'has-panel': $store.mode.panelModes.includes($store.mode.active),
+        'sidebar-hidden': !$store.layout.sidebarOpen,
+        'panel-hidden': !$store.layout.panelOpen
+     }"
+     :style="'--sidebar-w:' + ($store.layout.sidebarOpen ? $store.layout.sidebarWidth + 'px' : '0px') + ';--panel-w:' + $store.layout.panelWidth + 'px'">
     <header class="header">
+        <button class="icon-btn sidebar-toggle"
+                @click="$store.layout.toggleSidebar()"
+                :title="$store.layout.sidebarOpen ? 'Hide sidebar' : 'Show sidebar'"
+                aria-label="Toggle sidebar">
+            <span x-text="$store.layout.sidebarOpen ? '«' : '»'"></span>
+        </button>
         <div class="brand">μcli</div>
         <div class="crumb"
              :title="'session: ' + ($store.sessions.current || '{{ session_name }}') + ' · {{ provider }}/{{ model }}'">
@@ -61,6 +72,13 @@
             <span class="yolo-label">yolo</span>
             <span class="yolo-dot"></span>
         </button>
+        <button class="icon-btn"
+                x-show="$store.mode.panelModes.includes($store.mode.active)"
+                @click="$store.layout.togglePanel()"
+                :title="$store.layout.panelOpen ? 'Hide panel' : 'Show panel'"
+                aria-label="Toggle panel">
+            <span x-text="$store.layout.panelOpen ? '»' : '«'"></span>
+        </button>
         <button class="icon-btn" @click="$store.inspector.openDrawer()"
                 title="Workspace · memory · stats · settings"
                 aria-label="Open inspector">⚙</button>
@@ -73,7 +91,9 @@
                 title="Leave this session and return to the picker">leave</button>
     </header>
 
-    <aside class="sidebar">
+    <aside class="sidebar" style="position:relative;">
+        <div class="resize-handle-sidebar"
+             @mousedown="$store.layout.startDrag('sidebar', $event)"></div>
         <h3>Sessions</h3>
         <template x-for="s in $store.sessions.list" :key="s.name">
             <div class="nav-item"
@@ -95,6 +115,9 @@
                       }"
                       aria-hidden="true"></span>
                 <span class="name" x-text="s.name"></span>
+                <span class="prompt-badge"
+                      x-show="$store.prompts.queue.some(p => p.session_name === s.name) && s.name !== $store.chat.currentName"
+                      title="Awaiting input">!</span>
                 <!-- Unload (only meaningful for loaded background sessions). -->
                 <span class="u"
                       x-show="$store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName"
@@ -113,6 +136,9 @@
         <div class="chat-column">
             {% include "fragments/chat.html" %}
         </div>
+        <div class="resize-handle"
+             x-show="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen"
+             @mousedown="$store.layout.startDrag('panel', $event)"></div>
         {% include "fragments/teacher_panel.html" %}
         {% include "fragments/feature_panel.html" %}
         {% include "fragments/research_panel.html" %}
@@ -124,24 +150,6 @@
     {% include "fragments/inspector.html" %}
     {% include "fragments/file_browser.html" %}
 
-    <!-- Cursor-anchored confirmation popover. Replaces window.confirm()
-         so destructive actions don't pop a native modal that blocks the
-         whole page; just a small bubble next to where the user clicked. -->
-    <div class="confirm-pop"
-         x-show="$store.confirm.open"
-         x-transition.opacity.duration.120ms
-         :style="`left:${$store.confirm.x}px; top:${$store.confirm.y}px;`"
-         @click.outside="$store.confirm.cancel()"
-         @keydown.escape.window="$store.confirm.cancel()"
-         @keydown.enter.window="$store.confirm.open && $store.confirm.confirm()"
-         role="dialog">
-        <div class="confirm-message" x-text="$store.confirm.message"></div>
-        <div class="confirm-actions">
-            <button @click="$store.confirm.cancel()">cancel</button>
-            <button class="primary" :class="{ danger: $store.confirm.danger }"
-                    @click="$store.confirm.confirm()">confirm</button>
-        </div>
-    </div>
 </div>
 {% endif %}
 {% endblock %}

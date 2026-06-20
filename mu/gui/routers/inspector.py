@@ -575,12 +575,27 @@ async def set_variable(
         casted = validate_and_cast(key, payload["value"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    with request.app.state.session_lock_for():
-        session.variables[key] = casted
-        try:
-            session.session_manager.save_history(session.folder_context)
-        except Exception:
-            pass
+
+    # Variable assignment is GIL-atomic for simple values, so it's safe
+    # without the lock.  Run save_history in a thread so we never block
+    # the event loop on the session lock (which the agent thread holds
+    # for the duration of a turn — blocking here would deadlock the
+    # entire server, freezing SSE and prompt-answer routes).
+    session.variables[key] = casted
+
+    lock = request.app.state.session_lock_for()
+
+    def _persist():
+        if lock.acquire(timeout=2):
+            try:
+                session.session_manager.save_history(session.folder_context)
+            except Exception:
+                pass
+            finally:
+                lock.release()
+
+    import asyncio
+    asyncio.get_event_loop().run_in_executor(None, _persist)
     return {"ok": True, "key": key, "value": casted}
 
 
@@ -593,10 +608,19 @@ async def unset_variable(
     if key not in VARIABLE_SCHEMA:
         raise HTTPException(status_code=404, detail=f"unknown variable: {key}")
     default = VARIABLE_SCHEMA[key].get("default")
-    with request.app.state.session_lock_for():
-        session.variables[key] = default
-        try:
-            session.session_manager.save_history(session.folder_context)
-        except Exception:
-            pass
+    session.variables[key] = default
+
+    lock = request.app.state.session_lock_for()
+
+    def _persist():
+        if lock.acquire(timeout=2):
+            try:
+                session.session_manager.save_history(session.folder_context)
+            except Exception:
+                pass
+            finally:
+                lock.release()
+
+    import asyncio
+    asyncio.get_event_loop().run_in_executor(None, _persist)
     return {"ok": True, "key": key, "value": default}

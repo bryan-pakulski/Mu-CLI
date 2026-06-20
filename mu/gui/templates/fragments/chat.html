@@ -62,6 +62,23 @@
                 </div>
             </template>
 
+            <!-- command result -->
+            <template x-if="t.role === 'command'">
+                <div class="msg command" :class="{ 'cmd-err': !t.ok }">
+                    <div class="cmd-head">
+                        <span class="cmd-name mono" x-text="t.command"></span>
+                        <span class="cmd-status" x-text="t.ok ? 'ok' : 'error'"></span>
+                        <span class="cmd-message muted" x-show="t.isPreformatted && t.message" x-text="t.message"></span>
+                    </div>
+                    <template x-if="t.isPreformatted && t.body">
+                        <pre class="cmd-pre" x-text="t.body"></pre>
+                    </template>
+                    <template x-if="!t.isPreformatted && t.body">
+                        <div class="cmd-body" x-html="t.html"></div>
+                    </template>
+                </div>
+            </template>
+
             <!-- resolved prompt: the breadcrumb left behind after the
                  live inline prompt card is dismissed. Quiet record so
                  scrolling back shows what was asked + what was picked. -->
@@ -88,7 +105,7 @@
          as its own chat item. They sit at the bottom of the chat flow
          instead of a centered modal so the rest of the conversation
          stays visible and the user can scroll history while answering. -->
-    <template x-for="item in $store.prompts.queue" :key="item.id">
+    <template x-for="item in $store.prompts.visibleQueue" :key="item.id">
         <div class="msg prompt"
              x-data="promptModal()"
              x-effect="sync(item)"
@@ -192,14 +209,50 @@
         <p>Type below to start. <code>/help</code> lists commands.</p>
     </div>
 </div>
-<div class="composer">
-    <form @submit.prevent="$store.chat.send($refs.input.value); $refs.input.value=''; $refs.input.style.height='auto'">
-        <textarea
-            x-ref="input"
-            placeholder="Ask anything. / for commands. Enter to send, Shift+Enter for newline."
-            @input="autoSize($el)"
-            @keydown="if ($event.key==='Enter' && !$event.shiftKey) { $event.preventDefault(); $store.chat.send($refs.input.value); $refs.input.value=''; $el.style.height='auto'; }"
-        ></textarea>
+<div class="composer" x-data="{ get cc() { return $store.cmdComplete } }">
+    <form @submit.prevent="$store.chat.send($refs.input.value); $refs.input.value=''; $refs.input.style.height='auto'; cc.close()">
+        <div class="composer-input-wrap">
+            <!-- command completion popup -->
+            <div class="cmd-complete" x-show="cc.visible && cc.items.length" x-transition.opacity.duration.100ms>
+                <template x-for="(item, i) in cc.items" :key="item.value + i">
+                    <div class="cmd-complete-row"
+                         :class="{ selected: i === cc.selectedIdx }"
+                         @mousedown.prevent="cc.selectedIdx = i; cc.accept($refs.input); $refs.input.focus()">
+                        <span class="cmd-complete-name mono" x-text="item.label"></span>
+                        <span class="cmd-complete-help" x-show="item.desc" x-text="item.desc"></span>
+                    </div>
+                </template>
+            </div>
+            <textarea
+                x-ref="input"
+                placeholder="Ask anything. / for commands. Enter to send, Shift+Enter for newline."
+                @input="autoSize($el); (() => {
+                    const v = $el.value;
+                    if (v.startsWith('/') && !v.includes('\n')) {
+                        cc.update(v);
+                    } else {
+                        cc.close();
+                    }
+                })()"
+                @keydown="(() => {
+                    if (cc.visible && cc.items.length) {
+                        if ($event.key === 'ArrowUp') { $event.preventDefault(); cc.moveUp(); return; }
+                        if ($event.key === 'ArrowDown') { $event.preventDefault(); cc.moveDown(); return; }
+                        if ($event.key === 'Tab' || ($event.key === 'Enter' && !$event.shiftKey)) {
+                            $event.preventDefault(); cc.accept($refs.input); return;
+                        }
+                        if ($event.key === 'Escape') { $event.preventDefault(); cc.close(); return; }
+                    }
+                    if ($event.key==='Enter' && !$event.shiftKey) {
+                        $event.preventDefault();
+                        $store.chat.send($refs.input.value);
+                        $refs.input.value='';
+                        $el.style.height='auto';
+                        cc.close();
+                    }
+                })()"
+            ></textarea>
+        </div>
         <button type="button" class="icon-btn attach-btn"
                 @click="$store.fileBrowser.show('file', (path) => {
                     const ta = $refs.input;
@@ -217,11 +270,18 @@
                 <span></span><span></span><span></span>
             </span>
             <span style="margin-left:6px;">generating</span>
+            <button class="interrupt-btn"
+                    @click="$store.chat.interrupt()"
+                    title="Interrupt — pause execution (like Ctrl-C in TUI). Use /continue to resume.">stop</button>
         </span>
         <span x-show="$store.prompts.queue.length > 0" class="busy" style="color:var(--accent);">
             ↑ awaiting your input above
         </span>
-        <span x-show="$store.chat.connected === false" class="down">reconnecting…</span>
+        <span x-show="$store.chat.connected === false" class="down">
+            reconnecting…
+            <button style="margin-left:8px;font-size:11px;padding:2px 8px;"
+                    @click="location.reload()">reload</button>
+        </span>
         <span x-show="$store.chat.externalActive" class="shared">↻ shared with another mucli process</span>
     </div>
 </div>

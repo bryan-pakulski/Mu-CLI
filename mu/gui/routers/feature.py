@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -27,11 +28,14 @@ from pydantic import BaseModel
 
 from mu.feature.engine import (
     FeaturePlan,
+    FeaturePhase,
+    FeatureTask,
     load_feature_plan,
     save_feature_plan,
     summarize_feature_plan,
     transition_task_status,
 )
+from mu.session.helpers import _slugify_feature_id, derive_feature_state_status
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -192,10 +196,11 @@ def _features_list(sm) -> List[Dict[str, Any]]:
                 "feature_name": record.get("feature_name") or fid,
                 "status": record.get("status"),
                 "is_active": fid == sm.active_feature_id,
+                "archived": bool(record.get("archived")),
                 "updated_at": record.get("updated_at"),
             }
         )
-    out.sort(key=lambda f: (not f["is_active"], str(f["feature_id"] or "")))
+    out.sort(key=lambda f: (f["archived"], not f["is_active"], str(f["feature_id"] or "")))
     return out
 
 
@@ -339,3 +344,252 @@ async def toggle_exit_criterion(
         "criterion_index": idx,
         "verified": criterion in (task.verified_exit_criteria or []),
     }
+
+
+@router.post("/{feature_id}/approve")
+async def approve_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Approve the feature plan so implementation can begin."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    feature_id = _slugify_feature_id(feature_id)
+
+    record = (sm.feature_registry or {}).get(feature_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+
+    plan = _hydrate_plan(record)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No plan data found for this feature.")
+    if plan.approved:
+        return {"ok": True, "features": _features_list(sm)}
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        plan.approved = True
+        save_feature_plan("", plan)
+        summary = summarize_feature_plan(plan)
+        record["feature_plan"] = summary
+        record["status"] = derive_feature_state_status(summary)
+        record["updated_at"] = time.time()
+        sm.save_history()
+        if sm.active_feature_id == feature_id and isinstance(sm.feature_state, dict):
+            sm.feature_state["feature_plan"] = summary
+            sm.feature_state["status"] = record["status"]
+
+    return {"ok": True, "features": _features_list(sm)}
+
+
+@router.delete("/{feature_id}")
+async def delete_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Delete a feature from the registry. Refuses if the feature is
+    currently active (loaded) — the user must unload it first."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    feature_id = _slugify_feature_id(feature_id)
+
+    if sm.active_feature_id == feature_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Feature '{feature_id}' is currently loaded — unload it first.",
+        )
+
+    record = (sm.feature_registry or {}).get(feature_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        sm.delete_feature(feature_id)
+
+    return {"ok": True, "features": _features_list(sm)}
+
+
+@router.post("/{feature_id}/load")
+async def load_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Load (activate) a feature plan so the kanban view shows it."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    feature_id = _slugify_feature_id(feature_id)
+
+    record = (sm.feature_registry or {}).get(feature_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+    if record.get("archived"):
+        raise HTTPException(status_code=409, detail="Unarchive the feature first.")
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        sm.activate_feature(feature_id)
+
+    return {"ok": True, "features": _features_list(sm)}
+
+
+@router.post("/{feature_id}/unload")
+async def unload_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Unload the active feature plan. Clears active_feature_id and
+    feature_state so the feature list view is shown again."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    feature_id = _slugify_feature_id(feature_id)
+
+    if sm.active_feature_id != feature_id:
+        if (sm.feature_registry or {}).get(feature_id) is None:
+            raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Feature '{feature_id}' is not the active feature.",
+        )
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        sm.active_feature_id = None
+        sm.feature_state = None
+        sm.save_history()
+
+    return {"ok": True, "features": _features_list(sm)}
+
+
+@router.post("/{feature_id}/archive")
+async def archive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Archive a feature — hides it from the active list."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    feature_id = _slugify_feature_id(feature_id)
+
+    if sm.active_feature_id == feature_id:
+        raise HTTPException(
+            status_code=409, detail="Unload the feature before archiving."
+        )
+    record = (sm.feature_registry or {}).get(feature_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        sm.archive_feature(feature_id)
+
+    return {"ok": True, "features": _features_list(sm)}
+
+
+@router.post("/{feature_id}/unarchive")
+async def unarchive_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Restore a feature from the archive."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    feature_id = _slugify_feature_id(feature_id)
+
+    record = (sm.feature_registry or {}).get(feature_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        sm.unarchive_feature(feature_id)
+
+    return {"ok": True, "features": _features_list(sm)}
+
+
+class CreateTaskBody(BaseModel):
+    title: str
+    objectives: List[str] = []
+    exit_criteria: List[str] = []
+
+
+class CreatePhaseBody(BaseModel):
+    title: str
+    goal: str = ""
+    tasks: List[CreateTaskBody] = []
+
+
+class CreateFeatureBody(BaseModel):
+    feature_name: str
+    feature_request: str = ""
+    directory: str = ""
+    phases: List[CreatePhaseBody] = []
+
+
+@router.post("/create")
+async def create_feature(request: Request, body: CreateFeatureBody) -> Dict[str, Any]:
+    """Create a new feature with optional phases and tasks."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+
+    name = body.feature_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="feature_name is required")
+
+    directory = body.directory.strip() or os.getcwd()
+
+    lock = request.app.state.session_lock_for()
+    with lock:
+        record = sm.create_feature_record(
+            name,
+            directory=directory,
+            feature_request=body.feature_request.strip(),
+        )
+        feature_id = record["feature_id"]
+        metadata_path = record["metadata_path"]
+
+        if body.phases:
+            phases_meta = []
+            tasks = []
+            task_id = 1
+            for pi, phase_body in enumerate(body.phases):
+                phase_id = pi + 1
+                task_ids = []
+                for task_body in phase_body.tasks:
+                    tasks.append(FeatureTask(
+                        id=task_id,
+                        title=task_body.title.strip(),
+                        phase_id=phase_id,
+                        objectives=[o.strip() for o in task_body.objectives if o.strip()],
+                        exit_criteria=[c.strip() for c in task_body.exit_criteria if c.strip()],
+                    ))
+                    task_ids.append(task_id)
+                    task_id += 1
+                phases_meta.append(FeaturePhase(
+                    id=phase_id,
+                    title=phase_body.title.strip(),
+                    goal=(phase_body.goal or "").strip(),
+                    order=pi,
+                    task_ids=task_ids,
+                ))
+
+            plan = FeaturePlan(
+                feature_id=feature_id,
+                feature_name=name,
+                feature_request=body.feature_request.strip() or name,
+                directory=directory,
+                metadata_path=metadata_path,
+                tasks=tasks,
+                phases_meta=phases_meta,
+            )
+            save_feature_plan("", plan)
+            summary = summarize_feature_plan(plan)
+            reg_record = sm.feature_registry.get(feature_id)
+            if isinstance(reg_record, dict):
+                reg_record["feature_plan"] = summary
+                reg_record["status"] = derive_feature_state_status(summary)
+                reg_record["updated_at"] = time.time()
+            if sm.active_feature_id == feature_id and isinstance(sm.feature_state, dict):
+                sm.feature_state["feature_plan"] = summary
+                sm.feature_state["status"] = (
+                    reg_record.get("status") if isinstance(reg_record, dict) else None
+                )
+            sm.save_history()
+
+    return {"ok": True, "feature_id": feature_id, "features": _features_list(sm)}

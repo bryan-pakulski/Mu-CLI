@@ -22,26 +22,55 @@
 
     <!-- backlog (todos) -->
     <section class="panel-section"
-             x-show="$store.loop.backlog.length"
+             x-show="$store.loop.backlog.length || $store.loop.loopGoal"
              :class="{ open: $store.loop.openSections.backlog }">
-        <button class="panel-section-head"
-                @click="$store.loop.toggleSection('backlog')"
-                :aria-expanded="$store.loop.openSections.backlog">
-            <span class="caret">›</span>
-            <span class="panel-section-name">backlog</span>
-            <span class="panel-section-count mono muted"
-                  x-text="$store.loop.backlog.length"></span>
-        </button>
+        <div class="panel-section-header-row">
+            <button class="panel-section-head"
+                    @click="$store.loop.toggleSection('backlog')"
+                    :aria-expanded="$store.loop.openSections.backlog">
+                <span class="caret">›</span>
+                <span class="panel-section-name">backlog</span>
+                <span class="panel-section-count mono muted"
+                      x-text="$store.loop.backlog.length"></span>
+            </button>
+            <span class="panel-add-btn"
+                  @click.stop="$store.loop.openAddItem()"
+                  title="Add backlog item">+</span>
+        </div>
         <div class="panel-section-body" x-show="$store.loop.openSections.backlog"
              x-transition.opacity.duration.150ms>
             <template x-for="item in $store.loop.backlog" :key="item.id">
-                <div class="loop-todo-row">
-                    <span class="status-glyph"
-                          x-text="$store.loop.statusGlyph(item.status)"></span>
-                    <span class="loop-todo-text" x-text="item.content"></span>
-                    <span class="tag mono muted" x-text="item.status"></span>
+                <div class="loop-todo-item"
+                     :class="{ expanded: $store.loop.isItemExpanded(item.id) }">
+                    <div class="loop-todo-row"
+                         @click="$store.loop.toggleItem(item.id)">
+                        <span class="status-glyph"
+                              x-text="$store.loop.statusGlyph(item.status)"></span>
+                        <span class="loop-todo-text" x-text="item.content"></span>
+                        <span class="tag mono muted" x-text="item.status"></span>
+                    </div>
+                    <div class="loop-todo-detail"
+                         x-show="$store.loop.isItemExpanded(item.id)"
+                         x-transition.opacity.duration.120ms
+                         @click.stop>
+                        <div class="loop-todo-content" x-text="item.content"></div>
+                        <div class="loop-todo-meta" x-show="(item.tags || []).length">
+                            <template x-for="tag in (item.tags || [])" :key="tag">
+                                <span class="tag" x-text="tag"></span>
+                            </template>
+                        </div>
+                        <div class="loop-todo-timestamps muted mono">
+                            <span x-show="item.source" x-text="'source: ' + item.source"></span>
+                            <span x-show="item.created_at"
+                                  x-text="'created: ' + $store.loop.formatTimestamp(item.created_at)"></span>
+                            <span x-show="item.updated_at"
+                                  x-text="'updated: ' + $store.loop.formatTimestamp(item.updated_at)"></span>
+                        </div>
+                    </div>
                 </div>
             </template>
+            <div class="loop-empty muted mono" x-show="!$store.loop.backlog.length"
+                 style="font-size:11px;padding:4px 0;">no items yet</div>
         </div>
     </section>
 

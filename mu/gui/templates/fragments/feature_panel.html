@@ -3,33 +3,107 @@
        x-show="$store.mode.active === 'feature'"
        x-transition.opacity.duration.200ms>
 
-    <!-- empty state -->
+    <!-- feature list (no plan active) -->
     <div class="panel-empty" x-show="!$store.feature.plan">
-        <h3>no feature active</h3>
-        <p class="muted">In chat: <code>/feature new &lt;name&gt;</code> to start a plan,
-        or <code>/feature load &lt;id&gt;</code> to resume.</p>
+        <div class="feature-list-title-row">
+            <h3>features</h3>
+            <button class="panel-add-btn"
+                    @click="$store.feature.openCreateModal()"
+                    title="Create new feature">+</button>
+        </div>
         <div class="feature-list" x-show="($store.feature.features || []).length">
-            <h4>features in registry</h4>
-            <template x-for="f in $store.feature.features" :key="f.feature_id">
-                <div class="feature-row"
-                     @click="$store.confirm.ask(
-                         'Load feature \'' + f.feature_id + '\'?',
-                         $event,
-                         () => $store.feature.switchFeature(f.feature_id)
-                     )"
-                     :title="'Load feature ' + f.feature_id">
-                    <span class="mono" x-text="f.feature_id"></span>
-                    <span x-text="f.feature_name"></span>
-                    <span class="tag" x-text="f.status || '?'"></span>
+            <div class="feature-list-header">
+                <input type="text"
+                       class="feature-search"
+                       placeholder="search…"
+                       x-model="$store.feature.searchQuery"
+                       @click.stop
+                       @keydown.stop />
+                <button class="feature-archive-toggle"
+                        :class="{ active: $store.feature.showArchived }"
+                        x-show="$store.feature.archivedCount() > 0"
+                        @click="$store.feature.showArchived = !$store.feature.showArchived"
+                        x-text="$store.feature.showArchived
+                            ? 'active'
+                            : 'archive (' + $store.feature.archivedCount() + ')'"
+                        title="Toggle archived features"></button>
+            </div>
+            <template x-for="f in $store.feature.filteredFeatures()" :key="f.feature_id">
+                <div class="feature-row" :class="{ 'is-archived': f.archived }">
+                    <span class="feature-name" x-text="f.feature_name || f.feature_id"></span>
+                    <span class="feature-id mono muted" x-text="f.feature_id"></span>
+                    <span class="feature-status-tag"
+                          :class="'st-' + (f.is_active ? 'active' : (f.status || 'unknown').toLowerCase().replace(/ /g, '_'))"
+                          x-text="f.is_active ? 'active' : (f.status || '?')"></span>
+                    <div class="feature-row-actions">
+                        <template x-if="f.archived">
+                            <div class="feature-row-actions-inner">
+                                <button class="feature-action-btn"
+                                        @click.stop="$store.feature.unarchiveFeature(f.feature_id)"
+                                        title="Unarchive">↩</button>
+                                <button class="feature-action-btn feature-action-delete"
+                                        @click.stop="$store.confirm.ask(
+                                            'Permanently delete \'' + f.feature_id + '\'?',
+                                            $event,
+                                            () => $store.feature.deleteFeature(f.feature_id),
+                                            {danger:true}
+                                        )"
+                                        title="Delete permanently">×</button>
+                            </div>
+                        </template>
+                        <template x-if="!f.archived && f.is_active">
+                            <div class="feature-row-actions-inner">
+                                <button class="feature-action-btn"
+                                        @click.stop="$store.feature.unloadFeature(f.feature_id)"
+                                        title="Unload">↗</button>
+                            </div>
+                        </template>
+                        <template x-if="!f.archived && !f.is_active">
+                            <div class="feature-row-actions-inner">
+                                <button class="feature-action-btn feature-action-approve"
+                                        x-show="(f.status || '').toLowerCase() === 'awaiting_approval'"
+                                        @click.stop="$store.confirm.ask(
+                                            'Approve feature \'' + f.feature_id + '\'?',
+                                            $event,
+                                            () => $store.feature.approveFeature(f.feature_id)
+                                        )"
+                                        title="Approve plan">✓</button>
+                                <button class="feature-action-btn"
+                                        @click.stop="$store.feature.loadFeature(f.feature_id)"
+                                        title="Load">▶</button>
+                                <button class="feature-action-btn"
+                                        @click.stop="$store.feature.archiveFeature(f.feature_id)"
+                                        title="Archive">⌂</button>
+                                <button class="feature-action-btn feature-action-delete"
+                                        @click.stop="$store.confirm.ask(
+                                            'Delete feature \'' + f.feature_id + '\'?',
+                                            $event,
+                                            () => $store.feature.deleteFeature(f.feature_id),
+                                            {danger:true}
+                                        )"
+                                        title="Delete">×</button>
+                            </div>
+                        </template>
+                    </div>
                 </div>
             </template>
         </div>
+        <p class="muted" x-show="!($store.feature.features || []).length"
+           style="margin-top:var(--space-4);font-size:12px;">
+            No features yet.
+            <button class="modal-add-btn" style="margin-top:var(--space-2)"
+                    @click="$store.feature.openCreateModal()">+ new feature</button>
+        </p>
     </div>
 
     <!-- header -->
     <div class="panel-head" x-show="$store.feature.plan">
-        <div class="panel-subject"
-             x-text="$store.feature.plan && ($store.feature.plan.feature_name || $store.feature.plan.feature_id)"></div>
+        <div class="panel-subject" style="display:flex;align-items:center;gap:var(--space-2)">
+            <span x-text="$store.feature.plan && ($store.feature.plan.feature_name || $store.feature.plan.feature_id)"></span>
+            <button class="feature-action-btn feature-action-unload"
+                    @click.stop="$store.feature.unloadFeature($store.feature.plan && $store.feature.plan.feature_id)"
+                    title="Unload feature">↗</button>
+        </div>
         <div class="panel-meta mono muted">
             <span class="mono" x-text="$store.feature.plan && $store.feature.plan.feature_id"></span>
             <span class="tag" x-text="$store.feature.plan && $store.feature.plan.overall_status"></span>
@@ -51,17 +125,17 @@
                  ) + '%;'"></div>
         </div>
         <div class="feature-strip"
-             x-show="($store.feature.features || []).length > 1">
-            <template x-for="f in $store.feature.features" :key="f.feature_id">
+             x-show="($store.feature.features || []).filter(f => !f.archived).length > 1">
+            <template x-for="f in ($store.feature.features || []).filter(f => !f.archived)" :key="f.feature_id">
                 <button class="course-chip"
                         :class="{ active: f.is_active }"
-                        @click="!f.is_active && $store.confirm.ask(
-                            'Switch to feature \'' + f.feature_id + '\'?',
-                            $event,
-                            () => $store.feature.switchFeature(f.feature_id)
-                        )"
+                        @click="!f.is_active && $store.feature.loadFeature(f.feature_id)"
                         :title="f.feature_id + ' (' + (f.status || '?') + ')'">
                     <span class="mono" x-text="f.feature_id"></span>
+                    <span class="feature-action-btn feature-action-unload"
+                          x-show="f.is_active"
+                          @click.stop="$store.feature.unloadFeature(f.feature_id)"
+                          title="Unload active feature">↗</span>
                 </button>
             </template>
         </div>

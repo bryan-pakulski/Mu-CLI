@@ -138,8 +138,14 @@ function welcomeView() {
         },
         async remove(name) {
             // Caller dispatches via $store.confirm.ask so no native popup.
-            await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
-            this.load();
+            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || `Delete failed (${r.status})`, "error");
+                return;
+            }
+            Alpine.store("toast").show(`Session '${name}' deleted`, "success");
+            location.reload();
         },
     };
 }

@@ -322,6 +322,29 @@ class SessionManager(HistoryMixin):
         self.save_history()
         return deepcopy(record)
 
+    def archive_feature(self, feature_id: str) -> dict | None:
+        resolved = _slugify_feature_id(feature_id)
+        record = self.feature_registry.get(resolved)
+        if not isinstance(record, dict):
+            return None
+        record["archived"] = True
+        record["updated_at"] = time.time()
+        if self.active_feature_id == resolved:
+            self.active_feature_id = None
+            self.feature_state = None
+        self.save_history()
+        return deepcopy(record)
+
+    def unarchive_feature(self, feature_id: str) -> dict | None:
+        resolved = _slugify_feature_id(feature_id)
+        record = self.feature_registry.get(resolved)
+        if not isinstance(record, dict):
+            return None
+        record.pop("archived", None)
+        record["updated_at"] = time.time()
+        self.save_history()
+        return deepcopy(record)
+
     def delete_feature(self, feature_id: str) -> dict | None:
         resolved_feature_id = _slugify_feature_id(feature_id)
         record = self.feature_registry.pop(resolved_feature_id, None)

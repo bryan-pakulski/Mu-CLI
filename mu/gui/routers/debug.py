@@ -50,7 +50,9 @@ async def get_debug_state(request: Request) -> Dict[str, Any]:
     # supported / confirmed).
     hypotheses: List[Dict[str, Any]] = []
     suspects: List[Dict[str, Any]] = []
+    notes: List[Dict[str, Any]] = []
     scratchpad_count = 0
+    classified_ids: set = set()
     try:
         entries = sm.turn_scratchpad.list_entries(limit=50)
         scratchpad_count = len(entries)
@@ -63,8 +65,13 @@ async def get_debug_state(request: Request) -> Dict[str, Any]:
                     if t in ("disproved", "supported", "confirmed"):
                         status = t
                 hypotheses.append({**_entry_dict(e), "status": status})
+                classified_ids.add(e.id)
             elif kind == "suspect" or "suspect" in tags:
                 suspects.append(_entry_dict(e))
+                classified_ids.add(e.id)
+        for e in entries:
+            if e.id not in classified_ids:
+                notes.append(_entry_dict(e))
     except Exception as exc:
         _logger.warning("debug: scratchpad read failed: %s", exc)
 
@@ -84,6 +91,7 @@ async def get_debug_state(request: Request) -> Dict[str, Any]:
         "debug_target": debug_target,
         "hypotheses": hypotheses,
         "suspects": suspects,
+        "notes": notes,
         "findings": findings,
         "scratchpad_count": scratchpad_count,
     }

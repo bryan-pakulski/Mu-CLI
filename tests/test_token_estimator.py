@@ -100,10 +100,10 @@ def test_layers_include_l1_and_l1b(session):
     assert "L1B" in layer_ids
 
 
-def test_layers_include_all_eight_slots(session):
-    """L0 (system prompt) was added; total is now 8 layers."""
+def test_layers_include_all_seven_slots(session):
+    """L0 (system prompt) added; L4 removed from system prompt; total is now 7 layers."""
     layers = collect_context_layers(session)
-    expected = {"L0", "L1", "L1B", "L2", "L3", "L4", "L4B", "L5"}
+    expected = {"L0", "L1", "L1B", "L2", "L3", "L4B", "L5"}
     assert {layer["layer"] for layer in layers} == expected
 
 
@@ -289,7 +289,6 @@ def test_all_layer_budget_variables_are_in_schema():
         "skills_mode",
         "conversation_summary_char_limit",
         "active_goal_context_char_limit",
-        "recent_tool_context_char_limit",
         "retrieval_context_char_limit",
         "retrieval_top_k",
         "context_token_limit",

@@ -38,6 +38,7 @@ import utils.config as _config
 
 from .helpers import _slugify_feature_id, derive_feature_state_status
 from .history import HistoryMixin
+from .tool_cache import ToolResultCache
 
 
 def _history_dir() -> str:
@@ -61,6 +62,7 @@ class SessionManager(HistoryMixin):
         self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
+        self.tool_result_cache = ToolResultCache()
         self.token_counts = {
             "input": 0,
             "output": 0,
@@ -98,6 +100,7 @@ class SessionManager(HistoryMixin):
         self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
+        self.tool_result_cache = ToolResultCache()
         self.variables.clear()
         self.token_counts = {
             "input": 0,

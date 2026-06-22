@@ -175,7 +175,6 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "response_token_reserve",
             "conversation_summary_char_limit",
             "active_goal_context_char_limit",
-            "recent_tool_context_char_limit",
             "retrieval_context_char_limit",
             "retrieval_top_k",
             "workspace_context_max_chars",

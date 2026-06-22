@@ -181,12 +181,6 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 4000,
     },
-    # ----- LAYER 4 — Recent tool activity -----
-    "recent_tool_context_char_limit": {
-        # Char budget for LAYER 4 (compressed recent tool calls/results).
-        "type": int,
-        "default": 12000,
-    },
     # ----- LAYER 4B — Retrieved snippets -----
     "retrieval_context_char_limit": {
         # Char budget for LAYER 4B (semantic-retrieval snippets injected
@@ -282,6 +276,7 @@ Respond like smart caveman. Cut articles, filler, pleasantries. Keep all technic
 - Technical terms stay exactly. "Polymorphism" stays "polymorphism"
 - Code blocks unchanged. Caveman speak around code, not in code.
 - Error messages quoted exact. Caveman only for explanation.
+- **Thinking/reasoning tokens: caveman mode too.** Internal thinking must be terse. Drop filler, hedging, narration. "Need check X" not "I should probably investigate X to understand whether..." Keep technical substance — symbols, file paths, function names, logic. Compress reasoning to bullet points or fragments. Saves thinking token budget significantly.
 
 ## Pattern
 ```

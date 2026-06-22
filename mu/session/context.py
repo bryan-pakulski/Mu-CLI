@@ -11,14 +11,14 @@ sending to the provider:
   * `inject_hierarchical_context(session, system_prompt)` — assemble
     the full layered system prompt: time prelude → LAYER 1
     (workspace files) → LAYER 1B (skills) → LAYER 2 (summary) →
-    LAYER 3 (active goal) → LAYER 4 (recent tool activity) → LAYER
-    4B (retrieved snippets) → LAYER 5 (current turn). Per-layer
+    LAYER 3 (active goal) → LAYER 4B (retrieved snippets) →
+    LAYER 5 (current turn). Per-layer
     budgets + eviction policies are surfaced inline so they show up
     verbatim in `/memory list L*`.
 
 These helpers delegate to other session methods that stay on the
-`Session` class: `_build_active_goal_context`, `_build_recent_tool_context`,
-`_build_skills_block`. They also read `session.session_manager.conversation_summary`
+`Session` class: `_build_active_goal_context`, `_build_skills_block`.
+They also read `session.session_manager.conversation_summary`
 and `session._pending_retrieved_context` for the L2 and L4B blocks.
 
 Tests: `tests/test_workspace_context_files.py` (LAYER 1),
@@ -100,7 +100,6 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
       L1B Installed skills (compact index or full bodies)
       L2  Conversation summary
       L3  Active task plan / current goal
-      L4  Recent tool activity
       L4B Retrieved workspace snippets
       L5  Current-turn marker (telling the model to prioritize the
           live user message + current-turn tool results)
@@ -129,15 +128,11 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
         summary = summary[-summary_limit:].lstrip()
 
     goal_context = session._build_active_goal_context()
-    tool_context = session._build_recent_tool_context(
-        max_chars=max(
-            0,
-            int(
-                session.variables.get("recent_tool_context_char_limit", 12000)
-                or 12000
-            ),
-        )
-    )
+    # L4 (Recent tool activity) removed from system prompt — tool activity
+    # now lives in messages: verbatim for recent calls, compressed with
+    # [cache:KEY] tags for older calls (see prepare_runtime_history in
+    # messages.py). The model can recall() cached results on demand.
+    # This eliminates ~3000 tokens of redundant system-prompt content.
 
     layers: list[str] = []
 
@@ -177,21 +172,6 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
         layers.append(
             "LAYER 3 — Active task plan / current goal:\n" + goal_context
         )
-
-    if tool_context:
-        tool_limit = max(
-            0,
-            int(
-                session.variables.get("recent_tool_context_char_limit", 12000)
-                or 12000
-            ),
-        )
-        layers.append(
-            "LAYER 4 — Recent tool activity (latest first):\n"
-            f"[budget: {tool_limit} chars | eviction: drop oldest tool records]\n"
-            + tool_context
-        )
-
     retrieved_context = str(
         getattr(session, "_pending_retrieved_context", "") or ""
     ).strip()

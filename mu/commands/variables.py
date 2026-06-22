@@ -48,11 +48,6 @@ LAYER_BUDGET_VARS: Dict[str, Tuple[str, str, str]] = {
         "Active goal",
         "Feature/task status + scratchpad snapshot",
     ),
-    "L4": (
-        "recent_tool_context_char_limit",
-        "Recent tool activity",
-        "Compressed recent tool calls/results",
-    ),
     "L4B": (
         "retrieval_context_char_limit",
         "Retrieved snippets",
@@ -146,7 +141,7 @@ def _list_layer_budgets(session: Any, allow_prompt: bool) -> CommandResult:
                 console.print(table)
                 console.print(
                     "[dim]Set with[/dim] [bold]/set layer <id> <tokens>[/bold]"
-                    " — e.g. /set layer L4 6000\n"
+                    " — e.g. /set layer L2 6000\n"
                     "[dim]L5 has no per-layer budget; tighten[/dim] "
                     "[bold]context_token_limit[/bold] [dim]instead.[/dim]"
                 )
@@ -168,7 +163,7 @@ def _set_layer_budget(
     internally because the underlying truncation is char-based."""
     parts = raw_args.split(None, 1)
     if len(parts) < 2:
-        msg = "Usage: /set layer <id> <tokens>  (e.g. /set layer L4 6000)"
+        msg = "Usage: /set layer <id> <tokens>  (e.g. /set layer L2 6000)"
         _emit(session, msg, allow_prompt, error=True)
         return CommandResult(ok=False, message=msg)
 

@@ -133,7 +133,9 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
 
     assert prepared[0]["role"] == "user"
     assert prepared[1]["role"] == "system"
-    assert "LAYER 4 — Recent tool activity (compressed for budget)." in prepared[1]["parts"][0]["text"]
+    # L4a system prompt block removed; L4b messages compression still active
+    assert prepared[1]["role"] == "system"
+    assert "LAYER 4 — Recent tool activity (compressed for budget)" in prepared[1]["parts"][0]["text"]
     assert len(prepared) == 4
 
 
@@ -306,14 +308,12 @@ def test_layer_budgets_eviction_policies():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.variables["conversation_summary_char_limit"] = 20
-    session.variables["recent_tool_context_char_limit"] = 40
     session.variables["retrieval_context_char_limit"] = 30
     sm.conversation_summary = "0123456789abcdefghijklmnopqrstuvwxyz"
     session._pending_retrieved_context = "x" * 200
     layered = session._inject_hierarchical_context("system instruction")
 
     assert "[budget: 20 chars | eviction: keep newest]" in layered
-    assert "[budget: 40 chars | eviction: drop oldest tool records]" not in layered
     assert "LAYER 4B — Retrieved workspace snippets:" in layered
     assert "[budget: 30 chars | eviction: drop lowest-ranked snippets]" in layered
 

@@ -91,7 +91,7 @@ class GetCompleter(Completer):
 
             self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
         except Exception:
-            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4", "L4B")
+            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4B")
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -236,7 +236,7 @@ class SetCompleter(Completer):
 
             self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
         except Exception:
-            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4", "L4B")
+            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4B")
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor

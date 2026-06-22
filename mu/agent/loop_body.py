@@ -380,10 +380,26 @@ def run_turn(session, text):
     session._pending_retrieved_context = ""
 
     if session.folder_context.folders:
-        retrieval_query = effective_text or text
-        session._pending_retrieved_context = session._build_retrieved_workspace_context(
-            retrieval_query
-        )
+        # Skip L4B retrieval if model already called retrieve_relevant_context
+        # in recent history — avoids duplicating same snippets in both
+        # system prompt (L4B) and tool result messages.
+        _already_retrieved = False
+        for msg in reversed(session.session_manager.history[-12:]):
+            for p in (msg.get("parts") or []):
+                if (
+                    p.get("type") == "tool_call"
+                    and p.get("tool_name") == "retrieve_relevant_context"
+                ):
+                    _already_retrieved = True
+                    break
+            if _already_retrieved:
+                break
+
+        if not _already_retrieved:
+            retrieval_query = effective_text or text
+            session._pending_retrieved_context = session._build_retrieved_workspace_context(
+                retrieval_query
+            )
         # Let tools auto discover workspace content as needed
         if session.agentic:
             active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
@@ -1185,12 +1201,24 @@ def run_turn(session, text):
                     source_result,
                     result,
                 )
+                # Store full result in tool result cache before compression
+                cache_key = None
+                try:
+                    cache_key = session.tool_result_cache.store(
+                        call_id=getattr(part, "tool_call_id", ""),
+                        tool_name=part.tool_name,
+                        result=result,
+                    )
+                except Exception:
+                    pass
+
                 tool_result_parts.append(
                     {
                         "type": "tool_result",
                         "tool_name": part.tool_name,
                         "tool_result": result,
                         "thought_signature": part.thought_signature,
+                        "cache_key": cache_key,
                     }
                 )
                 current_tool_name = None

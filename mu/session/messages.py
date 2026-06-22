@@ -158,10 +158,13 @@ def summarize_message_parts(msg_dict: dict) -> str:
             else:
                 result = str(raw_result)
             result = result.strip().replace("\n", " ")
+            # Include cache key tag if present so model can recall full result
+            cache_key = part.get("cache_key")
+            cache_tag = f"[cache:{cache_key}] " if cache_key else ""
             if len(result) > 140:
                 result = f"{result[:137]}..."
             summaries.append(
-                f"tool_result:{part.get('tool_name')} => {result}"
+                f"tool_result:{part.get('tool_name')} => {cache_tag}{result}"
             )
         elif p_type == "file":
             fr = part.get("file_ref", {})

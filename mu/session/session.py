@@ -211,6 +211,7 @@ class Session:
         self.collation_buffer = self.session_manager.collation_buffer
         self.task_memory = self.session_manager.task_memory
         self.turn_scratchpad = self.session_manager.turn_scratchpad
+        self.tool_result_cache = self.session_manager.tool_result_cache
         self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
         setattr(
@@ -536,27 +537,6 @@ class Session:
         return state.get("features", [])
 
     # ── End loop state management ─────────────────────────────────────
-
-    def _build_recent_tool_context(self, max_chars: int = 8000) -> str:
-        if max_chars <= 0:
-            return ""
-        recent = []
-        consumed = 0
-        for msg in reversed(self.session_manager.history):
-            if msg.get("role") not in {"assistant", "tool"}:
-                continue
-            for part in reversed(msg.get("parts", [])):
-                if part.get("type") not in {"tool_call", "tool_result"}:
-                    continue
-                line = self._summarize_message_parts({"role": msg.get("role"), "parts": [part]})
-                if not line:
-                    continue
-                entry = line + "\n"
-                if consumed + len(entry) > max_chars and recent:
-                    return "".join(reversed(recent)).strip()
-                recent.append(entry)
-                consumed += len(entry)
-        return "".join(reversed(recent)).strip()
 
     def _build_retrieved_workspace_context(self, query: str) -> str:
         if not self.folder_context or not self.folder_context.folders:

@@ -270,3 +270,55 @@ def list_scratchpad(args: Dict[str, Any], context) -> str:
 def clear_scratchpad(args: Dict[str, Any], context) -> str:
     _scratchpad(context).clear()
     return "Turn scratchpad cleared."
+
+
+# ---------------------------------------------------------------- tool result cache
+
+
+@tool(
+    name="recall",
+    description=(
+        "Recall a previously-cached tool result by its cache key. "
+        "When the L4 compression summary shows [cache:KEY], call this tool "
+        "with the key to fetch the full original result — no need to re-read "
+        "files or re-run searches."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key": {
+                "type": "string",
+                "description": "The cache key from a [cache:KEY] tag in the compressed summary.",
+            },
+        },
+        "required": ["cache_key"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def recall(args: Dict[str, Any], context) -> str:
+    """Fetch a cached tool result by its cache key.
+
+    The L4 compression system stores full tool results in a sidecar cache
+    before compressing them into short summary lines. This tool retrieves
+    the original full result — avoiding re-reading files or re-running searches.
+    """
+    import json as _json
+
+    session = getattr(context, "session", None)
+    if session is None or not hasattr(session, "tool_result_cache"):
+        return "Error: No tool result cache available on this session."
+    key = args.get("cache_key", "")
+    if not key:
+        return "Error: cache_key argument is required."
+    result = session.tool_result_cache.recall(key)
+    if result is None:
+        return (
+            f"Cache key '{key}' not found or evicted. "
+            "The result may have been dropped due to LRU eviction. "
+            "Re-run the original tool call if needed."
+        )
+    return _json.dumps(result, default=str, indent=2)

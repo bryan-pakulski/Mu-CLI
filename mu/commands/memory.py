@@ -172,7 +172,6 @@ LIST_TARGETS = (
     "L1B",
     "L2",
     "L3",
-    "L4",
     "L4B",
     "L5",
 )
@@ -184,7 +183,7 @@ _LAYER_BUILDERS = {
     "L1B": ("_build_skills_block", "Installed skills"),
     "L2": (None, "Conversation summary"),  # straight off session_manager
     "L3": ("_build_active_goal_context", "Active goal"),
-    "L4": ("_build_recent_tool_context", "Recent tool activity"),
+
     "L4B": (None, "Retrieved snippets"),  # off session._pending_retrieved_context
     "L5": (None, "Conversation history"),  # off session_manager.history
 }

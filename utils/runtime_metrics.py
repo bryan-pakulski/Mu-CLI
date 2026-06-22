@@ -303,9 +303,6 @@ def collect_context_layers(session):
     goal_limit_chars = max(
         1, int(session.variables.get("active_goal_context_char_limit", 4000) or 4000)
     )
-    tool_limit_chars = max(
-        1, int(session.variables.get("recent_tool_context_char_limit", 12000) or 12000)
-    )
     retrieval_limit_chars = max(
         1, int(session.variables.get("retrieval_context_char_limit", 5000) or 5000)
     )
@@ -324,10 +321,6 @@ def collect_context_layers(session):
         goal_text = str(session._build_active_goal_context() or "")
     except Exception:
         goal_text = ""
-    try:
-        tool_text = str(session._build_recent_tool_context(max_chars=tool_limit_chars) or "")
-    except Exception:
-        tool_text = ""
     retrieved_text = str(getattr(session, "_pending_retrieved_context", "") or "")
 
     # --- L5 / history: total tokens for everything *not* covered by the
@@ -383,13 +376,6 @@ def collect_context_layers(session):
             "current": _chars_to_tokens(goal_text, model),
             "maximum": _budget_chars_to_tokens(goal_limit_chars),
             "description": "Feature/task status + scratchpad snapshot.",
-        },
-        {
-            "layer": "L4",
-            "name": "Recent tool activity",
-            "current": _chars_to_tokens(tool_text, model),
-            "maximum": _budget_chars_to_tokens(tool_limit_chars),
-            "description": "Compressed recent tool calls/results.",
         },
         {
             "layer": "L4B",

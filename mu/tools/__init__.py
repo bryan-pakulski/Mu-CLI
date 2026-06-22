@@ -274,7 +274,7 @@ def _load_builtin_tools() -> None:
             "mu.tools: failed to load agent tool package: %s", exc
         )
     try:
-        from . import memory as _memory_tools  # noqa: F401 — registers save/search/list_{memory,scratchpad} + clear_scratchpad
+        from . import memory as _memory_tools  # noqa: F401 — registers save/search/list_{memory,scratchpad} + clear_scratchpad + recall
     except Exception as exc:  # pragma: no cover — defensive
         import logging
         logging.getLogger("mucli").warning(

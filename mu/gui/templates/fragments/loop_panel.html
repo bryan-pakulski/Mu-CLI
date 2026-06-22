@@ -55,7 +55,7 @@
                          @click.stop>
                         <div class="loop-todo-content" x-text="item.content"></div>
                         <div class="loop-todo-meta" x-show="(item.tags || []).length">
-                            <template x-for="tag in (item.tags || [])" :key="tag">
+                            <template x-for="(tag, ti) in (item.tags || [])" :key="ti">
                                 <span class="tag" x-text="tag"></span>
                             </template>
                         </div>

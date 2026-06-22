@@ -2291,42 +2291,68 @@ function typesetMathInScope(selector) {
 
 function bootSSE() {
     let hasConnectedBefore = false;
-    const source = new EventSource("/api/events");
-    source.onopen = () => {
-        const chat = Alpine.store("chat");
-        chat.connected = true;
-        chat.lastOpenAt = Date.now();
-        // On reconnect (not initial boot), re-sync state in case we
-        // missed events while the connection was down. This handles the
-        // common case of session switch causing a brief SSE drop.
-        if (hasConnectedBefore) {
-            chat.loadHistory();
-            Alpine.store("sessions").load();
-            refreshActivePanel();
-        }
-        hasConnectedBefore = true;
-    };
-    source.onmessage = (ev) => {
-        let data;
-        try { data = JSON.parse(ev.data); } catch { return; }
-        if (data && data.kind === "hello") {
-            const busyNames = data.busy || [];
+    let source = null;
+    let reconnectTimer = null;
+    let pingTimer = null;
+
+    function connect() {
+        if (source) { try { source.close(); } catch {} source = null; }
+        source = new EventSource("/api/events");
+        source.onopen = () => {
             const chat = Alpine.store("chat");
-            for (const name of busyNames) {
-                chat._slot(name).busy = true;
+            chat.connected = true;
+            chat.lastOpenAt = Date.now();
+            // Reset ping watchdog
+            if (pingTimer) clearTimeout(pingTimer);
+            pingTimer = setTimeout(() => {
+                // No ping received in 45s — connection likely stale
+                if (source) source.dispatchEvent(new Event("error"));
+            }, 45000);
+            // On reconnect (not initial boot), re-sync state in case we
+            // missed events while the connection was down.
+            if (hasConnectedBefore) {
+                chat.loadHistory();
+                Alpine.store("sessions").load();
+                refreshActivePanel();
             }
-            return;
-        }
-        routeEvent(data);
-    };
-    source.addEventListener("ping", () => {});
-    source.onerror = () => {
-        const chat = Alpine.store("chat");
-        const sinceOpen = chat.lastOpenAt ? Date.now() - chat.lastOpenAt : Infinity;
-        if (sinceOpen > 3000) {
+            hasConnectedBefore = true;
+        };
+        source.onmessage = (ev) => {
+            let data;
+            try { data = JSON.parse(ev.data); } catch { return; }
+            if (data && data.kind === "hello") {
+                const busyNames = data.busy || [];
+                const chat = Alpine.store("chat");
+                for (const name of busyNames) {
+                    chat._slot(name).busy = true;
+                }
+                return;
+            }
+            routeEvent(data);
+        };
+        source.addEventListener("ping", () => {
+            // Reset ping watchdog on each ping
+            if (pingTimer) clearTimeout(pingTimer);
+            pingTimer = setTimeout(() => {
+                if (source) source.dispatchEvent(new Event("error"));
+            }, 45000);
+        });
+        source.onerror = () => {
+            const chat = Alpine.store("chat");
             chat.connected = false;
-        }
-    };
+            // Close the dead source and schedule a fresh connection.
+            // EventSource auto-retries, but it can silently give up
+            // after repeated failures or if the server returns a
+            // non-retryable HTTP status. Taking control ourselves
+            // guarantees recovery.
+            try { source.close(); } catch {}
+            source = null;
+            if (pingTimer) { clearTimeout(pingTimer); pingTimer = null; }
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connect, 2000);
+        };
+    }
+    connect();
 }
 
 // Refresh the panel store for whichever mode is currently active.

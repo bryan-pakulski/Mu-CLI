@@ -60,19 +60,63 @@ def _hydrate_from_disk(stub: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any
 
 def _summarize_assignments(course: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Compact assignment list with the bits the panel actually shows:
-    id, lesson, kind, status, grade summary."""
+    id, lesson, kind, status, grade summary, plus the prompt/rubric/
+    verification/artifact_paths/dialog_turns so the panel can render
+    full detail rows when an assignment is expanded."""
     out: List[Dict[str, Any]] = []
     for a in course.get("assignments", []) or []:
         if not isinstance(a, dict):
             continue
         grade = a.get("grade") or {}
+        verification = a.get("verification") or {}
+        # Compact the dialog turns so the panel can show a turn-by-turn
+        # transcript without shipping the full submission payload.
+        dialog_turns = []
+        for t in a.get("dialog_turns", []) or []:
+            if not isinstance(t, dict):
+                continue
+            dialog_turns.append(
+                {
+                    "role": t.get("role"),
+                    "content": (t.get("content") or "").strip(),
+                    "quality_signal": t.get("quality_signal"),
+                }
+            )
+        # Compact the rubric so each criterion is present but stripped
+        # of any heavyweight metadata the panel does not render.
+        rubric = []
+        for r in a.get("rubric", []) or []:
+            if not isinstance(r, dict):
+                continue
+            rubric.append(
+                {
+                    "criterion": r.get("criterion"),
+                    "description": r.get("description"),
+                    "weight": r.get("weight"),
+                }
+            )
         out.append(
             {
                 "assignment_id": a.get("assignment_id"),
                 "lesson_id": a.get("lesson_id"),
                 "kind": a.get("kind"),
                 "status": a.get("status"),
+                "prompt": a.get("prompt") or "",
                 "pass_threshold": a.get("pass_threshold"),
+                "artifact_paths": list(a.get("artifact_paths") or []),
+                "rubric": rubric,
+                "verification": {
+                    "method": verification.get("method"),
+                    "verify_cmd": verification.get("verify_cmd"),
+                    "expected_markers": list(verification.get("expected_markers") or []),
+                    "expected_answer": verification.get("expected_answer"),
+                    "min_turns": verification.get("min_turns"),
+                    "required_concepts": list(verification.get("required_concepts") or []),
+                }
+                if isinstance(verification, dict) and verification
+                else {},
+                "dialog_turns": dialog_turns,
+                "submission": a.get("submission") or {},
                 "grade": {
                     "score_pct": grade.get("score_pct"),
                     "passed": grade.get("passed"),
@@ -85,11 +129,73 @@ def _summarize_assignments(course: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _summarize_reviews(course: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Normalize scheduled_reviews so the panel template can render them
+    without knowing the engine's exact field names.
+
+    The engine stores: review_id, source_lesson_id, due_at_lesson_count,
+    status, score_pct, completed_at, notes, created_at. We surface those
+    plus a couple of display-friendly derived fields (status_label,
+    source_lesson_title when joinable).
+    """
+    lessons_by_id = {
+        l.get("lesson_id"): l
+        for l in course.get("lessons", []) or []
+        if isinstance(l, dict) and l.get("lesson_id")
+    }
+    out: List[Dict[str, Any]] = []
+    for r in course.get("scheduled_reviews", []) or []:
+        if not isinstance(r, dict):
+            continue
+        status = (r.get("status") or "").lower()
+        source_lesson_id = r.get("source_lesson_id")
+        source_lesson = lessons_by_id.get(source_lesson_id) or {}
+        out.append(
+            {
+                "review_id": r.get("review_id"),
+                "source_lesson_id": source_lesson_id,
+                "source_lesson_title": source_lesson.get("title") or source_lesson_id or "?",
+                "due_at_lesson_count": r.get("due_at_lesson_count"),
+                "status": r.get("status"),
+                "status_label": {
+                    "pending": "due",
+                    "done": "done",
+                    "skipped": "skipped",
+                }.get(status, r.get("status") or "—"),
+                "score_pct": r.get("score_pct"),
+                "completed_at": r.get("completed_at"),
+                "created_at": r.get("created_at"),
+                "notes": r.get("notes") or "",
+            }
+        )
+    return out
+
+
+def _summarize_lesson_turns(raw_turns: Any) -> List[Dict[str, Any]]:
+    """Compact the lecture_turns list for the panel: keep role + content +
+    timestamp + comprehension markers, drop any heavyweight fields."""
+    turns: List[Dict[str, Any]] = []
+    for t in raw_turns or []:
+        if not isinstance(t, dict):
+            continue
+        turns.append(
+            {
+                "role": t.get("role"),
+                "content": (t.get("content") or "").strip(),
+                "timestamp": t.get("timestamp"),
+                "comprehension_pct": t.get("comprehension_pct"),
+                "gaps": list(t.get("gaps") or []),
+            }
+        )
+    return turns
+
+
 def _summarize_lessons(course: Dict[str, Any]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for l in course.get("lessons", []) or []:
         if not isinstance(l, dict):
             continue
+        lecture_turns = l.get("lecture_turns") or []
         out.append(
             {
                 "lesson_id": l.get("lesson_id"),
@@ -98,8 +204,10 @@ def _summarize_lessons(course: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "status": l.get("status"),
                 "concept_brief": l.get("concept_brief", ""),
                 "learning_objectives": list(l.get("learning_objectives") or []),
-                "lecture_turn_count": len(l.get("lecture_turns") or []),
+                "lecture_turn_count": len(lecture_turns),
+                "lecture_turns": _summarize_lesson_turns(lecture_turns),
                 "lecture_comprehension_pct": l.get("lecture_comprehension_pct"),
+                "lecture_gaps": list(l.get("lecture_gaps") or []),
                 "lecture_concluded": bool(l.get("lecture_concluded")),
                 "assignment_ids": list(l.get("assignment_ids") or []),
                 "remediation_count": l.get("remediation_count", 0),
@@ -122,10 +230,15 @@ def _summarize_modules(course: Dict[str, Any]) -> List[Dict[str, Any]]:
         lessons_by_module.setdefault(mid, []).append(l)
 
     out: List[Dict[str, Any]] = []
+    seen_module_ids: set[str] = set()
     for m in course.get("modules", []) or []:
         if not isinstance(m, dict):
             continue
         module_id = str(m.get("module_id") or "")
+        # Defensive: skip duplicate module_ids (breaks Alpine x-for :key)
+        if module_id in seen_module_ids:
+            continue
+        seen_module_ids.add(module_id)
         lesson_ids = list(m.get("lesson_ids") or [])
         # Preserve the module's explicit lesson order when given; fall
         # back to lookup-order otherwise.
@@ -200,7 +313,7 @@ def _course_payload(course: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]
         "modules": modules,
         "lessons": lessons,
         "assignments": assignments,
-        "scheduled_reviews": list(course.get("scheduled_reviews") or []),
+        "scheduled_reviews": _summarize_reviews(course),
     }
 
 

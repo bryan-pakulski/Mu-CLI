@@ -64,8 +64,9 @@
                   x-show="$store.teacher.course
                           && $store.teacher.course.learner_profile
                           && $store.teacher.course.learner_profile.recorded_at"
-                  x-text="$store.teacher.formatTimestamp(
-                            ($store.teacher.course.learner_profile || {}).recorded_at)"></span>
+                  x-text="$store.teacher.course && $store.teacher.course.learner_profile
+                            ? $store.teacher.formatTimestamp($store.teacher.course.learner_profile.recorded_at)
+                            : ''"></span>
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.profile"
              x-transition.opacity.duration.150ms>
@@ -127,12 +128,12 @@
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.curriculum"
              x-transition.opacity.duration.150ms>
-            <div class="curriculum-tree"
-                 x-show="$store.teacher.course && ($store.teacher.course.modules || []).length">
-                <template x-for="m in ($store.teacher.course && $store.teacher.course.modules) || []"
-                          :key="m.module_id">
-                    <div class="curriculum-module"
-                         :class="{ current: m.module_id === ($store.teacher.course && $store.teacher.course.current_module_id) }">
+            <template x-if="$store.teacher.course && ($store.teacher.course.modules || []).length">
+                <div class="curriculum-tree">
+                    <template x-for="m in $store.teacher.course.modules"
+                              :key="m.module_id">
+                        <div class="curriculum-module"
+                             :class="{ current: m.module_id === $store.teacher.course.current_module_id }">
                         <div class="curriculum-module-head">
                             <span class="status-glyph"
                                   x-text="$store.teacher.statusGlyph(m.status)"></span>
@@ -166,6 +167,7 @@
                     </div>
                 </template>
             </div>
+            </template>
             <div class="empty-row"
                  x-show="$store.teacher.course && !($store.teacher.course.modules || []).length">
                 curriculum not proposed yet
@@ -215,6 +217,18 @@
                         <span x-show="$store.teacher.currentLesson().remediation_count"
                               x-text="' · ' + $store.teacher.currentLesson().remediation_count + ' remediations'"></span>
                     </div>
+                    <ol class="lesson-lecture-turns"
+                        x-show="(($store.teacher.currentLesson().lecture_turns || [])).length">
+                        <template x-for="(t, ti) in ($store.teacher.currentLesson().lecture_turns || [])" :key="ti">
+                            <li>
+                                <span class="mono small" x-text="t.role || '?'"></span>
+                                <span x-text="t.content"></span>
+                                <span class="muted mono small"
+                                      x-show="t.comprehension_pct != null"
+                                      x-text="' · ' + t.comprehension_pct + '%'"></span>
+                            </li>
+                        </template>
+                    </ol>
                 </div>
             </template>
         </div>
@@ -253,7 +267,44 @@
                     </div>
                     <div class="grade-feedback muted"
                          x-show="a.grade && a.grade.feedback"
-                         x-text="a.grade.feedback"></div>
+                         x-text="a.grade ? (a.grade.feedback || '') : ''"></div>
+                    <!-- expanded detail: prompt + rubric + verification + artifacts + dialog turns -->
+                    <div class="assignment-detail muted"
+                         x-show="a.prompt || (a.rubric && a.rubric.length) || (a.artifact_paths && a.artifact_paths.length) || (a.dialog_turns && a.dialog_turns.length)">
+                        <div class="detail-prompt" x-show="a.prompt"
+                             x-text="a.prompt"></div>
+                        <ul class="detail-rubric" x-show="a.rubric && a.rubric.length">
+                            <template x-for="r in a.rubric" :key="r.criterion">
+                                <li>
+                                    <span class="mono small" x-text="r.weight != null ? ('[' + r.weight + '] ') : ''"></span>
+                                    <span x-text="r.criterion"></span>
+                                    <span class="muted small" x-show="r.description"
+                                          x-text="' — ' + r.description"></span>
+                                </li>
+                            </template>
+                        </ul>
+                        <div class="detail-verification mono small" x-show="a.verification && a.verification.method">
+                            <span x-text="'verify: ' + (a.verification.method || '?')"></span>
+                            <span x-show="a.verification.verify_cmd"
+                                  x-text="' · cmd: ' + a.verification.verify_cmd"></span>
+                            <span x-show="a.verification.expected_answer"
+                                  x-text="' · answer: ' + a.verification.expected_answer"></span>
+                        </div>
+                        <div class="detail-markers mono small" x-show="a.verification && a.verification.expected_markers && a.verification.expected_markers.length">
+                            <span x-text="'markers: ' + a.verification.expected_markers.join(', ')"></span>
+                        </div>
+                        <div class="detail-artifacts mono small" x-show="a.artifact_paths && a.artifact_paths.length">
+                            <span x-text="'artifacts: ' + a.artifact_paths.join(', ')"></span>
+                        </div>
+                        <ol class="detail-dialog" x-show="a.dialog_turns && a.dialog_turns.length">
+                            <template x-for="(t, ti) in a.dialog_turns" :key="ti">
+                                <li>
+                                    <span class="mono small" x-text="t.role || '?'"></span>
+                                    <span x-text="t.content"></span>
+                                </li>
+                            </template>
+                        </ol>
+                    </div>
                 </div>
             </template>
         </div>
@@ -273,13 +324,27 @@
         </button>
         <div class="panel-section-body" x-show="$store.teacher.openSections.reviews"
              x-transition.opacity.duration.150ms>
-            <template x-for="(r, i) in $store.teacher.scheduledReviews()" :key="i">
+            <template x-for="(r, i) in $store.teacher.scheduledReviews()" :key="r.review_id || i">
                 <div class="review-row">
-                    <span class="mono" x-text="r.lesson_id || r.assignment_id || '?'"></span>
+                    <span class="status-glyph"
+                          x-text="r.status === 'done' ? '✓'
+                                : r.status === 'skipped' ? '∘'
+                                : '→'"></span>
+                    <span class="mono" x-text="r.source_lesson_id || '?'"></span>
+                    <span class="muted small" x-show="r.source_lesson_title"
+                          x-text="r.source_lesson_title"></span>
                     <span class="muted mono small"
-                          x-show="r.due_at"
-                          x-text="$store.teacher.formatTimestamp(r.due_at)"></span>
-                    <span class="muted" x-show="r.reason" x-text="r.reason"></span>
+                          x-show="r.due_at_lesson_count != null"
+                          x-text="'due @ lesson ' + r.due_at_lesson_count"></span>
+                    <span class="muted mono small"
+                          x-show="r.status_label"
+                          x-text="r.status_label"></span>
+                    <span class="mono" style="margin-left:auto;"
+                          x-show="r.score_pct != null"
+                          x-text="r.score_pct + '%'"></span>
+                    <div class="review-notes muted small"
+                         x-show="r.notes"
+                         x-text="r.notes"></div>
                 </div>
             </template>
         </div>

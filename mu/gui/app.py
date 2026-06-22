@@ -146,6 +146,9 @@ def create_app(
     app.state.web_ui_for = lambda name=None: web_ui_for(app, name)
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Ensure Jinja2 auto-reloads templates when files change on disk
+    # (prevents stale template serving during development).
+    templates.env.auto_reload = True
     app.state.templates = templates
 
     app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")

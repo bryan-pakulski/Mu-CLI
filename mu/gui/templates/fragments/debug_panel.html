@@ -102,7 +102,7 @@
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + n.id"></span>
-                        <template x-for="tag in (n.tags || [])" :key="tag">
+                        <template x-for="(tag, ti) in (n.tags || [])" :key="ti">
                             <span class="tag" x-text="tag"></span>
                         </template>
                     </div>

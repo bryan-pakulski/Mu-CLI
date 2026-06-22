@@ -887,9 +887,74 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 .review-row {
     display: flex;
     align-items: baseline;
-    gap: var(--space-3);
+    flex-wrap: wrap;
+    gap: var(--space-2);
     padding: 4px 0;
     font-size: 12px;
+}
+.review-row .status-glyph { width: 1em; }
+.review-row .review-notes {
+    flex: 1 1 100%;
+    font-size: 11px;
+    line-height: 1.4;
+    padding-left: 20px;
+    margin-top: 2px;
+}
+
+/* assignment expanded detail (prompt / rubric / verification / artifacts / dialog) */
+.grade-row .assignment-detail {
+    margin-top: 6px;
+    padding: 6px 0 4px 20px;
+    border-top: 1px dashed var(--border);
+    font-size: 11.5px;
+    line-height: 1.45;
+}
+.grade-row .detail-prompt {
+    margin-bottom: 4px;
+    color: var(--text-soft);
+    white-space: pre-wrap;
+}
+.grade-row .detail-rubric {
+    margin: 4px 0;
+    padding-left: 14px;
+}
+.grade-row .detail-rubric li {
+    margin: 2px 0;
+}
+.grade-row .detail-verification,
+.grade-row .detail-markers,
+.grade-row .detail-artifacts {
+    margin: 2px 0;
+    color: var(--text-dim);
+}
+.grade-row .detail-dialog {
+    margin: 4px 0 2px;
+    padding-left: 18px;
+}
+.grade-row .detail-dialog li {
+    margin: 3px 0;
+    line-height: 1.4;
+}
+.grade-row .detail-dialog li .mono {
+    color: var(--text-dim);
+    margin-right: 6px;
+}
+
+/* current-lesson lecture turns transcript */
+.current-lesson .lesson-lecture-turns {
+    margin: var(--space-2) 0 2px;
+    padding-left: 18px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+.current-lesson .lesson-lecture-turns li {
+    margin: 4px 0;
+    line-height: 1.45;
+    font-size: 11.5px;
+}
+.current-lesson .lesson-lecture-turns li .mono {
+    color: var(--text-dim);
+    margin-right: 6px;
 }
 
 .teacher-courses-list .teacher-course-row {

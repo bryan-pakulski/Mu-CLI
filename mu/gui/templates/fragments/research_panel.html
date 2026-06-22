@@ -136,7 +136,7 @@
                 <div class="finding-entry">
                     <div class="finding-head">
                         <span class="mono muted" x-text="'#' + f.id"></span>
-                        <template x-for="tag in (f.tags || [])" :key="tag">
+                        <template x-for="(tag, ti) in (f.tags || [])" :key="ti">
                             <span class="tag" x-text="tag"></span>
                         </template>
                         <span class="mono muted small"

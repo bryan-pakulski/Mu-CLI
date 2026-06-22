@@ -114,7 +114,7 @@
                   x-show="$store.feature.plan
                           && $store.feature.plan.execution
                           && ($store.feature.plan.execution.blocked_tasks || []).length"
-                  x-text="(($store.feature.plan.execution && $store.feature.plan.execution.blocked_tasks) || []).length + ' blocked'"></span>
+                  x-text="(($store.feature.plan && $store.feature.plan.execution && $store.feature.plan.execution.blocked_tasks) || []).length + ' blocked'"></span>
         </div>
         <div class="module-progress"
              x-show="$store.feature.plan && $store.feature.plan.task_count">

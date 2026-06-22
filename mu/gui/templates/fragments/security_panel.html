@@ -19,15 +19,16 @@
             <span x-text="($store.security.report && $store.security.report.findings_total || 0) + ' findings'"></span>
         </div>
         <!-- severity distribution bar -->
-        <div class="severity-bar"
-             x-show="$store.security.summary && $store.security.summary.by_severity">
-            <template x-for="sev in ['critical','high','medium','low','info']" :key="sev">
-                <div class="severity-segment"
-                     x-show="$store.security.summary.by_severity[sev]"
-                     :style="'flex: ' + ($store.security.summary.by_severity[sev] || 0) + '; background: ' + $store.security.severityColor(sev)"
-                     :title="sev + ': ' + ($store.security.summary.by_severity[sev] || 0)"></div>
-            </template>
-        </div>
+        <template x-if="$store.security.summary && $store.security.summary.by_severity">
+            <div class="severity-bar">
+                <template x-for="sev in ['critical','high','medium','low','info']" :key="sev">
+                    <div class="severity-segment"
+                         x-show="$store.security.summary.by_severity[sev]"
+                         :style="'flex: ' + ($store.security.summary.by_severity[sev] || 0) + '; background: ' + $store.security.severityColor(sev)"
+                         :title="sev + ': ' + ($store.security.summary.by_severity[sev] || 0)"></div>
+                </template>
+            </div>
+        </template>
     </div>
 
     <!-- findings list -->
@@ -168,15 +169,17 @@
         </button>
         <div class="panel-section-body" x-show="$store.security.openSections.stats"
              x-transition.opacity.duration.150ms>
-            <div class="scan-stats">
-                <template x-for="[status, count] in Object.entries($store.security.summary.by_status || {})" :key="status">
-                    <div class="scan-stat-row">
-                        <span class="status-glyph" x-text="$store.security.statusGlyph(status)"></span>
-                        <span x-text="status"></span>
-                        <span class="mono muted" x-text="count"></span>
-                    </div>
-                </template>
-            </div>
+            <template x-if="$store.security.summary && $store.security.summary.by_status">
+                <div class="scan-stats">
+                    <template x-for="[status, count] in Object.entries($store.security.summary.by_status)" :key="status">
+                        <div class="scan-stat-row">
+                            <span class="status-glyph" x-text="$store.security.statusGlyph(status)"></span>
+                            <span x-text="status"></span>
+                            <span class="mono muted" x-text="count"></span>
+                        </div>
+                    </template>
+                </div>
+            </template>
         </div>
     </section>
 

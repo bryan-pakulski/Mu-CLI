@@ -221,34 +221,53 @@ def prepare_runtime_history(
     prefix = recent_history[:start_in_recent]
     current_turn = recent_history[start_in_recent:]
 
-    tool_messages = [
-        msg for msg in current_turn if msg.get("role") in {"assistant", "tool"}
-    ]
-    if len(tool_messages) <= tool_window:
+    # Group current-turn messages into atomic compression units.
+    # An assistant message containing tool_call(s) and its immediately
+    # following tool message containing tool_result(s) form an
+    # indivisible pair.  Compressing one without the other splits
+    # tool_call from tool_result, which causes provider errors on the
+    # next turn — the API requires every tool_call to have a matching
+    # tool_result.
+    groups: list[tuple[bool, list[dict]]] = []  # (is_tool_pair, msgs)
+    i = 0
+    while i < len(current_turn):
+        msg = current_turn[i]
+        if (
+            msg.get("role") == "assistant"
+            and i + 1 < len(current_turn)
+            and current_turn[i + 1].get("role") == "tool"
+            and not message_has_thought_signature(msg)
+            and not message_has_thought_signature(current_turn[i + 1])
+        ):
+            groups.append((True, [msg, current_turn[i + 1]]))
+            i += 2
+            continue
+        groups.append((False, [msg]))
+        i += 1
+
+    tool_pairs = [g for g in groups if g[0]]
+    # tool_window counts individual messages; each pair = 2 messages.
+    total_tool_msgs = sum(len(msgs) for _, msgs in tool_pairs)
+    if total_tool_msgs <= tool_window:
         return recent_history
 
-    compressible_tool_messages = [
-        msg for msg in tool_messages if not message_has_thought_signature(msg)
-    ]
-    if len(compressible_tool_messages) <= tool_window:
-        return recent_history
-
-    keep_start = len(compressible_tool_messages) - tool_window
-    compressed_tool_count = 0
+    # Keep enough complete pairs to cover at least tool_window individual
+    # messages.  Rounding up avoids splitting a pair when tool_window is odd.
+    keep_pair_count = -(-tool_window // 2)  # ceil division
+    compress_pair_count = len(tool_pairs) - keep_pair_count
+    pair_count = 0
     summarized_lines: List[str] = []
     compressed_turn: List[dict] = []
 
-    for msg in current_turn:
-        if msg.get("role") in {"assistant", "tool"}:
-            if message_has_thought_signature(msg):
-                compressed_turn.append(msg)
+    for is_pair, msgs in groups:
+        if is_pair:
+            if pair_count < compress_pair_count:
+                for m in msgs:
+                    summarized_lines.append(summarize_message_parts(m))
+                pair_count += 1
                 continue
-            if compressed_tool_count < keep_start:
-                summarized_lines.append(summarize_message_parts(msg))
-                compressed_tool_count += 1
-                continue
-            compressed_tool_count += 1
-        compressed_turn.append(msg)
+            pair_count += 1
+        compressed_turn.extend(msgs)
 
     if summarized_lines:
         summary_text = (

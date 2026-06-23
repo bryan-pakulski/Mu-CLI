@@ -917,17 +917,21 @@ class Session:
             return "retry"
         return "abort"
 
-    def _announce_retryable_failure(self, tool_name: str, raw_result):
+    def _announce_retryable_failure(self, tool_name: str, raw_result) -> int:
         """If `raw_result` is a structured failure envelope with `retryable=True`,
         surface its `hint` on the live UI so the human can see what the agent
-        saw. Also tracks repeat retryable failures of the same (tool, fingerprint)
-        and escalates to an error banner on the third strike so the user knows
-        the agent is stuck.
+        saw. Also tracks repeat retryable failures of the same (tool, error_code)
+        and escalates to an error banner on the third strike.
+
+        Returns the current retryable-failure count for this (tool_name,
+        error_code) pair, or 0 if the result is not a retryable failure.
+        The caller (loop_body) uses the return value to inject a corrective
+        message into the conversation when the count exceeds a threshold,
+        breaking retryable-failure loops that pattern-based loop detection
+        cannot catch (different tool args each time → different fingerprints).
         """
-        if not self.ui:
-            return
         if not bool(self.variables.get("reflective_retry_enabled", True)):
-            return
+            return 0
         envelope = None
         if isinstance(raw_result, dict):
             envelope = raw_result
@@ -939,15 +943,15 @@ class Session:
             except (ValueError, TypeError):
                 envelope = None
         if not envelope:
-            return
+            return 0
         if envelope.get("ok") is not False:
-            return
+            return 0
         if not envelope.get("retryable"):
-            return
+            return 0
         error_code = str(envelope.get("error_code") or "unknown")
         hint = str(envelope.get("hint") or "").strip()
         if not hint:
-            return
+            return 0
 
         # Track repeats — `_retryable_failure_counts` is a dict keyed by
         # (tool_name, error_code) -> count. Reset each turn (cleared in
@@ -958,15 +962,18 @@ class Session:
         self._retryable_failure_counts[key] = self._retryable_failure_counts.get(key, 0) + 1
         count = self._retryable_failure_counts[key]
 
-        if count >= 3:
-            self.ui.show_error(
-                f"🔁 {tool_name} has hit {error_code} {count}x this turn. "
-                f"Hint stays the same: {hint[:160]}"
-            )
-        else:
-            self.ui.show_info(
-                f"  [retryable {error_code}] {hint[:200]}"
-            )
+        if self.ui:
+            if count >= 3:
+                self.ui.show_error(
+                    f"🔁 {tool_name} has hit {error_code} {count}x this turn. "
+                    f"Hint stays the same: {hint[:160]}"
+                )
+            else:
+                self.ui.show_info(
+                    f"  [retryable {error_code}] {hint[:200]}"
+                )
+
+        return count
 
     # Retry helpers moved to `mu/agent/retry.py`. Static-method
     # forwarders preserve the `Session._is_transient_provider_error`
@@ -1084,8 +1091,8 @@ class Session:
         total_cost: float,
         error: str | None = None,
     ) -> dict:
-        # Clear the rolling flag so a future turn starts fresh.
-        self._history_rolled_this_turn = False
+        # Reset the compaction watermark so a future turn starts fresh.
+        self._compaction_watermark = 0
         # Reset per-turn retry counters so the next turn isn't penalised for
         # failures the previous turn already escalated on.
         if hasattr(self, "_retryable_failure_counts"):

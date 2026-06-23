@@ -820,20 +820,20 @@ document.addEventListener("alpine:init", () => {
     });
 
     Alpine.store("mode", {
+        // `active` is the VIEW — which panel the UI shows.
+        // `realMode` is the actual MuCLI backend mode.
+        // They can diverge: top picker changes view only,
+        // chat composer mode selector changes real mode.
         active: "default",
+        realMode: "default",
         modes: [],
-        // Modes that own a dedicated side-panel template. The layout
-        // toggles its `.has-panel` shell class against this list so the
-        // chat column reserves room only when something will fill it.
         panelModes: ["teacher", "feature", "research", "security", "loop", "debug"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
             this.modes = data.modes || [];
-            this.active = data.current || "default";
-            // Mode-specific side-effect: refresh the panel store for
-            // the active mode so the layout has data the instant the
-            // user lands here (no extra click).
+            this.realMode = data.current || "default";
+            this.active = this.realMode;
             const store = this.panelModes.includes(this.active)
                 ? Alpine.store(this.active)
                 : null;
@@ -842,12 +842,20 @@ document.addEventListener("alpine:init", () => {
         async set(name) {
             const r = await fetch(`/api/modes/${name}`, { method: "POST" });
             if (r.ok) {
+                this.realMode = name;
                 this.active = name;
             } else {
                 const d = await r.json().catch(() => ({}));
                 Alpine.store("chat").addInfo(d.detail || `mode switch failed (${r.status})`);
             }
             await this.load();
+        },
+        setView(name) {
+            this.active = name;
+            const store = this.panelModes.includes(name)
+                ? Alpine.store(name)
+                : null;
+            if (store && typeof store.load === "function") store.load();
         },
     });
 
@@ -2164,6 +2172,55 @@ document.addEventListener("alpine:init", () => {
             await this.loadVariables();
         },
 
+        // ----- provider/model switching
+        providers: [],
+        models: [],
+        currentProvider: "",
+        currentModel: "",
+        async loadProviders() {
+            const r = await fetch("/api/providers");
+            const d = await r.json();
+            this.providers = d.providers || [];
+            await this.loadCurrentProvider();
+        },
+        async loadCurrentProvider() {
+            const r = await fetch("/api/providers/current");
+            const d = await r.json();
+            this.currentProvider = d.provider || "";
+            this.currentModel = d.model || "";
+            if (this.currentProvider) {
+                await this.loadModels(this.currentProvider);
+            }
+        },
+        async loadModels(provider) {
+            const r = await fetch(`/api/providers/${encodeURIComponent(provider)}/models`);
+            const d = await r.json();
+            this.models = d.models || [];
+        },
+        async onProviderChange() {
+            // provider dropdown changed — reload models for new provider
+            this.currentModel = "";
+            this.models = [];
+            if (this.currentProvider) {
+                await this.loadModels(this.currentProvider);
+            }
+        },
+        async onModelChange() {
+            if (!this.currentProvider || !this.currentModel) return;
+            const r = await fetch("/api/providers/switch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    provider: this.currentProvider,
+                    model: this.currentModel,
+                }),
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                alert(d.detail || `switch failed (${r.status})`);
+            }
+        },
+
         // ----- shell
         async openDrawer() {
             this.open = true;
@@ -2760,6 +2817,7 @@ document.addEventListener("DOMContentLoaded", () => {
     Alpine.store("yolo").load();
     Alpine.store("skills").load();
     Alpine.store("cmdComplete").load();
+    Alpine.store("inspector").loadProviders();
     setInterval(() => Alpine.store("sessions").load(), 5000);
     // Live clock: bump while ANY session's turn is in flight so the
     // running trace header re-renders its elapsed time. (One global tick

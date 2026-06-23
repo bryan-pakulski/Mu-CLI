@@ -31,24 +31,41 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     session = ctx.session
     if session is None:
         return None
-    if getattr(session, "_history_rolled_this_turn", False):
-        return None
     session_manager = getattr(session, "session_manager", None)
     if session_manager is None or not hasattr(
         session_manager, "roll_history_summary_to_token_budget"
     ):
         return None
 
+    # Re-compaction gate: allow when history has grown since the last
+    # compaction pass.  The previous boolean flag suppressed ALL
+    # re-compaction within a turn, which meant long turns with many tool
+    # calls grew history unbounded until emergency compaction fired.
+    watermark = getattr(session, "_compaction_watermark", 0)
+    history_len = len(getattr(session_manager, "history", []))
+    if history_len <= watermark:
+        return None
+
     variables = getattr(session, "variables", None) or ctx.variables or {}
     try:
-        context_limit = max(
-            1024, int(variables.get("context_token_limit", 256000) or 256000)
-        )
         threshold = float(variables.get("context_trim_threshold", 0.85) or 0.85)
     except (TypeError, ValueError):
         return None
     threshold = max(0.10, min(threshold, 1.0))
-    budget = int(context_limit * threshold)
+    # Use the provider-aware compaction budget when available — it
+    # accounts for the actual model context window, not just the
+    # user-set harness default.  Falls back to the raw variable for
+    # sessions that don't expose _compaction_token_budget.
+    if hasattr(session, "_compaction_token_budget"):
+        budget = int(session._compaction_token_budget() * threshold)
+    else:
+        try:
+            context_limit = max(
+                1024, int(variables.get("context_token_limit", 256000) or 256000)
+            )
+        except (TypeError, ValueError):
+            return None
+        budget = int(context_limit * threshold)
 
     try:
         rolled = session_manager.roll_history_summary_to_token_budget(

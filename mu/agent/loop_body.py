@@ -85,7 +85,7 @@ def _estimate_messages_tokens(messages) -> int:
     return total
 
 
-def _preflight_context_check(session, system_prompt, messages):
+def _preflight_context_check(session, system_prompt, messages, turn_start_index=None):
     """Emergency-compact history if the assembled prompt exceeds the
     provider's context window.
 
@@ -96,6 +96,13 @@ def _preflight_context_check(session, system_prompt, messages):
     runs right before the provider call with the *actual* prompt and
     messages, and triggers a second compaction if the total would
     overflow.
+
+    ``turn_start_index`` is forwarded to ``_prepare_runtime_history`` so
+    that tool-window compression applies the same pair-grouping logic
+    used during normal (non-emergency) calls.  Without it the early-exit
+    at ``turn_start_index is None`` skips compression and sends more
+    tokens than necessary — which can cascade into repeated emergency
+    compaction attempts.
 
     Returns (system_prompt, messages) — unchanged if within budget,
     or with rebuilt messages after emergency compaction.
@@ -122,17 +129,18 @@ def _preflight_context_check(session, system_prompt, messages):
     )
     emergency_budget = max(512, max_prompt - prompt_tokens)
     try:
-        session._history_rolled_this_turn = False
         session.session_manager.roll_history_summary_to_token_budget(
             int(emergency_budget * 0.85),
             keep_recent=2,
         )
-        session._history_rolled_this_turn = True
+        session._compaction_watermark = len(session.session_manager.history)
     except Exception as exc:
         logger.warning("Emergency compaction failed: %s", exc)
         return system_prompt, messages
 
-    recent_history = session._prepare_runtime_history()
+    recent_history = session._prepare_runtime_history(
+        turn_start_index=turn_start_index,
+    )
     messages = session._build_messages_from_history(
         recent_history,
         {"role": "system", "parts": []},
@@ -490,10 +498,13 @@ def run_turn(session, text):
         session._compaction_token_budget(),
         keep_recent=4,
     )
-    # Tell the auto-compaction hook we've already rolled this turn so it
-    # doesn't double-roll inside the iteration loop. Cleared in
-    # `_collect_turn_response` when the turn finishes.
-    session._history_rolled_this_turn = True
+    # Record history length as the compaction watermark.  The
+    # auto-compaction hook will allow another compaction pass only when
+    # history has grown beyond this point, preventing redundant
+    # re-compaction while still permitting re-compaction when long
+    # turns with many tool calls push history past the threshold.
+    # Reset to 0 in `_collect_turn_response` when the turn finishes.
+    session._compaction_watermark = len(session.session_manager.history)
     session._pending_user_text = effective_text or text or ""
     # Resumption briefings: queued by /teach load, /feature load, and
     # session-switch paths. Drained here so the agent's next provider
@@ -560,6 +571,7 @@ def run_turn(session, text):
         current_tool_args = None
         iteration_tool_exact_fingerprints: list[str] = []
         iteration_tool_pattern: list[str] = []
+        _max_retryable_count_this_iter = 0
 
         try:
             dynamic_system_prompt = base_system_prompt
@@ -590,6 +602,7 @@ def run_turn(session, text):
 
             dynamic_system_prompt, messages = _preflight_context_check(
                 session, dynamic_system_prompt, messages,
+                turn_start_index=turn_start_index,
             )
 
             if session.ui and hasattr(session.ui, "build_live_status"):
@@ -1105,7 +1118,15 @@ def run_turn(session, text):
                 # Surface retryable failures to the live UI with the
                 # registered hint. The model already sees the structured
                 # envelope in its next turn; this is for the human.
-                session._announce_retryable_failure(part.tool_name, raw_result)
+                # Returns retryable-failure count for this (tool, error_code)
+                # pair so we can inject a corrective message when the model
+                # keeps hitting the same retryable error with different args
+                # (which evades pattern-based loop detection).
+                _retryable_count = session._announce_retryable_failure(
+                    part.tool_name, raw_result
+                )
+                if _retryable_count > _max_retryable_count_this_iter:
+                    _max_retryable_count_this_iter = _retryable_count
                 # --- Collation Logic ---
                 is_flush = part.tool_name == "flush"
                 should_collate = (
@@ -1274,6 +1295,38 @@ def run_turn(session, text):
                         {"role": "system", "parts": []},
                     )[:-1]
                     continue
+
+            # Retryable-failure escalation: if any tool hit a retryable
+            # error code too many times this iteration (even with different
+            # args, which evades pattern-based loop detection above),
+            # inject a corrective message telling the model to stop
+            # retrying the same failing tool and try a different approach.
+            _RETRYABLE_ESCALATION_THRESHOLD = 5
+            if _max_retryable_count_this_iter >= _RETRYABLE_ESCALATION_THRESHOLD:
+                escalation_text = (
+                    f"RETRYABLE FAILURE ESCALATION: A tool has hit the same retryable "
+                    f"error {_max_retryable_count_this_iter}x this turn with different arguments. "
+                    f"This means the approach itself is wrong — the tool will keep failing. "
+                    f"Do NOT call this tool again with slightly different arguments. "
+                    f"Instead: re-read the target file with read_file to confirm exact current "
+                    f"state, or use a completely different tool/approach to achieve the goal. "
+                    f"If you cannot proceed, call raise_blocker to ask the user for guidance."
+                )
+                if session.ui:
+                    session.ui.show_error(escalation_text)
+                logger.warning(escalation_text)
+                escalation_msg = {
+                    "role": "user",
+                    "parts": [{"type": "text", "text": escalation_text}],
+                }
+                session.session_manager.history.append(escalation_msg)
+                session.session_manager.save_history(session.folder_context)
+                messages = session._build_messages_from_history(
+                    session._prepare_runtime_history(turn_start_index),
+                    {"role": "system", "parts": []},
+                )[:-1]
+                _max_retryable_count_this_iter = 0
+                continue
 
             messages = session._build_messages_from_history(
                 session._prepare_runtime_history(turn_start_index),

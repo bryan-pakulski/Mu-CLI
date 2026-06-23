@@ -20,12 +20,28 @@ def test_tool_fingerprint_pattern_mode_includes_argument_fingerprint():
     assert pattern.startswith("read_file~")
 
 
-def test_bash_pattern_fingerprint_changes_with_command_args():
+def test_bash_pattern_fingerprint_collapses_string_content():
+    # Pattern fingerprints should be IDENTICAL when only the string arg
+    # content differs — this is what lets loop detection fire when the
+    # model keeps calling the same tool with different string values
+    # (e.g. search_for_string with different query strings).
     first = Session._tool_call_fingerprint(
         "bash", {"command": "ls -la"}, pattern_only=True
     )
     second = Session._tool_call_fingerprint(
         "bash", {"command": "cat README.md"}, pattern_only=True
+    )
+    assert first == second
+
+
+def test_bash_pattern_fingerprint_differs_on_arg_structure():
+    # Pattern fingerprints SHOULD differ when the argument STRUCTURE differs
+    # (e.g. different keys, different non-string values).
+    first = Session._tool_call_fingerprint(
+        "bash", {"command": "ls -la"}, pattern_only=True
+    )
+    second = Session._tool_call_fingerprint(
+        "bash", {"command": "ls -la", "cwd": "/tmp"}, pattern_only=True
     )
     assert first != second
 

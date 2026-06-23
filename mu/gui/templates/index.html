@@ -30,16 +30,16 @@
         </div>
         <div class="spacer"></div>
 
-        <!-- Mode picker: collapsed dropdown rather than vertical sidebar list.
-             Shows the active mode + opens a popover to switch. -->
+        <!-- View picker: changes which panel the UI shows, NOT the backend mode.
+             Backend mode is controlled from the chat composer area. -->
         <div class="mode-picker" x-data="{ open: false }"
              @click.outside="open = false"
              @keydown.escape.window="open = false">
             <button class="mode-pill" @click="open = !open"
                     :class="{ open: open }"
-                    title="Switch agent mode"
+                    title="Switch view (panel only — mode is set in chat composer)"
                     aria-haspopup="listbox" :aria-expanded="open">
-                <span class="label">mode</span>
+                <span class="label">view</span>
                 <span class="value mono" x-text="$store.mode.active"></span>
                 <span class="caret">▾</span>
             </button>
@@ -48,8 +48,8 @@
                  role="listbox">
                 <template x-for="m in $store.mode.modes" :key="m.name">
                     <button class="mode-option"
-                            :class="{ active: m.is_current, disabled: m.disabled }"
-                            @click="!m.disabled && ($store.mode.set(m.name), open = false)"
+                            :class="{ active: $store.mode.active === m.name, disabled: m.disabled }"
+                            @click="!m.disabled && ($store.mode.setView(m.name), open = false)"
                             :title="m.disabled ? 'Requires a workspace — add one in the inspector' : (m.description || m.name)"
                             :disabled="m.disabled">
                         <div class="mode-name">

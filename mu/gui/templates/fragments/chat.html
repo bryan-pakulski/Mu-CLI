@@ -209,7 +209,105 @@
         <p>Type below to start. <code>/help</code> lists commands.</p>
     </div>
 </div>
-<div class="composer" x-data="{ get cc() { return $store.cmdComplete } }">
+<div class="composer" x-data="{ get cc() { return $store.cmdComplete }, modeOpen: false, settingsOpen: false }"
+     @click.outside="modeOpen = false; settingsOpen = false"
+     @keydown.escape.window="modeOpen = false; settingsOpen = false">
+    <!-- Composer toolbar: mode selector (real backend mode) + settings hamburger -->
+    <div class="composer-toolbar">
+        <!-- Mode selector: changes actual MuCLI backend mode -->
+        <div class="composer-mode-picker">
+            <button class="composer-mode-pill" @click="modeOpen = !modeOpen; settingsOpen = false"
+                    :class="{ open: modeOpen }"
+                    title="Switch agent mode (backend)"
+                    aria-haspopup="listbox" :aria-expanded="modeOpen">
+                <span class="label">mode</span>
+                <span class="value mono" x-text="$store.mode.realMode"></span>
+                <span class="caret">▾</span>
+            </button>
+            <div class="composer-mode-popout" x-show="modeOpen"
+                 x-transition.opacity.duration.150ms
+                 role="listbox">
+                <template x-for="m in $store.mode.modes" :key="m.name">
+                    <button class="mode-option"
+                            :class="{ active: $store.mode.realMode === m.name, disabled: m.disabled }"
+                            @click="!m.disabled && ($store.mode.set(m.name), modeOpen = false)"
+                            :title="m.disabled ? 'Requires a workspace' : (m.description || m.name)"
+                            :disabled="m.disabled">
+                        <div class="mode-name">
+                            <span x-text="m.display_name"></span>
+                            <span class="mode-key mono muted" x-text="m.name"></span>
+                        </div>
+                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace' : m.description"></div>
+                    </button>
+                </template>
+            </div>
+        </div>
+
+        <!-- Settings hamburger: quick access to session variables -->
+        <div class="composer-settings">
+            <button class="composer-settings-btn" @click="settingsOpen = !settingsOpen; modeOpen = false"
+                    :class="{ open: settingsOpen }"
+                    title="Session settings"
+                    aria-haspopup="true" :aria-expanded="settingsOpen">
+                <span class="dots">···</span>
+            </button>
+            <div class="composer-settings-popout" x-show="settingsOpen"
+                 x-transition.opacity.duration.150ms
+                 x-init="$store.inspector.loadVariables()">
+                <div class="settings-header">session settings</div>
+                <!-- provider / model switching -->
+                <div class="settings-group provider-model-section">
+                    <div class="settings-group-label">provider &amp; model</div>
+                    <label class="settings-var">
+                        <span class="settings-var-key mono">provider</span>
+                        <select class="settings-var-select"
+                                x-model="$store.inspector.currentProvider"
+                                @change="$store.inspector.onProviderChange()">
+                            <option value="">—</option>
+                            <template x-for="p in $store.inspector.providers" :key="p.name">
+                                <option :value="p.name" x-text="p.name + (p.configured ? '' : ' (not configured)')"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label class="settings-var">
+                        <span class="settings-var-key mono">model</span>
+                        <select class="settings-var-select"
+                                x-model="$store.inspector.currentModel"
+                                @change="$store.inspector.onModelChange()">
+                            <option value="">—</option>
+                            <template x-for="m in $store.inspector.models" :key="m">
+                                <option :value="m" x-text="m"></option>
+                            </template>
+                        </select>
+                    </label>
+                </div>
+                <template x-for="g in $store.inspector.variables.groups" :key="g.name">
+                    <div class="settings-group">
+                        <button class="settings-group-toggle"
+                                @click="$store.inspector.toggleGroup(g.name)"
+                                :aria-expanded="$store.inspector.isGroupOpen(g.name)">
+                            <span class="caret" x-text="$store.inspector.isGroupOpen(g.name) ? '▾' : '▸'"></span>
+                            <span x-text="g.name"></span>
+                        </button>
+                        <div class="settings-vars" x-show="$store.inspector.isGroupOpen(g.name)">
+                            <template x-for="v in g.variables" :key="v.key">
+                                <label class="settings-var" :title="v.description || v.key">
+                                    <span class="settings-var-key mono" x-text="v.key"></span>
+                                    <input class="settings-var-input"
+                                           :type="v.type === 'bool' ? 'checkbox' : 'text'"
+                                           :checked="v.type === 'bool' ? v.value === true || v.value === 'true' : false"
+                                           :value="v.type === 'bool' ? '' : (v.value ?? '')"
+                                           @change="v.type === 'bool'
+                                               ? $store.inspector.setVariable(v.key, $event.target.checked)
+                                               : $store.inspector.setVariable(v.key, $event.target.value)">
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
     <form @submit.prevent="$store.chat.send($refs.input.value); $refs.input.value=''; $refs.input.style.height='auto'; cc.close()">
         <div class="composer-input-wrap">
             <!-- command completion popup -->

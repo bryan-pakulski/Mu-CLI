@@ -4,10 +4,10 @@
 
 The feature plan engine provides a persistent workflow for implementing new features in phases instead of relying on a single free-form implementation turn.
 
-The engine is centered around a generated directory under `documentation/feature_req_<id>/` containing:
+The engine is centered around a single `feature_plan.json` file (stored in the workspace root or session directory) containing:
 
 - `feature_plan.json` — machine-readable plan metadata for the harness and server APIs.
-- `phase_1.md`, `phase_2.md`, ... — human-readable implementation phases that the model updates as work progresses.
+- Phase definitions embedded in the JSON plan, with human-readable descriptions the model updates as work progresses.
 
 This design allows a harness to:
 
@@ -18,18 +18,11 @@ This design allows a harness to:
 5. run a final review pass before returning success, and
 6. pause safely when the model raises a blocker that requires user input.
 
-In addition to the plan files on disk, the latest feature-loop runtime state can be stored in the active session JSON so blocked or interrupted loops can be reloaded after a disconnect or application restart.
+The latest feature-loop runtime state can be stored in the active session JSON so blocked or interrupted loops can be reloaded after a disconnect or application restart.
 
-## Directory Layout
+## File Layout
 
-```text
-documentation/
-  feature_req_example_feature/
-    feature_plan.json
-    phase_1.md
-    phase_2.md
-    phase_3.md
-```
+The plan metadata is stored as a single `feature_plan.json` file in either the workspace root or the session directory. No `documentation/feature_req_<id>/` directory structure is created.
 
 ## Phase File Format
 

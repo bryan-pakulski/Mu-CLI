@@ -1002,10 +1002,10 @@ class Session:
     # call sites used by the iteration loop and tests.
 
     @staticmethod
-    def _coarse_tool_args(tool_args):
+    def _coarse_tool_args(tool_args, tool_name=""):
         from mu.agent.loop_detection import coarse_tool_args
 
-        return coarse_tool_args(tool_args)
+        return coarse_tool_args(tool_args, tool_name)
 
     @staticmethod
     def _tool_call_fingerprint(tool_name: str, tool_args, *, pattern_only: bool = False) -> str:

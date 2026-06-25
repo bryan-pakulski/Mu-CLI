@@ -512,6 +512,8 @@ document.addEventListener("alpine:init", () => {
                 // mode.load() refreshes the active mode's panel store
                 // via panelModes — no explicit teacher/feature call needed.
                 Alpine.store("mode").load();
+                // Refresh model selector for the newly-focused session.
+                await Alpine.store("inspector").loadCurrentProvider();
                 return;
             }
             // Not loaded yet — POST /load (which is idempotent).
@@ -530,6 +532,8 @@ document.addEventListener("alpine:init", () => {
             Alpine.store("chat").focus(name);
             await Alpine.store("chat").loadHistory(name);
             await Alpine.store("mode").load();
+            // Refresh model selector for the newly-loaded session.
+            await Alpine.store("inspector").loadCurrentProvider();
         },
         async remove(name) {
             const r = await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });

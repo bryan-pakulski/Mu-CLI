@@ -1,3 +1,4 @@
+import json
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from types import SimpleNamespace
@@ -331,9 +332,15 @@ def test_feature_completion_includes_exit_subcommand():
 
 
 def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "documentation" / "feature_req_alpha").mkdir(parents=True)
-    (tmp_path / "documentation" / "feature_req_beta").mkdir(parents=True)
+    monkeypatch.setattr("mu.ui.input.HISTORY_DIR", str(tmp_path))
+    features_dir = tmp_path / "sessions" / "my_session" / "features"
+    features_dir.mkdir(parents=True)
+    (features_dir / "alpha.json").write_text(
+        json.dumps({"feature_id": "alpha"}), encoding="utf-8"
+    )
+    (features_dir / "beta.json").write_text(
+        json.dumps({"feature_id": "beta"}), encoding="utf-8"
+    )
 
     handler = InputHandler()
     document = Document(text="/feature delete a", cursor_position=len("/feature delete a"))

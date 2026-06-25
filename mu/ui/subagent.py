@@ -80,11 +80,22 @@ class SubagentUI:
         return cur
 
     def _emit(self, kind: str, message: str) -> None:
-        """Forward a styled info/error/status message to the root UI."""
+        """Forward a styled info/error/status message to the root UI.
+
+        Builds a pre-styled ``Text`` with explicit style spans so that:
+          * The ``[dim cyan]`` prefix renders as a Rich style, not literal text.
+          * Literal square brackets in the message (e.g. ``[Collated: get_chunk]``
+            or ``[subagent d=1]``) are preserved verbatim — ``Text`` bypasses
+            markup parsing, unlike ``Text.from_markup()``.
+        """
+        from rich.text import Text
+
         root = self._root()
         if root is None:
             return
-        styled = f"[dim cyan]{self._prefix}[/dim cyan] {message}"
+        styled = Text()
+        styled.append(self._prefix, style="dim cyan")
+        styled.append(f"   {message}")
         if kind == "error" and hasattr(root, "show_error"):
             root.show_error(styled)
         elif hasattr(root, "show_info"):

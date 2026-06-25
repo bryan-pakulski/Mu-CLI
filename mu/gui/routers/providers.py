@@ -117,5 +117,7 @@ async def switch_provider(req: SwitchRequest, request: Request) -> Dict[str, Any
         "provider": req.provider,
         "model": req.model,
     }
+    # Persist to disk so reload restores the selected model.
+    session.session_manager.save_history()
 
     return {"ok": True, "provider": req.provider, "model": req.model}

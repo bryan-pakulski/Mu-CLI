@@ -107,11 +107,6 @@ async def completions_endpoint(request: Request, kind: str = ""):
         from utils.config import HISTORY_DIR
 
         ids: set = set()
-        for path in _glob.glob(os.path.join("documentation", "feature_req_*")):
-            if os.path.isdir(path):
-                name = os.path.basename(path)
-                if name.startswith("feature_req_"):
-                    ids.add(name.replace("feature_req_", "", 1))
         for path in _glob.glob(
             os.path.join(HISTORY_DIR, "sessions", "*", "features", "*.json")
         ):

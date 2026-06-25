@@ -13,7 +13,7 @@ from mu.workspace.folder_context import FolderContext
 @pytest.fixture(autouse=True)
 def _isolate_feature_writes(tmp_path, monkeypatch):
     """Feature handlers fall back to `os.getcwd()` for the workspace
-    root. Chdir into tmp_path so `documentation/feature_req_*` dirs
+    root. Chdir into tmp_path so `feature_plan.json` files
     land in /tmp instead of the repo."""
     monkeypatch.chdir(tmp_path)
 

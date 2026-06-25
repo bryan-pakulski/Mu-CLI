@@ -119,14 +119,6 @@ class DynamicFeatureIdCompleter(Completer):
     def get_completions(self, document, complete_event):
         feature_ids = set()
 
-        # Workspace feature directories: documentation/feature_req_<feature_id>
-        for path in glob.glob(os.path.join("documentation", "feature_req_*")):
-            if not os.path.isdir(path):
-                continue
-            name = os.path.basename(path)
-            if name.startswith("feature_req_"):
-                feature_ids.add(name.replace("feature_req_", "", 1))
-
         # Session-managed feature metadata records.
         for path in glob.glob(
             os.path.join(HISTORY_DIR, "sessions", "*", "features", "*.json")

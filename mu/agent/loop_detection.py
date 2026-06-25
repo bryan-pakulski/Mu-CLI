@@ -2,11 +2,14 @@
 
 Three primitives:
 
-  * `coarse_tool_args(tool_args)` — produce a stable, recursive,
-    digest-friendly representation of tool arguments. Strings are
-    hashed to a fixed-length SHA1 prefix so that fingerprints don't
-    blow up on long content while still distinguishing different
-    payloads.
+  * `coarse_tool_args(tool_args, tool_name="")` — produce a stable,
+    recursive, digest-friendly representation of tool arguments.
+    For **pattern-sensitive** tools (search/query tools), strings
+    collapse to a fixed ``"str:*"`` placeholder so calls with the same
+    shape but different content collide. For all other tools, strings
+    get a short SHA1 hash prefix so different content produces
+    different fingerprints — legitimate sequential calls (e.g.
+    ``bash`` with different commands) won't trip pattern detection.
 
   * `tool_call_fingerprint(name, args, pattern_only=False)` — combine
     `(name, args)` into a compact string token. With
@@ -37,6 +40,7 @@ from typing import Any, List
 # should NOT count toward loop detection (they're bookkeeping calls).
 _BOOKKEEPING_TOOLS = frozenset(
     {
+        # Feature-mode mutators/inspectors
         "create_feature",
         "create_phases",
         "create_task",
@@ -49,19 +53,74 @@ _BOOKKEEPING_TOOLS = frozenset(
         "get_execution_state",
         "get_tasks",
         "get_current_task",
+        # Meta/tooling calls that legitimately repeat every iteration
+        "flush",
+        "todo_write",
+        "todo_set_status",
+        "todo_list",
+        "save_scratchpad",
+        "search_scratchpad",
+        "list_scratchpad",
+        "clear_scratchpad",
+        "save_memory",
+        "search_memory",
+        "list_memory",
+        # Read-only context tools that fire every iteration
+        "get_workspace_details",
+        "get_course_state",
+        "get_security_state",
+        "get_due_reviews",
+    }
+)
+
+# Tools where the model may legitimately try many different string
+# queries/paths before finding what it needs. For these, string content
+# is collapsed so repeated calls with different queries collide on the
+# same pattern fingerprint (the hallmark of a search-loop).
+_PATTERN_SENSITIVE_TOOLS = frozenset(
+    {
+        "search_for_string",
+        "search_references",
+        "retrieve_relevant_context",
+        "web_search",
+        "arxiv_search",
+        "doi_resolve",
+        "reddit_search",
+        "stackoverflow_search",
+        "hackernews_search",
+        "search_memory",
+        "search_scratchpad",
     }
 )
 
 
-def coarse_tool_args(tool_args: Any) -> Any:
+def _collapse_string(val: str, tool_name: str) -> str:
+    """Collapse string for pattern fingerprint. For pattern-sensitive
+    tools (search/query), all strings become ``"str:*"`` so repeated
+    searches with different queries collide. For all other tools,
+    strings get a short SHA1 hash prefix so different content produces
+    different fingerprints — legitimate sequential calls (e.g.
+    ``bash`` with different commands) won't trip pattern detection."""
+    if tool_name in _PATTERN_SENSITIVE_TOOLS:
+        return "str:*"
+    return "str:" + hashlib.sha1(val.encode("utf-8")).hexdigest()[:8]
+
+
+def coarse_tool_args(tool_args: Any, tool_name: str = "") -> Any:
     """Build a stable, coarse-grained representation of tool args for
-    loop pattern checks. All string values collapse to a fixed
-    ``"str:*"`` placeholder so that calls with the same tool and same
-    argument *shape* but different string *content* produce the same
-    fingerprint.  This is what allows pattern-based loop detection to
-    fire when the model keeps calling e.g. ``search_for_string`` with
-    different query strings — the exact fingerprints differ but the
-    pattern fingerprints should collide.
+    loop pattern checks.
+
+    For **pattern-sensitive** tools (search/query tools), string values
+    collapse to a fixed ``"str:*"`` placeholder so that calls with the
+    same tool and same argument *shape* but different string *content*
+    produce the same fingerprint. This is what allows pattern-based
+    loop detection to fire when the model keeps calling e.g.
+    ``search_for_string`` with different query strings.
+
+    For all other tools, strings get a short SHA1 hash prefix so
+    different content produces different fingerprints — legitimate
+    sequential calls (e.g. ``bash`` with different commands) won't
+    trip pattern detection.
 
     ints/floats/bools/None pass through; nested dicts/lists recurse;
     unknown types collapse to their type name.
@@ -74,20 +133,22 @@ def coarse_tool_args(tool_args: Any) -> Any:
         for key in sorted(tool_args.keys()):
             val = tool_args.get(key)
             if isinstance(val, str):
-                coarse[key] = "str:*"
+                coarse[key] = _collapse_string(val, tool_name)
             elif isinstance(val, (int, float, bool)) or val is None:
                 coarse[key] = val
             elif isinstance(val, list):
-                coarse[key] = [coarse_tool_args(item) for item in val[:8]]
+                coarse[key] = [
+                    coarse_tool_args(item, tool_name) for item in val[:8]
+                ]
             elif isinstance(val, dict):
-                coarse[key] = coarse_tool_args(val)
+                coarse[key] = coarse_tool_args(val, tool_name)
             else:
                 coarse[key] = type(val).__name__
         return coarse
     if isinstance(tool_args, list):
-        return [coarse_tool_args(item) for item in tool_args[:8]]
+        return [coarse_tool_args(item, tool_name) for item in tool_args[:8]]
     if isinstance(tool_args, str):
-        return "str:*"
+        return _collapse_string(tool_args, tool_name)
     if isinstance(tool_args, (int, float, bool)) or tool_args is None:
         return tool_args
     return type(tool_args).__name__
@@ -102,7 +163,9 @@ def tool_call_fingerprint(
     string content but the same shape collide on the same fingerprint."""
     name = str(tool_name or "").strip().lower() or "tool"
     payload_source = (
-        coarse_tool_args(tool_args or {}) if pattern_only else (tool_args or {})
+        coarse_tool_args(tool_args or {}, tool_name=name)
+        if pattern_only
+        else (tool_args or {})
     )
     try:
         payload = json.dumps(

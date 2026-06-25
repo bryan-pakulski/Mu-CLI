@@ -15,7 +15,7 @@ from providers.base import LLMProvider, MessagePart, ProviderResponse
 @pytest.fixture(autouse=True)
 def _isolate_feature_writes(tmp_path, monkeypatch):
     """Feature plans default their workspace root to `os.getcwd()`.
-    Chdir to tmp_path so any `documentation/feature_req_*` directory
+    Chdir to tmp_path so any `feature_plan.json` file
     created during a test lands in /tmp instead of the repo."""
     monkeypatch.chdir(tmp_path)
 
@@ -737,7 +737,7 @@ def test_feature_mode_blocks_direct_feature_plan_access(tmp_path, monkeypatch):
     session.folder_context.add_folder(str(tmp_path))
     session.sync_runtime_state()
     session.variables["agent_mode"] = "feature"
-    plan_path = tmp_path / "documentation" / "feature_req_demo" / "feature_plan.json"
+    plan_path = tmp_path / "feature_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text("{}", encoding="utf-8")
     session.session_manager.set_feature_state(

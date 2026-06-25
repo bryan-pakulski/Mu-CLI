@@ -52,7 +52,7 @@ mucli --debug                             # verbose logging
 - Multi-provider model support (OpenAI, Gemini, Ollama) with real streaming, parallel tool execution, prompt caching, reasoning effort, and cached/reasoning token telemetry.
 - Workspace context from attached folders and files.
 - Session save/load and multi-session workflows.
-- Feature mode with persistent plans under `documentation/feature_req_<id>/`.
+- Feature mode with persistent plans stored in session metadata.
 - Plan mode (`/plan`) — read-only tool enforcement.
 - Hooks (`.mu/hooks.json`) — shell-cmd hooks at five lifecycle points; plus built-in Python hooks for plan-mode enforcement, secret-path guarding, auto-compaction, and usage tracking. See [documentation/hooks.md](documentation/hooks.md).
 - MCP support (`.mu/mcp.json`) — discover and register tools from any MCP server. See [documentation/mcp.md](documentation/mcp.md).

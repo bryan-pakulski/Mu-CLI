@@ -3,7 +3,7 @@
 Exposes the active FeaturePlan to the GUI so the side-panel can render
 a kanban of tasks grouped by phase, the current task's exit-criteria
 checklist, and the recent event log. State lives on disk under each
-feature's metadata_path (workspace `documentation/feature_req_<id>/`
+feature's metadata_path (workspace `feature_plan.json`
 or session-history `<HISTORY_DIR>/sessions/<id>/features/<id>.json`).
 The SessionManager keeps a registry of stubs; the rich plan structure
 is read from the registry record's embedded `feature_plan` field, or

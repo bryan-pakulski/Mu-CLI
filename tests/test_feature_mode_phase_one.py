@@ -17,7 +17,7 @@ from mu.feature.engine import (
 def _isolate_feature_writes(tmp_path, monkeypatch):
     """The feature engine resolves its workspace root from `os.getcwd()`
     when `folder_context=None`. Chdir into the per-test tmp_path so the
-    `documentation/feature_req_<id>/` directories land in /tmp instead
+    `feature_plan.json` file lands in /tmp instead
     of the repo's `documentation/`."""
     monkeypatch.chdir(tmp_path)
 

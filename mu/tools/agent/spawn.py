@@ -43,7 +43,7 @@ logger = logging.getLogger("mucli")
 
 MAX_SUBAGENT_DEPTH = 2
 
-_DEFAULT_MAX_ITERATIONS = 25
+_DEFAULT_MAX_ITERATIONS = 50
 
 
 _SUBAGENT_SYSTEM_TEMPLATE = """\
@@ -57,8 +57,8 @@ Sub-agent task:
 Operating rules:
 - Use read/search tools first to ground yourself, then act.
 - Issue independent reads in parallel within a single turn.
-- Read-only tools buffer into a collation buffer; call `flush` once you \
-have gathered enough to act.
+- Read-only tool results are injected directly into your context -- \
+no need to call `flush`.
 - For your own internal task tracking within this delegation, use \
 `todo_write` / `todo_set_status` / `todo_list`. They are scoped to this \
 sub-session and do not leak back to the parent.
@@ -116,7 +116,7 @@ def _envelope(
             },
             "max_iterations": {
                 "type": "integer",
-                "description": "Cap on the child's tool-call loop. Default: 25.",
+                "description": "Cap on the child's tool-call loop. Default: 50.",
             },
             "model": {
                 "type": "string",
@@ -246,6 +246,13 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     child.variables["compact_history"] = False
     # Skip the agent_mode-specific prompts (feature / loop) for subagent turns.
     child.variables["agent_mode"] = "default"
+    # Disable collation for subagents: each read→flush cycle wastes 2
+    # iterations (one for the read, one for the flush).  Subagent iteration
+    # budget is already tight; collation is designed for the parent's
+    # multi-turn context management, not short delegation runs.  With
+    # collation off, read-only results are injected directly into history
+    # so the subagent sees them immediately and can act in the same turn.
+    child.variables["collation_enabled"] = False
 
     # Tools whitelist (if any). Always keep `flush` so collation works,
     # and disable `spawn_agent` if we're at the depth cap for the child.

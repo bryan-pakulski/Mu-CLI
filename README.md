@@ -8,6 +8,7 @@ Terminal-first multi-provider coding assistant.
 - At least one provider key or local model setup:
   - `OPENAI_API_KEY` for OpenAI
   - `GEMINI_API_KEY` or `GOOGLE_API_KEY` for Gemini
+  - `OLLAMA_API_KEY` for Ollama
   - running Ollama instance for local models
 
 ## Installation

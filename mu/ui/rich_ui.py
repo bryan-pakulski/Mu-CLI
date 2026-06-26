@@ -146,15 +146,12 @@ class RichUI:
             )
             return
         # Assistant path. If the text already streamed token-by-token, the
-        # user has seen it — don't redraw the whole panel. Otherwise (no
-        # streaming, or streaming disabled) fall back to the original panel.
-        # However, history replay and other non-streaming callers should
-        # always render, so we check the flag only when an active Live is
-        # open (i.e., during the live generation that set the flag).
-        if self._streamed_any_text and self._gen_live is not None:
-            # The stream already wrote header + body to the console; just
-            # close the visual unit. `stream_assistant_end` may have
-            # already emitted the trailing newline.
+        # user has seen it — `_GenerationLive.__exit__` already re-emitted
+        # it via `render_response`. Don't redraw the panel (duplicate).
+        # The `_streamed_any_text` flag survives until the next stream's
+        # `__enter__` clears it. History replay and other non-streaming
+        # callers never set the flag, so they always render normally.
+        if self._streamed_any_text:
             return
         if model_name:
             self.console.print(f"\nAssistant ({model_name}) [{ts}]:")

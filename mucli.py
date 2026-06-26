@@ -1205,6 +1205,12 @@ def main():
         help="Port for --gui (default 30311).",
     )
     parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Bind address for --gui (default 127.0.0.1; use 0.0.0.0 for LAN access).",
+    )
+    parser.add_argument(
         "--system",
         type=str,
         default="""You are a helpful assistant, answer all questions succinctly.

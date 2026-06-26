@@ -25,47 +25,49 @@ from .app import create_app
 
 
 DEFAULT_PORT = 30311
+DEFAULT_HOST = "127.0.0.1"
 
 
 def run_gui(args, build_session) -> None:
     """Top-level entry. Daemonizes by default; runs in foreground if
     ``args.gui_foreground`` is set."""
     port = int(getattr(args, "port", None) or DEFAULT_PORT)
+    host = getattr(args, "host", None) or DEFAULT_HOST
 
     # gui_foreground marker MUST be checked before is_running — the
     # parent writes the pid file before spawning the child, so the
     # child would otherwise read its OWN pid and exit thinking the GUI
     # is "already running."
     if getattr(args, "gui_foreground", False):
-        run_server_foreground(args, build_session, port=port)
+        run_server_foreground(args, build_session, port=port, host=host)
         return
 
     existing = daemon.is_running()
     if existing is not None:
-        url = f"http://127.0.0.1:{port}/"
+        url = f"http://{host}:{port}/"
         print(f"  mucli GUI already running at {url} (pid {existing})")
         print(f"  stop with: mucli --gui-stop")
         return
 
     # Re-invoke ourselves with the internal marker so the child runs
     # the server in foreground while we detach.
-    child_args = _build_child_argv(args, port)
+    child_args = _build_child_argv(args, port, host)
     pid = daemon.spawn_detached(child_args, port=port)
     daemon.write_pid(pid)
 
-    if not daemon.wait_for_port(port, timeout=8.0):
+    if not daemon.wait_for_port(port, host=host, timeout=8.0):
         print(
-            f"  mucli GUI spawned (pid {pid}) but isn't listening on {port} yet.\n"
+            f"  mucli GUI spawned (pid {pid}) but isn't listening on {host}:{port} yet.\n"
             f"  Tail the log: tail -f {daemon.log_file()}"
         )
         return
 
-    print(f"  mucli GUI → http://127.0.0.1:{port}/  (pid {pid})")
+    print(f"  mucli GUI → http://{host}:{port}/  (pid {pid})")
     print(f"  log:  {daemon.log_file()}")
     print(f"  stop: mucli --gui-stop")
 
 
-def run_server_foreground(args, build_session, *, port: int) -> None:
+def run_server_foreground(args, build_session, *, port: int, host: str = DEFAULT_HOST) -> None:
     """Run uvicorn in the current process. Used by the daemon child."""
     app = create_app(args=args, build_session_fn=build_session, port=port)
 
@@ -74,7 +76,7 @@ def run_server_foreground(args, build_session, *, port: int) -> None:
 
     config = uvicorn.Config(
         app,
-        host="127.0.0.1",
+        host=host,
         port=port,
         log_level="warning",
         access_log=False,
@@ -129,17 +131,22 @@ def stop_gui() -> int:
 # ---------------------------------------------------------------------------
 
 
-def _build_child_argv(args, port: int) -> list[str]:
+def _build_child_argv(args, port: int, host: str = DEFAULT_HOST) -> list[str]:
     """Construct the argv for the daemonized child.
 
     Forwards the user's flags (session, provider, model, workspace,
     yolo, debug, system) and tags the invocation with ``--gui
-    --gui-foreground --port <port>`` so the child runs the server in
-    foreground (no further forking).
+    --gui-foreground --port <port> --host <host>`` so the child runs
+    the server in foreground (no further forking).
     """
     py = sys.executable or "python3.11"
     script = _resolve_mucli_script()
     argv = [py, script, "--gui", "--gui-foreground", "--port", str(port)]
+
+    # Only forward --host when the user explicitly overrode the default.
+    # This keeps the child's behavior predictable when no flag was given.
+    if host and host != DEFAULT_HOST:
+        argv += ["--host", str(host)]
 
     if getattr(args, "session", None):
         argv += ["--session", str(args.session)]

@@ -1249,6 +1249,37 @@ def run_turn(session, text):
             session.session_manager.history.append(tool_result_msg)
             session.session_manager.save_history(session.folder_context)
 
+            # --- Event-driven workspace diff injection ---
+            # If any tool in this iteration modified files, inject a diff
+            # of workspace changes (vs initial snapshots) into the dynamic
+            # system prompt for the NEXT iteration.  This ensures the model
+            # always sees current file state without periodic full rebuilds.
+            # Zero stale windows: the diff only appears when files actually
+            # change, and only for the iteration immediately following the
+            # change.  If no files were modified, no diff is injected (saves
+            # tokens).
+            _files_changed_this_iter = False
+            for _part in tool_result_parts:
+                _res = _part.get("tool_result")
+                if isinstance(_res, dict) and _res.get("modified_files"):
+                    _files_changed_this_iter = True
+                    break
+            if _files_changed_this_iter and session.folder_context:
+                try:
+                    _diff_xml = session.folder_context.get_context_diff_xml()
+                    if _diff_xml:
+                        base_system_prompt = (
+                            base_system_prompt.rsplit(
+                                "\n\nL4B -- Workspace changes since turn start:",
+                                1
+                            )[0]
+                            + "\n\nL4B -- Workspace changes since turn start:\n"
+                            + _diff_xml
+                        )
+                except Exception:
+                    pass
+            # --- End event-driven diff injection ---
+
             if loop_detection_enabled and iteration_tool_exact_fingerprints:
                 exact_seq = " -> ".join(iteration_tool_exact_fingerprints)
                 pattern_seq = " -> ".join(iteration_tool_pattern)

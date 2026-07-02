@@ -132,6 +132,7 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
         session.session_manager.roll_history_summary_to_token_budget(
             int(emergency_budget * 0.85),
             keep_recent=2,
+            provider=session.provider,
         )
         session._compaction_watermark = len(session.session_manager.history)
     except Exception as exc:
@@ -354,7 +355,11 @@ def run_turn(session, text):
                 )
             ),
         )
-        session.turn_scratchpad.clear()
+        # Only clear scratchpad at turn start when persistence is off.
+        # When scratchpad_persist_across_turns=True, scratchpad notes
+        # survive across turns so the agent can build on prior plans.
+        if not session.variables.get("scratchpad_persist_across_turns", False):
+            session.turn_scratchpad.clear()
 
     parts = list(session.staged_files)
     effective_text = text
@@ -385,30 +390,10 @@ def run_turn(session, text):
         session.ui.render_message("user", text)
 
     workspace_context = ""
-    session._pending_retrieved_context = ""
 
     if session.folder_context.folders:
-        # Skip L4B retrieval if model already called retrieve_relevant_context
-        # in recent history — avoids duplicating same snippets in both
-        # system prompt (L4B) and tool result messages.
-        _already_retrieved = False
-        for msg in reversed(session.session_manager.history[-12:]):
-            for p in (msg.get("parts") or []):
-                if (
-                    p.get("type") == "tool_call"
-                    and p.get("tool_name") == "retrieve_relevant_context"
-                ):
-                    _already_retrieved = True
-                    break
-            if _already_retrieved:
-                break
-
-        if not _already_retrieved:
-            retrieval_query = effective_text or text
-            session._pending_retrieved_context = session._build_retrieved_workspace_context(
-                retrieval_query
-            )
-        # Let tools auto discover workspace content as needed
+        # L4B auto-retrieval removed — model uses retrieve_relevant_context
+        # tool on demand instead of pre-injected snippets.
         if session.agentic:
             active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
             tool_desc_str = "\n".join(
@@ -444,18 +429,11 @@ def run_turn(session, text):
                 with session.ui.show_status(
                     "Scanning monitored folders for changes..."
                 ):
-                    if session._pending_retrieved_context:
-                        workspace_context = (
-                            "### RETRIEVAL-FIRST WORKSPACE CONTEXT\n"
-                            "Ranked snippets were selected from semantic index scoring.\n"
-                            f"{session._pending_retrieved_context}"
-                        )
-                    else:
-                        folder_initial_xml = (
-                            session.folder_context.get_initial_context_xml()
-                        )
-                        folder_diff_xml = session.folder_context.get_context_diff_xml()
-                        workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
+                    folder_initial_xml = (
+                        session.folder_context.get_initial_context_xml()
+                    )
+                    folder_diff_xml = session.folder_context.get_context_diff_xml()
+                    workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
 
     base_system_prompt = session.system_instruction
     if active_mode == "feature":
@@ -496,7 +474,8 @@ def run_turn(session, text):
         base_system_prompt += f"\n\n{workspace_context}"
     session.session_manager.roll_history_summary_to_token_budget(
         session._compaction_token_budget(),
-        keep_recent=4,
+        keep_recent=12,
+        provider=session.provider,
     )
     # Record history length as the compaction watermark.  The
     # auto-compaction hook will allow another compaction pass only when
@@ -1222,13 +1201,19 @@ def run_turn(session, text):
                     source_result,
                     result,
                 )
-                # Store full result in tool result cache before compression
+                # Store full result in tool result cache before compression.
+                # Cache the RAW source_result (original tool output), not the
+                # structured `result` envelope — when collation transforms
+                # the result, `result` contains metadata like
+                # {"collated": True, "source_char_count": 4500} which is
+                # useless to recall().  source_result has the actual file
+                # content / search output the model needs to recover.
                 cache_key = None
                 try:
                     cache_key = session.tool_result_cache.store(
                         call_id=getattr(part, "tool_call_id", ""),
                         tool_name=part.tool_name,
-                        result=result,
+                        result=source_result,
                     )
                 except Exception:
                     pass
@@ -1270,10 +1255,10 @@ def run_turn(session, text):
                     if _diff_xml:
                         base_system_prompt = (
                             base_system_prompt.rsplit(
-                                "\n\nL4B -- Workspace changes since turn start:",
+                                "\n\nWorkspace changes since turn start:",
                                 1
                             )[0]
-                            + "\n\nL4B -- Workspace changes since turn start:\n"
+                            + "\n\nWorkspace changes since turn start:\n"
                             + _diff_xml
                         )
                 except Exception:

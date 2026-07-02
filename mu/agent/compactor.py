@@ -70,7 +70,8 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     try:
         rolled = session_manager.roll_history_summary_to_token_budget(
             budget,
-            keep_recent=int(variables.get("compactor_keep_recent", 4) or 4),
+            keep_recent=int(variables.get("compactor_keep_recent", 12) or 12),
+            provider=getattr(session, "provider", None),
         )
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("Auto-compaction raised %s; continuing without compacting", exc)

@@ -41,7 +41,7 @@ from __future__ import annotations
 import base64
 from typing import Any, List, Optional
 
-from providers.base import FileReference, ImageData, Message, MessagePart
+from providers.base import FileReference, ImageData, LLMProvider, Message, MessagePart
 
 from .helpers import _shorten_tool_args
 
@@ -132,10 +132,18 @@ def clip_preview(text: Any, limit: int = 240) -> str:
     return f"{text[: limit - 3]}..."
 
 
-def summarize_message_parts(msg_dict: dict) -> str:
+def summarize_message_parts(
+    msg_dict: dict,
+    provider: Optional[LLMProvider] = None,
+) -> str:
     """Render one history entry as a single-line summary for
     compressed-history blocks. Returns `- <role>: <summaries>` or
-    `- <role>: [no serializable content]`."""
+    `- <role>: [no serializable content]`.
+
+    Char limits expanded from 120/140 to 500 to preserve more context
+    in the mechanical fallback path. The LLM summarization path
+    (_llm_summarize_tool_batch) is preferred when a provider is
+    available — see prepare_runtime_history."""
     role = msg_dict.get("role", "message")
     summaries: List[str] = []
     for part in msg_dict.get("parts", []):
@@ -143,7 +151,7 @@ def summarize_message_parts(msg_dict: dict) -> str:
         if p_type == "text":
             text = str(part.get("text", "")).strip().replace("\n", " ")
             if text:
-                summaries.append(text[:120])
+                summaries.append(text[:500])
         elif p_type == "tool_call":
             summaries.append(
                 f"tool_call:{part.get('tool_name')} "
@@ -161,8 +169,8 @@ def summarize_message_parts(msg_dict: dict) -> str:
             # Include cache key tag if present so model can recall full result
             cache_key = part.get("cache_key")
             cache_tag = f"[cache:{cache_key}] " if cache_key else ""
-            if len(result) > 140:
-                result = f"{result[:137]}..."
+            if len(result) > 500:
+                result = f"{result[:497]}..."
             summaries.append(
                 f"tool_result:{part.get('tool_name')} => {cache_tag}{result}"
             )
@@ -181,9 +189,68 @@ def summarize_message_parts(msg_dict: dict) -> str:
     return f"- {role}: " + " | ".join(summaries)
 
 
+_LLM_TOOL_SUMMARY_SYSTEM_PROMPT = (
+    "You are a tool-activity summarizer for an AI coding agent. "
+    "Summarize the following tool call/result pairs into a concise "
+    "but information-preserving summary. Keep file paths, function "
+    "names, error messages, and key findings VERBATIM. Output a "
+    "brief structured summary, not a narrative.\n\n"
+    "Format:\n"
+    "- <tool_name>: <key result or finding> (preserve paths/identifiers)\n\n"
+    "Rules:\n"
+    "- Preserve file paths, function names, and error messages verbatim.\n"
+    "- Include cache key tags like [cache:KEY] so the agent can recall "
+    "full results.\n"
+    "- Be concise but complete. Target 100-300 words.\n"
+    "- Do NOT add commentary or headers.\n"
+)
+
+
+def _llm_summarize_tool_batch(
+    provider: Optional[LLMProvider],
+    entries: List[dict],
+) -> Optional[str]:
+    """Generate an LLM summary of tool call/result pairs for L4 compression.
+
+    Returns structured summary text, or None on any failure (caller
+    falls back to mechanical summarize_message_parts).
+    """
+    if provider is None or not entries:
+        return None
+
+    try:
+        rendered = "\n".join(summarize_message_parts(e) for e in entries)
+        if not rendered.strip():
+            return None
+
+        messages = [
+            Message(
+                role="user",
+                parts=[MessagePart(type="text", text=f"Summarize these tool activities:\n\n{rendered}")],
+            ),
+        ]
+
+        response = provider.generate(
+            messages=messages,
+            system_prompt=_LLM_TOOL_SUMMARY_SYSTEM_PROMPT,
+            thinking=False,
+            tools=None,
+        )
+
+        summary_text = str(response.text or "").strip()
+        if not summary_text:
+            return None
+
+        return summary_text
+
+    except Exception:
+        return None
+
+
 def prepare_runtime_history(
     session: Any,
     turn_start_index: Optional[int] = None,
+    provider: Optional[LLMProvider] = None,
 ) -> List[dict]:
     """Pick the slice of `session.session_manager.history` to send to
     the provider this turn, then (within the current-turn region)
@@ -263,18 +330,31 @@ def prepare_runtime_history(
         if is_pair:
             if pair_count < compress_pair_count:
                 for m in msgs:
-                    summarized_lines.append(summarize_message_parts(m))
+                    summarized_lines.append(summarize_message_parts(m, provider=provider))
                 pair_count += 1
                 continue
             pair_count += 1
         compressed_turn.extend(msgs)
 
     if summarized_lines:
-        summary_text = (
-            "LAYER 4 — Recent tool activity (compressed for budget).\n"
-            "Older tool call/result pairs from this turn were summarized.\n"
-            + "\n".join(summarized_lines)
+        # Try LLM summarization first (Claude-style); fall back to
+        # the expanded mechanical lines (500 chars per part, not 120).
+        llm_summary = _llm_summarize_tool_batch(
+            provider,
+            [m for _, msgs in groups[:compress_pair_count] for m in msgs if _ == True for _ in [True]],
         )
+        if llm_summary is not None:
+            summary_text = (
+                "LAYER 4 — Recent tool activity (LLM-summarized for budget).\n"
+                "Older tool call/result pairs from this turn were summarized.\n"
+                + llm_summary
+            )
+        else:
+            summary_text = (
+                "LAYER 4 — Recent tool activity (compressed for budget).\n"
+                "Older tool call/result pairs from this turn were summarized.\n"
+                + "\n".join(summarized_lines)
+            )
         compressed_turn.insert(
             (
                 1
@@ -296,4 +376,5 @@ __all__ = [
     "clip_preview",
     "summarize_message_parts",
     "prepare_runtime_history",
+    "_llm_summarize_tool_batch",
 ]

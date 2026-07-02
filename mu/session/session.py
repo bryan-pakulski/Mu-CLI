@@ -350,7 +350,9 @@ class Session:
     def _summarize_message_parts(self, msg_dict: dict) -> str:
         from mu.session.messages import summarize_message_parts
 
-        return summarize_message_parts(msg_dict)
+        return summarize_message_parts(
+            msg_dict, provider=getattr(self, "provider", None)
+        )
 
     # Budget helpers (`_resolve_context_limit`, `_resolve_response_reserve`,
     # `_compaction_token_budget`) moved to `mu/session/budgets.py`. These
@@ -379,7 +381,9 @@ class Session:
         `mu/session/messages.py:prepare_runtime_history`."""
         from mu.session.messages import prepare_runtime_history
 
-        return prepare_runtime_history(self, turn_start_index)
+        return prepare_runtime_history(
+            self, turn_start_index, provider=getattr(self, "provider", None)
+        )
 
     def _inject_conversation_summary(self, system_prompt: str) -> str:
         summary = str(
@@ -546,7 +550,7 @@ class Session:
             return ""
         top_k = max(1, int(self.variables.get("retrieval_top_k", 5) or 5))
         char_budget = max(
-            1, int(self.variables.get("retrieval_context_char_limit", 5000) or 5000)
+            1, int(self.variables.get("retrieval_context_char_limit", 10000) or 10000)
         )
         self.retrieval_index.refresh_incremental(self.folder_context)
         payload = self.retrieval_index.retrieve(request, top_k=top_k, filters={})

@@ -48,11 +48,6 @@ LAYER_BUDGET_VARS: Dict[str, Tuple[str, str, str]] = {
         "Active goal",
         "Feature/task status + scratchpad snapshot",
     ),
-    "L4B": (
-        "retrieval_context_char_limit",
-        "Retrieved snippets",
-        "Semantic-retrieval context injected for the current turn",
-    ),
 }
 
 

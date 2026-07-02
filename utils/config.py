@@ -20,6 +20,65 @@ if not os.path.exists(HISTORY_DIR):
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
+# --- Layer Char-Budget Ratio System ---
+# Layer char budgets scale with context_token_limit. At a reference limit
+# each layer has a target token budget; when context_token_limit changes,
+# budgets are recomputed proportionally but never drop below absolute floors
+# (the historical defaults), so smaller context windows keep usable budgets.
+TOKEN_TO_CHAR_RATIO = 4
+
+_REFERENCE_TOKEN_LIMIT = 900000
+
+# Target token budgets at the reference limit (in tokens, not chars).
+_LAYER_TOKEN_TARGETS = {
+    "workspace_context_max_chars": 10000,       # L1
+    "skills_max_chars": 10000,                   # L1B
+    "conversation_summary_char_limit": 20000,   # L2
+    "active_goal_context_char_limit": 4096,     # L3
+    "retrieval_context_char_limit": 10000,       # L4B
+}
+
+# Absolute floors — historical defaults, never scale below these.
+LAYER_CHAR_FLOORS = {
+    "workspace_context_max_chars": 16384,
+    "skills_max_chars": 6144,
+    "conversation_summary_char_limit": 24000,
+    "active_goal_context_char_limit": 4000,
+    "retrieval_context_char_limit": 10000,
+}
+
+
+def compute_layer_char_budgets(context_token_limit):
+    """Compute char budgets for all layer vars, scaled from reference
+    targets but never below floors.
+
+    Returns dict[var_name, chars].
+    """
+    ratio = context_token_limit / _REFERENCE_TOKEN_LIMIT
+    result = {}
+    for var_name, target_tokens in _LAYER_TOKEN_TARGETS.items():
+        scaled_chars = int(target_tokens * TOKEN_TO_CHAR_RATIO * ratio)
+        floor = LAYER_CHAR_FLOORS[var_name]
+        result[var_name] = max(scaled_chars, floor)
+    return result
+
+
+def reratio_layer_budgets(session):
+    """Recompute and apply layer char budgets when context_token_limit changes.
+
+    Called from /set and /unset when context_token_limit is modified.
+    """
+    ctx_limit = int(
+        session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT)
+    )
+    budgets = compute_layer_char_budgets(ctx_limit)
+    for var_name, chars in budgets.items():
+        session.variables[var_name] = chars
+
+
+_DEFAULT_CONTEXT_TOKEN_LIMIT = 900000
+_LAYER_CHAR_DEFAULTS = compute_layer_char_budgets(_DEFAULT_CONTEXT_TOKEN_LIMIT)
+
 # --- Variable Schema & Defaults ---
 VARIABLE_SCHEMA = {
     "agent_mode": {
@@ -97,6 +156,10 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 24,
     },
+    "scratchpad_persist_across_turns": {
+        "type": bool,
+        "default": False,
+    },
     "tool_context_window": {
         "type": int,
         "default": 6,
@@ -152,7 +215,7 @@ VARIABLE_SCHEMA = {
         # Char budget for LAYER 1 (workspace files like AGENTS.md, CLAUDE.md,
         # .mu/CONTEXT.md per attached folder).
         "type": int,
-        "default": 8192,
+        "default": 16384,
     },
     "workspace_context_files": {
         # Comma-separated list of filenames to auto-load from each attached
@@ -173,7 +236,7 @@ VARIABLE_SCHEMA = {
         # Clipped from the tail when exceeded so the most recent summary
         # batches survive.
         "type": int,
-        "default": 8000,
+        "default": 24000,
     },
     # ----- LAYER 3 — Active goal context -----
     "active_goal_context_char_limit": {
@@ -186,7 +249,7 @@ VARIABLE_SCHEMA = {
         # Char budget for LAYER 4B (semantic-retrieval snippets injected
         # for the current turn).
         "type": int,
-        "default": 5000,
+        "default": 10000,
     },
     "retrieval_top_k": {
         # Number of semantic-retrieval hits to include in LAYER 4B.

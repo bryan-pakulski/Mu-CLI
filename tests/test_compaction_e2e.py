@@ -156,7 +156,7 @@ def test_compaction_falls_back_to_payload_truncation_when_one_huge_message():
     )
     assert changed is True
     payload = sm.history[0]["parts"][0]["tool_result"]
-    assert "truncated_to_4000_chars_for_context_budget" in payload
+    assert "truncated_to_16000_chars_for_context_budget" in payload
 
 
 def test_agent_loop_uses_provider_aware_budget_before_provider_call(monkeypatch):

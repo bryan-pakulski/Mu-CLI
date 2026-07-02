@@ -195,7 +195,7 @@ def test_roll_history_summary_to_token_budget_clips_large_payload_when_stuck():
 
     assert changed is True
     payload = sm.history[0]["parts"][0]["tool_result"]
-    assert "truncated_to_4000_chars_for_context_budget" in payload
+    assert "truncated_to_16000_chars_for_context_budget" in payload
 
 
 def test_clip_conversation_summary_marks_truncation_boundary():
@@ -260,11 +260,16 @@ def test_send_message_injects_hierarchical_context_layers():
     assert "LAYER 2 — Conversation summary:" in provider.last_system_prompt
     assert "LAYER 5 — Current turn:" in provider.last_system_prompt
     assert "turn 1" in provider.last_system_prompt
-    assert sm.summary_anchor == 2
+    # With keep_recent=12 (default after LLM-compaction change), pre-turn
+    # compaction won't fire for only 7 entries. Emergency compaction
+    # (keep_recent=2) fires instead, advancing the anchor further.
+    assert sm.summary_anchor > 0
     assert "turn 1" in sm.conversation_summary
 
 
-def test_layered_context_prefers_retrieved_snippets(tmp_path):
+def test_layered_context_no_longer_injects_l4b_retrieval(tmp_path):
+    """L4B auto-retrieval removed — model uses retrieve_relevant_context
+    tool on demand instead of pre-injected snippets."""
     class CaptureProvider(LLMProvider):
         def __init__(self):
             super().__init__("dummy")
@@ -300,22 +305,22 @@ def test_layered_context_prefers_retrieved_snippets(tmp_path):
     session.variables["retrieval_top_k"] = 2
     session.send_message("where is authentication token validated?")
 
-    assert "LAYER 4B — Retrieved workspace snippets:" in provider.last_system_prompt
-    assert "auth.py" in provider.last_system_prompt
+    # L4B should NOT be in the system prompt anymore.
+    assert "LAYER 4B" not in provider.last_system_prompt
+    # But L5 (current turn) should still be there.
+    assert "LAYER 5" in provider.last_system_prompt
 
 
 def test_layer_budgets_eviction_policies():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.variables["conversation_summary_char_limit"] = 20
-    session.variables["retrieval_context_char_limit"] = 30
     sm.conversation_summary = "0123456789abcdefghijklmnopqrstuvwxyz"
-    session._pending_retrieved_context = "x" * 200
     layered = session._inject_hierarchical_context("system instruction")
 
     assert "[budget: 20 chars | eviction: keep newest]" in layered
-    assert "LAYER 4B — Retrieved workspace snippets:" in layered
-    assert "[budget: 30 chars | eviction: drop lowest-ranked snippets]" in layered
+    # L4B removed — no longer in layered output.
+    assert "LAYER 4B" not in layered
 
 
 def test_prepare_runtime_history_keeps_signed_tool_messages():

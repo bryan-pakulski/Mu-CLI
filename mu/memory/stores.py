@@ -48,11 +48,29 @@ class MemoryEntry:
 class BaseNoteStore:
     title = "Notes"
 
-    def __init__(self, max_entries: int = 64, summary_char_limit: int = 2_000) -> None:
+    # Default kind weights for eviction scoring. Higher weight = kept longer.
+    # Decisions (architectural choices, design rationale) are most valuable.
+    # Findings (root causes, verified facts) are next.
+    # Observations (general notes) are lowest priority.
+    DEFAULT_EVIC_KIND_WEIGHTS: Dict[str, float] = {
+        "decision": 3.0,
+        "finding": 2.0,
+        "observation": 1.0,
+    }
+
+    def __init__(
+        self,
+        max_entries: int = 64,
+        summary_char_limit: int = 2_000,
+        eviction_kind_weights: Dict[str, float] | None = None,
+    ) -> None:
         self.max_entries = max_entries
         self.summary_char_limit = summary_char_limit
         self.entries: List[MemoryEntry] = []
         self._next_id = 1
+        self.eviction_kind_weights = eviction_kind_weights or dict(
+            self.DEFAULT_EVIC_KIND_WEIGHTS
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -175,11 +193,29 @@ class BaseNoteStore:
             lines.append(f"#{entry.id} tags={tags} source={source} :: {entry.content}")
         return "\n".join(lines)
 
+    def _eviction_score(self, entry: MemoryEntry) -> float:
+        """Score an entry for eviction. Lower score = evicted first.
+
+        Combines hits (access frequency) with kind weight (semantic
+        importance). Uses (hits + 1) so that kind weight matters even
+        for newly-created entries with 0 hits. A decision with 0 hits
+        scores 3.0; an observation with 0 hits scores 1.0. This means
+        decisions always survive longer than observations at the same
+        access frequency.
+        """
+        kind_weight = self.eviction_kind_weights.get(entry.kind, 1.0)
+        return float(entry.hits + 1) * kind_weight
+
     def _enforce_limit(self) -> None:
         if len(self.entries) <= self.max_entries:
             return
 
-        self.entries.sort(key=lambda entry: (entry.hits, entry.updated_at))
+        # Kind-aware eviction: sort by eviction score (lowest evicted first).
+        # Falls back to updated_at as a tiebreaker — older entries evicted
+        # before newer ones with the same score.
+        self.entries.sort(
+            key=lambda entry: (self._eviction_score(entry), entry.updated_at)
+        )
         while len(self.entries) > self.max_entries:
             self.entries.pop(0)
 
@@ -187,6 +223,12 @@ class BaseNoteStore:
 class TaskMemoryStore(BaseNoteStore):
     title = "In-Task Memory"
 
+    def __init__(self, max_entries: int = 1024, summary_char_limit: int = 16_000) -> None:
+        super().__init__(max_entries=max_entries, summary_char_limit=summary_char_limit)
+
 
 class ScratchpadStore(BaseNoteStore):
     title = "Turn Scratchpad"
+
+    def __init__(self, max_entries: int = 256, summary_char_limit: int = 8_000) -> None:
+        super().__init__(max_entries=max_entries, summary_char_limit=summary_char_limit)

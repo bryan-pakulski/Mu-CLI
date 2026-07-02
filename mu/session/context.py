@@ -11,7 +11,7 @@ sending to the provider:
   * `inject_hierarchical_context(session, system_prompt)` — assemble
     the full layered system prompt: time prelude → LAYER 1
     (workspace files) → LAYER 1B (skills) → LAYER 2 (summary) →
-    LAYER 3 (active goal) → LAYER 4B (retrieved snippets) →
+    LAYER 3 (active goal) →
     LAYER 5 (current turn). Per-layer
     budgets + eviction policies are surfaced inline so they show up
     verbatim in `/memory list L*`.
@@ -19,7 +19,7 @@ sending to the provider:
 These helpers delegate to other session methods that stay on the
 `Session` class: `_build_active_goal_context`, `_build_skills_block`.
 They also read `session.session_manager.conversation_summary`
-and `session._pending_retrieved_context` for the L2 and L4B blocks.
+and `session.session_manager.conversation_summary` for the L2 block.
 
 Tests: `tests/test_workspace_context_files.py` (LAYER 1),
 `tests/test_skills.py` (LAYER 1B injection),
@@ -53,7 +53,7 @@ def build_workspace_context_files(session: Any) -> str:
         return ""
     budget = max(
         0,
-        int(session.variables.get("workspace_context_max_chars", 8192) or 8192),
+        int(session.variables.get("workspace_context_max_chars", 16384) or 16384),
     )
     if budget == 0:
         return ""
@@ -100,7 +100,6 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
       L1B Installed skills (compact index or full bodies)
       L2  Conversation summary
       L3  Active task plan / current goal
-      L4B Retrieved workspace snippets
       L5  Current-turn marker (telling the model to prioritize the
           live user message + current-turn tool results)
     """
@@ -117,8 +116,8 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
     summary_limit = max(
         0,
         int(
-            session.variables.get("conversation_summary_char_limit", 8000)
-            or 8000
+            session.variables.get("conversation_summary_char_limit", 24000)
+            or 12000
         ),
     )
     summary = str(
@@ -141,7 +140,7 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
         ws_limit = max(
             0,
             int(
-                session.variables.get("workspace_context_max_chars", 8192)
+                session.variables.get("workspace_context_max_chars", 16384)
                 or 8192
             ),
         )
@@ -172,24 +171,8 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
         layers.append(
             "LAYER 3 — Active task plan / current goal:\n" + goal_context
         )
-    retrieved_context = str(
-        getattr(session, "_pending_retrieved_context", "") or ""
-    ).strip()
-    if retrieved_context:
-        retrieval_limit = max(
-            1,
-            int(
-                session.variables.get("retrieval_context_char_limit", 5000)
-                or 5000
-            ),
-        )
-        if len(retrieved_context) > retrieval_limit:
-            retrieved_context = retrieved_context[:retrieval_limit].rstrip()
-        layers.append(
-            "LAYER 4B — Retrieved workspace snippets:\n"
-            f"[budget: {retrieval_limit} chars | eviction: drop lowest-ranked snippets]\n"
-            + retrieved_context
-        )
+    # L4B auto-retrieval removed — model uses retrieve_relevant_context
+    # tool on demand instead of pre-injected snippets.
 
     layers.append(
         "LAYER 5 — Current turn:\n"

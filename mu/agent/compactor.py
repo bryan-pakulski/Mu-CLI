@@ -22,6 +22,8 @@ from .hooks import HookContext, HookRegistry, HookResult, HookSpec, default_regi
 
 logger = logging.getLogger("mucli")
 
+from utils.config import _DEFAULT_CONTEXT_TOKEN_LIMIT
+
 
 def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     # `run_turn` calls `roll_history_summary_to_token_budget()` once
@@ -61,7 +63,13 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     else:
         try:
             context_limit = max(
-                1024, int(variables.get("context_token_limit", 256000) or 256000)
+                1024,
+                int(
+                    variables.get(
+                        "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
+                    )
+                    or _DEFAULT_CONTEXT_TOKEN_LIMIT
+                ),
             )
         except (TypeError, ValueError):
             return None

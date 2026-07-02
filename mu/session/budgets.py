@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.config import _DEFAULT_CONTEXT_TOKEN_LIMIT
+
 
 def resolve_context_limit(session: Any) -> int:
     """Pick the smaller of (user-set `context_token_limit`, real
@@ -36,7 +38,10 @@ def resolve_context_limit(session: Any) -> int:
     user_limit = max(
         1024,
         int(
-            session.variables.get("context_token_limit", 256000) or 256000
+            session.variables.get(
+                "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
+            )
+            or _DEFAULT_CONTEXT_TOKEN_LIMIT
         ),
     )
     try:

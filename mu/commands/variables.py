@@ -48,6 +48,11 @@ LAYER_BUDGET_VARS: Dict[str, Tuple[str, str, str]] = {
         "Active goal",
         "Feature/task status + scratchpad snapshot",
     ),
+    "L4B": (
+        "retrieval_context_char_limit",
+        "Retrieved snippets",
+        "Semantic workspace retrieval context",
+    ),
 }
 
 
@@ -327,6 +332,12 @@ def set_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
     _persist(session)
     _sync_provider_if_needed(session, key)
     _refresh_hud(session)
+    # When context_token_limit changes, reratio all per-layer char budgets
+    # so the layers scale proportionally with the new global cap.
+    if key == "context_token_limit":
+        from utils.config import reratio_layer_budgets
+
+        reratio_layer_budgets(session)
     casted = session.variables[key]
     _emit(
         session,
@@ -405,6 +416,12 @@ def unset_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
     _persist(session)
     _sync_provider_if_needed(session, key)
     _refresh_hud(session)
+    # When context_token_limit is reset, reratio all per-layer char budgets
+    # so the layers scale proportionally with the restored global cap.
+    if key == "context_token_limit":
+        from utils.config import reratio_layer_budgets
+
+        reratio_layer_budgets(session)
     return CommandResult(
         ok=True,
         message=f"Unset variable: {key}",

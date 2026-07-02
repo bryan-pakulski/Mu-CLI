@@ -168,8 +168,12 @@ VARIABLE_SCHEMA = {
         # Global cap on total prompt tokens (sum of all 7 layers + history).
         # The compactor reserves headroom for non-L5 layers before deciding
         # how much room L5 (conversation history) gets.
+        #
+        # When this changes via /set, reratio_layer_budgets() recomputes
+        # the per-layer char budgets proportionally (see
+        # compute_layer_char_budgets above).
         "type": int,
-        "default": 256000,
+        "default": _DEFAULT_CONTEXT_TOKEN_LIMIT,
     },
     "context_trim_threshold": {
         # Fraction of the global cap above which compaction kicks in.
@@ -213,9 +217,10 @@ VARIABLE_SCHEMA = {
     # ----- LAYER 1 — Workspace context files -----
     "workspace_context_max_chars": {
         # Char budget for LAYER 1 (workspace files like AGENTS.md, CLAUDE.md,
-        # .mu/CONTEXT.md per attached folder).
+        # .mu/CONTEXT.md per attached folder). Scales with context_token_limit
+        # via compute_layer_char_budgets; never drops below LAYER_CHAR_FLOORS.
         "type": int,
-        "default": 16384,
+        "default": _LAYER_CHAR_DEFAULTS["workspace_context_max_chars"],
     },
     "workspace_context_files": {
         # Comma-separated list of filenames to auto-load from each attached
@@ -227,29 +232,31 @@ VARIABLE_SCHEMA = {
     "skills_max_chars": {
         # Total budget for the AVAILABLE SKILLS block injected as LAYER 1B
         # of the system prompt. 0 disables skills entirely.
+        # Scales with context_token_limit via compute_layer_char_budgets.
         "type": int,
-        "default": 6144,
+        "default": _LAYER_CHAR_DEFAULTS["skills_max_chars"],
     },
     # ----- LAYER 2 — Conversation summary -----
     "conversation_summary_char_limit": {
         # Char budget for LAYER 2 (rolling summary of older history).
         # Clipped from the tail when exceeded so the most recent summary
-        # batches survive.
+        # batches survive. Scales with context_token_limit.
         "type": int,
-        "default": 24000,
+        "default": _LAYER_CHAR_DEFAULTS["conversation_summary_char_limit"],
     },
     # ----- LAYER 3 — Active goal context -----
     "active_goal_context_char_limit": {
         # Char budget for LAYER 3 (feature/task status + scratchpad snapshot).
+        # Scales with context_token_limit via compute_layer_char_budgets.
         "type": int,
-        "default": 4000,
+        "default": _LAYER_CHAR_DEFAULTS["active_goal_context_char_limit"],
     },
     # ----- LAYER 4B — Retrieved snippets -----
     "retrieval_context_char_limit": {
         # Char budget for LAYER 4B (semantic-retrieval snippets injected
-        # for the current turn).
+        # for the current turn). Scales with context_token_limit.
         "type": int,
-        "default": 10000,
+        "default": _LAYER_CHAR_DEFAULTS["retrieval_context_char_limit"],
     },
     "retrieval_top_k": {
         # Number of semantic-retrieval hits to include in LAYER 4B.

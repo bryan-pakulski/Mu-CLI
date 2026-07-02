@@ -3,7 +3,7 @@ import json
 import os
 import time
 
-from utils.config import HISTORY_DIR
+from utils.config import HISTORY_DIR, _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 
 def collect_feature_progress(session):
@@ -85,7 +85,7 @@ def collect_runtime_metrics(session):
     if anchor > hist_len:
         anchor = 0
     active_turns = max(0, hist_len - anchor)
-    context_limit = _max_int(session.variables.get("context_token_limit", 256000))
+    context_limit = _max_int(session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT))
     if hasattr(session.session_manager, "estimate_runtime_history_tokens"):
         context_tokens = int(session.session_manager.estimate_runtime_history_tokens() or 0)
     else:
@@ -291,20 +291,57 @@ def collect_context_layers(session):
         model = ""
 
     # --- char-budgeted layers (the variable schema names them in chars) ---
+    from utils.config import LAYER_CHAR_FLOORS
+
     workspace_limit_chars = max(
-        1, int(session.variables.get("workspace_context_max_chars", 8192) or 8192)
+        1,
+        int(
+            session.variables.get(
+                "workspace_context_max_chars",
+                LAYER_CHAR_FLOORS["workspace_context_max_chars"],
+            )
+            or LAYER_CHAR_FLOORS["workspace_context_max_chars"]
+        ),
     )
     skills_limit_chars = max(
-        1, int(session.variables.get("skills_max_chars", 6144) or 6144)
+        1,
+        int(
+            session.variables.get(
+                "skills_max_chars",
+                LAYER_CHAR_FLOORS["skills_max_chars"],
+            )
+            or LAYER_CHAR_FLOORS["skills_max_chars"]
+        ),
     )
     summary_limit_chars = max(
-        1, int(session.variables.get("conversation_summary_char_limit", 8000) or 8000)
+        1,
+        int(
+            session.variables.get(
+                "conversation_summary_char_limit",
+                LAYER_CHAR_FLOORS["conversation_summary_char_limit"],
+            )
+            or LAYER_CHAR_FLOORS["conversation_summary_char_limit"]
+        ),
     )
     goal_limit_chars = max(
-        1, int(session.variables.get("active_goal_context_char_limit", 4000) or 4000)
+        1,
+        int(
+            session.variables.get(
+                "active_goal_context_char_limit",
+                LAYER_CHAR_FLOORS["active_goal_context_char_limit"],
+            )
+            or LAYER_CHAR_FLOORS["active_goal_context_char_limit"]
+        ),
     )
     retrieval_limit_chars = max(
-        1, int(session.variables.get("retrieval_context_char_limit", 5000) or 5000)
+        1,
+        int(
+            session.variables.get(
+                "retrieval_context_char_limit",
+                LAYER_CHAR_FLOORS["retrieval_context_char_limit"],
+            )
+            or LAYER_CHAR_FLOORS["retrieval_context_char_limit"]
+        ),
     )
 
     # --- materialize the layer bodies the same way the prompt builder does ---
@@ -334,7 +371,13 @@ def collect_context_layers(session):
         history_tokens = 0
 
     history_limit_tokens = max(
-        1, int(session.variables.get("context_token_limit", 256000) or 256000)
+        1,
+        int(
+            session.variables.get(
+                "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
+            )
+            or _DEFAULT_CONTEXT_TOKEN_LIMIT
+        ),
     )
 
     # L0 — base system prompt (persona + agentic harness + mode workflow).

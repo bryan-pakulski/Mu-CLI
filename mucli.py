@@ -29,7 +29,7 @@ from mu.feature.engine import (
 )
 from mu.tools._dispatcher import execute_tool
 from mu.ui.rich_ui import RichUI
-from utils.config import AGENT_MODE_METADATA
+from utils.config import AGENT_MODE_METADATA, _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 console = Console()
 
@@ -703,7 +703,7 @@ def print_splash(session):
     # cap, not only when conversation history gets long.
     from utils.runtime_metrics import estimate_active_context_tokens
 
-    context_limit = int(session.variables.get("context_token_limit", 256000) or 256000)
+    context_limit = int(session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT) or _DEFAULT_CONTEXT_TOKEN_LIMIT)
     trim_threshold = float(session.variables.get("context_trim_threshold", 0.85) or 0.85)
     trim_threshold = max(0.10, min(trim_threshold, 1.0))
     context_tokens = int(estimate_active_context_tokens(session) or 0)

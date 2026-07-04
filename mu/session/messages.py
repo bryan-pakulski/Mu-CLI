@@ -290,7 +290,30 @@ def prepare_runtime_history(
             for idx in sorted(protected)
             if idx < start_index
         ]
-        recent_history = protected_below_anchor + session_manager.history[start_index:]
+        if protected_below_anchor:
+            # Wrap protected messages in a labelled envelope so the model
+            # understands these are intentionally preserved, not stale or
+            # duplicated — they were excluded from L2 summarisation and
+            # re-injected verbatim to keep important context (original user
+            # request, key decisions) alive through compaction.
+            preserved_marker = {
+                "role": "user",
+                "parts": [{
+                    "type": "text",
+                    "text": (
+                        "[PRESERVED CONTEXT — These messages are kept verbatim "
+                        "and protected from summarisation. They are NOT stale "
+                        "or duplicated; they are intentionally preserved to "
+                        "maintain important context through compaction.]"
+                    ),
+                }],
+            }
+            recent_history = (
+                [preserved_marker] + protected_below_anchor
+                + session_manager.history[start_index:]
+            )
+        else:
+            recent_history = session_manager.history[start_index:]
     else:
         recent_history = session_manager.history[start_index:]
     tool_window = max(0, int(session.variables.get("tool_context_window", 6)))

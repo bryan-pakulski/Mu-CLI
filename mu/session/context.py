@@ -184,7 +184,9 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
     layers.append(
         "LAYER 5 — Current turn:\n"
         "Always prioritize the live user message and current turn tool "
-        "results over older context."
+        "results over older context. "
+        "Some older messages marked [PRESERVED CONTEXT] are kept verbatim "
+        "and protected from summarisation — they are NOT stale or duplicated."
     )
 
     if not layers:

@@ -290,8 +290,25 @@ VARIABLE_SCHEMA = {
     },
     "loop_detection_repeat_threshold": {
         "type": int,
-        "default": 3,
+        "default": 5,
     },
+    # ----- TTS / STT (audio) -----
+    "tts_enabled": {
+        "type": bool,
+        "default": True,
+    },  # Show TTS speak button on assistant messages
+    "tts_voice": {
+        "type": str,
+        "default": "af_heart",
+    },  # Kokoro voice name (af_heart, af_sky, etc.)
+    "stt_enabled": {
+        "type": bool,
+        "default": True,
+    },  # Show mic button in composer for voice input
+    "stt_model": {
+        "type": str,
+        "default": "base",
+    },  # faster-whisper model size: tiny|base|small|medium|large-v3
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}

@@ -126,6 +126,13 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
     if summary_limit and len(summary) > summary_limit:
         summary = summary[-summary_limit:].lstrip()
 
+    # Prepend pinned session_goal to L2 summary as a durable preamble.
+    # This ensures the goal survives compaction even if L3 is empty or
+    # the session_goal variable is cleared at end of turn.
+    session_goal = str(session.variables.get("session_goal", "") or "").strip()
+    if session_goal and summary:
+        summary = f"[Active Goal: {session_goal}]\n\n{summary}"
+
     goal_context = session._build_active_goal_context()
     # L4 (Recent tool activity) removed from system prompt — tool activity
     # now lives in messages: verbatim for recent calls, compressed with

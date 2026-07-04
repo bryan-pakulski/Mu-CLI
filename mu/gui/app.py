@@ -32,6 +32,7 @@ from .bus import EventBus
 from .deps import require_session  # re-exported
 from .prompts import PromptStore
 from .routers import (
+    audio as audio_router,
     chat,
     debug as debug_router,
     feature as feature_router,
@@ -166,6 +167,7 @@ def create_app(
     app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
     app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
+    app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])
     app.include_router(chat.events_router, tags=["events"])
 
     @app.get("/", response_class=HTMLResponse)

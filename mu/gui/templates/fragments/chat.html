@@ -7,6 +7,18 @@
                 <div :class="'msg ' + t.role + (t.streaming ? ' streaming' : '')">
                     <div class="role" x-text="t.role"></div>
                     <div class="body" x-html="t.html"></div>
+                    <!-- TTS speak button (assistant messages only, not while streaming) -->
+                    <div class="msg-actions" x-show="t.role === 'assistant' && !t.streaming">
+                        <button class="msg-action-btn"
+                                @click="$store.tts.speak(t.text || '', t.id)"
+                                :class="{ 'is-loading': $store.tts.isLoading(t.id), 'is-speaking': $store.tts.isSpeaking(t.id) }"
+                                :title="$store.tts.isSpeaking(t.id) ? 'Stop audio' : 'Speak this message'"
+                                x-show="$store.tts.enabled">
+                            <span x-show="!$store.tts.isLoading(t.id) && !$store.tts.isSpeaking(t.id)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6v4h2l3 3V3L4 6H2z"/><path d="M9 5.5c1 .5 1.5 1.5 1.5 2.5S10 10 9 10.5"/><path d="M11 4c1.5 .75 2.5 2 2.5 4s-1 3.25-2.5 4"/></svg></span>
+                            <span x-show="$store.tts.isLoading(t.id)" class="thinking-dots"><span></span><span></span><span></span></span>
+                            <span x-show="$store.tts.isSpeaking(t.id)"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg></span>
+                        </button>
+                    </div>
                 </div>
             </template>
 
@@ -360,6 +372,16 @@
                     ta.focus();
                 })"
                 title="Attach a file">📎</button>
+        <!-- STT mic button (only when stt_enabled) -->
+        <button type="button" class="icon-btn mic-btn"
+                x-show="$store.stt.enabled"
+                @click="$store.stt.toggleRecording()"
+                :class="{ recording: $store.stt.recording, loading: $store.stt.loading }"
+                :title="$store.stt.recording ? 'Stop recording' : 'Voice input'">
+            <span x-show="!$store.stt.recording && !$store.stt.loading"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="1.5" width="4" height="8" rx="2"/><path d="M3 8c0 2.8 2.2 5 5 5s5-2.2 5-5"/><line x1="8" y1="13" x2="8" y2="15.5"/><line x1="5.5" y1="15.5" x2="10.5" y2="15.5"/></svg></span>
+            <span x-show="$store.stt.recording" class="rec-dot"></span>
+            <span x-show="$store.stt.loading" class="thinking-dots"><span></span><span></span><span></span></span>
+        </button>
         <button type="submit" class="primary send-btn">send</button>
     </form>
     <div class="hint">

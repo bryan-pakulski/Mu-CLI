@@ -391,11 +391,18 @@ class Session:
         ).strip()
         if not summary:
             return system_prompt
+        # Prepend the pinned session_goal as a preamble to the L2 summary.
+        # This ensures the goal survives compaction even if L3 is small
+        # or the session_goal variable is cleared at end of turn.
+        session_goal = str(self.variables.get("session_goal", "") or "").strip()
+        preamble = ""
+        if session_goal:
+            preamble = f"[Active Goal: {session_goal}]\n\n"
         return (
             f"{system_prompt}\n\n"
             "A rolling summary of older conversation history is available below. "
             "Use it for long-term continuity before re-reading or re-deriving prior work.\n"
-            f"{summary}"
+            f"{preamble}{summary}"
         )
 
     def _build_active_goal_context(self) -> str:
@@ -1169,6 +1176,14 @@ class Session:
             return run_turn(self, text)
         finally:
             self._strip_session_goal_after_turn()
+            # Clean up turn-prompt protection now that the turn is over.
+            # The turn's starting prompt was protected during the active
+            # turn; after the turn, unprotect it if it's not otherwise
+            # worthy of long-term protection (e.g. short/slash commands).
+            turn_idx = getattr(self, "_current_turn_start_index", None)
+            if turn_idx is not None:
+                self.session_manager._cleanup_protected(turn_idx)
+                self._current_turn_start_index = None
 
     def _strip_session_goal_after_turn(self) -> None:
         """Clear `session_goal` at the end of every agent turn.

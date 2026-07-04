@@ -2257,6 +2257,182 @@ document.addEventListener("alpine:init", () => {
                 .filter(g => g.variables.length > 0);
         },
     });
+
+    // ── TTS (text-to-speech) ─────────────────────────────────────
+    Alpine.store("tts", {
+        enabled: false,
+        playing: false,
+        loading: false,
+        currentMessageId: null,
+        _audio: null,
+        _voice: "",
+
+        async load() {
+            try {
+                const r = await fetch("/api/variables");
+                const d = await r.json();
+                for (const g of (d.groups || [])) {
+                    for (const v of (g.variables || [])) {
+                        if (v.key === "tts_enabled") { this.enabled = !!v.value; }
+                        if (v.key === "tts_voice") { this._voice = v.value || ""; }
+                    }
+                }
+            } catch (e) { /* non-fatal */ }
+        },
+
+        async speak(text, messageId) {
+            if (this.playing && this.currentMessageId === messageId) {
+                this.stop();
+                return;
+            }
+            this.stop();
+            this.loading = true;
+            this.currentMessageId = messageId;
+            try {
+                const resp = await fetch("/api/audio/tts", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ text, voice: this._voice || undefined }),
+                });
+                if (!resp.ok) {
+                    const d = await resp.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || `TTS failed (${resp.status})`, "error");
+                    this.loading = false;
+                    this.currentMessageId = null;
+                    return;
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                this._audio = new Audio(url);
+                this._audio.onended = () => { this._reset(); };
+                this._audio.onerror = () => {
+                    Alpine.store("toast").show("Audio playback failed", "error");
+                    this._reset();
+                };
+                this.loading = false;
+                this.playing = true;
+                await this._audio.play();
+            } catch (e) {
+                Alpine.store("toast").show(`TTS error: ${e}`, "error");
+                this._reset();
+            }
+        },
+
+        stop() {
+            if (this._audio) {
+                this._audio.pause();
+                this._audio.currentTime = 0;
+                URL.revokeObjectURL(this._audio.src);
+                this._audio = null;
+            }
+            this._reset();
+        },
+
+        _reset() {
+            this.playing = false;
+            this.loading = false;
+            this.currentMessageId = null;
+        },
+
+        isSpeaking(messageId) {
+            return this.playing && this.currentMessageId === messageId;
+        },
+
+        isLoading(messageId) {
+            return this.loading && this.currentMessageId === messageId;
+        },
+    });
+
+    // ── STT (speech-to-text) ──────────────────────────────────────
+    Alpine.store("stt", {
+        enabled: false,
+        recording: false,
+        loading: false,
+        _mediaRecorder: null,
+        _chunks: [],
+
+        async load() {
+            try {
+                const r = await fetch("/api/variables");
+                const d = await r.json();
+                for (const g of (d.groups || [])) {
+                    for (const v of (g.variables || [])) {
+                        if (v.key === "stt_enabled") { this.enabled = !!v.value; }
+                    }
+                }
+            } catch (e) { /* non-fatal */ }
+        },
+
+        async toggleRecording() {
+            if (this.recording) {
+                this.stopRecording();
+                return;
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                Alpine.store("toast").show("Microphone not supported in this browser", "error");
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                this._chunks = [];
+                this._mediaRecorder = new MediaRecorder(stream);
+                this._mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) this._chunks.push(e.data);
+                };
+                this._mediaRecorder.onstop = () => {
+                    this._sendForTranscription();
+                    stream.getTracks().forEach(t => t.stop());
+                };
+                this._mediaRecorder.start();
+                this.recording = true;
+            } catch (e) {
+                Alpine.store("toast").show(`Microphone access denied: ${e}`, "error");
+            }
+        },
+
+        stopRecording() {
+            if (this._mediaRecorder && this._mediaRecorder.state !== "inactive") {
+                this._mediaRecorder.stop();
+            }
+            this.recording = false;
+        },
+
+        async _sendForTranscription() {
+            if (this._chunks.length === 0) return;
+            this.loading = true;
+            try {
+                const blob = new Blob(this._chunks, { type: this._mediaRecorder.mimeType || "audio/webm" });
+                const formData = new FormData();
+                formData.append("audio", blob, "recording.webm");
+                const resp = await fetch("/api/audio/stt", {
+                    method: "POST",
+                    body: formData,
+                });
+                if (!resp.ok) {
+                    const d = await resp.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || `STT failed (${resp.status})`, "error");
+                    this.loading = false;
+                    return;
+                }
+                const data = await resp.json();
+                const text = (data.text || "").trim();
+                if (text) {
+                    const ta = document.querySelector(".composer textarea");
+                    if (ta) {
+                        const prefix = ta.value && !ta.value.endsWith(" ") && !ta.value.endsWith("\n") ? " " : "";
+                        ta.value += prefix + text;
+                        ta.dispatchEvent(new Event("input"));
+                        ta.focus();
+                    }
+                }
+            } catch (e) {
+                Alpine.store("toast").show(`STT error: ${e}`, "error");
+            } finally {
+                this.loading = false;
+                this._chunks = [];
+            }
+        },
+    });
 });
 
 function escapeHtml(s) {
@@ -2814,6 +2990,8 @@ document.addEventListener("DOMContentLoaded", () => {
     bootSSE();
     Alpine.store("chat").loadHistory();
     Alpine.store("sessions").load();
+    Alpine.store("tts").load();
+    Alpine.store("stt").load();
     // mode.load() preloads the active mode's panel store via panelModes —
     // the panel populates the instant the user lands in a panel mode,
     // no extra mode-flip round-trip needed.

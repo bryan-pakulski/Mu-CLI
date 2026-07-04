@@ -402,7 +402,16 @@ class HistoryMixin:
         if target_anchor <= self.summary_anchor:
             return False
 
-        entries_to_summarize = self.history[self.summary_anchor : target_anchor]
+        # Exclude protected messages from summarization — they stay
+        # verbatim in L5 even after the anchor advances past them.
+        # This preserves important context (initial user request, key
+        # decisions) through compaction without losing recent history.
+        protected = getattr(self, "protected_indices", set())
+        entries_to_summarize = [
+            msg
+            for idx, msg in enumerate(self.history[self.summary_anchor : target_anchor])
+            if (self.summary_anchor + idx) not in protected
+        ]
 
         # LLM-generated structured summary (Claude Code / Pi style).
         # Falls back to mechanical truncation on any failure.

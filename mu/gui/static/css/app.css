@@ -2879,6 +2879,68 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 }
 .empty-state p { font-size: 13px; color: var(--text-dimmer); }
 
+/* ------------------------------------------------------------ message actions (TTS) */
+
+.msg-actions {
+    margin-top: var(--space-2);
+    display: flex;
+    gap: var(--space-1);
+}
+
+.msg-action-btn {
+    background: var(--bg-lift);
+    border: 0;
+    border-radius: var(--radius);
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1;
+    transition: background 0.12s, color 0.12s;
+}
+.msg-action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+.msg-action-btn.is-loading {
+    opacity: 0.6;
+    cursor: wait;
+}
+.msg-action-btn.is-speaking {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+/* ------------------------------------------------------------ mic button (STT) */
+
+.mic-btn.recording {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.rec-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: inline-block;
+    animation: rec-pulse 1s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.mic-btn.loading {
+    opacity: 0.6;
+    cursor: wait;
+}
+
 /* ------------------------------------------------------------ composer */
 
 .composer {

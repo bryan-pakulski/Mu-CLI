@@ -15,3 +15,7 @@ fastapi
 uvicorn[standard]
 jinja2
 sse-starlette
+python-multipart
+kokoro
+faster-whisper
+soundfile

@@ -373,6 +373,14 @@ def run_turn(session, text):
     # Mode-agnostic: every turn, mirror the pinned session_goal into
     # task_memory so it survives history compaction.
     session._ensure_session_goal_persistence()
+    # Auto-pin session_goal if unset and text is a substantial user
+    # message (not a slash command, not empty, >10 chars).
+    # This ensures L3 always has a goal anchor from the first meaningful
+    # user message without requiring /goal to be set manually.
+    if not str(session.variables.get("session_goal", "") or "").strip():
+        raw_text = str(text or "").strip()
+        if raw_text and len(raw_text) > 10 and not raw_text.startswith("/"):
+            session.variables["session_goal"] = raw_text
     if effective_text:
         parts.append({"type": "text", "text": effective_text})
 
@@ -498,9 +506,15 @@ def run_turn(session, text):
 
     initial_history_len = len(session.session_manager.history)
     session.session_manager.history.append(new_user_message)
+    turn_start_index = len(session.session_manager.history) - 1
+    # Store on session so send_message's finally block can call _cleanup_protected
+    # after the turn ends (unprotect the turn prompt if it's not otherwise worthy).
+    session._current_turn_start_index = turn_start_index
+    # Mark important user messages as protected from compaction.
+    # The turn's starting prompt is always protected during this turn.
+    session.session_manager._maybe_protect(turn_start_index, "user", effective_text, is_turn_prompt=True)
     session.session_manager.save_history()
     session.staged_files = []
-    turn_start_index = len(session.session_manager.history) - 1
 
     max_iterations = session.variables.get("max_iterations", 50)
     iteration = 0
@@ -519,7 +533,7 @@ def run_turn(session, text):
     )
     loop_detection_repeat_threshold = max(
         2,
-        int(session.variables.get("loop_detection_repeat_threshold", 3) or 3),
+        int(session.variables.get("loop_detection_repeat_threshold", 5) or 5),
     )
 
     while iteration < max_iterations:

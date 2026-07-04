@@ -59,6 +59,7 @@ class SessionManager(HistoryMixin):
         self.provider_config = {}
         self.collation_buffer = CollationBuffer()
         self.summary_anchor = 0
+        self.protected_indices: set[int] = set()
         self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
@@ -95,6 +96,7 @@ class SessionManager(HistoryMixin):
         self.history = []
         self.conversation_summary = ""
         self.summary_anchor = 0
+        self.protected_indices = set()
         self.provider_config = {}
         self.collation_buffer = CollationBuffer()
         self.folder_context = FolderContext()
@@ -129,6 +131,7 @@ class SessionManager(HistoryMixin):
                         data.get("conversation_summary", "") or ""
                     )
                     self.summary_anchor = data.get("summary_anchor", 0)
+                    self.protected_indices = set(data.get("protected_indices", []))
                     self.provider_config = data.get("provider_config", {})
                     self.collation_buffer = CollationBuffer.from_dict(
                         data.get("collation_buffer", {})
@@ -215,6 +218,67 @@ class SessionManager(HistoryMixin):
             return data.get("history", [])
         return []
 
+    # ----- Protected messages: key messages preserved through compaction -----
+    _PROTECTED_CAP = 20
+
+    def _maybe_protect(self, idx: int, role: str, text: str, *, is_turn_prompt: bool = False) -> None:
+        """Mark a history index as protected if it meets importance criteria.
+
+        Rules:
+        - No index is permanently protected — index 0 follows the same rules.
+        - The turn's starting prompt (is_turn_prompt=True) is always protected during active turn.
+        - Other user messages >50 chars and not starting with '/' are protected.
+        - Slash commands and short messages are NOT protected.
+        - After adding, enforce cap: if > _PROTECTED_CAP protected indices,
+          evict oldest (smallest idx), no special case for index 0.
+        - Call _cleanup_protected() at end of turn to unset turn-prompt
+          protections that are no longer needed.
+        """
+        if role != "user":
+            return
+        text = (text or "").strip()
+        # Index 0 is NOT permanently protected — it follows the same rules
+        # as any other message: protected during active turn (is_turn_prompt)
+        # or if substantial (>50 chars, not a /command). After the task/
+        # feature completes, index 0 can be wiped/summarized away.
+        if is_turn_prompt or (len(text) > 50 and not text.startswith("/")):
+            self.protected_indices.add(idx)
+        # Enforce cap with age-based eviction (keep newest, no special case)
+        self._enforce_protected_cap()
+
+    def _enforce_protected_cap(self) -> None:
+        """Evict oldest protected indices when count exceeds cap."""
+        while len(self.protected_indices) > self._PROTECTED_CAP:
+            evictable = sorted(self.protected_indices)
+            if evictable:
+                self.protected_indices.discard(evictable[0])
+            else:
+                break
+
+    def _cleanup_protected(self, turn_start_index: int) -> None:
+        """Clean up protected indices after a turn ends.
+
+        - Remove the turn-prompt protection (turn_start_index) if it's
+          not otherwise worthy of long-term protection (not a substantial
+          user message >50 chars).
+        - Index 0 is NOT specially protected — it follows the same rules.
+        - This keeps the protected set bounded: only genuinely important
+          messages survive across turns; the turn's starting prompt is
+          protected only while that turn is active.
+        """
+        # Check if the turn prompt qualifies for long-term protection
+        if turn_start_index < len(self.history):
+            msg = self.history[turn_start_index]
+            text = ""
+            for part in msg.get("parts", []):
+                if part.get("type") == "text":
+                    text = (part.get("text") or "").strip()
+                    break
+            if len(text) > 50 and not text.startswith("/"):
+                return  # qualifies on its own merits, keep protected
+        # Not otherwise worthy — unprotect the turn prompt
+        self.protected_indices.discard(turn_start_index)
+
     def save_history(self, folder_context_obj=None):
         if not self.current_session_name:
             logger.debug("save_history skipped — no session name set")
@@ -236,6 +300,7 @@ class SessionManager(HistoryMixin):
                 "history": self.history,
                 "conversation_summary": self.conversation_summary,
                 "summary_anchor": self.summary_anchor,
+                "protected_indices": sorted(self.protected_indices),
                 "provider_config": self.provider_config,
                 "folder_context": self.folder_context.to_dict(),
                 "variables": self.variables,

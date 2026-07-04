@@ -278,7 +278,21 @@ def prepare_runtime_history(
             break
         running_tokens += next_tokens
         start_index = next_index
-    recent_history = session_manager.history[start_index:]
+    # Inject protected messages that are below the summary anchor back
+    # into the runtime history.  These messages were excluded from LLM
+    # summarisation in roll_history_summary() and must appear verbatim
+    # in L5 so the model retains the original user request and key
+    # decisions even after compaction has advanced the anchor past them.
+    protected = getattr(session_manager, "protected_indices", set())
+    if protected:
+        protected_below_anchor = [
+            session_manager.history[idx]
+            for idx in sorted(protected)
+            if idx < start_index
+        ]
+        recent_history = protected_below_anchor + session_manager.history[start_index:]
+    else:
+        recent_history = session_manager.history[start_index:]
     tool_window = max(0, int(session.variables.get("tool_context_window", 6)))
 
     if turn_start_index is None:

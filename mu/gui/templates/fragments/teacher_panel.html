@@ -9,7 +9,7 @@
         <p class="muted">In chat: <code>/teach new &lt;subject&gt;</code> to start one,
         or <code>/teach load &lt;id&gt;</code> to resume.</p>
         <div class="teacher-courses-list" x-show="($store.teacher.courses || []).length">
-            <h4>courses on disk</h4>
+            <h4 class="label-mono">courses on disk</h4>
             <template x-for="c in $store.teacher.courses" :key="c.course_id">
                 <div class="teacher-course-row"
                      @click="$store.teacher.switchCourse(c.course_id)"

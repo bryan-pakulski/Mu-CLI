@@ -27,7 +27,7 @@
 
         <!-- workspace -->
         <section x-show="$store.inspector.tab === 'workspace'">
-            <h4 title="Folders attached to the active session. The agent indexes them for retrieval and respects their .gitignore.">attached folders</h4>
+            <h4 class="label-mono" title="Folders attached to the active session. The agent indexes them for retrieval and respects their .gitignore.">attached folders</h4>
             <div class="kv-list" x-show="$store.inspector.workspace.folders.length">
                 <template x-for="p in $store.inspector.workspace.folders" :key="p">
                     <div class="kv-row">
@@ -42,7 +42,7 @@
                  title="No folders attached — the agent has nothing indexed for this session yet.">
                 no folders attached
             </div>
-            <h4 style="margin-top:24px;"
+            <h4 class="label-mono" style="margin-top:24px;"
                 title="Attach a folder so the agent can read its files. Absolute paths or ~-relative paths both work.">attach</h4>
             <form @submit.prevent="$store.inspector.addWorkspace()" class="inline-form">
                 <input type="text"
@@ -163,17 +163,17 @@
                     <div class="stat-key">mode</div>
                     <div class="stat-val mono" x-text="$store.inspector.stats?.agent_mode"></div>
                 </div>
-                <h4 style="margin-top:20px;">tokens</h4>
+                <h4 class="label-mono" style="margin-top:20px;">tokens</h4>
                 <div class="stat-grid">
                     <div><div class="stat-key">input</div><div class="stat-val mono"  x-text="$store.inspector.stats?.tokens?.input || 0"></div></div>
                     <div><div class="stat-key">output</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.output || 0"></div></div>
                     <div><div class="stat-key">total</div><div class="stat-val mono"  x-text="$store.inspector.stats?.tokens?.total || 0"></div></div>
                     <div><div class="stat-key">cached</div><div class="stat-val mono" x-text="$store.inspector.stats?.tokens?.cached || 0"></div></div>
                 </div>
-                <h4 style="margin-top:20px;">cost (estimate)</h4>
+                <h4 class="label-mono" style="margin-top:20px;">cost (estimate)</h4>
                 <div class="stat-val mono large"
                      x-text="'$' + (($store.inspector.stats?.estimated_cost_usd || 0).toFixed(4))"></div>
-                <h4 style="margin-top:20px;">other</h4>
+                <h4 class="label-mono" style="margin-top:20px;">other</h4>
                 <div class="stat-grid">
                     <div><div class="stat-key">history</div><div class="stat-val mono" x-text="$store.inspector.stats?.history_length"></div></div>
                     <div><div class="stat-key">task mem</div><div class="stat-val mono" x-text="$store.inspector.stats?.task_memory_size"></div></div>

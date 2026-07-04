@@ -94,7 +94,7 @@
     <aside class="sidebar" style="position:relative;">
         <div class="resize-handle-sidebar"
              @mousedown="$store.layout.startDrag('sidebar', $event)"></div>
-        <h3>Sessions</h3>
+        <h3 class="label-mono">Sessions</h3>
         <template x-for="s in $store.sessions.list" :key="s.name">
             <div class="nav-item"
                  :class="{

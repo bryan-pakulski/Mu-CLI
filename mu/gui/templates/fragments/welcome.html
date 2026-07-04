@@ -9,7 +9,7 @@
     </p>
 
     <div x-show="sessions.length">
-        <h4>Existing</h4>
+        <h4 class="label-mono">Existing</h4>
         <div class="session-list">
             <template x-for="s in sessions" :key="s.name">
                 <div class="row">
@@ -25,7 +25,7 @@
         </div>
     </div>
 
-    <h4>Create new</h4>
+    <h4 class="label-mono">Create new</h4>
     <form @submit.prevent="createSession()">
         <div class="form-row">
             <label>name</label>

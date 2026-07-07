@@ -539,6 +539,28 @@ def run_turn(session, text):
     while iteration < max_iterations:
         iteration += 1
         logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
+        # Subagent wrap-up reminder: fire 3 iterations before cap so the
+        # child consolidates findings instead of hitting the cap with
+        # all work lost. Injected once per run via _subagent_wrap_up_injected.
+        wrap_up_iter = getattr(session, "_subagent_wrap_up_iter", None)
+        if (
+            wrap_up_iter
+            and iteration >= wrap_up_iter
+            and not getattr(session, "_subagent_wrap_up_injected", False)
+        ):
+            session._subagent_wrap_up_injected = True
+            session.session_manager.history.append({
+                "role": "system",
+                "parts": [{"type": "text", "text": (
+                    "WRAP UP NOW: You are at iteration "
+                    f"{iteration}/{max_iterations}. Stop calling tools "
+                    "immediately. Consolidate all findings into a single "
+                    "final summary message. Do not call any more tools."
+                )}],
+            })
+            logger.info(
+                f"Subagent wrap-up reminder injected at iteration {iteration}/{max_iterations}"
+            )
         # Honor a hook abort raised in the previous iteration. The
         # in-flight provider call / tool dispatch from that iteration
         # has already finished and stored its results in history; we

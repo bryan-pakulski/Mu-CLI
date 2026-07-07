@@ -43,7 +43,62 @@ logger = logging.getLogger("mucli")
 
 MAX_SUBAGENT_DEPTH = 2
 
-_DEFAULT_MAX_ITERATIONS = 50
+_DEFAULT_MAX_ITERATIONS = 60
+_MIN_MAX_ITERATIONS = 30
+
+
+def _extract_partial_summary(child_sm) -> str:
+    """Mine a child SessionManager's history for partial findings.
+
+    When a sub-agent hits max_iterations or errors before producing a
+    final assistant response, its history still contains every tool
+    result and every intermediate assistant message it generated. This
+    function extracts those into a formatted summary so the parent gets
+    *something* useful instead of a placeholder that discards all work.
+
+    Returns a non-empty string if any assistant text or tool results
+    were found; empty string if the child did nothing at all.
+    """
+    if not child_sm or not child_sm.history:
+        return ""
+
+    parts: list[str] = []
+
+    for turn in child_sm.history:
+        role = turn.get("role", "")
+        for p in turn.get("parts", []):
+            ptype = p.get("type", "")
+            if ptype == "text" and p.get("text"):
+                text = p["text"].strip()
+                if not text:
+                    continue
+                # Skip pure tool-call narration lines ("Running tool: X")
+                if text.startswith("🔨 Running tool:"):
+                    continue
+                # Skip per-iteration token chatter
+                if text.startswith("Tokens:") or text.startswith("Final session tokens:"):
+                    continue
+                parts.append(text)
+            elif ptype == "tool_result" and p.get("tool_result"):
+                raw = p["tool_result"]
+                if isinstance(raw, (dict, list)):
+                    import json as _json
+                    raw = _json.dumps(raw, default=str)[:500]
+                else:
+                    raw = str(raw)[:500]
+                tool_name = p.get("tool_name", "?")
+                parts.append(f"[{tool_name}] {raw}")
+
+    if not parts:
+        return ""
+
+    # Cap to avoid flooding the parent context with a giant partial dump.
+    # Keep the last 8 entries (most recent findings are most relevant).
+    if len(parts) > 8:
+        parts = parts[-8:]
+
+    header = "⚠️ Sub-agent hit iteration limit. Partial findings recovered:\n\n"
+    return header + "\n---\n".join(parts)
 
 
 _SUBAGENT_SYSTEM_TEMPLATE = """\
@@ -69,12 +124,18 @@ summarising what you did, what you found, and any caveats. This text is \
 what gets returned to the parent — make it self-contained.
 - Do not spawn more than {remaining_depth} additional level(s) of sub-agents.
 - The user is NOT in the loop; tool approvals are auto-granted.
+- You have a LIMITED iteration budget of {max_iterations} tool calls. When \
+you notice you are running low on iterations (e.g. you have used more than \
+half), start consolidating your findings into a summary. If you cannot \
+complete the full task, save what you have found so far as your final \
+response — partial results are far more useful than no results.
 """
 
 
-def _build_system_prompt(task: str, remaining_depth: int) -> str:
+def _build_system_prompt(task: str, remaining_depth: int, max_iterations: int = 60) -> str:
     return _SUBAGENT_SYSTEM_TEMPLATE.format(
-        task=task, remaining_depth=max(0, remaining_depth)
+        task=task, remaining_depth=max(0, remaining_depth),
+        max_iterations=max_iterations,
     )
 
 
@@ -182,6 +243,10 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     max_iterations = int(args.get("max_iterations") or _DEFAULT_MAX_ITERATIONS)
     if max_iterations <= 0:
         max_iterations = _DEFAULT_MAX_ITERATIONS
+    # Enforce a minimum floor so the parent agent can't starve the child
+    # with an unreasonably low budget. Values below 30 are clamped to 30.
+    if max_iterations < _MIN_MAX_ITERATIONS:
+        max_iterations = _MIN_MAX_ITERATIONS
 
     parent_provider = parent.provider
     original_model = parent_provider.model_name
@@ -229,7 +294,7 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     child = Session(
         provider=parent_provider,
         thinking=parent.thinking,
-        system_instruction=_build_system_prompt(task, remaining_depth),
+        system_instruction=_build_system_prompt(task, remaining_depth, max_iterations),
         session_manager=child_sm,
         ui=child_ui,
         debug=getattr(parent, "debug", False),
@@ -242,6 +307,8 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     # Auto-approve so the child runs to completion without blocking the parent.
     child.variables["yolo"] = True
     child.variables["max_iterations"] = max_iterations
+    # Marker for loop_body.py: fire wrap-up reminder 3 iterations before cap.
+    child._subagent_wrap_up_iter = max(1, max_iterations - 3)
     # Subagent runs are short — never compact history mid-run.
     child.variables["compact_history"] = False
     # Skip the agent_mode-specific prompts (feature / loop) for subagent turns.
@@ -322,7 +389,15 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
 
     final_text = str(result.get("assistant_text") or "").strip()
     if not final_text:
-        final_text = "(sub-agent finished without producing a final text response)"
+        # When the child hits max_iterations or errors before producing a
+        # final assistant response, mine its history for partial findings
+        # so the parent gets *something* useful instead of a placeholder
+        # that discards every tool result and every intermediate thought.
+        partial = _extract_partial_summary(child_sm)
+        if partial:
+            final_text = partial
+        else:
+            final_text = "(sub-agent finished without producing a final text response)"
 
     child_ok = bool(result.get("ok", True))
     tokens = result.get("tokens") or {}

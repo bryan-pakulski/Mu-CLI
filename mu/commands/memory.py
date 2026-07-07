@@ -23,11 +23,18 @@ def _build_stats(store: Any) -> Dict[str, Any]:
         key=lambda e: (int(getattr(e, "hits", 0) or 0), float(getattr(e, "updated_at", 0) or 0)),
         reverse=True,
     )[:3]
+    # Count entries by lifecycle status so /memory status shows the
+    # active/done/superseded/archived/stale breakdown.
+    status_counts: Dict[str, int] = {}
+    for e in entries:
+        s = getattr(e, "status", "active") or "active"
+        status_counts[s] = status_counts.get(s, 0) + 1
     return {
         "entries": len(entries),
         "total_hits": total_hits,
         "avg_hits": (total_hits / len(entries)) if entries else 0.0,
         "top_entries": [e.to_dict() for e in top],
+        "status_counts": status_counts,
     }
 
 
@@ -282,6 +289,25 @@ def _layer_content(session: Any, layer_id: str) -> str:
         return ""
 
 
+def _status_style(status: str) -> str:
+    """Rich style for a memory entry's lifecycle status.
+
+    active=green, done=dim, superseded=yellow, archived=dim+strike, stale=red.
+    """
+    s = (status or "active").lower()
+    if s == "active":
+        return "green"
+    if s == "done":
+        return "dim"
+    if s == "superseded":
+        return "yellow"
+    if s == "archived":
+        return "dim strike"
+    if s == "stale":
+        return "red"
+    return "white"
+
+
 def _print_store_table(console, store, title) -> None:
     from rich import box
     from rich.table import Table
@@ -293,14 +319,17 @@ def _print_store_table(console, store, title) -> None:
 
     table = Table(title=title, box=box.SIMPLE)
     table.add_column("ID", style="dim", justify="right")
+    table.add_column("Status", justify="left")
     table.add_column("Hits", style="yellow", justify="right")
     table.add_column("Tags", style="yellow")
     table.add_column("Source", style="blue")
     table.add_column("Content")
     for entry in store.entries:
         tags = ", ".join(entry.tags) if entry.tags else "-"
+        status = getattr(entry, "status", "active") or "active"
         table.add_row(
             f"#{entry.id}",
+            Text(status, style=_status_style(status)),
             str(entry.hits),
             Text(tags),
             Text(entry.source or "-"),

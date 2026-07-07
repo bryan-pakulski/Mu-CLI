@@ -24,7 +24,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -211,6 +211,8 @@ def _summarize_lessons(course: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "lecture_concluded": bool(l.get("lecture_concluded")),
                 "assignment_ids": list(l.get("assignment_ids") or []),
                 "remediation_count": l.get("remediation_count", 0),
+                "lecture_transcript_path": l.get("lecture_transcript_path"),
+                "exercise_file_paths": list(l.get("exercise_file_paths") or []),
             }
         )
     return out
@@ -380,3 +382,86 @@ async def get_teacher_state(request: Request) -> Dict[str, Any]:
             else None
         ),
     }
+
+
+# ── Dual presentation endpoints ─────────────────────────────────
+
+
+def _resolve_course_dir(request: Request) -> Optional[str]:
+    """Resolve the active course directory from the session."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        return None
+    sm = session.session_manager
+    teacher_state = sm.teacher_state
+    if teacher_state is None and sm.active_course_id:
+        registry_record = (sm.teacher_registry or {}).get(sm.active_course_id)
+        if isinstance(registry_record, dict):
+            teacher_state = registry_record
+    teacher_state = _hydrate_from_disk(teacher_state)
+    if isinstance(teacher_state, dict):
+        return teacher_state.get("directory")
+    return None
+
+
+def _lesson_dir(course_dir: str, lesson_id: str) -> str:
+    """Return the per-lesson directory path."""
+    from mu.teacher.storage import slugify
+    return os.path.join(course_dir, "lessons", slugify(lesson_id))
+
+
+@router.get("/lessons/{lesson_id}/lecture")
+async def get_lecture_transcript(request: Request, lesson_id: str) -> Dict[str, Any]:
+    """Return the authored lecture.md content for a lesson, or 404."""
+    course_dir = _resolve_course_dir(request)
+    if not course_dir:
+        raise HTTPException(status_code=404, detail="No active course.")
+    path = os.path.join(_lesson_dir(course_dir, lesson_id), "lecture.md")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="No lecture transcript for this lesson.")
+    with open(path, "r", encoding="utf-8") as fh:
+        content = fh.read()
+    return {"lesson_id": lesson_id, "content": content}
+
+
+@router.get("/lessons/{lesson_id}/exercises")
+async def get_exercises_listing(request: Request, lesson_id: str) -> Dict[str, Any]:
+    """Return a listing of exercise file paths plus each file's contents."""
+    course_dir = _resolve_course_dir(request)
+    if not course_dir:
+        raise HTTPException(status_code=404, detail="No active course.")
+    exercises_dir = os.path.join(_lesson_dir(course_dir, lesson_id), "exercises")
+    if not os.path.isdir(exercises_dir):
+        return {"lesson_id": lesson_id, "files": []}
+    files = []
+    for root, dirs, filenames in os.walk(exercises_dir):
+        dirs.sort()
+        for fname in sorted(filenames):
+            full = os.path.join(root, fname)
+            rel = os.path.relpath(full, exercises_dir)
+            try:
+                with open(full, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                content = ""
+            files.append({"path": rel, "content": content})
+    return {"lesson_id": lesson_id, "files": files}
+
+
+@router.get("/lessons/{lesson_id}/exercises/{path:path}")
+async def get_exercise_file(request: Request, lesson_id: str, path: str) -> Dict[str, Any]:
+    """Return a single exercise file's contents (path-validated)."""
+    course_dir = _resolve_course_dir(request)
+    if not course_dir:
+        raise HTTPException(status_code=404, detail="No active course.")
+    exercises_dir = os.path.join(_lesson_dir(course_dir, lesson_id), "exercises")
+    target = os.path.normpath(os.path.join(exercises_dir, path))
+    # Path traversal guard: resolved path must stay under exercises_dir.
+    if not os.path.abspath(target).startswith(os.path.abspath(exercises_dir)):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed.")
+    if not os.path.isfile(target):
+        raise HTTPException(status_code=404, detail="Exercise file not found.")
+    with open(target, "r", encoding="utf-8") as fh:
+        content = fh.read()
+    rel = os.path.relpath(target, exercises_dir)
+    return {"lesson_id": lesson_id, "path": rel, "content": content}

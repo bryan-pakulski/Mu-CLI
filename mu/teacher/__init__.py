@@ -40,6 +40,8 @@ from mu.teacher.engine import (
     record_lecture_turn,
     save_course,
     start_lecture,
+    write_lecture_transcript,
+    register_exercise_file,
 )
 from mu.teacher.grading import grade as grade_assignment_payload
 from mu.teacher.storage import (
@@ -78,4 +80,6 @@ __all__ = [
     "save_course",
     "start_lecture",
     "workspace_root",
+    "write_lecture_transcript",
+    "register_exercise_file",
 ]

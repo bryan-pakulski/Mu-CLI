@@ -59,6 +59,8 @@ from mu.teacher.engine import (
     save_course,
     schedule_review,
     start_lecture,
+    write_lecture_transcript,
+    register_exercise_file,
 )
 from mu.teacher.grading import grade as grade_assignment_payload
 from mu.tools import tool
@@ -1684,6 +1686,126 @@ def complete_review_tool(args: dict[str, Any], context) -> str:
         return _err(str(exc))
 
 
+# ── Dual presentation artifacts ──────────────────────────────────
+
+
+@tool(
+    name="write_lecture_transcript",
+    description=(
+        "Write the authored lecture transcript for a lesson. Creates "
+        "lessons/<lesson_id>/lecture.md on disk. The transcript is the "
+        "primary served content; exercises are referenced by relative "
+        "path. Does NOT alter lesson lifecycle status."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "lesson_id": {
+                "type": "string",
+                "description": "The lesson to write the transcript for.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Markdown content of the lecture transcript.",
+            },
+        },
+        "required": ["lesson_id", "content"],
+    },
+    requires_approval=False,
+)
+def write_lecture_transcript_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        lesson_id = str(args.get("lesson_id", "")).strip()
+        content = str(args.get("content", "") or "")
+        if not lesson_id:
+            return _err("lesson_id is required")
+        lesson = find_lesson(course, lesson_id)
+        if lesson is None:
+            return _err(f"lesson {lesson_id!r} not found")
+        if lesson.status == LESSON_PENDING:
+            return _err(
+                "lesson must be at least 'presenting' before writing a "
+                "lecture transcript"
+            )
+        path = write_lecture_transcript(course, lesson_id, content)
+        _persist(session, course)
+        return _ok(
+            {
+                "lesson_id": lesson_id,
+                "lecture_transcript_path": lesson.lecture_transcript_path,
+                "path": path,
+            }
+        )
+    except Exception as exc:
+        return _err(str(exc))
+
+
+@tool(
+    name="register_exercise_file",
+    description=(
+        "Write an exercise/example file for a lesson. Creates "
+        "lessons/<lesson_id>/exercises/<relative_path> on disk and "
+        "appends to the lesson's exercise_file_paths. Does NOT alter "
+        "lesson lifecycle status and is NOT a graded assignment."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "lesson_id": {
+                "type": "string",
+                "description": "The lesson to register the exercise for.",
+            },
+            "path": {
+                "type": "string",
+                "description": (
+                    "Relative filename within the exercises/ directory "
+                    "(e.g. 'example_01.py'). Must not be absolute or "
+                    "contain '..' segments."
+                ),
+            },
+            "content": {
+                "type": "string",
+                "description": "File content to write.",
+            },
+        },
+        "required": ["lesson_id", "path", "content"],
+    },
+    requires_approval=False,
+)
+def register_exercise_file_tool(args: dict[str, Any], context) -> str:
+    try:
+        session = _session_from_context(context)
+        course = _load_active_course(session, context)
+        lesson_id = str(args.get("lesson_id", "")).strip()
+        rel_path = str(args.get("path", "")).strip()
+        content = str(args.get("content", "") or "")
+        if not lesson_id:
+            return _err("lesson_id is required")
+        if not rel_path:
+            return _err("path is required")
+        lesson = find_lesson(course, lesson_id)
+        if lesson is None:
+            return _err(f"lesson {lesson_id!r} not found")
+        if lesson.status == LESSON_PENDING:
+            return _err(
+                "lesson must be at least 'presenting' before registering "
+                "exercise files"
+            )
+        path = register_exercise_file(course, lesson_id, rel_path, content)
+        _persist(session, course)
+        return _ok(
+            {
+                "lesson_id": lesson_id,
+                "exercise_file_paths": lesson.exercise_file_paths,
+                "path": path,
+            }
+        )
+    except Exception as exc:
+        return _err(str(exc))
+
+
 __all__ = [
     "approve_curriculum_tool",
     "assign_exercise_tool",
@@ -1700,8 +1822,10 @@ __all__ = [
     "raise_teacher_blocker_tool",
     "record_diagnostic_tool",
     "record_dialog_turn_tool",
-    "update_learner_profile_tool",
+    "register_exercise_file_tool",
     "schedule_review_tool",
     "start_lesson_tool",
     "submit_assignment_tool",
+    "update_learner_profile_tool",
+    "write_lecture_transcript_tool",
 ]

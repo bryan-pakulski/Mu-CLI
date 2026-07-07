@@ -466,18 +466,44 @@ class Session:
         truth for L3 rendering; the memory entry is a durable audit
         trace and a recovery hatch if the variable ever gets cleared
         accidentally.
+
+        Lifecycle: saves with kind='goal', status='active'. Stores
+        the entry ID on ``self._active_goal_memory_id`` so the strip
+        / clear path can mark it 'done' (audit trail retained).
+        On goal shift (new text while old is active), marks the old
+        entry 'done' before creating the new one.
         """
         session_goal = str(self.variables.get("session_goal", "") or "").strip()
         if not session_goal:
             return
+        # Check if this exact goal text is already persisted as an active
+        # goal entry — if so, just record the ID and return (idempotent).
         existing = self.task_memory.search("session goal", limit=12)
-        if any(session_goal in str(entry.content or "") for entry in existing):
-            return
-        self.task_memory.save(
+        for entry in existing:
+            if (
+                session_goal in str(entry.content or "")
+                and getattr(entry, "status", "active") == "active"
+                and getattr(entry, "kind", "") == "goal"
+            ):
+                self._active_goal_memory_id = entry.id
+                return
+        # Goal shift: mark the previous active goal entry as done before
+        # creating the new one. The old entry stays in the store for
+        # audit trail — it's just deprioritized.
+        old_id = getattr(self, "_active_goal_memory_id", None)
+        if old_id is not None:
+            old_entry = self.task_memory.get_entry(old_id)
+            if old_entry is not None and getattr(old_entry, "status", "active") == "active":
+                self.task_memory.update_status(old_id, "done")
+        # Save new goal entry with lifecycle metadata.
+        entry = self.task_memory.save(
             f"Locked session goal: {session_goal}",
-            tags=["session", "goal", "locked"],
+            tags=["goal", "session-goal", "locked"],
             source="session_goal",
+            kind="goal",
+            status="active",
         )
+        self._active_goal_memory_id = entry.id
 
     def _ensure_loop_goal_persistence(self) -> None:
         if str(self.variables.get("agent_mode", "default")).lower() != "loop":
@@ -1194,12 +1220,24 @@ class Session:
         `/memory search` can still surface the original ask, but L3
         no longer renders it after the turn completes.
 
+        Lifecycle: marks the active goal memory entry (tracked via
+        ``self._active_goal_memory_id``) as ``status='done'`` so
+        future searches don't resurface it unless explicitly requested
+        via ``include_all=True``.
+
         Safe to call even when no goal was set — it's a no-op then.
         """
         current = str(self.variables.get("session_goal", "") or "").strip()
         if not current:
             return
         self.variables["session_goal"] = ""
+        # Mark the goal memory entry as done (audit trail retained).
+        goal_id = getattr(self, "_active_goal_memory_id", None)
+        if goal_id is not None:
+            entry = self.task_memory.get_entry(goal_id)
+            if entry is not None and getattr(entry, "status", "active") == "active":
+                self.task_memory.update_status(goal_id, "done")
+            self._active_goal_memory_id = None
         # Clear the explicit flag so future modes' defaults apply
         # cleanly on the next turn. (See
         # `show_thinking_explicit` for the same pattern.)

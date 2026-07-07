@@ -121,6 +121,13 @@ def _clear(session: Any) -> CommandResult:
     if not previous:
         return CommandResult(ok=True, message="No session goal pinned.")
     session.variables["session_goal"] = ""
+    # Mark the goal memory entry as done (audit trail retained).
+    goal_id = getattr(session, "_active_goal_memory_id", None)
+    if goal_id is not None:
+        entry = session.task_memory.get_entry(goal_id)
+        if entry is not None and getattr(entry, "status", "active") == "active":
+            session.task_memory.update_status(goal_id, "done")
+        session._active_goal_memory_id = None
     _persist(session)
     return CommandResult(
         ok=True,

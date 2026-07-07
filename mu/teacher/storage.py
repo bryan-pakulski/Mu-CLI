@@ -68,6 +68,33 @@ def assignment_submission_dir(
     )
 
 
+def lesson_directory(
+    course_id: str, lesson_id: str, folder_context: Any = None
+) -> str:
+    """Return the per-lesson directory under ``lessons/<lesson_id>/``.
+
+    Used by the dual-presentation layer (lecture.md + exercises/) so
+    the agent can write artifacts scoped to a single lesson without
+    touching the assignment work/ tree.
+    """
+    return os.path.join(
+        course_directory(course_id, folder_context),
+        "lessons",
+        slugify(lesson_id),
+    )
+
+
+def ensure_lesson_directory(
+    course_id: str, lesson_id: str, folder_context: Any = None
+) -> str:
+    """Create ``lessons/<lesson_id>/`` (and the exercises/ subdirectory)
+    if they don't exist. Returns the lesson directory path."""
+    directory = lesson_directory(course_id, lesson_id, folder_context)
+    os.makedirs(directory, exist_ok=True)
+    os.makedirs(os.path.join(directory, "exercises"), exist_ok=True)
+    return directory
+
+
 def list_courses(folder_context: Any = None) -> list[str]:
     root = courses_workspace_dir(folder_context)
     if not os.path.isdir(root):
@@ -97,6 +124,8 @@ __all__ = [
     "course_state_path",
     "courses_workspace_dir",
     "ensure_course_directory",
+    "ensure_lesson_directory",
+    "lesson_directory",
     "list_courses",
     "slugify",
     "workspace_root",

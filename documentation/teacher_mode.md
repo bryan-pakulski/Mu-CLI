@@ -297,10 +297,72 @@ The conversation is incidental; the directory is the course record.
 | `/teach curriculum` | Render the syllabus. |
 | `/teach delete <id>` | Delete a course (irreversible). |
 
+## Dual presentation
+
+Each lesson produces two distinct, persisted artifacts alongside the
+existing chat-derived transcript and graded assignments:
+
+1. **Exercise / example files** — dry code samples, worked examples,
+   scaffold snippets, practice questions — written to
+   `courses/<course_id>/lessons/<lesson_id>/exercises/`.
+2. **Authored lecture transcript** — `lessons/<lesson_id>/lecture.md` —
+   a lecture-style markdown narrative that explains the topic end-to-end
+   and references each exercise file by relative path (e.g.
+   `exercises/example_01.py`).
+
+The lecture transcript is the primary served content; exercises live in
+their own filesystem level. Both coexist with the watcher's chat-derived
+`lessons/<id>.md` transcript — the authored `lecture.md` is a curated
+record, not a narration.
+
+### Dual presentation tools
+
+| Tool | Signature | Behavior |
+| --- | --- | --- |
+| `write_lecture_transcript` | `(lesson_id: str, content: str)` | Writes `lessons/<lesson_id>/lecture.md` on disk, sets `lesson.lecture_transcript_path`, persists course. Refuses if lesson status is `pending`. `requires_approval=False`. |
+| `register_exercise_file` | `(lesson_id: str, path: str, content: str)` | Writes `lessons/<lesson_id>/exercises/<path>` on disk, appends to `lesson.exercise_file_paths`, persists course. Refuses if lesson status is `pending`. Rejects absolute paths and `..` segments. `requires_approval=False`. |
+
+Both tools are blocked by plan mode (they are in the `WRITE_TOOLS`
+blocklist alongside `assign_exercise`, `grade_assignment`, etc.).
+
+### Dual presentation GUI endpoints
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /teacher/lessons/{lesson_id}/lecture` | Raw `lecture.md` markdown content, or 404 when absent. |
+| `GET /teacher/lessons/{lesson_id}/exercises` | JSON listing of exercise file paths plus each file's contents. Returns empty listing (not 404) when no exercises directory exists. |
+| `GET /teacher/lessons/{lesson_id}/exercises/{path:path}` | Single exercise file contents. Rejects path traversal (`..` segments, absolute paths). |
+
+The `GET /teacher/state` endpoint's lesson payload now includes
+`lecture_transcript_path` and `exercise_file_paths` as additive fields.
+Old courses without these fields load and render with safe defaults
+(`None` / `[]`).
+
+### Expected agent workflow
+
+1. `register_exercise_file` — author exercise/example files first so
+   the transcript can reference them.
+2. `write_lecture_transcript` — write the lecture markdown that
+   explains the topic and embeds relative-path references to the exercise
+   files.
+3. `assign_exercise` — assign the graded exercise as usual. The dual
+   presentation artifacts are not graded; they are illustrative.
+
+**Exercise files vs graded assignments:** If the artifact needs a
+`verify_cmd`, grade, or pass/fail gate, it is an `assign_exercise`
+assignment, NOT an exercise file. Exercise files are illustrative/dry
+only.
+
+**Filename collision note:** `lecture.md` (authored transcript) vs
+`<lesson_id>.md` (chat transcript from the watcher) — distinct names,
+both retained.
+
 ## Plan-mode interaction
 
 Toggling `/plan on` while in teacher mode blocks every write-side
 teacher tool (`create_course`, `assign_exercise`, `grade_assignment`,
-`decide_next`, `complete_module`, `finalize_course`, etc.) with the
-standard plan-mode envelope. `get_course_state` and `raise_teacher_blocker`
-remain available so the agent can still surface status during planning.
+`decide_next`, `complete_module`, `finalize_course`,
+`write_lecture_transcript`, `register_exercise_file`, etc.) with the
+standard plan-mode envelope. `get_course_state` and
+`raise_teacher_blocker` remain available so the agent can still surface
+status during planning.

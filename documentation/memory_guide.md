@@ -42,12 +42,18 @@ class MemoryEntry:
     content: str
     tags: List[str]
     source: str
+    kind: str = "observation"          # decision | finding | observation | goal
     created_at: float
     updated_at: float
-    hits: int  # Access counter for ranking
+    hits: int                          # Access counter for ranking
+    status: str = "active"             # active | done | superseded | archived | stale
+    superseded_by: Optional[int] = None  # ID of entry that replaced this one
+    supersedes: Optional[int] = None     # ID of entry this one replaces
 ```
 
 **Why implemented:** Prevents the AI from re-reading large files or re-executing expensive searches. Critical findings (file locations, search results, workspace structure) are preserved for quick recall.
+
+**Lifecycle fields** (`status`, `superseded_by`, `supersedes`) let the agent distinguish active work from completed, superseded, or archived entries. `kind` drives eviction priority (decisions > findings > observations > goals). See the [Memory Lifecycle](#memory-lifecycle) section below.
 
 ---
 
@@ -130,6 +136,112 @@ class MemoryEntry:
 │  (LLM context)  │
 └─────────────────┘
 ```
+
+---
+
+## Memory Lifecycle
+
+Memory entries carry a `status` field that tracks their lifecycle state. This lets the agent distinguish what is actively being worked on from what has been completed, superseded, or archived — preventing old goals and completed work from resurfacing in search results and system-prompt injection.
+
+### Status states
+
+| Status | Meaning | Search default | Summary injection | Eviction weight |
+|--------|---------|----------------|-------------------|-----------------|
+| `active` | Current work, ongoing relevance | Included | Included (first priority) | 1.0 (last evicted) |
+| `done` | Work described is complete | Excluded unless filtered | Included (capped at 2) | 0.5 |
+| `superseded` | A newer entry replaces this one | Excluded unless filtered | Excluded | 0.3 |
+| `archived` | No longer relevant; retained for audit | Excluded unless `include_all` | Excluded | 0.1 (first evicted) |
+| `stale` | Not hit in N turns (agent-set) | Excluded unless filtered | Excluded | 0.8 |
+
+### Transition diagram
+
+```
+                    ┌──────────────────────────────────────────────┐
+                    │                                              │
+                    ▼                                              │
+  ┌─────────┐  save_memory   ┌─────────┐  retire_memory  ┌──────┐  │
+  │ (new)   │ ─────────────▶ │ active  │ ─────────────▶ │ done │  │
+  └─────────┘                └─────────┘                └──────┘  │
+                               │     │                     │     │
+                               │     │ reactivate_memory   │     │
+                               │     │ (clears link)        │     │
+                               │     ▼                     │     │
+                               │  ┌──────────┐             │     │
+                               │  │superseded│◀────────────┘     │
+                               │  └──────────┘  supersede_memory │
+                               │     │                          │
+                               │     │ archive_memory           │
+                               │     ▼                          │
+                               │  ┌──────────┐                  │
+                               │  │ archived │                  │
+                               │  └──────────┘                  │
+                               │     │                          │
+                               │     │ reactivate_memory        │
+                               │     ▼                          │
+                               └─────┘                            │
+                                                                  │
+  ┌───────┐  update_memory_status(status='stale')                 │
+  │ stale │ ◀─────────────────────────────────────────────────────┘
+  └───────┘  reactivate_memory returns to active
+```
+
+### Tool reference
+
+| Tool | Action | When to use |
+|------|--------|-------------|
+| `save_memory` | Creates or updates entry with `kind` + `status` | General saves; classify via `kind` (decision/finding/observation/goal) |
+| `update_memory_status` | Transitions entry to any valid status | Direct lifecycle control; if `status='superseded'` and reason contains `#N`, sets `superseded_by` |
+| `supersede_memory` | Marks old as superseded, links old↔new | Decision reversed, goal changed, finding corrected |
+| `retire_memory` | Shorthand for `update_memory_status(entry_id, 'done')` | Work described by the entry is complete |
+| `reactivate_memory` | Sets status back to `active`, clears `superseded_by` | Revisiting completed or superseded work |
+| `archive_memory` | Sets status to `archived` | No longer relevant but should not be lost (old project context, superseded with no replacement) |
+| `search_memory` | Filtered search with `status`, `kind`, `tags_exclude`, `include_all` | Query active work, historical entries, or full audit |
+
+### Goal persistence flow
+
+Session goals pinned via `/goal` or `set_session_goal` are now persisted as memory entries:
+
+1. **Goal set**: `set_session_goal(goal_text)` saves a memory entry with `kind='goal'`, `status='active'`, `tags=['goal', 'session-goal']`. The entry ID is stored as `session._active_goal_memory_id`.
+2. **Goal clear**: `/goal clear` or `set_session_goal(clear=True)` marks the goal entry `status='done'` (not deleted — audit trail retained).
+3. **Goal shift**: If a new goal is set while one is active, the previous goal entry is marked `status='done'` before the new one is created.
+4. **Auto-clear**: At turn end, if `_active_goal_memory_id` is set, the goal entry is marked `status='done'`.
+5. **Eviction safety**: If the goal entry was evicted before retirement, the clear path handles `None` gracefully — no crash, logs a warning.
+6. **Dedup**: Identical goal text triggers dedup in `store.save()` (content+tags match, status match) — increments `hits`, no spurious done→active churn.
+
+### Eviction by status
+
+When `max_entries` is hit, eviction proceeds in this order (lowest score first):
+
+```
+archived (0.1) → superseded (0.3) → done (0.5) → stale (0.8) → active (1.0)
+```
+
+Within each status tier, the existing kind-weight + LRU scoring applies:
+
+- **Kind weights**: `decision=3.0`, `finding=2.0`, `goal=2.5`, `observation=1.0`
+- **Eviction score**: `(hits + 1) * kind_weight * status_weight`
+- Lower score = evicted first.
+
+This means an active decision with 0 hits scores `2 * 3.0 * 1.0 = 6.0`, while an archived observation with 5 hits scores `6 * 1.0 * 0.1 = 0.6`. Archived entries are always evicted before active ones, regardless of hit count.
+
+### Search default behavior
+
+`search_memory("auth refactor")` with no status filter returns **only active entries** matching. This prevents the core complaint: old goals and completed work resurfacing.
+
+To see historical entries:
+- `search_memory("auth", status="done")` — only completed entries
+- `search_memory("auth", status="superseded")` — only superseded entries
+- `search_memory("auth", include_all=True)` — all entries regardless of status (full audit)
+
+### render_summary() behavior
+
+The system-prompt memory snapshot (`render_summary()`) now:
+1. Lists **active entries first** (up to the limit)
+2. Then optionally **done entries** (capped at 2)
+3. **Excludes archived** entries entirely (unless `include_archived=True`)
+4. Each line includes the status tag: `- #id [active] [tags] (source): content`
+
+This ensures the injected memory snapshot reflects **current work**, not historical baggage.
 
 ---
 

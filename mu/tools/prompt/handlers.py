@@ -272,6 +272,13 @@ def set_session_goal_tool(args: dict[str, Any], context) -> str:
     if clear:
         previous = str(session.variables.get("session_goal", "") or "").strip()
         session.variables["session_goal"] = ""
+        # Mark the goal memory entry as done (audit trail retained).
+        goal_id = getattr(session, "_active_goal_memory_id", None)
+        if goal_id is not None:
+            entry = session.task_memory.get_entry(goal_id)
+            if entry is not None and getattr(entry, "status", "active") == "active":
+                session.task_memory.update_status(goal_id, "done")
+            session._active_goal_memory_id = None
         try:
             session.session_manager.save_history(session.folder_context)
         except Exception:

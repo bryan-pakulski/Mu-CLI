@@ -387,6 +387,10 @@ def _entry_dict(entry) -> Dict[str, Any]:
         "hits": entry.hits,
         "created_at": entry.created_at,
         "updated_at": entry.updated_at,
+        "status": getattr(entry, "status", "active") or "active",
+        "kind": getattr(entry, "kind", "observation") or "observation",
+        "superseded_by": getattr(entry, "superseded_by", None),
+        "supersedes": getattr(entry, "supersedes", None),
     }
 
 
@@ -482,6 +486,7 @@ async def get_stats(request: Request) -> Dict[str, Any]:
         "estimated_cost_usd": cost,
         "task_memory_size": len(sm.task_memory.entries),
         "scratchpad_size": len(sm.turn_scratchpad.entries),
+        "memory_status_counts": sm.task_memory.status_counts(),
         "agent_mode": session.variables.get("agent_mode", "default"),
     }
 

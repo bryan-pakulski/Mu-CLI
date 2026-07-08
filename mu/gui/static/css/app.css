@@ -3689,3 +3689,207 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     outline: none;
     border-color: var(--accent);
 }
+
+/* ------------------------------------------------------------ history panel */
+
+.history-search-bar {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.history-search-input {
+    flex: 1;
+    font-size: 14px;
+    font-family: var(--sans);
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 8px 12px;
+    transition: border-color 0.12s, box-shadow 0.12s;
+}
+.history-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-line);
+}
+.history-search-input::placeholder {
+    color: var(--text-dim);
+}
+
+.history-search-btn {
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-family: var(--mono);
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+.history-search-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+.history-search-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+.history-filters {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.history-filter-select,
+.history-filter-input {
+    font-size: 12px;
+    font-family: var(--sans);
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 6px 10px;
+    transition: border-color 0.12s;
+}
+.history-filter-select:focus,
+.history-filter-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+.history-filter-select {
+    cursor: pointer;
+}
+.history-filter-input {
+    flex: 1;
+}
+.history-filter-input::placeholder {
+    color: var(--text-dimmer);
+}
+
+.history-loading {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-4) 0;
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+.history-error {
+    padding: var(--space-3) 0;
+}
+.history-error .err-text {
+    color: var(--err);
+    font-size: 13px;
+}
+
+.history-results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.history-results-summary {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    margin-bottom: var(--space-2);
+}
+.history-more-flag {
+    color: var(--accent);
+}
+
+.history-result-card {
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    transition: background 0.12s, border-color 0.12s;
+}
+.history-result-card:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+}
+
+.history-result-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+.history-index {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dimmer);
+}
+.history-role {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-soft);
+}
+.history-anchor-badge {
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 6px;
+    border-radius: 999px;
+}
+
+.history-match {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+.history-match-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    background: var(--bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.history-snippet {
+    color: var(--text-soft);
+    flex: 1;
+}
+
+.history-context {
+    margin-top: var(--space-2);
+    padding-left: var(--space-3);
+}
+.history-context-line {
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--text-dim);
+    padding: 2px 0;
+}
+.history-context-line .mono {
+    font-family: var(--mono);
+    font-size: 10.5px;
+}
+
+.history-cache-key {
+    margin-top: var(--space-1);
+    font-size: 10.5px;
+    color: var(--text-dimmer);
+    font-family: var(--mono);
+}
+
+.history-search-bar,
+.history-filters {
+    flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+    .history-search-bar { flex-direction: column; }
+    .history-filters { flex-direction: column; }
+}

@@ -625,6 +625,19 @@ Operating principles:
 - **Reason about trust boundaries.** The same code is safe inside a process and unsafe at the HTTP edge. Identify where untrusted input enters and trace it through.
 - **Memory discipline.** `save_memory` durable findings (e.g. "this codebase uses pattern X which is consistently safe / consistently unsafe"). Future scans benefit.
 - **Don't patch what you can't exploit.** Approved findings = verified attacks + verified defenses. Anything else is noise.""",
+    "history": """WORKFLOW (History Search):
+
+You are in HISTORY mode for searching and visualizing past conversation history.
+
+1. The history panel provides a searchable interface to the full session conversation log.
+2. Search covers all message types: text, tool_call, tool_result, file, image_input parts.
+3. Pre-anchor (compacted) messages are included by default — set include_summarized=False for active-only.
+4. Results show: message index, role, match type, snippet, context lines, anchor badge, cache key (if available).
+5. Use the search bar with optional role and tool_name filters to narrow results.
+6. The GET /chat/history/search endpoint powers the search — fully read-only, no session mutation.
+
+This is a read-only visualization mode. No code changes, no session mutation. The search endpoint
+already exists from the Queryable Session History feature.""",
     "teacher": """WORKFLOW (Teacher Mode):
 
 You are a one-on-one tutor. This is a personal session, not a generic lecture series. Your single most important job is to understand THIS learner — how they think, how they learn, what already lives in their head — and shape every word you say to fit them. Generic, off-the-shelf teaching is a failure.
@@ -739,6 +752,11 @@ AGENT_MODE_METADATA = {
         ),
         "documentation": "documentation/security_mode.md",
         "display_name": "Security Mode",
+    },
+    "history": {
+        "description": "Searchable conversation history with keyword, role, and tool-name filters.",
+        "documentation": "documentation/session_guide.md",
+        "display_name": "History Search",
     },
     "teacher": {
         "description": (

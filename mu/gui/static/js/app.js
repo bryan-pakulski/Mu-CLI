@@ -831,7 +831,7 @@ document.addEventListener("alpine:init", () => {
         active: "default",
         realMode: "default",
         modes: [],
-        panelModes: ["teacher", "feature", "research", "security", "loop", "debug"],
+        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
@@ -2431,6 +2431,61 @@ document.addEventListener("alpine:init", () => {
                 this.loading = false;
                 this._chunks = [];
             }
+        },
+    });
+
+    // ── History search ───────────────────────────────────────────
+    Alpine.store("history", {
+        query: "",
+        role: "",
+        tool_name: "",
+        results: [],
+        loading: false,
+        hasMore: false,
+        totalMatches: 0,
+        loaded: false,
+        searched: false,
+        error: "",
+        openSections: { results: true },
+
+        toggleSection(name) {
+            this.openSections[name] = !this.openSections[name];
+        },
+
+        async search() {
+            const q = (this.query || "").trim();
+            if (!q) { return; }
+            this.loading = true;
+            this.error = "";
+            try {
+                const params = new URLSearchParams({ query: q, max_results: 20 });
+                if (this.role) { params.set("role", this.role); }
+                if (this.tool_name) { params.set("tool_name", this.tool_name); }
+                const r = await fetch(`/chat/history/search?${params}`);
+                if (!r.ok) {
+                    this.error = `Search failed (${r.status})`;
+                    this.results = [];
+                    this.loading = false;
+                    return;
+                }
+                const data = await r.json();
+                this.results = data.results || [];
+                this.totalMatches = data.total_matches || 0;
+                this.hasMore = !!data.has_more;
+                this.loaded = true;
+                this.searched = true;
+            } catch (e) {
+                this.error = `Search error: ${e}`;
+                this.results = [];
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        clearResults() {
+            this.results = [];
+            this.totalMatches = 0;
+            this.hasMore = false;
         },
     });
 });

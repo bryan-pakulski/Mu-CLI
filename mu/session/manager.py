@@ -38,6 +38,7 @@ import utils.config as _config
 
 from .helpers import _slugify_feature_id, derive_feature_state_status
 from .history import HistoryMixin
+from .history_search import HistorySearchMixin
 from .tool_cache import ToolResultCache
 
 
@@ -49,7 +50,7 @@ def _history_dir() -> str:
     return _config.HISTORY_DIR
 
 
-class SessionManager(HistoryMixin):
+class SessionManager(HistoryMixin, HistorySearchMixin):
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
         logger.info(f"Initializing SessionManager (session_name={session_name})")

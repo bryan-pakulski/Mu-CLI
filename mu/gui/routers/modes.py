@@ -24,9 +24,13 @@ async def list_modes(request: Request):
     current = session.variables.get("agent_mode", "default") if session else None
     has_ws = _has_workspace(session)
     modes = []
+    # Modes that don't need a workspace attached — view-only / informational
+    # modes that work off session state alone, not workspace files.
+    _NO_WORKSPACE_NEEDED = {"default", "history"}
+
     for key in AGENTIC_MODES:
         meta = AGENT_MODE_METADATA.get(key, {})
-        needs_workspace = key != "default"
+        needs_workspace = key not in _NO_WORKSPACE_NEEDED
         modes.append(
             {
                 "name": key,

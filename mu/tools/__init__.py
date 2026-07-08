@@ -350,6 +350,13 @@ def _load_builtin_tools() -> None:
         logging.getLogger("mucli").warning(
             "mu.tools: failed to load prompt tool package: %s", exc
         )
+    try:
+        from . import session as _session_tools  # noqa: F401 — registers search_history
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load session tool package: %s", exc
+        )
 
 
 _load_builtin_tools()

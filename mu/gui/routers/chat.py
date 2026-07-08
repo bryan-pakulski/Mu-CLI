@@ -278,6 +278,35 @@ async def interrupt(request: Request, payload: Optional[Dict[str, Any]] = None):
     return {"ok": res == 1}
 
 
+@router.get("/history/search")
+async def search_history(
+    request: Request,
+    query: str = "",
+    role: Optional[str] = None,
+    tool_name: Optional[str] = None,
+    max_results: int = 20,
+    session_name: Optional[str] = None,
+):
+    """Search conversation history for matching messages.
+
+    Read-only endpoint that calls session.search_history() and returns
+    JSON results. Accepts query, role, tool_name, max_results params.
+    """
+    query = (query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    session = _resolve_session(request, session_name)
+    sm = session.session_manager
+    results = sm.search_history(
+        query=query,
+        role=role or None,
+        tool_name=tool_name or None,
+        max_results=max_results,
+    )
+    return results
+
+
 def _summarize_result(result: Any) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return {"ok": False}

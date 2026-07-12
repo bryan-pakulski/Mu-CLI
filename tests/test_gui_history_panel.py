@@ -174,7 +174,7 @@ def test_app_js_history_store_has_search_method():
     with open(APP_JS_PATH, "r", encoding="utf-8") as f:
         content = f.read()
     assert "search()" in content
-    assert "/chat/history/search" in content
+    assert "/api/chat/history/search" in content
 
 
 def test_app_js_history_store_has_clear_method():

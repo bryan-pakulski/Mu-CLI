@@ -2461,7 +2461,7 @@ document.addEventListener("alpine:init", () => {
                 const params = new URLSearchParams({ query: q, max_results: 20 });
                 if (this.role) { params.set("role", this.role); }
                 if (this.tool_name) { params.set("tool_name", this.tool_name); }
-                const r = await fetch(`/chat/history/search?${params}`);
+                const r = await fetch(`/api/chat/history/search?${params}`);
                 if (!r.ok) {
                     this.error = `Search failed (${r.status})`;
                     this.results = [];

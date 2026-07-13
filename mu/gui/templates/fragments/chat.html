@@ -257,7 +257,8 @@
 
         <!-- Settings hamburger: quick access to session variables -->
         <div class="composer-settings">
-            <button class="composer-settings-btn" @click="settingsOpen = !settingsOpen; modeOpen = false"
+            <button class="composer-settings-btn"
+                    @click="settingsOpen = !settingsOpen; modeOpen = false; if (settingsOpen) { $store.inspector.loadVariables(); $store.inspector.loadCurrentProvider(); }"
                     :class="{ open: settingsOpen }"
                     title="Session settings"
                     aria-haspopup="true" :aria-expanded="settingsOpen">

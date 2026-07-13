@@ -13,26 +13,35 @@ Two signals, one grid:
   …, L5 red). The band's color identifies *which* layer it is at a
   glance.
 * **Change frequency (hash-based)** — each layer's text is split into one
-  chunk per **column at the requested resolution** (``cols`` slices) and
-  SHA-256 hashed. The fingerprint remembers each column's last hash + a
-  change counter per column, keyed by the session object and the
-  ``(cols, rows)`` resolution. Every snapshot compares the current column
-  hashes to the stored ones; a column whose hash changed increments its
+  chunk **per grid cell in its band** (``r * cols`` row-major slices, so
+  the chunk count equals the band's cell count — one hash per displayed
+  cell) and SHA-256 hashed. The fingerprint remembers each cell's last
+  hash + a per-cell change counter, keyed by the session object and the
+  ``(cols, rows)`` resolution. Every snapshot compares the current cell
+  hashes to the stored ones; a cell whose hash changed increments its
   counter. Cell brightness encodes that counter (sqrt curve, capped), so
-  the parts of a layer that change every iteration *glow* and the parts
-  that have been stable since first contact stay *dim*. Because chunking
-  is per-column (text is 1D; the band's height is just token-share
-  emphasis), the heat stays stable when a layer's band height jiggles as
-  its token count drifts — only ``cols`` affects the chunking. That is
-  the whole point of the panel: watching which areas of each layer's
-  memory churn in real time, not just that the layer grew.
+  the regions of a layer that change every iteration *glow* and the
+  regions stable since first contact stay *dim*. That is the whole point
+  of the panel: watching **which regions of each layer's memory churn**
+  in real time, and how often — not just that the layer grew.
+
+  Because chunking tracks the band's actual cell count, a layer whose
+  band height changes (its token share drifted) is re-chunked. To keep
+  the change signal across that resize, cells are compared by
+  *fractional position* against the previous layout (the cell at "30%
+  through the layer" still corresponds to "30% through"), so the regions
+  that shifted still light up — at the cost of some boundary noise from
+  the moved slice edges on that one snapshot. While the band height is
+  stable (the common case within a turn), cells compare directly and the
+  per-cell heat accumulates cleanly.
 
 Each resolution keeps its own change history (keyed by ``(cols, rows)``),
 so switching resolution starts a fresh heat for that view. Identical
 content between two snapshots at the same resolution yields an identical
-grid (deterministic); only changed columns brighten. Empty space is
-still space: every layer always gets at least one band row, and a column
-with no text renders as a dim layer-colored cell rather than vanishing.
+grid (deterministic); only changed cells brighten. Empty space is still
+space: every layer always gets at least one band row, and a cell whose
+slice has no text renders as a dim layer-colored cell rather than
+vanishing.
 
 The same builder feeds the REST endpoint (``/api/memory/state``) and the
 ``pre_provider_call`` hook that pushes a live snapshot per iteration, so
@@ -196,6 +205,29 @@ def _heat_value(count: int) -> int:
     return max(1, round(t * 254))
 
 
+def _changed(new_hash: str, prev_hash: str) -> bool:
+    """Did this chunk's content change between snapshots?
+
+    A hash diff is a change; a chunk going present→absent or absent→present
+    (one side empty, the other not) is also a change — the region's content
+    materially moved in or out. Both-empty is no change.
+    """
+    if new_hash and prev_hash:
+        return new_hash != prev_hash
+    return bool(new_hash) != bool(prev_hash)
+
+
+def _prop_index(j: int, new_n: int, old_n: int) -> int:
+    """Index in a length-``old_n`` array for fractional position ``j`` of a
+    length-``new_n`` array — used to correspond cells across a band resize,
+    so "30% through the layer" still maps to "30% through" after re-chunking.
+    """
+    if old_n <= 0:
+        return 0
+    idx = int((j + 0.5) * old_n / new_n)
+    return 0 if idx < 0 else (old_n - 1 if idx >= old_n else idx)
+
+
 def _empty_state(cols: int, rows: int) -> Dict[str, Any]:
     grid: List[List[int]] = [[0] * cols for _ in range(rows)]
     return {
@@ -244,8 +276,9 @@ def build_memory_snapshot(
       * ``layers`` — per-layer ``{id, name, tokens, max, fill_pct, hue,
         change_count, row_start, row_end}`` for the legend.
       * ``grid`` — ``rows`` × ``cols`` of ints. ``0`` = no content for
-        that cell (transparent); ``1..255`` = present, magnitude encodes
-        change frequency (1 = stable, 255 = churning).
+        that cell (the frontend renders it as a dim "empty space"); ``1..255``
+        = present, magnitude encodes change frequency (1 = stable, 255 =
+        churning).
       * ``total_tokens`` / ``context_limit`` / ``fill_pct`` for the header.
 
     The frontend derives each cell's color from the layer hue + the heat
@@ -302,56 +335,61 @@ def build_memory_snapshot(
         for i, lid in enumerate(_LAYER_ORDER):
             band_rows[lid] = base + (1 if i < rem else 0)
 
-    # --- change tracking: one hash per COLUMN at the requested resolution.
-    # Text is 1D, so the honest 2D mapping is per-column heat repeated down
-    # each band's rows (band height = the layer's token-share emphasis).
-    # Keyed by (cols, rows) so each resolution keeps its own change history;
-    # changing resolution starts fresh heat for that view. Per-column (not
-    # per-cell) keeps the heat stable when a layer's band height jiggles as
-    # its token count drifts — only `cols` affects the chunking.
+    # --- change tracking: one hash per GRID CELL in the band (r*cols
+    # row-major slices — one chunk per displayed cell), so changes light up
+    # at cell granularity and you can see *which regions* of a layer churn.
+    # Keyed by (cols, rows) so each resolution keeps its own change history.
     fp = _fingerprint(session)
     res_fp = fp.setdefault((cols, rows), {})
-    layer_heat: Dict[str, List[int]] = {}   # per-column heat value (len == cols)
+    layer_heat: Dict[str, List[int]] = {}   # per-cell heat (len == r*cols)
     layer_change_count: Dict[str, int] = {}
     for lid in _LAYER_ORDER:
+        r = band_rows.get(lid, 0)
+        n = r * cols                          # one chunk per band cell (row-major)
         text = _layer_text(session, lid)
-        chunks = _sample_chunks(text, cols)
+        chunks = _sample_chunks(text, n) if n > 0 else []
         hashes = [_chunk_hash(c) for c in chunks]
         present = [bool(c) for c in chunks]
 
         state = res_fp.get(lid)
-        if state is None:
-            counts = [0] * cols
-        else:
-            prev = state.get("hashes") or []
-            counts = list(state.get("counts") or [0] * cols)
-            # Pad/truncate to the column count defensively.
-            if len(counts) < cols:
-                counts += [0] * (cols - len(counts))
-            counts = counts[:cols]
-            for i in range(cols):
-                ph = prev[i] if i < len(prev) else ""
-                if hashes[i] and ph and hashes[i] != ph:
-                    counts[i] += 1
-                # A column going present→absent or absent→present is a
-                # material change too (the content grew into or out of it).
-                if (bool(hashes[i]) != bool(ph)) and (hashes[i] or ph):
-                    counts[i] += 1
+        prev_hashes = (state or {}).get("hashes") or []
+        prev_counts = (state or {}).get("counts") or []
+        prev_r = (state or {}).get("band_rows")
 
-        res_fp[lid] = {"hashes": hashes, "counts": counts}
-        # 0 = empty column (no text in that slice); 1..255 = present, where
-        # the magnitude encodes change frequency (1 = stable since first
-        # seen, 255 = churning).
+        counts = [0] * n
+        if state is not None and prev_hashes:
+            if prev_r == r and len(prev_hashes) == n:
+                # Band height unchanged → direct cell-by-cell correspondence;
+                # carry each cell's accumulated count forward.
+                for i in range(n):
+                    pc = prev_counts[i] if i < len(prev_counts) else 0
+                    counts[i] = pc + (1 if _changed(hashes[i], prev_hashes[i]) else 0)
+            else:
+                # Band resized → re-chunked. Correspond by fractional position
+                # so we still detect *which regions* shifted (with some boundary
+                # noise from the moved slice edges on this one snapshot).
+                # Counts start fresh for the new layout.
+                old_n = len(prev_hashes)
+                for i in range(n):
+                    if _changed(hashes[i], prev_hashes[_prop_index(i, n, old_n)]):
+                        counts[i] = 1
+        # else: first snapshot for this (resolution, layer) → counts stay 0.
+
+        res_fp[lid] = {"band_rows": r, "hashes": hashes, "counts": counts}
+        # 0 = empty cell (no text in that slice); 1..255 = present, where the
+        # magnitude encodes change frequency (1 = stable since first seen,
+        # 255 = churning).
         layer_heat[lid] = [
             (0 if not present[i] else 1 + _heat_value(counts[i]))
-            for i in range(cols)
+            for i in range(n)
         ]
         layer_change_count[lid] = sum(counts)
 
-    # --- build the grid: each band fills its rows with the layer's per-column
-    # heat (vertical stripes within the band). Every cell carries a value;
-    # empty columns stay 0 so the frontend renders them as dim "empty space"
-    # rather than transparent — the band's full extent is always visible.
+    # --- build the grid: each band cell carries its own per-cell heat
+    # (row-major within the band), so changes show up as spatial regions,
+    # not uniform stripes. Empty cells stay 0 so the frontend renders them
+    # as dim "empty space" rather than transparent — the band's full extent
+    # is always visible.
     grid: List[List[int]] = [[0] * cols for _ in range(rows)]
     layers_out: List[Dict[str, Any]] = []
     row_cursor = 0
@@ -362,11 +400,13 @@ def build_memory_snapshot(
         r = band_rows.get(lid, 0)
         row_start = row_cursor
         row_end = min(row_cursor + r, rows)
-        heat = layer_heat.get(lid) or [0] * cols
+        heat = layer_heat.get(lid) or []
         for ri in range(row_start, row_end):
             row = grid[ri]
+            base = (ri - row_start) * cols
             for ci in range(cols):
-                row[ci] = heat[ci]
+                idx = base + ci
+                row[ci] = heat[idx] if idx < len(heat) else 0
         row_cursor = row_end
 
         layers_out.append(

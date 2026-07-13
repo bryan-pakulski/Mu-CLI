@@ -2045,6 +2045,82 @@ document.addEventListener("alpine:init", () => {
                 }
             }
         },
+
+        // ---- Layer-content modal ----
+        // Clicking a layer in the legend opens an overlay with the actual
+        // text the harness injects for that layer, fetched on demand from
+        // /api/memory/content. The body is plain preformatted text so it
+        // selects + copies cleanly (the model's real view, not a re-render).
+        layerModal: {
+            open: false,
+            id: "",
+            name: "",
+            hue: 0,
+            content: "",
+            tokens: 0,
+            chars: 0,
+            loading: false,
+            error: "",
+            copied: false,
+        },
+
+        async openLayer(l) {
+            // Seed the header immediately from the legend entry so the modal
+            // isn't blank while the content fetch is in flight.
+            this.layerModal = {
+                open: true,
+                id: l.id || "",
+                name: l.name || l.id || "",
+                hue: (typeof l.hue === "number") ? l.hue : 0,
+                content: "",
+                tokens: l.tokens || 0,
+                chars: 0,
+                loading: true,
+                error: "",
+                copied: false,
+            };
+            try {
+                const r = await fetch(
+                    `/api/memory/content?layer=${encodeURIComponent(l.id || "")}`
+                );
+                const d = await r.json();
+                this.layerModal.content = d.content || "";
+                this.layerModal.tokens = (d.tokens != null) ? d.tokens : this.layerModal.tokens;
+                this.layerModal.chars = d.chars || 0;
+                if (d.name) this.layerModal.name = d.name;
+                if (typeof d.hue === "number") this.layerModal.hue = d.hue;
+                this.layerModal.error = d.error || "";
+            } catch (e) {
+                this.layerModal.error = String(e || "fetch failed");
+            } finally {
+                this.layerModal.loading = false;
+            }
+        },
+
+        closeLayer() { this.layerModal.open = false; },
+
+        async copyLayer() {
+            const text = this.layerModal.content || "";
+            if (!text) return;
+            // Prefer the async Clipboard API; fall back to a hidden textarea
+            // + execCommand for non-secure contexts (http) where it's gated.
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    ta.style.position = "fixed";
+                    ta.style.opacity = "0";
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                }
+                this.layerModal.copied = true;
+                setTimeout(() => { this.layerModal.copied = false; }, 1500);
+            } catch (e) { /* clipboard blocked — selection still works manually */ }
+        },
     });
 
     Alpine.store("confirm", {
@@ -2265,6 +2341,10 @@ document.addEventListener("alpine:init", () => {
         varFilter: "",
         // group name → bool. Collapsed by default; user toggles per group.
         openGroups: {},
+        // Default model for spawned sub-agents ("" = inherit parent model).
+        // Populated from the variables list so the picker stays in sync
+        // with /set and the inspector settings tab.
+        subagentModel: "",
 
         async loadVariables() {
             const r = await fetch("/api/variables");
@@ -2274,6 +2354,24 @@ document.addEventListener("alpine:init", () => {
             // existing per-group toggle state across refreshes.
             for (const g of this.variables.groups) {
                 if (!(g.name in this.openGroups)) this.openGroups[g.name] = false;
+            }
+            // Reflect the current subagent_model value in the picker.
+            this.subagentModel = this._readVariable("subagent_model") || "";
+        },
+        _readVariable(key) {
+            for (const g of this.variables.groups || []) {
+                for (const v of g.variables || []) {
+                    if (v.key === key) return v.value;
+                }
+            }
+            return null;
+        },
+        async onSubagentModelChange() {
+            // Empty = inherit parent model → reset to the schema default ("").
+            if (!this.subagentModel) {
+                await this.resetVariable("subagent_model");
+            } else {
+                await this.setVariable("subagent_model", this.subagentModel);
             }
         },
         toggleGroup(name) {

@@ -292,6 +292,18 @@
                             </template>
                         </select>
                     </label>
+                    <label class="settings-var"
+                           title="Model used by spawned sub-agents. Empty = inherit the parent (session) model. Uninstalled values fall back to the parent model. Set via /set subagent_model too.">
+                        <span class="settings-var-key mono">subagent model</span>
+                        <select class="settings-var-select"
+                                x-model="$store.inspector.subagentModel"
+                                @change="$store.inspector.onSubagentModelChange()">
+                            <option value="">inherit parent</option>
+                            <template x-for="m in $store.inspector.models" :key="m">
+                                <option :value="m" x-text="m"></option>
+                            </template>
+                        </select>
+                    </label>
                 </div>
                 <template x-for="g in $store.inspector.variables.groups" :key="g.name">
                     <div class="settings-group">

@@ -51,6 +51,18 @@ _DEFAULT_MAX_ITERATIONS = 60
 _MIN_MAX_ITERATIONS = 30
 
 
+def _model_installed(model: str, installed: list) -> bool:
+    """True if `model` is in the provider's available list. Matches exactly,
+    or by base name (split on ``:``) so an elided ``:latest`` tag on Ollama
+    still counts as installed. Mirrors OllamaProvider.is_model_installed."""
+    if not model:
+        return False
+    if model in installed:
+        return True
+    base = model.split(":", 1)[0]
+    return any(m.split(":", 1)[0] == base for m in installed)
+
+
 _SUBAGENT_SYSTEM_TEMPLATE = """\
 You are a focused sub-agent spawned by a parent agent. Your single \
 responsibility is the task below — do not chat, do not propose; act with \
@@ -221,7 +233,12 @@ def _envelope(
             },
             "model": {
                 "type": "string",
-                "description": "Optional model override for the child. Default: parent's model.",
+                "description": (
+                    "Optional per-call model override for the child — must be a "
+                    "model installed on the active provider. Default: the "
+                    "subagent_model session variable if set, else the parent's "
+                    "model. An uninstalled name falls back to the parent model."
+                ),
             },
             "context": {
                 "type": "string",
@@ -303,10 +320,44 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
         max_iterations = _MIN_MAX_ITERATIONS
 
     # Cloned provider — own model_name slot, shared (thread-safe) client.
+    # clone_for_child() shallow-copies the parent, so the child already
+    # inherits the parent's model_name. We only reassign it when a valid
+    # override is selected below. Resolution priority:
+    #   1. `subagent_model` session variable (user-configured default)
+    #   2. the agent's per-call `model` arg
+    #   3. the inherited parent model (the clone's current model_name)
+    # An uninstalled config/arg falls back to the parent model with a
+    # warning, so a hallucinated name (e.g. "sonnet-3.5" on Ollama) no
+    # longer crashes the child's first generate() call — the child just
+    # runs on the parent's working model instead.
     child_provider = parent.provider.clone_for_child()
-    model_override = args.get("model")
-    if model_override:
-        child_provider.model_name = str(model_override)
+    parent_model = child_provider.model_name
+    try:
+        installed = list(parent.provider.get_available_models() or [])
+    except Exception:  # noqa: BLE001 — never let listing block a spawn
+        installed = []
+
+    cfg_model = str((parent.variables or {}).get("subagent_model") or "").strip()
+    arg_model = str(args.get("model") or "").strip()
+
+    def _pick(candidate: str, source: str) -> str | None:
+        if not candidate:
+            return None
+        if _model_installed(candidate, installed):
+            return candidate
+        logger.warning(
+            "spawn_agent: %s model %r is not installed on %s (available: %s); "
+            "falling back to parent model %r.",
+            source,
+            candidate,
+            getattr(parent.provider, "name", "") or "provider",
+            installed[:8] if installed else "<none>",
+            parent_model,
+        )
+        return None
+
+    resolved = _pick(cfg_model, "subagent_model") or _pick(arg_model, "requested") or parent_model
+    child_provider.model_name = resolved
 
     child_session_name = f"__subagent__"
     child_sm = SessionManager(session_name=child_session_name)

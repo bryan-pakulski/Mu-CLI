@@ -408,6 +408,20 @@ VARIABLE_SCHEMA = {
         "type": bool,
         "default": True,
     },
+    # Default model for spawned sub-agents. Empty (default) => the child
+    # inherits the parent's model (via clone_for_child). Set to any model
+    # installed on the active provider to run children on a different model
+    # (e.g. a smaller/faster one for cheap side quests). An uninstalled value
+    # falls back to the parent model with a warning rather than crashing the
+    # child's first generate() — this is the fix for "Ollama model 'sonnet-3.5'
+    # is not installed" errors, which happened when the agent passed a
+    # hallucinated model name to spawn_agent. A spawn_agent `model` arg, when
+    # valid+installed, overrides this for that one child. Set via /set or the
+    # GUI composer settings (dynamic model picker).
+    "subagent_model": {
+        "type": str,
+        "default": "",
+    },
     # ----- TTS / STT (audio) -----
     "tts_enabled": {
         "type": bool,

@@ -62,11 +62,18 @@
             </div>
         </div>
 
-        <!-- per-layer legend -->
+        <!-- per-layer legend — click a row to open the layer's actual
+             content in a modal (what the model sees at that layer). -->
         <div class="memory-legend">
             <template x-for="l in $store.memory.layers" :key="l.id">
                 <div class="memory-legend-row"
-                     :class="{ empty: !l.tokens }">
+                     :class="{ empty: !l.tokens }"
+                     role="button"
+                     tabindex="0"
+                     :title="'View ' + l.id + ' layer contents'"
+                     @click="$store.memory.openLayer(l)"
+                     @keydown.enter.prevent="$store.memory.openLayer(l)"
+                     @keydown.space.prevent="$store.memory.openLayer(l)">
                     <span class="memory-legend-swatch"
                           :style="'background:hsl(' + (l.hue || 0) + ',68%,42%)'"></span>
                     <span class="memory-legend-id mono" x-text="l.id"></span>
@@ -83,7 +90,7 @@
         </div>
 
         <div class="panel-footnote muted mono" x-show="$store.memory.loaded">
-            <span x-text="'hue = layer · brightness = change frequency (sha256 per slice) · live per iteration'"></span>
+            <span x-text="'hue = layer · brightness = change frequency (sha256 per slice) · click a layer to view contents · live per iteration'"></span>
         </div>
     </div>
 

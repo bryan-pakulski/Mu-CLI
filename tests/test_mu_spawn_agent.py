@@ -30,16 +30,20 @@ class _ScriptedProvider(LLMProvider):
     background thread with its own provider copy.
     """
 
-    def __init__(self, responses):
+    def __init__(self, responses, available=None):
         super().__init__("scripted-model")
         self.name = "scripted"
         self.queue = list(responses)
+        # Models this provider advertises as installed. Defaults to just the
+        # parent's own model; tests that exercise a model override pass a
+        # wider list so the override is considered "installed".
+        self._available = list(available) if available is not None else ["scripted-model"]
         # Shared by reference across copy.copy() — the child's copy writes
         # here and the test thread reads here.
         self._captures = {"system_prompt": None, "tool_names": None}
 
     def get_available_models(self):
-        return ["scripted-model"]
+        return list(self._available)
 
     def generate(self, messages, system_prompt=None, thinking=False, tools=None):
         self._captures["system_prompt"] = system_prompt or ""
@@ -83,6 +87,21 @@ def _poll_until(parent, task_id, target=("done", "killed", "error"), timeout=10.
             return snap
         time.sleep(0.02)
     return registry.snapshot(task_id)
+
+
+# ---------------------------------------------------------------- happy path
+
+
+def test_subagent_model_is_in_variable_schema():
+    """subagent_model is a real session variable so /set and the GUI can drive
+    it; default "" means children inherit the parent model."""
+    from utils.config import VARIABLE_SCHEMA, DEFAULT_VARIABLES
+
+    entry = VARIABLE_SCHEMA.get("subagent_model")
+    assert entry is not None, "subagent_model missing from VARIABLE_SCHEMA"
+    assert entry["type"] is str
+    assert entry["default"] == ""
+    assert DEFAULT_VARIABLES["subagent_model"] == ""
 
 
 # ---------------------------------------------------------------- happy path
@@ -275,7 +294,9 @@ def test_spawn_agent_model_override_does_not_mutate_parent(tmp_path, monkeypatch
             ProviderResponse(
                 text="ok", parts=[MessagePart(type="text", text="ok")]
             )
-        ]
+        ],
+        # Advertise the override as installed so the new validation honors it.
+        available=["scripted-model", "different-model"],
     )
     parent = _build_parent(tmp_path, provider, monkeypatch)
     parent.provider.model_name = "original-model"
@@ -293,6 +314,101 @@ def test_spawn_agent_model_override_does_not_mutate_parent(tmp_path, monkeypatch
     assert parent.provider.model_name == "original-model"
     # The child's cloned provider carries the override.
     assert record.child.provider.model_name == "different-model"
+
+
+def test_spawn_agent_defaults_to_parent_model(tmp_path, monkeypatch):
+    """With no subagent_model config and no model arg, the child inherits
+    the parent's model — the documented default."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ]
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+
+    res = execute("spawn_agent", {"task": "do"}, _ctx_for(parent))
+    task_id = res["data"]["task_id"]
+    record = parent._subagent_registry.get(task_id)
+    _poll_until(parent, task_id)
+
+    assert record.child.provider.model_name == "parent-model"
+    assert parent.provider.model_name == "parent-model"
+
+
+def test_spawn_agent_subagent_model_config_overrides_arg(tmp_path, monkeypatch):
+    """The subagent_model session variable takes priority over the agent's
+    per-call `model` arg, and is applied when installed."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ],
+        available=["scripted-model", "config-model", "arg-model"],
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+    parent.variables["subagent_model"] = "config-model"
+
+    res = execute(
+        "spawn_agent",
+        {"task": "do", "model": "arg-model"},
+        _ctx_for(parent),
+    )
+    record = parent._subagent_registry.get(res["data"]["task_id"])
+    _poll_until(parent, res["data"]["task_id"])
+
+    # Config wins over the arg; the child runs on config-model.
+    assert record.child.provider.model_name == "config-model"
+    assert parent.provider.model_name == "parent-model"
+
+
+def test_spawn_agent_uninstalled_arg_falls_back_to_parent(tmp_path, monkeypatch, caplog):
+    """A hallucinated/uninstalled `model` arg no longer crashes the child —
+    it falls back to the parent model with a warning. This is the fix for
+    "Ollama model 'sonnet-3.5' is not installed"."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ],
+        available=["scripted-model"],  # "sonnet-3.5" is NOT installed
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="mucli"):
+        res = execute(
+            "spawn_agent",
+            {"task": "do", "model": "sonnet-3.5"},
+            _ctx_for(parent),
+        )
+    record = parent._subagent_registry.get(res["data"]["task_id"])
+    _poll_until(parent, res["data"]["task_id"])
+
+    # The uninstalled arg was ignored; child runs on the parent model.
+    assert record.child.provider.model_name == "parent-model"
+    assert parent.provider.model_name == "parent-model"
+    assert any("sonnet-3.5" in r.getMessage() for r in caplog.records)
+
+
+def test_spawn_agent_uninstalled_config_falls_back_to_parent(tmp_path, monkeypatch):
+    """An uninstalled subagent_model config also falls back to parent."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ],
+        available=["scripted-model"],
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+    parent.variables["subagent_model"] = "ghost-model"
+
+    res = execute("spawn_agent", {"task": "do"}, _ctx_for(parent))
+    record = parent._subagent_registry.get(res["data"]["task_id"])
+    _poll_until(parent, res["data"]["task_id"])
+
+    assert record.child.provider.model_name == "parent-model"
 
 
 # ---------------------------------------------------------- YOLO inheritance

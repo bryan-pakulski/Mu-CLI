@@ -148,6 +148,59 @@ def test_app_js_routes_context_snapshot_event():
     assert 'case "context_snapshot"' in content
 
 
+def test_app_js_memory_store_has_layer_modal_methods():
+    with open(APP_JS_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "layerModal" in content
+    assert "openLayer" in content
+    assert "closeLayer" in content
+    assert "copyLayer" in content
+    assert "/api/memory/content" in content
+
+
+def test_memory_panel_legend_rows_are_clickable():
+    with open(PANEL_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "$store.memory.openLayer(l)" in content
+    # keyboard accessible too
+    assert "@keydown.enter" in content
+
+
+def test_memory_layer_modal_fragment_exists():
+    modal_path = os.path.join(
+        os.path.dirname(PANEL_PATH), "memory_layer_modal.html",
+    )
+    assert os.path.isfile(modal_path)
+    with open(modal_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "modal-backdrop" in content
+    assert "$store.memory.layerModal" in content
+    assert "$store.memory.copyLayer" in content
+    assert "$store.memory.closeLayer" in content
+    # copy/paste support: a copy button + selectable pre body
+    assert "<pre" in content
+    assert "copy" in content
+
+
+def test_index_html_includes_memory_layer_modal():
+    with open(INDEX_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "memory_layer_modal.html" in content
+
+
+def test_css_has_memory_layer_modal_classes():
+    with open(CSS_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
+    for cls in (
+        ".memory-layer-modal",
+        ".memory-layer-pre",
+        ".memory-legend-row",
+    ):
+        assert cls in content, f"CSS class {cls} not found in app.css"
+    # the <pre> body is selectable so copy/paste works
+    assert "user-select: text" in content
+
+
 # ============================================================ CSS
 
 
@@ -192,6 +245,57 @@ def test_memory_snapshot_hook_registered_idempotent():
     _register_memory_snapshot_hook()  # second call must not duplicate
     names = [s.name for s in default_registry.list("pre_provider_call")]
     assert names.count("gui_memory_snapshot") == 1
+
+
+def _make_content_app(session):
+    """Minimal FastAPI app mounting only the memory router, wired so the
+    /content endpoint resolves the given session as the focused one."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from mu.gui.routers import memory as memory_router
+
+    app = FastAPI()
+    app.state.sessions = {"s1": session}
+    app.state.current_session_name = "s1"
+    app.state.session_locks = {}
+    app.state._fallback_lock = __import__("threading").Lock()
+
+    def _session_by_name(name=None):
+        return app.state.sessions.get(app.state.current_session_name)
+
+    app.state.session_by_name = _session_by_name
+    app.include_router(memory_router.router, prefix="/api/memory")
+    return TestClient(app)
+
+
+def test_memory_content_endpoint_returns_layer_body():
+    session = _make_session()
+    _add_user_turn(session, "alpha beta gamma delta epsilon zeta eta theta")
+    client = _make_content_app(session)
+
+    r = client.get("/api/memory/content?layer=L5")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["layer"] == "L5"
+    assert "content" in d and isinstance(d["content"], str)
+    # The L5 body is a human-readable conversation view, so the turn we
+    # added must appear in the rendered contents.
+    assert "alpha beta gamma" in d["content"]
+    assert d["chars"] == len(d["content"])
+    assert d["tokens"] >= 0
+    assert d["error"] == ""
+    # Hue is echoed so the modal header matches the legend swatch.
+    assert d["hue"] == 358
+
+
+def test_memory_content_endpoint_rejects_unknown_layer():
+    session = _make_session()
+    client = _make_content_app(session)
+    r = client.get("/api/memory/content?layer=L9")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["error"] == "unknown layer"
+    assert d["content"] == ""
 
 
 # ============================================================ builder behavior
@@ -365,23 +469,22 @@ def test_snapshot_heat_keyed_per_resolution():
     assert max(c for r in b64["grid"] for c in r) <= 1     # 64 starts clean
 
 
-def test_snapshot_grid_columns_are_per_resolution_hashes():
+def test_snapshot_resize_keeps_change_signal():
     from mu.gui.memory_snapshot import build_memory_snapshot
 
-    # The grid is one hash per column (len == cols), repeated down each
-    # band's rows — so within a band every row is identical (vertical
-    # stripes), and the column count tracks the requested resolution.
+    # Growing a layer resizes its band (re-chunk), but the changed regions
+    # must still register as heat via fractional-position correspondence.
     session = _make_session()
     _add_user_turn(session, "alpha beta gamma delta epsilon zeta eta theta")
-    snap = build_memory_snapshot(session, cols=24, rows=24)
-    # Find the L5 band (the only layer with content here).
-    l5 = next(l for l in snap["layers"] if l["id"] == "L5")
-    r0, r1 = l5["row_start"], l5["row_end"]
-    assert r1 > r0
-    first = snap["grid"][r0]
-    for ri in range(r0 + 1, r1):
-        assert snap["grid"][ri] == first   # rows within a band are identical
-    assert len(first) == 24                # one hash per column at res 24
+    before = build_memory_snapshot(session, cols=32, rows=32)
+    before_changes = sum(l["change_count"] for l in before["layers"])
+
+    _add_user_turn(session, "iota kappa lambda mu nu xi omicron pi rho sigma")
+    after = build_memory_snapshot(session, cols=32, rows=32)
+    after_changes = sum(l["change_count"] for l in after["layers"])
+
+    assert after_changes > before_changes
+    assert max(c for r in after["grid"] for c in r) > 1
 
 
 def test_hash_color_is_deterministic_and_hex():

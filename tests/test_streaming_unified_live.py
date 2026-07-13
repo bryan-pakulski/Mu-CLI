@@ -14,7 +14,9 @@ a `CommandResult.message` that never got printed. They now call
 
 from unittest.mock import MagicMock
 
+import io
 import pytest
+from rich.console import Console
 
 from mu.commands.stats import (
     agentic_cmd,
@@ -31,10 +33,23 @@ class _RecordingUI:
     def __init__(self):
         self.info_calls = []
         self.error_calls = []
+        # `stats_cmd` renders its tables directly to `ui.console` (not via
+        # show_info), so give the stub a real Rich Console capturing to a
+        # buffer for assertions.
+        self._console_buf = io.StringIO()
+        self.console = Console(
+            file=self._console_buf,
+            width=120,
+            force_terminal=False,
+            color_system=None,
+        )
     def show_info(self, m):
         self.info_calls.append(str(m))
     def show_error(self, m):
         self.error_calls.append(str(m))
+    @property
+    def console_output(self) -> str:
+        return self._console_buf.getvalue()
 
 
 class _SessionStub:
@@ -99,12 +114,13 @@ def test_stats_command_emits_summary_line(monkeypatch):
     session = _SessionStub()
     result = stats_cmd(session, "", allow_prompt=True)
     assert result.ok is True
-    assert session.ui.info_calls, "stats should print a summary line"
-    body = session.ui.info_calls[0]
-    assert "tokens" in body.lower()
+    # stats_cmd renders a Rich table directly to ui.console (not show_info).
+    body = session.ui.console_output
+    assert body, "stats should render a summary table to the console"
+    assert "Tokens" in body  # the lifetime tokens row
     assert "100" in body  # input tokens
     assert "150" in body  # total
-    assert "mode=default" in body
+    assert "Mode" in body and "default" in body  # mode row
 
 
 # ============================================================ _GenerationLive

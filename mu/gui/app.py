@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+
+_logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, Response
@@ -30,6 +33,7 @@ from starlette.types import Scope
 
 from .bus import EventBus
 from .deps import require_session  # re-exported
+from .memory_snapshot import LIVE_RESOLUTION, build_memory_snapshot
 from .prompts import PromptStore
 from .routers import (
     audio as audio_router,
@@ -38,6 +42,7 @@ from .routers import (
     feature as feature_router,
     inspector,
     loop as loop_router,
+    memory as memory_router,
     modes,
     prompts as prompts_router,
     providers as providers_router,
@@ -45,10 +50,46 @@ from .routers import (
     security as security_router,
     sessions,
     skills as skills_router,
+    system_prompts as system_prompts_router,
     teacher as teacher_router,
 )
 from .watcher import SessionWatcher
 from .web_ui import WebUI
+
+# Hook registry + context for the live memory-snapshot push. Imported
+# lazily-safe at module load (mu.agent.hooks has no heavy deps).
+from mu.agent.hooks import HookContext, default_registry
+
+_MEMORY_HOOK_NAME = "gui_memory_snapshot"
+
+
+def _register_memory_snapshot_hook() -> None:
+    """Register a ``pre_provider_call`` hook that pushes a live context
+    snapshot to the GUI per iteration so the Memory Map panel updates in
+    real time while a turn runs.
+
+    Idempotent: no-ops if the hook is already registered (tests may call
+    ``create_app`` more than once). The handler skips any session whose
+    UI isn't a :class:`WebUI`, so CLI runs are unaffected. Fires on the
+    agent thread, where ``HookContext`` already carries the fully
+    assembled system prompt + messages about to go to the provider.
+    """
+    if any(spec.name == _MEMORY_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
+        return
+
+    def _snapshot(ctx: HookContext):
+        ui = getattr(ctx.session, "ui", None)
+        if not isinstance(ui, WebUI):
+            return None
+        try:
+            snap = build_memory_snapshot(ctx.session, cols=LIVE_RESOLUTION, rows=LIVE_RESOLUTION)
+        except Exception as exc:  # defensive — must never break a turn
+            _logger.warning("memory snapshot hook failed: %s", exc)
+            return None
+        ui._publish({"kind": "context_snapshot", **snap})
+        return None
+
+    default_registry.register("pre_provider_call", name=_MEMORY_HOOK_NAME)(_snapshot)
 
 GUI_ROOT = Path(__file__).parent
 TEMPLATES_DIR = GUI_ROOT / "templates"
@@ -159,6 +200,11 @@ def create_app(
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(modes.router, prefix="/api/modes", tags=["modes"])
     app.include_router(prompts_router.router, prefix="/api/prompts", tags=["prompts"])
+    app.include_router(
+        system_prompts_router.router,
+        prefix="/api/system-prompts",
+        tags=["system-prompts"],
+    )
     app.include_router(inspector.router, prefix="/api", tags=["inspector"])
     app.include_router(teacher_router.router, prefix="/api/teacher", tags=["teacher"])
     app.include_router(feature_router.router, prefix="/api/feature", tags=["feature"])
@@ -166,9 +212,14 @@ def create_app(
     app.include_router(security_router.router, prefix="/api/security", tags=["security"])
     app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
     app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
+    app.include_router(memory_router.router, prefix="/api/memory", tags=["memory"])
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])
     app.include_router(chat.events_router, tags=["events"])
+
+    # Live Memory Map: push a context snapshot per provider iteration so
+    # the panel updates in real time while a turn runs. Idempotent.
+    _register_memory_snapshot_hook()
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):

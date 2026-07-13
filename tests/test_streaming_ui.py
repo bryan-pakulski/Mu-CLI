@@ -39,7 +39,18 @@ def _make_rich_ui_with_recording_console():
         # Render the markup-as-string approximation: the bits that actually
         # get printed to the user. We deliberately don't try to reproduce
         # full Rich formatting; we just want a faithful order-of-calls log.
-        text = " ".join(str(a) for a in args)
+        # For `rich.text.Text` args, surface the style so tests can assert
+        # on styling (e.g. the dim-italic thinking style) — `str(Text)`
+        # alone drops the style.
+        parts = []
+        for a in args:
+            style = getattr(a, "style", None)
+            style_str = str(style).strip() if style is not None else ""
+            if style_str and style_str.lower() != "none":
+                parts.append(f"[{style_str}]{a}")
+            else:
+                parts.append(str(a))
+        text = " ".join(parts)
         captured.append(("print", text, dict(kwargs)))
 
     ui.console = MagicMock()

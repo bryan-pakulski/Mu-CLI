@@ -148,12 +148,17 @@ def test_invoke_skill_bumps_skills_counter(session):
 
 def test_invoke_skill_emits_visible_banner(session):
     """The pre_tool hook for `invoke_skill` must visibly highlight
-    the activation through the UI surface."""
+    the activation through the UI's console surface."""
     captured: List[str] = []
 
+    class _FakeConsole:
+        def print(self, *args, **kwargs):
+            for a in args:
+                captured.append(a.plain if hasattr(a, "plain") else str(a))
+
     class _FakeUI:
-        def show_info(self, body):
-            captured.append(str(body))
+        def __init__(self):
+            self.console = _FakeConsole()
 
     session.ui = _FakeUI()
     _fire(
@@ -169,9 +174,14 @@ def test_invoke_skill_emits_visible_banner(session):
 def test_non_skill_tool_does_not_emit_banner(session):
     captured: List[str] = []
 
+    class _FakeConsole:
+        def print(self, *args, **kwargs):
+            for a in args:
+                captured.append(a.plain if hasattr(a, "plain") else str(a))
+
     class _FakeUI:
-        def show_info(self, body):
-            captured.append(str(body))
+        def __init__(self):
+            self.console = _FakeConsole()
 
     session.ui = _FakeUI()
     _fire("pre_tool", session=session, tool_name="read_file", tool_args={"filename": "x"})

@@ -6,7 +6,9 @@ Two hooks:
     hook can compute elapsed time. Also prints a visible banner when
     `invoke_skill` fires so the user can see exactly when a skill is
     being applied (per the user request: "highlight it in the text
-    to show that it is being used").
+    to show that it is being used"). The same banner is printed for
+    trigger-regex auto-expansion from `mu/session/session.py`; the
+    shared renderer lives in `mu.skills.announce_skill`.
 
   * **post_tool** — increments the per-tool counters on
     `session.tool_stats`, records last-used timestamp, and (for

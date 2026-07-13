@@ -115,6 +115,21 @@ class Session:
         # the aborting hook for the turn-response error field.
         self._hook_abort_requested: bool = False
         self._hook_abort_reason: str | None = None
+        # Async sub-agent orchestrator state. `_subagent_cancelled` is the
+        # cooperative kill flag (read at the top of each run_turn iteration,
+        # mirroring `_hook_abort_requested`); `_subagent_kill_reason` carries
+        # the reason ("killed_by_parent" | "runtime_exceeded" | ...).
+        # `_subagent_lifecycle` is set per-child by spawn_agent so the child's
+        # own loop can feed tool calls to its SubagentLifecycleManager.
+        # `_subagent_registry` is the per-parent control plane for async
+        # sub-agent runs (task_id -> running child). All absent / default for
+        # single-agent sessions.
+        self._subagent_cancelled: bool = False
+        self._subagent_kill_reason: str | None = None
+        self._subagent_lifecycle = None
+        from mu.agent.registry import SubagentRegistry
+
+        self._subagent_registry = SubagentRegistry()
         # Per-session usage tracker. Populated by the pre_tool /
         # post_tool hooks in `mu/agent/usage_tracker.py`. Surfaced via
         # `/stats`. Reset via `/stats clear`.
@@ -635,7 +650,6 @@ class Session:
             from mu.skills import (
                 announce_skill,
                 discover_skills,
-                match_trigger,
                 render_skills_block,
             )
         except ImportError:
@@ -1290,6 +1304,16 @@ class Session:
             return run_turn(self, text)
         finally:
             self._strip_session_goal_after_turn()
+            # Lazy LAYER 3B: clear the orchestrator role once no children are
+            # active so a session that spawned sub-agents earlier doesn't keep
+            # emitting ORCHESTRATOR guidance on unrelated future turns. The
+            # role is re-stamped on the next spawn_agent call.
+            try:
+                if not self._subagent_registry.has_active():
+                    if str(self.variables.get("session_role", "") or "") == "parent":
+                        self.variables["session_role"] = ""
+            except Exception:
+                pass
             # Clean up turn-prompt protection now that the turn is over.
             # The turn's starting prompt was protected during the active
             # turn; after the turn, unprotect it if it's not otherwise
@@ -1344,3 +1368,20 @@ class Session:
                 )
             except Exception:
                 pass
+
+    def shutdown(self) -> None:
+        """Release resources held for the lifetime of the session.
+
+        Cancels any still-running async sub-agents and reaps background
+        bash tasks. Called from the REPL's top-level ``finally`` on exit
+        so no child threads or subprocesses outlive the session. Safe to
+        call more than once.
+        """
+        try:
+            self._subagent_registry.shutdown()
+        except Exception:
+            logger.debug("subagent registry shutdown failed", exc_info=True)
+        try:
+            self.background_tasks.shutdown()
+        except Exception:
+            logger.debug("background task shutdown failed", exc_info=True)

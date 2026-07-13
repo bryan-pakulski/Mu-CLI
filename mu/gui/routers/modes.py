@@ -26,7 +26,7 @@ async def list_modes(request: Request):
     modes = []
     # Modes that don't need a workspace attached — view-only / informational
     # modes that work off session state alone, not workspace files.
-    _NO_WORKSPACE_NEEDED = {"default", "history"}
+    _NO_WORKSPACE_NEEDED = {"default", "history", "memory"}
 
     for key in AGENTIC_MODES:
         meta = AGENT_MODE_METADATA.get(key, {})

@@ -33,6 +33,57 @@ import os
 from typing import Any
 
 
+# Depth cap for sub-agent spawning (mirrors mu/tools/agent/spawn.py).
+_MAX_SUBAGENT_DEPTH = 2
+
+
+def _build_role_layer(role: str, session: Any) -> str:
+    """LAYER 3B — Agent Role guidance. Kept under 500 chars.
+
+    * ``parent``  — orchestrator instructions: delegate, don't block, poll,
+      kill/extend, synthesize. Rendered only after the session has spawned
+      at least one child (lazy gating via ``session_role``).
+    * ``child``   — focused sub-agent instructions with depth + depth-cap
+      message. Rendered for spawned sub-agent sessions.
+    """
+    role = (role or "").strip().lower()
+    if role == "parent":
+        # Count currently-registered children for context.
+        n_active = 0
+        try:
+            n_active = sum(
+                1 for r in session._subagent_registry.list() if r.status == "running"
+            )
+        except Exception:
+            n_active = 0
+        children = f"{n_active} child sub-agent(s) running" if n_active else "child sub-agents may be running"
+        return (
+            "You are the ORCHESTRATOR. You may spawn sub-agents for research, deep dives, and focused tasks.\n"
+            f"- {children}. Do NOT block waiting for them. Dispatch, continue other work, then poll.\n"
+            "- Use poll_subagent(task_id) to check progress / retrieve results. Use kill_subagent(task_id) to cancel a stuck or unneeded child.\n"
+            "- Sub-agents return summaries via poll. You synthesize their findings into the final response.\n"
+            "- You can extend a child that needs more time (keep polling) or kill one that is looping."
+        )
+    if role == "child":
+        try:
+            depth = int(session.variables.get("subagent_depth", 1) or 1)
+        except Exception:
+            depth = 1
+        remaining = max(0, _MAX_SUBAGENT_DEPTH - depth)
+        if remaining <= 0:
+            cap_line = "Do NOT spawn further sub-agents (depth cap reached)."
+        else:
+            cap_line = f"You may spawn up to {remaining} further sub-agent level(s)."
+        return (
+            f"You are a SUB-AGENT (depth={depth}), spawned by the parent orchestrator.\n"
+            "- Complete your assigned task. Return a concise summary of findings via your final response.\n"
+            f"- {cap_line}\n"
+            "- Do NOT interact with the user. Return results to the parent only.\n"
+            "- If you cannot complete the task, return what you have — partial results are valuable."
+        )
+    return ""
+
+
 def build_workspace_context_files(session: Any) -> str:
     """LAYER 1 — read any user-curated context files from the workspace
     folders and concatenate with provenance headers. Returns "" when
@@ -178,6 +229,15 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
         layers.append(
             "LAYER 3 — Active task plan / current goal:\n" + goal_context
         )
+    # LAYER 3B — Agent Role (parent orchestrator / child sub-agent). Skipped
+    # when `session_role` is unset (single-agent sessions) so the prompt is
+    # unchanged for the common case. Lazy: the parent is stamped "parent"
+    # only on its first spawn; children are stamped "child" at creation.
+    session_role = str(session.variables.get("session_role", "") or "").strip()
+    if session_role:
+        role_block = _build_role_layer(session_role, session)
+        if role_block:
+            layers.append("LAYER 3B — Agent role:\n" + role_block)
     # L4B auto-retrieval removed — model uses retrieve_relevant_context
     # tool on demand instead of pre-injected snippets.
 

@@ -9,6 +9,7 @@ from mu.session.session import Session, SessionManager
 from mu.commands.variables import LAYER_BUDGET_VARS
 from providers.base import LLMProvider, ProviderResponse
 from mu.ui.input import InputHandler
+from utils.config import _LAYER_CHAR_DEFAULTS
 
 
 class _DummyProvider(LLMProvider):
@@ -222,7 +223,12 @@ def test_unset_works_via_underlying_variable_name(session):
         session, "/unset conversation_summary_char_limit", allow_prompt=False
     )
     assert result.ok
-    assert session.variables["conversation_summary_char_limit"] == 8000  # schema default
+    # The schema default is the scaled layer-char budget (not a hardcoded
+    # constant) — assert against the same source VARIABLE_SCHEMA uses.
+    assert (
+        session.variables["conversation_summary_char_limit"]
+        == _LAYER_CHAR_DEFAULTS["conversation_summary_char_limit"]
+    )
 
 
 # ----------------------------------------------- autocomplete

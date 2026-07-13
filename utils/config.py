@@ -308,6 +308,52 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 5,
     },
+    # ----- Sub-agent async orchestrator -----
+    # session_role drives LAYER 3B (Agent Role) injection in
+    # inject_hierarchical_context. Default "" => single-agent sessions skip
+    # LAYER 3B (backward compatible). Stamped "parent" on a session when it
+    # first spawns a child; "child" on every spawned sub-agent session.
+    "session_role": {
+        "type": str,
+        "default": "",
+    },
+    # Increments per spawn level; cap at MAX_SUBAGENT_DEPTH (2). Children
+    # read this to render depth-aware LAYER 3B sub-agent guidance.
+    "subagent_depth": {
+        "type": int,
+        "default": 0,
+    },
+    # Links a child to its parent's task_id for polling/correlation.
+    "subagent_parent_task_id": {
+        "type": str,
+        "default": "",
+    },
+    # Consecutive same-tool+same-args calls before the lifecycle manager
+    # flags the sub-agent as stuck (surfaced to parent via poll; not an
+    # auto-kill).
+    "subagent_stuck_threshold": {
+        "type": int,
+        "default": 3,
+    },
+    # Consecutive no-novel-output calls before the lifecycle manager flags
+    # the sub-agent as stalled (surfaced to parent via poll; not an
+    # auto-kill).
+    "subagent_stall_threshold": {
+        "type": int,
+        "default": 5,
+    },
+    # Hard runtime limit (seconds) before the lifecycle watchdog auto-kills
+    # a runaway sub-agent. The ONLY auto-kill path; stuck/stall are advisory.
+    "subagent_max_runtime_seconds": {
+        "type": int,
+        "default": 300,
+    },
+    # Master switch for lifecycle signal tracking + stuck/stall detection.
+    # When False, sub-agents still run async but no heuristics fire.
+    "subagent_lifecycle_enabled": {
+        "type": bool,
+        "default": True,
+    },
     # ----- TTS / STT (audio) -----
     "tts_enabled": {
         "type": bool,
@@ -654,6 +700,23 @@ You are in HISTORY mode for searching and visualizing past conversation history.
 
 This is a read-only visualization mode. No code changes, no session mutation. The search endpoint
 already exists from the Queryable Session History feature.""",
+    "memory": """WORKFLOW (Memory Map):
+
+You are in MEMORY MAP mode — a read-only visualization of the context window
+the model actually sees each turn. This is an observational view, not a
+working mode; switch back to default/debug/feature/etc. to do work.
+
+1. The panel renders one horizontal band per context layer (L0 system prompt,
+   L1 workspace files, L1B skills, L2 conversation summary, L3 active goal,
+   L4B retrieved snippets, L5 conversation history). Band height is
+   proportional to the layer's token share.
+2. Each cell's color is the SHA-256 hash of a slice of that layer's text, so
+   identical content renders identically and a changed layer visibly shifts.
+3. The grid updates every turn (on turn completion) and every iteration
+   within a turn (a pre-provider-call hook pushes a live snapshot), so you
+   can watch the L5 history band grow and other layers shift in real time.
+
+No tools, no session mutation. Just watch.""",
     "teacher": """WORKFLOW (Teacher Mode):
 
 You are a one-on-one tutor. This is a personal session, not a generic lecture series. Your single most important job is to understand THIS learner — how they think, how they learn, what already lives in their head — and shape every word you say to fit them. Generic, off-the-shelf teaching is a failure.
@@ -774,6 +837,15 @@ AGENT_MODE_METADATA = {
         "documentation": "documentation/session_guide.md",
         "display_name": "History Search",
     },
+    "memory": {
+        "description": (
+            "Live context-window map: a color grid fingerprinting every "
+            "layer (system prompt, workspace, skills, summary, goal, "
+            "history) as it evolves each turn and each iteration."
+        ),
+        "documentation": "documentation/session_guide.md",
+        "display_name": "Memory Map",
+    },
     "teacher": {
         "description": (
             "Structured course engine — diagnostic, curriculum, per-lesson "
@@ -782,6 +854,15 @@ AGENT_MODE_METADATA = {
         ),
         "documentation": "documentation/teacher_mode.md",
         "display_name": "Teacher Mode",
+    },
+    "systemPrompts": {
+        "description": (
+            "Edit and manage file-based system-prompt overrides. View, "
+            "edit, save, reload, init, and reset base and per-mode prompts "
+            "via the GUI."
+        ),
+        "documentation": "documentation/system_prompt_architecture.md",
+        "display_name": "System Prompts",
     },
 }
 

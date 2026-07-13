@@ -148,6 +148,7 @@ def _load_command_modules() -> None:
     from . import teach  # noqa: F401 — registers /teach
     from . import shell  # noqa: F401 — registers /bash, /sh, /!
     from . import goal  # noqa: F401 — registers /goal
+    from . import prompts  # noqa: F401 — registers /prompts
 
 
 _load_command_modules()

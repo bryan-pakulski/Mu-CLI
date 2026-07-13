@@ -23,6 +23,9 @@ v2 design:
   * `### AUTO-EXPANDED SKILLS` carries full bodies for skills whose
     trigger matched the latest user message;
   * model can call `invoke_skill(name)` to expand any other skill;
+  * both activation paths print a visible `🎯 SKILL ACTIVE` banner via
+    `announce_skill` (auto-expansion tags itself `· trigger`) and bump
+    a per-skill counter in `/stats`;
   * users list / inspect / reload / enable / disable via `/skills`.
 
 Budget knob: `skills_max_chars` (default 6144).

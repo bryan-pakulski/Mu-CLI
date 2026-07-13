@@ -574,7 +574,7 @@ def test_get_lecture_transcript_returns_markdown(isolated_workspace):
     save_course(course)
 
     request = _fake_request(course.directory)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         get_lecture_transcript(request, "l1")
     )
     assert result["lesson_id"] == "l1"
@@ -589,7 +589,7 @@ def test_get_lecture_transcript_404_when_absent(isolated_workspace):
     course = _seed_course()
     request = _fake_request(course.directory)
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             get_lecture_transcript(request, "l1")
         )
     assert exc_info.value.status_code == 404
@@ -613,7 +613,7 @@ def test_get_lecture_transcript_404_no_active_course(isolated_workspace):
     request = SimpleNamespace(app=SimpleNamespace(state=app_state))
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             get_lecture_transcript(request, "l1")
         )
     assert exc_info.value.status_code == 404
@@ -629,7 +629,7 @@ def test_get_exercises_listing_returns_files(isolated_workspace):
     save_course(course)
 
     request = _fake_request(course.directory)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         get_exercises_listing(request, "l1")
     )
     assert result["lesson_id"] == "l1"
@@ -648,7 +648,7 @@ def test_get_exercises_listing_empty_when_no_dir(isolated_workspace):
 
     course = _seed_course()
     request = _fake_request(course.directory)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         get_exercises_listing(request, "l1")
     )
     assert result["lesson_id"] == "l1"
@@ -664,7 +664,7 @@ def test_get_exercise_file_returns_content(isolated_workspace):
     save_course(course)
 
     request = _fake_request(course.directory)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         get_exercise_file(request, "l1", "example.py")
     )
     assert result["lesson_id"] == "l1"
@@ -680,7 +680,7 @@ def test_get_exercise_file_404_not_found(isolated_workspace):
     course = _seed_course()
     request = _fake_request(course.directory)
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             get_exercise_file(request, "l1", "nonexistent.py")
         )
     assert exc_info.value.status_code == 404
@@ -697,7 +697,7 @@ def test_get_exercise_file_rejects_traversal(isolated_workspace):
 
     request = _fake_request(course.directory)
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             get_exercise_file(request, "l1", "../../../etc/passwd")
         )
     assert exc_info.value.status_code == 403
@@ -711,7 +711,7 @@ def test_get_exercise_file_rejects_absolute_path(isolated_workspace):
     course = _seed_course()
     request = _fake_request(course.directory)
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             get_exercise_file(request, "l1", "/etc/passwd")
         )
     assert exc_info.value.status_code == 403
@@ -726,7 +726,7 @@ def test_get_exercise_file_handles_subdirectory(isolated_workspace):
     save_course(course)
 
     request = _fake_request(course.directory)
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         get_exercise_file(request, "l1", "subdir/nested.py")
     )
     assert result["path"] == os.path.join("subdir", "nested.py")

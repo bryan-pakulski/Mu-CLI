@@ -364,6 +364,21 @@ class LLMProvider(ABC):
     def upload_file(self, file_path: str, mime_type: str) -> Optional[FileReference]:
         """Upload a file to the provider's storage mechanism (if required)."""
 
+    def clone_for_child(self) -> "LLMProvider":
+        """Return a provider instance for a spawned sub-agent.
+
+        Sub-agents run on background threads and may override ``model_name``;
+        the default shallow ``copy.copy`` gives each child its own
+        ``model_name`` slot while sharing the underlying (thread-safe) HTTP
+        client — eliminating the race where concurrent children clobbered a
+        single shared ``model_name``. Providers that carry per-call mutable
+        instance state beyond ``model_name`` should override this to copy
+        that state safely.
+        """
+        import copy as _copy
+
+        return _copy.copy(self)
+
 
 __all__ = [
     "CacheHint",

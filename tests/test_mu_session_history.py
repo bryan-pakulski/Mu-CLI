@@ -28,13 +28,19 @@ def test_mixin_re_exported_via_package():
 
 
 def test_estimate_tokens_from_text_zero_for_empty():
-    assert HistoryMixin._estimate_tokens_from_text("") == 0
-    assert HistoryMixin._estimate_tokens_from_text(None) == 0
+    # `_estimate_tokens_from_text` is an instance method (it resolves the
+    # active model via self._active_model()); call it through a host. The
+    # _Host stub has no provider_config, so _active_model() returns "" and
+    # the estimator falls back to its general-purpose encoder.
+    host = _Host()
+    assert host._estimate_tokens_from_text("") == 0
+    assert host._estimate_tokens_from_text(None) == 0
 
 
 def test_estimate_tokens_from_text_chars_over_four():
     # 12 chars / 4 = 3 tokens
-    assert HistoryMixin._estimate_tokens_from_text("hello world!") == 3
+    host = _Host()
+    assert host._estimate_tokens_from_text("hello world!") == 3
 
 
 def test_estimate_message_tokens_counts_role_type_and_payload():

@@ -3893,3 +3893,93 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     .history-search-bar { flex-direction: column; }
     .history-filters { flex-direction: column; }
 }
+
+/* ------------------------------------------------------------ memory panel
+ *
+ * Live context-window fingerprint: a color grid with one horizontal
+ * band per context layer (L0..L5). Each cell is sha256(layer text
+ * slice) → color. The canvas is a low-res buffer scaled up with
+ * pixelated rendering so cells stay crisp; dividers are a CSS overlay
+ * positioned by each layer's row share.
+ */
+
+.memory-body { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.memory-panel { display: flex; flex-direction: column; }
+
+.memory-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 12px;
+}
+.memory-controls label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.memory-controls select {
+    background: var(--bg-elev, var(--bg));
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+}
+.memory-refresh {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 1px 8px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+.memory-refresh:hover { color: var(--text); border-color: var(--accent-line); }
+
+.memory-canvas-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-elev, rgba(0, 0, 0, 0.18));
+}
+.memory-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+.memory-dividers {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+.memory-divider {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 0;
+    border-top: 1px solid var(--accent-line);
+    opacity: 0.55;
+}
+
+.memory-legend { display: flex; flex-direction: column; gap: 2px; }
+.memory-legend-row {
+    display: grid;
+    grid-template-columns: 34px 1fr 92px;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 12px;
+    padding: 1px 0;
+}
+.memory-legend-row.empty { opacity: 0.45; }
+.memory-legend-id {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+}
+.memory-legend-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-legend-tok { font-size: 11px; text-align: right; white-space: nowrap; }

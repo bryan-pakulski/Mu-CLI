@@ -831,7 +831,7 @@ document.addEventListener("alpine:init", () => {
         active: "default",
         realMode: "default",
         modes: [],
-        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history"],
+        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
@@ -1916,6 +1916,102 @@ document.addEventListener("alpine:init", () => {
         },
     });
 
+    // Memory Map — a live color-grid fingerprint of the context window.
+    // One horizontal band per layer (L0..L5); each cell's color is the
+    // SHA-256 hash of a slice of that layer's text, so identical content
+    // renders identically and a changed layer visibly shifts. Refreshed
+    // each turn by refreshActivePanel() and each iteration by the
+    // context_snapshot SSE event (pushed from a pre_provider_call hook).
+    Alpine.store("memory", {
+        active: false,
+        loaded: false,
+        resolution: 128,
+        cols: 128,
+        rows: 128,
+        layers: [],
+        grid: [],
+        totalTokens: 0,
+        contextLimit: 0,
+        fillPct: 0,
+        _canvas: null,
+        _renderPending: false,
+
+        bindCanvas(canvas) {
+            this._canvas = canvas;
+            // Re-draw whenever the theme flips (canvas is transparent so
+            // only dividers/bg care, but cheap to refresh) and on resize.
+            this.render();
+        },
+
+        async load() {
+            const res = this.resolution || 128;
+            try {
+                const r = await fetch(
+                    `/api/memory/state?cols=${res}&rows=${res}`
+                );
+                const d = await r.json();
+                this._apply(d);
+                this.loaded = true;
+            } catch (e) { console.error("memory.load", e); }
+        },
+
+        // Apply a snapshot (from REST load() or a live SSE event) and
+        // schedule a single render. Coalesces rapid iteration bursts via
+        // requestAnimationFrame so we never draw more than once per frame.
+        applySnapshot(snap) {
+            this._apply(snap);
+            this._scheduleRender();
+        },
+
+        _apply(d) {
+            this.active = !!d.active;
+            this.cols = d.cols || this.resolution;
+            this.rows = d.rows || this.resolution;
+            this.layers = d.layers || [];
+            this.grid = d.grid || [];
+            this.totalTokens = d.total_tokens || 0;
+            this.contextLimit = d.context_limit || 0;
+            this.fillPct = d.fill_pct || 0;
+        },
+
+        _scheduleRender() {
+            if (this._renderPending) return;
+            this._renderPending = true;
+            const run = () => {
+                this._renderPending = false;
+                this.render();
+            };
+            (window.requestAnimationFrame || setTimeout)(run);
+        },
+
+        render() {
+            const canvas = this._canvas;
+            if (!canvas || !this.grid || !this.grid.length) return;
+            const ctx = canvas.getContext("2d");
+            const cols = this.cols;
+            const rows = this.rows;
+            // Match the buffer to the current grid dimensions.
+            if (canvas.width !== cols || canvas.height !== rows) {
+                canvas.width = cols;
+                canvas.height = rows;
+            }
+            // Clear to transparent so the CSS background shows for null
+            // cells (no content in that slice of the layer).
+            ctx.clearRect(0, 0, cols, rows);
+            for (let ri = 0; ri < rows; ri++) {
+                const row = this.grid[ri];
+                if (!row) continue;
+                for (let ci = 0; ci < cols; ci++) {
+                    const c = row[ci];
+                    if (c) {
+                        ctx.fillStyle = c;
+                        ctx.fillRect(ci, ri, 1, 1);
+                    }
+                }
+            }
+        },
+    });
+
     Alpine.store("confirm", {
         // Small inline confirm-popover anchored near the click coords.
         // Replaces window.confirm() so we don't pop a native modal that
@@ -2488,6 +2584,169 @@ document.addEventListener("alpine:init", () => {
             this.hasMore = false;
         },
     });
+
+    // ── System Prompts editor ──────────────────────────────────────────
+    Alpine.store("systemPrompts", {
+        items: [],
+        selected: null,        // currently-selected prompt name
+        text: "",              // editor textarea content
+        rawFile: null,         // raw file content (frontmatter + body)
+        source: "",            // "file" | "hardcoded" | "override"
+        path: null,            // file path on disk
+        version: null,
+        chars: 0,
+        validation: [],
+        loading: false,
+        saving: false,
+        error: "",
+        dirty: false,
+        openSections: { list: true, editor: true },
+
+        toggleSection(name) {
+            this.openSections[name] = !this.openSections[name];
+        },
+
+        async load() {
+            this.loading = true;
+            this.error = "";
+            try {
+                const r = await fetch("/api/system-prompts");
+                if (!r.ok) { this.error = `Failed to load (${r.status})`; return; }
+                const data = await r.json();
+                this.items = data.items || [];
+                // Auto-select first item if nothing selected
+                if (!this.selected && this.items.length > 0) {
+                    await this.select(this.items[0].name);
+                }
+            } catch (e) {
+                this.error = `Load error: ${e}`;
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async select(name) {
+            this.selected = name;
+            this.loading = true;
+            this.error = "";
+            this.dirty = false;
+            try {
+                const r = await fetch(`/api/system-prompts/${encodeURIComponent(name)}`);
+                if (!r.ok) { this.error = `Failed to load prompt (${r.status})`; return; }
+                const data = await r.json();
+                this.text = data.text || "";
+                this.rawFile = data.raw_file || null;
+                this.source = data.source || "";
+                this.path = data.path || null;
+                this.version = data.version ?? null;
+                this.chars = data.chars || 0;
+                this.validation = data.validation || [];
+            } catch (e) {
+                this.error = `Select error: ${e}`;
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        markDirty() {
+            this.dirty = true;
+            this.chars = (this.text || "").length;
+        },
+
+        async save() {
+            if (!this.selected) return;
+            this.saving = true;
+            this.error = "";
+            try {
+                const r = await fetch(`/api/system-prompts/${encodeURIComponent(this.selected)}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ text: this.text }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    this.error = d.detail || `Save failed (${r.status})`;
+                    return;
+                }
+                const data = await r.json();
+                this.validation = data.validation || [];
+                this.path = data.path || this.path;
+                this.dirty = false;
+                // Refresh the list to pick up updated source/version
+                await this.load();
+                // Re-select to refresh metadata
+                await this.select(this.selected);
+            } catch (e) {
+                this.error = `Save error: ${e}`;
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        async reload() {
+            this.error = "";
+            try {
+                await fetch("/api/system-prompts/reload", { method: "POST" });
+                if (this.selected) { await this.select(this.selected); }
+            } catch (e) {
+                this.error = `Reload error: ${e}`;
+            }
+        },
+
+        async init(name) {
+            this.error = "";
+            try {
+                const body = { force: false };
+                if (name) { body.names = [name]; }
+                const r = await fetch("/api/system-prompts/init", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    this.error = d.detail || `Init failed (${r.status})`;
+                    return;
+                }
+                const data = await r.json();
+                // Refresh list and re-select
+                await this.load();
+                if (this.selected) { await this.select(this.selected); }
+            } catch (e) {
+                this.error = `Init error: ${e}`;
+            }
+        },
+
+        async reset() {
+            if (!this.selected) return;
+            this.error = "";
+            try {
+                const r = await fetch(`/api/system-prompts/${encodeURIComponent(this.selected)}/reset`, {
+                    method: "POST",
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    this.error = d.detail || `Reset failed (${r.status})`;
+                    return;
+                }
+                await this.load();
+                if (this.selected) { await this.select(this.selected); }
+            } catch (e) {
+                this.error = `Reset error: ${e}`;
+            }
+        },
+
+        sourceLabel() {
+            if (this.source === "override") return "runtime override";
+            if (this.source === "file") return "file override";
+            if (this.source === "hardcoded") return "hardcoded fallback";
+            return this.source || "—";
+        },
+
+        hasValidationIssues() {
+            return this.validation && this.validation.length > 0;
+        },
+    });
 });
 
 function escapeHtml(s) {
@@ -2670,6 +2929,17 @@ function routeEvent(ev) {
     const isFocused = !name || name === chat.currentName;
     switch (ev.kind) {
         case "user_message": break;  // echoed locally on send
+        case "context_snapshot": {
+            // Live Memory Map push from the pre_provider_call hook —
+            // one per iteration. Only act when the Memory view is the
+            // active panel for the focused session, so background turns
+            // and other views pay nothing.
+            const mode = Alpine.store("mode");
+            if (isFocused && mode && mode.active === "memory") {
+                Alpine.store("memory").applySnapshot(ev);
+            }
+            break;
+        }
         case "assistant_start": chat.startAssistant(ev.turn_id, name); break;
         case "assistant_delta": chat.appendDelta(ev.turn_id, ev.text || "", name); break;
         case "assistant_end":

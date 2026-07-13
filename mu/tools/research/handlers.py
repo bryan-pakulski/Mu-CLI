@@ -185,6 +185,36 @@ def _ddgs_text_search(query: str, max_results: int):
 _WEB_SEARCH_HARD_TIMEOUT = 60.0
 
 
+def _normalize_ddg_href(href: str) -> str:
+    """Normalize a DuckDuckGo HTML result href to an absolute https URL.
+
+    DDG's HTML endpoint wraps every result in a redirect URL of the form
+    ``//duckduckgo.com/l/?uddg=<url-encoded target>&rut=...`` —
+    protocol-relative AND redirect-wrapped. Returning that verbatim gives
+    callers unusable ``//`` URLs. This unwraps to the real target:
+
+      * ``//host/...``           → ``https://host/...``
+      * ``https://duckduckgo.com/l/?uddg=<enc>`` → the decoded ``uddg`` URL
+      * anything else            → unchanged
+    """
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    href = (href or "").strip()
+    if not href:
+        return ""
+    if href.startswith("//"):
+        href = "https:" + href
+    try:
+        parsed = urlparse(href)
+        if "duckduckgo.com" in (parsed.netloc or "").lower() and parsed.path.startswith("/l/"):
+            uddg = (parse_qs(parsed.query).get("uddg") or [""])[0]
+            if uddg:
+                return unquote(uddg)
+    except Exception:  # noqa: BLE001
+        pass
+    return href
+
+
 def web_search(query: str, engine: str = "duckduckgo", num_results: int = 10, folder_context=None) -> str:
     """Search the web using DuckDuckGo or Google Custom Search API.
 
@@ -332,7 +362,7 @@ def _web_search_impl(query: str, engine: str = "duckduckgo", num_results: int = 
             for i, row in enumerate(soup.select(".result")[:num_results]):
                 link = row.select_one(".result__a")
                 snippet = row.select_one(".result__snippet")
-                href = link.get("href", "") if link else ""
+                href = _normalize_ddg_href(link.get("href", "")) if link else ""
                 title = link.get_text(strip=True) if link else ""
                 body = snippet.get_text(strip=True) if snippet else ""
                 if not href and not title:

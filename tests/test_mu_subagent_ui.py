@@ -5,6 +5,8 @@ child makes, and sees the completion summary — instead of staring at a
 frozen REPL.
 """
 
+import time
+
 import pytest
 
 from mu.session.session import Session, SessionManager
@@ -200,7 +202,22 @@ def _build_parent(tmp_path, provider, ui, monkeypatch):
     return parent
 
 
-def test_spawn_emits_start_and_end_banners_to_parent_ui(tmp_path, monkeypatch):
+def _poll_until(parent, task_id, target=("done", "killed", "error"), timeout=10.0):
+    """Poll the registry until the child reaches a terminal status."""
+    registry = parent._subagent_registry
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        snap = registry.snapshot(task_id)
+        if snap.get("status") in target:
+            return snap
+        time.sleep(0.02)
+    return registry.snapshot(task_id)
+
+
+def test_spawn_emits_start_banner_and_poll_retrieves_summary(tmp_path, monkeypatch):
+    """Async contract: dispatch emits a start banner immediately; the final
+    summary is retrieved by polling (the old synchronous end banner is gone
+    because the child runs in a background thread)."""
     provider = _ScriptedProvider(
         responses=[
             ProviderResponse(
@@ -215,7 +232,7 @@ def test_spawn_emits_start_and_end_banners_to_parent_ui(tmp_path, monkeypatch):
     parent_ui = _RecordingUI()
     parent = _build_parent(tmp_path, provider, parent_ui, monkeypatch)
 
-    execute(
+    res = execute(
         "spawn_agent",
         {"task": "summarise the README"},
         build_tool_context(
@@ -226,18 +243,26 @@ def test_spawn_emits_start_and_end_banners_to_parent_ui(tmp_path, monkeypatch):
         ),
     )
 
-    # Start banner
+    # Dispatch is async and emits a start banner synchronously.
+    assert res["ok"] is True
+    assert res["data"]["status"] == "running"
     start_lines = [m for m in parent_ui.info_calls if "Spawning subagent" in m]
     assert start_lines, f"no start banner in {parent_ui.info_calls!r}"
     assert "summarise the README" in start_lines[0]
 
-    # End banner
-    end_lines = [m for m in parent_ui.info_calls if "Subagent" in m and "done" in m]
-    assert end_lines, f"no end banner in {parent_ui.info_calls!r}"
-    assert "tool call" in end_lines[0]
+    # The final summary arrives via poll, not a synchronous end banner.
+    snap = _poll_until(parent, res["data"]["task_id"])
+    assert snap["status"] == "done"
+    assert "all done" in snap["summary"]
+    # The progress tracker row is closed with the summary.
+    rows = parent._subagent_registry.tracker.snapshot()
+    assert any(r.status == "done" and "all done" in r.summary for r in rows)
 
 
-def test_spawn_forwards_child_tool_call_info_to_parent_ui(tmp_path, monkeypatch):
+def test_spawn_routes_child_tool_calls_to_progress_tracker(tmp_path, monkeypatch):
+    """With a tracker attached, the child's "Running tool: X" lines become
+    live-panel updates instead of parent-terminal log spam. The tool call
+    is observable via the registry snapshot (lifecycle) and the tracker row."""
     # Child plan: one tool call (read_file), then final text.
     target = tmp_path / "data.txt"
     target.write_text("payload")
@@ -262,7 +287,7 @@ def test_spawn_forwards_child_tool_call_info_to_parent_ui(tmp_path, monkeypatch)
     parent_ui = _RecordingUI()
     parent = _build_parent(tmp_path, provider, parent_ui, monkeypatch)
 
-    execute(
+    res = execute(
         "spawn_agent",
         {"task": "read the file"},
         build_tool_context(
@@ -273,21 +298,28 @@ def test_spawn_forwards_child_tool_call_info_to_parent_ui(tmp_path, monkeypatch)
         ),
     )
 
-    # The child's "Running tool: read_file(...)" log line should have
-    # bubbled to the parent UI, prefixed with the depth label.
-    tool_call_lines = [
+    snap = _poll_until(parent, res["data"]["task_id"])
+    assert snap["status"] == "done"
+    # The tool call was recorded by the lifecycle manager (fed from loop_body).
+    assert snap["tool_count"] >= 1
+    assert snap["last_tool"] == "read_file"
+    assert "found payload" in snap["summary"]
+    # The "Running tool: read_file" line was routed to the tracker, NOT
+    # flooded to the parent UI as a log line.
+    tool_log_lines = [
         m
         for m in parent_ui.info_calls
-        if "[subagent d=1]" in m and "Running tool" in m and "read_file" in m
+        if "Running tool" in m and "read_file" in m
     ]
-    assert tool_call_lines, (
-        f"expected a [subagent d=1] 'Running tool: read_file...' line in parent UI; "
-        f"got: {parent_ui.info_calls!r}"
+    assert not tool_log_lines, (
+        f"tool-call line should route to tracker, not parent UI: {tool_log_lines!r}"
     )
 
 
-def test_spawn_failure_emits_error_banner(tmp_path, monkeypatch):
-    """If the child raises, the parent UI gets an error line, not silence."""
+def test_spawn_failure_surfaces_error_via_poll(tmp_path, monkeypatch):
+    """If the child raises, the error is captured by the registry and
+    surfaced via poll (and the child's SubagentUI forwards the error line
+    to the parent UI's error channel)."""
 
     class _BoomProvider(LLMProvider):
         name = "boom"
@@ -312,5 +344,12 @@ def test_spawn_failure_emits_error_banner(tmp_path, monkeypatch):
         ),
     )
 
-    assert res["ok"] is False
-    assert any("FAILED" in m for m in parent_ui.error_calls)
+    # Dispatch still succeeds (async); the failure is captured in the
+    # background and surfaced via poll.
+    assert res["ok"] is True
+    snap = _poll_until(parent, res["data"]["task_id"])
+    assert snap["status"] == "error"
+    # The error text is captured.
+    assert snap["error"] and "planned crash" in snap["error"]
+    # The child's SubagentUI forwarded the error line to the parent UI.
+    assert any("planned crash" in m for m in parent_ui.error_calls)

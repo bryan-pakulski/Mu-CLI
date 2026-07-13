@@ -283,7 +283,15 @@ def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
     def _raise_import_error(query: str, max_results: int):
         raise ImportError("forced missing ddgs")
 
+    def _httpx_offline(*args, **kwargs):
+        # The HTML-scrape fallback fetches via httpx (not urllib). Force it
+        # to fail so we fall through to the InstantAnswer fallback, which
+        # uses urllib.request.urlopen (patched below) — keeping the test
+        # offline and deterministic.
+        raise RuntimeError("forced offline: httpx disabled in test")
+
     monkeypatch.setattr("mu.tools.research.handlers._ddgs_text_search", _raise_import_error)
+    monkeypatch.setattr("httpx.get", _httpx_offline)
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
 
     payload = json.loads(web_search("privacy search", engine="duckduckgo", num_results=3))
@@ -291,6 +299,27 @@ def test_web_search_duckduckgo_fallback_works_without_ddgs(monkeypatch):
     assert payload.get("error") is None
     assert payload["num_results"] >= 1
     assert payload["results"][0]["url"].startswith("https://")
+    # InstantAnswer abstract is the first result.
+    assert payload["results"][0]["url"] == "https://duckduckgo.com/about"
+
+
+def test_normalize_ddg_href_unwraps_redirect_and_protocol_relative():
+    """DuckDuckGo HTML results come back as protocol-relative redirect
+    wrappers; the normalizer must unwrap them to absolute https URLs."""
+    from mu.tools.research.handlers import _normalize_ddg_href
+
+    # Redirect wrapper with url-encoded target → decoded target.
+    assert (
+        _normalize_ddg_href("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpath&rut=x")
+        == "https://example.com/path"
+    )
+    # Plain protocol-relative → https.
+    assert _normalize_ddg_href("//example.com/foo") == "https://example.com/foo"
+    # Already absolute → unchanged.
+    assert _normalize_ddg_href("https://example.com/x") == "https://example.com/x"
+    # Empty / falsy → empty.
+    assert _normalize_ddg_href("") == ""
+    assert _normalize_ddg_href(None) == ""
 
 
 def test_web_search_returns_unknown_engine_error():

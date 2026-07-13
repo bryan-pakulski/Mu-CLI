@@ -222,16 +222,16 @@ def compose_base_system_prompt(session) -> str:
     agentic = bool(getattr(session, "agentic", False))
     if agentic:
         try:
-            from utils.config import AGENTIC_MODES, AGENTIC_SYSTEM_BASE
+            from mu.prompts import get_base as _get_base_prompt
+            from mu.prompts import get_mode as _get_mode_prompt
 
             agentic_base = str(
-                variables.get("agentic_system_base_override", AGENTIC_SYSTEM_BASE)
-                or AGENTIC_SYSTEM_BASE
+                variables.get("agentic_system_base_override")
+                or _get_base_prompt()
             )
-            default_mode = AGENTIC_MODES.get(active_mode, AGENTIC_MODES.get("default", ""))
             mode_instruction = str(
-                variables.get(f"agentic_mode_prompt_{active_mode}", default_mode)
-                or default_mode
+                variables.get(f"agentic_mode_prompt_{active_mode}")
+                or _get_mode_prompt(active_mode)
             )
             parts.append(
                 f"{agentic_base}\n\n### CURRENT STRATEGY MODE: "

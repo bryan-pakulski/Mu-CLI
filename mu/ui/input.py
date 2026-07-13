@@ -522,6 +522,16 @@ class InputHandler:
             "/skills": _SkillNameCompleter(),
             # docs
             "/docs": _DocsNameCompleter(),
+            # prompts (file-based system-prompt overrides)
+            "/prompts": NestedCompleter.from_nested_dict(
+                {
+                    "reload": None,
+                    "init": None,
+                    "show": None,
+                    "validate": None,
+                    "edit": None,
+                }
+            ),
             # mcp
             "/mcp": NestedCompleter.from_nested_dict(
                 {

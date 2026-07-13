@@ -570,6 +570,7 @@ _HELP_GROUPS = [
         [
             ("/skills [<name>|reload|enable <n>|disable <n>]", "", "Manage installed skills"),
             ("/docs [<name>]", "", "Browse bundled documentation"),
+            ("/prompts [reload|init|show|validate|edit]", "", "Manage file-based system-prompt overrides"),
         ],
     ),
     (
@@ -1036,6 +1037,18 @@ def build_session(args, ui, allow_prompt=True):
         debug=args.debug,
     )
 
+    # File-based system-prompt overrides. --system-file replaces the
+    # non-agentic base instruction; --mode-prompt NAME=PATH installs a
+    # runtime override for the base agentic prompt or a per-mode workflow
+    # (same keys /set uses: agentic_system_base_override /
+    # agentic_mode_prompt_<mode>). Both accept '-' for stdin.
+    try:
+        from mu.commands._prompt_flags import apply_prompt_flags
+
+        apply_prompt_flags(session, args)
+    except ImportError:
+        pass
+
     # If the session we just loaded has in-flight teacher / feature
     # state, queue a resumption briefing so the agent's first turn
     # knows what's already running without making the user re-explain.
@@ -1224,6 +1237,29 @@ def main():
   """,
         help="Initial system instruction",
     )
+    parser.add_argument(
+        "--system-file",
+        type=str,
+        default=None,
+        help=(
+            "Load the initial system instruction from a file (overrides --system). "
+            "Use '-' to read from stdin."
+        ),
+    )
+    parser.add_argument(
+        "--mode-prompt",
+        type=str,
+        action="append",
+        default=None,
+        metavar="NAME=PATH",
+        help=(
+            "Load a file-based prompt override for the base or a mode. Repeatable. "
+            "NAME is 'base' or a mode name (default, debug, feature, research, "
+            "loop, security, history, teacher); PATH is a file (use '-' for stdin). "
+            "Examples: --mode-prompt base=./prompts/base.md "
+            "--mode-prompt default=./prompts/default.md"
+        ),
+    )
     args = parser.parse_args()
 
     if args.gui_stop:
@@ -1254,39 +1290,47 @@ def main():
     print_splash(session)
     refresh_memory_hud(session, ui)
 
-    while True:
-        try:
-            current_task = get_current_feature_task_label(session)
-            feature_context = get_feature_prompt_context(session)
-            user_input = ui.get_input(
-                session.session_manager.current_session_name,
-                session.staged_files,
-                agent_mode=session.variables.get("agent_mode", "default"),
-                current_task=current_task,
-                feature_context=feature_context,
-            )
-
-            if not user_input:
-                continue
-
-            if user_input.startswith("/"):
-                result = handle_command(session, user_input, allow_prompt=True)
-                if result.get("data", {}).get("exit"):
-                    break
-                continue
-
-            send_result = session.send_message(user_input)
-            if send_result.get("status") == "interrupted":
-                console.print(
-                    "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
+    try:
+        while True:
+            try:
+                current_task = get_current_feature_task_label(session)
+                feature_context = get_feature_prompt_context(session)
+                user_input = ui.get_input(
+                    session.session_manager.current_session_name,
+                    session.staged_files,
+                    agent_mode=session.variables.get("agent_mode", "default"),
+                    current_task=current_task,
+                    feature_context=feature_context,
                 )
-            refresh_memory_hud(session, ui)
 
-        except KeyboardInterrupt:
-            console.print("\n(Interrupted. Type /quit to exit)")
-        except EOFError:
-            console.print("\nGoodbye!")
-            break
+                if not user_input:
+                    continue
+
+                if user_input.startswith("/"):
+                    result = handle_command(session, user_input, allow_prompt=True)
+                    if result.get("data", {}).get("exit"):
+                        break
+                    continue
+
+                send_result = session.send_message(user_input)
+                if send_result.get("status") == "interrupted":
+                    console.print(
+                        "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
+                    )
+                refresh_memory_hud(session, ui)
+
+            except KeyboardInterrupt:
+                console.print("\n(Interrupted. Type /quit to exit)")
+            except EOFError:
+                console.print("\nGoodbye!")
+                break
+    finally:
+        # Cancel any still-running async sub-agents and reap background bash
+        # tasks so nothing outlives the session. No-op when none are active.
+        try:
+            session.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -49,8 +49,6 @@ from mu.tools._envelope import infer_tool_error_code
 from mu.tools.descriptors import COLLATED_TOOLS, TOOLS
 from providers.base import FileReference, ImageData, Message, MessagePart
 from utils.config import (
-    AGENTIC_MODES,
-    AGENTIC_SYSTEM_BASE,
     NUDGE_EMPTY_RESPONSE,
     calculate_cost,
 )
@@ -436,21 +434,25 @@ def run_turn(session, text):
             )
 
             agent_mode = str(session.variables.get("agent_mode", "default")).lower()
-            default_mode_instruction = AGENTIC_MODES.get(
-                agent_mode, AGENTIC_MODES["default"]
-            )
+            # Prompt resolution priority (highest first):
+            #   1. runtime session-variable override (set via /set)
+            #   2. file override under $MUCLI_HOME/prompts/ (PromptLibrary)
+            #   3. hardcoded fallback in utils/config.py
+            # The `or` falls through empty-string overrides to the library,
+            # which itself falls through file→hardcoded.
+            from mu.prompts import get_base as _get_base_prompt
+            from mu.prompts import get_mode as _get_mode_prompt
+
+            default_mode_instruction = _get_mode_prompt(agent_mode)
             mode_instruction = str(
                 session.variables.get(
                     f"agentic_mode_prompt_{agent_mode}",
-                    default_mode_instruction,
                 )
                 or default_mode_instruction
             )
             agentic_system_base = str(
-                session.variables.get(
-                    "agentic_system_base_override", AGENTIC_SYSTEM_BASE
-                )
-                or AGENTIC_SYSTEM_BASE
+                session.variables.get("agentic_system_base_override")
+                or _get_base_prompt()
             )
 
             # Providers automatically generated tool prompts so don't need to be embedded into the system prompt
@@ -583,28 +585,50 @@ def run_turn(session, text):
     while iteration < max_iterations:
         iteration += 1
         logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
-        # Subagent wrap-up reminder: fire 3 iterations before cap so the
-        # child consolidates findings instead of hitting the cap with
-        # all work lost. Injected once per run via _subagent_wrap_up_injected.
-        wrap_up_iter = getattr(session, "_subagent_wrap_up_iter", None)
-        if (
-            wrap_up_iter
-            and iteration >= wrap_up_iter
-            and not getattr(session, "_subagent_wrap_up_injected", False)
-        ):
-            session._subagent_wrap_up_injected = True
-            session.session_manager.history.append({
-                "role": "system",
-                "parts": [{"type": "text", "text": (
-                    "WRAP UP NOW: You are at iteration "
-                    f"{iteration}/{max_iterations}. Stop calling tools "
-                    "immediately. Consolidate all findings into a single "
-                    "final summary message. Do not call any more tools."
-                )}],
-            })
-            logger.info(
-                f"Subagent wrap-up reminder injected at iteration {iteration}/{max_iterations}"
-            )
+        # Subagent wrap-up reminder. Two strategies:
+        #  * Adaptive (preferred): when a SubagentLifecycleManager is attached
+        #    (an async-orchestrated child), drive consolidation from its
+        #    signals — inject "WRAP UP NOW" once the child stalls (no novel
+        #    output for `subagent_stall_threshold` calls), with a hard
+        #    iteration-based safety net (last 2 iters) so a child that never
+        #    stalls still consolidates before the cap.
+        #  * Legacy fallback: no lifecycle manager -> use the hardcoded
+        #    `_subagent_wrap_up_iter` (max_iterations - 3) cutoff.
+        # Injected once per run via `_subagent_wrap_up_injected`.
+        if not getattr(session, "_subagent_wrap_up_injected", False):
+            _lc = getattr(session, "_subagent_lifecycle", None)
+            _should_wrap = False
+            if _lc is not None:
+                try:
+                    _lc_snap = _lc.snapshot()
+                except Exception:
+                    _lc_snap = {}
+                if bool(_lc_snap.get("stall", False)):
+                    _should_wrap = True
+                    logger.info(
+                        f"Subagent wrap-up: stalled signal at iteration "
+                        f"{iteration}/{max_iterations}"
+                    )
+                elif iteration >= max(1, max_iterations - 2):
+                    _should_wrap = True
+            else:
+                wrap_up_iter = getattr(session, "_subagent_wrap_up_iter", None)
+                if wrap_up_iter and iteration >= wrap_up_iter:
+                    _should_wrap = True
+            if _should_wrap:
+                session._subagent_wrap_up_injected = True
+                session.session_manager.history.append({
+                    "role": "system",
+                    "parts": [{"type": "text", "text": (
+                        "WRAP UP NOW: You are at iteration "
+                        f"{iteration}/{max_iterations}. Stop calling tools "
+                        "immediately. Consolidate all findings into a single "
+                        "final summary message. Do not call any more tools."
+                    )}],
+                })
+                logger.info(
+                    f"Subagent wrap-up reminder injected at iteration {iteration}/{max_iterations}"
+                )
         # Honor a hook abort raised in the previous iteration. The
         # in-flight provider call / tool dispatch from that iteration
         # has already finished and stored its results in history; we
@@ -625,6 +649,22 @@ def run_turn(session, text):
                     session._hook_abort_reason
                     or "A lifecycle hook requested abort."
                 ),
+            )
+        # Honor a cooperative sub-agent kill (parent called kill_subagent,
+        # or the runtime watchdog fired). Same shape as the hook-abort path:
+        # the previous iteration's work is already in history, so exit
+        # cleanly here with status="killed". The registry's thread wrapper
+        # captures partial findings from history after this returns.
+        if getattr(session, "_subagent_cancelled", False):
+            _kill_reason = getattr(session, "_subagent_kill_reason", None) or "killed"
+            logger.info(f"Agentic loop exiting on sub-agent kill: {_kill_reason}")
+            return session._collect_turn_response(
+                initial_history_len,
+                status="killed",
+                total_in=total_in,
+                total_out=total_out,
+                total_cost=total_cost,
+                error=_kill_reason,
             )
         current_tool_name = None
         current_tool_args = None
@@ -1110,43 +1150,29 @@ def run_turn(session, text):
                         ),
                     )
 
-                    # If two or more of the parallel calls are sub-agent
-                    # spawns, replace the streaming per-call logs with a
-                    # live progress panel. Hooked up via
-                    # `session._subagent_progress`, which `spawn_agent` reads
-                    # to register/update/close its row.
+                    # Sub-agent progress is now rendered on demand from the
+                    # long-lived tracker owned by `session._subagent_registry`
+                    # (populated by async spawn_agent). We deliberately do NOT
+                    # run a continuous rich.Live here: a Live spanning the async
+                    # gap would corrupt the console while the parent loop keeps
+                    # writing tool results. Instead, when sub-agent spawns are
+                    # in this batch, we render a one-shot static snapshot so the
+                    # user sees the dispatch (single spawns included — the old
+                    # `spawn_count >= 2` gate is gone).
                     spawn_count = sum(
                         1
                         for i in parallel_indices
                         if tool_calls[i].tool_name == "spawn_agent"
                     )
-                    live_progress_ctx = None
-                    live = None
-                    rich_console = getattr(session.ui, "console", None) if session.ui else None
-                    if spawn_count >= 2 and rich_console is not None:
+                    if spawn_count >= 1 and session.ui is not None:
                         try:
-                            from mu.ui.progress import SubagentProgressTracker
-                            from rich.live import Live
+                            _tracker = session._subagent_registry.tracker
+                            if _tracker.has_active():
+                                session.ui.show_info(_tracker.render_panel())
+                        except Exception:  # noqa: BLE001
+                            pass
 
-                            tracker = SubagentProgressTracker()
-                            session._subagent_progress = tracker
-                            live = Live(
-                                get_renderable=tracker.render_panel,
-                                console=rich_console,
-                                refresh_per_second=4,
-                                transient=False,
-                            )
-                            live.start()
-                            live_progress_ctx = tracker
-                        except Exception as _exc:  # pragma: no cover — defensive
-                            logger.debug(
-                                "Live progress panel unavailable: %s", _exc
-                            )
-                            live = None
-
-                    if len(par_calls) > 1 and session.ui and live is None:
-                        # Only show the one-liner when we're NOT using the
-                        # live panel (otherwise it pollutes the panel area).
+                    if len(par_calls) > 1 and session.ui:
                         session.ui.show_info(
                             f"⚡ Dispatching {len(par_calls)} tool call(s) in "
                             f"parallel (max_concurrency={max_concurrency})."
@@ -1161,11 +1187,9 @@ def run_turn(session, text):
                             max_concurrency=max_concurrency,
                         )
                     finally:
-                        if live is not None:
-                            try:
-                                live.stop()
-                            except Exception:
-                                pass
+                        # Keep the legacy transient attribute cleared for any
+                        # external readers; the authoritative tracker lives on
+                        # the registry now.
                         session._subagent_progress = None
                     for idx, pr in zip(parallel_indices, par_results):
                         if pr.error is not None:
@@ -1307,6 +1331,21 @@ def run_turn(session, text):
                     )
 
                 # --- End Collation Logic ---
+                # Feed this tool call to the child's lifecycle manager (only
+                # set on async-orchestrated sub-agent sessions). Uses the full
+                # args + result so the manager can detect stuck (same tool +
+                # same args repeated) and stall (no novel output) signals.
+                # No-op for the parent and for non-child sessions.
+                _lifecycle = getattr(session, "_subagent_lifecycle", None)
+                if _lifecycle is not None:
+                    try:
+                        _lifecycle.record_tool_call(
+                            part.tool_name, part.tool_args, source_result
+                        )
+                    except Exception:
+                        logger.debug(
+                            "lifecycle record_tool_call failed", exc_info=True
+                        )
                 if session.variables.get("structured_tool_results", True):
                     if raw_result != source_result:
                         _, unwrapped_source = session._unwrap_tool_envelope(

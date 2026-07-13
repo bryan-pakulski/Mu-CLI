@@ -30,7 +30,7 @@ Tests: `tests/test_workspace_context_files.py` (LAYER 1),
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Optional
 
 
 # Depth cap for sub-agent spawning (mirrors mu/tools/agent/spawn.py).
@@ -142,7 +142,13 @@ def build_workspace_context_files(session: Any) -> str:
     return "\n\n".join(blocks).strip()
 
 
-def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
+def inject_hierarchical_context(
+    session: Any,
+    system_prompt: str,
+    *,
+    cached_workspace: Optional[str] = None,
+    cached_skills: Optional[str] = None,
+) -> str:
     """Compose the full layered system prompt sent to the provider.
 
     Layer order (each is omitted when empty):
@@ -153,6 +159,15 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
       L3  Active task plan / current goal
       L5  Current-turn marker (telling the model to prioritize the
           live user message + current-turn tool results)
+
+    ``cached_workspace`` / ``cached_skills`` let the caller reuse L1 / L1B
+    text built once per turn (those read files from disk and are expensive
+    to rebuild every iteration). When omitted (``None``), the layers are
+    rebuilt from session as before. L2 and L3 are always rebuilt fresh from
+    in-memory state so mid-turn updates (auto-compaction rewriting the
+    summary, tools updating feature_state / scratchpad) reach the model
+    the same turn — the frozen-at-turn-start bug that caused long-horizon
+    amnesia.
     """
     # L0 — prepend a time-awareness banner so the model isn't guessing
     # at the wall clock. Cheap (~25 tokens) and reflected in L0 of
@@ -193,7 +208,11 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
 
     layers: list[str] = []
 
-    workspace_files = build_workspace_context_files(session)
+    workspace_files = (
+        cached_workspace
+        if cached_workspace is not None
+        else build_workspace_context_files(session)
+    )
     if workspace_files:
         ws_limit = max(
             0,
@@ -208,7 +227,11 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
             + workspace_files
         )
 
-    skills_block = session._build_skills_block(announce=True)
+    skills_block = (
+        cached_skills
+        if cached_skills is not None
+        else session._build_skills_block(announce=True)
+    )
     if skills_block:
         sk_limit = max(
             0, int(session.variables.get("skills_max_chars", 6144) or 6144)

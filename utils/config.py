@@ -107,6 +107,14 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "",
     },  # The user's pinned top-level task for the CURRENT TURN. Rendered in L3 of the system prompt every iteration so the model retains direction even when the L2 conversation summary gets compacted mid-turn. Set with /goal <text> or the set_session_goal tool; clears automatically at end of turn (`Session._strip_session_goal_after_turn`) so it can't bias an unrelated next request. The durable mirror in task_memory (saved via `_ensure_session_goal_persistence`) stays — only the live variable resets.
+    "session_goal_sticky": {
+        "type": bool,
+        "default": False,
+    },  # When True (or in loop/feature mode, which default to sticky), the pinned `session_goal` is NOT cleared at end of turn — it persists across turns in L3 until the user clears it (/goal clear) or sets a new goal. Long-horizon multi-turn work needs the goal to survive turn boundaries; conversational default-mode use does not. See `Session._strip_session_goal_after_turn`.
+    "session_goal_sticky_explicit": {
+        "type": bool,
+        "default": False,
+    },  # Tracks whether the user has explicitly set `session_goal_sticky` via /set, so the mode-aware default (loop/feature = sticky) only applies until the user overrides it. Mirrors the `show_thinking_explicit` pattern.
     "show_thinking": {
         "type": bool,
         "default": True,
@@ -144,11 +152,57 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 64,
     },
+    "memory_stale_after_turns": {
+        # Auto-decay: at turn start, ACTIVE task-memory entries whose last
+        # explicit search/save hit was >= this many turns ago are demoted to
+        # STALE. Keeps the active set honest ("active" = recently mattered,
+        # not "ever saved") so search_memory (active-only by default) and L3
+        # injection stay high-signal instead of accumulating noise. Reversible
+        # — a search hit or re-save promotes a STALE entry back to ACTIVE.
+        # 0 disables decay. See BaseNoteStore.apply_staleness_decay.
+        "type": int,
+        "default": 12,
+    },
+    "progress_checkpoint_every": {
+        # Periodic L2 progress checkpoint: every N iterations, fold recent
+        # history into the structured conversation_summary (Progress / Key
+        # decisions / Current state / Open items) WITHOUT compacting (the
+        # anchor doesn't advance, entries stay in L5). This keeps L2 fresh
+        # on long turns that never hit the compaction budget, so the model
+        # stops re-deriving context it already gathered (the long-horizon
+        # stall). 0 disables. When unset, loop/feature modes default to 12
+        # (long-horizon work benefits); default/chat modes default to 0
+        # (short turns don't need it). See HistoryMixin.force_progress_checkpoint.
+        "type": int,
+        "default": 0,
+    },
     "tool_result_floor": {
         # R3/FM-8: number of trailing tool-result messages in the active
         # turn that compaction must leave verbatim, even under emergency
         # compaction with a tiny keep_recent. Prevents mid-turn compaction
-        # from dropping tool results just received.
+        # from dropping tool results just received. Mode-aware (Fix #10):
+        # loop/feature modes raise this to at least 8.
+        "type": int,
+        "default": 4,
+    },
+    "tool_result_cache_entries": {
+        # Max entries in the tool-result sidecar cache (recall() + auto-
+        # recall by locator, Fix #10). Mode-aware: loop/feature modes raise
+        # this to at least 256.
+        "type": int,
+        "default": 50,
+    },
+    "tool_result_cache_bytes": {
+        # Max bytes in the tool-result sidecar cache (Fix #10). Mode-aware:
+        # loop/feature modes raise this to at least 2 MB.
+        "type": int,
+        "default": 524288,
+    },
+    "recoverage_stall_threshold": {
+        # Context-gathering stall detection (Fix #12): number of consecutive
+        # iterations that re-read files already read this turn WITHOUT a
+        # concrete change (write/bash/spawn) before a "stop gathering, act"
+        # re-orient nudge is injected. 0 disables. See loop_detection.
         "type": int,
         "default": 4,
     },
@@ -438,7 +492,8 @@ TOOL SURFACE:
 - Shell: `bash` covers everything else — git ops, make, grep, find, curl, anything not surfaced as a dedicated tool.
 - Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `url_grounding`, `read_document` (PDFs).
 - Memory: `save_memory` / `search_memory` / `list_memory` (durable, cross-turn), `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` (per-turn).
-- Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)` for per-session task plans the user can see.
+- Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
+- Context self-management: `context_status` (per-layer token fill + L2-staleness signal + entry counts), `checkpoint_progress` (fold recent history into L2 without compacting), `retire_thread(topic, reason)` (drop an abandoned thread — archives matching active memory + clears matching scratchpad notes).
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
 - Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
 - Goal pinning: `set_session_goal(goal, clear=False)` pins the user's top-level task into L3 of the system prompt for the CURRENT turn. Keeps you on track through long multi-iteration runs where L2 (conversation summary) gets compacted. **Auto-clears at end of turn** — each new user message starts fresh; re-pin at the top of the next turn if it's also multi-step. Don't carry stale goals into unrelated requests. The user can also `/goal <text>` manually. If the pinned goal mid-turn diverges from the user's current ask, pause and confirm before overwriting.
@@ -470,10 +525,18 @@ GENERAL RULES:
 6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, etc.) results are stored in a collation buffer.
    You receive a status update when you call them; call `flush` when ready to consume the buffered context.
    Collect at MOST 3 turns of context before flushing and acting. Be loop-aware; do not repeatedly ask for the same information.
-7. YOU MUST use scratchpad for temporary observations and short-term plans; refer often to it to confirm you are on track.
-8. YOU MUST use task memory for durable facts, decisions, and verified findings. Keep memories concise and high-value.
-   Retrieve memory before conducting significant actions or repeating tool work.
-9. For long-horizon work, maintain `todo_*` as a visible progress ledger so the user can see what you're doing.
+7. YOU OWN YOUR CONTEXT. The harness enforces only hard limits (iteration cap, token budget, tight-repeat detection). What stays and what gets pruned is YOUR call — do not wait for a nudge.
+
+SELF-MANAGEMENT:
+- **Todo ledger is persistent and yours — keep it honest.** The `todo` ledger survives across turns (it is NOT cleared at turn start like ephemeral scratchpad notes). At the start of a non-trivial task, `todo_write` the plan. When a task is done → `todo_set_status(completed)`. When abandoned or no longer relevant → `todo_delete(id)` (or `todo_clear('completed')` to prune all finished items in one call). When the user's ask shifts mid-task, RECONCILE the ledger BEFORE starting new work: drop what no longer applies, repromote what does. Do not leave stale `in_progress` items lying around — that is the "clean up the stale task list" move, do it proactively.
+- **Promote durable, drop ephemeral.** When a fact/decision/finding will matter beyond this turn, `save_memory` it AND clear the scratchpad note it came from. Memory is the durable store; scratchpad is scratch. Use the memory lifecycle: `supersede_memory` when a finding changes, `retire_memory` when done, `archive_memory` when no longer relevant, `retire_thread(topic, reason)` to drop a whole abandoned thread in one call.
+- **Supersede, don't sibling.** When a finding/decision is UPDATED, `supersede_memory(old_id, new_id)` the old entry — do NOT save a sibling. Five progressively-better versions of the same fact, all `active`, is the fastest way to drown signal in noise. One source of truth per fact; the old one goes `superseded` (off the active set) the moment the new one lands.
+- **Decay keeps the active set honest — reconcile, don't accumulate.** Memory entries not searched or re-saved in the last `memory_stale_after_turns` turns auto-decay from `active` to `stale` at turn start, so "active" means recently mattered, not ever saved. A search hit or re-save promotes a stale entry back to `active` automatically — decay is reversible through use, it never loses what you're actually using. Your job is to FINISH the job decay starts: when `context_status` shows `stale_memory_count > 0`, `archive_memory` or `retire_thread` those entries before adding new state; when `stale_todos > 0`, `todo_clear('completed')`. Net metadata should stay flat or shrink over a turn — if you only ever add and never retire, you are accumulating the exact rot that confuses you about what's important. Watch `memory_pressure_pct`: curate BEFORE the cap forces a silent eviction that drops a high-value entry to make room for trivia.
+- **Watch your own context fill.** Call `context_status` before big gathers and when a turn feels long. It returns per-layer token fill plus `l2_stale_vs_l5`, `uncheckpointed_entries`, `stale_memory_count`, `stale_todos`, and `memory_pressure_pct`. If L2 is stale relative to L5 progress, call `checkpoint_progress` to fold recent work into the summary yourself — don't wait for the budget to force it.
+- **Recognize your own stall.** If you've re-read the same files two iterations running without a concrete change (no write/bash/spawn between), STOP gathering: reconcile the ledger, decide the next concrete action, and act. Re-reading is not progress.
+- **You write the handoffs.** When you near the iteration cap or the user ends the turn mid-work, leave a consolidation in memory (`kind=consolidation` via `save_memory`, or just `save_memory` with the what's-done / what-remains / blocker): the next turn starts from your handoff, not from re-derivation.
+8. YOU MUST use scratchpad for temporary observations and short-term plans; refer often to it to confirm you are on track. YOU MUST use task memory for durable facts, decisions, and verified findings — keep memories concise and high-value. Retrieve memory (`search_memory`) before conducting significant actions or repeating tool work.
+9. For long-horizon work, maintain `todo_*` as a visible progress ledger so the user can see what you're doing — and prune it (rule 7) so it reflects current reality, not history.
 10. For focused side-quests that would consume large parent context (deep research, multi-file refactors), call `spawn_agent` with a tight `tools` whitelist. The child returns a clean summary; parent stays uncluttered.
 11. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs.
 12. If plan mode is active, write-side tools (`write_file`, `apply_diff`, `bash`, `spawn_agent`, feature mutators) are blocked. Gather context, propose a plan, and tell the user to `/plan off` when they're ready for execution.
@@ -687,36 +750,6 @@ Operating principles:
 - **Reason about trust boundaries.** The same code is safe inside a process and unsafe at the HTTP edge. Identify where untrusted input enters and trace it through.
 - **Memory discipline.** `save_memory` durable findings (e.g. "this codebase uses pattern X which is consistently safe / consistently unsafe"). Future scans benefit.
 - **Don't patch what you can't exploit.** Approved findings = verified attacks + verified defenses. Anything else is noise.""",
-    "history": """WORKFLOW (History Search):
-
-You are in HISTORY mode for searching and visualizing past conversation history.
-
-1. The history panel provides a searchable interface to the full session conversation log.
-2. Search covers all message types: text, tool_call, tool_result, file, image_input parts.
-3. Pre-anchor (compacted) messages are included by default — set include_summarized=False for active-only.
-4. Results show: message index, role, match type, snippet, context lines, anchor badge, cache key (if available).
-5. Use the search bar with optional role and tool_name filters to narrow results.
-6. The GET /chat/history/search endpoint powers the search — fully read-only, no session mutation.
-
-This is a read-only visualization mode. No code changes, no session mutation. The search endpoint
-already exists from the Queryable Session History feature.""",
-    "memory": """WORKFLOW (Memory Map):
-
-You are in MEMORY MAP mode — a read-only visualization of the context window
-the model actually sees each turn. This is an observational view, not a
-working mode; switch back to default/debug/feature/etc. to do work.
-
-1. The panel renders one horizontal band per context layer (L0 system prompt,
-   L1 workspace files, L1B skills, L2 conversation summary, L3 active goal,
-   L4B retrieved snippets, L5 conversation history). Band height is
-   proportional to the layer's token share.
-2. Each cell's color is the SHA-256 hash of a slice of that layer's text, so
-   identical content renders identically and a changed layer visibly shifts.
-3. The grid updates every turn (on turn completion) and every iteration
-   within a turn (a pre-provider-call hook pushes a live snapshot), so you
-   can watch the L5 history band grow and other layers shift in real time.
-
-No tools, no session mutation. Just watch.""",
     "teacher": """WORKFLOW (Teacher Mode):
 
 You are a one-on-one tutor. This is a personal session, not a generic lecture series. Your single most important job is to understand THIS learner — how they think, how they learn, what already lives in their head — and shape every word you say to fit them. Generic, off-the-shelf teaching is a failure.
@@ -832,20 +865,6 @@ AGENT_MODE_METADATA = {
         "documentation": "documentation/security_mode.md",
         "display_name": "Security Mode",
     },
-    "history": {
-        "description": "Searchable conversation history with keyword, role, and tool-name filters.",
-        "documentation": "documentation/session_guide.md",
-        "display_name": "History Search",
-    },
-    "memory": {
-        "description": (
-            "Live context-window map: a color grid fingerprinting every "
-            "layer (system prompt, workspace, skills, summary, goal, "
-            "history) as it evolves each turn and each iteration."
-        ),
-        "documentation": "documentation/session_guide.md",
-        "display_name": "Memory Map",
-    },
     "teacher": {
         "description": (
             "Structured course engine — diagnostic, curriculum, per-lesson "
@@ -855,16 +874,40 @@ AGENT_MODE_METADATA = {
         "documentation": "documentation/teacher_mode.md",
         "display_name": "Teacher Mode",
     },
-    "systemPrompts": {
-        "description": (
-            "Edit and manage file-based system-prompt overrides. View, "
-            "edit, save, reload, init, and reset base and per-mode prompts "
-            "via the GUI."
-        ),
-        "documentation": "documentation/system_prompt_architecture.md",
-        "display_name": "System Prompts",
-    },
 }
+
+# GUI-only view panels — read-only visualization surfaces exposed through
+# the GUI "tools" menu. These are NOT agent modes: they never appear in the
+# composer mode picker, `/mode`, the splash banner, or `/set agent_mode`
+# autocomplete, and `POST /api/modes/{name}` rejects them. They drive no
+# system-prompt workflow text. Each entry: name, display_name, description.
+GUI_VIEW_PANELS = [
+    {
+        "name": "history",
+        "display_name": "History",
+        "description": (
+            "Searchable conversation history (keyword, role, and "
+            "tool-name filters)."
+        ),
+    },
+    {
+        "name": "memory",
+        "display_name": "Memory Map",
+        "description": (
+            "Live context-window map: a color grid fingerprinting every "
+            "layer (system prompt, workspace, skills, summary, goal, "
+            "history) as it evolves each turn and each iteration."
+        ),
+    },
+    {
+        "name": "systemPrompts",
+        "display_name": "System Prompts",
+        "description": (
+            "Edit the base + per-mode system-prompt templates "
+            "(view, edit, save, reload, init, reset)."
+        ),
+    },
+]
 
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."
 

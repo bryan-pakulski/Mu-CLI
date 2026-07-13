@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from utils.config import AGENT_MODE_METADATA, AGENTIC_MODES
+from utils.config import AGENT_MODE_METADATA, AGENTIC_MODES, GUI_VIEW_PANELS
 
 from ..deps import require_session
 
@@ -24,9 +24,10 @@ async def list_modes(request: Request):
     current = session.variables.get("agent_mode", "default") if session else None
     has_ws = _has_workspace(session)
     modes = []
-    # Modes that don't need a workspace attached — view-only / informational
-    # modes that work off session state alone, not workspace files.
-    _NO_WORKSPACE_NEEDED = {"default", "history", "memory"}
+    # Only `default` works without a workspace attached — every other real
+    # agent mode operates on workspace files. (history/memory/systemPrompts
+    # are view-only panels, not agent modes — surfaced separately as `views`.)
+    _NO_WORKSPACE_NEEDED = {"default"}
 
     for key in AGENTIC_MODES:
         meta = AGENT_MODE_METADATA.get(key, {})
@@ -41,7 +42,20 @@ async def list_modes(request: Request):
                 "disabled": needs_workspace and not has_ws,
             }
         )
-    return {"current": current, "modes": modes, "has_workspace": has_ws}
+    # GUI-only view panels — read-only, never settable as agent_mode, never
+    # require a workspace (they render off session state).
+    views = [
+        {
+            "name": panel["name"],
+            "display_name": panel["display_name"],
+            "description": panel["description"],
+            "view_only": True,
+            "needs_workspace": False,
+            "disabled": False,
+        }
+        for panel in GUI_VIEW_PANELS
+    ]
+    return {"current": current, "modes": modes, "views": views, "has_workspace": has_ws}
 
 
 @router.post("/{name}")

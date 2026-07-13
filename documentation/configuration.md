@@ -115,7 +115,9 @@ inspectable via `/get <key>` or `/variables`. Defaults come from
 | `agent_mode` | str | `default` | Active agent mode. Same set as `/mode`. |
 | `strict_mode` | bool | `false` | Force user approval for every tool call. |
 | `yolo` | bool | `false` | Auto-approve write-side tools. |
-| `max_iterations` | int | `1000` | Hard cap on iterations per conversation turn. |
+| `max_iterations` | int | `1000` | Hard cap on iterations per conversation turn. When reached mid-work, the agent runs one final consolidation turn (tools disabled) and writes a handoff summary to memory instead of stopping silently. |
+| `session_goal` | str | `""` | The user's pinned top-level task for the current turn, rendered in L3 every iteration so the model keeps direction even when L2 is compacted. Set with `/goal <text>`; clears at end of turn unless `session_goal_sticky` is in effect. |
+| `session_goal_sticky` | bool | `false` | When true (or in `loop`/`feature` mode, which default to sticky), `session_goal` is **not** cleared at end of turn — it persists across turns in L3 until cleared (`/goal clear`) or replaced. Long-horizon multi-turn work needs the goal to survive turn boundaries; conversational default-mode use does not. The `session_goal_sticky_explicit` tracker records whether the user set this via `/set`, so the mode-aware default only applies until overridden. |
 | `reflective_retry_enabled` | bool | `true` | Show retryable tool failures + remediation hints inline. |
 | `streaming_enabled` | bool | `true` | Stream tokens one-by-one instead of one final panel. |
 | `structured_tool_results` | bool | `true` | Use structured envelope for tool results (vs. raw text). |
@@ -136,9 +138,13 @@ skills will trigger compaction sooner.
 | `context_trim_threshold` | float | `0.85` | Fraction of the cap above which compaction kicks in. |
 | `response_token_reserve` | int | `4096` | Tokens reserved for the model's reply. Tune down for small-context models (Ollama 8k). |
 | `tool_context_window` | int | `6` | Recent tool messages kept uncompressed in history. |
-| `tool_result_floor` | int | `4` | Trailing tool-result messages in the active turn that compaction (including emergency compaction) must leave verbatim (R3). Prevents mid-turn compaction from dropping results just received. |
+| `tool_result_floor` | int | `4` | Trailing tool-result messages in the active turn that compaction (including emergency compaction) must leave verbatim (R3). Prevents mid-turn compaction from dropping results just received. Mode-aware: `loop`/`feature` modes raise this to at least 8 (long-horizon work re-covers more files). |
+| `tool_result_cache_entries` | int | `50` | Max entries in the tool-result sidecar cache (`recall()` + auto-recall by locator). Mode-aware: `loop`/`feature` modes raise this to at least 256. |
+| `tool_result_cache_bytes` | int | `524288` | Max bytes in the tool-result sidecar cache. Mode-aware: `loop`/`feature` modes raise this to at least 2 MB. |
 | `emergency_keep_recent` | int | `2` | Trailing messages kept verbatim by emergency (pre-flight) compaction — smaller than the normal keep-recent so budget is reclaimed fast; `tool_result_floor` still protects recent tool results. |
 | `compact_history` | bool | `true` | Auto-compact tooling history after each finished turn. |
+| `progress_checkpoint_every` | int | `0` | Periodic L2 progress checkpoint: every N iterations, fold recent history into the structured `conversation_summary` (Progress / Key decisions / Current state / Open items) **without compacting** (the anchor doesn't advance, entries stay in L5). Keeps L2 fresh on long turns that never hit the compaction budget so the model stops re-deriving context it already gathered. `0` disables; when unset, `loop`/`feature` modes default to 12, `default`/`chat` to 0. |
+| `recoverage_stall_threshold` | int | `4` | Context-gathering stall detection: number of consecutive iterations that re-read files already read this turn **without** a concrete change (write/bash/spawn) before a "stop gathering, act" re-orient nudge is injected. `0` disables. Catches the diffuse re-coverage stall that doesn't form a clean repeated/periodic tool sequence. |
 
 ### Provider retry (transient failures)
 

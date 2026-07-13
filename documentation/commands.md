@@ -112,6 +112,16 @@ history list. The pin is also mirrored into `task_memory` with a
 at end of turn so a stale pin can't bias an unrelated next request.
 Set a fresh goal at the start of each multi-step task.
 
+**Sticky goals (long-horizon work)**: in `loop` and `feature` modes the goal
+is **sticky** — it does *not* auto-clear at end of turn and persists across
+turns in L3 until you clear it (`/goal clear`) or set a new one. Long-horizon
+multi-turn work needs the goal to survive turn boundaries. In `default`
+mode the goal clears per turn unless you opt in with
+`/set session_goal_sticky true` (and `/unset session_goal_sticky` reverts to
+the mode-aware default). Setting `session_goal_sticky` via `/set` records an
+explicit tracker so the mode default yields to your explicit choice; `/unset`
+clears that tracker.
+
 | Command | Description |
 | --- | --- |
 | `/goal` | Show the current pinned goal (or "none pinned"). |
@@ -125,8 +135,8 @@ The agent can also self-pin via the `set_session_goal(goal, clear=False)`
 tool — useful when the model detects a multi-step task and the user
 forgot to run `/goal` manually. The tool description tells the model
 to pin immediately on multi-step asks at the start of a turn. Since
-the variable auto-clears at end of turn, the model doesn't need to
-remember to `clear=true` for the common case.
+the variable auto-clears at end of turn (unless sticky), the model
+doesn't need to remember to `clear=true` for the common case.
 
 ## Documentation
 

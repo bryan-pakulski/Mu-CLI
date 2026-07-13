@@ -46,8 +46,12 @@ def tmp_prompts_dir(tmp_path, monkeypatch):
 def test_known_names_includes_base_and_all_modes():
     names = known_names()
     assert names[0] == "base"
-    for mode in ("default", "debug", "feature", "research", "loop", "security", "history", "teacher"):
+    # Real agent modes only — history/memory/systemPrompts are GUI view
+    # panels, not agent modes, so they are not in known_names().
+    for mode in ("default", "debug", "feature", "research", "loop", "security", "teacher"):
         assert mode in names
+    for panel in ("history", "memory", "systemPrompts"):
+        assert panel not in names
 
 
 def test_fallback_to_hardcoded_when_no_file(tmp_prompts_dir):

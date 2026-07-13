@@ -338,6 +338,11 @@ def set_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
         from utils.config import reratio_layer_budgets
 
         reratio_layer_budgets(session)
+    # Mark session_goal_sticky as explicitly set so the mode-aware default
+    # (loop/feature = sticky) yields to the user's explicit choice. See
+    # Session._session_goal_is_sticky.
+    if key == "session_goal_sticky":
+        session.variables["session_goal_sticky_explicit"] = True
     casted = session.variables[key]
     _emit(
         session,
@@ -367,22 +372,24 @@ def get_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
 
     if not key:
         if allow_prompt:
-            ui = getattr(session, "ui", None)
-            console = getattr(ui, "console", None) if ui is not None else None
-            if console is not None:
-                from utils.helpers import safe_markup
+            from utils.helpers import safe_markup
 
-                for k, v in session.variables.items():
-                    console.print(f"[blue]{safe_markup(k)}[/blue] = {safe_markup(v)}")
+            lines = [
+                f"{safe_markup(k)} = {safe_markup(v)}"
+                for k, v in session.variables.items()
+            ]
+            _emit(session, "\n".join(lines), allow_prompt)
         return CommandResult(
             ok=True,
             message="Listed variables.",
             data={"variables": dict(session.variables)},
         )
+    value = session.variables.get(key)
+    _emit(session, f"{key} = {value}", allow_prompt)
     return CommandResult(
         ok=True,
-        message=f"{key} = {session.variables.get(key)}",
-        data={"key": key, "value": session.variables.get(key)},
+        message=f"{key} = {value}",
+        data={"key": key, "value": value},
     )
 
 
@@ -413,6 +420,12 @@ def unset_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         session.variables[key] = VARIABLE_SCHEMA[key]["default"]
     else:
         del session.variables[key]
+    # Clearing session_goal_sticky reverts to the mode-aware default (loop/
+    # feature = sticky, default = clear-per-turn), so the explicit tracker
+    # must be reset too — otherwise a stale explicit flag would keep forcing
+    # the cleared value. See Session._session_goal_is_sticky.
+    if key == "session_goal_sticky":
+        session.variables["session_goal_sticky_explicit"] = False
     _persist(session)
     _sync_provider_if_needed(session, key)
     _refresh_hud(session)

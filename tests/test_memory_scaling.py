@@ -99,18 +99,24 @@ def test_scratchpad_persist_variable_in_schema():
 
 
 def test_scratchpad_persist_flag_gates_clear_in_loop_body():
-    """Verify loop_body.py gates turn_scratchpad.clear() on the flag."""
+    """Verify loop_body.py gates the turn-start scratchpad clear on the flag.
+
+    The clear now uses `clear_excluding({"todo"})` so the persistent todo
+    ledger survives the wipe while ephemeral notes are cleared — pinned here
+    so a regression to a wholesale `clear()` is caught."""
     import inspect
     from mu.agent import loop_body
 
     src = inspect.getsource(loop_body.run_turn)
     assert "scratchpad_persist_across_turns" in src
-    assert "turn_scratchpad.clear()" in src
-    # The clear should be inside an if block that checks the flag.
-    # Verify it's gated (not unconditional).
-    clear_pos = src.index("turn_scratchpad.clear()")
+    assert "clear_excluding" in src
+    assert '"todo"' in src or "'todo'" in src
+    # The carve-out should be inside an if block that checks the flag.
+    clear_pos = src.index("clear_excluding")
     flag_pos = src.index("scratchpad_persist_across_turns")
     assert flag_pos < clear_pos
+    # A wholesale clear() must not remain as the turn-start path.
+    assert "turn_scratchpad.clear()" not in src
 
 
 # ============================================================ /memory save/load round-trip

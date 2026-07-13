@@ -62,6 +62,37 @@
             </div>
         </div>
 
+        <!-- Tools menu: read-only view panels (history, memory map, system
+             prompts). These are NOT agent modes — they never change the
+             backend `agent_mode`, they just switch the panel view. -->
+        <div class="mode-picker tools-picker" x-data="{ open: false }"
+             @click.outside="open = false"
+             @keydown.escape.window="open = false">
+            <button class="mode-pill" @click="open = !open"
+                    :class="{ open: open, highlight: $store.mode.views.some(v => v.name === $store.mode.active) }"
+                    title="Tools — view-only panels (history, memory map, system prompts)"
+                    aria-haspopup="listbox" :aria-expanded="open">
+                <span class="label">tools</span>
+                <span class="caret">▾</span>
+            </button>
+            <div class="mode-popout" x-show="open"
+                 x-transition.opacity.duration.150ms
+                 role="listbox">
+                <template x-for="v in $store.mode.views" :key="v.name">
+                    <button class="mode-option"
+                            :class="{ active: $store.mode.active === v.name }"
+                            @click="$store.mode.setView(v.name), open = false"
+                            :title="v.description || v.name">
+                        <div class="mode-name">
+                            <span x-text="v.display_name"></span>
+                            <span class="mode-key mono muted" x-text="v.name"></span>
+                        </div>
+                        <div class="mode-desc" x-text="v.description"></div>
+                    </button>
+                </template>
+            </div>
+        </div>
+
         <div class="util" title="Token totals for this session">
             <span x-text="'tok·' + ($store.tokens.total || 0)"></span>
         </div>

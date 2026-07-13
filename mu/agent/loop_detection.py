@@ -271,10 +271,78 @@ def is_periodic_sequence(
     return False
 
 
+# Read-only tools whose arguments identify an on-disk source the agent is
+# (re-)covering. Re-coverage of these is the long-horizon stall signature:
+# the agent keeps re-reading files it already gathered instead of acting.
+_RECOVERAGE_READ_TOOLS = frozenset({
+    "read_file",
+    "get_chunk",
+    "list_dir",
+    "search_for_string",
+    "search_references",
+    "retrieve_relevant_context",
+    "get_workspace_details",
+})
+
+
+def extract_read_paths(tool_calls: Any) -> set:
+    """Return the normalized set of source paths an iteration's read-only
+    tool calls refer to (Fix #12).
+
+    Used by the context-gathering stall detector: if the agent re-covers a
+    path it already read earlier in the turn, that's a re-coverage event.
+    Paths come from the ``path`` (or ``pattern``+``path``) arg; args without
+    a path contribute nothing. Returns an empty set when there are no
+    read-only calls or no path-bearing args.
+    """
+    paths: set = set()
+    if not tool_calls:
+        return paths
+    for call in tool_calls:
+        try:
+            name = str(getattr(call, "tool_name", "") or "").strip().lower()
+        except Exception:
+            continue
+        if name not in _RECOVERAGE_READ_TOOLS:
+            continue
+        try:
+            args = getattr(call, "tool_args", None)
+        except Exception:
+            args = None
+        if not isinstance(args, dict):
+            continue
+        path = args.get("path")
+        if isinstance(path, str) and path:
+            paths.add(path)
+    return paths
+
+
+def is_concrete_change_iter(tool_calls: Any) -> bool:
+    """True if an iteration made (or would make) a concrete change, not just
+    gathered context (Fix #12). Any tool that isn't a read-only /
+    bookkeeping call counts: writes, bash, spawn_agent, apply_diff, etc.
+    """
+    if not tool_calls:
+        return False
+    for call in tool_calls:
+        try:
+            name = str(getattr(call, "tool_name", "") or "").strip().lower()
+        except Exception:
+            continue
+        if not name:
+            continue
+        if name in _RECOVERAGE_READ_TOOLS or name in _BOOKKEEPING_TOOLS:
+            continue
+        return True
+    return False
+
+
 __all__ = [
     "coarse_tool_args",
     "tool_call_fingerprint",
     "track_tool_for_loop_detection",
     "is_repeated_tool_sequence",
     "is_periodic_sequence",
+    "extract_read_paths",
+    "is_concrete_change_iter",
 ]

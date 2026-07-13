@@ -66,12 +66,56 @@ def resolve_keep_recent(session: Any, *, emergency: bool = False) -> int:
 
 def resolve_tool_result_floor(session: Any) -> int:
     """Number of trailing tool-result messages in the active turn that
-    compaction must leave verbatim (R3, FM-8)."""
+    compaction must leave verbatim (R3, FM-8).
+
+    Mode-aware (Fix #10): long-horizon modes (loop/feature) re-cover many
+    files, so a larger floor keeps more recent read results verbatim in L5
+    instead of compacting them away and forcing re-reads. Only raises the
+    configured value — a user's explicit higher setting always wins.
+    """
     raw = session.variables.get("tool_result_floor", TOOL_RESULT_FLOOR_DEFAULT)
     try:
-        return max(0, int(raw))
+        floor = max(0, int(raw))
     except (TypeError, ValueError):
-        return TOOL_RESULT_FLOOR_DEFAULT
+        floor = TOOL_RESULT_FLOOR_DEFAULT
+    mode = str(session.variables.get("agent_mode", "default") or "default").lower()
+    if mode in ("loop", "feature"):
+        floor = max(floor, 8)
+    return floor
+
+
+# Default tool-result cache bounds (Fix #10). Raised in long-horizon modes
+# so more on-disk reads stay recallable instead of being evicted under the
+# small default 50-entry / 512KB cap.
+TOOL_CACHE_ENTRIES_DEFAULT = 50
+TOOL_CACHE_BYTES_DEFAULT = 524_288  # 512 KB
+
+
+def resolve_tool_cache_bounds(session: Any) -> tuple[int, int]:
+    """(max_entries, max_bytes) for the tool-result sidecar cache.
+
+    Mode-aware (Fix #10): loop/feature modes do far more read-only tool
+    calls, so the cache is grown to keep more results recallable (and
+    auto-recallable by locator). Only raises the configured bounds — a
+    user's explicit larger setting always wins.
+    """
+    try:
+        entries = max(1, int(
+            session.variables.get("tool_result_cache_entries", TOOL_CACHE_ENTRIES_DEFAULT)
+        ))
+    except (TypeError, ValueError):
+        entries = TOOL_CACHE_ENTRIES_DEFAULT
+    try:
+        nbytes = max(1, int(
+            session.variables.get("tool_result_cache_bytes", TOOL_CACHE_BYTES_DEFAULT)
+        ))
+    except (TypeError, ValueError):
+        nbytes = TOOL_CACHE_BYTES_DEFAULT
+    mode = str(session.variables.get("agent_mode", "default") or "default").lower()
+    if mode in ("loop", "feature"):
+        entries = max(entries, 256)
+        nbytes = max(nbytes, 2_097_152)  # 2 MB
+    return entries, nbytes
 
 
 def resolve_context_limit(session: Any) -> int:
@@ -164,7 +208,10 @@ __all__ = [
     "compaction_token_budget",
     "resolve_keep_recent",
     "resolve_tool_result_floor",
+    "resolve_tool_cache_bounds",
     "KEEP_RECENT_DEFAULT",
     "KEEP_RECENT_EMERGENCY",
     "TOOL_RESULT_FLOOR_DEFAULT",
+    "TOOL_CACHE_ENTRIES_DEFAULT",
+    "TOOL_CACHE_BYTES_DEFAULT",
 ]

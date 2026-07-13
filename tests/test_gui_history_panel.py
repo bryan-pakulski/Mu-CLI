@@ -1,7 +1,8 @@
 """Tests for the GUI History Search Panel feature.
 
 Verifies:
-  - 'history' mode registered in AGENTIC_MODES + AGENT_MODE_METADATA
+  - 'history' is a GUI view panel (in GUI_VIEW_PANELS), NOT an agent mode
+    (not in AGENTIC_MODES / AGENT_MODE_METADATA, not settable via POST /api/modes)
   - history_panel.html fragment exists with required elements
   - index.html includes history_panel.html
   - app.js contains Alpine.store('history') with search state fields
@@ -9,38 +10,119 @@ Verifies:
 """
 
 import os
+import threading
+
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from utils.config import AGENTIC_MODES, AGENT_MODE_METADATA
-
-
-# ============================================================ mode registration
-
-
-def test_history_in_agentic_modes():
-    assert "history" in AGENTIC_MODES
-    prompt = AGENTIC_MODES["history"]
-    assert isinstance(prompt, str)
-    assert len(prompt) > 50  # non-trivial system prompt
+from utils.config import AGENTIC_MODES, AGENT_MODE_METADATA, GUI_VIEW_PANELS
 
 
-def test_history_in_agent_mode_metadata():
-    assert "history" in AGENT_MODE_METADATA
-    meta = AGENT_MODE_METADATA["history"]
-    assert "display_name" in meta
-    assert "description" in meta
-    assert isinstance(meta["display_name"], str)
-    assert isinstance(meta["description"], str)
+# ============================================================ /api/modes endpoint
 
 
-def test_history_mode_does_not_require_workspace():
+def _make_modes_app(with_session: bool = True):
+    """Minimal FastAPI app mounting only the modes router, with a stub
+    session so require_session resolves. Lets us assert response shape +
+    that view-panel names 400 on POST without spinning up create_app."""
+    from mu.gui.routers import modes as modes_mod
+    from mu.gui.app import session_by_name, session_lock_for
+
+    app = FastAPI()
+    app.state.sessions = {}
+    app.state.session_locks = {}
+    app.state.current_session_name = None
+    app.state._fallback_lock = threading.Lock()
+    app.state.session_by_name = lambda name=None: session_by_name(app, name)
+    app.state.session_lock_for = lambda name=None: session_lock_for(app, name)
+
+    if with_session:
+        class _StubSM:
+            class folder_context:
+                folders = []
+            def save_history(self, fc):
+                return None
+
+        class _StubSession:
+            variables = {"agent_mode": "default"}
+            session_manager = _StubSM()
+
+        app.state.sessions["s1"] = _StubSession()
+        app.state.current_session_name = "s1"
+
+    app.include_router(modes_mod.router, prefix="/api/modes")
+    return app
+
+
+def test_api_modes_returns_views_array():
+    app = _make_modes_app()
+    client = TestClient(app)
+    r = client.get("/api/modes")
+    assert r.status_code == 200
+    data = r.json()
+    assert "views" in data
+    view_names = [v["name"] for v in data["views"]]
+    assert set(view_names) == {"history", "memory", "systemPrompts"}
+    for v in data["views"]:
+        assert v["view_only"] is True
+        assert v["needs_workspace"] is False
+        assert v["disabled"] is False
+    # Real agent modes are still listed, and the view panels are NOT.
+    mode_names = [m["name"] for m in data["modes"]]
+    assert "default" in mode_names
+    for panel in ("history", "memory", "systemPrompts"):
+        assert panel not in mode_names
+
+
+def test_post_modes_history_rejected():
+    app = _make_modes_app()
+    client = TestClient(app)
+    r = client.post("/api/modes/history")
+    assert r.status_code == 400
+
+
+def test_post_modes_memory_rejected():
+    app = _make_modes_app()
+    client = TestClient(app)
+    r = client.post("/api/modes/memory")
+    assert r.status_code == 400
+
+
+def test_post_modes_systemprompts_rejected():
+    app = _make_modes_app()
+    client = TestClient(app)
+    r = client.post("/api/modes/systemPrompts")
+    assert r.status_code == 400
+
+
+# ============================================================ view-panel registration
+
+
+def test_history_not_an_agent_mode():
+    # history is a read-only view panel, not a real agent mode — it must
+    # not be settable as agent_mode.
+    assert "history" not in AGENTIC_MODES
+    assert "history" not in AGENT_MODE_METADATA
+
+
+def test_history_in_gui_view_panels():
+    names = [p["name"] for p in GUI_VIEW_PANELS]
+    assert "history" in names
+    panel = next(p for p in GUI_VIEW_PANELS if p["name"] == "history")
+    assert "display_name" in panel
+    assert "description" in panel
+    assert isinstance(panel["display_name"], str)
+    assert isinstance(panel["description"], str)
+
+
+def test_history_not_in_no_workspace_set():
     import inspect
     from mu.gui.routers import modes as modes_mod
     source = inspect.getsource(modes_mod)
-    assert "history" in source
     assert "_NO_WORKSPACE_NEEDED" in source
-    # Verify 'history' is in the no-workspace set by checking the source
-    assert '"history"' in source
+    # history dropped from the no-workspace set when it stopped being a mode
+    assert '"history"' not in source
 
 
 # ============================================================ panel fragment

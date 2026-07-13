@@ -145,9 +145,12 @@ def save_memory(args: Dict[str, Any], context) -> str:
     name="search_memory",
     description=(
         "Searches the in-task memory store for previously saved facts. "
-        "By default returns only active entries — pass include_all=True "
-        "or a status filter to see historical entries. Use kind to filter "
-        "by entry classification (decision/finding/observation/goal)."
+        "By default returns ACTIVE + STALE entries — a search hit on a "
+        "STALE (decayed) entry reactivates it to ACTIVE, so retrieving "
+        "relevant-but-forgotten knowledge brings it back to the working "
+        "set automatically. Pass a status filter or include_all=True to "
+        "see done/superseded/archived entries. Use kind to filter by entry "
+        "classification (decision/finding/observation/goal)."
     ),
     parameters={
         "type": "object",
@@ -166,7 +169,7 @@ def save_memory(args: Dict[str, Any], context) -> str:
                 "enum": ["active", "done", "superseded", "archived", "stale"],
                 "description": (
                     "Filter by lifecycle status. If omitted, defaults to "
-                    "active-only. Pass 'done' or 'superseded' to see "
+                    "active + stale. Pass 'done' or 'superseded' to see "
                     "historical entries of that type."
                 ),
             },
@@ -516,6 +519,132 @@ def archive_memory(args: Dict[str, Any], context) -> str:
         return f"Error: Could not archive memory #{entry_id}."
 
     return f"Memory #{entry_id} archived: {old_status} → archived."
+
+
+# ------------------------------------------------------------ retire_thread
+
+
+@tool(
+    name="retire_thread",
+    description=(
+        "Explicitly drop an investigation or work thread you have abandoned — "
+        "the 'I'm done carrying this' lever for self-managed context. Archives "
+        "every ACTIVE task-memory entry whose content, tags, or source "
+        "matches the given topic (so they stop appearing in the default "
+        "active-only search and the system-prompt summary), optionally "
+        "removes matching scratchpad notes, and writes a single archived "
+        "audit entry recording the drop with your reason. Use when the "
+        "user's ask has shifted, a hypothesis was disproved and you're "
+        "moving on, or a sub-thread is simply no longer relevant."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "topic": {
+                "type": "string",
+                "description": (
+                    "Keyword or substring identifying the thread to drop. "
+                    "Matched case-insensitively against memory content, tags, "
+                    "and source, and against scratchpad note content."
+                ),
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why the thread is being dropped (audit trail).",
+            },
+            "clear_scratchpad": {
+                "type": "boolean",
+                "description": (
+                    "If True (default), also remove non-todo scratchpad notes "
+                    "whose content contains the topic. Todo ledger entries "
+                    "are never touched here — prune those with todo_delete "
+                    "or todo_clear."
+                ),
+                "default": True,
+            },
+        },
+        "required": ["topic"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="json",
+)
+def retire_thread(args: Dict[str, Any], context) -> Dict[str, Any]:
+    topic = str(args.get("topic", "") or "").strip()
+    if not topic:
+        return {
+            "ok": False,
+            "error_code": "invalid_args",
+            "message": "retire_thread requires non-empty 'topic'.",
+            "data": {},
+            "artifacts": [],
+            "telemetry": {"tool_name": "retire_thread"},
+        }
+    reason = str(args.get("reason", "") or "").strip()
+    clear_scratch = bool(args.get("clear_scratchpad", True))
+    topic_l = topic.lower()
+
+    store = _task_memory(context)
+    # Active entries matching the topic → archived. Keep audit trail.
+    archived_ids: list[int] = []
+    for entry in list(store.entries):
+        if entry.status != "active":
+            continue
+        haystack = " ".join([
+            entry.content or "",
+            " ".join(entry.tags or []),
+            entry.source or "",
+        ]).lower()
+        if topic_l in haystack:
+            if store.update_status(entry.id, "archived") is not None:
+                archived_ids.append(entry.id)
+
+    # Audit entry recording the drop.
+    audit_text = f"Thread retired: {topic}"
+    if reason:
+        audit_text += f" — {reason}"
+    store.save(
+        audit_text,
+        tags=["retired", "abandoned"],
+        source="retire_thread",
+        kind="observation",
+        status="archived",
+    )
+
+    # Optionally drop matching scratchpad notes (never todos).
+    scratch_removed = 0
+    if clear_scratch:
+        sp = _scratchpad(context)
+        kept: list = []
+        for e in sp.entries:
+            if "todo" in (e.tags or []):
+                kept.append(e)
+                continue
+            if topic_l in (e.content or "").lower():
+                scratch_removed += 1
+                continue
+            kept.append(e)
+        sp.entries = kept
+        sp._next_id = (max(e.id for e in kept) + 1) if kept else 1
+
+    return {
+        "ok": True,
+        "error_code": None,
+        "message": (
+            f"Retired thread '{topic}': archived {len(archived_ids)} active "
+            f"memory entry/entries, removed {scratch_removed} scratchpad note(s)."
+        ),
+        "data": {
+            "topic": topic,
+            "archived_memory_ids": archived_ids,
+            "scratchpad_removed": scratch_removed,
+            "audit_recorded": True,
+        },
+        "artifacts": [],
+        "telemetry": {"tool_name": "retire_thread"},
+    }
 
 
 # ---------------------------------------------------------------- scratchpad

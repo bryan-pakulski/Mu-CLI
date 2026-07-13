@@ -725,12 +725,28 @@ class Session:
                 except Exception:
                     pass
 
-    def _inject_hierarchical_context(self, system_prompt: str) -> str:
+    def _inject_hierarchical_context(
+        self,
+        system_prompt: str,
+        *,
+        cached_workspace: str | None = None,
+        cached_skills: str | None = None,
+    ) -> str:
         """Layered system-prompt assembly. Body moved to
-        `mu/session/context.py:inject_hierarchical_context`."""
+        `mu/session/context.py:inject_hierarchical_context`.
+
+        ``cached_workspace`` / ``cached_skills`` forward per-turn-cached
+        L1 / L1B text so the agent loop can rebuild L2 / L3 fresh every
+        iteration without re-reading files from disk each time.
+        """
         from mu.session.context import inject_hierarchical_context
 
-        return inject_hierarchical_context(self, system_prompt)
+        return inject_hierarchical_context(
+            self,
+            system_prompt,
+            cached_workspace=cached_workspace,
+            cached_skills=cached_skills,
+        )
 
     def queue_resumption_briefing(self, briefing: str) -> None:
         """Add a one-shot resumption note to the next agent turn.
@@ -1323,14 +1339,40 @@ class Session:
                 self.session_manager._cleanup_protected(turn_idx)
                 self._current_turn_start_index = None
 
+    def _session_goal_is_sticky(self) -> bool:
+        """Should the pinned session_goal survive the end of this turn?
+
+        True when the user opted in via ``session_goal_sticky`` or the
+        active mode is a long-horizon mode (loop / feature) that defaults
+        to keeping the goal across turn boundaries. Explicit opt-out
+        (``session_goal_sticky=False`` set by the user) is honored even
+        in long-horizon modes. Uses ``session_goal_sticky_explicit`` to
+        tell a user override apart from the schema default (mirrors
+        ``show_thinking_explicit``).
+        """
+        if bool(self.variables.get("session_goal_sticky_explicit", False)):
+            return bool(self.variables.get("session_goal_sticky", False))
+        mode = str(self.variables.get("agent_mode", "default") or "default").lower()
+        return mode in ("loop", "feature")
+
     def _strip_session_goal_after_turn(self) -> None:
-        """Clear `session_goal` at the end of every agent turn.
+        """Clear `session_goal` at the end of every agent turn — unless
+        the goal is *sticky*, in which case it persists across turns in
+        L3 until the user clears it (/goal clear) or sets a new goal.
+
+        Sticky when: ``session_goal_sticky`` is set True, OR the active
+        mode is a long-horizon mode (loop / feature) that defaults to
+        keeping the goal across turn boundaries. Long-horizon multi-turn
+        work needs the goal to survive turn boundaries so the model
+        doesn't lose the thread between turns; conversational default
+        use strips it so a pinned goal can't bias an unrelated next
+        request.
 
         The variable is the only thing that gets reset — the durable
         `task_memory` audit entry (saved by
         `_ensure_session_goal_persistence`) stays as history. So
         `/memory search` can still surface the original ask, but L3
-        no longer renders it after the turn completes.
+        no longer renders it after the turn completes (when non-sticky).
 
         Lifecycle: marks the active goal memory entry (tracked via
         ``self._active_goal_memory_id``) as ``status='done'`` so
@@ -1341,6 +1383,10 @@ class Session:
         """
         current = str(self.variables.get("session_goal", "") or "").strip()
         if not current:
+            return
+        if self._session_goal_is_sticky():
+            # Keep the goal pinned across turns. Don't mark the memory
+            # entry done — it's still the active objective.
             return
         self.variables["session_goal"] = ""
         # Mark the goal memory entry as done (audit trail retained).

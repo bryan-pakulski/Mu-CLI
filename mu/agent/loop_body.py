@@ -351,7 +351,35 @@ def run_turn(session, text):
     session._loop_blocker_raised = False  # fresh turn — last turn's pause doesn't apply
     session._hook_abort_requested = False
     session._hook_abort_reason = None
+    # Fix #13: reset the consolidation guard each turn so a max-iterations
+    # consolidation can fire on subsequent turns too.
+    session._consolidation_done = False
+    # Fix #12: reset per-turn re-coverage stall tracking.
+    session._recoverage_seen_paths = set()
+    session._recoverage_stall_iters = 0
+    session._recoverage_last_nudge_iter = -10_000
     session.sync_runtime_state()
+    # Staleness decay (self-management): advance the memory turn counter
+    # once per turn, then demote ACTIVE task-memory entries not hit in the
+    # last `memory_stale_after_turns` turns to STALE. This keeps the active
+    # set honest — "active" means recently mattered, not ever saved — so
+    # search_memory (active-only by default) and L3 injection stay
+    # high-signal instead of accumulating noise. Reversible: a search hit or
+    # re-save promotes a STALE entry back to ACTIVE. 0 disables. Decay only
+    # applies to task_memory (the durable store); the ephemeral scratchpad
+    # is wiped per turn and never decays. See context_status for the
+    # stale_memory_count signal that tells the agent what to retire.
+    try:
+        stale_after = int(session.variables.get("memory_stale_after_turns", 12) or 0)
+    except (TypeError, ValueError):
+        stale_after = 12
+    if stale_after > 0 and hasattr(session, "task_memory") and session.task_memory is not None:
+        session.task_memory.advance_turn()
+        _demoted = session.task_memory.apply_staleness_decay(stale_after)
+        if _demoted:
+            logger.info(
+                "memory staleness decay: %d active entries demoted to stale", _demoted
+            )
     # Compute the active agent mode once — reused by scratchpad handling
     # below and by the mode-specific prompt builders that follow.
     active_mode = str(session.variables.get("agent_mode", "default")).lower()
@@ -377,14 +405,20 @@ def run_turn(session, text):
         _should_persist = _explicit_persist or active_mode in ("loop", "feature")
         if not _should_persist:
             _had_entries = len(session.turn_scratchpad.entries) > 0
-            session.turn_scratchpad.clear()
+            # Carve out the `todo`-tagged ledger — it is the agent's persistent
+            # self-managed task plan and must survive the turn-start wipe so
+            # the agent can reconcile/prune it across turns (the Claude-Code
+            # "clean up the stale task list" move). Only ephemeral notes are
+            # cleared; todos persist for the session.
+            _removed = session.turn_scratchpad.clear_excluding({"todo"})
             if _had_entries:
                 _notice = (
                     "Turn scratchpad auto-cleared at turn start "
-                    "(scratchpad_persist_across_turns is off in default mode)."
+                    "(scratchpad_persist_across_turns is off in default mode); "
+                    "todo ledger retained."
                 )
                 logger.info(_notice)
-                if session.ui:
+                if session.ui and _removed:
                     session.ui.show_info(_notice)
 
     parts = list(session.staged_files)
@@ -509,9 +543,22 @@ def run_turn(session, text):
             base_system_prompt += profile_block
     if workspace_context:
         base_system_prompt += f"\n\n{workspace_context}"
-    from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
+    from mu.session.budgets import (
+        resolve_keep_recent,
+        resolve_tool_result_floor,
+        resolve_tool_cache_bounds,
+    )
 
     session.session_manager._tool_result_floor = resolve_tool_result_floor(session)
+    # Fix #10: grow the tool-result sidecar cache for long-horizon modes so
+    # more on-disk reads stay recallable / auto-recallable by locator instead
+    # of being evicted under the small default cap. Only raises the bounds.
+    try:
+        _tc_entries, _tc_bytes = resolve_tool_cache_bounds(session)
+        session.tool_result_cache.max_entries = _tc_entries
+        session.tool_result_cache.max_bytes = _tc_bytes
+    except Exception:
+        pass
     session.session_manager.roll_history_summary_to_token_budget(
         session._compaction_token_budget(),
         keep_recent=resolve_keep_recent(session),
@@ -531,7 +578,26 @@ def run_turn(session, text):
     resumption_block = session._drain_resumption_briefings()
     if resumption_block:
         base_system_prompt = f"{base_system_prompt}\n\n{resumption_block}"
-    base_system_prompt = session._inject_hierarchical_context(base_system_prompt)
+    # Cache the disk-backed L1 (workspace files) and L1B (skills) layers
+    # once per turn. They're expensive to rebuild (read files / walk the
+    # skills tree) and stable within a turn, so reusing the cached text
+    # every iteration lets us rebuild L2 (conversation summary) and L3
+    # (active goal) fresh each iteration without the disk cost — closing
+    # the frozen-at-turn-start gap that starved the model of mid-turn
+    # progress updates. See _inject_hierarchical_context(cached_*).
+    from mu.session.context import build_workspace_context_files
+
+    session._turn_workspace_block = build_workspace_context_files(session)
+    session._turn_skills_block = session._build_skills_block(announce=True)
+    # The pre-injection persona text (system_instruction + mode prompt +
+    # workspace_context + resumption block). Reused as the base for every
+    # per-iteration system-prompt rebuild.
+    base_persona_prompt = base_system_prompt
+    base_system_prompt = session._inject_hierarchical_context(
+        base_persona_prompt,
+        cached_workspace=session._turn_workspace_block,
+        cached_skills=session._turn_skills_block,
+    )
 
     recent_history = session._prepare_runtime_history()
     messages = session._build_messages_from_history(recent_history, new_user_message)
@@ -581,10 +647,69 @@ def run_turn(session, text):
         2,
         int(session.variables.get("loop_detection_repeat_threshold", 5) or 5),
     )
+    # Fix #12: context-gathering stall detection. Tracks paths read across
+    # the whole turn and counts consecutive iterations that re-cover
+    # already-read paths without making a concrete change — the diffuse
+    # "going around getting context, progress halts" stall that doesn't
+    # form a clean repeated/periodic tool sequence. When the count hits the
+    # threshold, inject a re-orient nudge telling the agent to stop
+    # gathering and act. State lives on the session so it survives across
+    # the turn's iterations.
+    from mu.agent.loop_detection import (
+        extract_read_paths,
+        is_concrete_change_iter,
+    )
+
+    recoverage_threshold = max(
+        0, int(session.variables.get("recoverage_stall_threshold", 4) or 0)
+    )
+    if getattr(session, "_recoverage_seen_paths", None) is None:
+        session._recoverage_seen_paths = set()
+    if getattr(session, "_recoverage_stall_iters", None) is None:
+        session._recoverage_stall_iters = 0
+    if getattr(session, "_recoverage_last_nudge_iter", None) is None:
+        session._recoverage_last_nudge_iter = -10_000
 
     while iteration < max_iterations:
         iteration += 1
         logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
+        # Periodic L2 progress checkpoint (Fix #9). On long turns that never
+        # hit the compaction budget, conversation_summary stays frozen while
+        # the model racks up real progress in L5 — it then keeps re-reading
+        # files it already explored (the long-horizon stall). Every N
+        # iterations, fold recent history into the structured L2 summary
+        # WITHOUT compacting (anchor doesn't advance) so the next iteration's
+        # system prompt reflects current Progress/State/Open-items. Cadence:
+        # `progress_checkpoint_every` (0 disables); when unset, loop/feature
+        # modes default to 12, default/chat to 0. Fires before the per-
+        # iteration system-prompt rebuild so the refreshed L2 is used this
+        # iteration.
+        try:
+            _ckpt_every = int(
+                session.variables.get("progress_checkpoint_every", 0) or 0
+            )
+            if _ckpt_every <= 0:
+                # Mode-aware default: only long-horizon modes auto-enable.
+                _ckpt_mode = str(
+                    session.variables.get("agent_mode", "default") or "default"
+                ).lower()
+                if _ckpt_mode in ("loop", "feature"):
+                    _ckpt_every = 12
+            if (
+                _ckpt_every > 0
+                and iteration > 1
+                and (iteration % _ckpt_every) == 0
+            ):
+                _ckpt_ok = session.session_manager.force_progress_checkpoint(
+                    session.provider
+                )
+                if _ckpt_ok:
+                    logger.debug(
+                        f"L2 progress checkpoint refreshed at iteration "
+                        f"{iteration}/{max_iterations}"
+                    )
+        except Exception as _ckpt_exc:
+            logger.debug(f"progress checkpoint skipped: {_ckpt_exc}")
         # Subagent wrap-up reminder. Two strategies:
         #  * Adaptive (preferred): when a SubagentLifecycleManager is attached
         #    (an async-orchestrated child), drive consolidation from its
@@ -680,7 +805,18 @@ def run_turn(session, text):
         _iteration_retryable_codes: set[str] = set()
 
         try:
-            dynamic_system_prompt = base_system_prompt
+            # Rebuild the layered system prompt fresh each iteration so L2
+            # (conversation summary) and L3 (active goal / feature_state /
+            # scratchpad) reflect mid-turn updates — auto-compaction can
+            # rewrite the summary via the pre_provider_call hook, and tools
+            # can update feature_state / the scratchpad between iterations.
+            # L1 / L1B are reused from the per-turn cache (no disk reads).
+            # The memory + scratchpad snapshots are appended below as before.
+            dynamic_system_prompt = session._inject_hierarchical_context(
+                base_persona_prompt,
+                cached_workspace=session._turn_workspace_block,
+                cached_skills=session._turn_skills_block,
+            )
             if session.variables.get("memory_enabled", True):
                 active_mode_for_mem = str(
                     session.variables.get("agent_mode", "default")
@@ -1111,6 +1247,37 @@ def run_turn(session, text):
 
             # --- PHASE 2: execute pending calls (parallel for safe tools, serial for others) ---
             exec_results: dict[int, Any] = {}
+            # Fix #10: auto-recall tracker. Maps tool-call index → cache_key for
+            # reads that short-circuited to a cached result (same path, file
+            # unchanged since the cached read). Post-processing annotates the
+            # rendered result so the model knows it was served from cache and
+            # doesn't re-burn tokens re-reading the same file — the core
+            # context-gathering stall on long tasks.
+            _auto_recall_hits: dict[int, str] = {}
+
+            def _auto_recall_or_execute(part_idx: int, part) -> Any:
+                hit = None
+                try:
+                    hit = session.tool_result_cache.lookup_by_locator(
+                        part.tool_name, part.tool_args
+                    )
+                except Exception:
+                    hit = None
+                if hit is not None:
+                    _auto_recall_hits[part_idx] = str(hit.get("cache_key", "") or "")
+                    if session.ui:
+                        try:
+                            session.ui.show_info(
+                                f"  [Auto-recall: {part.tool_name} served from "
+                                f"cache {hit.get('cache_key', '')} — file unchanged]"
+                            )
+                        except Exception:
+                            pass
+                    return hit["result"]
+                return session._execute_tool_with_memory(
+                    part.tool_name, part.tool_args
+                )
+
             if pending_executions:
                 from mu.agent.parallel import (
                     PARALLEL_SAFE_TOOLS,
@@ -1181,8 +1348,8 @@ def run_turn(session, text):
                     try:
                         par_results = _exec_calls(
                             par_calls,
-                            lambda tc: session._execute_tool_with_memory(
-                                tc.tool_name, tc.tool_args
+                            lambda tc: _auto_recall_or_execute(
+                                int(tc.tool_call_id), tc
                             ),
                             max_concurrency=max_concurrency,
                         )
@@ -1211,9 +1378,7 @@ def run_turn(session, text):
                         # collation buffer. Placeholder result here.
                         exec_results[idx] = None
                         continue
-                    exec_results[idx] = session._execute_tool_with_memory(
-                        part.tool_name, part.tool_args
-                    )
+                    exec_results[idx] = _auto_recall_or_execute(idx, part)
 
             # --- PHASE 3: post-processing (serial, in input order) -----------
             for i, part in enumerate(tool_calls):
@@ -1403,11 +1568,27 @@ def run_turn(session, text):
                     if should_collate and collation_cache_key:
                         cache_key = collation_cache_key
                     else:
-                        cache_key = session.tool_result_cache.store(
-                            call_id=getattr(part, "tool_call_id", ""),
-                            tool_name=part.tool_name,
-                            result=source_result,
-                        )
+                        # store_with_locator (Fix #10): index by tool+args and
+                        # record the source file's mtime/size so a later
+                        # repeat read of the same unchanged file auto-recalls
+                        # from cache instead of re-reading + re-burning
+                        # tokens. Falls back to plain store when args are
+                        # missing/unhashable.
+                        try:
+                            cache_key = (
+                                session.tool_result_cache.store_with_locator(
+                                    call_id=getattr(part, "tool_call_id", ""),
+                                    tool_name=part.tool_name,
+                                    tool_args=part.tool_args,
+                                    result=source_result,
+                                )
+                            )
+                        except Exception:
+                            cache_key = session.tool_result_cache.store(
+                                call_id=getattr(part, "tool_call_id", ""),
+                                tool_name=part.tool_name,
+                                result=source_result,
+                            )
                 except Exception:
                     pass
 
@@ -1427,15 +1608,82 @@ def run_turn(session, text):
             session.session_manager.history.append(tool_result_msg)
             session.session_manager.save_history(session.folder_context)
 
+            # --- Fix #12: context-gathering stall detection -------------
+            # Count consecutive iterations that re-cover already-read paths
+            # without a concrete change. When the count hits the threshold
+            # (and cooldown has passed), inject a re-orient nudge so the
+            # next iteration's prompt steers the agent to act instead of
+            # gathering more context it already has.
+            if recoverage_threshold > 0:
+                try:
+                    _iter_read_paths = extract_read_paths(tool_calls)
+                    _recovered = {
+                        p for p in _iter_read_paths
+                        if p in session._recoverage_seen_paths
+                    }
+                    _concrete = is_concrete_change_iter(tool_calls)
+                    # Grow the seen set with this iteration's reads.
+                    session._recoverage_seen_paths.update(_iter_read_paths)
+                    if _recovered and not _concrete:
+                        session._recoverage_stall_iters += 1
+                    else:
+                        # A concrete change or fresh-only reads reset the
+                        # stall counter — the agent is making progress.
+                        session._recoverage_stall_iters = 0
+                    _cooldown_ok = (
+                        iteration - session._recoverage_last_nudge_iter
+                    ) >= recoverage_threshold
+                    if (
+                        session._recoverage_stall_iters >= recoverage_threshold
+                        and _cooldown_ok
+                    ):
+                        _nudge = (
+                            "CONTEXT-GATHERING STALL: you have re-read files "
+                            f"{session._recoverage_stall_iters} iterations in a row "
+                            "without making a concrete change. You already have "
+                            "enough context to make progress. STOP re-reading and "
+                            "re-checking the same files. Take a concrete action NOW: "
+                            "apply the code change, run the test, or — if you're "
+                            "blocked — raise_blocker with the exact missing "
+                            "requirement. Re-reading will not unblock you."
+                        )
+                        session.session_manager.history.append({
+                            "role": "user",
+                            "parts": [{"type": "text", "text": _nudge}],
+                        })
+                        session.session_manager.save_history(
+                            session.folder_context
+                        )
+                        session._recoverage_last_nudge_iter = iteration
+                        # Reset so we don't nudge every iteration; the next
+                        # nudge fires only after another `threshold` stalled
+                        # iterations.
+                        session._recoverage_stall_iters = 0
+                        if session.ui:
+                            session.ui.show_error(
+                                "Context-gathering stall detected — "
+                                "re-orient nudge injected."
+                            )
+                        logger.warning(
+                            "Recoverage stall at iteration %s/%s — nudge injected.",
+                            iteration,
+                            max_iterations,
+                        )
+                except Exception:
+                    logger.debug(
+                        "recoverage stall check failed", exc_info=True
+                    )
+
             # --- Event-driven workspace diff injection ---
             # If any tool in this iteration modified files, inject a diff
-            # of workspace changes (vs initial snapshots) into the dynamic
-            # system prompt for the NEXT iteration.  This ensures the model
-            # always sees current file state without periodic full rebuilds.
-            # Zero stale windows: the diff only appears when files actually
-            # change, and only for the iteration immediately following the
-            # change.  If no files were modified, no diff is injected (saves
-            # tokens).
+            # of workspace changes (vs initial snapshots) into the persona
+            # prompt for the NEXT iteration. Because the per-iteration
+            # system prompt is rebuilt from `base_persona_prompt` (with
+            # fresh L2/L3), patching the persona carries the diff forward
+            # until files change again. This ensures the model always sees
+            # current file state without periodic full rebuilds. Zero
+            # stale windows: the diff only appears when files actually
+            # change. If no files were modified, no diff is injected.
             _files_changed_this_iter = False
             for _part in tool_result_parts:
                 _res = _part.get("tool_result")
@@ -1446,8 +1694,8 @@ def run_turn(session, text):
                 try:
                     _diff_xml = session.folder_context.get_context_diff_xml()
                     if _diff_xml:
-                        base_system_prompt = (
-                            base_system_prompt.rsplit(
+                        base_persona_prompt = (
+                            base_persona_prompt.rsplit(
                                 "\n\nWorkspace changes since turn start:",
                                 1
                             )[0]
@@ -1748,6 +1996,118 @@ def run_turn(session, text):
 
     session.session_manager.save_history(session.folder_context)
     session.paused_execution_text = None
+
+    # Fix #13: instead of silently stopping at max_iterations mid-work,
+    # run ONE final consolidation turn — inject a user message telling the
+    # model the budget is exhausted and asking it to write what it
+    # accomplished, what's left, and save that to memory — then make a
+    # final provider call with tools disabled so it can only respond, not
+    # spin more tool calls. This turns an abrupt "max iterations reached"
+    # cliff into a useful handoff the user can act on. Guarded by
+    # `_consolidation_done` so it never recurses.
+    if not getattr(session, "_consolidation_done", False):
+        try:
+            session._consolidation_done = True
+            consolidation_text = (
+                f"You have reached the maximum iteration budget ({max_iterations}). "
+                "You will NOT get another tool call — this is your final response. "
+                "Consolidate now:\n"
+                "1. State what you actually accomplished this turn (files changed, "
+                "tests run, concrete outcomes) — be specific.\n"
+                "2. State exactly what remains to finish the task (next actionable steps).\n"
+                "3. If any blocker stopped you, name it precisely and what you need.\n"
+                "Do NOT call more tools. Do NOT re-read files. Summarize from what you "
+                "already know and respond."
+            )
+            session.session_manager.history.append({
+                "role": "user",
+                "parts": [{"type": "text", "text": consolidation_text}],
+            })
+            session.session_manager.save_history(session.folder_context)
+
+            # Fresh L2/L3 for the consolidation call (cheap; reuses per-turn
+            # cached L1/L1B).
+            _consol_prompt = session._inject_hierarchical_context(
+                base_persona_prompt,
+                cached_workspace=session._turn_workspace_block,
+                cached_skills=session._turn_skills_block,
+            )
+            _consol_messages = session._build_messages_from_history(
+                session._prepare_runtime_history(turn_start_index),
+                {"role": "system", "parts": []},
+            )[:-1]
+            if session.ui and hasattr(session.ui, "build_live_status"):
+                _cstatus = session.ui.build_live_status(
+                    session, session.provider.model_name,
+                    max_iterations, max_iterations,
+                )
+            else:
+                _cstatus = (
+                    f"Consolidating ({session.provider.model_name}) "
+                    f"max_iter reached | {build_live_status_line(session)}"
+                )
+            if session.ui:
+                with session.ui.show_status(_cstatus):
+                    _consol_resp = session._provider_generate_with_retry(
+                        messages=_consol_messages,
+                        system_prompt=_consol_prompt,
+                        thinking=session.thinking,
+                        tools=None,  # no more tool calls — respond only
+                    )
+            else:
+                _consol_resp = session._provider_generate_with_retry(
+                    messages=_consol_messages,
+                    system_prompt=_consol_prompt,
+                    thinking=session.thinking,
+                    tools=None,
+                )
+            total_in += int(getattr(_consol_resp, "input_tokens", 0) or 0)
+            total_out += int(getattr(_consol_resp, "output_tokens", 0) or 0)
+            # Render the consolidation text so the user sees it, and append
+            # it to history as the assistant's final turn.
+            _consol_parts = []
+            for _p in getattr(_consol_resp, "parts", []) or []:
+                if getattr(_p, "type", "") == "text" and getattr(_p, "text", ""):
+                    if session.ui:
+                        session.ui.render_message(
+                            "assistant", _p.text, session.provider.model_name
+                        )
+                    _consol_parts.append({"type": "text", "text": _p.text})
+            if _consol_parts:
+                session.session_manager.history.append({
+                    "role": "assistant",
+                    "parts": _consol_parts,
+                })
+                session.session_manager.save_history(session.folder_context)
+            # Persist the consolidation into task memory so the next turn
+            # inherits the handoff instead of re-deriving state from scratch.
+            try:
+                _consol_blob = " ".join(
+                    str(p.get("text", "")) for p in _consol_parts if p.get("text")
+                ).strip()
+                if _consol_blob:
+                    session.task_memory.save(
+                        _consol_blob[:2000],
+                        tags=["consolidation", "max_iterations"],
+                        source="max_iterations_consolidation",
+                        kind="consolidation",
+                        # A consolidation is a handoff/audit record, not active
+                        # working memory — save as DONE so it stays out of the
+                        # default active+stale search and the active-first L3
+                        # injection. It's still retrievable via
+                        # search_memory(status="done") / include_all if a later
+                        # turn needs the handoff. (anti-rot: audit-is-invisible.)
+                        status="done",
+                    )
+            except Exception:
+                logger.debug("consolidation memory persist failed", exc_info=True)
+            logger.info(
+                "Forced consolidation turn at max_iterations (%s).",
+                max_iterations,
+            )
+        except Exception:
+            logger.debug("consolidation turn failed", exc_info=True)
+
     if session.session_manager.get_feature_state():
         session._set_feature_state(status="max_iterations_reached")
     return session._collect_turn_response(
@@ -1757,7 +2117,8 @@ def run_turn(session, text):
         total_out=total_out,
         total_cost=total_cost,
         error=(
-            f"Reached maximum iterations ({max_iterations}) without a final "
-            "assistant response."
+            f"Reached maximum iterations ({max_iterations}). A final "
+            "consolidation summary was generated — see the last assistant "
+            "message for what was accomplished and what remains."
         ),
     )

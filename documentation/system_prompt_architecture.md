@@ -21,16 +21,16 @@ count, and responsibility. Char counts are the source literal lengths
 | Component | Location | Chars | Responsibility |
 |-----------|----------|------:|----------------|
 | `--system` CLI default | `mucli.py:1216` | ~603 | Non-agentic base instruction (the `session.system_instruction` prefix). Used as-is when agentic mode is OFF; prepended to the agentic base when ON. |
-| `AGENTIC_SYSTEM_BASE` | `utils/config.py:367` | 7 422 | Agentic base: caveman grammar, full TOOL SURFACE taxonomy, sub-agent guidance, 13 GENERAL RULES. Appended as `workspace_context` whenever agentic mode is ON. |
+| `AGENTIC_SYSTEM_BASE` | `utils/config.py:367` | 11 432 | Agentic base: caveman grammar, full TOOL SURFACE taxonomy (incl. self-management tools), sub-agent guidance, 13 GENERAL RULES, and a SELF-MANAGEMENT block (rule 7) instructing the agent to own its context — prune the todo ledger, promote durable/drop ephemeral, supersede-don't-sibling, reconcile on staleness signals from `context_status` (stale_memory_count/stale_todos/memory_pressure_pct), watch fill, self-trigger `checkpoint_progress`, recognize its own stall, write its own handoffs. Appended as `workspace_context` whenever agentic mode is ON. |
 | `AGENTIC_MODES["default"]` | `utils/config.py:437` | 2 412 | Collation-aware default coding workflow (clarify → recall → semantic retrieval → plan → parallel collect → act → verify → save → summarize). |
 | `AGENTIC_MODES["debug"]` | `utils/config.py:459` | 3 150 | Debugging workflow with scratchpad-tagging protocol (hypothesis/suspect/repro/bisect), recall-first, repro→locate→hypothesize→bisect→fix→verify→persist. |
 | `AGENTIC_MODES["feature"]` | `utils/config.py:488` | 3 021 | Feature Task Engine workflow: plan→per-task loop→review, anchored to the feature-task engine tools, mandatory memory+scratchpad, blockers. |
 | `AGENTIC_MODES["research"]` | `utils/config.py:523` | 3 180 | Research workflow: recall, parallel multi-source search, semantic retrieval for codebase, delegation, citation requirements + source credibility table, anti-detection. |
 | `AGENTIC_MODES["loop"]` | `utils/config.py:569` | 2 637 | Long-horizon autonomous loop: goal lock, user-visible backlog, per-increment re-orient→gather→act→verify→reflect, memory discipline, timeline updates. |
 | `AGENTIC_MODES["security"]` | `utils/config.py:611` | 4 356 | Security audit engine: anti-hallucination contract (PoC + patch both verified), discovery→per-finding proof-and-patch→final report, refutation of failed hypotheses. |
-| `AGENTIC_MODES["history"]` | `utils/config.py:644` | 851 | Read-only history search/visualization mode (no code changes, no session mutation). |
 | `AGENTIC_MODES["teacher"]` | `utils/config.py:657` | 14 483 | One-on-one tutor: personalization contract, chat-based teaching (watcher records), curriculum + per-lesson loop, dual-presentation artifacts, spaced review. |
-| `AGENT_MODE_METADATA` | `utils/config.py:738` | — | Mode registry (display_name, description, documentation path). Not prompt text; drives `/mode`, the GUI modes list, and the splash banner. |
+| `AGENT_MODE_METADATA` | `utils/config.py:814` | — | Real-mode registry (display_name, description, documentation path). Not prompt text; drives `/mode`, the GUI modes list, and the splash banner. The read-only view panels (history, memory, systemPrompts) are NOT here — they live in `GUI_VIEW_PANELS` and are surfaced through the GUI Tools menu, not as settable agent modes. |
+| `GUI_VIEW_PANELS` | `utils/config.py` | — | GUI-only view-panel registry (history, memory, systemPrompts). Read-only; never agent modes — `POST /api/modes/{name}` rejects them and they never appear in `/mode`, the splash banner, or `--mode-prompt`. Surfaced as the `views` array in `GET /api/modes`. |
 | `NUDGE_EMPTY_RESPONSE` | `utils/config.py:788` | 161 | Injected as a user message when the model returns no text after tool calls (`loop_body.py:845`). |
 | Feature-mode dynamic block | `loop_body.py:475-489` | ~1 100 | Appended to `base_system_prompt` when `active_mode == "feature"`: FEATURE MODE SYSTEM PROMPT instructions (staged engine, exit criteria, one task at a time). |
 | Loop-mode dynamic block | `loop_body.py:490-503` | ~700 | Appended when `active_mode == "loop"`: LOOP MODE SYSTEM PROMPT + the locked `loop_goal`. |
@@ -57,6 +57,26 @@ count, and responsibility. Char counts are the source literal lengths
 
 `agentic_system_base` and `mode_instruction` are resolved with the
 priority ladder in §2.
+
+### Per-iteration rebuild (not frozen at turn start)
+
+Steps 5–6 are re-run **every iteration within a turn**, so L2 (conversation
+summary) and L3 (active goal / memory / scratchpad) reflect mid-turn updates
+(auto-compaction rewriting the summary, tools mutating `feature_state` /
+the scratchpad) instead of being frozen at their turn-start value — the
+long-horizon amnesia bug. To keep this cheap:
+
+- L1 (workspace files) and L1B (skills) are built **once per turn**
+  (`session._turn_workspace_block` / `session._turn_skills_block`,
+  `loop_body.py:541-544`) and passed to `inject_hierarchical_context` as
+  `cached_workspace=` / `cached_skills=`, so each iteration's rebuild skips
+  the disk reads / skills-tree walk.
+- L2 and L3 are always reassembled from in-memory state.
+
+A periodic **L2 progress checkpoint** (`HistoryMixin.force_progress_checkpoint`,
+gated by `progress_checkpoint_every`) folds recent history into the structured
+summary without advancing the compaction anchor, so long turns that never
+hit the compaction budget still get a fresh Progress / Open-items picture.
 
 ---
 
@@ -120,8 +140,9 @@ per-session version tracking.
   file (overrides `--system`). `-` reads stdin.
 - `--mode-prompt NAME=PATH` — install a runtime override for `base` or a
   mode (repeatable). `NAME` ∈ {base, default, debug, feature, research,
-  loop, security, history, teacher}. Sets the same session variables as
-  `/set`, so it sits at priority 1.
+  loop, security, teacher}. Sets the same session variables as
+  `/set`, so it sits at priority 1. (history/memory/systemPrompts are GUI
+  view panels, not prompt-overridable modes.)
 
 ### Slash command (`/prompts`, `mu/commands/prompts.py`)
 
@@ -149,9 +170,10 @@ agent thread for `ask_user_choice`/approval). Endpoints:
 - `POST /api/system-prompts/{name}/reset` — delete the file override so
   the hardcoded fallback takes over.
 
-A GUI editor panel can be built directly on this API: list → select →
-edit textarea → PUT → reload. The panel is the documented next step; the
-API surface is implemented now.
+The GUI editor panel is built on this API (`mu/gui/templates/fragments/
+system_prompts_panel.html`): list → select → edit textarea → PUT →
+reload. It is surfaced as a view-only panel in the GUI Tools menu (not an
+agent mode).
 
 ### Hot-reload
 
@@ -199,7 +221,7 @@ critical tool-surface / workflow anchor the harness depends on.
 
 | Prompt | Original (chars) | Refined (chars) | Ratio | Anchors preserved |
 |--------|-----------------:|----------------:|------:|-------------------|
-| base   | 7 422 | 6 032 | 0.81 | bash, read_file, apply_diff, search_and_replace_file, search_for_string, retrieve_relevant_context, spawn_agent, todo_write, save_memory, save_scratchpad, flush, plan mode, parallel/concurrent |
+| base   | 11 432 | 6 032 | 0.53 | bash, read_file, apply_diff, search_and_replace_file, search_for_string, retrieve_relevant_context, spawn_agent, todo_write, save_memory, save_scratchpad, flush, plan mode, parallel/concurrent |
 | default | 2 412 | 2 126 | 0.88 | search_memory, retrieve_relevant_context, bash, verif, todo_write, parallel/concurrent, spawn_agent, save_memory |
 
 Refinement approach:
@@ -219,7 +241,7 @@ Both refined templates pass `validate()` clean (zero missing anchors) —
 verified in `tests/test_prompts.py::test_validate_passes_for_refined_templates`
 and `test_refined_{base,default}_no_longer_than_original`.
 
-The other six modes are externalizable (the loader supports them; `/prompts init <mode>`
+The other five modes are externalizable (the loader supports them; `/prompts init <mode>`
 seeds them verbatim from the hardcoded fallback) but their refinement is
 intentionally deferred — each is large (security 4 356, teacher 14 483)
 and pinned by `test_mode_sota_patterns.py` substrings, so refining them
@@ -243,8 +265,9 @@ Surfaces:
 - `tests/test_prompts.py::test_validate_passes_for_hardcoded_constants` —
   guards the shipped hardcoded prompts against drift.
 
-`history` and `teacher` have no pinned anchors (free-form content) and
-validate clean by design.
+`teacher` has no pinned anchors (free-form content) and validates clean by
+design. (`history` was removed from `AGENTIC_MODES` — it is now a GUI view
+panel, not a prompt-overridable mode.)
 
 ---
 
@@ -262,10 +285,11 @@ validate clean by design.
 - 22 unit tests + E2E assembly verification + 327 regression tests green.
 
 **Documented / follow-up:**
-- GUI editor *panel* (frontend) — the API is ready; the JS panel is the
-  next increment.
-- Refinement of the remaining 6 modes (debug/feature/research/loop/
-  security/history/teacher) — mechanism supports it; refinement deferred
+- GUI editor panel — implemented (`mu/gui/templates/fragments/
+  system_prompts_panel.html` + `Alpine.store("systemPrompts")`), surfaced
+  as a view-only panel in the GUI Tools menu (not an agent mode).
+- Refinement of the remaining 5 modes (debug/feature/research/loop/
+  security/teacher) — mechanism supports it; refinement deferred
   to a dedicated pass with per-mode validation.
 - Per-session prompt-version persistence in the saved session file
   (currently version is surfaced live via `/prompts` and the API; writing

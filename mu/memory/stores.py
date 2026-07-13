@@ -39,6 +39,12 @@ class MemoryEntry:
     status: str = ACTIVE
     superseded_by: Optional[int] = None
     supersedes: Optional[int] = None
+    # Turn index of the last explicit retrieval/save (active reliance), used
+    # by staleness decay (`apply_staleness_decay`). 0 = never touched since
+    # load. Passive L3 injection does NOT bump this (injection is not active
+    # reliance), so entries that are only ever surfaced — never searched or
+    # re-saved — eventually decay to STALE and drop out of the active set.
+    last_hit_turn: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -53,6 +59,7 @@ class MemoryEntry:
             "status": self.status,
             "superseded_by": self.superseded_by,
             "supersedes": self.supersedes,
+            "last_hit_turn": self.last_hit_turn,
         }
 
     @classmethod
@@ -69,6 +76,7 @@ class MemoryEntry:
             status=str(data.get("status") or ACTIVE),
             superseded_by=data.get("superseded_by"),
             supersedes=data.get("supersedes"),
+            last_hit_turn=int(data.get("last_hit_turn", 0)),
         )
 
 
@@ -99,6 +107,10 @@ class BaseNoteStore:
         self.eviction_kind_weights = eviction_kind_weights or dict(
             self.DEFAULT_EVIC_KIND_WEIGHTS
         )
+        # Monotonic turn counter for staleness decay. The agent loop calls
+        # `advance_turn()` once per turn before `apply_staleness_decay()`.
+        # Persisted so decay stays consistent across session resume.
+        self.turn_count: int = 0
         # Transient log of entries evicted by `_enforce_limit` (R12, FM-11).
         # The agent loop drains this into an L3 notice block so the model
         # learns that a memory it relied on is gone (preventing silent
@@ -110,6 +122,7 @@ class BaseNoteStore:
             "max_entries": self.max_entries,
             "summary_char_limit": self.summary_char_limit,
             "next_id": self._next_id,
+            "turn_count": self.turn_count,
             "entries": [entry.to_dict() for entry in self.entries],
         }
 
@@ -120,6 +133,7 @@ class BaseNoteStore:
             summary_char_limit=int(data.get("summary_char_limit", 2_000)),
         )
         store._next_id = int(data.get("next_id", 1))
+        store.turn_count = int(data.get("turn_count", 0))
         store.entries = [
             MemoryEntry.from_dict(item) for item in data.get("entries", [])
         ]
@@ -130,6 +144,57 @@ class BaseNoteStore:
     def clear(self) -> None:
         self.entries.clear()
         self._next_id = 1
+
+    def clear_excluding(self, except_tags: set[str]) -> int:
+        """Drop every entry NOT carrying one of ``except_tags``.
+
+        Used at turn start to wipe ephemeral scratchpad notes while
+        preserving the persistent `todo`-tagged ledger (the agent's
+        self-managed task plan survives across turns). Returns the number
+        of entries removed. ``_next_id`` is recomputed so new saves don't
+        collide with retained entries.
+        """
+        if not except_tags:
+            return self._do_clear()
+        kept = [e for e in self.entries if any(t in except_tags for t in e.tags)]
+        removed = len(self.entries) - len(kept)
+        self.entries = kept
+        self._next_id = (max(e.id for e in kept) + 1) if kept else 1
+        return removed
+
+    def _do_clear(self) -> int:
+        n = len(self.entries)
+        self.entries.clear()
+        self._next_id = 1
+        return n
+
+    def advance_turn(self) -> None:
+        """Bump the monotonic turn counter. Called once per turn by the
+        agent loop, before `apply_staleness_decay`."""
+        self.turn_count += 1
+
+    def apply_staleness_decay(self, stale_after_turns: int) -> int:
+        """Demote ACTIVE entries not hit in ``stale_after_turns`` turns to
+        STALE. The single mechanism that keeps the active set honest: "active"
+        means "recently mattered", not "ever saved". Reversible — a search
+        hit or re-save promotes a STALE entry back to ACTIVE automatically
+        (see `search` / `save`), so decay never loses information the agent
+        is actually using.
+
+        Only ACTIVE entries are touched; done/superseded/archived are left
+        alone (they're already off the active set). Returns the count
+        demoted. No-op when ``stale_after_turns <= 0`` (decay disabled).
+        """
+        if stale_after_turns <= 0:
+            return 0
+        threshold = self.turn_count - stale_after_turns
+        demoted = 0
+        for entry in self.entries:
+            if entry.status == ACTIVE and entry.last_hit_turn <= threshold:
+                entry.status = STALE
+                entry.updated_at = time.time()
+                demoted += 1
+        return demoted
 
     def save(
         self,
@@ -153,12 +218,18 @@ class BaseNoteStore:
         if existing:
             existing.updated_at = time.time()
             existing.hits += 1
+            existing.last_hit_turn = self.turn_count
             if source and not existing.source:
                 existing.source = source
             if kind and not existing.kind:
                 existing.kind = kind
-            # Update status if content+tags match but status differs
-            if status != existing.status:
+            # Re-saving identical content is active reliance — if the entry
+            # had decayed to STALE, promote it back to ACTIVE (decay is
+            # reversible through use, not just through reactivate_memory).
+            if existing.status == STALE:
+                existing.status = status if status != STALE else ACTIVE
+            elif status != existing.status:
+                # Update status if content+tags match but status differs
                 existing.status = status
             return existing
 
@@ -169,6 +240,7 @@ class BaseNoteStore:
             source=source,
             kind=kind,
             status=status,
+            last_hit_turn=self.turn_count,
         )
         self._next_id += 1
         self.entries.append(entry)
@@ -261,8 +333,15 @@ class BaseNoteStore:
         include_all: bool = False,
     ) -> List[MemoryEntry]:
         # Normalize status_filter to a set
+        # Default search surfaces ACTIVE + STALE (decayed-but-recent). A
+        # search hit on a STALE entry reactivates it to ACTIVE (see below), so
+        # decay is self-correcting through use — the agent doesn't need
+        # `include_all` to find and revive relevant-but-decayed knowledge.
+        # L3 *injection* (`render_summary`) keeps the stricter active-first
+        # priority, so the auto-surfaced context window stays clean even
+        # though search can still surface stale entries on demand.
         if status_filter is None and not include_all:
-            status_set = {ACTIVE}
+            status_set = {ACTIVE, STALE}
         elif status_filter is None and include_all:
             status_set = None  # no status filtering
         else:
@@ -292,6 +371,12 @@ class BaseNoteStore:
         for entry in results:
             entry.hits += 1
             entry.updated_at = time.time()
+            entry.last_hit_turn = self.turn_count
+            # An explicit search hit is proof of relevance — if the entry had
+            # decayed to STALE, reactivate it. Decay is self-correcting: use
+            # it and it comes back to the active set automatically.
+            if entry.status == STALE:
+                entry.status = ACTIVE
         return results
 
     def list_entries(

@@ -2504,6 +2504,12 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     color: var(--text);
     border-color: var(--accent-line);
 }
+/* Tools menu pill lights up when a view-only panel is currently shown. */
+.mode-pill.highlight {
+    border-color: var(--accent-line);
+    color: var(--accent);
+}
+.mode-pill.highlight .label { color: var(--accent); }
 .mode-pill .label {
     color: var(--text-dimmer);
     text-transform: uppercase;

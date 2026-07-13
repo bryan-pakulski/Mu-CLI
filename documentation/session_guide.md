@@ -16,6 +16,15 @@ The system prompt is composed of seven layers:
 - **L4** — Recent tool activity (compressed, or LLM-summarized, for budget)
 - **L5** — Current turn (full history entries from `summary_anchor` onwards)
 
+L1 and L1B are built once per turn (disk reads / skills-tree walk happen
+once) and cached; L2 and L3 are reassembled **every iteration** from
+in-memory state, so mid-turn updates (auto-compaction rewriting the summary,
+tools mutating feature_state / the scratchpad, a freshly-set session goal)
+reach the model the same turn — they are never frozen at their turn-start
+value. On long turns that stay under the compaction budget, a periodic L2
+progress checkpoint (`progress_checkpoint_every`) folds recent history into
+the structured summary without compacting, so L2 reflects current progress.
+
 When history exceeds the context budget, the compactor rolls older messages
 into the L2 conversation summary and advances `summary_anchor`. Messages
 before the anchor are no longer sent to the model — but they remain in

@@ -831,11 +831,13 @@ document.addEventListener("alpine:init", () => {
         active: "default",
         realMode: "default",
         modes: [],
+        views: [],
         panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
             this.modes = data.modes || [];
+            this.views = data.views || [];
             this.realMode = data.current || "default";
             this.active = this.realMode;
             const store = this.panelModes.includes(this.active)

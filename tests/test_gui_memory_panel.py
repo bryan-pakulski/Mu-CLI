@@ -1,8 +1,8 @@
 """Tests for the GUI Memory Map panel feature.
 
 Mirrors tests/test_gui_history_panel.py's structure:
-  - 'memory' mode registered in AGENTIC_MODES + AGENT_MODE_METADATA
-  - memory panel does not require a workspace
+  - 'memory' is a GUI view panel (in GUI_VIEW_PANELS), NOT an agent mode
+    (not in AGENTIC_MODES / AGENT_MODE_METADATA, not settable via POST /api/modes)
   - memory_panel.html fragment exists with required elements
   - index.html includes memory_panel.html
   - app.js contains Alpine.store('memory') with grid/layers/load
@@ -14,39 +14,37 @@ Mirrors tests/test_gui_history_panel.py's structure:
 
 import os
 
-from utils.config import AGENTIC_MODES, AGENT_MODE_METADATA
+from utils.config import AGENTIC_MODES, AGENT_MODE_METADATA, GUI_VIEW_PANELS
 
 
-# ============================================================ mode registration
+# ============================================================ view-panel registration
 
 
-def test_memory_in_agentic_modes():
-    assert "memory" in AGENTIC_MODES
-    prompt = AGENTIC_MODES["memory"]
-    assert isinstance(prompt, str)
-    assert len(prompt) > 50
+def test_memory_not_an_agent_mode():
+    # memory is a read-only view panel, not a real agent mode — it must
+    # not be settable as agent_mode.
+    assert "memory" not in AGENTIC_MODES
+    assert "memory" not in AGENT_MODE_METADATA
 
 
-def test_memory_in_agent_mode_metadata():
-    assert "memory" in AGENT_MODE_METADATA
-    meta = AGENT_MODE_METADATA["memory"]
-    assert "display_name" in meta
-    assert "description" in meta
-    assert isinstance(meta["display_name"], str)
-    assert isinstance(meta["description"], str)
+def test_memory_in_gui_view_panels():
+    names = [p["name"] for p in GUI_VIEW_PANELS]
+    assert "memory" in names
+    panel = next(p for p in GUI_VIEW_PANELS if p["name"] == "memory")
+    assert "display_name" in panel
+    assert "description" in panel
+    assert isinstance(panel["display_name"], str)
+    assert isinstance(panel["description"], str)
 
 
-def test_memory_mode_does_not_require_workspace():
+def test_memory_not_in_no_workspace_set():
     from mu.gui.routers import modes as modes_mod
-
-    # The set is built inside list_modes, so re-resolve by calling it
-    # would need a session; instead assert the literal is present in the
-    # source (the established pattern from test_gui_history_panel.py).
     import inspect
 
     source = inspect.getsource(modes_mod)
     assert "_NO_WORKSPACE_NEEDED" in source
-    assert '"memory"' in source
+    # memory dropped from the no-workspace set when it stopped being a mode
+    assert '"memory"' not in source
 
 
 # ============================================================ panel fragment

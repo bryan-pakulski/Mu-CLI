@@ -699,5 +699,89 @@ class HistoryMixin:
         except Exception:
             return None
 
+    # --------------------------------------------------- periodic L2 checkpoint
+
+    def force_progress_checkpoint(
+        self,
+        provider: Optional[LLMProvider] = None,
+        *,
+        min_new_entries: int = 6,
+    ) -> bool:
+        """Refresh L2 mid-turn without compacting.
+
+        On long turns that never reach the compaction token budget,
+        ``conversation_summary`` (L2) stays frozen at its turn-start value
+        while the model racks up real progress in L5 — so the model keeps
+        re-deriving context it already gathered (the long-horizon stall).
+        A checkpoint folds *recent* history into the structured L2 summary
+        (Progress / Key decisions / Current state / Open items) so the
+        model sees an up-to-date picture the next iteration.
+
+        Unlike ``roll_history_summary`` this does **not** advance
+        ``summary_anchor`` — entries stay verbatim in L5; only L2 is
+        enriched. ``_checkpoint_anchor`` tracks how far we've already
+        checkpointed so repeated checkpoints only summarize work done
+        since the last one (not the whole turn again), bounding cost.
+
+        Returns True if L2 was updated.
+        """
+        if not self.history:
+            return False
+        try:
+            base = int(self.summary_anchor or 0)
+        except Exception:
+            base = 0
+        try:
+            start = max(base, int(getattr(self, "_checkpoint_anchor", 0) or 0))
+        except Exception:
+            start = base
+        end = len(self.history)
+        # Not enough new work since the last checkpoint to justify a
+        # provider call. 6 ≈ a couple of tool rounds.
+        if end - start < max(1, int(min_new_entries or 1)):
+            return False
+        entries = [
+            msg
+            for idx, msg in enumerate(self.history[start:end], start=start)
+            if idx not in getattr(self, "protected_indices", set())
+        ]
+        if not entries:
+            return False
+
+        summary_batch = self._generate_llm_summary(provider, entries)
+        if summary_batch and (
+            "### Task" in summary_batch or "### Progress" in summary_batch
+        ):
+            self._merge_structured_summary(summary_batch)
+        elif summary_batch:
+            # Legacy/unstructured fallback — append under a dated header so
+            # it's distinguishable from compaction-driven sections.
+            header = (
+                f"\n### Progress checkpoint (messages {start}-{end})\n"
+                if self.conversation_summary
+                else f"### Progress checkpoint (messages {start}-{end})\n"
+            )
+            self.conversation_summary = (
+                f"{self.conversation_summary}{header}{summary_batch}".strip()
+            )
+            self._clip_conversation_summary()
+        else:
+            # LLM summary unavailable (no provider) — mechanical snapshot.
+            mech = self._summarize_history_batch(entries)
+            if not mech:
+                return False
+            header = (
+                f"\n### Progress checkpoint (messages {start}-{end})\n"
+                if self.conversation_summary
+                else f"### Progress checkpoint (messages {start}-{end})\n"
+            )
+            self.conversation_summary = (
+                f"{self.conversation_summary}{header}{mech}".strip()
+            )
+            self._clip_conversation_summary()
+
+        self._checkpoint_anchor = end
+        return True
+
 
 __all__ = ["HistoryMixin"]

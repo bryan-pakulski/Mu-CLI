@@ -118,3 +118,89 @@ def test_separate_sessions_have_separate_todo_lists():
     execute("todo_write", {"content": "only in 1"}, ctx1)
     listing_2 = execute("todo_list", {}, ctx2)
     assert listing_2["data"]["count"] == 0
+
+
+# ---------------------------------------------------------- delete + clear
+
+
+def test_todo_delete_removes_entry():
+    ctx = _ctx()
+    r = execute("todo_write", {"content": "stale task"}, ctx)
+    todo_id = r["data"]["id"]
+    assert ctx.session.turn_scratchpad.entries  # has the entry
+
+    res = execute("todo_delete", {"id": todo_id}, ctx)
+    assert res["ok"] is True
+    assert "Deleted todo" in res["message"]
+    # Entry gone from the store.
+    assert all(e.id != todo_id for e in ctx.session.turn_scratchpad.entries)
+
+
+def test_todo_delete_unknown_id():
+    ctx = _ctx()
+    res = execute("todo_delete", {"id": 999}, ctx)
+    assert res["ok"] is False
+    assert res["error_code"] == "not_found"
+
+
+def test_todo_delete_only_touches_todos():
+    """A non-todo scratchpad note sharing an id space must not be deleted
+    by todo_delete — the tool filters on the `todo` tag."""
+    ctx = _ctx()
+    # Save a plain (non-todo) scratchpad note directly to the store so it
+    # shares the id sequence but lacks the todo tag.
+    note = ctx.session.turn_scratchpad.save("plain note", tags=["plan"])
+    res = execute("todo_delete", {"id": note.id}, ctx)
+    assert res["ok"] is False
+    assert res["error_code"] == "not_found"
+    # The plain note survives.
+    assert any(e.id == note.id for e in ctx.session.turn_scratchpad.entries)
+
+
+def test_todo_clear_completed_prunes_only_finished():
+    ctx = _ctx()
+    execute("todo_write", {"content": "done one", "status": "completed"}, ctx)
+    execute("todo_write", {"content": "still going", "status": "in_progress"}, ctx)
+    execute("todo_write", {"content": "not started"}, ctx)
+
+    res = execute("todo_clear", {}, ctx)  # default scope = completed
+    assert res["ok"] is True
+    assert res["data"]["removed"] == 1
+    remaining = execute("todo_list", {}, ctx)["data"]["todos"]
+    assert {t["content"] for t in remaining} == {"still going", "not started"}
+
+
+def test_todo_clear_all_wipes_ledger():
+    ctx = _ctx()
+    execute("todo_write", {"content": "a"}, ctx)
+    execute("todo_write", {"content": "b", "status": "in_progress"}, ctx)
+
+    res = execute("todo_clear", {"status": "all"}, ctx)
+    assert res["ok"] is True
+    assert res["data"]["removed"] == 2
+    assert execute("todo_list", {}, ctx)["data"]["count"] == 0
+
+
+def test_todo_clear_rejects_unknown_scope():
+    ctx = _ctx()
+    execute("todo_write", {"content": "a"}, ctx)
+    res = execute("todo_clear", {"status": "bogus"}, ctx)
+    assert res["ok"] is False
+    assert res["error_code"] == "invalid_args"
+    # Ledger untouched.
+    assert execute("todo_list", {}, ctx)["data"]["count"] == 1
+
+
+def test_todo_clear_all_preserves_non_todo_scratchpad():
+    """todo_clear('all') wipes the todo ledger but must not drop unrelated
+    scratchpad notes that share the store."""
+    ctx = _ctx()
+    ctx.session.turn_scratchpad.save("ephemeral note", tags=["plan"])
+    execute("todo_write", {"content": "task"}, ctx)
+
+    res = execute("todo_clear", {"status": "all"}, ctx)
+    assert res["ok"] is True
+    # Non-todo note survives.
+    notes = [e for e in ctx.session.turn_scratchpad.entries if "todo" not in e.tags]
+    assert len(notes) == 1
+    assert notes[0].content == "ephemeral note"

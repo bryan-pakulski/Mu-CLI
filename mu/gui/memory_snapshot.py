@@ -12,21 +12,27 @@ Two signals, one grid:
 * **Per-layer hue** — every layer gets a fixed hue (L0 blue, L1 green,
   …, L5 red). The band's color identifies *which* layer it is at a
   glance.
-* **Change frequency (hash-based)** — each layer's text is split into a
-  fixed number of *canonical* chunks and SHA-256 hashed. The fingerprint
-  remembers each chunk's last hash + a change counter per chunk, keyed by
-  the session object. Every snapshot compares the current chunk hashes to
-  the stored ones; a chunk whose hash changed increments its counter.
-  Cell brightness encodes that counter (sqrt curve, capped), so the parts
-  of a layer that change every iteration *glow* and the parts that have
-  been stable since first contact stay *dim*. That is the whole point of
-  the panel: watching which areas of each layer's memory churn in real
-  time, not just that the layer grew.
+* **Change frequency (hash-based)** — each layer's text is split into one
+  chunk per **column at the requested resolution** (``cols`` slices) and
+  SHA-256 hashed. The fingerprint remembers each column's last hash + a
+  change counter per column, keyed by the session object and the
+  ``(cols, rows)`` resolution. Every snapshot compares the current column
+  hashes to the stored ones; a column whose hash changed increments its
+  counter. Cell brightness encodes that counter (sqrt curve, capped), so
+  the parts of a layer that change every iteration *glow* and the parts
+  that have been stable since first contact stay *dim*. Because chunking
+  is per-column (text is 1D; the band's height is just token-share
+  emphasis), the heat stays stable when a layer's band height jiggles as
+  its token count drifts — only ``cols`` affects the chunking. That is
+  the whole point of the panel: watching which areas of each layer's
+  memory churn in real time, not just that the layer grew.
 
-The grid is resolution-independent: change tracking always runs at the
-canonical chunk count, so changing the display resolution does not reset
-or distort the heat. Identical content between two snapshots yields an
-identical grid (deterministic); only changed chunks brighten.
+Each resolution keeps its own change history (keyed by ``(cols, rows)``),
+so switching resolution starts a fresh heat for that view. Identical
+content between two snapshots at the same resolution yields an identical
+grid (deterministic); only changed columns brighten. Empty space is
+still space: every layer always gets at least one band row, and a column
+with no text renders as a dim layer-colored cell rather than vanishing.
 
 The same builder feeds the REST endpoint (``/api/memory/state``) and the
 ``pre_provider_call`` hook that pushes a live snapshot per iteration, so
@@ -73,13 +79,13 @@ _DEFAULT_RES = 128
 # visually seamless.
 _LIVE_RES = 96
 
-# Canonical chunk count per layer for change tracking. Fixed regardless of
-# display resolution so heat is stable and comparable across res changes.
-_CANON_CHUNKS = 128
-
 # Change-count at which a cell reaches max brightness (sqrt curve below).
 # ~8 observed changes → fully hot; stable content stays dim.
 _HEAT_REF = 8.0
+
+# Minimum band height: every layer gets at least this many rows so an empty
+# layer still renders as a visible (dim) band rather than disappearing.
+_MIN_BAND = 1
 
 
 def _clamp_res(value: int, default: int) -> int:
@@ -164,7 +170,7 @@ def _layer_text(session: Any, layer_id: str) -> str:
 # id() can never inherit a dead session's counts (which would otherwise
 # make a fresh session's first snapshot look "already churning").
 #
-# Structure: { session(obj): { <layer>: { "hashes": [...], "counts": [...] } } }
+# Structure: { session(obj): { (cols, rows): { <layer>: { "hashes": [...], "counts": [...] } } } }
 _FINGERPRINTS: "weakref.WeakKeyDictionary[Any, Dict[str, Dict[str, List[Any]]]]" = weakref.WeakKeyDictionary()
 
 
@@ -203,6 +209,30 @@ def _empty_state(cols: int, rows: int) -> Dict[str, Any]:
         "fill_pct": 0.0,
         "updated_at": None,
     }
+
+
+def _adjust_band_rows(
+    band_rows: Dict[str, int], layer_tokens: Dict[str, int], rows: int
+) -> None:
+    """Fix up band row counts so they sum to exactly ``rows`` without
+    dropping any layer below ``_MIN_BAND`` — every layer stays visible.
+
+    Shrinks the largest shrinkable band when over-allocated, grows the
+    largest token-bearing band (else the largest band) when under-allocated.
+    """
+    total = sum(band_rows.values())
+    while total > rows:
+        cand = [lid for lid in _LAYER_ORDER if band_rows[lid] > _MIN_BAND]
+        if not cand:
+            break
+        big = max(cand, key=lambda lid: band_rows[lid])
+        band_rows[big] -= 1
+        total -= 1
+    while total < rows:
+        cand = [lid for lid in _LAYER_ORDER if layer_tokens[lid] > 0] or list(_LAYER_ORDER)
+        big = max(cand, key=lambda lid: band_rows[lid])
+        band_rows[big] += 1
+        total += 1
 
 
 def build_memory_snapshot(
@@ -247,74 +277,81 @@ def build_memory_snapshot(
 
     fill_pct = round(100.0 * total_tokens / context_limit, 1) if context_limit > 0 else 0.0
 
-    # --- band sizing: proportional to token share ---
+    # --- band sizing: proportional to token share, but every layer gets at
+    # least _MIN_BAND rows so empty layers still render ("empty space is
+    # still space"). Bands tile the grid exactly (sum == rows).
     band_rows: Dict[str, int] = {}
     layer_tokens: Dict[str, int] = {}
     for lid in _LAYER_ORDER:
-        tok = int((by_id.get(lid, {}) or {}).get("current") or 0)
-        layer_tokens[lid] = tok
+        layer_tokens[lid] = int((by_id.get(lid, {}) or {}).get("current") or 0)
         band_rows[lid] = 0
 
     if total_tokens > 0:
         for lid in _LAYER_ORDER:
             tok = layer_tokens[lid]
             if tok <= 0:
-                continue
-            r = round(rows * tok / total_tokens)
-            band_rows[lid] = max(1, r)
+                band_rows[lid] = _MIN_BAND
+            else:
+                band_rows[lid] = max(_MIN_BAND, round(rows * tok / total_tokens))
+        _adjust_band_rows(band_rows, layer_tokens, rows)
+    else:
+        # No content anywhere: split the grid evenly so all layers show as
+        # visible (empty) bands rather than a blank canvas.
+        base = rows // len(_LAYER_ORDER)
+        rem = rows - base * len(_LAYER_ORDER)
+        for i, lid in enumerate(_LAYER_ORDER):
+            band_rows[lid] = base + (1 if i < rem else 0)
 
-        allocated = sum(band_rows.values())
-        while allocated > rows:
-            candidates = [lid for lid in _LAYER_ORDER if band_rows[lid] > 1]
-            if not candidates:
-                break
-            big = max(candidates, key=lambda lid: band_rows[lid])
-            band_rows[big] -= 1
-            allocated -= 1
-        if allocated < rows:
-            nonzero = [lid for lid in _LAYER_ORDER if band_rows[lid] > 0]
-            if nonzero:
-                big = max(nonzero, key=lambda lid: layer_tokens[lid])
-                band_rows[big] += rows - allocated
-
-    # --- change tracking: canonical chunks per layer ---
+    # --- change tracking: one hash per COLUMN at the requested resolution.
+    # Text is 1D, so the honest 2D mapping is per-column heat repeated down
+    # each band's rows (band height = the layer's token-share emphasis).
+    # Keyed by (cols, rows) so each resolution keeps its own change history;
+    # changing resolution starts fresh heat for that view. Per-column (not
+    # per-cell) keeps the heat stable when a layer's band height jiggles as
+    # its token count drifts — only `cols` affects the chunking.
     fp = _fingerprint(session)
-    layer_heat: Dict[str, List[int]] = {}   # per canonical chunk heat value
+    res_fp = fp.setdefault((cols, rows), {})
+    layer_heat: Dict[str, List[int]] = {}   # per-column heat value (len == cols)
     layer_change_count: Dict[str, int] = {}
     for lid in _LAYER_ORDER:
         text = _layer_text(session, lid)
-        chunks = _sample_chunks(text, _CANON_CHUNKS)
+        chunks = _sample_chunks(text, cols)
         hashes = [_chunk_hash(c) for c in chunks]
-        present = [1 if c else 0 for c in chunks]
+        present = [bool(c) for c in chunks]
 
-        state = fp.get(lid)
+        state = res_fp.get(lid)
         if state is None:
-            counts = [0] * _CANON_CHUNKS
+            counts = [0] * cols
         else:
             prev = state.get("hashes") or []
-            counts = list(state.get("counts") or [0] * _CANON_CHUNKS)
-            # Pad/truncate to the canonical length defensively.
-            if len(counts) < _CANON_CHUNKS:
-                counts += [0] * (_CANON_CHUNKS - len(counts))
-            counts = counts[:_CANON_CHUNKS]
-            for i in range(_CANON_CHUNKS):
+            counts = list(state.get("counts") or [0] * cols)
+            # Pad/truncate to the column count defensively.
+            if len(counts) < cols:
+                counts += [0] * (cols - len(counts))
+            counts = counts[:cols]
+            for i in range(cols):
                 ph = prev[i] if i < len(prev) else ""
                 if hashes[i] and ph and hashes[i] != ph:
                     counts[i] += 1
-                # If the chunk went from present→absent or vice versa, treat
-                # it as a change too (the area's content materially moved).
+                # A column going present→absent or absent→present is a
+                # material change too (the content grew into or out of it).
                 if (bool(hashes[i]) != bool(ph)) and (hashes[i] or ph):
                     counts[i] += 1
 
-        fp[lid] = {"hashes": hashes, "counts": counts}
-        # Cell value: 0 if the canonical chunk is empty, else 1 + heat.
+        res_fp[lid] = {"hashes": hashes, "counts": counts}
+        # 0 = empty column (no text in that slice); 1..255 = present, where
+        # the magnitude encodes change frequency (1 = stable since first
+        # seen, 255 = churning).
         layer_heat[lid] = [
-            (0 if present[i] == 0 else 1 + _heat_value(counts[i]))
-            for i in range(_CANON_CHUNKS)
+            (0 if not present[i] else 1 + _heat_value(counts[i]))
+            for i in range(cols)
         ]
         layer_change_count[lid] = sum(counts)
 
-    # --- build the grid row by row, mapping display cells → canonical chunks ---
+    # --- build the grid: each band fills its rows with the layer's per-column
+    # heat (vertical stripes within the band). Every cell carries a value;
+    # empty columns stay 0 so the frontend renders them as dim "empty space"
+    # rather than transparent — the band's full extent is always visible.
     grid: List[List[int]] = [[0] * cols for _ in range(rows)]
     layers_out: List[Dict[str, Any]] = []
     row_cursor = 0
@@ -324,22 +361,12 @@ def build_memory_snapshot(
         maximum = int(meta.get("maximum") or 0)
         r = band_rows.get(lid, 0)
         row_start = row_cursor
-        row_end = row_cursor + r
-
-        if r > 0 and row_end <= rows:
-            heat = layer_heat.get(lid) or [0] * _CANON_CHUNKS
-            total_cells = r * cols
-            for ri in range(r):
-                row = grid[row_start + ri]
-                for ci in range(cols):
-                    display_lin = ri * cols + ci
-                    # Map this display cell to the nearest canonical chunk.
-                    canon_idx = (display_lin * _CANON_CHUNKS) // max(1, total_cells)
-                    if canon_idx >= _CANON_CHUNKS:
-                        canon_idx = _CANON_CHUNKS - 1
-                    row[ci] = heat[canon_idx]
-
-        row_end = min(row_end, rows)
+        row_end = min(row_cursor + r, rows)
+        heat = layer_heat.get(lid) or [0] * cols
+        for ri in range(row_start, row_end):
+            row = grid[ri]
+            for ci in range(cols):
+                row[ci] = heat[ci]
         row_cursor = row_end
 
         layers_out.append(

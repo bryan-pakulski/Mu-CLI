@@ -334,6 +334,56 @@ def test_snapshot_change_increments_heat():
     assert after_max > before_max
 
 
+def test_snapshot_empty_layers_still_render_bands():
+    from mu.gui.memory_snapshot import build_memory_snapshot
+
+    session = _make_session()
+    # Only L5 (history) carries content; the other six layers are empty.
+    _add_user_turn(session, "alpha beta gamma delta epsilon")
+    snap = build_memory_snapshot(session, cols=48, rows=48)
+    # Every layer gets at least one band row — empty space is still space.
+    for l in snap["layers"]:
+        assert (l["row_end"] - l["row_start"]) >= 1
+    # Bands tile the whole grid, so the canvas is never blank.
+    assert snap["layers"][0]["row_start"] == 0
+    assert snap["layers"][-1]["row_end"] == 48
+
+
+def test_snapshot_heat_keyed_per_resolution():
+    from mu.gui.memory_snapshot import build_memory_snapshot
+
+    session = _make_session()
+    _add_user_turn(session, "alpha beta gamma delta epsilon zeta eta")
+    build_memory_snapshot(session, cols=48, rows=48)  # seed 48 history
+
+    # A second turn shifts L5 columns at the 48 resolution → heat accrues.
+    _add_user_turn(session, "theta iota kappa lambda mu nu xi omicron")
+    b48 = build_memory_snapshot(session, cols=48, rows=48)
+    b64 = build_memory_snapshot(session, cols=64, rows=64)  # fresh resolution
+
+    assert max(c for r in b48["grid"] for c in r) > 1      # 48 accumulated heat
+    assert max(c for r in b64["grid"] for c in r) <= 1     # 64 starts clean
+
+
+def test_snapshot_grid_columns_are_per_resolution_hashes():
+    from mu.gui.memory_snapshot import build_memory_snapshot
+
+    # The grid is one hash per column (len == cols), repeated down each
+    # band's rows — so within a band every row is identical (vertical
+    # stripes), and the column count tracks the requested resolution.
+    session = _make_session()
+    _add_user_turn(session, "alpha beta gamma delta epsilon zeta eta theta")
+    snap = build_memory_snapshot(session, cols=24, rows=24)
+    # Find the L5 band (the only layer with content here).
+    l5 = next(l for l in snap["layers"] if l["id"] == "L5")
+    r0, r1 = l5["row_start"], l5["row_end"]
+    assert r1 > r0
+    first = snap["grid"][r0]
+    for ri in range(r0 + 1, r1):
+        assert snap["grid"][ri] == first   # rows within a band are identical
+    assert len(first) == 24                # one hash per column at res 24
+
+
 def test_hash_color_is_deterministic_and_hex():
     from mu.gui.memory_snapshot import _hash_color
 

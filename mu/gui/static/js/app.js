@@ -2026,14 +2026,21 @@ document.addEventListener("alpine:init", () => {
             for (let ri = 0; ri < rows; ri++) {
                 const row = this.grid[ri];
                 if (!row) continue;
-                const hue = (rowHue[ri] != null) ? rowHue[ri] : 0;
+                const hue = rowHue[ri];
+                if (hue == null) continue;       // outside any band → transparent
                 for (let ci = 0; ci < cols; ci++) {
                     const v = row[ci];
-                    if (!v) continue;            // 0 → empty/transparent
-                    // v is 1..255: 1 = present & stable, 255 = churning.
-                    const t = (v - 1) / 254;     // 0..1 change frequency
-                    const light = heat ? (16 + 44 * t) : 42;
-                    ctx.fillStyle = `hsl(${hue},68%,${light.toFixed(1)}%)`;
+                    if (!v) {
+                        // Empty space is still space: a column with no text
+                        // renders as a dim, desaturated layer hue so the
+                        // band's full extent stays visible.
+                        ctx.fillStyle = `hsl(${hue},30%,11%)`;
+                    } else {
+                        // v is 1..255: 1 = present & stable, 255 = churning.
+                        const t = (v - 1) / 254;     // 0..1 change frequency
+                        const light = heat ? (16 + 44 * t) : 42;
+                        ctx.fillStyle = `hsl(${hue},68%,${light.toFixed(1)}%)`;
+                    }
                     ctx.fillRect(ci, ri, 1, 1);
                 }
             }

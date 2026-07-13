@@ -24,9 +24,13 @@
         </button>
         <div class="brand">μcli</div>
         <div class="crumb"
-             :title="'session: ' + ($store.sessions.current || '{{ session_name }}') + ' · {{ provider }}/{{ model }}'">
-            <span x-text="$store.sessions.current || '{{ session_name }}'" style="color:var(--text);font-weight:500;"></span>
-            <span class="meta">{{ provider }}·{{ model }}</span>
+             x-data="{
+                get _provider() { return $store.inspector.currentProvider || '{{ provider }}'; },
+                get _model() { return $store.inspector.currentModel || '{{ model }}'; }
+             }"
+             :title="'session: ' + ($store.sessions.current || '{{ session_name }}') + ' · ' + _provider + '/' + _model">
+            <span x-text="$store.sessions.current || '{{ session_name }}'" style="color:var(--text);font-weight:500;">{{ session_name }}</span>
+            <span class="meta" x-text="_provider + '·' + _model">{{ provider }}·{{ model }}</span>
         </div>
         <div class="spacer"></div>
 

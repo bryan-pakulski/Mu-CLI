@@ -353,8 +353,14 @@
     <!-- Toast notifications -->
     <div class="toast-container" x-data>
         <template x-for="m in $store.toast.messages" :key="m.id">
-            <div class="toast" :class="'toast--' + m.type" x-transition>
-                <span x-text="m.msg"></span>
+            <div class="toast" :class="'toast--' + m.type"
+                 x-transition:enter="toast--enter"
+                 x-transition:enter-start="toast--enter-start"
+                 x-transition:enter-end="toast--enter-end"
+                 x-transition:leave="toast--leave"
+                 x-transition:leave-start="toast--leave-start"
+                 x-transition:leave-end="toast--leave-end">
+                <span class="toast__msg" x-text="m.msg"></span>
                 <button class="toast__close" @click="$store.toast.dismiss(m.id)">&times;</button>
             </div>
         </template>

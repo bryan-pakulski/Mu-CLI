@@ -2368,10 +2368,17 @@ document.addEventListener("alpine:init", () => {
         },
         async onSubagentModelChange() {
             // Empty = inherit parent model → reset to the schema default ("").
-            if (!this.subagentModel) {
-                await this.resetVariable("subagent_model");
-            } else {
-                await this.setVariable("subagent_model", this.subagentModel);
+            const chosen = this.subagentModel;
+            const ok = chosen
+                ? await this.setVariable("subagent_model", chosen)
+                : await this.resetVariable("subagent_model");
+            if (ok) {
+                Alpine.store("toast").show(
+                    chosen
+                        ? `subagent model → ${chosen}`
+                        : "subagent model → inherit parent",
+                    "success",
+                );
             }
         },
         toggleGroup(name) {
@@ -2396,13 +2403,27 @@ document.addEventListener("alpine:init", () => {
             });
             if (!r.ok) {
                 const d = await r.json().catch(() => ({}));
-                alert(d.detail || `set failed (${r.status})`);
+                Alpine.store("toast").show(
+                    d.detail || `set failed (${r.status})`,
+                    "error",
+                );
+                return false;
             }
             await this.loadVariables();
+            return true;
         },
         async resetVariable(key) {
-            await fetch(`/api/variables/${encodeURIComponent(key)}`, { method: "DELETE" });
+            const r = await fetch(`/api/variables/${encodeURIComponent(key)}`, { method: "DELETE" });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(
+                    d.detail || `reset failed (${r.status})`,
+                    "error",
+                );
+                return false;
+            }
             await this.loadVariables();
+            return true;
         },
 
         // ----- provider/model switching
@@ -2438,6 +2459,22 @@ document.addEventListener("alpine:init", () => {
                 await this.loadModels(this.currentProvider);
             }
         },
+        // The active provider's model list, with `extra` (the currently
+        // bound value) guaranteed to be present + first. A loaded session's
+        // model sometimes isn't in the fetched list (e.g. an elided
+        // `:latest` tag, or a transient listing failure) — without this the
+        // <select> can't match its bound value and falls back to the "—"
+        // placeholder even though a model IS loaded.
+        modelOptions(extra) {
+            const out = [];
+            const seen = new Set();
+            const add = (m) => {
+                if (m && !seen.has(m)) { seen.add(m); out.push(m); }
+            };
+            add(extra);
+            for (const m of this.models || []) add(m);
+            return out;
+        },
         async onModelChange() {
             if (!this.currentProvider || !this.currentModel) return;
             const r = await fetch("/api/providers/switch", {
@@ -2450,8 +2487,19 @@ document.addEventListener("alpine:init", () => {
             });
             if (!r.ok) {
                 const d = await r.json().catch(() => ({}));
-                alert(d.detail || `switch failed (${r.status})`);
+                Alpine.store("toast").show(
+                    d.detail || `switch failed (${r.status})`,
+                    "error",
+                );
+                return;
             }
+            // Persist the switched model so the picker stays in sync and
+            // a reload restores it (the backend already persisted it).
+            this.currentModel = (await r.json().catch(() => ({}))).model || this.currentModel;
+            Alpine.store("toast").show(
+                `model → ${this.currentModel} (${this.currentProvider})`,
+                "success",
+            );
         },
 
         // ----- shell

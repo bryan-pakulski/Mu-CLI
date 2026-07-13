@@ -3473,14 +3473,20 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 }
 
 /* ------------------------------------------------------------ toast */
+/* Top-center, just below the 56px header. Keeps the toasts clear of the
+ * top-right header controls (view / tools / yolo / inspector / theme /
+ * leave) which the old top-right stack overlapped. Frosted pill with a
+ * colored type glyph so the kind reads at a glance. */
 
 .toast-container {
     position: fixed;
-    top: var(--space-4);
-    right: var(--space-4);
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 9999;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: var(--space-2);
     pointer-events: none;
 }
@@ -3489,33 +3495,64 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     pointer-events: auto;
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius);
-    font-size: 12.5px;
+    gap: var(--space-2);
+    padding: 8px 12px 8px 10px;
+    border-radius: var(--radius-pill);
+    font-size: 13px;
+    font-weight: 500;
     line-height: 1.4;
-    background: var(--bg-lift);
     color: var(--text);
+    background: color-mix(in srgb, var(--bg-lift) 90%, transparent);
+    -webkit-backdrop-filter: blur(10px) saturate(1.15);
+    backdrop-filter: blur(10px) saturate(1.15);
     border: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-modal);
-    max-width: 20rem;
+    box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.40),
+        0 0 0 1px rgba(0, 0, 0, 0.05);
+    max-width: min(92vw, 30rem);
 }
 
-.toast--error   { border-left: 3px solid var(--err); }
-.toast--success { border-left: 3px solid #4ade80; }
-.toast--info    { border-left: 3px solid var(--accent); }
+/* Type glyph — colored, so the toast's intent is obvious without reading. */
+.toast::before {
+    content: "";
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bg);
+}
+.toast--success::before { content: "✓"; background: #4ade80; }
+.toast--error::before   { content: "!"; background: var(--err); }
+.toast--info::before    { content: "i"; background: var(--accent); }
+
+.toast__msg { flex: 1 1 auto; min-width: 0; }
 
 .toast__close {
     background: none;
     border: none;
     color: var(--text-dim);
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1;
     cursor: pointer;
     padding: 0 0 0 var(--space-1);
+    margin-left: var(--space-1);
     transition: color 0.12s;
 }
 .toast__close:hover { color: var(--text); }
+
+/* Slide-down-from-header enter, slide-up-on-leave. Keeps the toast feeling
+ * like it drops in from the header rather than popping over content. */
+.toast--enter { transition: opacity 0.18s ease, transform 0.18s ease; }
+.toast--enter-start { opacity: 0; transform: translateY(-8px); }
+.toast--enter-end { opacity: 1; transform: translateY(0); }
+.toast--leave { transition: opacity 0.16s ease, transform 0.16s ease; }
+.toast--leave-start { opacity: 1; transform: translateY(0); }
+.toast--leave-end { opacity: 0; transform: translateY(-8px); }
 
 /* ------------------------------------------------------------ composer toolbar
  *

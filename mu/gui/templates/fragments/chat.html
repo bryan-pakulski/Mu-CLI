@@ -287,8 +287,8 @@
                         <select class="settings-var-select"
                                 x-model="$store.inspector.currentModel"
                                 @change="$store.inspector.onModelChange()">
-                            <option value="">—</option>
-                            <template x-for="m in $store.inspector.models" :key="m">
+                            <option value="" :hidden="$store.inspector.currentModel ? true : null">—</option>
+                            <template x-for="m in $store.inspector.modelOptions($store.inspector.currentModel)" :key="m">
                                 <option :value="m" x-text="m"></option>
                             </template>
                         </select>
@@ -299,8 +299,8 @@
                         <select class="settings-var-select"
                                 x-model="$store.inspector.subagentModel"
                                 @change="$store.inspector.onSubagentModelChange()">
-                            <option value="">inherit parent</option>
-                            <template x-for="m in $store.inspector.models" :key="m">
+                            <option value="" :hidden="$store.inspector.subagentModel ? true : null">inherit parent</option>
+                            <template x-for="m in $store.inspector.modelOptions($store.inspector.subagentModel)" :key="m">
                                 <option :value="m" x-text="m"></option>
                             </template>
                         </select>

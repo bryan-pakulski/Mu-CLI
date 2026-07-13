@@ -25,8 +25,10 @@ async def get_memory_state(
     """Current context-window snapshot for the focused session.
 
     ``cols``/``rows`` are clamped to [16, 256] inside the builder. Returns
-    a grid of ``#rrggbb`` colors (or ``null`` for empty cells) plus a
-    per-layer legend the panel renders alongside the canvas.
+    an int ``grid`` (``0`` = empty/transparent, ``1..255`` = present where
+    the magnitude encodes change frequency — 1 = stable since first seen,
+    255 = churning) plus a per-layer legend (``hue`` + ``change_count``)
+    the panel renders as a hue-per-layer heatmap alongside the canvas.
     """
     session = request.app.state.session_by_name()
     return build_memory_snapshot(session, cols=cols, rows=rows)

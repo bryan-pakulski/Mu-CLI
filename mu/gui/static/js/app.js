@@ -1919,15 +1919,20 @@ document.addEventListener("alpine:init", () => {
     });
 
     // Memory Map — a live color-grid fingerprint of the context window.
-    // One horizontal band per layer (L0..L5); each cell's color is the
-    // SHA-256 hash of a slice of that layer's text, so identical content
-    // renders identically and a changed layer visibly shifts. Refreshed
-    // each turn by refreshActivePanel() and each iteration by the
-    // context_snapshot SSE event (pushed from a pre_provider_call hook).
+    // One horizontal band per layer (L0..L5); each band gets a fixed hue
+    // (so you can tell layers apart) and each cell's *brightness* encodes
+    // how often that slice of the layer's text has changed between
+    // snapshots (hash-based change frequency). Two render modes share one
+    // backend payload (int grid 0=empty / 1..255=1+heat):
+    //   heat  — hue=layer, lightness ∝ change frequency (default)
+    //   layer — solid per-layer hue, uniform lightness
+    // Refreshed each turn by refreshActivePanel() and each iteration by
+    // the context_snapshot SSE event (pre_provider_call hook).
     Alpine.store("memory", {
         active: false,
         loaded: false,
         resolution: 128,
+        view: "heat",        // "heat" | "layer" — pure client-side choice
         cols: 128,
         rows: 128,
         layers: [],
@@ -1940,8 +1945,6 @@ document.addEventListener("alpine:init", () => {
 
         bindCanvas(canvas) {
             this._canvas = canvas;
-            // Re-draw whenever the theme flips (canvas is transparent so
-            // only dividers/bg care, but cheap to refresh) and on resize.
             this.render();
         },
 
@@ -1954,7 +1957,16 @@ document.addEventListener("alpine:init", () => {
                 const d = await r.json();
                 this._apply(d);
                 this.loaded = true;
+                this._scheduleRender();
             } catch (e) { console.error("memory.load", e); }
+        },
+
+        // Switch render mode without a re-fetch — same int grid, different
+        // lightness mapping. Triggers a redraw.
+        setView(v) {
+            if (v !== "heat" && v !== "layer") return;
+            this.view = v;
+            this._scheduleRender();
         },
 
         // Apply a snapshot (from REST load() or a live SSE event) and
@@ -1986,29 +1998,43 @@ document.addEventListener("alpine:init", () => {
             (window.requestAnimationFrame || setTimeout)(run);
         },
 
+        // row index → layer hue. Built once per render from the legend
+        // (each layer carries row_start/row_end + hue).
+        _rowHueMap() {
+            const m = new Array(this.rows);
+            for (const l of this.layers) {
+                const hue = (typeof l.hue === "number") ? l.hue : 0;
+                const end = Math.min(l.row_end || 0, this.rows);
+                for (let i = l.row_start || 0; i < end; i++) m[i] = hue;
+            }
+            return m;
+        },
+
         render() {
             const canvas = this._canvas;
             if (!canvas || !this.grid || !this.grid.length) return;
             const ctx = canvas.getContext("2d");
             const cols = this.cols;
             const rows = this.rows;
-            // Match the buffer to the current grid dimensions.
             if (canvas.width !== cols || canvas.height !== rows) {
                 canvas.width = cols;
                 canvas.height = rows;
             }
-            // Clear to transparent so the CSS background shows for null
-            // cells (no content in that slice of the layer).
             ctx.clearRect(0, 0, cols, rows);
+            const rowHue = this._rowHueMap();
+            const heat = this.view !== "layer";
             for (let ri = 0; ri < rows; ri++) {
                 const row = this.grid[ri];
                 if (!row) continue;
+                const hue = (rowHue[ri] != null) ? rowHue[ri] : 0;
                 for (let ci = 0; ci < cols; ci++) {
-                    const c = row[ci];
-                    if (c) {
-                        ctx.fillStyle = c;
-                        ctx.fillRect(ci, ri, 1, 1);
-                    }
+                    const v = row[ci];
+                    if (!v) continue;            // 0 → empty/transparent
+                    // v is 1..255: 1 = present & stable, 255 = churning.
+                    const t = (v - 1) / 254;     // 0..1 change frequency
+                    const light = heat ? (16 + 44 * t) : 42;
+                    ctx.fillStyle = `hsl(${hue},68%,${light.toFixed(1)}%)`;
+                    ctx.fillRect(ci, ri, 1, 1);
                 }
             }
         },

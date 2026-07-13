@@ -22,8 +22,18 @@
             </div>
         </div>
 
-        <!-- resolution control -->
+        <!-- controls: view mode + resolution -->
         <div class="memory-controls">
+            <div class="memory-view-toggle" role="group" aria-label="render view">
+                <button type="button"
+                        :class="{ active: $store.memory.view === 'heat' }"
+                        @click="$store.memory.setView('heat')"
+                        title="Brightness = how often each slice changed">heat</button>
+                <button type="button"
+                        :class="{ active: $store.memory.view === 'layer' }"
+                        @click="$store.memory.setView('layer')"
+                        title="Solid color per layer">layer</button>
+            </div>
             <label class="mono muted" for="mem-res">res</label>
             <select id="mem-res"
                     x-model.number="$store.memory.resolution"
@@ -57,17 +67,23 @@
             <template x-for="l in $store.memory.layers" :key="l.id">
                 <div class="memory-legend-row"
                      :class="{ empty: !l.tokens }">
+                    <span class="memory-legend-swatch"
+                          :style="'background:hsl(' + (l.hue || 0) + ',68%,42%)'"></span>
                     <span class="memory-legend-id mono" x-text="l.id"></span>
                     <span class="memory-legend-name" x-text="l.name"></span>
                     <span class="memory-legend-tok mono muted"
-                          :style="'color:' + (l.fillPct > 90 ? 'var(--err)' : '')"
-                          x-text="l.tokens + '  ·  ' + l.fillPct + '%'"></span>
+                          :style="'color:' + (l.fill_pct > 90 ? 'var(--err)' : '')"
+                          x-text="l.tokens + '  ·  ' + l.fill_pct + '%'"></span>
+                    <span class="memory-legend-delta mono"
+                          :class="{ hot: l.change_count > 0 }"
+                          x-text="'Δ' + (l.change_count || 0)"
+                          title="chunks changed since first seen"></span>
                 </div>
             </template>
         </div>
 
         <div class="panel-footnote muted mono" x-show="$store.memory.loaded">
-            <span x-text="'each cell = sha256(layer text slice) → color · live per iteration'"></span>
+            <span x-text="'hue = layer · brightness = change frequency (sha256 per slice) · live per iteration'"></span>
         </div>
     </div>
 

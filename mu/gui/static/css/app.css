@@ -3918,8 +3918,33 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     align-items: center;
     gap: var(--space-2);
     font-size: 12px;
+    flex-wrap: wrap;
 }
 .memory-controls label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.memory-view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.memory-view-toggle button {
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    padding: 1px 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: lowercase;
+    cursor: pointer;
+    line-height: 1.5;
+}
+.memory-view-toggle button:last-child { border-right: none; }
+.memory-view-toggle button.active {
+    color: var(--text);
+    background: var(--bg-elev, rgba(255, 255, 255, 0.06));
+}
+.memory-view-toggle button:hover:not(.active) { color: var(--text); }
 .memory-controls select {
     background: var(--bg-elev, var(--bg));
     color: var(--text);
@@ -3975,13 +4000,19 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 .memory-legend { display: flex; flex-direction: column; gap: 2px; }
 .memory-legend-row {
     display: grid;
-    grid-template-columns: 34px 1fr 92px;
+    grid-template-columns: 12px 30px 1fr 78px 48px;
     align-items: center;
     gap: var(--space-2);
     font-size: 12px;
     padding: 1px 0;
 }
 .memory-legend-row.empty { opacity: 0.45; }
+.memory-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+}
 .memory-legend-id {
     font-size: 10px;
     color: var(--text-dim);
@@ -3989,3 +4020,10 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 }
 .memory-legend-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-legend-tok { font-size: 11px; text-align: right; white-space: nowrap; }
+.memory-legend-delta {
+    font-size: 10px;
+    text-align: right;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.memory-legend-delta.hot { color: var(--warn, #e0a800); }

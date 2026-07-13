@@ -285,7 +285,53 @@ def test_snapshot_none_session_is_inactive():
     snap = build_memory_snapshot(None, cols=32, rows=32)
     assert snap["active"] is False
     assert len(snap["grid"]) == 32
-    assert all(c is None for r in snap["grid"] for c in r)
+    # Empty cells are 0 (int), not None — the grid is an int heatmap now.
+    assert all(c == 0 for r in snap["grid"] for c in r)
+
+
+def test_snapshot_layers_carry_hue_and_change_count():
+    from mu.gui.memory_snapshot import build_memory_snapshot, LAYER_HUES
+
+    session = _make_session()
+    _add_user_turn(session, "a b c d e f g h i j k l m n o p")
+    snap = build_memory_snapshot(session, cols=48, rows=48)
+    for l in snap["layers"]:
+        assert "hue" in l
+        assert "change_count" in l
+        assert l["hue"] == LAYER_HUES.get(l["id"], 0)
+        assert isinstance(l["change_count"], int)
+
+
+def test_snapshot_grid_is_int_heatmap():
+    from mu.gui.memory_snapshot import build_memory_snapshot
+
+    session = _make_session()
+    _add_user_turn(session, "a b c d e f g h i j k l m n o p")
+    snap = build_memory_snapshot(session, cols=48, rows=48)
+    flat = [c for r in snap["grid"] for c in r]
+    # Every cell is an int in [0, 255]; 0 = empty, 1..255 = 1+heat.
+    assert all(isinstance(c, int) for c in flat)
+    assert all(0 <= c <= 255 for c in flat)
+
+
+def test_snapshot_change_increments_heat():
+    from mu.gui.memory_snapshot import build_memory_snapshot
+
+    session = _make_session()
+    _add_user_turn(session, "alpha beta gamma delta epsilon zeta eta theta")
+    before = build_memory_snapshot(session, cols=48, rows=48)
+    before_max = max(c for r in before["grid"] for c in r)
+    before_total_changes = sum(l["change_count"] for l in before["layers"])
+
+    # Add a second turn — L5 content shifts, so some canonical chunks now
+    # hash differently and their per-chunk change counter ticks up.
+    _add_user_turn(session, "iota kappa lambda mu nu xi omicron pi rho sigma")
+    after = build_memory_snapshot(session, cols=48, rows=48)
+    after_max = max(c for r in after["grid"] for c in r)
+    after_total_changes = sum(l["change_count"] for l in after["layers"])
+
+    assert after_total_changes > before_total_changes
+    assert after_max > before_max
 
 
 def test_hash_color_is_deterministic_and_hex():

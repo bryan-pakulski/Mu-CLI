@@ -74,10 +74,6 @@ The teacher engine is the only source of truth for course progress.
 | `propose_curriculum` | Replace the modules + lessons with a proposed curriculum. Flips status to `curriculum_proposed`. |
 | `approve_curriculum` | Learner-side approval. Unlocks the lesson loop; refuses unless status is `curriculum_proposed`. |
 | `start_lesson` | Set the current lesson and flip its status to `presenting`. |
-| `present_concept` | Record the agent's ≤3-sentence intro for the lesson. |
-| `start_lecture` | Enter the lecture / back-and-forth teaching phase. Optional `plan` outlines the chunks you'll cover. |
-| `record_lecture_turn` | Append a turn to the lecture: `agent_explanation`, `agent_check`, or `learner_response`. |
-| `conclude_lecture` | Close the lecture with a `comprehension_pct` and `gaps`. Refuses unless `min_lecture_checks` is met and the score clears the threshold. |
 | `assign_exercise` | Create an assignment. Engine writes `artifact_files` to `work/` and persists the verification spec. |
 | `submit_assignment` | Record the learner's submission payload (inline answer or notes referencing edited artifact files). |
 | `grade_assignment` | Run the verifier. For exec_markers kinds runs `verify_cmd`; for MC/fill-blank with live UI launches the quiz Application; for rubric kinds requires `llm_rubric_score` after the keyword gate passes. |
@@ -171,8 +167,11 @@ Repeat until the course is complete.
 7. Give specific, honest feedback. If they got 40%, say so.
 8. `decide_next(advance | remediate)`. If `remediate`, do a *different*
    small exercise on the same concept — and if the failure was a
-   *understanding* gap, re-enter the lecture phase (`start_lecture`
-   is allowed from `remediating`) before re-assigning.
+   *understanding* gap, re-explain the concept in chat (a fresh
+   explanation chunk tuned to what the learner got wrong) before
+   re-assigning. Note the watcher does not record transcript turns while
+   a lesson is in the `remediating` state, so re-explanation here is
+   narrated to the learner, not logged as lecture turns.
 
 ### Phase 4 — Module review
 
@@ -296,6 +295,7 @@ The conversation is incidental; the directory is the course record.
 | `/teach grades` | Markdown table of every graded assignment. |
 | `/teach curriculum` | Render the syllabus. |
 | `/teach delete <id>` | Delete a course (irreversible). |
+| `/teach help` | Inline help. |
 
 ## Dual presentation
 
@@ -329,11 +329,11 @@ blocklist alongside `assign_exercise`, `grade_assignment`, etc.).
 
 | Endpoint | Returns |
 | --- | --- |
-| `GET /teacher/lessons/{lesson_id}/lecture` | Raw `lecture.md` markdown content, or 404 when absent. |
-| `GET /teacher/lessons/{lesson_id}/exercises` | JSON listing of exercise file paths plus each file's contents. Returns empty listing (not 404) when no exercises directory exists. |
-| `GET /teacher/lessons/{lesson_id}/exercises/{path:path}` | Single exercise file contents. Rejects path traversal (`..` segments, absolute paths). |
+| `GET /api/teacher/lessons/{lesson_id}/lecture` | Raw `lecture.md` markdown content, or 404 when absent. |
+| `GET /api/teacher/lessons/{lesson_id}/exercises` | JSON listing of exercise file paths plus each file's contents. Returns empty listing (not 404) when no exercises directory exists. |
+| `GET /api/teacher/lessons/{lesson_id}/exercises/{path:path}` | Single exercise file contents. Rejects path traversal (`..` segments, absolute paths). |
 
-The `GET /teacher/state` endpoint's lesson payload now includes
+The `GET /api/teacher/state` endpoint's lesson payload now includes
 `lecture_transcript_path` and `exercise_file_paths` as additive fields.
 Old courses without these fields load and render with safe defaults
 (`None` / `[]`).

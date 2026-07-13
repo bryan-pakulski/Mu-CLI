@@ -157,7 +157,7 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
             + workspace_files
         )
 
-    skills_block = session._build_skills_block()
+    skills_block = session._build_skills_block(announce=True)
     if skills_block:
         sk_limit = max(
             0, int(session.variables.get("skills_max_chars", 6144) or 6144)

@@ -13,13 +13,22 @@ The system prompt is composed of seven layers:
 - **L1B** — Installed skills (compact index + auto-expanded bodies)
 - **L2** — Conversation summary (rolling LLM-generated compression of older history)
 - **L3** — Active goal context (feature/task status + scratchpad snapshot + pinned session goal)
-- **L4** — Recent tool activity (compressed for budget)
+- **L4** — Recent tool activity (compressed, or LLM-summarized, for budget)
 - **L5** — Current turn (full history entries from `summary_anchor` onwards)
 
 When history exceeds the context budget, the compactor rolls older messages
 into the L2 conversation summary and advances `summary_anchor`. Messages
 before the anchor are no longer sent to the model — but they remain in
 `self.history` and on disk in `session.json`.
+
+Mid-turn compaction (triggered when a provider call would exceed the
+budget) keeps a window of trailing messages verbatim and protects the
+most recent tool results via `tool_result_floor` (R3), so results just
+received are never dropped to make room. If a single message's text
+alone exceeds the per-turn history budget (R4), it is replaced in the
+runtime slice with a chunk-summarized `[CONTEXT-OVERFLOW …]` envelope
+summarized via the provider — the original stays on disk, and the model
+is told the verbatim text is not in context.
 
 ## Configuration variables
 
@@ -29,11 +38,19 @@ before the anchor are no longer sent to the model — but they remain in
 | `context_trim_threshold` | 0.85 | Fraction of the cap above which compaction kicks in. |
 | `response_token_reserve` | 4096 | Tokens reserved for the model's reply. |
 | `tool_context_window` | 6 | Recent tool messages kept uncompressed in history. |
+| `tool_result_floor` | 4 | Trailing tool-result messages in the active turn that compaction (including emergency compaction) must leave verbatim, so mid-turn compaction can't drop results just received. |
+| `emergency_keep_recent` | 2 | Trailing messages kept verbatim by emergency (pre-flight) compaction — smaller than the normal keep-recent so budget is reclaimed fast; `tool_result_floor` still protects recent tool results. |
 | `compact_history` | true | Auto-compact tooling history after each finished turn. |
-| `conversation_summary_char_limit` | 24000 | Char budget for L2 rolling summary. |
-| `workspace_context_max_chars` | 16384 | Char budget for L1 workspace files. |
-| `skills_max_chars` | 6144 | Char budget for L1B skills block. |
-| `retrieval_context_char_limit` | 10000 | Char budget for L4B semantic-retrieval snippets. |
+| `conversation_summary_char_limit` | 80000 | Char budget for L2 rolling summary (scales with `context_token_limit`, floor `24000`). |
+| `workspace_context_max_chars` | 40000 | Char budget for L1 workspace files (scales with `context_token_limit`, floor `16384`). |
+| `skills_max_chars` | 40000 | Char budget for L1B skills block (scales with `context_token_limit`, floor `6144`). |
+| `retrieval_context_char_limit` | 40000 | Char budget for L4B semantic-retrieval snippets (scales with `context_token_limit`, floor `10000`). |
+
+The four char-budget variables scale proportionally with
+`context_token_limit` (`utils/config.py:compute_layer_char_budgets`);
+the "Default" column is the value at the default `context_token_limit =
+900000`, and each never drops below its floor. See
+[configuration.md](configuration.md#per-layer-budgets) for the full table.
 
 ## Task memory and scratchpad
 
@@ -138,13 +155,20 @@ been compressed into the conversation summary.
 ### ToolResultCache integration
 
 When a search hit is a `tool_result` part that has a corresponding entry
-in the `ToolResultCache` (detected by matching content hash), the
-`cache_key` is included in the result. The agent can immediately call
-`recall(cache_key)` to retrieve the full uncompressed tool result.
+in the `ToolResultCache`, the `cache_key` is included in the result. The
+agent can immediately call `recall(cache_key)` to retrieve the full
+uncompressed tool result.
 
-If no cache key is available (the result was evicted or the tool doesn't
-support caching), `cache_key` is `null`. The agent gets a 200-char snippet
-preview but cannot recall the full result.
+Cache-key resolution (R10/FM-9) is an **O(1) lookup**: the
+`ToolResultCache` maintains a reverse index (`_result_index`, result-content
+hash → key) populated whenever a result is stored, so a search hit maps
+straight to its key by content hash without scanning cache entries. The
+hash matches the linear-scan comparison exactly, so the fast path and the
+fallback always agree on the same key. When a cache entry is evicted, its
+reverse mapping is dropped at the same time, so a stale hash never
+resolves to a reused key. If no cache key is available (the result was
+evicted or the tool doesn't support caching), `cache_key` is `null`. The
+agent gets a 200-char snippet preview but cannot recall the full result.
 
 ### GUI endpoint
 
@@ -184,11 +208,20 @@ indented with `↑` (before) and `↓` (after) arrows.
 
 ### Performance characteristics
 
-Search is a **linear scan** over `self.history` — no index is built.
-This is fast for typical sessions (hundreds of messages) but may be
-noticeably slower for very large histories (>1000 messages). The search
-is in-memory lexical matching with no external dependencies (no vector
-DB, no embeddings).
+For short queries (≥ 3 characters), `search_history` builds an
+**in-memory trigram inverted index** (trigram → set of message indices)
+lazily on first use and reuses it across searches within a turn. Because
+every trigram of a query that is a substring of a message's searchable
+blob is present in that blob, intersecting the trigram postings produces
+a *superset* of matching message indices, so the per-part matcher only
+runs against that narrowed candidate set instead of the whole history.
+The index is invalidated and rebuilt when the history length changes
+(new messages added), keeping it correct without per-message
+bookkeeping. Queries too short to form a trigram (< 3 chars) fall back
+to a plain linear scan.
 
-Future enhancement: build an in-memory keyword index on session load
-for faster lookups on large histories.
+Search is in-memory lexical matching with no external dependencies (no
+vector DB, no embeddings). The trigram index keeps large sessions
+(thousands of messages) fast on the common keyword/substring path while
+preserving exact substring semantics — no approximate matches are
+introduced.

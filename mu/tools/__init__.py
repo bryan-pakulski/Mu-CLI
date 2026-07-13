@@ -1,4 +1,4 @@
-"""Tool registry for the new agent loop.
+"""Tool registry for the agent loop.
 
 The registry exposes three primary operations:
 
@@ -73,7 +73,7 @@ def tool(
     error_mode: str = "text_error",
     summary_builder: Optional[str] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator that registers a handler as a tool in the new registry.
+    """Decorator that registers a handler as a tool in the registry.
 
     The handler signature is `(args: dict, context: ToolExecutionContext)`
     and may return either a string, a dict with an envelope shape, or a
@@ -199,7 +199,7 @@ def execute(name: str, args: Dict[str, Any], context: ToolExecutionContext) -> D
 
     `dispatch` returns a JSON-encoded envelope string (the wire format
     the agent loop inlines into message history). We parse it back into
-    a dict here because the new agent loop wants structured access.
+    a dict here because the agent loop wants structured access.
     """
 
     import json as _json

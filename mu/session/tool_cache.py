@@ -45,6 +45,11 @@ class ToolResultCache:
         self.max_entries = max_entries
         self.max_bytes = max_bytes
         self._current_bytes = 0
+        # Reverse index: result-content hash → cache key (R10, FM-9).
+        # Lets `HistorySearchMixin._lookup_cache_key` resolve a tool_result
+        # part to its cache key in O(1) instead of scanning every cached
+        # entry. Maintained alongside `store` / eviction.
+        self._result_index: "Dict[str, str]" = {}
 
     # ------------------------------------------------------------------ key
 
@@ -58,6 +63,17 @@ class ToolResultCache:
         )
         return hashlib.sha256(content.encode()).hexdigest()[:12]
 
+    @staticmethod
+    def _result_hash(result: Any) -> str:
+        """Stable hash of the result CONTENT only (no call_id/tool).
+
+        Mirrors the comparison `HistorySearchMixin._lookup_cache_key` used to
+        do line-for-line: ``json.dumps(result, default=str)`` (no sort_keys,
+        no ensure_ascii) so the hashes agree across store-time and
+        lookup-time."""
+        serialized = json.dumps(result, default=str)
+        return hashlib.sha256(serialized.encode()).hexdigest()[:16]
+
     # ---------------------------------------------------------------- store
 
     def store(
@@ -65,16 +81,27 @@ class ToolResultCache:
         call_id: str,
         tool_name: str,
         result: Any,
+        *,
+        force: bool = False,
     ) -> Optional[str]:
         """Store a tool result.  Returns cache key, or None if not cacheable.
 
         Non-cacheable tools (writes, bash, etc.) return None — the caller
         should treat None as "no cache annotation" and proceed normally.
+
+        ``force=True`` bypasses the ``_CACHEABLE_TOOLS`` filter so the result
+        is cached even for tools not on the default allowlist. Used by the
+        collation path: when a read-only result is deferred into the
+        collation buffer (and may later be dropped by ``_enforce_limit``
+        before the model calls ``flush``), caching the raw payload gives
+        the model a ``recall(cache_key)`` recovery path it would otherwise
+        not have. See R11 in documentation/harness-investigation.md (FM-4).
         """
-        if tool_name not in _CACHEABLE_TOOLS:
+        if not force and tool_name not in _CACHEABLE_TOOLS:
             return None
 
         key = self._make_key(call_id, tool_name, result)
+        rhash = self._result_hash(result)
         size_bytes = len(
             json.dumps(result, default=str, ensure_ascii=False).encode()
         )
@@ -85,13 +112,18 @@ class ToolResultCache:
             "size_bytes": size_bytes,
         }
 
-        # Evict oldest entries if over budget
+        # Evict oldest entries if over budget. Drop the evicted entry's
+        # reverse-index mapping too so stale result_hash → key pointers
+        # don't resurrect evicted content.
         while (
             self._current_bytes + size_bytes > self.max_bytes
             or len(self._cache) >= self.max_entries
         ) and self._cache:
-            _, evicted = self._cache.popitem(last=False)
+            ev_key, evicted = self._cache.popitem(last=False)
             self._current_bytes -= evicted["size_bytes"]
+            ev_hash = self._result_hash(evicted["result"])
+            if self._result_index.get(ev_hash) == ev_key:
+                del self._result_index[ev_hash]
 
         # If already present (same key), remove old entry so we re-insert at end
         if key in self._cache:
@@ -100,6 +132,11 @@ class ToolResultCache:
 
         self._cache[key] = entry
         self._current_bytes += size_bytes
+        # (Re)point the reverse index at this key. A result-content collision
+        # across two keys is possible but extremely unlikely; the lookup path
+        # verifies the cached tool_name before trusting the pointer, so a
+        # collision degrades to a linear-scan fallback, never a wrong key.
+        self._result_index[rhash] = key
         return key
 
     # ---------------------------------------------------------------- recall
@@ -138,3 +175,4 @@ class ToolResultCache:
         """Clear all cached results."""
         self._cache.clear()
         self._current_bytes = 0
+        self._result_index.clear()

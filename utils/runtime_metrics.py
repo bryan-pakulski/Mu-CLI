@@ -277,7 +277,7 @@ def collect_context_layers(session):
     """Per-layer breakdown of the active context, in **tokens**.
 
     Every layer matches the system-prompt assembly in
-    `core/session.py:_inject_hierarchical_context` so the table in
+    `mu/session/context.py:inject_hierarchical_context` so the table in
     `/memory` reflects the real prompt cost (not just a slice of it).
     The estimator (`utils.token_estimator.estimate_tokens`) is the
     same one the compactor uses, so the numbers here, the splash

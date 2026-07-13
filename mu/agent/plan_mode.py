@@ -85,7 +85,7 @@ WRITE_TOOLS: Set[str] = {
 def _build_envelope(tool_name: str) -> dict:
     """Build a tool-result envelope that mimics what `_handle_*` returns
     when a tool is denied. The schema matches `_build_tool_envelope` in
-    `core/tools.py` so the agent loop's structured-result wrapping does
+    `mu/tools/_envelope.py` so the agent loop's structured-result wrapping does
     not need a special case.
     """
     return {

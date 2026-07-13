@@ -61,6 +61,10 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.collation_buffer = CollationBuffer()
         self.summary_anchor = 0
         self.protected_indices: set[int] = set()
+        # Active-turn start index, mirrored from the agent loop so the
+        # compaction paths can compute the per-turn tool-result floor
+        # (R3, FM-8). None outside an active turn.
+        self._active_turn_start_index: int | None = None
         self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
@@ -255,6 +259,31 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 self.protected_indices.discard(evictable[0])
             else:
                 break
+
+    def tool_result_floor_indices(
+        self, turn_start_index: int | None, floor: int
+    ) -> set[int]:
+        """Indices of the last ``floor`` tool-result-bearing messages
+        within the active turn (``>= turn_start_index``).
+
+        These are protected from summarization/degradation (R3, FM-8) so
+        compaction mid-turn cannot drop tool results just received.
+        Returns an empty set when ``floor <= 0`` or no active turn is set.
+        """
+        if floor <= 0 or turn_start_index is None:
+            return set()
+        start = max(0, int(turn_start_index))
+        if start >= len(self.history):
+            return set()
+        indices: list[int] = []
+        for idx in range(start, len(self.history)):
+            msg = self.history[idx]
+            parts = msg.get("parts") or []
+            if any(p.get("type") == "tool_result" for p in parts):
+                indices.append(idx)
+        if len(indices) <= floor:
+            return set(indices)
+        return set(indices[-floor:])
 
     def _cleanup_protected(self, turn_start_index: int) -> None:
         """Clean up protected indices after a turn ends.

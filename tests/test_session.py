@@ -133,9 +133,15 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
 
     assert prepared[0]["role"] == "user"
     assert prepared[1]["role"] == "system"
-    # L4a system prompt block removed; L4b messages compression still active
-    assert prepared[1]["role"] == "system"
-    assert "LAYER 4 — Recent tool activity (compressed for budget)" in prepared[1]["parts"][0]["text"]
+    # L4a system prompt block removed; L4b messages compression still active.
+    # The compression block may be labelled either "compressed for budget"
+    # (mechanical fallback) or "LLM-summarized for budget" (when a provider
+    # is available — the R1/FM-1 `summarized_pairs_msgs` fix routes the real
+    # pairs to `_llm_summarize_tool_batch`). Both indicate the older tool
+    # pairs were rolled into a LAYER 4 system summary, which is the intent.
+    l4_text = prepared[1]["parts"][0]["text"]
+    assert "LAYER 4 — Recent tool activity" in l4_text
+    assert "Older tool call/result pairs from this turn were summarized." in l4_text
     assert len(prepared) == 4
 
 

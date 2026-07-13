@@ -29,6 +29,51 @@ from typing import Any
 from utils.config import _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 
+# ── Compaction keep-recent policy (R3, FM-8) ─────────────────────────────
+# Single source of truth for how many trailing messages the compactor
+# keeps verbatim. Previously these were inline magic numbers scattered
+# across the call sites (12 / 12 / 2), which made the relationship
+# between normal roll, auto-compaction, and emergency compaction opaque.
+KEEP_RECENT_DEFAULT = 12
+KEEP_RECENT_EMERGENCY = 2
+# Per-turn tool-result floor: the last K tool-result messages of the
+# active turn are never summarized or degraded, even under emergency
+# compaction with a tiny keep_recent. Prevents the "compaction mid-turn
+# drops tool results just received" failure mode (FM-8) at the cost of
+# slightly higher steady-state token usage.
+TOOL_RESULT_FLOOR_DEFAULT = 4
+
+
+def resolve_keep_recent(session: Any, *, emergency: bool = False) -> int:
+    """How many trailing messages the compactor keeps verbatim.
+
+    Normal/auto compaction uses `compactor_keep_recent` (default
+    `KEEP_RECENT_DEFAULT`). Emergency compaction (pre-flight context
+    check) uses `emergency_keep_recent` (default `KEEP_RECENT_EMERGENCY`)
+    — smaller so it can reclaim budget fast, but the tool-result floor
+    (`resolve_tool_result_floor`) still protects recent tool results
+    regardless of this value.
+    """
+    if emergency:
+        raw = session.variables.get("emergency_keep_recent", KEEP_RECENT_EMERGENCY)
+    else:
+        raw = session.variables.get("compactor_keep_recent", KEEP_RECENT_DEFAULT)
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return KEEP_RECENT_EMERGENCY if emergency else KEEP_RECENT_DEFAULT
+
+
+def resolve_tool_result_floor(session: Any) -> int:
+    """Number of trailing tool-result messages in the active turn that
+    compaction must leave verbatim (R3, FM-8)."""
+    raw = session.variables.get("tool_result_floor", TOOL_RESULT_FLOOR_DEFAULT)
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return TOOL_RESULT_FLOOR_DEFAULT
+
+
 def resolve_context_limit(session: Any) -> int:
     """Pick the smaller of (user-set `context_token_limit`, real
     provider window). Ollama models often have 4k–32k real windows
@@ -117,4 +162,9 @@ __all__ = [
     "resolve_context_limit",
     "resolve_response_reserve",
     "compaction_token_budget",
+    "resolve_keep_recent",
+    "resolve_tool_result_floor",
+    "KEEP_RECENT_DEFAULT",
+    "KEEP_RECENT_EMERGENCY",
+    "TOOL_RESULT_FLOOR_DEFAULT",
 ]

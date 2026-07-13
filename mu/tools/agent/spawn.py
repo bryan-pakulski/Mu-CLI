@@ -36,6 +36,7 @@ import logging
 import uuid
 from typing import Any, Dict, Optional
 
+from mu.memory.stores import ACTIVE
 from mu.tools import tool
 
 
@@ -117,8 +118,11 @@ no need to call `flush`.
 - For your own internal task tracking within this delegation, use \
 `todo_write` / `todo_set_status` / `todo_list`. They are scoped to this \
 sub-session and do not leak back to the parent.
-- You have NO access to the parent's prior conversation. Treat the task \
-above as the full briefing.
+- You have NO access to the parent's prior conversation history. Treat the \
+task above as the full briefing. HOWEVER, durable findings the parent \
+handed off (decisions, root causes, file locations) ARE available to you \
+both in your own task memory and in the Parent findings section below \
+when present — use them, and supersede any that you find to be wrong.
 - When the task is complete, produce a SINGLE clear text response \
 summarising what you did, what you found, and any caveats. This text is \
 what gets returned to the parent — make it self-contained.
@@ -129,14 +133,97 @@ you notice you are running low on iterations (e.g. you have used more than \
 half), start consolidating your findings into a summary. If you cannot \
 complete the full task, save what you have found so far as your final \
 response — partial results are far more useful than no results.
+{parent_findings}
 """
 
 
-def _build_system_prompt(task: str, remaining_depth: int, max_iterations: int = 60) -> str:
+def _build_system_prompt(
+    task: str,
+    remaining_depth: int,
+    max_iterations: int = 60,
+    parent_findings: str = "",
+) -> str:
     return _SUBAGENT_SYSTEM_TEMPLATE.format(
-        task=task, remaining_depth=max(0, remaining_depth),
+        task=task,
+        remaining_depth=max(0, remaining_depth),
         max_iterations=max_iterations,
+        parent_findings=("\n" + parent_findings) if parent_findings else "",
     )
+
+
+# ── R5 / FM-5: curated parent→child context handoff ─────────────────────
+# The child gets isolated history (unchanged) but inherits a CURATED slice
+# of the parent's durable memory so it doesn't re-derive hard-won findings
+# (root causes, decisions, file locations). At depth 2 the grandchild
+# accumulates grandparent→parent→child findings via `_subagent_handoff`.
+
+_HANDOFF_MAX_ENTRIES = 8
+_HANDOFF_MINE_LIMIT = 6
+
+
+def _mine_parent_memory(parent) -> list:
+    """Select the parent's most valuable durable entries to hand off.
+
+    Priority: decisions > goals > findings; active before done; recency
+    as the final tiebreaker. Returns a list of `MemoryEntry` objects
+    (empty when the parent has no task memory)."""
+    mem = getattr(getattr(parent, "session_manager", None), "task_memory", None)
+    if mem is None:
+        return []
+    priority = {"decision": 0, "goal": 1, "finding": 2}
+    entries = [
+        e
+        for e in mem.entries
+        if e.kind in priority and e.status in ("active", "done")
+    ]
+    entries.sort(
+        key=lambda e: (priority.get(e.kind, 9), 0 if e.status == "active" else 1, -e.updated_at)
+    )
+    return entries[:_HANDOFF_MINE_LIMIT]
+
+
+def _build_handoff(parent, explicit_context: str) -> list:
+    """Assemble the curated handoff list (dicts with content/kind/tags),
+    combining (a) findings inherited by the parent from its own parent,
+    (b) freshly mined parent-memory entries, deduped by content and capped
+    at `_HANDOFF_MAX_ENTRIES`."""
+    inherited = list(getattr(parent, "_subagent_handoff", []) or [])
+    mined = _mine_parent_memory(parent)
+
+    handoff: list = []
+    seen: set[str] = set()
+
+    def _add(content: str, kind: str, tags: list) -> None:
+        if len(handoff) >= _HANDOFF_MAX_ENTRIES:
+            return
+        content = str(content or "").strip()
+        if not content or content in seen:
+            return
+        seen.add(content)
+        handoff.append({"content": content, "kind": kind or "finding", "tags": list(tags or [])})
+
+    for item in inherited:
+        _add(item.get("content", ""), item.get("kind", "finding"), item.get("tags", []))
+    for entry in mined:
+        _add(entry.content, entry.kind, entry.tags)
+    return handoff
+
+
+def _format_parent_findings(handoff: list, explicit_context: str) -> str:
+    """Render the Parent findings block for the child system prompt."""
+    blocks: list[str] = []
+    ctx = str(explicit_context or "").strip()
+    if ctx:
+        blocks.append("Parent-provided context (free-form):\n" + ctx)
+    if handoff:
+        lines = [
+            "Parent findings (durable memory handed off via your task "
+            "memory; you may supersede any entry that turns out to be wrong):"
+        ]
+        for item in handoff:
+            lines.append(f"- [{item.get('kind') or 'finding'}] {item['content']}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def _envelope(
@@ -182,6 +269,16 @@ def _envelope(
             "model": {
                 "type": "string",
                 "description": "Optional model override for the child. Default: parent's model.",
+            },
+            "context": {
+                "type": "string",
+                "description": (
+                    "Optional free-form briefing handed to the child (hard-won "
+                    "facts, constraints, or partial answers the child should not "
+                    "re-derive). In addition, the parent's durable task-memory "
+                    "decisions/findings are auto-handed-off; this text is layered "
+                    "on top. Keep it terse."
+                ),
             },
         },
         "required": ["task"],
@@ -262,6 +359,14 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     remaining_depth = MAX_SUBAGENT_DEPTH - (current_depth + 1)
     child_depth = current_depth + 1
 
+    # ── R5 / FM-5: curated parent→child context handoff ──────────────
+    # Mine the parent's durable task memory for decisions/findings (plus any
+    # inherited handoff the parent itself received, so grandparent→parent→
+    # child findings accumulate at depth 2) and any explicit `context` text.
+    explicit_context = str(args.get("context") or "").strip()
+    handoff = _build_handoff(parent, explicit_context)
+    parent_findings_block = _format_parent_findings(handoff, explicit_context)
+
     # Build a child UI that forwards tool-call / status messages to the
     # parent's UI with a clear `[subagent d=N]` prefix so the user can see
     # what's happening instead of staring at a frozen terminal.
@@ -294,11 +399,36 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     child = Session(
         provider=parent_provider,
         thinking=parent.thinking,
-        system_instruction=_build_system_prompt(task, remaining_depth, max_iterations),
+        system_instruction=_build_system_prompt(
+            task,
+            remaining_depth,
+            max_iterations,
+            parent_findings=parent_findings_block,
+        ),
         session_manager=child_sm,
         ui=child_ui,
         debug=getattr(parent, "debug", False),
     )
+
+    # Seed the child's durable task memory with the handed-off entries so
+    # the child can search/supersede them like its own findings (source is
+    # tagged "parent_handoff" so a later `supersede` cleanly replaces them).
+    # History stays isolated — only the curated slice crosses the boundary.
+    if handoff and getattr(child_sm, "task_memory", None) is not None:
+        for item in handoff:
+            try:
+                child_sm.task_memory.save(
+                    content=item["content"],
+                    tags=item["tags"],
+                    source="parent_handoff",
+                    kind=item["kind"],
+                    status=ACTIVE,
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "spawn_agent: failed to seed child memory with %r",
+                    item["content"][:60],
+                )
 
     # Inherit the folder context — the child reads/writes within the same workspace.
     child.folder_context = parent.folder_context
@@ -337,6 +467,9 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
 
     # Tag the depth on the child so a grandchild sees the running count.
     child._subagent_depth = child_depth
+    # Carry the curated handoff forward so a grandchild (depth 2) inherits
+    # grandparent→parent→child findings rather than re-deriving them.
+    child._subagent_handoff = handoff
 
     logger.info(
         "spawn_agent: depth=%d, task=%s, max_iter=%d, disabled=%d",

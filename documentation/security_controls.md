@@ -15,11 +15,11 @@ harness itself from leaking secrets.
 
 ## The three layers
 
-### 1. Path denylist (`core/secret_paths.py`)
+### 1. Path denylist (`mu/security/secret_paths.py`)
 
 Always-on. Every file-touching tool (`read_file`, `write_file`,
 `apply_diff`, `search_and_replace_file`, `get_chunk`, `bash`) routes
-through `_check_bounds`, which calls `is_denied_path()` *before* the
+through `check_bounds`, which calls `is_denied_path()` *before* the
 workspace check. Denied paths are refused with a clear error regardless
 of workspace state.
 
@@ -62,10 +62,10 @@ When a check fires, the tool result is short-circuited with
 `error_code: "secret_guard_blocked"` and a message explaining the
 reason and the override flag.
 
-### 3. Output scrubber (`core/secret_paths.py:redact_secrets`)
+### 3. Output scrubber (`mu/security/secret_paths.py:redact_secrets`)
 
 Tool output passes through a regex pass before being returned to the
-model. Applied in `read_file`, `bash_command`, `get_chunk`,
+model. Applied in `read_file`, `bash`, `get_chunk`,
 `search_for_string`, and `search_references`. Matches are replaced with
 `[REDACTED:<label>]` and a trailer `[security: redacted N secret(s) from
 output]` is appended so the model knows the output was sanitized.
@@ -150,11 +150,11 @@ db_url: postgres://localhost:5432/foo
 
 ## Implementation notes
 
-- Layer 1 wire-in: `core/tools.py:_check_bounds`.
-- Layer 2 hook registration: `core/session.py` imports
+- Layer 1 wire-in: `mu/tools/_bounds.py:check_bounds`.
+- Layer 2 hook registration: `mu/agent/__init__.py` imports
   `mu.agent.secret_guard` alongside `mu.agent.plan_mode` so the hook is
   live from the first tool call.
-- Layer 3 wire-in: `core/tools.py` — `read_file`, `bash_command`,
+- Layer 3 wire-in: `mu/tools/_scrub.py` — `read_file`, `bash`,
   `get_chunk`, `search_for_string`, `search_references`.
 
 Tests live in `tests/test_secret_paths.py`,

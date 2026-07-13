@@ -1,4 +1,4 @@
-"""UI primitives for the new agent loop. Currently exposes the streaming
+"""UI primitives for the agent loop. Currently exposes the streaming
 renderer that bridges provider stream events to a live terminal UI.
 """
 

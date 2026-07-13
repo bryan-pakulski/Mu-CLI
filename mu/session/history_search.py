@@ -38,6 +38,19 @@ _SNIPPET_LEN = 200
 _PREVIEW_LEN = 100
 _MAX_RESULT_CHARS = 4000
 
+# R10 / FM-9: a trigram inverted index narrows `search_history` from an
+# O(n) scan of every message to a scan of only the messages that could
+# possibly contain the query. Trigrams (not whole-word tokens) are used so
+# the candidate set is a strict SUPERSET of the true substring matches: if
+# the query Q is a substring of a message's searchable blob, every trigram
+# of Q is present in that blob, so the message lands in every trigram's
+# posting set and survives the intersection. Queries shorter than 3 chars
+# can't form a trigram, so they fall back to the linear scan (rare on the
+# >1000-message sessions this optimisation targets). The index is built
+# lazily on the first `search_history` of a turn and invalidated whenever
+# the history length changes (grow OR shrink — compaction shrinks it).
+_SEARCH_INDEX_MIN_QUERY = 3
+
 
 class HistorySearchMixin:
     """Search methods for conversation history.  Host must supply
@@ -101,9 +114,21 @@ class HistorySearchMixin:
         role_lower = role.lower() if role else None
         tool_lower = tool_name.lower() if tool_name else None
 
+        # R10 / FM-9: narrow the scan to candidate messages via the trigram
+        # inverted index. `candidates` is None → linear scan (query too
+        # short, no query, or index unavailable); a set → only those indices
+        # are scanned. The candidate set is a superset of true matches, so
+        # the per-part matcher below is unchanged and stays exact.
+        candidates: Optional[set] = None
+        if query and len(q_lower) >= _SEARCH_INDEX_MIN_QUERY:
+            self._ensure_search_index()
+            candidates = self._candidate_indices(q_lower, start, end)
+
         raw_hits: List[Dict[str, Any]] = []
 
         for idx in range(start, end):
+            if candidates is not None and idx not in candidates:
+                continue
             msg = history[idx]
             # --- anchor filter ---
             if not include_summarized and idx < anchor:
@@ -360,19 +385,131 @@ class HistorySearchMixin:
                 ]
         return ""
 
+    # ----------------------------------------------- R10 trigram search index
+
+    def _searchable_blob(self, msg: Dict[str, Any]) -> str:
+        """Concatenate every searchable string in a message into one blob.
+
+        Mirrors the part types the matcher inspects (text, tool_name,
+        tool_args, tool_result, file ref, image metadata) so the trigram
+        index's notion of 'this message could contain Q' matches what the
+        matcher can actually hit."""
+        parts = msg.get("parts", []) or []
+        chunks: List[str] = []
+        for part in parts:
+            p_type = part.get("type")
+            if p_type == "text":
+                chunks.append(str(part.get("text", "")))
+            elif p_type == "tool_call":
+                chunks.append(str(part.get("tool_name", "")))
+                chunks.append(json.dumps(part.get("tool_args", {}), default=str))
+            elif p_type == "tool_result":
+                chunks.append(str(part.get("tool_name", "")))
+                result = part.get("tool_result", "")
+                chunks.append(
+                    result if isinstance(result, str)
+                    else json.dumps(result, default=str)
+                )
+            elif p_type == "file":
+                file_ref = part.get("file_ref", {}) or {}
+                chunks.append(str(file_ref.get("display_name", "")))
+                chunks.append(str(file_ref.get("uri", "")))
+            elif p_type == "image_input":
+                img = part.get("image", {}) or {}
+                chunks.append(str(img.get("source", "")))
+                chunks.append(str(img.get("mime_type", "")))
+        return " ".join(chunks)
+
+    def _ensure_search_index(self) -> None:
+        """Build (or rebuild) the trigram inverted index lazily.
+
+        Invalidated whenever the history length changes — growth appends new
+        messages, compaction shrinks the list, and either changes the
+        index→message mapping. Rebuild cost is O(total searchable chars),
+        paid once per turn on the first `search_history` call."""
+        history = self.history
+        idx = getattr(self, "_search_index", None)
+        if idx is not None and getattr(self, "_search_index_len", None) == len(history):
+            return
+        idx: Dict[str, set] = {}
+        for i, msg in enumerate(history):
+            blob = self._searchable_blob(msg)
+            if len(blob) < _SEARCH_INDEX_MIN_QUERY:
+                continue
+            lower = blob.lower()
+            # Dedupe trigrams within a message so a repeated token doesn't
+            # bloat the posting set.
+            seen: set = set()
+            for j in range(len(lower) - _SEARCH_INDEX_MIN_QUERY + 1):
+                tg = lower[j:j + _SEARCH_INDEX_MIN_QUERY]
+                if tg in seen:
+                    continue
+                seen.add(tg)
+                idx.setdefault(tg, set()).add(i)
+        self._search_index = idx
+        self._search_index_len = len(history)
+
+    def _candidate_indices(
+        self, q_lower: str, start: int, end: int
+    ) -> set:
+        """Return the set of message indices in [start, end) whose
+        searchable blob contains every trigram of `q_lower`.
+
+        Returns an empty set when some trigram is absent from the index
+        (no message can contain the full query → no matches). Callers treat
+        a None return as 'no narrowing, do the linear scan'; this method
+        only runs for queries >= _SEARCH_INDEX_MIN_QUERY chars."""
+        idx = getattr(self, "_search_index", None) or {}
+        postings: Optional[set] = None
+        for j in range(len(q_lower) - _SEARCH_INDEX_MIN_QUERY + 1):
+            tg = q_lower[j:j + _SEARCH_INDEX_MIN_QUERY]
+            p = idx.get(tg)
+            if not p:
+                # This trigram appears in no message → the query cannot be
+                # a substring of any message → guaranteed empty result.
+                return set()
+            if postings is None:
+                postings = set(p)
+            else:
+                postings &= p
+            if not postings:
+                return set()
+        return {i for i in (postings or set()) if start <= i < end}
+
     def _lookup_cache_key(self, part: Dict[str, Any]) -> Optional[str]:
         """Check if a tool_result part has a corresponding
-        ``ToolResultCache`` entry.  Returns the cache key or None."""
+        ``ToolResultCache`` entry.  Returns the cache key or None.
+
+        Fast path (R10, FM-9): when the cache exposes a ``_result_index``
+        (result-content hash → key), resolve in O(1) and verify the cached
+        ``tool_name`` matches before trusting the pointer. Falls back to the
+        original linear scan for caches that don't expose the index (e.g.
+        mock caches in tests) or on a hash collision / tool_name mismatch.
+        """
         cache = getattr(self, "tool_result_cache", None)
         if cache is None:
             return None
+        result = part.get("tool_result", "")
+        tool_name = str(part.get("tool_name", ""))
+
+        result_index = getattr(cache, "_result_index", None)
+        if result_index is not None and hasattr(cache, "_result_hash"):
+            rhash = cache._result_hash(result)
+            key = result_index.get(rhash)
+            if key is not None:
+                entry = cache._cache.get(key)
+                if entry is not None and entry.get("tool_name", "") == tool_name:
+                    return key
+                # Hash collision or tool_name mismatch → fall through to the
+                # linear scan so we never return a wrong-tool key.
+            # No pointer (or stale pointer) → also fall through; the linear
+            # scan below is the correctness safety net.
+
         # Use the public _cache OrderedDict if available; fall back to None
         # for caches that don't expose it (e.g. mock caches in tests).
         internal_cache = getattr(cache, "_cache", None)
         if internal_cache is None:
             return None
-        result = part.get("tool_result", "")
-        tool_name = str(part.get("tool_name", ""))
         # Iterate cache entries and compare result content.
         for key, entry in internal_cache.items():
             if entry.get("tool_name", "") != tool_name:

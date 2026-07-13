@@ -26,38 +26,65 @@ In other words, the GUI can already:
 
 ## Implemented Server Layers
 
-### 1. Headless UI adapter
+### 1. WebUI adapter
 
-`HeadlessUI` provides the non-interactive bridge between the core session loop and HTTP-driven clients. It logs status/tool activity and now forwards approval requests into the approval manager rather than silently auto-prompting. This is the key abstraction that lets GUI clients reuse the same session logic as the terminal UI.
+`WebUI` (`mu/gui/web_ui.py`) is the non-interactive bridge between the
+session loop and HTTP/SSE-driven clients. It subclasses the terminal
+`BaseUI`, forwards status/tool activity onto the per-session event bus,
+and routes approval/confirmation prompts into the `PromptStore` instead
+of blocking on stdin. This is the key abstraction that lets GUI clients
+reuse the same session logic as the terminal UI.
 
-### 2. Async task execution
+### 2. Multi-session turn execution
 
-`TaskManager` wraps long-running message execution into tracked tasks. This matters for GUI work because chat turns can now:
+The server runs a **multi-session** model (`app.state.sessions` in
+`mu/gui/app.py`): every loaded `Session` is keyed by name, each with its
+own `threading.Lock`, busy `threading.Event`, and `WebUI` bridge, so two
+sessions can have turns in flight simultaneously. A chat turn is started
+by `POST /api/chat/send`, which runs `run_turn` on a worker thread and
+streams progress to the browser through the SSE event bus
+(`app.state.bus`, `mu/gui/bus.py`). The same session refuses a second
+concurrent turn (409). A turn in flight can be cancelled with
+`POST /api/chat/interrupt`. Slash commands sent to `/api/chat/send` are
+dispatched inline and their result published as a `command_result` event.
 
-- start asynchronously
-- move through `pending`, `running`, `awaiting_approval`, `completed`, or `error`
-- be polled independently of the original request
+### 3. Explicit approval / prompt handling
 
-### 3. Explicit approval handling
-
-`ApprovalManager` stores pending approvals as first-class server objects. A modifying tool call can pause execution, emit a structured approval payload (including modifications/diffs), and resume once the GUI submits a decision.
+`PromptStore` (`mu/gui/prompts.py`) stores pending prompts — approvals,
+confirmations, and choice requests — as first-class objects keyed by a
+`prompt_id`. When a modifying tool call needs a decision, the `WebUI`
+opens a prompt (returning a `prompt_id` + an event the worker thread
+waits on), the GUI renders the structured payload (including
+modifications/diffs), and the user's decision arrives via
+`POST /api/prompts/{prompt_id}/answer` (or `/cancel`), which releases
+the worker and resumes the turn.
 
 ### 4. HTTP API surface
 
-The current API surface covers:
+Routers are mounted under `/api/*` (`mu/gui/app.py`):
 
-- health/state/history
-- sessions
-- runtime config
-- workspaces
-- staged files
-- tools
-- async tasks
-- approvals
-- message turns
-- slash commands
-- SSE-driven state mutation notifications for commands/tools/runtime/workspaces/staged files
-- live SSE trace events for tool execution and headless status output
+| Prefix | Router | Surface |
+| --- | --- | --- |
+| `/api/sessions` | `sessions` | session list/load/create/delete, runtime/workspace/staged-file state |
+| `/api/providers` | `providers` | provider + model switching |
+| `/api/chat` | `chat` | `/send`, `/interrupt`, `/commands`, `/completions`, `/history/search` |
+| `/api/modes` | `modes` | agent-mode switching + mode metadata |
+| `/api/prompts` | `prompts` | `/{prompt_id}/answer`, `/{prompt_id}/cancel` |
+| `/api` | `inspector` | variable/config inspection + `/set`/`/unset` + layer budgets |
+| `/api/teacher` | `teacher` | teacher-mode course CRUD |
+| `/api/feature` | `feature` | feature plan state/create/approve/load/archive + task transitions |
+| `/api/research` | `research` | research subcommands + citation engine |
+| `/api/security` | `security` | security-mode audit surface |
+| `/api/loop` | `loop` | loop-mode control |
+| `/api/debug` | `debug` | debug-mode surface |
+| `/api/skills` | `skills` | skill list/inspect/toggle |
+| `/api/audio` | `audio` | audio I/O |
+| (events) | `chat.events_router` | SSE stream — live tool execution, headless status, command/runtime/workspace mutations |
+
+The SSE event bus (`mu/gui/bus.py`) is the single subscribe channel the
+GUI uses for: token-by-token assistant output, live tool activity,
+approval/prompt notifications, command results, and runtime/workspace
+state mutations.
 
 ## What Is Still Missing?
 
@@ -76,11 +103,12 @@ Server-Sent Events are now available, which removes polling as a requirement for
 
 **Recommendation:** SSE is the right default for the current GUI phase; only add WebSockets if interactive client push/input patterns require them.
 
-#### B. Task cancellation
+#### B. Task cancellation — ✅ done
 
-Tasks can be started and polled, but there is no explicit cancellation endpoint yet.
-
-**Recommendation:** add task cancellation before introducing richer multi-panel GUI workflows.
+Turns in flight can be cancelled with `POST /api/chat/interrupt`
+(`mu/gui/routers/chat.py`), which signals the running turn to stop at
+the next iteration boundary and emits an `interrupted` result event. No
+further work needed here.
 
 #### C. Upload/download primitives
 
@@ -104,11 +132,13 @@ The current server is designed for trusted/local usage and does not implement au
 
 **Recommendation:** optional for local desktop GUI; required before exposing the server beyond localhost.
 
-#### F. Multi-session concurrency model
+#### F. Multi-session concurrency model — ✅ done
 
-The server works with a single in-process `Session` object at a time. This is fine for a single-user GUI, but if you later want multiple active GUI tabs with isolated concurrent conversations, you may want a session registry instead of one loaded session plus saved session switching.
-
-**Recommendation:** not a blocker for the current GUI effort.
+The server now keeps a **session registry** (`app.state.sessions`) rather
+than a single loaded session: every loaded `Session` is keyed by name
+with its own lock, busy event, and `WebUI` bridge, so multiple GUI tabs
+can hold isolated concurrent conversations at once. This is no longer a
+follow-up — it shipped.
 
 ## Resolution
 
@@ -121,6 +151,6 @@ For the stated goal — **implement the full server stack first so GUI developme
 
 ### Follow-up suggestions (non-blocking)
 
-1. add task cancellation
-2. add multipart file upload/download if the GUI will not always be local
-3. add auth only if the server will be exposed outside localhost
+1. add multipart file upload/download if the GUI will not always be local
+2. add auth only if the server will be exposed outside localhost
+3. persist in-memory prompt/approval state across server restarts if robust recovery is needed

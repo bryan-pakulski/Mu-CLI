@@ -1,18 +1,18 @@
 """Output-scrubber wiring for tool results.
 
 `scrub_and_annotate(text)` runs the secret-pattern redactor from
-`core/secret_paths.py` over a tool's output and appends a one-line
+`mu/security/secret_paths.py` over a tool's output and appends a one-line
 notice when anything was redacted, so the model can see that the
 result was sanitized.
 
-Wire-in points (all in `core/tools.py`):
+Wire-in points (across the tool handler modules):
   * `read_file` body              — file contents
-  * `bash_command` body           — combined stdout/stderr
+  * `bash` body                   — combined stdout/stderr
   * `get_chunk` body              — partial-file reads
   * `search_for_string` body      — grep results
   * `search_references` body      — grep with context
 
-The redaction itself lives in `core/secret_paths.py:redact_secrets`
+The redaction itself lives in `mu/security/secret_paths.py:redact_secrets`
 (pattern coverage: AWS, GitHub, GitLab, Slack, Anthropic, OpenAI,
 Google, JWT, PEM blocks). This module is the *wiring* — when and how
 the redacted-count notice gets appended.

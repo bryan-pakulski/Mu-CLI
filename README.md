@@ -8,7 +8,8 @@ Terminal-first multi-provider coding assistant.
 - At least one provider key or local model setup:
   - `OPENAI_API_KEY` for OpenAI
   - `GEMINI_API_KEY` or `GOOGLE_API_KEY` for Gemini
-  - `OLLAMA_API_KEY` for Ollama
+  - `OLLAMA_API_KEY` for the hosted Ollama service (optional — self-hosted
+    Ollama only needs `OLLAMA_HOST` and a running instance, below)
   - running Ollama instance for local models
 
 ## Installation
@@ -73,7 +74,7 @@ The most common day-to-day commands — see [documentation/commands.md](document
 | `/agentic` | Toggle tool-calling mode |
 | `/thinking` | Toggle reasoning / extended thinking |
 | `/yolo` | Toggle auto-approval for write-side tools |
-| `/mode <default\|debug\|feature\|research\|loop\|security>` | Switch agent strategy |
+| `/mode <default\|debug\|feature\|research\|loop\|security\|teacher>` | Switch agent strategy |
 | `/feature <subcommand>` | Manage feature workflows (`new`, `list`, `load`, `show`, `delete`, ...) |
 | `/workspace` | Show attached folders + staged files |
 | `/workspace folder <path>` (`remove`/`clear`) | Manage workspace folders |
@@ -83,7 +84,7 @@ The most common day-to-day commands — see [documentation/commands.md](document
 | `/mcp [list\|status\|reload\|debug <server>]` | Manage MCP servers |
 | `/skills [<name>\|reload\|enable <name>\|disable <name>]` | List, inspect, reload, or toggle skills |
 | `/docs [<name>]` | List or render bundled documentation (Tab autocompletes names) |
-| `/memory [status\|list <target>\|clear <target>]` | Inspect / wipe stores and inspect any of the 7 prompt layers (L1–L5) |
+| `/memory [status\|list <target>\|clear <target>\|save <name>\|load <name>]` | Inspect / wipe stores, inspect any prompt layer (`L0`, `L1`, `L1B`, `L2`, `L3`, `L5`), or snapshot/restore memory across sessions |
 | `/research <query>` | Web search + synthesis |
 | `/set <key> <value>` / `/get <key>` / `/unset <key>` / `/variables` | Manage session variables |
 | `/model [name]` / `/provider <name>` | Show or switch model / provider |
@@ -110,7 +111,7 @@ The most common day-to-day commands — see [documentation/commands.md](document
 ```
 Each server's tools register as `mcp__<server>__<tool>` in the unified tool registry — e.g. `mcp__fs__read_file`, `mcp__git__log`. They show up alongside built-in tools in `/tool list`.
 
-**Workspace context files** — by default mucli auto-loads any of `AGENTS.md`, `CLAUDE.md`, `MUCLI.md`, and `.mu/CONTEXT.md` from each attached workspace folder, injecting them as LAYER 1 of the system prompt (up to `workspace_context_max_chars`, default 8192). Customize the list via `/set workspace_context_files <comma-separated>`.
+**Workspace context files** — by default mucli auto-loads any of `AGENTS.md`, `CLAUDE.md`, `MUCLI.md`, and `.mu/CONTEXT.md` from each attached workspace folder, injecting them as LAYER 1 of the system prompt (up to `workspace_context_max_chars`, default `40000` chars at the default `context_token_limit`; scales with it). Customize the list via `/set workspace_context_files <comma-separated>`.
 
 **Session variables** — every knob (memory limits, context budgets, skill mode, Ollama parameters, etc.) is a session variable settable via `/set <key> <value>`. See [documentation/configuration.md](documentation/configuration.md) for the full reference.
 
@@ -118,16 +119,32 @@ Each server's tools register as `mcp__<server>__<tool>` in the unified tool regi
 
 ```
 mu/
-  agent/          AgentLoop façade, hooks, parallel dispatch, plan mode, compactor
+  agent/          AgentLoop façade, hooks, parallel dispatch, plan mode,
+                  compactor, retry/loop-detection, approval, collation,
+                  secret guard, usage tracker
   commands/       Slash-command registry with @command decorator
+  feature/        Feature plan engine
+  gui/            FastAPI web UI server (SSE chat, inspector, multi-session)
   mcp/            MCP stdio client + auto-registry
-  session/        HistoryMixin (token-budget rolling, summarization)
-  tools/          @tool decorator + legacy bridge (61 native + N MCP tools)
-  ui/             Stream renderer
-providers/        Gemini, OpenAI, Ollama
-core/             Session class (loop body) — migration in progress
-utils/            Config, metrics, citation manager, logger
+  memory/         TaskMemoryStore + ScratchpadStore (lifecycle, eviction)
+  retrieval/      SemanticCodeIndex for L4B context retrieval
+  security/       Always-on secret_paths denylist + scrubber
+  session/        Session, SessionManager, per-turn context/messages/
+                  budgets/tools_glue, history search, tool-result cache
+  skills/         Bundled skills (markdown)
+  teacher/        Teacher-mode course engine
+  tools/          @tool decorator + per-domain handlers (~95 native tools
+                  + N MCP tools registered as mcp__<server>__<tool>)
+  ui/             RichUI, stream renderer, input handler, subagent UI
+  workspace/      FolderContext (sandbox + gitignore)
+providers/        Gemini, OpenAI, Ollama, base classes
+utils/            Config, runtime metrics, token estimator, citation
+                  manager, anti-detection, helpers, logger
 ```
+
+No `core/` source — the refactor that collapsed the old `core/` + `mu/`
+two-package layout into a single `mu/` package is complete. See
+[refactor_roadmap.md](documentation/refactor_roadmap.md) for the history.
 
 ## Documentation
 See `documentation/`:
@@ -137,9 +154,12 @@ See `documentation/`:
 - [`mcp.md`](documentation/mcp.md) — Model Context Protocol setup, auth, and management
 - [`hooks.md`](documentation/hooks.md) — lifecycle hooks (Python decorator + `.mu/hooks.json`)
 - [`security.md`](documentation/security.md) — full security model: workspace sandbox, secret filtering, approval flow, plan mode, sub-agent isolation, limitations
+- [`security_controls.md`](documentation/security_controls.md) — the always-on secret-path denylist and scrubber controls
 - [`tooling_harness_architecture.md`](documentation/tooling_harness_architecture.md) — tool lifecycle
 - [`memory_guide.md`](documentation/memory_guide.md) — memory vs scratchpad
-- [`refactor_roadmap.md`](documentation/refactor_roadmap.md) — current `core/` ↔ `mu/` migration state, verified dead code, phased completion plan
+- [`session_guide.md`](documentation/session_guide.md) — session memory architecture, history search, context-preservation (compaction floors, oversized-message handling)
+- [`refactor_roadmap.md`](documentation/refactor_roadmap.md) — history of the `core/` → `mu/` consolidation (complete; historical reference)
+- [`harness-investigation.md`](documentation/harness-investigation.md) — context-management roadmap (R1–R12) with implementation status
 
 Agent modes (one doc per mode):
 - [`default_mode.md`](documentation/default_mode.md) — general coding workflow
@@ -148,6 +168,7 @@ Agent modes (one doc per mode):
 - [`research_mode.md`](documentation/research_mode.md) — research and explanation
 - [`loop_mode.md`](documentation/loop_mode.md) — long-horizon autonomous loop
 - [`security_mode.md`](documentation/security_mode.md) — verified-PoC security audit
+- [`teacher_mode.md`](documentation/teacher_mode.md) — structured course engine
 
 ## Testing
 ```bash

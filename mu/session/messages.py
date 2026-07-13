@@ -247,6 +247,137 @@ def _llm_summarize_tool_batch(
         return None
 
 
+# ── R4 / FM-2: first-class huge-message handling ────────────────────────
+# When a single message (typically the user's turn prompt — a massive
+# paste) alone consumes most of the L5 budget, the backward walk in
+# `prepare_runtime_history` is forced to include it (the newest message
+# is always kept), which overflows the provider window and triggers
+# destructive mechanical truncation in `_degrade_oldest_runtime_payload`.
+# Instead we chunk-summarize the oversized text via the provider (or a
+# head+tail mechanical fallback when no provider is available) and
+# substitute a labeled CONTEXT-OVERFLOW envelope so the model knows the
+# full original is not in context.
+
+_OVERFLOW_CHUNK_CHARS = 12_000  # ~3000 tokens per chunk
+_OVERFLOW_MAX_CHUNKS = 12  # bound work on pathological inputs
+
+
+def _chunk_summarize_text(
+    provider: Optional[LLMProvider],
+    text: str,
+    budget_tokens: int,
+) -> str:
+    """Summarize an oversized text in chunks. Uses the provider when
+    available (one generate() call per chunk, capped at
+    `_OVERFLOW_MAX_CHUNKS`); falls back to a head+tail mechanical elision
+    when no provider is present or a chunk call fails."""
+    if not text:
+        return ""
+    if provider is None:
+        return _mechanical_elide(text, budget_tokens)
+    chunks = [
+        text[i : i + _OVERFLOW_CHUNK_CHARS]
+        for i in range(0, len(text), _OVERFLOW_CHUNK_CHARS)
+    ][:_OVERFLOW_MAX_CHUNKS]
+    system = (
+        "You are a context summarizer for an AI coding agent. Summarize the "
+        "following chunk concisely while preserving file paths, function "
+        "names, error messages, and key findings VERBATIM. Be concise but "
+        "complete. Output ONLY the summary, no headers or commentary."
+    )
+    summaries: List[str] = []
+    for chunk in chunks:
+        try:
+            resp = provider.generate(
+                messages=[
+                    Message(
+                        role="user",
+                        parts=[MessagePart(type="text", text=chunk)],
+                    )
+                ],
+                system_prompt=system,
+                thinking=False,
+                tools=None,
+            )
+            s = str(resp.text or "").strip()
+            summaries.append(s if s else _mechanical_elide(chunk, budget_tokens))
+        except Exception:
+            summaries.append(_mechanical_elide(chunk, budget_tokens))
+    if len(text) > _OVERFLOW_CHUNK_CHARS * _OVERFLOW_MAX_CHUNKS:
+        elided = len(text) - _OVERFLOW_CHUNK_CHARS * _OVERFLOW_MAX_CHUNKS
+        summaries.append(f"[...{elided} additional chars not summarized...]")
+    return "\n\n".join(s for s in summaries if s).strip()
+
+
+def _mechanical_elide(text: str, budget_tokens: int) -> str:
+    """Head+tail elision fallback (no provider). Keeps a head and tail
+    sized to roughly fit the budget (~4 chars/token)."""
+    cap = max(4000, int(budget_tokens * 4))
+    if len(text) <= cap:
+        return text
+    half = cap // 2
+    return (
+        text[:half]
+        + f"\n[...{len(text) - cap} chars elided (no provider available "
+        "for chunked summary)...]\n"
+        + text[-half:]
+    )
+
+
+def _maybe_summarize_oversized(
+    session: Any,
+    abs_idx: int,
+    msg: dict,
+    budget_tokens: int,
+    provider: Optional[LLMProvider],
+    cache: dict,
+) -> dict:
+    """If `msg`'s text content alone exceeds the overflow threshold,
+    substitute a chunk-summarized CONTEXT-OVERFLOW envelope. Returns the
+    original message unchanged when it is not oversized. Summaries are
+    cached per absolute history index so repeated `prepare_runtime_history`
+    calls within a turn don't re-summarize."""
+    if budget_tokens <= 0 or not isinstance(msg, dict):
+        return msg
+    text = None
+    for p in msg.get("parts", []) or []:
+        if p.get("type") == "text":
+            text = p.get("text") or ""
+            break
+    if not text:
+        return msg
+    try:
+        text_tokens = session.session_manager._estimate_tokens_from_text(text)
+    except Exception:
+        text_tokens = len(text) // 4
+    # Threshold: a single message consuming more than 60% of the L5
+    # budget AND non-trivially large. Below this, normal compaction
+    # handles it; above it, proactive chunked summary avoids overflow.
+    threshold = max(2000, int(budget_tokens * 0.6))
+    if text_tokens <= threshold:
+        return msg
+    if abs_idx in cache:
+        summarized = cache[abs_idx]
+    else:
+        summarized = _chunk_summarize_text(provider, text, budget_tokens)
+        cache[abs_idx] = summarized
+    envelope = (
+        f"[CONTEXT-OVERFLOW — this message exceeded the context budget "
+        f"(~{text_tokens} tokens) and was summarized in chunks. The full "
+        f"original is NOT in context; ask the user to re-paste a specific "
+        f"section if you need verbatim detail.]\n\n{summarized}"
+    )
+    new_parts = []
+    replaced = False
+    for p in msg.get("parts", []) or []:
+        if (not replaced) and p.get("type") == "text" and (p.get("text") or "") == text:
+            new_parts.append({"type": "text", "text": envelope})
+            replaced = True
+        else:
+            new_parts.append(p)
+    return {**msg, "parts": new_parts}
+
+
 def prepare_runtime_history(
     session: Any,
     turn_start_index: Optional[int] = None,
@@ -278,6 +409,22 @@ def prepare_runtime_history(
             break
         running_tokens += next_tokens
         start_index = next_index
+    # R4 / FM-2: if any single message in the runtime slice is oversized
+    # relative to the L5 budget, substitute a chunk-summarized
+    # CONTEXT-OVERFLOW envelope BEFORE assembling recent_history. Cached
+    # per absolute history index on the session so repeated calls within
+    # a turn (the loop calls this every iteration) don't re-summarize.
+    raw_slice = session_manager.history[start_index:]
+    cache = getattr(session, "_oversized_message_summaries", None)
+    if cache is None:
+        cache = {}
+        session._oversized_message_summaries = cache
+    runtime_slice = [
+        _maybe_summarize_oversized(
+            session, start_index + i, msg, token_budget, provider, cache
+        )
+        for i, msg in enumerate(raw_slice)
+    ]
     # Inject protected messages that are below the summary anchor back
     # into the runtime history.  These messages were excluded from LLM
     # summarisation in roll_history_summary() and must appear verbatim
@@ -309,13 +456,12 @@ def prepare_runtime_history(
                 }],
             }
             recent_history = (
-                [preserved_marker] + protected_below_anchor
-                + session_manager.history[start_index:]
+                [preserved_marker] + protected_below_anchor + runtime_slice
             )
         else:
-            recent_history = session_manager.history[start_index:]
+            recent_history = runtime_slice
     else:
-        recent_history = session_manager.history[start_index:]
+        recent_history = runtime_slice
     tool_window = max(0, int(session.variables.get("tool_context_window", 6)))
 
     if turn_start_index is None:
@@ -361,6 +507,13 @@ def prepare_runtime_history(
     compress_pair_count = len(tool_pairs) - keep_pair_count
     pair_count = 0
     summarized_lines: List[str] = []
+    # The exact messages handed to the LLM summarizer. MUST stay in sync
+    # with `summarized_lines` (the mechanical fallback) — both must cover
+    # the SAME set of compressed pairs, otherwise a pair can be dropped
+    # from `compressed_turn` (via `continue` below) yet never reach the
+    # LLM summarizer, losing its tool result entirely. See R1 in
+    # documentation/harness-investigation.md (FM-1).
+    summarized_pairs_msgs: List[dict] = []
     compressed_turn: List[dict] = []
 
     for is_pair, msgs in groups:
@@ -368,6 +521,7 @@ def prepare_runtime_history(
             if pair_count < compress_pair_count:
                 for m in msgs:
                     summarized_lines.append(summarize_message_parts(m, provider=provider))
+                summarized_pairs_msgs.extend(msgs)
                 pair_count += 1
                 continue
             pair_count += 1
@@ -376,9 +530,12 @@ def prepare_runtime_history(
     if summarized_lines:
         # Try LLM summarization first (Claude-style); fall back to
         # the expanded mechanical lines (500 chars per part, not 120).
+        # `summarized_pairs_msgs` is the exact set the mechanical loop
+        # compressed, so the LLM summary and the fallback cover the same
+        # pairs — no tool result is silently dropped.
         llm_summary = _llm_summarize_tool_batch(
             provider,
-            [m for _, msgs in groups[:compress_pair_count] for m in msgs if _ == True for _ in [True]],
+            summarized_pairs_msgs,
         )
         if llm_summary is not None:
             summary_text = (

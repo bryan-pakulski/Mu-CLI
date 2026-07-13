@@ -127,8 +127,10 @@ this in production"), downgrade or refute.
 Everything lives under `documentation/security_scan_<id>/`:
 
 - `report.json` — engine state (findings, proofs, patches, decisions).
+- `README.md` — human-readable index of the scan.
 - `findings/<id>.md` — per-finding write-up with the exploit narrative.
-- `proofs/<id>.sh` — the PoC shell command.
+- `proofs/<id>/` — directory holding the captured stdout/stderr from
+  each PoC run (one run per verification attempt).
 - `patches/<id>.diff` — the applied remediation.
 
 These are the deliverables. The conversation transcript is incidental;

@@ -12,7 +12,7 @@ stores:
   * `clear_scratchpad`   — wipe the turn scratchpad
 
 Stores live on `context.session` as `task_memory` and `turn_scratchpad`
-(see `core/memory.py:TaskMemoryStore` and `ScratchpadStore`). For a
+(see `mu/memory/stores.py:TaskMemoryStore` and `ScratchpadStore`). For a
 session-less context (e.g. standalone unit tests) we fall back to a
 process-local store so the tools still exercise their handler logic.
 """

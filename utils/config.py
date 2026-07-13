@@ -144,6 +144,22 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 64,
     },
+    "tool_result_floor": {
+        # R3/FM-8: number of trailing tool-result messages in the active
+        # turn that compaction must leave verbatim, even under emergency
+        # compaction with a tiny keep_recent. Prevents mid-turn compaction
+        # from dropping tool results just received.
+        "type": int,
+        "default": 4,
+    },
+    "emergency_keep_recent": {
+        # Trailing messages kept verbatim by EMERGENCY compaction
+        # (pre-flight context check). Smaller than the normal
+        # `compactor_keep_recent` so it reclaims budget fast; the
+        # `tool_result_floor` still protects recent tool results.
+        "type": int,
+        "default": 2,
+    },
     "memory_summary_limit": {
         "type": int,
         "default": 8,

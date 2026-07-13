@@ -67,31 +67,15 @@ def _ensure_stats(session: Any) -> Optional[Dict[str, Any]]:
 
 
 def _skill_banner(ui: Any, skill_name: str) -> None:
-    """Print a visible banner for a skill activation. Renders the static
-    styling via Rich markup but escapes the dynamic skill name so a
-    bracketed name can never derail the markup parser.
+    """Print a visible banner for an `invoke_skill` activation.
 
-    `show_info` on RichUI now renders messages literally (no markup), so
-    this banner goes straight to the console with `Text.from_markup`
-    instead of routing through it, keeping the highlighted background."""
-    from rich.markup import escape as _esc
+    Delegates to the shared `mu.skills.announce_skill` so the
+    `invoke_skill` tool call and trigger-regex auto-expansion share one
+    consistent highlight. `via` is left as None here so the invoke_skill
+    banner text stays exactly as before ("🎯 SKILL ACTIVE: <name>")."""
+    from mu.skills import announce_skill
 
-    label = skill_name or "?"
-    body = f"[bold black on yellow] 🎯 SKILL ACTIVE: {_esc(label)} [/bold black on yellow]"
-    console = getattr(ui, "console", None) if ui is not None else None
-    if console is not None:
-        try:
-            from rich.text import Text as _Text
-
-            console.print(_Text.from_markup(body))
-            return
-        except Exception:
-            pass
-    # Last resort: best-effort plain print so the user still sees something.
-    try:
-        print(f"[SKILL ACTIVE: {label}]")
-    except Exception:
-        pass
+    announce_skill(ui, skill_name)
 
 
 @default_registry.register("pre_tool", name="usage_tracker_pre", priority=50)

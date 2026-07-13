@@ -8,7 +8,7 @@ Mu-CLI implements a multi-layered memory architecture designed to optimize conte
 
 ## 1. Context (FolderContext)
 
-**Location:** `core/workspace.py`
+**Location:** `mu/workspace/folder_context.py`
 
 **Purpose:** Manages workspace folder tracking and file change detection.
 
@@ -24,12 +24,12 @@ Mu-CLI implements a multi-layered memory architecture designed to optimize conte
 
 ## 2. Task Memory (TaskMemoryStore)
 
-**Location:** `core/memory.py`
+**Location:** `mu/memory/stores.py`
 
 **Purpose:** Persistent, durable memory that survives across turns and sessions.
 
 **Key features:**
-- **Max entries:** Configurable (default 64)
+- **Max entries:** Configurable (effective default 64 via the `memory_max_entries` config variable, applied at turn start in `mu/agent/loop_body.py`; the `TaskMemoryStore` class default is 1024 when constructed directly)
 - **Deduplication:** Identical content+tags updates existing entry (hits++, updated_at)
 - **LRU eviction:** When limit exceeded, least recently used entries are removed
 - **Searchable:** Full-text search across content, tags, and source
@@ -59,13 +59,15 @@ class MemoryEntry:
 
 ## 3. Scratchpad (ScratchpadStore)
 
-**Location:** `core/memory.py`
+**Location:** `mu/memory/stores.py`
 
-**Purpose:** Turn-local temporary notes that are cleared at the start of each new user turn.
+**Purpose:** Turn-local temporary notes that are cleared at the start of each new user turn (subject to mode-aware persistence — see below).
 
 **Key features:**
 - Same data structure as Task Memory
-- **Auto-cleared** when `send_message()` is called (if `scratchpad_enabled`)
+- **Max entries:** effective default 24 via the `scratchpad_max_entries` config variable (class default 256)
+- **Auto-cleared** at turn start when `scratchpad_enabled` is on, *unless* persistence applies
+- **Mode-aware persistence (R12/FM-12):** in `loop` and `feature` modes the scratchpad defaults to persisting across turns so cross-turn plans survive; in `default`/`teacher` modes it is cleared at turn start unless the user explicitly set `scratchpad_persist_across_turns=True`. An explicit `True` always persists; `loop`/`feature` always persist (mode wins). Computed once at turn start in `mu/agent/loop_body.py`.
 - Used for short-lived plans, observations, and temporary working notes
 - Included in system prompt via `render_summary()`
 
@@ -75,7 +77,7 @@ class MemoryEntry:
 
 ## 4. Collation Buffer (CollationBuffer)
 
-**Location:** `core/collation.py`
+**Location:** `mu/agent/collation.py`
 
 **Purpose:** Defers delivery of read-only tool results to reduce token usage during context gathering phases.
 
@@ -88,7 +90,8 @@ class MemoryEntry:
 - **Size limit:** 1MB default (configurable)
 - **Auto-truncation:** Oldest entries dropped when limit exceeded
 - **Persistence:** Saved in session JSON, survives reloads
-- **Collated tools:** `read_file`, `search_for_string`, `get_chunk`, `list_dir`, `get_workspace_details`, `git_status`, `git_diff`, `git_log`, `git_branch`, memory/scratchpad tools
+- **Recall path (R11/FM-4):** when a collated result is deferred, the raw payload is also stored in the `ToolResultCache` (`mu/session/tool_cache.py`) with `force=True` and the placeholder text is stamped with `[cache:KEY]`, so a result dropped by a later buffer overflow remains recoverable via `recall(cache_key)`.
+- **Collated tools:** `get_workspace_details`, `read_file`, `search_for_string`, `search_references`, `retrieve_relevant_context`, `get_chunk`, `list_dir`, `url_grounding`, `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `read_document`, `get_tasks`, `get_current_task` (the canonical set lives in `mu/tools/descriptors.py:_COLLATED_TOOL_NAMES`).
 
 **Why implemented:** Prevents context window bloat during "exploration" phases. The AI can gather multiple pieces of information before deciding which to process, rather than receiving everything immediately.
 
@@ -96,7 +99,7 @@ class MemoryEntry:
 
 ## 5. Session History
 
-**Location:** `core/session.py` (SessionManager)
+**Location:** `mu/session/session.py` (SessionManager)
 
 **Purpose:** Full conversation history with message compression.
 
@@ -224,6 +227,8 @@ Within each status tier, the existing kind-weight + LRU scoring applies:
 
 This means an active decision with 0 hits scores `2 * 3.0 * 1.0 = 6.0`, while an archived observation with 5 hits scores `6 * 1.0 * 0.1 = 0.6`. Archived entries are always evicted before active ones, regardless of hit count.
 
+**Eviction events (R12/FM-11):** when `_enforce_limit` evicts entries, it appends a one-line notice per evicted entry to a transient `eviction_log` (capped at the last 20). The agent loop drains this log each turn via `drain_eviction_log()` after rendering L3 memory, so the model is told — exactly once — that a memory it may have relied on is gone (preventing silent re-derivation). The log is not persisted.
+
 ### Search default behavior
 
 `search_memory("auth refactor")` with no status filter returns **only active entries** matching. This prevents the core complaint: old goals and completed work resurfacing.
@@ -235,13 +240,13 @@ To see historical entries:
 
 ### render_summary() behavior
 
-The system-prompt memory snapshot (`render_summary()`) now:
-1. Lists **active entries first** (up to the limit)
-2. Then optionally **done entries** (capped at 2)
-3. **Excludes archived** entries entirely (unless `include_archived=True`)
+The system-prompt memory snapshot (`render_summary(limit=8, include_archived=False, query="")`) now:
+1. **Relevance-aware injection (R6/FM-7):** when `query` is non-empty (the agent loop passes the current turn's user text), entries that score against the query are injected FIRST, leading the snapshot. Scoring uses the non-mutating `_rank_by_relevance` helper so this bias does NOT touch `hits`/`updated_at` and cannot perturb eviction scoring.
+2. Fills the remaining slots by the **recency partition**: active entries first (up to the limit), then optionally **done entries** (capped at 2), then other non-archived entries.
+3. **Excludes archived** entries entirely (unless `include_archived=True`), even among relevance hits.
 4. Each line includes the status tag: `- #id [active] [tags] (source): content`
 
-This ensures the injected memory snapshot reflects **current work**, not historical baggage.
+When `query` is empty this reproduces the original recency-only ordering exactly. This ensures the injected memory snapshot reflects **current work**, and surfaces the *relevant* durable decisions/findings for the current turn rather than only the most-recently-touched ones.
 
 ---
 
@@ -253,10 +258,11 @@ This ensures the injected memory snapshot reflects **current work**, not histori
 | `memory_max_entries` | `64` | Max persistent memory entries |
 | `memory_summary_limit` | `8` | Entries to include in system prompt |
 | `scratchpad_enabled` | `True` | Enable turn-local scratchpad |
-| `scratchpad_max_entries` | `64` | Max scratchpad entries |
+| `scratchpad_max_entries` | `24` | Max scratchpad entries |
+| `scratchpad_persist_across_turns` | `False` | Keep scratchpad across turns. Mode-aware: `loop`/`feature` modes persist regardless; `default`/`teacher` clear at turn start unless this is `True`. |
 | `collation_enabled` | `True` | Enable deferred tool results |
 | `tool_context_window` | `6` | Recent tool messages to keep uncompressed |
-| `context_token_limit` | `256000` | Token budget used for runtime context/history trimming |
+| `context_token_limit` | `900000` | Token budget used for runtime context/history trimming |
 | `context_trim_threshold` | `0.85` | Begin summarizing once runtime context reaches this fraction of the token budget |
 
 ---

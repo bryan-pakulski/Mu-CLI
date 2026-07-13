@@ -35,6 +35,72 @@ from utils.logger import logger
 from .helpers import _shorten_tool_args
 
 
+# Canonical section order for structured (###-headed) conversation summaries.
+# Used by `_merge_structured_summary` (append-by-section) and
+# `_clip_conversation_summary` (section-aware trimming). The order also
+# encodes trim priority: Task and Open items are the most load-bearing and
+# are trimmed last; Progress is the bulkiest/most-summarizable and is
+# trimmed first.
+_SUMMARY_CANONICAL_ORDER = [
+    "Task",
+    "Progress",
+    "Key decisions",
+    "Current state",
+    "Open items",
+]
+
+# Sections trimmed first (in this order) when the summary exceeds its char
+# budget. Task and Open items are intentionally excluded — they are the
+# shortest, most load-bearing sections and should survive as long as
+# possible. See R2 in documentation/harness-investigation.md (FM-3).
+_SUMMARY_TRIM_ORDER = ["Progress", "Key decisions", "Current state"]
+
+
+def _parse_summary_sections(text: str) -> Dict[str, str]:
+    """Split a structured (``###``-headed) summary into ``{header: body}``.
+
+    Module-level helper shared by `_merge_structured_summary` (append by
+    section) and `_clip_conversation_summary` (section-aware trim) so the
+    two paths agree on what counts as a section.
+    """
+    sections: Dict[str, str] = {}
+    current_header: Optional[str] = None
+    current_lines: List[str] = []
+    for line in text.splitlines():
+        if line.strip().startswith("###"):
+            if current_header is not None:
+                sections[current_header] = "\n".join(current_lines).strip()
+            current_header = line.strip().lstrip("#").strip()
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_header is not None:
+        sections[current_header] = "\n".join(current_lines).strip()
+    return sections
+
+
+def _reassemble_summary_sections(sections: Dict[str, str]) -> str:
+    """Reassemble a ``{header: body}`` map into a single ``###``-headed
+    summary in canonical section order, dropping empty sections."""
+    out_lines: List[str] = []
+    for header in _SUMMARY_CANONICAL_ORDER:
+        body = sections.get(header, "").strip()
+        if body:
+            out_lines.append(f"### {header}")
+            out_lines.append(body)
+            out_lines.append("")
+    # Append any non-canonical sections that exist (future-proofing).
+    for header, body in sections.items():
+        if header in _SUMMARY_CANONICAL_ORDER:
+            continue
+        body = body.strip()
+        if body:
+            out_lines.append(f"### {header}")
+            out_lines.append(body)
+            out_lines.append("")
+    return "\n".join(out_lines).strip()
+
+
 class HistoryMixin:
     """History-summarization methods. Host must supply `history`,
     `summary_anchor`, and `conversation_summary` as instance attributes.
@@ -254,25 +320,8 @@ class HistoryMixin:
             self._clip_conversation_summary()
             return
 
-        def _parse_sections(text: str) -> Dict[str, str]:
-            """Split a structured summary into {header: body} pairs."""
-            sections: Dict[str, str] = {}
-            current_header = None
-            current_lines: List[str] = []
-            for line in text.splitlines():
-                if line.strip().startswith("###"):
-                    if current_header is not None:
-                        sections[current_header] = "\n".join(current_lines).strip()
-                    current_header = line.strip().lstrip("#").strip()
-                    current_lines = []
-                else:
-                    current_lines.append(line)
-            if current_header is not None:
-                sections[current_header] = "\n".join(current_lines).strip()
-            return sections
-
-        existing = _parse_sections(self.conversation_summary or "")
-        incoming = _parse_sections(new_summary)
+        existing = _parse_summary_sections(self.conversation_summary or "")
+        incoming = _parse_summary_sections(new_summary)
 
         # Merge: append new content to existing sections, add new sections.
         for header, body in incoming.items():
@@ -287,35 +336,70 @@ class HistoryMixin:
             else:
                 existing[header] = body
 
-        # Reassemble in a canonical section order to keep the summary
-        # readable across merges.
-        canonical_order = [
-            "Task", "Progress", "Key decisions",
-            "Current state", "Open items",
-        ]
-        out_lines: List[str] = []
-        for header in canonical_order:
-            body = existing.get(header, "").strip()
-            if body:
-                out_lines.append(f"### {header}")
-                out_lines.append(body)
-                out_lines.append("")
-        # Append any non-canonical sections that exist (future-proofing).
-        for header, body in existing.items():
-            if header in canonical_order:
-                continue
-            body = body.strip()
-            if body:
-                out_lines.append(f"### {header}")
-                out_lines.append(body)
-                out_lines.append("")
-
-        self.conversation_summary = "\n".join(out_lines).strip()
+        self.conversation_summary = _reassemble_summary_sections(existing)
         self._clip_conversation_summary()
 
     def _clip_conversation_summary(self, limit: int = 24_000) -> None:
+        """Trim the rolling summary to ``limit`` chars, section-aware.
+
+        Old behavior: keep the LAST ``limit`` chars. Because the canonical
+        section order is ``Task → Progress → … → Open items``, keep-newest
+        clipped from the FRONT — destroying the **Task** section (the
+        original user request) first, the single most load-bearing section.
+
+        New behavior (R2 / FM-3): parse the summary into ``###`` sections
+        and trim in priority order ``Progress → Key decisions → Current
+        state`` (the bulkiest/most-summarizable first), preserving **Task**
+        and **Open items** unless the summary still exceeds the budget with
+        only those two left. Trimming takes from the FRONT of a section's
+        body (oldest progress first) so the newest content in each section
+        survives. Falls back to keep-newest for legacy/unstructured
+        summaries that have no ``###`` headers.
+        """
         if len(self.conversation_summary) <= limit:
             return
+
+        sections = _parse_summary_sections(self.conversation_summary)
+        if not sections:
+            # Legacy/unstructured summary — keep-newest fallback.
+            clipped = self.conversation_summary[-limit:].lstrip()
+            newline_index = clipped.find("\n")
+            if newline_index > 0:
+                clipped = clipped[newline_index + 1 :]
+            self.conversation_summary = (
+                f"[conversation_summary_truncated_to_last_{limit}_chars]\n{clipped}"
+            ).strip()
+            return
+
+        # Trim sections in priority order until under budget. Trim from the
+        # FRONT of a section's body (oldest content first) so the newest
+        # content survives. We re-measure after every cut because the
+        # ``[..._trimmed]`` marker and reassembly change the byte count —
+        # a single-pass ``excess`` calculation does not converge.
+        for section in _SUMMARY_TRIM_ORDER:
+            while len(self.conversation_summary) > limit and sections.get(section):
+                body = sections[section]
+                excess = len(self.conversation_summary) - limit
+                # Cut a bit more than `excess` to absorb the trim marker and
+                # reassembly overhead so the loop converges in few passes.
+                cut = excess + 64
+                if cut >= len(body):
+                    sections[section] = ""
+                else:
+                    trimmed = body[cut:].lstrip()
+                    sections[section] = (
+                        f"[{section}_trimmed_to_fit_budget]\n{trimmed}"
+                        if trimmed
+                        else ""
+                    )
+                self.conversation_summary = _reassemble_summary_sections(sections)
+
+        if len(self.conversation_summary) <= limit:
+            return
+
+        # Still over budget — Task/Open items alone (plus any non-canonical
+        # sections) are too big. Last resort: keep-newest across the whole
+        # reassembled summary so we at least stay within the budget.
         clipped = self.conversation_summary[-limit:].lstrip()
         newline_index = clipped.find("\n")
         if newline_index > 0:
@@ -398,6 +482,20 @@ class HistoryMixin:
             if self.history[idx].get("role") == "user":
                 target_anchor = idx
                 break
+
+        # R3 / FM-8: never advance the anchor past the oldest protected
+        # tool-result of the active turn. This keeps the last K tool
+        # results verbatim in the unsummarized tail even under emergency
+        # compaction with a tiny keep_recent. Budget is instead reclaimed
+        # by `_degrade_oldest_runtime_payload` degrading OLDER content.
+        floor = getattr(self, "_tool_result_floor", 0) or 0
+        if floor > 0:
+            turn_start = getattr(self, "_active_turn_start_index", None)
+            floor_indices = self.tool_result_floor_indices(turn_start, int(floor))
+            if floor_indices:
+                oldest_floor = min(floor_indices)
+                if target_anchor > oldest_floor:
+                    target_anchor = oldest_floor
 
         if target_anchor <= self.summary_anchor:
             return False
@@ -484,7 +582,18 @@ class HistoryMixin:
         """
         if self.summary_anchor > len(self.history):
             self.summary_anchor = 0
-        for message in self.history[self.summary_anchor :]:
+        # R3 / FM-8: never degrade a protected active-turn tool result.
+        floor = getattr(self, "_tool_result_floor", 0) or 0
+        floor_indices = (
+            self.tool_result_floor_indices(
+                getattr(self, "_active_turn_start_index", None), int(floor)
+            )
+            if floor > 0
+            else set()
+        )
+        for msg_idx, message in enumerate(self.history[self.summary_anchor :], start=self.summary_anchor):
+            if msg_idx in floor_indices:
+                continue
             parts = message.get("parts", []) or []
             for part in parts:
                 p_type = part.get("type")

@@ -99,6 +99,11 @@ class BaseNoteStore:
         self.eviction_kind_weights = eviction_kind_weights or dict(
             self.DEFAULT_EVIC_KIND_WEIGHTS
         )
+        # Transient log of entries evicted by `_enforce_limit` (R12, FM-11).
+        # The agent loop drains this into an L3 notice block so the model
+        # learns that a memory it relied on is gone (preventing silent
+        # re-derivation). NOT persisted — `to_dict`/`from_dict` skip it.
+        self.eviction_log: List[str] = []
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -199,6 +204,53 @@ class BaseNoteStore:
         new.updated_at = time.time()
         return (old, new, old_status, new_status)
 
+    def _rank_by_relevance(
+        self,
+        query: str,
+        *,
+        status_set: set[str] | None,
+        kind_set: set[str] | None,
+        exclude_tags: set[str],
+    ) -> List[tuple]:
+        """Score every (filter-passing) entry against `query` WITHOUT
+        mutating hits/updated_at. Returns ``(score, updated_at, entry)``
+        tuples sorted by (score desc, updated_at desc). A non-empty query
+        with no term matches yields score 0 for that entry; an empty
+        query yields score 1 for every passing entry (recency-only).
+
+        Extracted from `search` so `render_summary` can bias L3 injection
+        toward the current turn's topic without the `hits += 1` /
+        `updated_at = now` side effects that `search` applies (R6, FM-7).
+        """
+        terms = [term for term in str(query or "").lower().split() if term]
+        ranked = []
+        for entry in self.entries:
+            # Status filtering
+            if status_set is not None and entry.status not in status_set:
+                continue
+            # Kind filtering
+            if kind_set is not None and entry.kind not in kind_set:
+                continue
+            # Tag exclusion filtering
+            if exclude_tags and any(tag in exclude_tags for tag in entry.tags):
+                continue
+
+            haystack = " ".join(
+                [entry.content, " ".join(entry.tags), entry.source]
+            ).lower()
+            score = 0
+            for term in terms:
+                if term in haystack:
+                    score += 2
+                if term in entry.content.lower():
+                    score += 1
+            if not terms:
+                score = 1
+            ranked.append((score, entry.updated_at, entry))
+
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return ranked
+
     def search(
         self,
         query: str = "",
@@ -230,33 +282,12 @@ class BaseNoteStore:
         # Normalize tags_exclude
         exclude_tags = set(tags_exclude or [])
 
-        terms = [term for term in str(query or "").lower().split() if term]
-        ranked = []
-        for entry in self.entries:
-            # Status filtering
-            if status_set is not None and entry.status not in status_set:
-                continue
-            # Kind filtering
-            if kind_set is not None and entry.kind not in kind_set:
-                continue
-            # Tag exclusion filtering
-            if exclude_tags and any(tag in exclude_tags for tag in entry.tags):
-                continue
-
-            haystack = " ".join(
-                [entry.content, " ".join(entry.tags), entry.source]
-            ).lower()
-            score = 0
-            for term in terms:
-                if term in haystack:
-                    score += 2
-                if term in entry.content.lower():
-                    score += 1
-            if not terms:
-                score = 1
-            ranked.append((score, entry.updated_at, entry))
-
-        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        ranked = self._rank_by_relevance(
+            query,
+            status_set=status_set,
+            kind_set=kind_set,
+            exclude_tags=exclude_tags,
+        )
         results = [entry for score, _, entry in ranked if score > 0][: max(1, limit)]
         for entry in results:
             entry.hits += 1
@@ -282,11 +313,16 @@ class BaseNoteStore:
             : max(1, limit)
         ]
 
-    def render_summary(self, limit: int = 8, include_archived: bool = False) -> str:
-        # Partition by status
-        active_entries = []
-        done_entries = []
-        other_entries = []
+    def render_summary(
+        self,
+        limit: int = 8,
+        include_archived: bool = False,
+        query: str = "",
+    ) -> str:
+        # Partition by status (recency-ordered within each partition).
+        active_entries: List[MemoryEntry] = []
+        done_entries: List[MemoryEntry] = []
+        other_entries: List[MemoryEntry] = []
         for entry in sorted(self.entries, key=lambda e: e.updated_at, reverse=True):
             if entry.status == ACTIVE:
                 active_entries.append(entry)
@@ -297,14 +333,48 @@ class BaseNoteStore:
             else:
                 other_entries.append(entry)
 
-        # Active first, done capped at 2, then other (non-archived)
-        ordered = active_entries[:limit]
-        remaining = limit - len(ordered)
-        if remaining > 0:
-            ordered.extend(done_entries[:min(2, remaining)])
+        ordered: List[MemoryEntry] = []
+        seen: set[int] = set()
+
+        # R6 / FM-7: when a query (the current turn's user text) is given,
+        # bias L3 injection toward relevance hits FIRST, then fill the
+        # remaining slots by the recency partition. Uses the non-mutating
+        # `_rank_by_relevance` so injection doesn't perturb hits/eviction.
+        terms = [t for t in str(query or "").lower().split() if t]
+        if terms:
+            ranked = self._rank_by_relevance(
+                query,
+                status_set=None,
+                kind_set=None,
+                exclude_tags=set(),
+            )
+            relevant = [entry for score, _, entry in ranked if score > 0]
+            for entry in relevant:
+                if len(ordered) >= limit:
+                    break
+                # Respect the archived-exclusion policy even for relevant hits.
+                if entry.status == ARCHIVED and not include_archived:
+                    continue
+                if entry.id in seen:
+                    continue
+                ordered.append(entry)
+                seen.add(entry.id)
+
+        # Fill remaining slots by the recency partition (active first,
+        # done capped at 2, then other non-archived). When there is no
+        # query this branch alone reproduces the original recency-only
+        # ordering exactly.
+        if len(ordered) < limit:
             remaining = limit - len(ordered)
-        if remaining > 0:
-            ordered.extend(other_entries[:remaining])
+            done_cap = min(2, remaining)
+            fill = active_entries + done_entries[:done_cap] + other_entries
+            for entry in fill:
+                if len(ordered) >= limit:
+                    break
+                if entry.id in seen:
+                    continue
+                ordered.append(entry)
+                seen.add(entry.id)
 
         if not ordered:
             return ""
@@ -362,8 +432,31 @@ class BaseNoteStore:
         self.entries.sort(
             key=lambda entry: (self._eviction_score(entry), entry.updated_at)
         )
+        evicted: List[MemoryEntry] = []
         while len(self.entries) > self.max_entries:
-            self.entries.pop(0)
+            evicted.append(self.entries.pop(0))
+        if evicted:
+            # Record a one-line notice per evicted entry (R12, FM-11) so the
+            # agent loop can surface the eviction to the model. Cap the log
+            # to the last 20 evictions to bound memory across long sessions.
+            for entry in evicted:
+                preview = entry.content[:80]
+                self.eviction_log.append(
+                    f"#{entry.id} [{entry.kind}] evicted to make room: {preview}"
+                )
+            if len(self.eviction_log) > 20:
+                del self.eviction_log[: len(self.eviction_log) - 20]
+
+    def drain_eviction_log(self) -> List[str]:
+        """Return and clear pending eviction notices (R12, FM-11).
+
+        The agent loop calls this each turn after rendering L3 memory so
+        eviction events are surfaced exactly once, then forgotten."""
+        if not self.eviction_log:
+            return []
+        pending = list(self.eviction_log)
+        self.eviction_log.clear()
+        return pending
 
 
 class TaskMemoryStore(BaseNoteStore):

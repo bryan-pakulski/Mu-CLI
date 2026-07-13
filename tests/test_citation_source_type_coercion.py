@@ -1,7 +1,7 @@
 """Regression pin for the `/research sources` crash.
 
 The bug: `register_source` was type-annotated as taking `SourceType`,
-but several call sites in `core/tools.py` (web_search HTML scrape,
+but several call sites in `mu/tools/research/handlers.py` (web_search HTML scrape,
 InstantAnswer fallback) passed plain strings (`"web"`). The string
 landed in storage verbatim. Later `/research sources` did
 `source.source_type.value` and crashed with

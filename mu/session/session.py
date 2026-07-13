@@ -87,6 +87,14 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self._pending_user_text = ""
+        # Per-turn dedup for skill auto-expansion banners: which skills we
+        # already announced for the current `_pending_user_text`, so a
+        # re-assembly of the system prompt (retry / re-inject) doesn't
+        # double-print. Reset when the user text changes. Only the
+        # `announce=True` path (real turn assembly) touches this — the
+        # `/memory` size-measurement path leaves it alone.
+        self._skills_announced_text: str = ""
+        self._skills_announced: set[str] = set()
         # One-shot system-prompt briefings queued by load/switch commands.
         # Drained at the top of every agent turn so the model knows it
         # just resumed an in-flight course / feature / session and can
@@ -610,14 +618,26 @@ class Session:
 
         return build_workspace_context_files(self)
 
-    def _build_skills_block(self) -> str:
+    def _build_skills_block(self, *, announce: bool = False) -> str:
         """LAYER 1B — render the installed skills (from `mu/skills/`,
         `~/.mu/skills/`, and `<workspace>/.mu/skills/`) into a labelled
         system-prompt block. Capped by `skills_max_chars` (default 6144).
         Mode is controlled by `skills_mode` (`"compact"` default).
+
+        When `announce` is True (the real per-turn system-prompt assembly
+        path), every skill whose `trigger` regex matches the current
+        user message prints the same `🎯 SKILL ACTIVE` banner the
+        `invoke_skill` tool uses — so trigger-regex auto-expansion is
+        visible, not silent. The `/memory` size-measurement path calls
+        this with `announce=False` (the default) and never banners.
         """
         try:
-            from mu.skills import discover_skills, render_skills_block
+            from mu.skills import (
+                announce_skill,
+                discover_skills,
+                match_trigger,
+                render_skills_block,
+            )
         except ImportError:
             return ""
         raw = self.variables.get("skills_max_chars", 6144)
@@ -640,9 +660,56 @@ class Session:
         if mode not in {"compact", "full"}:
             mode = "compact"
         user_text = str(getattr(self, "_pending_user_text", "") or "")
+
+        # Trigger-regex auto-expansion is a compact-mode concept (in "full"
+        # mode every body is already inlined, so there's no hidden
+        # activation to surface). Announce matched skills once per turn.
+        if announce and mode == "compact" and user_text:
+            try:
+                self._announce_auto_expanded_skills(skills, user_text, announce_skill)
+            except Exception:
+                logger.debug("skill auto-expand banner failed", exc_info=True)
+
         return render_skills_block(
             skills, budget=budget, user_text=user_text, mode=mode
         )
+
+    def _announce_auto_expanded_skills(self, skills, user_text, announce_skill) -> None:
+        """Print the activation banner for each skill whose trigger regex
+        matches `user_text`, deduped per turn so a re-injected system
+        prompt doesn't double-print. Also bumps a per-skill
+        `auto_expansions` counter on `tool_stats` so `/stats` can audit
+        trigger effectiveness alongside explicit `invoke_skill` calls."""
+        if user_text != self._skills_announced_text:
+            self._skills_announced_text = user_text
+            self._skills_announced = set()
+        ui = getattr(self, "ui", None)
+        stats = getattr(self, "tool_stats", None)
+        from mu.skills import match_trigger
+
+        for skill in skills:
+            if not match_trigger(skill, user_text):
+                continue
+            if skill.name in self._skills_announced:
+                continue
+            self._skills_announced.add(skill.name)
+            announce_skill(ui, skill.name, via="trigger")
+            # Defensive, optional stats bump — never let accounting break
+            # the turn.
+            if isinstance(stats, dict):
+                try:
+                    sk_bucket = stats.setdefault(
+                        "skills", {}
+                    ).setdefault(
+                        skill.name,
+                        {"invocations": 0, "auto_expansions": 0, "last_used_at": None},
+                    )
+                    sk_bucket.setdefault("auto_expansions", 0)
+                    sk_bucket.setdefault("invocations", 0)
+                    sk_bucket.setdefault("last_used_at", None)
+                    sk_bucket["auto_expansions"] = int(sk_bucket["auto_expansions"]) + 1
+                except Exception:
+                    pass
 
     def _inject_hierarchical_context(self, system_prompt: str) -> str:
         """Layered system-prompt assembly. Body moved to
@@ -999,6 +1066,14 @@ class Session:
         self._retryable_failure_counts[key] = self._retryable_failure_counts.get(key, 0) + 1
         count = self._retryable_failure_counts[key]
 
+        # Expose the latest retryable error_code so the agent loop can feed
+        # a synthetic `retryable~<error_code>` fingerprint into loop
+        # detection (R8, FM-6). Retryable-failure storms use different
+        # args each call, so their normal tool fingerprints never repeat
+        # and pattern-based loop detection cannot catch them. A dedicated
+        # retryable-fingerprint history lane closes that gap.
+        self._last_retryable_error_code = error_code
+
         if self.ui:
             if count >= 3:
                 self.ui.show_error(
@@ -1063,6 +1138,19 @@ class Session:
         from mu.agent.loop_detection import is_repeated_tool_sequence
 
         return is_repeated_tool_sequence(sequence_history, repeat_threshold)
+
+    @staticmethod
+    def _is_periodic_sequence(
+        sequence_history: list[str],
+        *,
+        max_period: int = 6,
+        min_repeats: int = 2,
+    ) -> bool:
+        from mu.agent.loop_detection import is_periodic_sequence
+
+        return is_periodic_sequence(
+            sequence_history, max_period=max_period, min_repeats=min_repeats
+        )
 
     def _provider_generate_with_retry(
         self,

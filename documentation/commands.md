@@ -89,8 +89,12 @@ workflow, tools, and quality bar.
 | Command | Description |
 | --- | --- |
 | `/memory status` | Show task memory + scratchpad stats and per-layer context fill (with global-cap total). |
-| `/memory list <target>` | Inspect a store or a layer. Targets: `all`, `task`, `scratchpad`, `L1`, `L1B`, `L2`, `L3`, `L4`, `L4B`, `L5`. Tab-completes. |
+| `/memory list <target>` | Inspect a store or a layer. Targets: `all`, `task`, `scratchpad`, `L0`, `L1`, `L1B`, `L2`, `L3`, `L5` (L4/L4B have no inspectable slab). Tab-completes. |
+| `/memory list saved` | List cross-session memory snapshots saved with `/memory save`. |
 | `/memory clear <target>` | Wipe a store. Targets: `task`, `scratchpad`, `all`. |
+| `/memory clear saved` | Delete every saved memory snapshot. |
+| `/memory save <name>` | Snapshot task memory + scratchpad to a file under `~/.mucli/memory/` for reuse across sessions. |
+| `/memory load <name>` | Restore a saved snapshot into the current session's task memory + scratchpad. |
 
 The collation buffer is drained by the model via the `flush` tool — there is no user-facing flush command.
 
@@ -139,7 +143,7 @@ at runtime. See [configuration.md](configuration.md) for the full list.
 | Command | Description |
 | --- | --- |
 | `/set <key> <value>` | Set a session variable. Type is validated/cast per schema. |
-| `/set layer <id> <tokens>` | Shortcut for per-layer budgets — value is in **tokens** (matching the unit shown in `/memory`). Converted to chars at 4:1 internally. IDs autocomplete. L5 has no budget (tighten `context_token_limit` instead). |
+| `/set layer <id> <tokens>` | Shortcut for per-layer budgets — value is in **tokens** (matching the unit shown in `/memory`). Converted to chars at 4:1 internally. IDs autocomplete. Valid IDs: `L1`, `L1B`, `L2`, `L3`, `L4B`. `L4` and `L5` have no per-layer budget (tighten `context_token_limit` instead). |
 | `/get <key>` | Print the current value of a variable. |
 | `/get layer [<id>]` | Show one or all layer budgets in tokens (with underlying char value). |
 | `/unset <key>` | Restore a variable to its default. |
@@ -161,21 +165,21 @@ for the engine model.
 | `/feature exit` (alias: `unload`) | Clear the active feature without deleting it. |
 | `/feature status` | Status of the active feature. |
 | `/feature phases` | List phases of the active feature. |
-| `/feature create` | Engine-driven creation of the next planning artifact. |
-| `/feature show <task-id>` | Show a specific task. |
-| `/feature move <task-id> <phase>` | Move a task between phases. |
+| `/feature create <plan\|phase\|task> <args>` | Engine-driven creation of the next planning artifact. `plan <name>`, `phase <title> \| <goal>`, or `task <phase_id> \| <title> \| <overview> \| <exit1;exit2>`. |
+| `/feature show <board\|execution\|reviews>` | Render a view of the active feature (default `board`). |
+| `/feature move <task-id> <status>` | Move a task to a new status (`completed` auto-attaches the task's exit criteria). |
 | `/feature block <task-id> <reason>` | Mark a task blocked. |
-| `/feature review` | Enter review loop for completed tasks. |
+| `/feature review auto` / `/feature review <task-id> <summary>` | Auto-review all completed tasks, or review one task with a summary. |
 | `/feature archive <task-id>` | Archive a completed-and-reviewed task. |
 | `/feature monitor` | Watch progress in real time. |
 | `/feature help` | Inline help. |
 
 ## Teacher mode
 
-`/teach` manages teacher-mode courses. Works from any mode (e.g. for
-`/teach status` peeks); the agent only drives lessons while `/mode
-teacher` is active. See [teacher_mode.md](teacher_mode.md) for the
-engine model.
+`/teach` (alias `/t`) manages teacher-mode courses. Works from any mode
+(e.g. for `/teach status` peeks); the agent only drives lessons while
+`/mode teacher` is active. See [teacher_mode.md](teacher_mode.md) for
+the engine model.
 
 | Subcommand | Description |
 | --- | --- |
@@ -214,6 +218,7 @@ engine model.
 | --- | --- |
 | `/stats` | Runtime token counts, cost, mode/toggles, plus per-session tool & skill usage (top tools by call count + avg latency, every skill invoked, failed-call tally by error code). |
 | `/stats clear` | Wipe the per-session usage tracker (counts, latencies, skill invocations, errors). Lifetime token counts and cost are kept — they represent real spend, not metadata. |
+| `/verbose [on\|off\|toggle]` | Toggle verbose rendering. When OFF (default) the UI hides tool-arg dumps, per-turn token lines, result previews, the compaction notice, and the user-echo panel; the compact `→ tool_name` indicator stays. |
 | `/help`, `/h` | List commands available in this session. |
 
 ## Provider-specific

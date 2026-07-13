@@ -157,7 +157,7 @@ class CitationManager:
             return self._source_urls[url]
 
         # Coerce string → enum at the boundary. The type hint says
-        # `SourceType` but several call sites in core/tools.py pass
+        # `SourceType` but several call sites in mu/tools/research/handlers.py pass
         # plain strings ("web", "academic", ...) — those used to land
         # in storage verbatim and crash any consumer that did
         # `source.source_type.value`. Normalize here so every Source

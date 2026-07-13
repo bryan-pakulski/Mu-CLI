@@ -107,7 +107,12 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
     Returns (system_prompt, messages) — unchanged if within budget,
     or with rebuilt messages after emergency compaction.
     """
-    from mu.session.budgets import resolve_context_limit, resolve_response_reserve
+    from mu.session.budgets import (
+        resolve_context_limit,
+        resolve_response_reserve,
+        resolve_keep_recent,
+        resolve_tool_result_floor,
+    )
 
     context_limit = resolve_context_limit(session)
     response_reserve = resolve_response_reserve(session)
@@ -128,10 +133,13 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
         total, context_limit, response_reserve, max_prompt, overshoot,
     )
     emergency_budget = max(512, max_prompt - prompt_tokens)
+    # R3 / FM-8: even emergency compaction must respect the per-turn
+    # tool-result floor so tool results just received stay verbatim.
+    session.session_manager._tool_result_floor = resolve_tool_result_floor(session)
     try:
         session.session_manager.roll_history_summary_to_token_budget(
             int(emergency_budget * 0.85),
-            keep_recent=2,
+            keep_recent=resolve_keep_recent(session, emergency=True),
             provider=session.provider,
         )
         session._compaction_watermark = len(session.session_manager.history)
@@ -346,6 +354,9 @@ def run_turn(session, text):
     session._hook_abort_requested = False
     session._hook_abort_reason = None
     session.sync_runtime_state()
+    # Compute the active agent mode once — reused by scratchpad handling
+    # below and by the mode-specific prompt builders that follow.
+    active_mode = str(session.variables.get("agent_mode", "default")).lower()
     if session.variables.get("scratchpad_enabled", True):
         session.turn_scratchpad.max_entries = max(
             1,
@@ -355,15 +366,31 @@ def run_turn(session, text):
                 )
             ),
         )
-        # Only clear scratchpad at turn start when persistence is off.
-        # When scratchpad_persist_across_turns=True, scratchpad notes
-        # survive across turns so the agent can build on prior plans.
-        if not session.variables.get("scratchpad_persist_across_turns", False):
+        # Scratchpad persistence (R12, FM-12): in loop/feature modes the
+        # scratchpad defaults to persisting across turns so cross-turn
+        # plans survive. In default/teacher modes it is cleared at turn
+        # start unless the user explicitly set the persist flag. An
+        # explicit True always persists; loop/feature always persists
+        # (mode wins). Default mode with entries present emits a clear
+        # notice so the human knows the plan was wiped.
+        _explicit_persist = bool(
+            session.variables.get("scratchpad_persist_across_turns", False)
+        )
+        _should_persist = _explicit_persist or active_mode in ("loop", "feature")
+        if not _should_persist:
+            _had_entries = len(session.turn_scratchpad.entries) > 0
             session.turn_scratchpad.clear()
+            if _had_entries:
+                _notice = (
+                    "Turn scratchpad auto-cleared at turn start "
+                    "(scratchpad_persist_across_turns is off in default mode)."
+                )
+                logger.info(_notice)
+                if session.ui:
+                    session.ui.show_info(_notice)
 
     parts = list(session.staged_files)
     effective_text = text
-    active_mode = str(session.variables.get("agent_mode", "default")).lower()
     if text and active_mode == "feature":
         effective_text = session._build_feature_mode_prompt(text)
     elif text and active_mode == "loop":
@@ -480,9 +507,12 @@ def run_turn(session, text):
             base_system_prompt += profile_block
     if workspace_context:
         base_system_prompt += f"\n\n{workspace_context}"
+    from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
+
+    session.session_manager._tool_result_floor = resolve_tool_result_floor(session)
     session.session_manager.roll_history_summary_to_token_budget(
         session._compaction_token_budget(),
-        keep_recent=12,
+        keep_recent=resolve_keep_recent(session),
         provider=session.provider,
     )
     # Record history length as the compaction watermark.  The
@@ -510,6 +540,12 @@ def run_turn(session, text):
     # Store on session so send_message's finally block can call _cleanup_protected
     # after the turn ends (unprotect the turn prompt if it's not otherwise worthy).
     session._current_turn_start_index = turn_start_index
+    # Mirror onto the session manager so the compaction paths can compute
+    # the per-turn tool-result floor (R3, FM-8).
+    session.session_manager._active_turn_start_index = turn_start_index
+    # Reset the per-turn oversized-message summary cache (R4, FM-2) so a
+    # new turn doesn't reuse a prior turn's chunk summaries.
+    session._oversized_message_summaries = {}
     # Mark important user messages as protected from compaction.
     # The turn's starting prompt is always protected during this turn.
     session.session_manager._maybe_protect(turn_start_index, "user", effective_text, is_turn_prompt=True)
@@ -528,6 +564,14 @@ def run_turn(session, text):
     provider_bad_request_retried = False
     exact_tool_sequence_history: list[str] = []
     pattern_tool_sequence_history: list[str] = []
+    # Dedicated lane for retryable-failure storms (R8, FM-6). Each
+    # iteration that hits a retryable failure appends a synthetic
+    # `retryable~<error_code>` fingerprint here; `is_repeated_tool_sequence`
+    # over this list catches storms that span iterations with different
+    # tool args (which evade both the per-iteration escalation threshold
+    # and the normal pattern lane, since non-search tools like read_file
+    # produce per-arg-distinct fingerprints).
+    retryable_tool_sequence_history: list[str] = []
     loop_detection_enabled = bool(
         session.variables.get("loop_detection_enabled", True)
     )
@@ -587,25 +631,50 @@ def run_turn(session, text):
         iteration_tool_exact_fingerprints: list[str] = []
         iteration_tool_pattern: list[str] = []
         _max_retryable_count_this_iter = 0
+        # Distinct retryable error_codes seen this iteration, collected so
+        # the cross-reference block below can append synthetic
+        # `retryable~<code>` fingerprints to the retryable loop-detection
+        # lane (R8). A set is enough — one marker per distinct code per
+        # iteration keeps the lane sensitive to storms without inflating
+        # a single transient blip into a false positive.
+        _iteration_retryable_codes: set[str] = set()
 
         try:
             dynamic_system_prompt = base_system_prompt
             if session.variables.get("memory_enabled", True):
-                session.task_memory.max_entries = max(
-                    1,
-                    int(
-                        session.variables.get(
-                            "memory_max_entries", session.task_memory.max_entries
-                        )
-                    ),
+                active_mode_for_mem = str(
+                    session.variables.get("agent_mode", "default")
+                ).lower()
+                # Mode-aware memory floor (R12): loop/feature modes do more
+                # multi-step work and benefit from a larger in-task memory
+                # cap. Raise the effective max_entries floor in those modes
+                # without lowering a user's explicit higher value.
+                _mem_cap = int(
+                    session.variables.get(
+                        "memory_max_entries", session.task_memory.max_entries
+                    )
                 )
+                if active_mode_for_mem in ("loop", "feature"):
+                    _mem_cap = max(_mem_cap, 128)
+                session.task_memory.max_entries = max(1, _mem_cap)
                 memory_summary = session.task_memory.render_summary(
-                    limit=int(session.variables.get("memory_summary_limit", 8))
+                    limit=int(session.variables.get("memory_summary_limit", 8)),
+                    query=effective_text,
                 )
                 if memory_summary:
                     dynamic_system_prompt += (
                         "\n\nLAYER 3 — Persisted working memory snapshot:\n"
                         f"{memory_summary}"
+                    )
+                # Surface eviction notices to the model (R12, FM-11) so it
+                # knows a memory it relied on is gone rather than silently
+                # re-deriving it. Drained once per turn.
+                _mem_evictions = session.task_memory.drain_eviction_log()
+                if _mem_evictions:
+                    dynamic_system_prompt += (
+                        "\n\nLAYER 3 — Memory eviction notices (these entries "
+                        "were removed to make room; do not assume they still "
+                        "exist):\n- " + "\n- ".join(_mem_evictions)
                     )
             if session.variables.get("scratchpad_enabled", True):
                 scratchpad_summary = session.turn_scratchpad.render_summary(limit=8)
@@ -613,6 +682,12 @@ def run_turn(session, text):
                     dynamic_system_prompt += (
                         "\n\nLAYER 3 — Turn scratchpad snapshot:\n"
                         f"{scratchpad_summary}"
+                    )
+                _scratch_evictions = session.turn_scratchpad.drain_eviction_log()
+                if _scratch_evictions:
+                    dynamic_system_prompt += (
+                        "\n\nLAYER 3 — Scratchpad eviction notices:\n- "
+                        + "\n- ".join(_scratch_evictions)
                     )
 
             dynamic_system_prompt, messages = _preflight_context_check(
@@ -1142,6 +1217,14 @@ def run_turn(session, text):
                 )
                 if _retryable_count > _max_retryable_count_this_iter:
                     _max_retryable_count_this_iter = _retryable_count
+                # Collect the error_code for the retryable loop-detection
+                # lane (R8). The announcer stashes the latest code on the
+                # session; we capture it here per failed call so multiple
+                # distinct codes in one iteration each contribute a marker.
+                if _retryable_count > 0:
+                    _code = getattr(session, "_last_retryable_error_code", "")
+                    if _code:
+                        _iteration_retryable_codes.add(str(_code))
                 # --- Collation Logic ---
                 is_flush = part.tool_name == "flush"
                 should_collate = (
@@ -1164,15 +1247,42 @@ def run_turn(session, text):
                         )
                 elif should_collate:
                     # Don't collate if there was an error
+                    collation_cache_key = None
                     if raw_result and not str(raw_result).startswith("Error"):
+                        # Cache the raw result BEFORE deferring it into the
+                        # collation buffer. The buffer's _enforce_limit can
+                        # drop the oldest entry (max_bytes) before the model
+                        # calls flush — without this cache entry, that raw
+                        # payload would be unrecoverable and the model would
+                        # have to re-read the file (the exact redundant-read
+                        # loop collation exists to prevent). force=True
+                        # caches even tools not in _CACHEABLE_TOOLS (e.g.
+                        # web_search, read_document) so every collated
+                        # read-only result has a recall() path. See R11
+                        # (FM-4).
+                        try:
+                            collation_cache_key = session.tool_result_cache.store(
+                                call_id=getattr(part, "tool_call_id", ""),
+                                tool_name=part.tool_name,
+                                result=source_result,
+                                force=True,
+                            )
+                        except Exception:
+                            collation_cache_key = None
                         session.collation_buffer.add(
                             part.tool_name, part.tool_args, raw_result
                         )
                         count = len(session.collation_buffer.entries)
+                        cache_hint = (
+                            f" [cache:{collation_cache_key}]"
+                            if collation_cache_key
+                            else ""
+                        )
                         raw_result = (
                             f"Stored '{part.tool_name}' result in collation buffer. "
                             f"{count} item(s) currently pending. "
                             "Continue gathering or call 'flush' when ready to receive all context."
+                            f"{cache_hint}"
                         )
                     if session.ui and active_mode != "loop":
                         session.ui.show_info(f"  [Collated: {part.tool_name}]")
@@ -1244,13 +1354,21 @@ def run_turn(session, text):
                 # {"collated": True, "source_char_count": 4500} which is
                 # useless to recall().  source_result has the actual file
                 # content / search output the model needs to recover.
+                #
+                # If the collation branch already cached this result (and
+                # stamped the key into the placeholder), reuse that key so
+                # the part's cache_key matches what the model saw — and skip
+                # the second store (idempotent, but wasteful).
                 cache_key = None
                 try:
-                    cache_key = session.tool_result_cache.store(
-                        call_id=getattr(part, "tool_call_id", ""),
-                        tool_name=part.tool_name,
-                        result=source_result,
-                    )
+                    if should_collate and collation_cache_key:
+                        cache_key = collation_cache_key
+                    else:
+                        cache_key = session.tool_result_cache.store(
+                            call_id=getattr(part, "tool_call_id", ""),
+                            tool_name=part.tool_name,
+                            result=source_result,
+                        )
                 except Exception:
                     pass
 
@@ -1315,9 +1433,33 @@ def run_turn(session, text):
                     pattern_tool_sequence_history,
                     repeat_threshold=loop_detection_repeat_threshold,
                 )
+                # Periodic (non-consecutive) cycle detection on the pattern
+                # lane (R7, FM-6). Catches read-loops where the agent
+                # alternates between distinct iteration shapes — e.g.
+                # [read a, edit, read a, edit] (period 2) — which never
+                # produce `repeat_threshold` consecutive identical entries.
+                # Path-aware collapsing makes multi-file read cycles
+                # collapse to a repeated fingerprint in the pattern lane.
+                pattern_periodic_detected = (
+                    not pattern_loop_detected
+                    and session._is_periodic_sequence(
+                        pattern_tool_sequence_history,
+                        max_period=int(
+                            session.variables.get(
+                                "loop_detection_periodic_max_period", 6
+                            )
+                        ),
+                        min_repeats=2,
+                    )
+                )
 
-                if exact_loop_detected or pattern_loop_detected:
-                    loop_kind = "exact" if exact_loop_detected else "pattern"
+                if exact_loop_detected or pattern_loop_detected or pattern_periodic_detected:
+                    if exact_loop_detected:
+                        loop_kind = "exact"
+                    elif pattern_loop_detected:
+                        loop_kind = "pattern"
+                    else:
+                        loop_kind = "periodic"
                     warning_text = (
                         "Loop detection triggered: repeated tool-call sequence "
                         f"detected {loop_detection_repeat_threshold}x ({loop_kind})."
@@ -1348,12 +1490,75 @@ def run_turn(session, text):
                     )[:-1]
                     continue
 
+            # --- Retryable-failure cross-reference (R8, FM-6) -----------
+            # Retryable storms where the model varies args each call (e.g.
+            # read_file against f1.py, f2.py, f3.py, all returning a
+            # retryable not_found envelope) evade both the normal pattern
+            # lane (read_file isn't pattern-sensitive, so each filename
+            # hashes to a distinct fingerprint) and the per-iteration
+            # escalation below (which counts within a single iteration).
+            # Feed a synthetic `retryable~<error_code>` fingerprint per
+            # distinct code per iteration into its own history lane; a
+            # storm spanning `loop_detection_repeat_threshold` iterations
+            # trips `is_repeated_tool_sequence` here and breaks the loop.
+            if (
+                loop_detection_enabled
+                and _iteration_retryable_codes
+            ):
+                for _code in sorted(_iteration_retryable_codes):
+                    retryable_tool_sequence_history.append(f"retryable~{_code}")
+                retryable_loop_detected = session._is_repeated_tool_sequence(
+                    retryable_tool_sequence_history,
+                    repeat_threshold=loop_detection_repeat_threshold,
+                )
+                if retryable_loop_detected:
+                    warning_text = (
+                        "Loop detection triggered: repeated retryable-failure "
+                        f"sequence detected {loop_detection_repeat_threshold}x "
+                        "(retryable)."
+                    )
+                    if session.ui:
+                        session.ui.show_error(warning_text)
+                    logger.warning(warning_text)
+                    retryable_break_msg = {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "LOOP DETECTED: You hit the same retryable error "
+                                    f"{loop_detection_repeat_threshold} iterations in a "
+                                    "row while varying arguments. The tool will keep "
+                                    "failing this way. You MUST break out now. Do NOT "
+                                    "call the failing tool again with slightly different "
+                                    "arguments. Re-read the target with read_file to "
+                                    "confirm exact current state, take a materially "
+                                    "different approach, or call raise_blocker with "
+                                    "exact missing requirements."
+                                ),
+                            }
+                        ],
+                    }
+                    session.session_manager.history.append(retryable_break_msg)
+                    session.session_manager.save_history(session.folder_context)
+                    messages = session._build_messages_from_history(
+                        session._prepare_runtime_history(turn_start_index),
+                        {"role": "system", "parts": []},
+                    )[:-1]
+                    _max_retryable_count_this_iter = 0
+                    continue
+
             # Retryable-failure escalation: if any tool hit a retryable
             # error code too many times this iteration (even with different
             # args, which evades pattern-based loop detection above),
             # inject a corrective message telling the model to stop
             # retrying the same failing tool and try a different approach.
-            _RETRYABLE_ESCALATION_THRESHOLD = 5
+            # Threshold is configurable via `retryable_escalation_threshold`
+            # (default 3 — lowered from 5 so a same-(tool,error) storm
+            # escalates sooner; R8).
+            _RETRYABLE_ESCALATION_THRESHOLD = int(
+                session.variables.get("retryable_escalation_threshold", 3)
+            )
             if _max_retryable_count_this_iter >= _RETRYABLE_ESCALATION_THRESHOLD:
                 escalation_text = (
                     f"RETRYABLE FAILURE ESCALATION: A tool has hit the same retryable "

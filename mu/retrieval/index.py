@@ -14,6 +14,12 @@ SYMBOL_RE = re.compile(
     re.MULTILINE,
 )
 
+# Cap on how much of a file's content is held in-memory for query-aware
+# snippet windowing (R9). Files larger than this keep the head-snippet
+# fallback. The cap bounds index memory while still covering typical
+# source files (where relevant code lower in the file surfaces).
+_CONTENT_SNIPPET_CAP = 262_144  # 256 KB
+
 
 def _tokenize(text: str) -> list[str]:
     tokens = []
@@ -33,6 +39,10 @@ class IndexedDocument:
     symbols: set[str] = field(default_factory=set)
     token_counts: Counter = field(default_factory=Counter)
     snippet: str = ""
+    # Capped raw content retained for query-aware snippet windowing (R9).
+    # Empty when the file exceeds `_CONTENT_SNIPPET_CAP`, in which case
+    # `snippet` (the file head) is used as a fallback.
+    content: str = ""
 
 
 class SemanticCodeIndex:
@@ -80,7 +90,21 @@ class SemanticCodeIndex:
         filters = filters or {}
         query_tokens = _tokenize(query)
         query_counts = Counter(query_tokens)
-        query_symbols = {token for token in query_tokens if token in set(query_tokens)}
+        # R9: query_symbols must be the subset of query tokens that are
+        # ACTUAL symbols in the indexed codebase, not `set(query_tokens)`
+        # (which is an always-true predicate that double-counted every
+        # lexical hit as a symbol hit). Intersecting with a pre-built
+        # symbol table (union of every doc's `symbols`) means symbol
+        # overlap only fires for tokens that resolve to real def/class
+        # names — preventing the lexical+symbol double count.
+        if query_tokens:
+            known_symbols: set[str] = set()
+            for doc in self.documents.values():
+                if doc.symbols:
+                    known_symbols |= doc.symbols
+            query_symbols = {t for t in set(query_tokens) if t in known_symbols}
+        else:
+            query_symbols = set()
         changed_paths = self._git_changed_paths(self.workspace_root)
         candidates = []
         now = time.time()
@@ -128,6 +152,22 @@ class SemanticCodeIndex:
             )
 
         ranked = sorted(candidates, key=lambda item: item["score"], reverse=True)[: max(1, int(top_k or 5))]
+
+        # R9: query-aware snippet windowing. For each ranked result, if the
+        # doc retained capped content, replace the file-head snippet with a
+        # window centered on the line with the highest query-token hit
+        # count. This surfaces relevant code that lives deep in a file
+        # instead of always previewing lines 1–12. Falls back to the head
+        # snippet when there is no content (file > cap) or no match.
+        if query_tokens:
+            for item in ranked:
+                doc = self.documents.get(item["path"])
+                if doc is None or not doc.content:
+                    continue
+                windowed = self._query_aware_snippet(doc, query_tokens)
+                if windowed:
+                    item["snippet"] = windowed
+
         return {
             "query": query,
             "top_k": max(1, int(top_k or 5)),
@@ -135,6 +175,44 @@ class SemanticCodeIndex:
             "latency_ms": round(self._last_refresh_latency_ms, 3),
             "results": ranked,
         }
+
+    def _query_aware_snippet(self, doc: "IndexedDocument", query_tokens: list[str]) -> str:
+        """Return a ~12-line window around the line with the highest
+        query-token hit count, or "" if no line matches.
+
+        Bounded: scans at most 4000 lines and 12 chars-deep token checks.
+        Output capped at 1200 chars to match the head-snippet budget.
+        """
+        content = doc.content
+        if not content or not query_tokens:
+            return ""
+        lowered_tokens = {t for t in query_tokens if len(t) >= 2}
+        if not lowered_tokens:
+            return ""
+        lines = content.splitlines()
+        best_idx = -1
+        best_score = 0
+        scan_limit = min(len(lines), 4000)
+        for i in range(scan_limit):
+            low = lines[i].lower()
+            # Cheap early-exit: only score lines mentioning any token.
+            score = 0
+            for t in lowered_tokens:
+                if t in low:
+                    score += 1
+            if score > best_score:
+                best_score = score
+                best_idx = i
+                if score == len(lowered_tokens):
+                    break  # perfect line — stop scanning
+        if best_idx < 0 or best_score == 0:
+            return ""
+        start = max(0, best_idx - 3)
+        end = min(len(lines), best_idx + 9)
+        window = "\n".join(lines[start:end])
+        if len(window) > 1200:
+            window = window[:1197] + "..."
+        return window
 
     def _collect_changed_files(self, folder_context, include_deleted: bool = True) -> dict[str, Any]:
         start = time.perf_counter()
@@ -182,6 +260,8 @@ class SemanticCodeIndex:
         tokens = Counter(_tokenize(content))
         lines = [line.rstrip() for line in content.splitlines() if line.strip()]
         snippet = "\n".join(lines[:12])[:1200]
+        # Retain capped content for query-aware snippet windowing (R9).
+        stored_content = content[:_CONTENT_SNIPPET_CAP] if content else ""
         try:
             mtime = os.path.getmtime(path)
             size = os.path.getsize(path)
@@ -195,6 +275,7 @@ class SemanticCodeIndex:
             symbols=symbols,
             token_counts=tokens,
             snippet=snippet,
+            content=stored_content,
         )
 
     def _workspace_root(self, folder_context=None, filters: dict[str, Any] | None = None) -> str:

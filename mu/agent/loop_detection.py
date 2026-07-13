@@ -93,14 +93,37 @@ _PATTERN_SENSITIVE_TOOLS = frozenset(
     }
 )
 
+# Pattern-sensitive tools whose string args are FILE PATHS rather than
+# free-form queries. For these, distinct paths collapse to a ``"path:*"``
+# placeholder so a multi-file read cycle (read_file f1 → f2 → f3 → f4 →
+# f1 → …) collapses to one repeated fingerprint in the pattern lane and
+# becomes detectable. Without this, non-pattern-sensitive read tools
+# hash each filename to a distinct fingerprint and read-loops evade
+# detection entirely (FM-6). The exact-fingerprint lane is unaffected,
+# so legitimate distinct reads still fingerprint precisely there.
+# See R7 in documentation/harness-investigation.md.
+_PATH_SENSITIVE_TOOLS = frozenset(
+    {
+        "read_file",
+        "get_chunk",
+        "list_dir",
+        "search_references",
+    }
+)
+
 
 def _collapse_string(val: str, tool_name: str) -> str:
     """Collapse string for pattern fingerprint. For pattern-sensitive
     tools (search/query), all strings become ``"str:*"`` so repeated
-    searches with different queries collide. For all other tools,
-    strings get a short SHA1 hash prefix so different content produces
-    different fingerprints — legitimate sequential calls (e.g.
-    ``bash`` with different commands) won't trip pattern detection."""
+    searches with different queries collide. For path-sensitive read
+    tools (read_file/get_chunk/list_dir/search_references), all path
+    strings become ``"path:*"`` so a multi-file read cycle collapses to
+    one repeated fingerprint. For all other tools, strings get a short
+    SHA1 hash prefix so different content produces different fingerprints
+    — legitimate sequential calls (e.g. ``bash`` with different commands)
+    won't trip pattern detection."""
+    if tool_name in _PATH_SENSITIVE_TOOLS:
+        return "path:*"
     if tool_name in _PATTERN_SENSITIVE_TOOLS:
         return "str:*"
     return "str:" + hashlib.sha1(val.encode("utf-8")).hexdigest()[:8]
@@ -204,9 +227,54 @@ def is_repeated_tool_sequence(
     return len(set(tail)) == 1
 
 
+def is_periodic_sequence(
+    sequence_history: List[str],
+    *,
+    max_period: int = 6,
+    min_repeats: int = 2,
+) -> bool:
+    """Detect a *periodic* (non-consecutive) repeat in the tail of
+    `sequence_history` — any repeating sub-sequence of period
+    ``2..max_period`` repeated at least ``min_repeats`` times.
+
+    This complements `is_repeated_tool_sequence` (which only catches
+    period-1 / consecutive-identical repeats). It catches read-loops
+    where the agent alternates between two or three distinct iteration
+    shapes, e.g. ``[A, B, A, B, A, B]`` (period 2) or
+    ``[A, B, C, A, B, C]`` (period 3) — patterns that never produce
+    ``repeat_threshold`` consecutive identical entries but are still
+    stuck cycles (FM-6, R7).
+
+    Period 1 is deliberately excluded: the consecutive detector owns
+    that case with its own (higher) threshold, so this function won't
+    fire on a 2-of-a-kind that the consecutive detector would reject.
+    """
+    n = len(sequence_history)
+    if n < 2 * 2:  # need at least period-2 × min_repeats=2 = 4 entries
+        return False
+    for period in range(2, max_period + 1):
+        if n < period * min_repeats:
+            continue
+        # Candidate repeating block = the last `period` entries.
+        block = sequence_history[n - period : n]
+        if not all(block):
+            continue
+        # Verify the preceding (min_repeats - 1) blocks match.
+        ok = True
+        for r in range(1, min_repeats):
+            seg = sequence_history[n - period * (r + 1) : n - period * r]
+            if seg != block:
+                ok = False
+                break
+        if ok:
+            return True
+    return False
+
+
 __all__ = [
     "coarse_tool_args",
     "tool_call_fingerprint",
     "track_tool_for_loop_detection",
     "is_repeated_tool_sequence",
+    "is_periodic_sequence",
 ]

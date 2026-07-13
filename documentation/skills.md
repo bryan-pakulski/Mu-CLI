@@ -79,7 +79,8 @@ Configured via session variables:
     `invoke_skill`.
   - `"full"`: every skill body inlined up to the budget (v1 behavior).
 - `skills_max_chars` — total char budget for the LAYER 1B block. Default
-  `6144`. Set to `0` to disable skills entirely.
+  `40000` chars at the default `context_token_limit` (scales with it,
+  floor `6144`). Set to `0` to disable skills entirely.
 
 When the budget is exceeded the renderer emits a
 `... and N more skill(s) not shown (budget reached)` trailer so the

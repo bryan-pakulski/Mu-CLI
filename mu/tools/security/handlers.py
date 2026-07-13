@@ -138,7 +138,14 @@ def _handle_verify_security_proof(
         finding = report.find(finding_id)
         if finding is None:
             return json.dumps({"error": f"no such finding: {finding_id}"})
-        cwd = report.directory or report.workspace_root or os.getcwd()
+        cwd = (
+            report.workspace_root
+            or (
+                context.folder_context.folders[0]
+                if context.folder_context and context.folder_context.folders
+                else os.getcwd()
+            )
+        )
         timeout = float(args.get("timeout_seconds", 60) or 60)
         verify_proof(finding, cwd=cwd, report=report, timeout=timeout)
         _save_active_report(session)

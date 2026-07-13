@@ -1,8 +1,7 @@
-"""Tests for the new tool registry in `mu.tools`.
+"""Tests for the tool registry in `mu.tools`.
 
-The registry is a transitional surface: it mirrors the legacy registry in
-`core/tools.py` and provides a `@tool` decorator for new registrations.
-These tests pin that bridge behavior.
+The registry lives in `mu.tools` and provides a `@tool` decorator for
+registering handlers. These tests pin that registration behavior.
 """
 
 import os

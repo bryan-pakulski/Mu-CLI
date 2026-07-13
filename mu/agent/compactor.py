@@ -76,9 +76,12 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
         budget = int(context_limit * threshold)
 
     try:
+        from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
+
+        session_manager._tool_result_floor = resolve_tool_result_floor(session)
         rolled = session_manager.roll_history_summary_to_token_budget(
             budget,
-            keep_recent=int(variables.get("compactor_keep_recent", 12) or 12),
+            keep_recent=resolve_keep_recent(session),
             provider=getattr(session, "provider", None),
         )
     except Exception as exc:  # pragma: no cover — defensive

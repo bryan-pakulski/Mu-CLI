@@ -2493,6 +2493,14 @@ document.addEventListener("alpine:init", () => {
         // Populated from the variables list so the picker stays in sync
         // with /set and the inspector settings tab.
         subagentModel: "",
+        // Ollama local/cloud first-class toggle. `ollamaMode` is the UI
+        // selection ("local" | "cloud"); `ollamaApiKey` is the password
+        // field value (empty until the user types — the real key is never
+        // echoed back by the API); `ollamaKeySet` reflects whether a key
+        // is already stored (from the variable entry's `is_set`).
+        ollamaMode: "local",
+        ollamaApiKey: "",
+        ollamaKeySet: false,
 
         async loadVariables() {
             const r = await fetch("/api/variables");
@@ -2510,6 +2518,14 @@ document.addEventListener("alpine:init", () => {
             for (const g of this.variables.groups || []) {
                 for (const v of g.variables || []) {
                     if (v.key === key) return v.value;
+                }
+            }
+            return null;
+        },
+        _readVariableEntry(key) {
+            for (const g of this.variables.groups || []) {
+                for (const v of g.variables || []) {
+                    if (v.key === key) return v;
                 }
             }
             return null;
@@ -2590,12 +2606,53 @@ document.addEventListener("alpine:init", () => {
             const d = await r.json();
             this.currentProvider = d.provider || "";
             this.currentModel = d.model || "";
+            if (this.currentProvider === "ollama") {
+                await this._loadOllamaState();
+            }
             if (this.currentProvider) {
                 await this.loadModels(this.currentProvider);
             }
         },
+        async _loadOllamaState() {
+            // Ensure the variables list is fresh so we can read the stored
+            // ollama_mode / ollama_host / ollama_api_key entries.
+            if (!this.variables.groups.length) {
+                try { await this.loadVariables(); } catch (_) {}
+            }
+            const host = this._readVariable("ollama_host") || "";
+            const modeVar = this._readVariable("ollama_mode") || "";
+            const keyEntry = this._readVariableEntry("ollama_api_key");
+            this.ollamaKeySet = !!(keyEntry && keyEntry.is_set);
+            this.ollamaApiKey = "";
+            // Infer the toggle position: an ollama.com host → cloud;
+            // else an explicit "cloud" mode → cloud; else "local" (the
+            // "auto" legacy default maps to local in the UI).
+            if (host.includes("ollama.com")) {
+                this.ollamaMode = "cloud";
+            } else if (modeVar === "cloud") {
+                this.ollamaMode = "cloud";
+            } else {
+                this.ollamaMode = "local";
+            }
+        },
+        _ollamaDiscoveryParams() {
+            // Belt-and-suspenders: pass the chosen mode + key to the
+            // discovery endpoint so the dropdown matches the target the
+            // running provider will use (the backend also falls back to
+            // the active session's variables).
+            if (this.currentProvider !== "ollama") return "";
+            const parts = [];
+            parts.push(`ollama_mode=${encodeURIComponent(this.ollamaMode)}`);
+            if (this.ollamaApiKey) {
+                parts.push(`ollama_api_key=${encodeURIComponent(this.ollamaApiKey)}`);
+            }
+            return `?${parts.join("&")}`;
+        },
         async loadModels(provider) {
-            const r = await fetch(`/api/providers/${encodeURIComponent(provider)}/models`);
+            const suffix = provider === "ollama" ? this._ollamaDiscoveryParams() : "";
+            const r = await fetch(
+                `/api/providers/${encodeURIComponent(provider)}/models${suffix}`,
+            );
             const d = await r.json();
             this.models = d.models || [];
         },
@@ -2603,9 +2660,54 @@ document.addEventListener("alpine:init", () => {
             // provider dropdown changed — reload models for new provider
             this.currentModel = "";
             this.models = [];
+            if (this.currentProvider === "ollama") {
+                await this._loadOllamaState();
+            }
             if (this.currentProvider) {
                 await this.loadModels(this.currentProvider);
             }
+        },
+        async onOllamaModeChange(mode) {
+            this.ollamaMode = mode;
+            // Cloud pins the host to ollama.com; local clears the host
+            // override so OLLAMA_HOST env / localhost applies (a custom
+            // daemon set via the inspector `ollama_host` field is
+            // preserved until the user explicitly picks a mode).
+            await this.setVariable("ollama_mode", mode);
+            await this.setVariable(
+                "ollama_host",
+                mode === "cloud" ? "https://ollama.com" : "",
+            );
+            this.currentModel = "";
+            this.models = [];
+            // Cloud with no key can't list models — wait for the user to
+            // enter one (onOllamaKeyChange reloads).
+            if (mode === "cloud" && !this.ollamaApiKey && !this.ollamaKeySet) {
+                Alpine.store("toast").show(
+                    "cloud selected — enter an API key to list models.",
+                    "info",
+                );
+                return;
+            }
+            await this.loadModels("ollama");
+        },
+        async onOllamaKeyChange() {
+            // The field is empty on load (the API never echoes the key),
+            // so only act when the user actually typed something. An
+            // empty submit clears the stored key.
+            const value = this.ollamaApiKey || "";
+            await this.setVariable("ollama_api_key", value);
+            this.ollamaKeySet = value !== "";
+            this.currentModel = "";
+            this.models = [];
+            if (this.ollamaMode === "cloud" && !value) {
+                Alpine.store("toast").show(
+                    "API key cleared — cloud needs a key to list models.",
+                    "info",
+                );
+                return;
+            }
+            await this.loadModels("ollama");
         },
         // The active provider's model list, with `extra` (the currently
         // bound value) guaranteed to be present + first. A loaded session's
@@ -2625,13 +2727,23 @@ document.addEventListener("alpine:init", () => {
         },
         async onModelChange() {
             if (!this.currentProvider || !this.currentModel) return;
+            const body = {
+                provider: this.currentProvider,
+                model: this.currentModel,
+            };
+            // For ollama, carry the chosen mode + key (and the derived
+            // host) so the hot-swapped provider starts on the right
+            // endpoint with the right auth, and they persist for reload.
+            if (this.currentProvider === "ollama") {
+                body.ollama_mode = this.ollamaMode;
+                body.ollama_host =
+                    this.ollamaMode === "cloud" ? "https://ollama.com" : "";
+                if (this.ollamaApiKey) body.ollama_api_key = this.ollamaApiKey;
+            }
             const r = await fetch("/api/providers/switch", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    provider: this.currentProvider,
-                    model: this.currentModel,
-                }),
+                body: JSON.stringify(body),
             });
             if (!r.ok) {
                 const d = await r.json().catch(() => ({}));

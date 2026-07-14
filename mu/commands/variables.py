@@ -75,7 +75,10 @@ def _refresh_hud(session: Any) -> None:
 
 
 def _sync_provider_if_needed(session: Any, key: str) -> None:
-    if key == "ollama_host":
+    # Any of these ollama variables changes the running provider's
+    # endpoint (host/mode) or auth (api key) or compaction headroom, so
+    # re-apply them live rather than waiting for the next session load.
+    if key in {"ollama_host", "ollama_mode", "ollama_api_key", "ollama_token_safety_factor"}:
         try:
             from mucli import sync_provider_settings
 

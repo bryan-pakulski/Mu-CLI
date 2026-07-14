@@ -3919,6 +3919,57 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
     border-color: var(--accent);
 }
 
+/* ollama local/cloud first-class toggle + cloud API-key field */
+.ollama-mode-row,
+.ollama-key-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 4px var(--space-2);
+    border-radius: var(--radius);
+}
+.ollama-mode-row:hover { background: var(--bg-hover); }
+.ollama-mode-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.ollama-mode-btn {
+    padding: 4px 12px;
+    font-size: 11px;
+    font-family: var(--mono);
+    background: var(--bg);
+    color: var(--text-dim);
+    border: none;
+    border-left: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+.ollama-mode-btn:first-child { border-left: none; }
+.ollama-mode-btn:hover { color: var(--text); }
+.ollama-mode-btn.active {
+    background: var(--accent);
+    color: var(--bg);
+}
+.ollama-key-input {
+    width: 160px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-family: var(--mono);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    flex-shrink: 0;
+}
+.ollama-key-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
 /* ------------------------------------------------------------ history panel */
 
 .history-search-bar {

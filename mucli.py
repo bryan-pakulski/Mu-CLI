@@ -940,15 +940,18 @@ def _delete_session_flow(session_manager, sessions):
 
 def sync_provider_settings(session):
     if isinstance(session.provider, OllamaProvider):
-        # Respect a per-session override for ollama_host; otherwise let the
-        # provider's own resolution (OLLAMA_HOST env → OLLAMA_API_KEY hosted
-        # → localhost) stand.
+        # `apply_session_variables` binds the variables dict AND recomputes
+        # host + api_key from `ollama_host` / `ollama_mode` / `ollama_api_key`
+        # in one shot — so a `/set ollama_mode cloud`, a GUI local/cloud
+        # toggle, or a provider switch all live-update the running provider.
+        if hasattr(session.provider, "apply_session_variables"):
+            session.provider.apply_session_variables(session.variables)
+            return
+        # Fallback for older provider objects without the unified applier.
         host_override = session.variables.get("ollama_host")
         if host_override:
             session.provider.host = host_override
             session.provider.invalidate_preflight()
-        # Bind variables so the provider picks up `/set ollama_num_ctx`
-        # etc. on the next call.
         if hasattr(session.provider, "bind_session_variables"):
             session.provider.bind_session_variables(session.variables)
 

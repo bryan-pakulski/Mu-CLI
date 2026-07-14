@@ -128,17 +128,60 @@ def test_over_budget_triggers_emergency_compaction():
         session, big_prompt, big_messages
     )
 
-    # Compaction should have been called
-    session.session_manager.roll_history_summary_to_token_budget.assert_called_once()
-    call_args = session.session_manager.roll_history_summary_to_token_budget.call_args
-    budget = call_args[0][0]
+    # Compaction should have been called at least once (the escalating
+    # loop fires up to 3 rounds when the rebuilt prompt is still over).
+    calls = session.session_manager.roll_history_summary_to_token_budget.call_args_list
+    assert len(calls) >= 1
+    first = calls[0]
+    budget = first[0][0]
     assert budget > 0
-    assert call_args[1]["keep_recent"] == 2
+    # Emergency keep_recent floor is KEEP_RECENT_EMERGENCY (2).
+    assert first[1]["keep_recent"] == 2
 
     # Messages should have been rebuilt
     assert result_msgs is not big_messages
     # System prompt unchanged (only messages get compacted)
     assert result_prompt is big_prompt
+
+
+def test_over_budget_escalates_keep_recent_when_still_over():
+    """When one compaction pass doesn't reach the budget, the escalating
+    loop shrinks keep_recent and compacts again (Claude Code-style
+    progressive compaction)."""
+    session = _stub_session(context_limit=100, response_reserve=20)
+    # The stub's rebuild always returns a short message, but the system
+    # prompt itself is far over budget so the re-check never succeeds —
+    # exercising all 3 escalation rounds.
+    big_prompt = "x " * 500
+    big_messages = _make_messages(["y " * 500])
+
+    _preflight_context_check(session, big_prompt, big_messages)
+
+    calls = session.session_manager.roll_history_summary_to_token_budget.call_args_list
+    # 3 rounds fire because the oversized system prompt keeps the
+    # re-estimate over budget after each rebuild.
+    assert len(calls) == 3
+    # keep_recent shrinks across rounds: 2, 2, 2 (floor at max(2, ...)).
+    keep_recents = [c[1]["keep_recent"] for c in calls]
+    assert keep_recents == [2, 2, 2]
+
+
+def test_over_budget_stops_early_when_rebuild_fits():
+    """When the first compaction rebuild gets under budget, the loop stops
+    after one round — no needless extra compaction passes."""
+    session = _stub_session(context_limit=10_000, response_reserve=500)
+    # max_prompt = 9500. A modestly oversized prompt that the stub's short
+    # rebuild will bring well under budget.
+    big_prompt = "x " * 600  # ~300 cl100k tokens
+    # Push the messages well over budget (~10k tokens) so compaction
+    # triggers, but the stub's short rebuild brings the total (~300)
+    # under 9500 so the loop exits after round 0.
+    big_messages = _make_messages(["y " * 20000])
+
+    _preflight_context_check(session, big_prompt, big_messages)
+
+    calls = session.session_manager.roll_history_summary_to_token_budget.call_args_list
+    assert len(calls) == 1
 
 
 def test_compaction_failure_returns_original():

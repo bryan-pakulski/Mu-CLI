@@ -13,12 +13,27 @@ router = APIRouter()
 KNOWN_PROVIDERS: List[str] = ["openai", "gemini", "ollama"]
 
 
-def _safe_init(name: str, model_name: str = "", ollama_host: str | None = None):
+def _safe_init(
+    name: str,
+    model_name: str = "",
+    ollama_host: str | None = None,
+    ollama_mode: str | None = None,
+    ollama_api_key: str | None = None,
+):
     try:
         if name == "ollama":
-            from providers.ollama import OllamaProvider
+            from providers.ollama import OllamaProvider, _resolve_host
 
-            return OllamaProvider(model_name=model_name, host=ollama_host)
+            # If a mode/key is supplied, resolve the host the same way the
+            # running provider will so discovery matches what the user will
+            # actually talk to. An explicit `ollama_host` always wins.
+            host = ollama_host
+            if not host and ollama_mode:
+                host = _resolve_host(None, ollama_mode)
+            kwargs: Dict[str, Any] = {"model_name": model_name, "host": host}
+            if ollama_api_key:
+                kwargs["api_key"] = ollama_api_key
+            return OllamaProvider(**kwargs)
         if name == "gemini":
             from providers.gemini import GeminiProvider
 
@@ -32,10 +47,36 @@ def _safe_init(name: str, model_name: str = "", ollama_host: str | None = None):
     return None
 
 
+def _ollama_discovery_overrides(request: Request) -> Dict[str, Any]:
+    """Resolve ollama mode/host/key for model discovery with priority
+    query-param → active session variables → env defaults.
+
+    The welcome/new-session modal has no session yet, so it passes the
+    chosen mode + key as query params. The in-session settings popout
+    omits them and we fall back to the active session's variables so the
+    dropdown matches the running provider.
+    """
+    out: Dict[str, Any] = {}
+    sess = request.app.state.session_by_name()
+    sess_vars = getattr(sess, "variables", None) if sess else None
+    for key in ("ollama_mode", "ollama_host", "ollama_api_key"):
+        # Query param wins; else the active session's stored variable.
+        qp = request.query_params.get(key)
+        if qp:
+            out[key] = qp
+        elif sess_vars:
+            val = sess_vars.get(key)
+            if val:
+                out[key] = val
+    return out
+
+
 class SwitchRequest(BaseModel):
     provider: str
     model: str
     ollama_host: Optional[str] = None
+    ollama_mode: Optional[str] = None
+    ollama_api_key: Optional[str] = None
 
 
 @router.get("")
@@ -64,10 +105,16 @@ async def list_providers() -> Dict[str, Any]:
 
 
 @router.get("/{name}/models")
-async def list_models(name: str) -> Dict[str, Any]:
+async def list_models(name: str, request: Request) -> Dict[str, Any]:
     if name not in KNOWN_PROVIDERS:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {name}")
-    provider = _safe_init(name)
+    overrides = _ollama_discovery_overrides(request) if name == "ollama" else {}
+    provider = _safe_init(
+        name,
+        ollama_host=overrides.get("ollama_host"),
+        ollama_mode=overrides.get("ollama_mode"),
+        ollama_api_key=overrides.get("ollama_api_key"),
+    )
     if provider is None:
         return {"models": [], "error": f"Could not initialise provider '{name}'"}
     try:
@@ -103,7 +150,13 @@ async def switch_provider(req: SwitchRequest, request: Request) -> Dict[str, Any
     if session is None:
         raise HTTPException(status_code=409, detail="No active session to switch.")
 
-    provider = _safe_init(req.provider, req.model, req.ollama_host)
+    provider = _safe_init(
+        req.provider,
+        req.model,
+        req.ollama_host,
+        req.ollama_mode,
+        req.ollama_api_key,
+    )
     if provider is None:
         raise HTTPException(
             status_code=500,
@@ -117,7 +170,25 @@ async def switch_provider(req: SwitchRequest, request: Request) -> Dict[str, Any
         "provider": req.provider,
         "model": req.model,
     }
-    # Persist to disk so reload restores the selected model.
+    # Persist the ollama mode/host/key the user chose alongside the
+    # provider config, so a reload restores the same endpoint + auth.
+    if req.provider == "ollama":
+        if req.ollama_mode:
+            session.variables["ollama_mode"] = req.ollama_mode
+        if req.ollama_host is not None:
+            session.variables["ollama_host"] = req.ollama_host
+        if req.ollama_api_key:
+            session.variables["ollama_api_key"] = req.ollama_api_key
+        # Re-apply so the freshly-built provider picks up mode + key
+        # (the constructor only saw host/mode/key args, but binding the
+        # variables dict keeps `/set` and future syncs consistent).
+        try:
+            from mucli import sync_provider_settings
+
+            sync_provider_settings(session)
+        except ImportError:
+            pass
+    # Persist to disk so reload restores the selected model + ollama vars.
     session.session_manager.save_history()
 
     return {"ok": True, "provider": req.provider, "model": req.model}

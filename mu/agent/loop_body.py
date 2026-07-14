@@ -43,6 +43,7 @@ import traceback
 from typing import Any
 
 from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_approval_plans
+from mu.agent.retry import is_context_overflow_error
 from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
 from mu.tools._dispatcher import execute_tool
 from mu.tools._envelope import infer_tool_error_code
@@ -133,38 +134,168 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
         total, context_limit, response_reserve, max_prompt, overshoot,
     )
     emergency_budget = max(512, max_prompt - prompt_tokens)
+    base_keep_recent = resolve_keep_recent(session, emergency=True)
     # R3 / FM-8: even emergency compaction must respect the per-turn
     # tool-result floor so tool results just received stay verbatim.
     session.session_manager._tool_result_floor = resolve_tool_result_floor(session)
+
+    # Escalating loop: compact, rebuild, re-estimate. If the first pass
+    # doesn't reach the budget (the cl100k estimate under-counts Ollama's
+    # real BPE ~2.2x, and a large recent tool result can keep the tail
+    # fat), shrink keep_recent and compact again — up to 3 rounds. The
+    # reactive overflow recovery in `_generate_with_overflow_recovery`
+    # is the estimation-independent backstop if this still isn't enough.
+    for round_idx in range(3):
+        try:
+            session.session_manager._pending_compaction_kind = "emergency_preflight"
+            session.session_manager._pending_compaction_iter = int(
+                getattr(session, "_trace_current_iter", 0) or 0
+            )
+            session.session_manager.roll_history_summary_to_token_budget(
+                int(emergency_budget * 0.85),
+                keep_recent=max(2, base_keep_recent - round_idx * 2),
+                max_passes=6,
+                provider=session.provider,
+            )
+            session._compaction_watermark = len(session.session_manager.history)
+        except Exception as exc:
+            logger.warning("Emergency compaction failed: %s", exc)
+            return system_prompt, messages
+
+        recent_history = session._prepare_runtime_history(
+            turn_start_index=turn_start_index,
+        )
+        messages = session._build_messages_from_history(
+            recent_history,
+            {"role": "system", "parts": []},
+        )[:-1]
+
+        new_msg_tokens = _estimate_messages_tokens(messages)
+        new_total = prompt_tokens + new_msg_tokens
+        if new_total <= max_prompt:
+            logger.info(
+                "Emergency compaction round %d complete: messages %d -> %d tokens.",
+                round_idx + 1, msg_tokens, new_msg_tokens,
+            )
+            return system_prompt, messages
+        logger.warning(
+            "Emergency compaction round %d: still %d over (est %d vs max_prompt %d); "
+            "escalating keep_recent.",
+            round_idx + 1, new_total - max_prompt, new_total, max_prompt,
+        )
+
+    # Couldn't get under budget in 3 rounds — return the most-compacted
+    # state; the provider call may still overflow, at which point reactive
+    # overflow recovery catches it. This avoids throwing pre-emptively.
+    logger.warning(
+        "Emergency compaction exhausted 3 rounds; est %d still over max_prompt %d. "
+        "Reactive overflow recovery will backstop the provider call.",
+        prompt_tokens + _estimate_messages_tokens(messages), max_prompt,
+    )
+    return system_prompt, messages
+
+
+def _aggressive_compact_for_overflow(session, system_prompt):
+    """Claude Code Tier 5-style reactive compaction: keep only the last ~4
+    messages verbatim and summarize everything older into the rolling
+    summary, then degrade any oversized payloads left in the tail.
+
+    Used by `_generate_with_overflow_recovery` when the provider itself
+    rejects the prompt as too long — i.e. the cl100k pre-flight estimate
+    (which under-counts Ollama ~2.2x) said we were fine but the real BPE
+    count overflowed. This path is estimation-independent.
+    """
+    from mu.session.budgets import (
+        resolve_context_limit,
+        resolve_response_reserve,
+        resolve_tool_result_floor,
+    )
+
+    context_limit = resolve_context_limit(session)
+    response_reserve = resolve_response_reserve(session)
+    max_prompt = context_limit - response_reserve
+    prompt_tokens = estimate_tokens(system_prompt)
+    # Target half the available message budget — aggressive, so a single
+    # pass reliably gets under the real window even with cl100k drift.
+    budget = max(512, int((max_prompt - prompt_tokens) * 0.5))
+    session.session_manager._tool_result_floor = resolve_tool_result_floor(session)
     try:
-        session.session_manager._pending_compaction_kind = "emergency_preflight"
+        session.session_manager._pending_compaction_kind = "reactive_overflow"
         session.session_manager._pending_compaction_iter = int(
             getattr(session, "_trace_current_iter", 0) or 0
         )
         session.session_manager.roll_history_summary_to_token_budget(
-            int(emergency_budget * 0.85),
-            keep_recent=resolve_keep_recent(session, emergency=True),
-            provider=session.provider,
+            budget, keep_recent=4, max_passes=8, provider=session.provider,
         )
         session._compaction_watermark = len(session.session_manager.history)
     except Exception as exc:
-        logger.warning("Emergency compaction failed: %s", exc)
-        return system_prompt, messages
+        logger.warning("Aggressive overflow compaction failed: %s", exc)
 
-    recent_history = session._prepare_runtime_history(
-        turn_start_index=turn_start_index,
-    )
-    messages = session._build_messages_from_history(
-        recent_history,
-        {"role": "system", "parts": []},
-    )[:-1]
 
-    new_msg_tokens = _estimate_messages_tokens(messages)
-    logger.info(
-        "Emergency compaction complete: messages went from %d to %d tokens.",
-        msg_tokens, new_msg_tokens,
-    )
-    return system_prompt, messages
+def _generate_with_overflow_recovery(
+    session, *, messages, system_prompt, thinking, tools, turn_start_index,
+):
+    """Provider generate with reactive context-overflow recovery.
+
+    Mirrors Claude Code's Tier 5 reactive compaction: if the provider
+    rejects the prompt as too long (a non-transient 400/413), instead of
+    surfacing a hard error we aggressively compact history (keep the last
+    ~4 messages, summarize the rest), rebuild the prompt, and retry the
+    provider call **once**. A per-turn guard (`_overflow_recovered_this_turn`)
+    is the one-attempt / circuit-breaker — a second overflow on the same
+    turn re-raises so we never loop compact-and-fail.
+
+    This is the estimation-independent backstop behind the cl100k-based
+    pre-flight check: when the cheap token estimate under-counts the
+    model's real BPE (Ollama drifts ~2.2x), the wire-level 400 is the
+    ground truth, and we recover from it rather than crashing the turn.
+    """
+    try:
+        return session._provider_generate_with_retry(
+            messages=messages,
+            system_prompt=system_prompt,
+            thinking=thinking,
+            tools=tools,
+        )
+    except Exception as exc:
+        if not is_context_overflow_error(exc):
+            raise
+        if getattr(session, "_overflow_recovered_this_turn", False):
+            logger.error(
+                "Context overflow persisted after reactive compaction; "
+                "re-raising (circuit breaker): %s",
+                str(exc)[:300],
+            )
+            raise
+        session._overflow_recovered_this_turn = True
+        if session.ui:
+            session.ui.show_info(
+                "Context overflow from the model — compacting older history "
+                "into a summary and retrying (no data lost)."
+            )
+        logger.warning(
+            "Reactive overflow recovery: provider rejected prompt as too long. "
+            "Aggressively compacting (keep_recent=4) and retrying once. Error: %s",
+            str(exc)[:300],
+        )
+        _aggressive_compact_for_overflow(session, system_prompt)
+        recent_history = session._prepare_runtime_history(
+            turn_start_index=turn_start_index,
+        )
+        messages = session._build_messages_from_history(
+            recent_history,
+            {"role": "system", "parts": []},
+        )[:-1]
+        # Final pre-flight (re-checks + may compact more) before the retry.
+        system_prompt, messages = _preflight_context_check(
+            session, system_prompt, messages, turn_start_index=turn_start_index,
+        )
+        return session._provider_generate_with_retry(
+            messages=messages,
+            system_prompt=system_prompt,
+            thinking=thinking,
+            tools=tools,
+        )
 
 
 def _active_teacher_lesson(session):
@@ -364,6 +495,9 @@ def run_turn(session, text):
     session._recoverage_seen_paths = set()
     session._recoverage_stall_iters = 0
     session._recoverage_last_nudge_iter = -10_000
+    # Reset the reactive-overflow-recovery guard so each turn gets one
+    # compact-and-retry attempt of its own (circuit breaker is per-turn).
+    session._overflow_recovered_this_turn = False
     session.sync_runtime_state()
     # Staleness decay (self-management): advance the memory turn counter
     # once per turn, then demote ACTIVE task-memory entries not hit in the
@@ -924,22 +1058,26 @@ def run_turn(session, text):
                 )
             if session.ui:
                 with session.ui.show_status(status_msg):
-                    response = session._provider_generate_with_retry(
+                    response = _generate_with_overflow_recovery(
+                        session,
                         messages=messages,
                         system_prompt=dynamic_system_prompt,
                         thinking=session.thinking,
                         tools=active_tools
                         if (session.folder_context.folders and session.agentic)
                         else None,
+                        turn_start_index=turn_start_index,
                     )
             else:
-                response = session._provider_generate_with_retry(
+                response = _generate_with_overflow_recovery(
+                    session,
                     messages=messages,
                     system_prompt=dynamic_system_prompt,
                     thinking=session.thinking,
                     tools=active_tools
                     if (session.folder_context.folders and session.agentic)
                     else None,
+                    turn_start_index=turn_start_index,
                 )
 
             logger.debug(

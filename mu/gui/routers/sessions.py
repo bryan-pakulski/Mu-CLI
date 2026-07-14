@@ -65,6 +65,36 @@ def _busy_session_names(request: Request) -> set[str]:
     return out
 
 
+def _ollama_seed_vars(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Pull the ollama mode/host/key the GUI sent in a create/load
+    payload, if any. Empty/absent values are dropped so defaults stand."""
+    out: Dict[str, Any] = {}
+    for key in ("ollama_mode", "ollama_host", "ollama_api_key"):
+        val = payload.get(key)
+        if val is not None and str(val).strip() != "":
+            out[key] = str(val).strip()
+    return out
+
+
+def _apply_ollama_vars(session, ollama_vars: Dict[str, Any]) -> None:
+    """Seed ollama mode/host/key onto a freshly-built session's variables
+    and re-sync the running provider so a cloud session created from the
+    welcome modal starts on ollama.com with its key."""
+    if not ollama_vars or session is None:
+        return
+    session.variables.update(ollama_vars)
+    try:
+        from mucli import sync_provider_settings
+
+        sync_provider_settings(session)
+    except ImportError:
+        pass
+    try:
+        session.session_manager.save_history(session.folder_context)
+    except Exception:
+        pass
+
+
 def _resolve(request: Request, name: Optional[str]):
     return request.app.state.session_by_name(name)
 
@@ -177,13 +207,22 @@ async def create_session(request: Request, payload: Dict[str, Any]):
         }
         if workspace:
             data["folder_context"] = {"folders": [workspace]}
+        ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
+        if ollama_vars:
+            # Seed into the persisted variables so the first load starts
+            # on the chosen endpoint (e.g. cloud + key) without an extra
+            # switch round-trip.
+            data["variables"] = ollama_vars
         path = os.path.join(_config.HISTORY_DIR, "sessions", name)
         os.makedirs(path, exist_ok=True)
         with open(os.path.join(path, "session.json"), "w") as fh:
             json.dump(data, fh, indent=2)
         return {"ok": True, "name": name, "active": False}
 
-    result = await load_session(name, request, payload={"provider": provider, "model": model})
+    ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
+    load_payload: Dict[str, Any] = {"provider": provider, "model": model}
+    load_payload.update(ollama_vars)
+    result = await load_session(name, request, payload=load_payload)
 
     if workspace:
         session = request.app.state.session_by_name(name)
@@ -229,6 +268,13 @@ async def load_session(name: str, request: Request, payload: Dict[str, Any] | No
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    # Seed ollama mode/host/key supplied by the GUI (welcome modal) onto
+    # the freshly-built session so a cloud session starts on ollama.com.
+    ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
+    if ollama_vars:
+        _apply_ollama_vars(state.session_by_name(name), ollama_vars)
+
     return {"ok": True, "name": name, "active": True, "loaded": True}
 
 

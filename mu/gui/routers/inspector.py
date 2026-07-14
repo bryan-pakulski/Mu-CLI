@@ -198,7 +198,10 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "ollama",
         (
+            "ollama_mode",
             "ollama_host",
+            "ollama_api_key",
+            "ollama_token_safety_factor",
             "ollama_num_ctx",
             "ollama_num_predict",
             "ollama_temperature",
@@ -516,14 +519,52 @@ def _schema_meta(key: str) -> Dict[str, Any]:
 
 def _build_variable_entry(key: str, value: Any) -> Dict[str, Any]:
     meta = _schema_meta(key)
-    return {
+    entry: Dict[str, Any] = {
         "key": key,
-        "value": value,
         "type": meta["type"],
         "default": meta["default"],
         "is_default": value == meta["default"],
         "help": _VARIABLE_HELP.get(key, ""),
     }
+    if _is_secret_var(key):
+        # Never echo a secret back over the API. The GUI shows a password
+        # field + an "is_set" indicator instead of the raw value.
+        entry["secret"] = True
+        entry["is_set"] = bool(value)
+        entry["value"] = None
+    else:
+        entry["value"] = value
+    return entry
+
+
+def _is_secret_var(key: str) -> bool:
+    """Heuristic: API keys / tokens / passwords are masked in API output."""
+    if key in {"ollama_api_key"}:
+        return True
+    lowered = key.lower()
+    return (
+        lowered.endswith("_api_key")
+        or lowered.endswith("_apikey")
+        or lowered.endswith("_secret")
+        or lowered.endswith("_token")
+        or "password" in lowered
+    )
+
+
+_OLLAMA_SYNC_KEYS = {"ollama_host", "ollama_mode", "ollama_api_key", "ollama_token_safety_factor"}
+
+
+def _sync_provider_if_needed(session: Any, key: str) -> None:
+    """Live-update the running ollama provider when one of its endpoint /
+    auth / headroom variables changes via the inspector — mirrors the
+    `/set` slash-command path (mu/commands/variables.py)."""
+    if key in _OLLAMA_SYNC_KEYS:
+        try:
+            from mucli import sync_provider_settings
+
+            sync_provider_settings(session)
+        except ImportError:
+            pass
 
 
 @router.get("/variables")
@@ -586,6 +627,7 @@ async def set_variable(
     # for the duration of a turn — blocking here would deadlock the
     # entire server, freezing SSE and prompt-answer routes).
     session.variables[key] = casted
+    _sync_provider_if_needed(session, key)
 
     lock = request.app.state.session_lock_for()
 
@@ -613,6 +655,7 @@ async def unset_variable(
         raise HTTPException(status_code=404, detail=f"unknown variable: {key}")
     default = VARIABLE_SCHEMA[key].get("default")
     session.variables[key] = default
+    _sync_provider_if_needed(session, key)
 
     lock = request.app.state.session_lock_for()
 

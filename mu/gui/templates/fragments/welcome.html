@@ -33,12 +33,37 @@
         </div>
         <div class="form-row">
             <label>provider</label>
-            <select x-model="form.provider" @change="loadModels()" required>
+            <select x-model="form.provider" @change="onProviderChange()" required>
                 <option value="">—</option>
                 <template x-for="p in providers" :key="p.name">
                     <option :value="p.name" x-text="p.name + (p.configured ? '' : ' (unconfigured)')"></option>
                 </template>
             </select>
+        </div>
+        <!-- ollama local/cloud first-class toggle (ollama only) -->
+        <div class="form-row ollama-mode-row"
+             x-show="form.provider === 'ollama'" x-cloak>
+            <label>endpoint</label>
+            <div class="ollama-mode-toggle">
+                <button type="button"
+                        class="ollama-mode-btn"
+                        :class="{ active: form.ollamaMode === 'local' }"
+                        @click="setOllamaMode('local')"
+                        title="Your daemon: OLLAMA_HOST env or localhost">local</button>
+                <button type="button"
+                        class="ollama-mode-btn"
+                        :class="{ active: form.ollamaMode === 'cloud' }"
+                        @click="setOllamaMode('cloud')"
+                        title="ollama.com cloud (needs API key)">cloud</button>
+            </div>
+        </div>
+        <div class="form-row ollama-key-row"
+             x-show="form.provider === 'ollama' && form.ollamaMode === 'cloud'" x-cloak>
+            <label>api key</label>
+            <input type="password" x-model="form.ollamaApiKey"
+                   placeholder="ollama.com API key"
+                   @change="loadModels()"
+                   autocomplete="off" />
         </div>
         <div class="form-row" x-show="form.provider">
             <label>model</label>
@@ -80,7 +105,10 @@ function welcomeView() {
         models: [],
         modelError: null,
         error: null,
-        form: { name: "", provider: "", model: "", workspace: "" },
+        form: {
+            name: "", provider: "", model: "", workspace: "",
+            ollamaMode: "local", ollamaApiKey: "",
+        },
         async load() {
             const [sR, pR] = await Promise.all([
                 fetch("/api/sessions"),
@@ -89,13 +117,43 @@ function welcomeView() {
             this.sessions = (await sR.json()).sessions || [];
             this.providers = (await pR.json()).providers || [];
         },
+        async onProviderChange() {
+            this.form.model = "";
+            if (this.form.provider === "ollama") {
+                // Reset the toggle to the sensible default for a fresh
+                // session (local daemon); the user can switch to cloud.
+                this.form.ollamaMode = "local";
+                this.form.ollamaApiKey = "";
+            }
+            await this.loadModels();
+        },
+        async setOllamaMode(mode) {
+            this.form.ollamaMode = mode;
+            this.form.model = "";
+            await this.loadModels();
+        },
         async loadModels() {
             this.models = [];
             this.modelError = null;
             this.form.model = "";
             if (!this.form.provider) return;
+            // Cloud without a key can't list models — surface that
+            // instead of a confusing empty dropdown.
+            if (this.form.provider === "ollama"
+                && this.form.ollamaMode === "cloud"
+                && !this.form.ollamaApiKey) {
+                this.modelError = "enter an ollama.com API key to list cloud models";
+                return;
+            }
             try {
-                const r = await fetch(`/api/providers/${this.form.provider}/models`);
+                let url = `/api/providers/${this.form.provider}/models`;
+                if (this.form.provider === "ollama") {
+                    const qs = new URLSearchParams();
+                    qs.set("ollama_mode", this.form.ollamaMode);
+                    if (this.form.ollamaApiKey) qs.set("ollama_api_key", this.form.ollamaApiKey);
+                    url += `?${qs.toString()}`;
+                }
+                const r = await fetch(url);
                 const d = await r.json();
                 this.models = d.models || [];
                 this.modelError = d.error || null;
@@ -124,6 +182,12 @@ function welcomeView() {
                 activate: true,
             };
             if (this.form.workspace.trim()) body.workspace = this.form.workspace.trim();
+            if (this.form.provider === "ollama") {
+                body.ollama_mode = this.form.ollamaMode;
+                body.ollama_host =
+                    this.form.ollamaMode === "cloud" ? "https://ollama.com" : "";
+                if (this.form.ollamaApiKey) body.ollama_api_key = this.form.ollamaApiKey;
+            }
             const r = await fetch("/api/sessions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

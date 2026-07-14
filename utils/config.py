@@ -140,6 +140,18 @@ VARIABLE_SCHEMA = {
     "ollama_repeat_penalty": {"type": float, "default": 0.0},
     "ollama_seed": {"type": int, "default": 0},
     "ollama_mirostat": {"type": int, "default": 0},
+    "ollama_mode": {
+        "type": str,
+        "default": "auto",
+    },  # local | cloud | auto(legacy). Selecting ollama in the GUI sets this explicitly. "local" = OLLAMA_HOST env or localhost (never the API-key cloud auto-switch); "cloud" = ollama.com (needs ollama_api_key); "auto" preserves the pre-toggle env-driven resolution for backward compat.
+    "ollama_api_key": {
+        "type": str,
+        "default": "",
+    },  # Per-session Ollama cloud bearer token. Empty falls back to env OLLAMA_API_KEY. Ignored by a local daemon.
+    "ollama_token_safety_factor": {
+        "type": float,
+        "default": 2.5,
+    },  # Divides the compaction context limit so the compactor triggers before the real (larger) prompt overflows the model window. cl100k_base under-counts Ollama's tokenizer ~2.2x; 2.5 gives ~20% headroom. 1.0 disables. Read by OllamaProvider.compaction_safety_factor.
     "collation_enabled": {
         "type": bool,
         "default": True,

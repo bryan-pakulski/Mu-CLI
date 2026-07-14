@@ -115,6 +115,11 @@ class Session:
         # the aborting hook for the turn-response error field.
         self._hook_abort_requested: bool = False
         self._hook_abort_reason: str | None = None
+        # Reactive overflow recovery (Claude Code Tier 5): flipped True after
+        # one compact-and-retry on a "prompt too long" provider error, so we
+        # never loop compact-and-fail. Reset per turn in run_turn +
+        # _collect_turn_response.
+        self._overflow_recovered_this_turn: bool = False
         # Async sub-agent orchestrator state. `_subagent_cancelled` is the
         # cooperative kill flag (read at the top of each run_turn iteration,
         # mirroring `_hook_abort_requested`); `_subagent_kill_reason` carries
@@ -1248,6 +1253,8 @@ class Session:
     ) -> dict:
         # Reset the compaction watermark so a future turn starts fresh.
         self._compaction_watermark = 0
+        # Reset the reactive-overflow-recovery guard for the next turn.
+        self._overflow_recovered_this_turn = False
         # Reset per-turn retry counters so the next turn isn't penalised for
         # failures the previous turn already escalated on.
         if hasattr(self, "_retryable_failure_counts"):

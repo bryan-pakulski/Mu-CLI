@@ -338,6 +338,35 @@
                             </template>
                         </select>
                     </label>
+                    <!-- ollama local/cloud first-class toggle (ollama only) -->
+                    <div class="ollama-mode-row"
+                         x-show="$store.inspector.currentProvider === 'ollama'"
+                         x-cloak>
+                        <span class="settings-var-key mono">endpoint</span>
+                        <div class="ollama-mode-toggle">
+                            <button type="button"
+                                    class="ollama-mode-btn"
+                                    :class="{ active: $store.inspector.ollamaMode === 'local' }"
+                                    @click="$store.inspector.onOllamaModeChange('local')"
+                                    title="Your daemon: OLLAMA_HOST env or localhost">local</button>
+                            <button type="button"
+                                    class="ollama-mode-btn"
+                                    :class="{ active: $store.inspector.ollamaMode === 'cloud' }"
+                                    @click="$store.inspector.onOllamaModeChange('cloud')"
+                                    title="ollama.com cloud (needs API key)">cloud</button>
+                        </div>
+                    </div>
+                    <label class="ollama-key-row"
+                           x-show="$store.inspector.currentProvider === 'ollama' && $store.inspector.ollamaMode === 'cloud'"
+                           x-cloak>
+                        <span class="settings-var-key mono">api key</span>
+                        <input class="ollama-key-input"
+                               type="password"
+                               :placeholder="$store.inspector.ollamaKeySet ? 'key set — type to replace' : 'ollama.com API key'"
+                               x-model="$store.inspector.ollamaApiKey"
+                               @change="$store.inspector.onOllamaKeyChange()"
+                               autocomplete="off" />
+                    </label>
                     <label class="settings-var">
                         <span class="settings-var-key mono">model</span>
                         <select class="settings-var-select"

@@ -433,3 +433,118 @@ def test_bind_session_variables_threads_through_to_stream(monkeypatch):
     assert options["temperature"] == 0.2
     # And a `done` event was emitted last.
     assert events[-1].kind == "done"
+
+
+# ===================================================== mode-aware host resolution
+
+
+def test_resolve_host_mode_local_uses_env_or_localhost(monkeypatch):
+    """mode='local' = OLLAMA_HOST env if set, else localhost — and must NOT
+    auto-switch to cloud even when OLLAMA_API_KEY is set (the legacy
+    auto-cloud is suppressed in local mode)."""
+    monkeypatch.setenv("OLLAMA_API_KEY", "x")  # would trigger cloud in 'auto'
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    assert _resolve_host(None, "local") == "http://localhost:11434"
+
+    monkeypatch.setenv("OLLAMA_HOST", "ollama.lan:11434")
+    assert _resolve_host(None, "local") == "http://ollama.lan:11434"
+
+
+def test_resolve_host_mode_cloud_is_ollama_com(monkeypatch):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    assert _resolve_host(None, "cloud") == "https://ollama.com"
+
+
+def test_resolve_host_explicit_host_beats_mode(monkeypatch):
+    """An explicit `ollama_host` override wins over mode (custom daemon)."""
+    monkeypatch.setenv("OLLAMA_API_KEY", "x")
+    assert _resolve_host("http://my.daemon:11434", "cloud") == "http://my.daemon:11434"
+    assert _resolve_host("http://my.daemon:11434", "local") == "http://my.daemon:11434"
+
+
+def test_resolve_host_auto_legacy_env_host_wins(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "ollama.lan:11434")
+    monkeypatch.setenv("OLLAMA_API_KEY", "x")
+    # auto: OLLAMA_HOST takes priority over the API-key cloud switch.
+    assert _resolve_host(None, "auto") == "http://ollama.lan:11434"
+
+
+def test_resolve_host_auto_legacy_api_key_cloud(monkeypatch):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("OLLAMA_API_KEY", "x")
+    assert _resolve_host(None, "auto") == "https://ollama.com"
+
+
+# ============================================== api_key precedence + apply_session
+
+
+def test_provider_api_key_arg_beats_env(monkeypatch):
+    monkeypatch.setenv("OLLAMA_API_KEY", "env-key")
+    p = OllamaProvider("llama3", api_key="explicit-key")
+    assert p.api_key == "explicit-key"
+    assert p._auth_headers() == {"Authorization": "Bearer explicit-key"}
+
+
+def test_provider_api_key_defaults_to_env(monkeypatch):
+    monkeypatch.setenv("OLLAMA_API_KEY", "env-key")
+    p = OllamaProvider("llama3")
+    assert p.api_key == "env-key"
+    assert p._auth_headers() == {"Authorization": "Bearer env-key"}
+
+
+def test_provider_no_api_key_no_auth_header(monkeypatch):
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    p = OllamaProvider("llama3")
+    assert p.api_key in (None, "")
+    assert p._auth_headers() == {}
+
+
+def test_apply_session_host_cloud_sets_host_and_key(monkeypatch):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    p = OllamaProvider("llama3")
+    p.apply_session_host(
+        {"ollama_mode": "cloud", "ollama_api_key": "sess-key", "ollama_host": ""}
+    )
+    assert p.host == "https://ollama.com"
+    assert p.api_key == "sess-key"
+    assert p._auth_headers() == {"Authorization": "Bearer sess-key"}
+
+
+def test_apply_session_host_local_suppresses_env_cloud(monkeypatch):
+    monkeypatch.setenv("OLLAMA_API_KEY", "env-key")  # would cloud in auto
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    p = OllamaProvider("llama3")
+    p.apply_session_host({"ollama_mode": "local", "ollama_api_key": "", "ollama_host": ""})
+    assert p.host == "http://localhost:11434"
+    # local mode keeps the env key for auth if present (key is orthogonal
+    # to host), but the host is NOT ollama.com.
+    assert p.host != "https://ollama.com"
+
+
+def test_apply_session_host_explicit_ollama_host_wins(monkeypatch):
+    monkeypatch.setenv("OLLAMA_API_KEY", "x")
+    p = OllamaProvider("llama3")
+    p.apply_session_host(
+        {"ollama_mode": "cloud", "ollama_api_key": "", "ollama_host": "http://custom:11434"}
+    )
+    assert p.host == "http://custom:11434"
+
+
+def test_apply_session_variables_binds_and_resolves(monkeypatch):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    p = OllamaProvider("llama3")
+    p.apply_session_variables(
+        {
+            "ollama_mode": "cloud",
+            "ollama_api_key": "sess-key",
+            "ollama_host": "",
+            "ollama_num_ctx": 32768,
+        }
+    )
+    assert p.host == "https://ollama.com"
+    assert p.api_key == "sess-key"
+    # bind_session_variables was threaded too — num_ctx is on the options.
+    assert p._session_variables["ollama_num_ctx"] == 32768

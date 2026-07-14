@@ -71,6 +71,64 @@ _TRANSIENT_MARKERS = (
 _RETRYABLE_HTTP_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 
+# Context-overflow is NOT transient (the same prompt will fail identically),
+# so it must not be retried by the transient loop. It is handled separately
+# by reactive overflow recovery (compact-and-retry once) in `loop_body`.
+_OVERFLOW_MARKERS = (
+    "prompt too long",
+    "prompt is too long",
+    "maximum context length",
+    "context length",
+    "context window",
+    "context overflow",
+    "maximum context",
+    "request entity too large",
+    "request too large",
+    "exceeded the context",
+    "exceeds the context",
+    "exceeded your available",
+    "context_length_exceeded",
+    "maximum_input_tokens",
+)
+# HTTP status codes that, when paired with a prompt/context marker, signal
+# overflow rather than a generic client error.
+_OVERFLOW_HTTP_STATUS = frozenset({400, 413})
+
+
+def is_context_overflow_error(error: Exception) -> bool:
+    """Detect a 'prompt too long' / context-window-exceeded provider error.
+
+    These are non-transient — resending the same prompt fails identically —
+    but they ARE recoverable by compacting history and retrying, so the
+    agentic loop reacts to them (Claude Code Tier 5: keep last ~4 messages,
+    summarize the rest, retry once) rather than surfacing a hard error.
+
+    Matches on the error message and any chained ``__cause__`` so the real
+    Ollama body (``"The prompt is too long: N, model maximum context length:
+    M"``) is caught even when wrapped by a transport layer.
+    """
+    blob = str(error or "")
+    cause = getattr(error, "__cause__", None)
+    if cause is not None and cause is not error:
+        blob = f"{blob}\n{cause}"
+    # An `actionable` attribute (OllamaError) often carries the classified
+    # phrasing ("Ollama context overflow for ...").
+    actionable = getattr(error, "actionable", None)
+    if actionable:
+        blob = f"{blob}\n{actionable}"
+    lowered = blob.lower()
+    if any(marker in lowered for marker in _OVERFLOW_MARKERS):
+        return True
+    # Bare 413 ("Request Entity Too Large") is overflow by definition.
+    status = extract_http_status_code(lowered)
+    if status is not None and status in _OVERFLOW_HTTP_STATUS:
+        # 400 is ambiguous — only treat as overflow if a context/prompt
+        # marker is present (already covered above). 413 alone qualifies.
+        if status == 413:
+            return True
+    return False
+
+
 def is_transient_provider_error(error: Exception) -> bool:
     """Classify whether `error` is worth retrying. String-match against
     known transient markers, then fall back to extracting an HTTP status
@@ -228,6 +286,7 @@ def provider_generate_with_retry(
 
 __all__ = [
     "is_transient_provider_error",
+    "is_context_overflow_error",
     "extract_http_status_code",
     "provider_generate_with_retry",
 ]

@@ -50,6 +50,7 @@ from mu.tools.descriptors import COLLATED_TOOLS, TOOLS
 from providers.base import FileReference, ImageData, Message, MessagePart
 from utils.config import (
     NUDGE_EMPTY_RESPONSE,
+    NUDGE_EMPTY_RESPONSE_CHILD,
     calculate_cost,
 )
 from utils.helpers import display_image_in_terminal, get_safe_mime_type
@@ -1011,10 +1012,24 @@ def run_turn(session, text):
                 if not has_text:
                     logger.warning("Assistant provided empty response. Nudging.")
 
+                    # Role-aware nudge: sub-agents are told (LAYER 3B) not to
+                    # interact with the user and to return findings to the
+                    # parent. The default nudge's "final answer to the user"
+                    # phrasing contradicts that, producing confused reasoning
+                    # ("the user is telling me…"). Use the child variant for
+                    # child sessions so the prompt stays self-consistent.
+                    _role = str(
+                        session.variables.get("session_role", "") or ""
+                    ).lower()
+                    _nudge_text = (
+                        NUDGE_EMPTY_RESPONSE_CHILD
+                        if _role == "child"
+                        else NUDGE_EMPTY_RESPONSE
+                    )
                     nudge_msg = {
                         "role": "user",
                         "parts": [
-                            {"type": "text", "text": NUDGE_EMPTY_RESPONSE}
+                            {"type": "text", "text": _nudge_text}
                         ],
                     }
                     session.session_manager.history.append(nudge_msg)

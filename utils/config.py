@@ -925,6 +925,12 @@ GUI_VIEW_PANELS = [
 
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."
 
+NUDGE_EMPTY_RESPONSE_CHILD = (
+    "You have completed your tool executions but provided no textual response. "
+    "Return a concise summary of your findings to the parent orchestrator now — "
+    "partial results are valuable. Do not wait for further input."
+)
+
 
 # --- Pricing & Models ---
 PRICING_DB = {

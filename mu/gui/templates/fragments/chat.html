@@ -34,7 +34,7 @@
                          @keydown.space.prevent="t.open = !t.open">
                         <span class="caret">›</span>
                         <span class="label" x-text="t.running ? 'thinking' : 'trace'"></span>
-                        <span class="summary" x-text="summarizeTrace(t)"></span>
+                        <span class="summary" x-text="summarizeTrace(t, $store.chat.clock)"></span>
                         <span x-show="t.running" class="thinking-dots" aria-hidden="true">
                             <span></span><span></span><span></span>
                         </span>

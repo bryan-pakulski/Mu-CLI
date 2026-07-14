@@ -82,7 +82,12 @@ document.addEventListener("alpine:init", () => {
         },
         _ensureTrace(slot) {
             let t = this._currentTrace(slot);
-            if (!t) {
+            // Don't resurrect a completed trace (running === false). That
+            // happens when history reload built the previous turn's trace
+            // and a live event now arrives for a NEW in-flight turn —
+            // pushing a fresh running trace keeps the elapsed honest and
+            // avoids marking an old turn as "thinking".
+            if (!t || !t.running) {
                 t = {
                     id: this._id("tr"),
                     role: "trace",
@@ -93,8 +98,6 @@ document.addEventListener("alpine:init", () => {
                     elapsed: null,
                 };
                 slot.turns.push(t);
-            } else {
-                t.running = true;
             }
             return t;
         },
@@ -621,7 +624,11 @@ document.addEventListener("alpine:init", () => {
             // Sync server-reported busy into chat slots so the UI shows
             // "generating" after a page refresh mid-turn.
             for (const name of this.busy) {
-                chat._slot(name).busy = true;
+                const slot = chat._slot(name);
+                slot.busy = true;
+                // Ensure a live trace exists so the "thinking" header and
+                // elapsed timer render immediately on refresh mid-turn.
+                chat._ensureTrace(slot);
             }
             // First load — sync the chat store's focus pointer.
             if (!chat.currentName && this.current) chat.focus(this.current);
@@ -3170,17 +3177,24 @@ function bootSSE() {
 
     function connect() {
         if (source) { try { source.close(); } catch {} source = null; }
+        // Connection-alive watchdog. The server only emits a `ping` event
+        // when its event queue goes idle for 15s — during a busy agent run
+        // (constant tool calls / deltas) it NEVER pings. So the watchdog
+        // must be reset on ANY server activity (message OR ping), not just
+        // ping, or a long busy turn falsely trips "reconnecting…" every 45s.
+        function bumpWatchdog() {
+            if (pingTimer) clearTimeout(pingTimer);
+            pingTimer = setTimeout(() => {
+                // No activity at all in 45s — connection is actually dead.
+                if (source) source.dispatchEvent(new Event("error"));
+            }, 45000);
+        }
         source = new EventSource("/api/events");
         source.onopen = () => {
             const chat = Alpine.store("chat");
             chat.connected = true;
             chat.lastOpenAt = Date.now();
-            // Reset ping watchdog
-            if (pingTimer) clearTimeout(pingTimer);
-            pingTimer = setTimeout(() => {
-                // No ping received in 45s — connection likely stale
-                if (source) source.dispatchEvent(new Event("error"));
-            }, 45000);
+            bumpWatchdog();
             // On reconnect (not initial boot), re-sync state in case we
             // missed events while the connection was down.
             if (hasConnectedBefore) {
@@ -3191,25 +3205,29 @@ function bootSSE() {
             hasConnectedBefore = true;
         };
         source.onmessage = (ev) => {
+            // Any message means the connection is alive — push the
+            // watchdog out, even before we try to parse the payload.
+            bumpWatchdog();
             let data;
             try { data = JSON.parse(ev.data); } catch { return; }
             if (data && data.kind === "hello") {
                 const busyNames = data.busy || [];
                 const chat = Alpine.store("chat");
                 for (const name of busyNames) {
-                    chat._slot(name).busy = true;
+                    const slot = chat._slot(name);
+                    slot.busy = true;
+                    // A turn is in flight on the server but the live trace
+                    // may not exist yet (history reload built only completed
+                    // traces). Ensure a running trace so the "thinking" header
+                    // + elapsed show immediately instead of waiting for the
+                    // next tool event.
+                    chat._ensureTrace(slot);
                 }
                 return;
             }
             routeEvent(data);
         };
-        source.addEventListener("ping", () => {
-            // Reset ping watchdog on each ping
-            if (pingTimer) clearTimeout(pingTimer);
-            pingTimer = setTimeout(() => {
-                if (source) source.dispatchEvent(new Event("error"));
-            }, 45000);
-        });
+        source.addEventListener("ping", bumpWatchdog);
         source.onerror = () => {
             const chat = Alpine.store("chat");
             chat.connected = false;
@@ -3423,7 +3441,11 @@ function renderJSON(val) {
     return escapeHtml(pretty);
 }
 
-function summarizeTrace(t) {
+function summarizeTrace(t, _tick) {
+    // `_tick` ($store.chat.clock) is read by the template binding so Alpine
+    // re-evaluates this expression every 500ms while the focused slot is
+    // busy — that's what makes the running elapsed counter actually tick.
+    // Without it, the elapsed only updates when a trace event is pushed.
     if (!t || !t.events) return "trace";
     const counts = {};
     for (const ev of t.events) counts[ev.kind] = (counts[ev.kind] || 0) + 1;

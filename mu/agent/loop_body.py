@@ -46,6 +46,7 @@ from mu.agent.approval import ApprovalPlan, build_approval_prompt, collect_appro
 from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
 from mu.tools._dispatcher import execute_tool
 from mu.tools._envelope import infer_tool_error_code
+from mu.trace.emitter import emit_nudge, emit_tool
 from mu.tools.descriptors import COLLATED_TOOLS, TOOLS
 from providers.base import FileReference, ImageData, Message, MessagePart
 from utils.config import (
@@ -136,6 +137,10 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
     # tool-result floor so tool results just received stay verbatim.
     session.session_manager._tool_result_floor = resolve_tool_result_floor(session)
     try:
+        session.session_manager._pending_compaction_kind = "emergency_preflight"
+        session.session_manager._pending_compaction_iter = int(
+            getattr(session, "_trace_current_iter", 0) or 0
+        )
         session.session_manager.roll_history_summary_to_token_budget(
             int(emergency_budget * 0.85),
             keep_recent=resolve_keep_recent(session, emergency=True),
@@ -560,6 +565,37 @@ def run_turn(session, text):
         session.tool_result_cache.max_bytes = _tc_bytes
     except Exception:
         pass
+    # Run tracer: emit the run_start header once, and tag this turn-start
+    # compaction so the trace can record it (drained at the post-response seam).
+    try:
+        from mu.trace.emitter import get_emitter
+
+        _tr = get_emitter(session)
+        if _tr is not None and not getattr(session, "_trace_started", False):
+            session._trace_started = True
+            _tr.run_start(
+                {
+                    "session": _tr.session_name,
+                    "model": getattr(session.provider, "model_name", ""),
+                    "provider": type(session.provider).__name__,
+                    "mode": active_mode,
+                    "context_limit": int(
+                        getattr(session, "_resolved_context_limit", 0)
+                        or session.variables.get("context_token_limit", 0)
+                        or 0
+                    ),
+                    "max_iterations": int(
+                        session.variables.get("max_iterations", 50) or 50
+                    ),
+                }
+            )
+    except Exception:
+        pass
+    try:
+        session.session_manager._pending_compaction_kind = "turn_start"
+        session.session_manager._pending_compaction_iter = 0
+    except Exception:
+        pass
     session.session_manager.roll_history_summary_to_token_budget(
         session._compaction_token_budget(),
         keep_recent=resolve_keep_recent(session),
@@ -673,6 +709,8 @@ def run_turn(session, text):
 
     while iteration < max_iterations:
         iteration += 1
+        session._trace_current_iter = iteration  # run tracer: compaction-kind iter
+        _trace_iter_start = time.monotonic()  # run tracer: per-iter wall clock
         logger.debug(f"Agentic loop iteration {iteration}/{max_iterations}")
         # Periodic L2 progress checkpoint (Fix #9). On long turns that never
         # hit the compaction budget, conversation_summary stays frozen while
@@ -1008,6 +1046,41 @@ def run_turn(session, text):
                     f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | Total {response.total_tokens} {cost_str}"
                 )
 
+            # Run tracer: emit the per-iteration record at the post-response seam
+            # (response.input_tokens is the real prompt size; context-layer
+            # estimates are the harness's cl100k_base estimate — drift between
+            # them is the headline long-horizon diagnostic). Compaction events
+            # drained from session_manager._compaction_log are emitted here too.
+            try:
+                from mu.trace.emitter import (
+                    build_iter_record,
+                    drain_compactions,
+                    get_emitter,
+                )
+
+                _tr = get_emitter(session)
+                if _tr is not None:
+                    _comps = drain_compactions(session)
+                    for _c in _comps:
+                        _tr.compaction(_c)
+                    _rec = build_iter_record(
+                        session,
+                        iteration=iteration,
+                        max_iter=max_iterations,
+                        response=response,
+                        total_in=total_in,
+                        total_out=total_out,
+                        total_cost=total_cost,
+                        has_text=has_text,
+                        has_tool_call=has_tool_call,
+                        iter_start=_trace_iter_start,
+                        cost_delta=float(est_cost or 0.0),
+                        compaction=_comps[-1] if _comps else None,
+                    )
+                    _tr.iter_record(_rec)
+            except Exception:
+                pass
+
             if not has_tool_call:
                 if not has_text:
                     logger.warning("Assistant provided empty response. Nudging.")
@@ -1033,6 +1106,7 @@ def run_turn(session, text):
                         ],
                     }
                     session.session_manager.history.append(nudge_msg)
+                    emit_nudge(session, "empty_response", iteration, role=_role)
                     messages = session._build_messages_from_history(
                         session._prepare_runtime_history(),
                         {"role": "system", "parts": []},
@@ -1077,6 +1151,7 @@ def run_turn(session, text):
                             ],
                         }
                         session.session_manager.history.append(watchdog_msg)
+                        emit_nudge(session, "loop_watchdog", iteration)
                         messages = session._build_messages_from_history(
                             session._prepare_runtime_history(),
                             {"role": "system", "parts": []},
@@ -1269,8 +1344,14 @@ def run_turn(session, text):
             # doesn't re-burn tokens re-reading the same file — the core
             # context-gathering stall on long tasks.
             _auto_recall_hits: dict[int, str] = {}
+            # Per-tool execution start times (monotonic) keyed by tool-call
+            # index — consumed in the post-processing loop to emit a trace
+            # `tool` record with real latency. Covers both the parallel
+            # (lambda) and serial execution paths through this funnel.
+            _tool_start_times: dict[int, float] = {}
 
             def _auto_recall_or_execute(part_idx: int, part) -> Any:
+                _tool_start_times[part_idx] = time.monotonic()
                 hit = None
                 try:
                     hit = session.tool_result_cache.lookup_by_locator(
@@ -1616,6 +1697,58 @@ def run_turn(session, text):
                         "cache_key": cache_key,
                     }
                 )
+                # --- Trace: per-tool capture (latency, cache hit, result size) ---
+                try:
+                    _t_start = _tool_start_times.pop(i, None)
+                    _lat = (
+                        int((time.monotonic() - _t_start) * 1000)
+                        if _t_start is not None
+                        else 0
+                    )
+                    _arg_fp = session._tool_call_fingerprint(
+                        part.tool_name, part.tool_args
+                    )
+                    _tok_path = ""
+                    _ta = part.tool_args or {}
+                    if isinstance(_ta, dict):
+                        # Read/search tools name their target arg differently
+                        # (read_file uses ``filename``, search_for_string uses
+                        # ``search_string``, search_references uses ``query``…).
+                        # Pull the first present one so the reads heatmap and
+                        # redundant-read detection actually have paths to work
+                        # with. Writes that share these keys are filtered out of
+                        # the read view by tool name on the parser side.
+                        for _pk in (
+                            "path", "file_path", "filepath", "filename", "fp",
+                            "search_string", "query", "pattern", "target",
+                        ):
+                            _pv = _ta.get(_pk)
+                            if _pv:
+                                _tok_path = str(_pv)
+                                break
+                    _res_preview = ""
+                    try:
+                        _res_preview = str(source_result or "")[:200]
+                    except Exception:  # noqa: BLE001
+                        _res_preview = ""
+                    emit_tool(
+                        session,
+                        iteration=iteration,
+                        name=part.tool_name,
+                        arg_fp=_arg_fp,
+                        ok=not str(raw_result).startswith("Error"),
+                        error_code=str(
+                            getattr(session, "_last_retryable_error_code", "") or ""
+                        )
+                        or None,
+                        latency_ms=_lat,
+                        cache_hit=bool(_auto_recall_hits.get(i)),
+                        result_bytes=len(str(source_result or "")),
+                        path=_tok_path,
+                        preview=_res_preview,
+                    )
+                except Exception:  # noqa: BLE001 — telemetry must not break the loop
+                    pass
                 current_tool_name = None
                 current_tool_args = None
 
@@ -1668,6 +1801,12 @@ def run_turn(session, text):
                         })
                         session.session_manager.save_history(
                             session.folder_context
+                        )
+                        emit_nudge(
+                            session,
+                            "recoverage_stall",
+                            iteration,
+                            stall_iters=session._recoverage_stall_iters,
                         )
                         session._recoverage_last_nudge_iter = iteration
                         # Reset so we don't nudge every iteration; the next
@@ -1786,6 +1925,7 @@ def run_turn(session, text):
                     }
                     session.session_manager.history.append(loop_break_msg)
                     session.session_manager.save_history(session.folder_context)
+                    emit_nudge(session, "loop_detect", iteration)
                     messages = session._build_messages_from_history(
                         session._prepare_runtime_history(turn_start_index),
                         {"role": "system", "parts": []},
@@ -1843,6 +1983,7 @@ def run_turn(session, text):
                     }
                     session.session_manager.history.append(retryable_break_msg)
                     session.session_manager.save_history(session.folder_context)
+                    emit_nudge(session, "loop_detect_retryable", iteration)
                     messages = session._build_messages_from_history(
                         session._prepare_runtime_history(turn_start_index),
                         {"role": "system", "parts": []},
@@ -1880,6 +2021,7 @@ def run_turn(session, text):
                 }
                 session.session_manager.history.append(escalation_msg)
                 session.session_manager.save_history(session.folder_context)
+                emit_nudge(session, "retryable_escalation", iteration)
                 messages = session._build_messages_from_history(
                     session._prepare_runtime_history(turn_start_index),
                     {"role": "system", "parts": []},

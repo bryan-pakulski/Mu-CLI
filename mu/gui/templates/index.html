@@ -83,16 +83,33 @@
                  x-transition.opacity.duration.150ms
                  role="listbox">
                 <template x-for="v in $store.mode.views" :key="v.name">
-                    <button class="mode-option"
-                            :class="{ active: $store.mode.active === v.name }"
-                            @click="$store.mode.setView(v.name), open = false"
-                            :title="v.description || v.name">
-                        <div class="mode-name">
-                            <span x-text="v.display_name"></span>
-                            <span class="mode-key mono muted" x-text="v.name"></span>
-                        </div>
-                        <div class="mode-desc" x-text="v.description"></div>
-                    </button>
+                    <div class="mode-option-wrap">
+                        <template x-if="v.external">
+                            <a class="mode-option mode-option--ext"
+                               :href="v.route_session ? (v.route + '?session=' + encodeURIComponent($store.chat.currentName || '')) : v.route"
+                               target="_blank" rel="noopener"
+                               @click="open = false"
+                               :title="v.description || v.name">
+                                <div class="mode-name">
+                                    <span x-text="v.display_name"></span>
+                                    <span class="mode-key mono muted">↗</span>
+                                </div>
+                                <div class="mode-desc" x-text="v.description"></div>
+                            </a>
+                        </template>
+                        <template x-if="!v.external">
+                            <button class="mode-option"
+                                    :class="{ active: $store.mode.active === v.name }"
+                                    @click="$store.mode.setView(v.name), open = false"
+                                    :title="v.description || v.name">
+                                <div class="mode-name">
+                                    <span x-text="v.display_name"></span>
+                                    <span class="mode-key mono muted" x-text="v.name"></span>
+                                </div>
+                                <div class="mode-desc" x-text="v.description"></div>
+                            </button>
+                        </template>
+                    </div>
                 </template>
             </div>
         </div>

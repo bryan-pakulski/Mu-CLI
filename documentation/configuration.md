@@ -21,6 +21,9 @@ Invoke via `python mucli.py [flags]`.
 | `--yolo` | Start in YOLO mode (auto-approve writes). |
 | `--debug` | Verbose logging. |
 | `--system <prompt>` | Override the initial system instruction. |
+| `--gui` | Launch the browser GUI in the background (default port 30311). |
+| `--trace` | Launch the GUI and open the Trace Analyzer dashboard (`/trace`). See [tracing.md](tracing.md). |
+| `--trace-analyze <file>` | Print a terminal summary of a trace JSONL file and exit (headless quick-look). See [tracing.md](tracing.md). |
 
 ## Environment variables
 
@@ -35,6 +38,7 @@ Sessions and logs live under `MUCLI_HOME`:
 
 - `~/.mucli/sessions/` — saved session JSON files
 - `~/.mucli/logs/` — log output
+- `~/.mucli/trace/` — per-run JSONL traces (one file per run; see [tracing.md](tracing.md))
 
 ## Configuration files
 
@@ -121,6 +125,7 @@ inspectable via `/get <key>` or `/variables`. Defaults come from
 | `reflective_retry_enabled` | bool | `true` | Show retryable tool failures + remediation hints inline. |
 | `streaming_enabled` | bool | `true` | Stream tokens one-by-one instead of one final panel. |
 | `structured_tool_results` | bool | `true` | Use structured envelope for tool results (vs. raw text). |
+| `trace_enabled` | bool | `true` | Write a per-run JSONL trace of every iteration to `~/.mucli/trace/` (context layers, real vs estimated tokens, compactions, nudges, tools, subagents, memory). The Trace Analyzer dashboard (`/trace`, or `mucli --trace`) visualizes it. Set `false` to disable. See [tracing.md](tracing.md). |
 
 ### Context — global cap
 

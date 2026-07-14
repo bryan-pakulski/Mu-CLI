@@ -1168,6 +1168,72 @@ def handle_command(session, user_input, allow_prompt=True):
     )
 
 
+def _trace_analyze_cli(path: str) -> int:
+    """Headless terminal summary of one trace JSONL file (``--trace-analyze``).
+
+    Thin wrapper over the shared ``mu.trace`` parser + summary builder so the
+    CLI and the GUI dashboard show identical numbers. Prints overview cards
+    and the headline compaction/drift/nudge/tool counts; returns an exit code.
+    """
+    import os
+
+    from mu.trace import build_series, build_summary, parse_trace
+
+    if not os.path.exists(path):
+        console.print(f"[red]trace file not found: {safe_markup(path)}[/red]")
+        return 1
+    run = parse_trace(path)
+    if not run.header and not run.iters:
+        console.print(
+            f"[red]no trace records parsed from: {safe_markup(path)}[/red]"
+        )
+        return 1
+    series = build_series(run)
+    s = build_summary(run, series)
+
+    console.print(
+        f"[bold]Trace run[/bold] {s['run_id']}  "
+        f"session=[cyan]{safe_markup(s['session'])}[/cyan]  "
+        f"model={safe_markup(s['model'])}  mode={safe_markup(s['mode'])}"
+    )
+    console.print(
+        f"  iters={s['iters']}  status={s['status']}  "
+        f"tokens in={s['total_in']} out={s['total_out']}  "
+        f"cost=${s['total_cost']}"
+    )
+    console.print(
+        f"  peak_context={s['peak_context']}  peak_estimated={s['peak_estimated']}  "
+        f"peak|drift|={s['peak_drift_abs']}%  mean_drift={s['mean_drift']}%  "
+        f"context_limit={s['context_limit']}"
+    )
+    console.print(
+        f"  compactions={s['compaction_count']} by_kind={s['compaction_by_kind']}  "
+        f"mechanical_fallbacks={s['mechanical_fallback_count']}"
+    )
+    console.print(
+        f"  nudges={s['nudge_count']} by_kind={s['nudge_by_kind']}  "
+        f"broke_loop={s['nudges_broken']}  "
+        f"redundant_reads={s['redundant_reads']}  tool_calls={s['tool_calls']}"
+    )
+    if series["tool_histogram"]:
+        console.print("  tools:")
+        for h in sorted(series["tool_histogram"], key=lambda x: -x["count"]):
+            console.print(
+                f"    {h['name']:<24} n={h['count']:<4} ok={h['ok']:<4} "
+                f"err={h['error']:<3} avg_lat={h['avg_latency_ms']}ms "
+                f"cache={h['cache_hit_rate']}"
+            )
+    if series["compaction_timeline"]:
+        console.print("  compaction timeline:")
+        for c in series["compaction_timeline"]:
+            console.print(
+                f"    iter={c['iter']:<4} {c['kind']:<20} "
+                f"{c['tokens_before']}→{c['tokens_after']} "
+                f"(saved {c['tokens_saved']})  summarizer={c['summarizer']}"
+            )
+    return 0
+
+
 def main():
     logger.info("μCLI starting...")
 
@@ -1205,6 +1271,25 @@ def main():
         "--gui-stop",
         action="store_true",
         help="Stop the running GUI daemon and exit.",
+    )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help=(
+            "Launch the GUI and open the Trace Analyzer dashboard (/trace) "
+            "to visualize per-run context growth, tokenizer drift, "
+            "compaction/nudge/tool timelines, and more."
+        ),
+    )
+    parser.add_argument(
+        "--trace-analyze",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Print a terminal summary of a trace JSONL file and exit "
+            "(headless quick-look — no GUI)."
+        ),
     )
     parser.add_argument(
         "--gui-foreground",
@@ -1261,6 +1346,28 @@ def main():
         ),
     )
     args = parser.parse_args()
+
+    if getattr(args, "trace_analyze", None):
+        sys.exit(_trace_analyze_cli(args.trace_analyze))
+
+    if getattr(args, "trace", False):
+        # Launch the GUI and point the user at the Trace Analyzer dashboard.
+        args.gui = True
+        from mu.gui.launcher import run_gui
+
+        host = getattr(args, "host", None) or "127.0.0.1"
+        port = int(getattr(args, "port", None) or 30311)
+        try:
+            run_gui(args, build_session)
+        except Exception as exc:
+            console.print(
+                f"[red]Failed to launch GUI: {safe_markup(str(exc))}[/red]"
+            )
+            sys.exit(1)
+        console.print(
+            f"  Trace Analyzer → http://{host}:{port}/trace"
+        )
+        return
 
     if args.gui_stop:
         from mu.gui.launcher import stop_gui

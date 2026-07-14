@@ -63,11 +63,15 @@ def test_api_modes_returns_views_array():
     data = r.json()
     assert "views" in data
     view_names = [v["name"] for v in data["views"]]
-    assert set(view_names) == {"history", "memory", "systemPrompts"}
+    assert set(view_names) == {"history", "memory", "systemPrompts", "trace"}
     for v in data["views"]:
         assert v["view_only"] is True
         assert v["needs_workspace"] is False
         assert v["disabled"] is False
+    # The trace analyzer is an external full-page route, not an in-page panel.
+    trace_view = next(v for v in data["views"] if v["name"] == "trace")
+    assert trace_view["external"] is True
+    assert trace_view["route"] == "/trace"
     # Real agent modes are still listed, and the view panels are NOT.
     mode_names = [m["name"] for m in data["modes"]]
     assert "default" in mode_names

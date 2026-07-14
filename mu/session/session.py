@@ -1281,7 +1281,7 @@ class Session:
                         }
                     )
 
-        return {
+        response = {
             "ok": error is None and status not in {"error"},
             "status": status,
             "error": error,
@@ -1301,6 +1301,23 @@ class Session:
             },
             "session_totals": dict(self.session_manager.token_counts),
         }
+        # Stash a compact turn summary for the run tracer. The `send_message`
+        # finally block reads this and emits the `turn_end` line + flushes the
+        # trace file. Kept small — full content lives in session.json.
+        try:
+            self._trace_turn_summary = {
+                "status": status,
+                "total_in": int(total_in or 0),
+                "total_out": int(total_out or 0),
+                "total_cost": float(total_cost or 0.0),
+                "tool_calls": len(tool_calls),
+                "tool_results": len(tool_results),
+                "error": error,
+                "session_totals": dict(self.session_manager.token_counts),
+            }
+        except Exception:  # noqa: BLE001 — telemetry must never break a turn
+            pass
+        return response
 
     def send_message(self, text):
         """Body moved to `mu/agent/loop_body.py:run_turn`.
@@ -1338,6 +1355,32 @@ class Session:
             if turn_idx is not None:
                 self.session_manager._cleanup_protected(turn_idx)
                 self._current_turn_start_index = None
+            # Run tracer: emit the turn_end line and flush+close the trace
+            # file. Runs on every exit path (normal completion, hook abort,
+            # sub-agent kill, exception) — telemetry must never be lost and
+            # must never propagate a failure into the turn.
+            try:
+                from mu.trace.emitter import get_emitter
+
+                _em = get_emitter(self)
+                if _em is not None and not _em._closed:
+                    _summary = getattr(self, "_trace_turn_summary", {}) or {}
+                    _em.turn_end(
+                        {
+                            "status": _summary.get("status", "unknown"),
+                            "total_in": _summary.get("total_in", 0),
+                            "total_out": _summary.get("total_out", 0),
+                            "total_cost": _summary.get("total_cost", 0.0),
+                            "tool_calls": _summary.get("tool_calls", 0),
+                            "tool_results": _summary.get("tool_results", 0),
+                            "error": _summary.get("error"),
+                            "session_totals": _summary.get("session_totals", {}),
+                            "iters": _em.iter_count,
+                        }
+                    )
+                    _em.close()
+            except Exception:  # noqa: BLE001 — telemetry must never break a turn
+                pass
 
     def _session_goal_is_sticky(self) -> bool:
         """Should the pinned session_goal survive the end of this turn?

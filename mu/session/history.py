@@ -517,6 +517,16 @@ class HistoryMixin:
         if summary_batch is None:
             summary_batch = self._summarize_history_batch(entries_to_summarize)
 
+        # Record which summarizer path produced this batch, so the run tracer
+        # can flag the catastrophically-lossy mechanical fallback (140-char
+        # truncation per part) — a silent long-horizon state-loss mode.
+        if "### Task" in (summary_batch or "") or "### Progress" in (summary_batch or ""):
+            self._last_summary_mode = "llm"
+        elif summary_batch:
+            self._last_summary_mode = "mechanical"
+        else:
+            self._last_summary_mode = "none"
+
         if not summary_batch:
             self.summary_anchor = target_anchor
             return True
@@ -550,6 +560,17 @@ class HistoryMixin:
         provider: Optional[LLMProvider] = None,
     ) -> bool:
         token_budget = max(1, int(token_budget or 1))
+        # Run-tracer instrumentation: record one compaction event per call so
+        # the trace can correlate compactions with context growth / drift. The
+        # `kind` (turn_start | auto_hook | emergency_preflight) and iteration
+        # are stashed by the caller via _pending_compaction_kind/iter. The log
+        # is drained by the trace emitter at the post-response seam.
+        _before_len = len(self.history)
+        _before_anchor = self.summary_anchor
+        try:
+            _before_tokens = self.estimate_runtime_history_tokens()
+        except Exception:  # noqa: BLE001
+            _before_tokens = 0
         changed = False
         for _ in range(max(1, int(max_passes or 1))):
             if self.estimate_runtime_history_tokens() <= token_budget:
@@ -561,6 +582,35 @@ class HistoryMixin:
                 changed = True
                 continue
             break
+        if changed:
+            try:
+                try:
+                    _after_tokens = self.estimate_runtime_history_tokens()
+                except Exception:  # noqa: BLE001
+                    _after_tokens = 0
+                log = getattr(self, "_compaction_log", None)
+                if log is None:
+                    log = []
+                    self._compaction_log = log
+                log.append(
+                    {
+                        "kind": getattr(self, "_pending_compaction_kind", "auto"),
+                        "iter": getattr(self, "_pending_compaction_iter", 0),
+                        "tokens_before": int(_before_tokens),
+                        "tokens_after": int(_after_tokens),
+                        "tokens_saved": int(_before_tokens - _after_tokens),
+                        "msgs_before": _before_len,
+                        "msgs_after": len(self.history),
+                        "anchor_before": _before_anchor,
+                        "anchor_after": self.summary_anchor,
+                        "anchor_delta": self.summary_anchor - _before_anchor,
+                        "summarizer": getattr(self, "_last_summary_mode", "unknown"),
+                        "keep_recent": keep_recent,
+                        "budget": token_budget,
+                    }
+                )
+            except Exception:  # noqa: BLE001 — tracer must never break compaction
+                pass
         return changed
 
     def _degrade_oldest_runtime_payload(

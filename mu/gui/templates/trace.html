@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>μcli · Trace Analyzer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>μ</text></svg>">
+    <script>
+    (function () {
+        try {
+            var saved = localStorage.getItem('mucli-theme');
+            var sys = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)
+                ? 'light' : 'dark';
+            var theme = (saved === 'light' || saved === 'dark') ? saved : sys;
+            document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/trace.css">
+    <!-- trace.js MUST load before alpine.min.js: this build calls
+         Alpine.start() via a microtask queued at the end of the alpine
+         script, which runs before the next defer script. If alpine loads
+         first, start() walks the DOM while traceApp() is still undefined
+         and the component silently fails to initialize (empty run picker).
+         base.html does the same thing with app.js (non-defer, first). -->
+    <script src="/static/js/trace.js" defer></script>
+    <script src="/static/vendor/alpine.min.js" defer></script>
+</head>
+<body class="trace-body" x-data="traceApp()" x-init="init()" @keydown.escape.window="infoOpen=null">
+    <header class="trace-header">
+        <div class="trace-title">
+            <span class="trace-mu">μ</span> Trace Analyzer
+            <span class="trace-session" x-show="session" x-text="'· ' + session"></span>
+            <span class="trace-session-count" x-show="session && runBounds.length"
+                  x-text="'· ' + runBounds.length + ' run' + (runBounds.length === 1 ? '' : 's')"></span>
+        </div>
+        <div class="trace-run-picker">
+            <select x-model="runId" @change="loadRun()" class="trace-select" x-show="!session">
+                <option value="">— select a run —</option>
+                <template x-for="r in runs" :key="r.run_id">
+                    <option :value="r.run_id"
+                            x-text="(session ? '' : (r.session + ' · ')) + r.model + ' · ' + r.mode + ' · ' + r.iters + ' iters · ' + fmtStatus(r)"></option>
+                </template>
+            </select>
+            <button class="trace-btn" @click="session ? loadSession() : loadRuns()" title="refresh">↻</button>
+            <button class="trace-btn trace-theme-btn" @click="toggleTheme()"
+                    :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+                    aria-label="Toggle theme">
+                <span x-text="theme === 'dark' ? '☾' : '☼'"></span>
+            </button>
+            <a class="trace-back" href="/">← chat</a>
+        </div>
+    </header>
+
+    <!-- Loading / empty states -->
+    <div class="trace-empty" x-show="!loading && !summary && (session ? !runBounds.length : runs.length === 0)">
+        <span x-text="session ? ('No runs recorded for session “' + session + '” yet.') : 'No trace runs found.'"></span>
+    </div>
+    <div class="trace-empty" x-show="!loading && !session && runs.length > 0 && !runId">Select a run above to visualize it.</div>
+    <div class="trace-empty" x-show="loading">Loading…</div>
+    <div class="trace-empty" x-show="!loading && runId && !summary">No data for this run.</div>
+
+    <main class="trace-main" x-show="!loading && summary" style="display:none;">
+
+        <!-- 1. Overview cards -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Overview
+                <button class="trace-info-btn" @click.stop="toggleInfo('overview')" :class="{open: infoOpen==='overview'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='overview'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Overview</div>
+                    <p><b>Shows:</b> at-a-glance totals and peaks for the whole run.</p>
+                    <p><b>Why:</b> the quickest read on whether the harness suspects fired — tokenizer drift, mechanical compaction fallbacks, nudges, redundant reads — actually happened, and how expensive the run was.</p>
+                    <p><b>Read:</b> warn-tinted cards (amber) flag a suspect worth drilling into. <em>median drift</em> is more robust than mean — the drift formula blows up when the real prompt is small, so a few iters can reach ±2000% and drag the mean.</p>
+                </div>
+            </h2>
+            <div class="trace-cards">
+                <div class="trace-card"><div class="tc-label">iterations</div><div class="tc-val" x-text="summary.iters"></div></div>
+                <div class="trace-card"><div class="tc-label">status</div><div class="tc-val" x-text="summary.status"></div></div>
+                <div class="trace-card"><div class="tc-label">tokens in / out</div>
+                    <div class="tc-val"><span x-text="fmtNum(summary.total_in)"></span> / <span x-text="fmtNum(summary.total_out)"></span></div></div>
+                <div class="trace-card"><div class="tc-label">cost</div><div class="tc-val" x-text="fmtCost(summary.total_cost)"></div></div>
+                <div class="trace-card"><div class="tc-label">wall time</div><div class="tc-val" x-text="fmtMs(summary.total_wall_ms)"></div></div>
+                <div class="trace-card"><div class="tc-label">peak context</div><div class="tc-val" x-text="fmtNum(summary.peak_context)"></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': Math.abs(summary.peak_drift_abs) >= 15}">
+                    <div class="tc-label">peak |drift|</div><div class="tc-val" x-text="summary.peak_drift_abs + '%'"></div></div>
+                <div class="trace-card"><div class="tc-label">median drift</div><div class="tc-val" x-text="summary.median_drift + '%'"></div></div>
+                <div class="trace-card"><div class="tc-label">mean drift</div><div class="tc-val" x-text="summary.mean_drift + '%'"></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': summary.mechanical_fallback_count > 0}">
+                    <div class="tc-label">mechanical fallbacks</div><div class="tc-val" x-text="summary.mechanical_fallback_count"></div></div>
+                <div class="trace-card"><div class="tc-label">compactions</div><div class="tc-val" x-text="summary.compaction_count"></div></div>
+                <div class="trace-card"><div class="tc-label">nudges / broke</div>
+                    <div class="tc-val"><span x-text="summary.nudge_count"></span> / <span x-text="summary.nudges_broken"></span></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': summary.redundant_reads > 0}">
+                    <div class="tc-label">redundant reads</div><div class="tc-val" x-text="summary.redundant_reads"></div></div>
+                <div class="trace-card"><div class="tc-label">tool calls</div><div class="tc-val" x-text="summary.tool_calls"></div></div>
+                <div class="trace-card"><div class="tc-label">subagent iters</div><div class="tc-val" x-text="summary.subagent_iters"></div></div>
+            </div>
+        </section>
+
+        <!-- 2 + 3. Context growth (lines + layer heat strip) -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Context growth <span class="trace-sub">total_est vs actual prompt tokens, per iteration</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('ctx')" :class="{open: infoOpen==='ctx'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='ctx'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Context growth</div>
+                    <p><b>Shows:</b> top — the harness's cl100k_base <em>estimate</em> (dashed) vs the provider's <em>real</em> prompt size (solid) per iteration, with the context limit and compaction events marked. Bottom — a heat strip of which context layer (L0–L5) dominates each iteration, plus a diverging drift strip.</p>
+                    <p><b>Why:</b> suspect #1 lives here. If the estimate diverges from actual, the compaction budget (computed in cl100k tokens) fires at the wrong point. The heat strip shows <i>which layer</i> is eating the budget — usually L5 history ballooning.</p>
+                    <p><b>Read:</b> dashed above solid = the harness over-estimates (compaction fires too early). Solid above dashed = under-estimate (fires too late, may blow the window). Blue verticals = compaction. If the limit line is off-chart, its value is printed top-right.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="ctxCanvas" class="trace-canvas" width="1200" height="220"></canvas>
+            </div>
+            <div class="trace-heat-label">Layer composition (heat = token share) · drift strip (teal = est &gt; actual, red = est &lt; actual)</div>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="heatCanvas" class="trace-canvas trace-canvas--heat" width="1200" height="170"></canvas>
+            </div>
+        </section>
+
+        <!-- 4. Drift -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Tokenizer drift <span class="trace-sub">(actual − est) / actual · 100 — the headline diagnostic</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('drift')" :class="{open: infoOpen==='drift'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='drift'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Tokenizer drift</div>
+                    <p><b>Shows:</b> per-iteration drift between the real prompt size and the harness estimate, centered at 0%. The ±15% band is shaded — inside it the estimate is "good enough".</p>
+                    <p><b>Why:</b> this single chart decides suspect #1. Persistent drift outside the band means the compaction budget is systematically wrong for this model's tokenizer.</p>
+                    <p><b>Caveat:</b> the formula normalizes by the <i>real</i> prompt, so when that is small early in a turn the percentage can spike to ±2000% and the mean becomes meaningless (use <i>median</i>). The y-axis is clamped to keep the warn band visible; ▲▼ caps mark values beyond the clamp. Toggle <b>signed-log</b> to read the full range. Absolute drift is visible in Context growth.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="driftCanvas" class="trace-canvas" width="1200" height="180"></canvas>
+            </div>
+            <label class="trace-toggle"><input type="checkbox" x-model="driftLog" @change="renderDrift()"> signed-log y scale (read the full ±range)</label>
+        </section>
+
+        <!-- 5. Compaction timeline -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Compaction timeline
+                <button class="trace-info-btn" @click.stop="toggleInfo('comp')" :class="{open: infoOpen==='comp'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='comp'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Compaction timeline</div>
+                    <p><b>Shows:</b> every compaction pass — kind (turn_start / auto_hook / emergency_preflight), tokens before→after, saved, summarizer mode, keep_recent, budget.</p>
+                    <p><b>Why:</b> suspect #3. <i>mechanical</i> summarizer rows (amber) mean the LLM summarizer fell back to lossy per-part truncation — a silent quality loss. Many <i>emergency_preflight</i> rows with <i>keep_recent=2</i> point at suspect #2 (unbudgeted reasoning tokens forcing emergency compaction).</p>
+                    <p><b>Read:</b> click a row to jump the conversation view to that iteration. Compactions also appear as blue verticals on Context growth.</p>
+                </div>
+            </h2>
+            <table class="trace-table" x-show="series.compaction_timeline.length">
+                <thead><tr><th>iter</th><th>kind</th><th>before → after</th><th>saved</th><th>summarizer</th><th>keep_recent</th><th>budget</th></tr></thead>
+                <tbody>
+                    <template x-for="c in series.compaction_timeline" :key="c.iter + '-' + c.kind + '-' + (c.tokens_before||0)">
+                        <tr :class="{'trace-row--mech': c.summarizer === 'mechanical'}"
+                            @click="selectIter(c.iter)">
+                            <td x-text="c.iter"></td>
+                            <td x-text="c.kind"></td>
+                            <td><span x-text="fmtNum(c.tokens_before)"></span> → <span x-text="fmtNum(c.tokens_after)"></span></td>
+                            <td x-text="fmtNum(c.tokens_saved)"></td>
+                            <td x-text="c.summarizer"></td>
+                            <td x-text="c.keep_recent"></td>
+                            <td x-text="fmtNum(c.budget)"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+            <p class="trace-muted" x-show="!series.compaction_timeline.length">No compactions fired — the run stayed under the trim threshold.</p>
+        </section>
+
+        <!-- 6. Tool histogram -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Tool histogram
+                <button class="trace-info-btn" @click.stop="toggleInfo('tool')" :class="{open: infoOpen==='tool'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='tool'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Tool histogram</div>
+                    <p><b>Shows:</b> per tool — call count (green = ok, red = errors), average latency, cache-hit rate, average result bytes, and the error codes when a tool failed.</p>
+                    <p><b>Why:</b> finds tools that dominate wall-time, churn large results (context bloat), or fail repeatedly. A high cache-hit rate on read tools means the tool-result cache is saving re-reads.</p>
+                    <p><b>Read:</b> click a row to plot that tool's per-iteration latency below (green bars ok, red errors, green cap = cache hit).</p>
+                </div>
+            </h2>
+            <div class="trace-hist" x-show="series.tool_histogram.length">
+                <template x-for="h in toolHistSorted()" :key="h.name">
+                    <div class="trace-hist-row" @click="selectTool(h.name)"
+                         :class="{'trace-hist-row--sel': selectedTool === h.name}">
+                        <div class="th-name" x-text="h.name"></div>
+                        <div class="th-bar">
+                            <div class="th-bar-ok" :style="`width:${(h.ok / maxToolCount()) * 100}%`"></div>
+                            <div class="th-bar-err" :style="`width:${(h.error / maxToolCount()) * 100}%`"></div>
+                        </div>
+                        <div class="th-stats">
+                            <span x-text="h.count + ' calls'"></span>
+                            <span x-text="h.error + ' err'"></span>
+                            <span x-text="h.avg_latency_ms + 'ms'"></span>
+                            <span x-text="'cache ' + (h.cache_hit_rate * 100).toFixed(0) + '%'"></span>
+                            <span x-text="fmtNum(h.avg_result_bytes) + 'B'"></span>
+                            <span class="th-codes" x-show="h.error > 0" x-text="errorCodes(h).map(([k,v]) => k + '×' + v).join('  ')"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <p class="trace-muted" x-show="!series.tool_histogram.length">No tool calls recorded.</p>
+            <div class="trace-canvas-wrap" x-show="selectedTool && selectedToolSeries().length"
+                 :title="selectedTool ? selectedTool + ' latency per iter' : ''">
+                <canvas x-ref="toolCanvas" class="trace-canvas" width="1200" height="140"></canvas>
+            </div>
+        </section>
+
+        <!-- 7. Read-state heatmap -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Read-state / redundant reads <span class="trace-sub">re-reads with no intervening write</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('reads')" :class="{open: infoOpen==='reads'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='reads'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Read-state / redundant reads</div>
+                    <p><b>Shows:</b> a path × iteration grid of read-tool calls (read_file, get_chunk, list_dir, search_…). Red cells are <i>redundant</i> — the same path was read again with no write in between.</p>
+                    <p><b>Why:</b> quantifies the context-gathering stall the recoverage nudge reacts to, and separates re-reading caused by state loss (clusters after a compaction) from aimless re-reading.</p>
+                    <p><b>Read:</b> a vertical red cluster = stuck re-reading one path. Rows are capped to the panel height; "+N more paths" appears when truncated. Click any other iter to highlight its column across panels.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="readCanvas" class="trace-canvas" width="1200" height="200"></canvas>
+            </div>
+        </section>
+
+        <!-- 8. Nudge timeline + efficacy -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Nudge timeline + efficacy
+                <button class="trace-info-btn" @click.stop="toggleInfo('nudge')" :class="{open: infoOpen==='nudge'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='nudge'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Nudge timeline + efficacy</div>
+                    <p><b>Shows:</b> each corrective nudge the harness injected (empty_response, loop_watchdog, recoverage_stall, loop_detect, retryable_escalation, …) and whether it <i>broke</i> the pattern — a write or a novel tool call followed within 3 iterations.</p>
+                    <p><b>Why:</b> the data to tune nudge text and thresholds. A nudge that rarely breaks the loop is wasted context; one that always does is doing real recovery work.</p>
+                    <p><b>Read:</b> green rows broke the loop. Click a row to jump to that iteration.</p>
+                </div>
+            </h2>
+            <table class="trace-table" x-show="series.nudge_timeline.length">
+                <thead><tr><th>iter</th><th>kind</th><th>broke loop?</th><th>how</th><th>extra</th></tr></thead>
+                <tbody>
+                    <template x-for="(nd, i) in series.nudge_timeline" :key="i">
+                        <tr @click="selectIter(nd.iter)" :class="{'trace-row--good': series.nudge_efficacy[i] && series.nudge_efficacy[i].broke}">
+                            <td x-text="nd.iter"></td>
+                            <td x-text="nd.kind"></td>
+                            <td x-text="(series.nudge_efficacy[i] && series.nudge_efficacy[i].broke) ? 'yes' : 'no'"></td>
+                            <td x-text="(series.nudge_efficacy[i] && series.nudge_efficacy[i].how) || '—'"></td>
+                            <td class="trace-muted" x-text="JSON.stringify(nd.extra) || ''"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+            <p class="trace-muted" x-show="!series.nudge_timeline.length">No nudges fired.</p>
+        </section>
+
+        <!-- 9. Subagent timeline + children -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Subagent timeline
+                <button class="trace-info-btn" @click.stop="toggleInfo('sub')" :class="{open: infoOpen==='sub'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='sub'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Subagent timeline</div>
+                    <p><b>Shows:</b> active child subagent count per iteration (bars), with stuck (red) / stall (amber) markers stacked above the bar. Below, the children themselves — task id, depth, status, tool calls, elapsed.</p>
+                    <p><b>Why:</b> long-running or stuck children burn context and wall-time in the parent. A child that stalls without producing wastes a whole sub-tree of work.</p>
+                    <p><b>Read:</b> select an iteration (click any chart) to filter the children list to that iteration's active children; otherwise all children seen this run are listed.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="subCanvas" class="trace-canvas" width="1200" height="120"></canvas>
+            </div>
+            <div class="trace-sub-children" x-show="subagentChildren().length">
+                <div class="trace-child-row trace-child-row--head">
+                    <span>task_id</span><span>depth</span><span>status</span><span>tool calls</span><span>elapsed</span><span>flags</span>
+                </div>
+                <template x-for="(c, i) in subagentChildren()" :key="(c.task_id ?? ('c' + i))">
+                    <div class="trace-child-row">
+                        <span class="mono" x-text="c.task_id ?? '—'"></span>
+                        <span x-text="'d' + (c.depth ?? 0)"></span>
+                        <span x-text="c.status"></span>
+                        <span x-text="(c.tool_calls ?? 0) + ' calls'"></span>
+                        <span x-text="fmtMs((c.elapsed ?? 0) * 1000)"></span>
+                        <span>
+                            <span class="flag-stuck" x-show="c.stuck">stuck</span>
+                            <span class="flag-stall" x-show="c.stall">stall</span>
+                        </span>
+                    </div>
+                </template>
+            </div>
+            <p class="trace-muted" x-show="!subagentChildren().length">No subagents spawned this run.</p>
+        </section>
+
+        <!-- 10. Memory counts -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Memory &amp; scratchpad counts <span class="trace-sub">task_memory + scratchpad, with status mix</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('mem')" :class="{open: infoOpen==='mem'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='mem'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Memory &amp; scratchpad counts</div>
+                    <p><b>Shows:</b> task-memory and scratchpad entry counts per iteration (lines), with a faint stacked area of the task-memory <i>status mix</i> (active / pending / stale / done / pruned) behind them.</p>
+                    <p><b>Why:</b> the counts show <i>how much</i> memory the model is carrying; the status mix shows <i>whether it's going stale</i> — a growing stale/pruned share with no done entries means memory is accumulating without resolution.</p>
+                    <p><b>Read:</b> solid green = task_memory, dashed amber = scratchpad. The colored bands = status composition.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="memCanvas" class="trace-canvas" width="1200" height="160"></canvas>
+            </div>
+        </section>
+
+        <!-- 11. Token breakdown -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Token breakdown <span class="trace-sub">in / out / cached / reasoning per iter</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('tok')" :class="{open: infoOpen==='tok'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='tok'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Token breakdown</div>
+                    <p><b>Shows:</b> input / output / cached / reasoning tokens per iteration.</p>
+                    <p><b>Why:</b> suspect #2. Reasoning tokens (purple) that balloon mid-turn are not budgeted and force keep_recent=2 emergency compaction — visible as a reasoning spike followed by an emergency_preflight row in Compaction. Cached tokens (blue) show prompt-cache effectiveness.</p>
+                    <p><b>Read:</b> hover for exact values; click to jump the conversation view.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="tokCanvas" class="trace-canvas" width="1200" height="180"></canvas>
+            </div>
+        </section>
+
+        <!-- 12. Iteration latency -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Iteration latency <span class="trace-sub">wall time per provider call</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('lat')" :class="{open: infoOpen==='lat'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='lat'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Iteration latency</div>
+                    <p><b>Shows:</b> wall time (ms) of each agent-loop iteration — how long the provider call + tool dispatch took.</p>
+                    <p><b>Why:</b> finds slow iterations that dominate total wall-time (the Overview "wall time" card is the sum). A spike often coincides with a long tool (see Tool histogram) or a big context (see Context growth).</p>
+                    <p><b>Read:</b> the selected iteration is highlighted amber. Hover for the exact time; click to jump the conversation view.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="latCanvas" class="trace-canvas" width="1200" height="140"></canvas>
+            </div>
+        </section>
+
+        <!-- 13. Conversation view -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Conversation <span class="trace-sub">iter-aligned · click any iter above to jump</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('conv')" :class="{open: infoOpen==='conv'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='conv'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Conversation</div>
+                    <p><b>Shows:</b> an iter-aligned view of the run from the trace's self-contained previews — assistant text, tool calls + args, and result previews.</p>
+                    <p><b>Why:</b> ties every metric above to what the model actually did. Click an iteration in any chart/table to scroll here and see the turn that produced it.</p>
+                    <p><b>Read:</b> previews are truncated in the trace; full message content lives in <code>session.json</code>. The highlighted iteration is the selected one.</p>
+                </div>
+            </h2>
+            <div class="trace-conv" :style="selectedIter !== null ? `--sel:${selectedIter}` : ''">
+                <template x-for="(c, ci) in convItems()" :key="ci">
+                    <template x-if="c.sep">
+                        <div class="trace-conv-runsep" :data-run="c.run_id">
+                            <span class="trace-conv-runsep-num" x-text="c.idx != null ? ('run ' + c.idx) : 'run'"></span>
+                            <span class="trace-muted" x-text="c.model"></span>
+                            <span class="trace-muted" x-text="c.iters != null ? (c.iters + ' iters') : ''"></span>
+                            <span class="trace-muted" x-text="c.status"></span>
+                        </div>
+                    </template>
+                    <template x-if="!c.sep">
+                        <div class="trace-conv-iter" :id="'iter-' + c.iter.iter"
+                             :class="{'trace-conv-iter--sel': selectedIter === c.iter.iter}">
+                            <div class="tc-iter-head">
+                                <span class="tc-iter-num" @click="selectIter(c.iter.iter)" x-text="'iter ' + c.iter.iter"></span>
+                                <span class="trace-muted" x-text="(c.iter.has_text ? 'text ' : '') + (c.iter.has_tool_call ? 'tools' : '')"></span>
+                                <span class="trace-muted" x-text="c.iter.context ? 'drift ' + c.iter.context.drift_pct + '%' : ''"></span>
+                            </div>
+                            <div class="tc-assistant" x-show="c.iter.assistant_preview" x-text="c.iter.assistant_preview"></div>
+                            <template x-for="(t, ti) in toolsForIter(c.iter.iter)" :key="c.iter.iter + '-' + ti + '-' + t.name">
+                                <div class="tc-tool">
+                                    <span class="tc-tool-name" x-text="t.name"></span>
+                                    <span class="trace-muted" x-text="t.path || ''"></span>
+                                    <span class="trace-muted" x-text="t.ok ? 'ok' : 'ERR'"></span>
+                                    <span class="trace-muted" x-text="t.latency_ms + 'ms'"></span>
+                                    <div class="tc-tool-prev" x-text="t.preview"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </template>
+            </div>
+            <p class="trace-muted" x-show="!iters.length">No iterations recorded.</p>
+        </section>
+    </main>
+</body>
+</html>

@@ -921,6 +921,25 @@ GUI_VIEW_PANELS = [
             "(view, edit, save, reload, init, reset)."
         ),
     },
+    {
+        "name": "trace",
+        "display_name": "Trace Analyzer",
+        "description": (
+            "Per-run visualization of context growth, tokenizer drift, "
+            "compaction/nudge/tool timelines, redundant reads, subagents, "
+            "and memory — the data for harness-performance decisions. "
+            "Opens in a new tab."
+        ),
+        # External full-page route (not an in-page panel). The tools
+        # dropdown renders external views as a new-tab link to `route`
+        # instead of calling setView.
+        "external": True,
+        "route": "/trace",
+        # Session-scoped: the tools dropdown appends ?session=<current session>
+        # so the analyzer opens on this session's combined run view, not a
+        # global run picker.
+        "route_session": True,
+    },
 ]
 
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."

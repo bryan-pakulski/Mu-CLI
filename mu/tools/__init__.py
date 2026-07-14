@@ -357,6 +357,13 @@ def _load_builtin_tools() -> None:
         logging.getLogger("mucli").warning(
             "mu.tools: failed to load session tool package: %s", exc
         )
+    try:
+        from . import trace as _trace_tools  # noqa: F401 — registers list_traces/trace_summary/trace_series/trace_iteration
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load trace tool package: %s", exc
+        )
 
 
 _load_builtin_tools()

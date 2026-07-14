@@ -48,6 +48,9 @@ mucli --session my-session                # load a saved session non-interactive
 mucli --yolo                              # auto-approve writes
 mucli --system "be concise"               # override system instruction
 mucli --debug                             # verbose logging
+mucli --gui                               # launch the browser GUI (port 30311)
+mucli --trace                             # launch GUI and open the Trace Analyzer
+mucli --trace-analyze ~/.mucli/trace/X.jsonl  # headless trace summary
 ```
 
 ## Key features
@@ -62,6 +65,7 @@ mucli --debug                             # verbose logging
 - Sub-agent spawning (`spawn_agent`) — isolated child sessions for focused side quests, depth-capped, plan-mode-aware.
 - Skills (`mu/skills/`, `~/.mu/skills/`, `<ws>/.mu/skills/`) — declarative agent extensions with regex triggers; compact index injected by default, bodies auto-load on trigger match or via `invoke_skill`. See [documentation/skills.md](documentation/skills.md).
 - Runtime stats with token + cache + reasoning + cost accounting.
+- Run tracing + Trace Analyzer dashboard — a per-run JSONL trace of every iteration (context layers, real vs estimated tokens, compactions, nudges, tools, subagents, memory) visualized at `/trace` (or `mucli --trace`) with context-growth curves, tokenizer drift, compaction/nudge/tool timelines, redundant-read heatmaps, and more. The data for harness-performance decisions. See [documentation/tracing.md](documentation/tracing.md).
 
 ## Common slash commands
 
@@ -135,6 +139,8 @@ mu/
   teacher/        Teacher-mode course engine
   tools/          @tool decorator + per-domain handlers (~95 native tools
                   + N MCP tools registered as mcp__<server>__<tool>)
+  trace/          Per-run JSONL trace emitter + parser/snapshot (Trace
+                  Analyzer dashboard data foundation)
   ui/             RichUI, stream renderer, input handler, subagent UI
   workspace/      FolderContext (sandbox + gitignore)
 providers/        Gemini, OpenAI, Ollama, base classes
@@ -156,6 +162,7 @@ See `documentation/`:
 - [`security.md`](documentation/security.md) — full security model: workspace sandbox, secret filtering, approval flow, plan mode, sub-agent isolation, limitations
 - [`security_controls.md`](documentation/security_controls.md) — the always-on secret-path denylist and scrubber controls
 - [`tooling_harness_architecture.md`](documentation/tooling_harness_architecture.md) — tool lifecycle
+- [`tracing.md`](documentation/tracing.md) — run tracing & the Trace Analyzer dashboard (per-iteration context/drift/compaction/nudge/tool telemetry)
 - [`memory_guide.md`](documentation/memory_guide.md) — memory vs scratchpad
 - [`session_guide.md`](documentation/session_guide.md) — session memory architecture, history search, context-preservation (compaction floors, oversized-message handling)
 - [`refactor_roadmap.md`](documentation/refactor_roadmap.md) — history of the `core/` → `mu/` consolidation (complete; historical reference)

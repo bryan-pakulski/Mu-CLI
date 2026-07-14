@@ -52,6 +52,13 @@ async def list_modes(request: Request):
             "view_only": True,
             "needs_workspace": False,
             "disabled": False,
+            # External full-page routes (e.g. the Trace Analyzer) open in a
+            # new tab rather than rendering as an in-page panel.
+            "external": bool(panel.get("external")),
+            "route": panel.get("route", ""),
+            # Session-scoped external routes get ?session=<current> appended
+            # by the tools dropdown so they open on the active session.
+            "route_session": bool(panel.get("route_session")),
         }
         for panel in GUI_VIEW_PANELS
     ]

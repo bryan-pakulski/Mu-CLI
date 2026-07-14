@@ -79,6 +79,12 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
         from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
 
         session_manager._tool_result_floor = resolve_tool_result_floor(session)
+        # Tag this compaction for the run tracer (drained into the trace at the
+        # post-response seam). `iter` comes from the loop's current-iter marker.
+        session_manager._pending_compaction_kind = "auto_hook"
+        session_manager._pending_compaction_iter = int(
+            getattr(session, "_trace_current_iter", 0) or 0
+        )
         rolled = session_manager.roll_history_summary_to_token_budget(
             budget,
             keep_recent=resolve_keep_recent(session),

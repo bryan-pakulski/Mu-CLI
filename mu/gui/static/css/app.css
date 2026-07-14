@@ -2593,6 +2593,11 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     width: 100%;
 }
 .mode-option:hover { background: var(--bg-hover); }
+/* Wrapper that gives x-for a single root child (Alpine requires one) while
+   leaving the inner .mode-option as the effective layout box. */
+.mode-option-wrap { display: contents; }
+/* External full-page views (Trace Analyzer) render as new-tab links. */
+a.mode-option--ext { text-decoration: none; color: var(--text); }
 .mode-option.active {
     background: var(--accent-soft);
 }

@@ -52,6 +52,7 @@ from .routers import (
     skills as skills_router,
     system_prompts as system_prompts_router,
     teacher as teacher_router,
+    traces as traces_router,
 )
 from .watcher import SessionWatcher
 from .web_ui import WebUI
@@ -215,6 +216,9 @@ def create_app(
     app.include_router(memory_router.router, prefix="/api/memory", tags=["memory"])
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])
+    app.include_router(
+        traces_router.router, prefix="/api/traces", tags=["traces"]
+    )
     app.include_router(chat.events_router, tags=["events"])
 
     # Live Memory Map: push a context snapshot per provider iteration so
@@ -234,6 +238,23 @@ def create_app(
                 "provider": session.provider.name if session and session.provider else "",
                 "model": session.provider.model_name if session and session.provider else "",
                 "session_active": session is not None,
+            },
+        )
+
+    @app.get("/trace", response_class=HTMLResponse)
+    async def trace_analyzer(request: Request):
+        # Full-page Trace Analyzer dashboard (separate from the chat SPA).
+        # Renders its own layout + Alpine store; data is fetched from
+        # /api/traces/* by trace.js.
+        return templates.TemplateResponse(
+            request,
+            "trace.html",
+            {
+                "session_name": "",
+                "agent_mode": "default",
+                "provider": "",
+                "model": "",
+                "session_active": False,
             },
         )
 

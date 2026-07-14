@@ -31,7 +31,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 logger = logging.getLogger("mucli")
@@ -102,6 +102,12 @@ class SubagentRecord:
     error: Optional[str] = None
     kill_reason: Optional[str] = None
     history_length: int = 0
+    # Live context-usage fields, written by the child loop (single writer =
+    # the child thread) and read by snapshot() under the registry lock.
+    context_pct: float = 0.0
+    iter: int = 0
+    max_iter: int = 0
+    tokens_in: int = 0
 
 
 class SubagentRegistry:
@@ -113,6 +119,10 @@ class SubagentRegistry:
         self._order: List[str] = []
         self._next_id = 0
         self._tracker: Any = None  # lazy SubagentProgressTracker
+        # GUI live-push callback. Set by ``spawn_agent`` (WebUI-only) so the
+        # chat feed gets subagent_start/progress/end events. ``None`` for
+        # CLI/TUI runs → emit is a no-op, no behaviour change.
+        self._publish_fn: Optional[Callable[[Dict[str, Any]], None]] = None
 
     # ----------------------------------------------------------- tracker
 
@@ -122,17 +132,90 @@ class SubagentRegistry:
             from mu.ui.progress import SubagentProgressTracker
 
             self._tracker = SubagentProgressTracker()
+            # Propagate an already-attached publish callback to the tracker so
+            # its per-tool / state-change emits reach the GUI too.
+            if self._publish_fn is not None:
+                self._tracker._publish = self._publish_fn
         return self._tracker
+
+    # ----------------------------------------------------------- GUI publish
+
+    @property
+    def _publish(self) -> Optional[Callable[[Dict[str, Any]], None]]:
+        return self._publish_fn
+
+    @_publish.setter
+    def _publish(self, fn: Optional[Callable[[Dict[str, Any]], None]]) -> None:
+        self._publish_fn = fn
+        # The tracker may already exist (spawn pre-opens its row); keep it in
+        # sync so per-tool emits route to the same bus.
+        if self._tracker is not None:
+            self._tracker._publish = fn
+
+    def _emit(self, event: Dict[str, Any]) -> None:
+        """Push a subagent event to the GUI bus. No-op when no ``_publish`` is
+        attached (CLI/TUI). The WebUI's ``_publish`` stamps ``session_name``."""
+        fn = self._publish_fn
+        if fn is None:
+            return
+        try:
+            fn(event)
+        except Exception:  # noqa: BLE001 — never let a UI push break the run
+            pass
+
+    def _link_tracker_task_id(self, tracker_agent_id: Optional[str], task_id: str) -> None:
+        """Tell the tracker the registry task_id for a pre-opened row so its
+        per-tool progress emits can carry the panel's upsert key."""
+        if tracker_agent_id is None:
+            return
+        try:
+            self.tracker.set_task_id(tracker_agent_id, task_id)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def update_child_live(
+        self,
+        task_id: str,
+        *,
+        context_pct: float = 0.0,
+        iter: int = 0,
+        max_iter: int = 0,
+        tokens_in: int = 0,
+    ) -> None:
+        """Write the live context-usage fields on a child's record. Called by
+        the child loop at the post-response seam (single writer = child
+        thread). Reads happen under the same lock via ``snapshot()``."""
+        with self._lock:
+            rec = self._records.get(task_id)
+            if rec is None:
+                return
+            rec.context_pct = float(context_pct)
+            rec.iter = int(iter)
+            rec.max_iter = int(max_iter)
+            rec.tokens_in = int(tokens_in)
 
     def _on_lifecycle_signal(self, record: SubagentRecord, lifecycle: Any) -> None:
         """Push stuck/stall state into the live progress tracker."""
         try:
             snap = lifecycle.snapshot()
+            stuck = bool(snap.get("stuck"))
+            stall = bool(snap.get("stall"))
             self.tracker.set_state(
                 record.tracker_agent_id,
-                stuck=bool(snap.get("stuck")),
-                stall=bool(snap.get("stall")),
+                stuck=stuck,
+                stall=stall,
                 repeat_count=int(snap.get("consecutive_repeats", 0)),
+            )
+            self._emit(
+                {
+                    "kind": "subagent_progress",
+                    "task_id": record.task_id,
+                    "stuck": stuck,
+                    "stall": stall,
+                    "consecutive_repeats": int(snap.get("consecutive_repeats", 0)),
+                    "consecutive_stalls": int(snap.get("consecutive_stalls", 0)),
+                    "status": record.status,
+                }
             )
         except Exception:  # noqa: BLE001
             pass
@@ -147,6 +230,7 @@ class SubagentRegistry:
         depth: int,
         lifecycle: Any,
         tracker_agent_id: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> SubagentRecord:
         """Register a child about to run on a background thread. Opens a
         progress-tracker row (unless ``tracker_agent_id`` is supplied —
@@ -178,6 +262,19 @@ class SubagentRegistry:
         with self._lock:
             self._records[task_id] = record
             self._order.append(task_id)
+        # Link the pre-opened tracker row to this task_id so the tracker's
+        # per-tool emits carry the panel's upsert key, then announce the
+        # start to the GUI (no-op when no _publish is attached).
+        self._link_tracker_task_id(tracker_agent_id, task_id)
+        self._emit(
+            {
+                "kind": "subagent_start",
+                "task_id": task_id,
+                "task": task,
+                "depth": depth,
+                "model": model or "",
+            }
+        )
         return record
 
     def launch(self, record: SubagentRecord, task: str) -> None:
@@ -271,19 +368,36 @@ class SubagentRegistry:
         status: str,
         kill_reason: Optional[str] = None,
     ) -> None:
-        if record.tracker_agent_id is None:
-            return
-        try:
-            self.tracker.close(
-                record.tracker_agent_id,
-                tool_count=tool_count,
-                summary=summary,
-                error=error,
-                status=status,
-                kill_reason=kill_reason,
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        if record.tracker_agent_id is not None:
+            try:
+                self.tracker.close(
+                    record.tracker_agent_id,
+                    tool_count=tool_count,
+                    summary=summary,
+                    error=error,
+                    status=status,
+                    kill_reason=kill_reason,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        # Announce completion to the GUI. Sent even when no tracker row existed
+        # (tracker_agent_id is None) so the panel still clears the agent.
+        self._emit(
+            {
+                "kind": "subagent_end",
+                "task_id": record.task_id,
+                "status": status,
+                "summary": summary,
+                "tokens": dict(record.tokens),
+                "tool_calls": tool_count,
+                "elapsed": round(
+                    max(0.0, (record.finished_at or time.monotonic()) - record.started_at),
+                    2,
+                ),
+                "kill_reason": kill_reason,
+                "error": error,
+            }
+        )
 
     # ----------------------------------------------------------- introspection
 
@@ -316,6 +430,10 @@ class SubagentRegistry:
                 "error": rec.error,
                 "kill_reason": rec.kill_reason,
                 "history_length": rec.history_length,
+                "context_pct": round(float(rec.context_pct), 1),
+                "iter": rec.iter,
+                "max_iter": rec.max_iter,
+                "tokens_in": rec.tokens_in,
             }
         # Merge in live lifecycle signals (running children especially).
         try:
@@ -369,6 +487,19 @@ class SubagentRegistry:
             self.tracker.set_state(rec.tracker_agent_id, status="killed", kill_reason="killed_by_parent")
         except Exception:  # noqa: BLE001
             pass
+        # Reflect the kill on the GUI right away — the thread finalizes
+        # rec.status="killed" (and re-emits via _close_tracker) shortly after.
+        self._emit(
+            {
+                "kind": "subagent_end",
+                "task_id": task_id,
+                "status": "killed",
+                "kill_reason": "killed_by_parent",
+                "elapsed": round(
+                    max(0.0, time.monotonic() - rec.started_at), 2
+                ),
+            }
+        )
 
         # Wait for the thread wrapper to finalize (it writes rec.status).
         deadline = time.monotonic() + max(0.0, grace_seconds)

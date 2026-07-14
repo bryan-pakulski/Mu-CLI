@@ -11,10 +11,12 @@ These exercise the new orchestrator contract:
 
 import io
 import time
+from types import SimpleNamespace
 
 import pytest
 
 from mu.agent.lifecycle import SubagentLifecycleManager
+from mu.agent.registry import SubagentRegistry
 from mu.session.context import inject_hierarchical_context
 from mu.session.session import Session, SessionManager
 from mu.workspace.folder_context import FolderContext
@@ -336,3 +338,117 @@ def test_single_spawn_renders_parent_and_child_rows(tmp_path, monkeypatch):
     rows = tracker.snapshot()
     assert any(r.status == "done" for r in rows)
     assert tracker.has_active() is False
+
+
+# ----------------------------------------------------------- GUI emit plane
+
+
+def _make_registry_with_publish():
+    """A registry whose ``_publish`` collects events into a list."""
+    reg = SubagentRegistry()
+    events: list = []
+    reg._publish = lambda ev: events.append(ev)
+    return reg, events
+
+
+def _fake_child():
+    return SimpleNamespace(
+        session_manager=SimpleNamespace(history=[]),
+        _subagent_cancelled=False,
+        _subagent_kill_reason=None,
+    )
+
+
+def test_registry_emits_start_and_end_when_publish_set():
+    """register() emits subagent_start; _close_tracker() emits subagent_end.
+    Both carry the task_id the GUI panel upserts by."""
+    reg, events = _make_registry_with_publish()
+    lc = SubagentLifecycleManager(thresholds={"enabled": False})
+    record = reg.register(
+        _fake_child(), task="review x", depth=1, lifecycle=lc, model="qwen3"
+    )
+    starts = [e for e in events if e.get("kind") == "subagent_start"]
+    assert len(starts) == 1
+    assert starts[0]["task_id"] == record.task_id
+    assert starts[0]["task"] == "review x"
+    assert starts[0]["depth"] == 1
+    assert starts[0]["model"] == "qwen3"
+
+    reg._close_tracker(
+        record, tool_count=4, summary="done", error=None, status="done"
+    )
+    ends = [e for e in events if e.get("kind") == "subagent_end"]
+    assert len(ends) == 1
+    assert ends[0]["task_id"] == record.task_id
+    assert ends[0]["status"] == "done"
+    assert ends[0]["tool_calls"] == 4
+
+
+def test_registry_silent_when_publish_unset():
+    """CLI/TUI: no _publish attached → register / _close_tracker emit nothing
+    and never raise."""
+    reg = SubagentRegistry()
+    lc = SubagentLifecycleManager(thresholds={"enabled": False})
+    record = reg.register(_fake_child(), task="t", depth=1, lifecycle=lc)
+    reg._close_tracker(record, tool_count=0, summary="", error=None, status="done")
+    # No exception, no publish callback to observe — the contract is "no-op".
+    assert reg._publish is None
+
+
+def test_registry_tracker_emits_progress_per_tool():
+    """The tracker emits subagent_progress on update_tool once its row is
+    linked to a task_id (done in register). Carries tool_count + last_tool."""
+    reg, events = _make_registry_with_publish()
+    lc = SubagentLifecycleManager(thresholds={"enabled": False})
+    record = reg.register(_fake_child(), task="t", depth=1, lifecycle=lc)
+    aid = record.tracker_agent_id
+    assert aid is not None
+    reg.tracker.update_tool(aid, "read_file")
+    reg.tracker.update_tool(aid, "search_for_string")
+    progress = [e for e in events if e.get("kind") == "subagent_progress"]
+    assert len(progress) >= 2
+    assert progress[-1]["task_id"] == record.task_id
+    assert progress[-1]["tool_count"] == 2
+    assert progress[-1]["last_tool"] == "search_for_string"
+
+
+def test_snapshot_carries_live_context_fields():
+    """update_child_live writes context_pct/iter/max_iter/tokens_in under the
+    lock; snapshot() surfaces them so the GUI context bar + trace render."""
+    reg = SubagentRegistry()
+    lc = SubagentLifecycleManager(thresholds={"enabled": False})
+    record = reg.register(_fake_child(), task="t", depth=1, lifecycle=lc)
+    reg.update_child_live(
+        record.task_id, context_pct=42.5, iter=7, max_iter=60, tokens_in=12345
+    )
+    snap = reg.snapshot(record.task_id)
+    assert snap["context_pct"] == 42.5
+    assert snap["iter"] == 7
+    assert snap["max_iter"] == 60
+    assert snap["tokens_in"] == 12345
+
+
+def test_cancel_emits_killed_end_event():
+    """cancel() pushes a subagent_end with status=killed immediately so the
+    GUI panel reflects the kill before the thread finalizes."""
+    reg, events = _make_registry_with_publish()
+    lc = SubagentLifecycleManager(thresholds={"enabled": False})
+
+    # A child that stays "running" so cancel has something to act on.
+    class _HungChild:
+        _subagent_cancelled = False
+        _subagent_kill_reason = None
+        session_manager = SimpleNamespace(history=[])
+
+        def send_message(self, task):
+            time.sleep(0.3)
+            return {"status": "killed", "assistant_text": "", "tool_calls": []}
+
+    record = reg.register(_HungChild(), task="t", depth=1, lifecycle=lc)
+    reg.launch(record, "t")
+    # Give the thread a moment to enter send_message.
+    time.sleep(0.05)
+    reg.cancel(record.task_id, grace_seconds=2.0)
+    ends = [e for e in events if e.get("kind") == "subagent_end" and e.get("status") == "killed"]
+    assert ends, f"expected a killed end event, events={events}"
+    assert ends[0]["task_id"] == record.task_id

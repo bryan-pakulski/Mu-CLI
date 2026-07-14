@@ -339,13 +339,25 @@
                 <button class="trace-info-btn" @click.stop="toggleInfo('conv')" :class="{open: infoOpen==='conv'}" title="What this panel shows">ⓘ</button>
                 <div class="trace-info-popout" x-show="infoOpen==='conv'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
                     <div class="tip-title">Conversation</div>
-                    <p><b>Shows:</b> an iter-aligned view of the run from the trace's self-contained previews — assistant text, tool calls + args, and result previews.</p>
-                    <p><b>Why:</b> ties every metric above to what the model actually did. Click an iteration in any chart/table to scroll here and see the turn that produced it.</p>
-                    <p><b>Read:</b> previews are truncated in the trace; full message content lives in <code>session.json</code>. The highlighted iteration is the selected one.</p>
+                    <p><b>Shows:</b> the run as a chat transcript — <em>request → assistant turns → final output</em>. Each turn card groups the iters where the model spoke (prose at top) and the tool calls it then made (folded below).</p>
+                    <p><b>Why:</b> ties every metric above to what the model actually did, in the order a person reads a conversation — not a flat iter dump. Tool result previews are folded by default so the skeleton of the run reads at a glance; expand a row or "expand N tools" to drill in.</p>
+                    <p><b>Read:</b> <b>★ final</b> = the last turn (the answer). <b>acting only</b> = the model called tools without narrating. <b>↺ compacted</b> = a compaction fired in that turn. Click an iteration in any chart to jump to its turn; the containing turn is highlighted. Previews are truncated in the trace; full content lives in <code>session.json</code>.</p>
                 </div>
             </h2>
             <div class="trace-conv" :style="selectedIter !== null ? `--sel:${selectedIter}` : ''">
-                <template x-for="(c, ci) in convItems()" :key="ci">
+                <!-- Request bookend: the user's turn that kicked off the run(s).
+                     The literal prompt isn't captured in the trace (it lives in
+                     session.json); this card frames the narrative the panel
+                     tells — request → turns → final output. -->
+                <div class="trace-conv-request" x-show="iters.length">
+                    <span class="trace-conv-role trace-conv-role--user">user</span>
+                    <span class="trace-conv-request-label"
+                          x-text="(session ? session + ' · ' : '') + 'request'"></span>
+                    <span class="trace-muted" x-show="runBounds.length"
+                          x-text="runBounds[0].model + ' · ' + runBounds[0].mode"></span>
+                </div>
+
+                <template x-for="(c, ci) in turnCards()" :key="ci">
                     <template x-if="c.sep">
                         <div class="trace-conv-runsep" :data-run="c.run_id">
                             <span class="trace-conv-runsep-num" x-text="c.idx != null ? ('run ' + c.idx) : 'run'"></span>
@@ -354,24 +366,53 @@
                             <span class="trace-muted" x-text="c.status"></span>
                         </div>
                     </template>
-                    <template x-if="!c.sep">
-                        <div class="trace-conv-iter" :id="'iter-' + c.iter.iter"
-                             :class="{'trace-conv-iter--sel': selectedIter === c.iter.iter}">
-                            <div class="tc-iter-head">
-                                <span class="tc-iter-num" @click="selectIter(c.iter.iter)" x-text="'iter ' + c.iter.iter"></span>
-                                <span class="trace-muted" x-text="(c.iter.has_text ? 'text ' : '') + (c.iter.has_tool_call ? 'tools' : '')"></span>
-                                <span class="trace-muted" x-text="c.iter.context ? 'drift ' + c.iter.context.drift_pct + '%' : ''"></span>
+                    <template x-if="c.card">
+                        <div class="trace-conv-turn"
+                             :id="'iter-' + c.iters[0].iter"
+                             :data-iter-min="c.iters[0].iter"
+                             :data-iter-max="c.iters[c.iters.length - 1].iter"
+                             :class="{
+                                'trace-conv-turn--sel': selectedIter !== null && selectedIter >= c.iters[0].iter && selectedIter <= c.iters[c.iters.length - 1].iter,
+                                'trace-conv-turn--final': c.final,
+                                'trace-conv-turn--acting': !c.voice
+                             }">
+                            <div class="trace-conv-turn-head">
+                                <span class="trace-conv-role">assistant</span>
+                                <span class="trace-conv-turn-iters"
+                                      @click="selectIter(c.iters[0].iter)"
+                                      x-text="cardLabel(c)"></span>
+                                <span class="trace-muted" x-text="fmtMs(cardWall(c)) + ' · ' + fmtNum(cardTokens(c)) + ' tok'"></span>
+                                <span class="trace-muted"
+                                      :class="{'trace-conv-warn': cardMaxDrift(c) >= 100}"
+                                      x-text="'drift ' + cardMaxDrift(c) + '%'"></span>
+                                <span class="trace-conv-flag" x-show="cardHasCompaction(c)">↺ compacted</span>
+                                <span class="trace-conv-flag trace-conv-flag--acting" x-show="!c.voice">acting only</span>
+                                <span class="trace-conv-flag trace-conv-flag--final" x-show="c.final">★ final</span>
+                                <button class="trace-conv-toolcount" x-show="c.toolList.length"
+                                        @click="toggleCardTools(c)"
+                                        x-text="(expandedCards[cardKey(c)] ? '▾ collapse' : '▸ expand') + ' ' + c.toolList.length + ' tools'"></button>
                             </div>
-                            <div class="tc-assistant" x-show="c.iter.assistant_preview" x-text="c.iter.assistant_preview"></div>
-                            <template x-for="(t, ti) in toolsForIter(c.iter.iter)" :key="c.iter.iter + '-' + ti + '-' + t.name">
-                                <div class="tc-tool">
-                                    <span class="tc-tool-name" x-text="t.name"></span>
-                                    <span class="trace-muted" x-text="t.path || ''"></span>
-                                    <span class="trace-muted" x-text="t.ok ? 'ok' : 'ERR'"></span>
-                                    <span class="trace-muted" x-text="t.latency_ms + 'ms'"></span>
-                                    <div class="tc-tool-prev" x-text="t.preview"></div>
-                                </div>
-                            </template>
+                            <div class="trace-conv-prose"
+                                 x-show="c.voice && c.voice.assistant_preview"
+                                 x-text="c.voice.assistant_preview"></div>
+                            <div class="trace-conv-tools" x-show="c.toolList.length">
+                                <template x-for="(t, ti) in c.toolList" :key="c.iters[0].iter + '-' + ti">
+                                    <div class="trace-conv-tool" @click="toggleTool(c, ti)">
+                                        <span class="trace-conv-tool-glyph"
+                                              x-text="toolExpanded(c, ti) ? '▾' : '▸'"></span>
+                                        <span class="trace-conv-tool-name" x-text="t.name"></span>
+                                        <span class="trace-muted" x-text="t.path || ''"></span>
+                                        <span class="trace-conv-tool-status"
+                                              :class="t.ok ? 'is-ok' : 'is-err'"
+                                              x-text="t.ok ? 'ok' : 'ERR'"></span>
+                                        <span class="trace-muted" x-text="fmtMs(t.latency_ms)"></span>
+                                        <span class="trace-muted" x-show="t.cache_hit">· cache</span>
+                                        <div class="trace-conv-tool-prev"
+                                             x-show="toolExpanded(c, ti)"
+                                             x-text="t.preview"></div>
+                                    </div>
+                                </template>
+                            </div>
                         </div>
                     </template>
                 </template>

@@ -184,6 +184,64 @@ def test_ollama_effective_context_parses_model_info_context_length(monkeypatch):
     assert provider.effective_context_window("qwen2.5") == 32768
 
 
+# ------------------------------------------------- compaction safety factor
+
+
+class _DriftyProvider(_SmallWindowProvider):
+    """A provider whose real tokenizer diverges from cl100k_base — models
+    the Ollama case where the harness estimate under-counts the real prompt."""
+
+    def compaction_safety_factor(self):
+        return 2.5
+
+
+def test_safety_factor_reduces_compaction_limit():
+    """A provider with compaction_safety_factor > 1 gets its limit divided,
+    so the compactor fires before the (under-counted) cl100k estimate would
+    otherwise suggest — preventing the Ollama 'prompt is too long' overflow."""
+    session = _session(_DriftyProvider("dummy"))
+    session.variables["context_token_limit"] = 100_000
+    # provider window 8192, then / 2.5 -> 3276
+    assert session._resolve_context_limit() == 3276
+
+
+def test_safety_factor_one_is_a_noop():
+    """factor == 1.0 (the base default) must not change the limit — frontier
+    providers that report true input_tokens are trusted verbatim."""
+    session = _session(_SmallWindowProvider("dummy"))
+    session.variables["context_token_limit"] = 100_000
+    assert session._resolve_context_limit() == 8192
+
+
+def test_ollama_safety_factor_default_and_override():
+    """Ollama defaults to 2.5 (observed cl100k→real drift for qwen-class),
+    and is tunable via the ollama_token_safety_factor session variable."""
+    from providers.ollama import OllamaProvider
+
+    provider = OllamaProvider("qwen3", host="http://localhost:11434")
+    provider.bind_session_variables({})
+    assert provider.compaction_safety_factor() == 2.5
+
+    provider.bind_session_variables({"ollama_token_safety_factor": 1.0})
+    assert provider.compaction_safety_factor() == 1.0
+
+    provider.bind_session_variables({"ollama_token_safety_factor": 3.0})
+    assert provider.compaction_safety_factor() == 3.0
+
+
+def test_safety_factor_compaction_budget_tightens(monkeypatch):
+    """The reduced limit flows through to the L5 compaction budget so the
+    normal compaction pass (not just the emergency pre-flight) triggers
+    earlier for drift-prone providers."""
+    session = _session(_DriftyProvider("dummy"))
+    _isolate_compaction_math(session, monkeypatch)
+    session.variables["context_token_limit"] = 100_000
+    session.variables["context_trim_threshold"] = 1.0
+    session.variables["response_token_reserve"] = 0
+    # 8192 / 2.5 = 3276 usable (non_l5 stubbed to 0), threshold 1.0
+    assert session._compaction_token_budget() == 3276
+
+
 def test_ollama_effective_context_caches_per_model(monkeypatch):
     """Don't hit the daemon every turn — cache per model."""
     from providers.ollama import OllamaProvider

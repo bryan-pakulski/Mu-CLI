@@ -688,6 +688,28 @@ class OllamaProvider(LLMProvider):
         """
         self._session_variables = variables
 
+    def compaction_safety_factor(self) -> float:
+        """Ollama's cl100k_base estimate under-counts the model's real
+        tokenizer (observed ~2.2x for qwen-class models), and the streamed
+        ``prompt_eval_count`` only reflects the non-cached prompt delta — so
+        the compactor must target a reduced limit or the real prompt
+        overflows before compaction fires (the "prompt is too long" 400).
+
+        Tunable via the ``ollama_token_safety_factor`` session variable
+        (``/set ollama_token_safety_factor <n>``); default 2.5 gives ~20%
+        headroom beyond the observed drift. Set to 1.0 to disable.
+        """
+        try:
+            vars_ = getattr(self, "_session_variables", None) or {}
+            raw = vars_.get("ollama_token_safety_factor")
+            if raw is not None:
+                f = float(raw)
+                if f > 0:
+                    return f
+        except (TypeError, ValueError):
+            pass
+        return 2.5
+
 
 __all__ = [
     "OllamaError",

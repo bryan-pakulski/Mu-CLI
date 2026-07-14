@@ -2422,6 +2422,147 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 .trace-event.te-thinking .te-text     { font-style: italic; color: var(--text-dim); }
 .trace-event.te-info .te-label        { color: var(--text-dimmer); }
 
+/* ------------------------------------------------------------ sub-agent panel
+ *
+ * Inline live status panel for spawned sub-agents. One per session slot,
+ * rendered in the chat feed. Mirrors the .trace block's collapsible header
+ * + inner list shape, with one row per child showing depth, task, live tool
+ * + tool count, elapsed, a context-usage bar, and tokens-in. Stuck / stall
+ * / killed / error rows tint amber / red. Collapses to a one-line summary
+ * (summarizeSubagentPanel) when all agents finish.
+ */
+.subagent-panel {
+    margin: calc(-1 * var(--space-3)) 0 var(--space-6);
+    font-family: var(--mono);
+    color: var(--text-dim);
+    animation: rise 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.sap-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 8px 0;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-dimmer);
+    font-size: 11.5px;
+    letter-spacing: 0.3px;
+    transition: color 0.15s ease;
+}
+.sap-header:hover { color: var(--text-dim); }
+.sap-header:focus-visible {
+    outline: 1px dashed var(--accent-line);
+    outline-offset: 4px;
+    border-radius: 4px;
+}
+.sap-header .caret {
+    display: inline-block;
+    transform-origin: center;
+    transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+    width: 8px;
+    color: var(--text-dimmer);
+}
+.subagent-panel.open .sap-header .caret { transform: rotate(90deg); }
+.sap-header .label {
+    text-transform: uppercase;
+    letter-spacing: 1.3px;
+    font-size: 10px;
+    color: var(--text-dimmer);
+}
+.sap-header .summary { color: var(--text-dim); }
+.subagent-panel.running .sap-header .label,
+.subagent-panel.running .sap-header .summary { color: var(--accent); }
+
+.sap-rows {
+    margin-top: var(--space-2);
+    padding-left: var(--space-4);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.sap-row {
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-soft);
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 8px;
+    animation: rise 0.18s ease-out both;
+}
+.sap-row.is-stuck   { border-color: rgba(224, 160, 64, 0.5); }
+.sap-row.is-stall   { border-color: rgba(224, 160, 64, 0.5); }
+.sap-row.is-killed  { border-color: rgba(176, 132, 176, 0.5); }
+.sap-row.is-error   { border-color: rgba(220, 100, 100, 0.5); }
+.sap-row.is-done    { opacity: 0.78; }
+
+.sap-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+.sap-depth {
+    font-size: 9.5px;
+    color: var(--text-dimmer);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    padding: 0 5px;
+    flex-shrink: 0;
+}
+.sap-task {
+    color: var(--text-soft);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.sap-status {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+.sap-row.is-running .sap-status { color: var(--accent); }
+.sap-row.is-stuck   .sap-status { color: #e0a040; }
+.sap-row.is-stall   .sap-status { color: #e0a040; }
+.sap-row.is-killed  .sap-status { color: #b884b8; }
+.sap-row.is-error   .sap-status { color: var(--err); }
+.sap-row.is-done    .sap-status { color: #7ec96b; }
+.sap-elapsed {
+    font-size: 10px;
+    color: var(--text-dimmer);
+    flex-shrink: 0;
+}
+
+.sap-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: 4px;
+    flex-wrap: wrap;
+    font-size: 10px;
+    color: var(--text-dimmer);
+}
+.sap-tools, .sap-tokens, .sap-iter { flex-shrink: 0; }
+.sap-ctx {
+    flex: 1 1 80px;
+    min-width: 60px;
+    height: 4px;
+    background: var(--bg);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.sap-ctx-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+.sap-ctx-fill.warn { background: #e0a040; }
+
 /* ------------------------------------------------------------ confirm popover
  *
  * Cursor-anchored mini-dialog used in place of window.confirm(). Floats

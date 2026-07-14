@@ -140,8 +140,22 @@ def resolve_context_limit(session: Any) -> int:
     except Exception:
         provider_window = None
     if provider_window and provider_window > 0:
-        return min(user_limit, int(provider_window))
-    return user_limit
+        limit = min(user_limit, int(provider_window))
+    else:
+        limit = user_limit
+    # Apply a provider-aware safety factor so the compactor targets a reduced
+    # ceiling for providers whose real tokenizer diverges from the harness's
+    # cl100k_base estimate (notably Ollama, where cl100k under-counts ~2x and
+    # streamed prompt_eval_count is only the non-cached delta). Without this
+    # the real prompt overflows the window before the cl100k-based compaction
+    # guard fires — the Ollama "prompt is too long" 400. 1.0 = trust cl100k.
+    try:
+        factor = float(session.provider.compaction_safety_factor())
+    except Exception:
+        factor = 1.0
+    if factor > 1.0:
+        limit = max(1024, int(limit / factor))
+    return limit
 
 
 def resolve_response_reserve(session: Any) -> int:

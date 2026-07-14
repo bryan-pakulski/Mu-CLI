@@ -58,6 +58,62 @@
                 </div>
             </template>
 
+            <!-- live sub-agent status panel: one per session, inline in the
+                 feed. Expanded while agents run (tool / context / tokens),
+                 collapses to a one-line summary when all finish. -->
+            <template x-if="t.role === 'subagent_panel'">
+                <div class="subagent-panel" :class="{ open: t.open, running: t.running }">
+                    <div class="sap-header"
+                         @click="t.open = !t.open"
+                         :aria-expanded="t.open"
+                         role="button"
+                         tabindex="0"
+                         @keydown.enter.prevent="t.open = !t.open"
+                         @keydown.space.prevent="t.open = !t.open">
+                        <span class="caret">›</span>
+                        <span class="label">subagents</span>
+                        <span class="summary" x-text="summarizeSubagentPanel(t)"></span>
+                        <span x-show="t.running" class="thinking-dots" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                        </span>
+                    </div>
+                    <div class="sap-rows"
+                         x-show="t.open"
+                         x-transition.opacity.duration.180ms>
+                        <template x-for="a in t.agents" :key="a.task_id">
+                            <div class="sap-row" :class="'is-' + a.status">
+                                <div class="sap-row-head">
+                                    <span class="sap-depth" x-text="'d=' + a.depth"></span>
+                                    <span class="sap-task" x-text="a.task"></span>
+                                    <span class="sap-status" x-text="subagentStatusText(a)"></span>
+                                    <span class="sap-elapsed"
+                                          x-show="a.elapsed"
+                                          x-text="(a.elapsed || 0).toFixed(1) + 's'"></span>
+                                </div>
+                                <div class="sap-meta">
+                                    <span class="sap-tools"
+                                          x-show="a.tool_count > 0"
+                                          x-text="a.tool_count + ' call' + (a.tool_count > 1 ? 's' : '')"></span>
+                                    <span class="sap-tokens"
+                                          x-show="a.tokens_in > 0"
+                                          x-text="_fmtTok(a.tokens_in) + ' in'"></span>
+                                    <span class="sap-iter"
+                                          x-show="a.max_iter > 0"
+                                          x-text="'iter ' + a.iter + '/' + a.max_iter"></span>
+                                    <div class="sap-ctx"
+                                         x-show="a.context_pct > 0"
+                                         :title="'context ' + (a.context_pct || 0).toFixed(1) + '%'">
+                                        <div class="sap-ctx-fill"
+                                             :class="{ warn: (a.context_pct || 0) > 80 }"
+                                             :style="'width:' + Math.min(100, a.context_pct || 0) + '%'"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
             <!-- standalone error -->
             <template x-if="t.role === 'error'">
                 <div class="msg error">

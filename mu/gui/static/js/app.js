@@ -34,6 +34,13 @@ document.addEventListener("alpine:init", () => {
                 busy: false,
                 externalActive: false,
                 clock: 0,
+                // A history reload was requested while a turn was in flight
+                // (SSE reconnect or a session_updated from another process).
+                // The in-flight assistant text isn't saved server-side yet,
+                // so reloading mid-stream would wipe it and leave only the
+                // tail deltas in a fresh turn ("output disappeared mid
+                // response"). Defer the reload until the turn completes.
+                pendingReload: false,
             };
         },
         _slot(name) {
@@ -45,7 +52,7 @@ document.addEventListener("alpine:init", () => {
         focus(name) {
             this.currentName = name || null;
             this._slot(name);   // ensure created
-            this.scroll();
+            this.scroll(true);
         },
 
         // Back-compat top-level getters: legacy templates read e.g.
@@ -111,6 +118,14 @@ document.addEventListener("alpine:init", () => {
         addUser(text, name) {
             const slot = this._slot(name);
             this._closeTrace(slot);
+            // Drop a finished sub-agent panel so a new turn starts clean.
+            // A panel whose agents are still running (outliving the parent
+            // turn) is kept until they finish.
+            const oldPanel = this._lastByRole(slot, "subagent_panel");
+            if (oldPanel && !this._panelRunning(oldPanel)) {
+                const idx = slot.turns.indexOf(oldPanel);
+                if (idx >= 0) slot.turns.splice(idx, 1);
+            }
             slot.turns.push({
                 id: this._id("u"),
                 role: "user",
@@ -118,7 +133,7 @@ document.addEventListener("alpine:init", () => {
                 html: renderMarkdown(text),
                 streaming: false,
             });
-            if (!name || name === this.currentName) this.scroll();
+            if (!name || name === this.currentName) this.scroll(true);
         },
         startAssistant(turn_id, name) {
             const slot = this._slot(name);
@@ -164,6 +179,9 @@ document.addEventListener("alpine:init", () => {
             if (!name || name === this.currentName) {
                 queueMicrotask(highlightAll);
                 queueMicrotask(() => typesetMathInScope(".msg.assistant .body"));
+                // Settle the view after the final reflow — but only if the
+                // user is already following at the bottom (see scroll()).
+                queueMicrotask(() => this.scroll());
             }
         },
 
@@ -296,7 +314,7 @@ document.addEventListener("alpine:init", () => {
                 html: body ? renderMarkdown(body) : "",
                 isPreformatted: preformatted,
             });
-            if (!name || name === this.currentName) this.scroll();
+            if (!name || name === this.currentName) this.scroll(true);
         },
 
         addPromptResolved(record, name) {
@@ -319,9 +337,109 @@ document.addEventListener("alpine:init", () => {
             if (!name || name === this.currentName) this.scroll();
         },
 
+        // ---------- sub-agent status panel ----------------------------
+        //
+        // One `subagent_panel` turn per session slot, holding an `agents`
+        // list upserted by `task_id`. While any agent is running the panel
+        // is expanded (live tool / context / token readout); when all are
+        // done it collapses to a one-line summary, expandable on click.
+
+        _newAgentRow(task_id) {
+            return {
+                task_id,
+                task: "", depth: 1, model: "", status: "running",
+                tool_count: 0, last_tool: null,
+                stuck: false, stall: false, repeat_count: 0,
+                elapsed: 0, context_pct: 0, iter: 0, max_iter: 0, tokens_in: 0,
+                summary: "", kill_reason: null, error: null,
+            };
+        },
+        _ensurePanel(slot) {
+            let p = this._lastByRole(slot, "subagent_panel");
+            if (!p) {
+                p = {
+                    id: this._id("sap"),
+                    role: "subagent_panel",
+                    agents: [],
+                    running: false,
+                    open: true,
+                };
+                slot.turns.push(p);
+            }
+            return p;
+        },
+        _panelRunning(p) {
+            return p.agents.some(a => a.status === "running" || a.status === "stuck");
+        },
+        upsertSubagent(name, agent) {
+            const tid = agent && agent.task_id;
+            if (!tid) return;
+            const slot = this._slot(name);
+            const p = this._ensurePanel(slot);
+            let row = p.agents.find(a => a.task_id === tid);
+            if (!row) {
+                row = this._newAgentRow(tid);
+                p.agents.push(row);
+            }
+            Object.assign(row, agent);
+            p.running = this._panelRunning(p);
+            if (p.running) p.open = true;
+            if (!name || name === this.currentName) this.scroll();
+        },
+        replaceSubagentSnapshot(name, children) {
+            if (!children || !children.length) return;
+            const slot = this._slot(name);
+            const p = this._ensurePanel(slot);
+            for (const c of children) {
+                const tid = c.task_id;
+                if (!tid) continue;
+                let row = p.agents.find(a => a.task_id === tid);
+                if (!row) {
+                    row = this._newAgentRow(tid);
+                    p.agents.push(row);
+                }
+                Object.assign(row, {
+                    task: c.task || row.task,
+                    depth: c.depth || row.depth,
+                    status: c.status || row.status,
+                    tool_count: c.tool_count ?? row.tool_count,
+                    last_tool: c.last_tool ?? row.last_tool,
+                    stuck: !!c.stuck,
+                    stall: !!c.stall,
+                    repeat_count: c.consecutive_repeats ?? row.repeat_count,
+                    elapsed: c.elapsed ?? row.elapsed,
+                    context_pct: c.context_pct ?? row.context_pct,
+                    iter: c.iter ?? row.iter,
+                    max_iter: c.max_iter ?? row.max_iter,
+                    tokens_in: c.tokens_in ?? row.tokens_in,
+                    summary: c.summary || row.summary,
+                    kill_reason: c.kill_reason ?? row.kill_reason,
+                    error: c.error ?? row.error,
+                });
+            }
+            p.running = this._panelRunning(p);
+            if (!p.running) p.open = false;
+            if (!name || name === this.currentName) this.scroll();
+        },
+        finishSubagents(name) {
+            const slot = this._slot(name);
+            const p = this._lastByRole(slot, "subagent_panel");
+            if (!p) return;
+            p.running = this._panelRunning(p);
+            if (!p.running) p.open = false;
+        },
+
         finishTurn(name) {
             const slot = this._slot(name);
             this._closeTrace(slot);
+            // If a history reload was deferred while this turn was streaming
+            // (SSE reconnect / session_updated from another process), the
+            // turn is now saved server-side — flush it so the view shows the
+            // authoritative, complete history.
+            if (slot.pendingReload) {
+                slot.pendingReload = false;
+                this.loadHistory(name, { force: true });
+            }
         },
 
         isBusy(name) {
@@ -330,12 +448,23 @@ document.addEventListener("alpine:init", () => {
 
         // ---------- send + history -----------------------------------
 
-        scroll() {
+        // Are we parked at (or near) the bottom of the chat feed?
+        // Terminal-style autoscroll: only follow new output when the user
+        // is already at the bottom. If they scrolled up to read, leave
+        // them there — don't yank them back down on every streaming delta.
+        // Threshold is generous so minor layout reflows near the tail
+        // (markdown re-render, code block resize) don't disable follow.
+        _atBottom(el, threshold = 120) {
+            return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+        },
+        scroll(force = false) {
             if (this._scrollRaf) return;
             this._scrollRaf = requestAnimationFrame(() => {
                 this._scrollRaf = 0;
                 const el = document.querySelector(".chat-history");
-                if (el) el.scrollTop = el.scrollHeight;
+                if (!el) return;
+                if (!force && !this._atBottom(el)) return;
+                el.scrollTop = el.scrollHeight;
             });
         },
         async send(text) {
@@ -381,8 +510,19 @@ document.addEventListener("alpine:init", () => {
                 console.error("interrupt", e);
             }
         },
-        async loadHistory(name) {
+        async loadHistory(name, { force = false } = {}) {
             const target = name || this.currentName;
+            // Resolve the slot for the busy check. _slot() creating it is
+            // harmless (it just holds the busy/pendingReload flags).
+            const slot = this._slot(target);
+            // Defer mid-stream reloads: an in-flight assistant turn isn't on
+            // the server yet, so `slot.turns = []` + rebuild would drop the
+            // streamed text and leave only the tail in a fresh turn. Wait
+            // for the turn to complete, then flush via finishTurn.
+            if (!force && slot.busy) {
+                slot.pendingReload = true;
+                return;
+            }
             try {
                 const url = target
                     ? `/api/sessions/current/history?session_name=${encodeURIComponent(target)}`
@@ -390,20 +530,21 @@ document.addEventListener("alpine:init", () => {
                 const r = await fetch(url);
                 const data = await r.json();
                 // At boot, target may be null (currentName is unset until
-                // sessions.load() runs). Key the slot by the server's
-                // returned name so the history lands where the proxy
-                // getters will look once sessions.load syncs currentName.
-                const key = target || data.name || null;
-                const slot = this._slot(key);
+                // sessions.load() runs). Re-key by the server's returned
+                // name so the history lands where the proxy getters will
+                // look once sessions.load syncs currentName.
+                const skey = target || data.name || null;
+                const dst = this._slot(skey);
                 if (!this.currentName && data.name) this.currentName = data.name;
-                slot.turns = [];
+                dst.pendingReload = false;
+                dst.turns = [];
                 let traceForTurn = null;
                 for (const turn of data.turns || []) {
                     for (const part of turn.parts || []) {
                         if (part.type === "text") {
                             traceForTurn = null;
-                            slot.turns.push({
-                                id: `h-${turn.index}-${slot.turns.length}`,
+                            dst.turns.push({
+                                id: `h-${turn.index}-${dst.turns.length}`,
                                 role: turn.role,
                                 text: part.text,
                                 html: renderMarkdown(part.text),
@@ -420,7 +561,7 @@ document.addEventListener("alpine:init", () => {
                                     startedAt: Date.now(),
                                     elapsed: null,
                                 };
-                                slot.turns.push(traceForTurn);
+                                dst.turns.push(traceForTurn);
                             }
                             traceForTurn.events.push({
                                 id: this._id("ev"),
@@ -440,7 +581,7 @@ document.addEventListener("alpine:init", () => {
                                     startedAt: Date.now(),
                                     elapsed: null,
                                 };
-                                slot.turns.push(traceForTurn);
+                                dst.turns.push(traceForTurn);
                             }
                             traceForTurn.events.push({
                                 id: this._id("ev"),
@@ -454,7 +595,7 @@ document.addEventListener("alpine:init", () => {
                     }
                 }
                 if (!name || name === this.currentName) {
-                    this.scroll();
+                    this.scroll(true);
                     queueMicrotask(highlightAll);
                     queueMicrotask(() => typesetMathInScope(".msg.assistant .body"));
                 }
@@ -3128,6 +3269,41 @@ function routeEvent(ev) {
             // Keep busy=true until turn_complete (more tool calls may follow).
             break;
         case "tool_call": chat.addToolCall(ev.tool_name, ev.tool_args, name); break;
+        case "subagent_start":
+            chat.upsertSubagent(name, {
+                task_id: ev.task_id, task: ev.task || "", depth: ev.depth || 1,
+                model: ev.model || "", status: "running",
+            });
+            break;
+        case "subagent_progress":
+            // Merge live fields onto the matching agent row.
+            chat.upsertSubagent(name, {
+                task_id: ev.task_id,
+                tool_count: ev.tool_count,
+                last_tool: ev.last_tool,
+                status: ev.status,
+                stuck: ev.stuck,
+                stall: ev.stall,
+                repeat_count: ev.repeat_count,
+                elapsed: ev.elapsed,
+            });
+            break;
+        case "subagent_end":
+            chat.upsertSubagent(name, {
+                task_id: ev.task_id,
+                status: ev.status || "done",
+                summary: ev.summary || "",
+                kill_reason: ev.kill_reason || null,
+                error: ev.error || null,
+                elapsed: ev.elapsed,
+                tokens_in: ev.tokens && ev.tokens.in ? ev.tokens.in : undefined,
+            });
+            chat.finishSubagents(name);
+            break;
+        case "subagent_snapshot":
+            // Authoritative reconciliation from the registry each parent iter.
+            chat.replaceSubagentSnapshot(name, ev.children || []);
+            break;
         case "thinking_delta": chat.addThinking(ev.text || "", name); break;
         case "tool_result":
             chat.addToolResult(ev.tool_name || "", ev.text || "", name);
@@ -3184,11 +3360,25 @@ function routeEvent(ev) {
             break;
         case "session_updated":
             slot.externalActive = true;
-            chat.addInfo(
-                "↻ another mucli process updated this session — reloading history",
-                { standalone: true }, name
-            );
-            chat.loadHistory(name);
+            // The server only reloads its in-memory copy when the session
+            // ISN'T busy (watcher defers mid-turn). When it deferred
+            // (reloaded=false), we must not reload either — doing so would
+            // wipe an in-flight assistant turn that isn't saved yet.
+            // loadHistory() also guards this (defers when slot.busy), but
+            // skip the fetch entirely and say so in the banner.
+            if (ev.reloaded === false) {
+                chat.addInfo(
+                    "↻ another mucli process updated this session — " +
+                    "history will refresh when the current turn finishes",
+                    { standalone: true }, name
+                );
+            } else {
+                chat.addInfo(
+                    "↻ another mucli process updated this session — reloading history",
+                    { standalone: true }, name
+                );
+                chat.loadHistory(name);
+            }
             if (isFocused) refreshActivePanel();
             break;
     }
@@ -3249,6 +3439,48 @@ function summarizeTrace(t) {
             ? `${((Date.now() - t.startedAt) / 1000).toFixed(1)}s`
             : null);
     return dur ? `${label} · ${dur}` : label;
+}
+
+function _fmtTok(n) {
+    n = Number(n) || 0;
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+    if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+    return String(n);
+}
+
+function summarizeSubagentPanel(p) {
+    if (!p || !p.agents || !p.agents.length) return "subagents";
+    const n = p.agents.length;
+    const parts = [`${n} subagent${n > 1 ? "s" : ""}`];
+    if (p.running) {
+        const active = p.agents.filter(a => a.status === "running" || a.status === "stuck").length;
+        parts.push(active === n ? "running" : `${active} running`);
+    } else {
+        const done = p.agents.filter(a => a.status === "done").length;
+        const killed = p.agents.filter(a => a.status === "killed").length;
+        const errored = p.agents.filter(a => a.status === "error").length;
+        const bits = [];
+        if (done) bits.push("done");
+        if (killed) bits.push("killed");
+        if (errored) bits.push("errored");
+        parts.push(bits.join("/") || "done");
+    }
+    const elapsed = Math.max(0, ...p.agents.map(a => a.elapsed || 0));
+    if (elapsed) parts.push(`${elapsed.toFixed(1)}s`);
+    const tok = p.agents.reduce((s, a) => s + (a.tokens_in || 0), 0);
+    if (tok) parts.push(`${_fmtTok(tok)} tok`);
+    return parts.join(" · ");
+}
+
+function subagentStatusText(a) {
+    switch (a.status) {
+        case "running": return a.last_tool ? `🔨 ${a.last_tool}` : "running";
+        case "stuck":   return `⚠ stuck${a.repeat_count ? ` ${a.repeat_count}x` : ""}`;
+        case "killed":  return `⏹ killed${a.kill_reason ? ` (${a.kill_reason})` : ""}`;
+        case "error":   return "✗ error";
+        case "done":    return a.summary ? `✓ done` : "✓ done";
+        default:        return a.status;
+    }
 }
 
 function eventLabel(ev) {

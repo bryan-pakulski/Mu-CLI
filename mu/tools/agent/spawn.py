@@ -378,6 +378,16 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
     from mu.ui.subagent import SubagentUI
 
     registry = parent._subagent_registry
+    # Wire the GUI live-push callback onto the registry (and its tracker) so
+    # subagent_start/progress/end events reach the chat-feed status panel.
+    # CLI/TUI UIs have no ``_publish`` → the registry stays silent (no
+    # behaviour change). Walk nested SubagentUI wrappers to the root UI so
+    # grandchild spawns route through the real WebUI too.
+    _root_ui = parent.ui
+    while isinstance(_root_ui, SubagentUI):
+        _root_ui = _root_ui._parent
+    if _root_ui is not None and hasattr(_root_ui, "_publish"):
+        registry._publish = lambda ev: _root_ui._publish(ev)
     # Pre-open the tracker row so the child UI can be wired with its agent_id.
     tracker_agent_id = None
     try:
@@ -488,8 +498,12 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
         depth=child_depth,
         lifecycle=lifecycle,
         tracker_agent_id=tracker_agent_id,
+        model=resolved,
     )
     child.variables["subagent_parent_task_id"] = record.task_id
+    # Bridge the child loop to its registry record so the child can report
+    # live context-usage (context_pct / iter / tokens_in) each iteration.
+    child._parent_registry = registry
 
     logger.info(
         "spawn_agent: dispatched task_id=%s depth=%d task=%s max_iter=%d disabled=%d",

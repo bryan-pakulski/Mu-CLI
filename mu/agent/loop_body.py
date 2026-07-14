@@ -1051,6 +1051,12 @@ def run_turn(session, text):
             # estimates are the harness's cl100k_base estimate — drift between
             # them is the headline long-horizon diagnostic). Compaction events
             # drained from session_manager._compaction_log are emitted here too.
+            # cl100k_base estimate of the assembled prompt, captured from the
+            # trace record when available. Used for the subagent context bar:
+            # for cache-enabled providers (Ollama) response.input_tokens is only
+            # the non-cached prompt delta (near-zero in a long loop), so the
+            # cl100k total_est is the more representative fill signal.
+            _ctx_est = 0
             try:
                 from mu.trace.emitter import (
                     build_iter_record,
@@ -1078,6 +1084,52 @@ def run_turn(session, text):
                         compaction=_comps[-1] if _comps else None,
                     )
                     _tr.iter_record(_rec)
+                    try:
+                        _ctx_est = int(_rec.get("context", {}).get("total_est", 0) or 0)
+                    except Exception:  # noqa: BLE001
+                        _ctx_est = 0
+            except Exception:
+                pass
+
+            # Live subagent context-usage: a child session reports its
+            # per-iteration context fill / iter / tokens to the parent's
+            # registry so the GUI status panel can render a live context
+            # bar. Single writer = the child thread; the registry reads
+            # under its own lock. No-op for top-level (parent) sessions and
+            # for CLI/TUI runs (no registry publish callback attached).
+            try:
+                _parent_reg = getattr(session, "_parent_registry", None)
+                if _parent_reg is not None and str(
+                    session.variables.get("session_role", "") or ""
+                ).lower() == "child":
+                    _tid = session.variables.get("subagent_parent_task_id")
+                    if _tid:
+                        from mu.session.budgets import (
+                            resolve_context_limit as _resolve_ctx_limit,
+                        )
+
+                        try:
+                            _climit = int(_resolve_ctx_limit(session) or 0)
+                        except Exception:  # noqa: BLE001
+                            _climit = 0
+                        _actual = int(getattr(response, "input_tokens", 0) or 0)
+                        # Prefer the larger of (provider-reported, cl100k est):
+                        # Ollama's input_tokens is the cached delta (tiny),
+                        # so total_est is the representative fill. For
+                        # frontier providers the two agree.
+                        _fill = max(_actual, _ctx_est)
+                        _ctx_pct = (
+                            round(_fill / _climit * 100, 1)
+                            if _climit > 0 and _fill > 0
+                            else 0.0
+                        )
+                        _parent_reg.update_child_live(
+                            _tid,
+                            context_pct=_ctx_pct,
+                            iter=iteration,
+                            max_iter=max_iterations,
+                            tokens_in=_fill,
+                        )
             except Exception:
                 pass
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 @dataclass
@@ -42,6 +42,9 @@ class _AgentState:
     finished_at: Optional[float] = None
     kill_reason: Optional[str] = None
     repeat_count: int = 0  # consecutive same-tool+args (stuck signal)
+    # The registry task_id for this row, set after register() allocates it.
+    # Lets per-tool / state-change emits carry the GUI panel's upsert key.
+    task_id: Optional[str] = None
 
 
 class SubagentProgressTracker:
@@ -52,6 +55,11 @@ class SubagentProgressTracker:
         self._agents: Dict[str, _AgentState] = {}
         self._order: List[str] = []
         self._next_id = 0
+        # Optional GUI live-push callback, attached by SubagentRegistry when
+        # the parent UI is a WebUI. When set, per-tool / state changes emit
+        # ``subagent_progress`` events so the chat-feed panel updates live
+        # without waiting for the parent's next provider call.
+        self._publish: Optional[Callable[[Dict[str, Any]], None]] = None
 
     # ------------------------------------------------------------ mutation
 
@@ -78,6 +86,7 @@ class SubagentProgressTracker:
                 return
             state.current_tool = tool_name
             state.tool_count += 1
+        self._emit_progress(agent_id)
 
     def set_state(
         self,
@@ -109,6 +118,47 @@ class SubagentProgressTracker:
             state.repeat_count = int(repeat_count)
             if kill_reason is not None:
                 state.kill_reason = kill_reason
+        self._emit_progress(agent_id)
+
+    def set_task_id(self, agent_id: str, task_id: str) -> None:
+        """Stamp the registry task_id onto a pre-opened row so progress emits
+        carry the GUI panel's upsert key."""
+        with self._lock:
+            state = self._agents.get(agent_id)
+            if state is not None:
+                state.task_id = task_id
+
+    def _emit_progress(self, agent_id: str) -> None:
+        """Push a ``subagent_progress`` event for one row to the GUI bus.
+
+        No-op when no ``_publish`` is attached or the row has no linked
+        ``task_id`` yet (the registry links it right after ``register``).
+        Builds the payload from a locked snapshot so the emit never observes
+        a half-updated row.
+        """
+        fn = self._publish
+        if fn is None:
+            return
+        with self._lock:
+            s = self._agents.get(agent_id)
+            if s is None or s.task_id is None:
+                return
+            now = time.monotonic()
+            end_time = s.finished_at if s.finished_at is not None else now
+            payload = {
+                "kind": "subagent_progress",
+                "task_id": s.task_id,
+                "tool_count": s.tool_count,
+                "last_tool": s.current_tool,
+                "status": s.status,
+                "stuck": s.status == "stuck",
+                "repeat_count": s.repeat_count,
+                "elapsed": round(max(0.0, end_time - s.started_at), 2),
+            }
+        try:
+            fn(payload)
+        except Exception:  # noqa: BLE001
+            pass
 
     def close(
         self,
@@ -158,6 +208,7 @@ class SubagentProgressTracker:
                     finished_at=a.finished_at,
                     kill_reason=a.kill_reason,
                     repeat_count=a.repeat_count,
+                    task_id=a.task_id,
                 )
                 for a in (self._agents[aid] for aid in self._order)
             ]

@@ -83,12 +83,25 @@
 .th-bar-err { background: rgba(220, 100, 100, 0.7); height: 100%; }
 .th-stats { font-size: 11px; color: var(--text-soft); display: flex; gap: var(--space-3); font-family: var(--mono); }
 
-/* Conversation view */
+/* Conversation view — chat-transcript layout: request bookend → assistant
+   turn cards → final. Tool result previews fold by default so the run's
+   skeleton (prose + tool-call names) reads at a glance. */
 .trace-conv { display: flex; flex-direction: column; gap: var(--space-2); max-height: 720px; overflow-y: auto; }
-.trace-conv-iter { border-left: 2px solid var(--border); padding: var(--space-2) var(--space-3); }
-.trace-conv-iter--sel { border-left-color: var(--accent); background: var(--accent-soft); }
-/* Combined session view: run-boundary separator between iterations from
-   different runs. Mirrors the dashed dividers drawn on the canvases. */
+
+/* Request bookend (the user's turn). The literal prompt lives in
+   session.json, not the trace — this card just frames the narrative. */
+.trace-conv-request {
+    display: flex; gap: var(--space-2); align-items: baseline; flex-wrap: wrap;
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-lift);
+    border-left: 2px solid var(--text-dim);
+    border-radius: var(--radius);
+    font-size: 12px;
+}
+.trace-conv-request-label { font-weight: 600; color: var(--text); }
+
+/* Run-boundary banner between turns from different runs (combined session
+   view). Mirrors the dashed dividers drawn on the canvases. */
 .trace-conv-runsep {
     display: flex; gap: var(--space-2); align-items: baseline;
     margin: var(--space-2) 0 2px;
@@ -97,12 +110,70 @@
     font-size: 11px; color: var(--text-dim);
 }
 .trace-conv-runsep-num { font-family: var(--mono); font-weight: 600; color: var(--accent); }
-.tc-iter-head { display: flex; gap: var(--space-3); align-items: center; font-size: 11px; }
-.tc-iter-num { font-family: var(--mono); font-weight: 600; cursor: pointer; color: var(--accent); }
-.tc-assistant { font-size: 12px; color: var(--text-soft); margin: 6px 0; white-space: pre-wrap; }
-.tc-tool { font-size: 11px; margin: 4px 0; padding-left: var(--space-3); }
-.tc-tool-name { font-family: var(--mono); color: var(--accent); }
-.tc-tool-prev { color: var(--text-dim); font-family: var(--mono); white-space: pre-wrap; margin-top: 2px; max-height: 60px; overflow: hidden; }
+
+/* An assistant turn card: one prose emission + the tool calls that followed,
+   possibly spanning several tool-only iters. */
+.trace-conv-turn {
+    border-left: 2px solid var(--border);
+    background: var(--bg);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: var(--space-2) var(--space-3);
+}
+.trace-conv-turn--sel { border-left-color: var(--accent); background: var(--accent-soft); }
+.trace-conv-turn--final { border-left-color: #7ec96b; }
+.trace-conv-turn--acting { border-left-color: var(--text-dimmer); }
+
+.trace-conv-turn-head {
+    display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;
+    font-size: 11px; color: var(--text-dim); margin-bottom: 4px;
+}
+.trace-conv-role {
+    font-family: var(--mono); font-weight: 600; font-size: 10px;
+    text-transform: lowercase; letter-spacing: 0.04em;
+    color: var(--accent);
+    padding: 1px 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+}
+.trace-conv-role--user { color: var(--text-dim); }
+.trace-conv-turn-iters { font-family: var(--mono); font-weight: 600; color: var(--text); cursor: pointer; }
+.trace-conv-turn-iters:hover { color: var(--accent); }
+.trace-conv-warn { color: #e0a040; }
+.trace-conv-flag { font-size: 10px; padding: 0 5px; border-radius: var(--radius-pill); }
+.trace-conv-flag--final { color: #7ec96b; border: 1px solid rgba(126,201,107,0.4); }
+.trace-conv-flag--acting { color: var(--text-dimmer); border: 1px solid var(--border); }
+.trace-conv-toolcount {
+    margin-left: auto; cursor: pointer;
+    font-size: 10px; color: var(--text-dim);
+    background: transparent; border: 1px solid var(--border); border-radius: var(--radius-pill);
+    padding: 1px 7px;
+}
+.trace-conv-toolcount:hover { color: var(--accent); border-color: var(--accent); }
+
+.trace-conv-prose {
+    font-size: 12.5px; line-height: 1.5; color: var(--text-soft);
+    margin: 4px 0 6px; white-space: pre-wrap;
+}
+/* Final turn's prose reads as the answer — slightly stronger. */
+.trace-conv-turn--final .trace-conv-prose { color: var(--text); }
+
+.trace-conv-tools { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.trace-conv-tool {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2);
+    font-size: 11px; padding: 3px 0; cursor: pointer;
+    border-top: 1px solid var(--border);
+}
+.trace-conv-tool:hover { background: var(--bg-hover); }
+.trace-conv-tool-glyph { color: var(--text-dim); width: 10px; }
+.trace-conv-tool-name { font-family: var(--mono); color: var(--accent); }
+.trace-conv-tool-status { font-family: var(--mono); font-size: 10px; padding: 0 4px; border-radius: var(--radius-pill); }
+.trace-conv-tool-status.is-ok { color: #7ec96b; }
+.trace-conv-tool-status.is-err { color: var(--err); }
+.trace-conv-tool-prev {
+    flex-basis: 100%; color: var(--text-dim); font-family: var(--mono);
+    white-space: pre-wrap; margin: 3px 0 2px 16px;
+    max-height: 140px; overflow: auto;
+    font-size: 10.5px; line-height: 1.45;
+    padding: 4px 6px; background: var(--bg-lift); border-radius: var(--radius);
+}
 
 /* Per-panel info button + popout */
 .trace-h2 {

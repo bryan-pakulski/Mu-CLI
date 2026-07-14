@@ -73,6 +73,8 @@ function traceApp() {
         session: "",            // session scope (?session=) — traces are per-session
         runBounds: [],           // per-run global [start,end] for the combined view
         theme: "dark",          // current data-theme (for the toggle button glyph)
+        expandedTools: {},      // toolKey -> true: that tool's result preview is expanded
+        expandedCards: {},      // cardKey -> true: all tool previews in that turn expanded
 
         async init() {
             // Session scope: the analyzer is opened from the chat with
@@ -212,16 +214,34 @@ function traceApp() {
         selectIter(it) {
             this.selectedIter = it;
             this.$nextTick(() => {
-                const el = document.getElementById("iter-" + it);
+                // The conversation view groups iters into turn cards, so the
+                // exact `iter-<it>` id may not exist (the card is keyed by its
+                // first iter). Fall back to the card whose [min,max] range
+                // contains the iter so chart clicks still scroll to the right turn.
+                let el = document.getElementById("iter-" + it);
+                if (!el) {
+                    const cards = document.querySelectorAll("[data-iter-min]");
+                    for (const c of cards) {
+                        const lo = +c.getAttribute("data-iter-min");
+                        const hi = +c.getAttribute("data-iter-max");
+                        if (it >= lo && it <= hi) { el = c; break; }
+                    }
+                }
                 if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
                 this.renderAll();
             });
         },
 
-        // Flat conversation list with run-separator entries spliced in at each
-        // run boundary (combined session view). Each item is either
-        // {sep:true, run_id, idx, model, status} or {sep:false, iter:<record>}.
-        convItems() {
+        // Group iters into assistant "turn cards" with run-separator banners
+        // spliced in at each run boundary (combined session view). A card
+        // starts at each iter where the model produced text (the turn's
+        // "voice") and absorbs the following tool-only iters until the next
+        // text iter — so prose sits at the top of the card and the tool calls
+        // it then made hang below it. Leading tool-only iters (the model
+        // acting before first speaking) form an "acting only" card with no
+        // voice. Returns a list of either {sep:true, run_id, idx, model,
+        // status, iters} or {card:true, ...turnCardFields}.
+        turnCards() {
             const out = [];
             let prevRun = null;
             const bounds = this.runBounds || [];
@@ -229,22 +249,72 @@ function traceApp() {
                 const i = bounds.findIndex(b => b.run_id === rid);
                 return i >= 0 ? i + 1 : null;
             };
+            let cur = null;
+            const flush = () => { if (cur) { out.push({ card: true, ...cur }); cur = null; } };
             for (const it of (this.iters || [])) {
                 const rid = it.run_id || "";
                 if (rid !== prevRun) {
+                    flush();
                     const b = bounds.find(x => x.run_id === rid);
                     out.push({
-                        sep: true, run_id: rid,
-                        idx: idxOf(rid),
-                        model: b ? b.model : "",
-                        status: b ? b.status : "",
+                        sep: true, run_id: rid, idx: idxOf(rid),
+                        model: b ? b.model : "", status: b ? b.status : "",
                         iters: b ? b.iters : null,
                     });
                     prevRun = rid;
+                    cur = null;
                 }
-                out.push({ sep: false, iter: it });
+                const tools = this.toolsForIter(it.iter).map(t => ({ ...t, _iter: it.iter }));
+                if (it.has_text) {
+                    // A speaking iter closes the previous card and opens a new
+                    // one with itself as the voice (not yet pushed, so later
+                    // tool-only iters absorb into it).
+                    flush();
+                    cur = { iters: [it], voice: it, toolList: tools.slice() };
+                } else {
+                    if (!cur) cur = { iters: [it], voice: null, toolList: [] };
+                    else cur.iters.push(it);
+                    cur.toolList.push(...tools);
+                }
+            }
+            flush();
+            // Badge the last turn card as the final output.
+            for (let i = out.length - 1; i >= 0; i--) {
+                if (out[i].card) { out[i].final = true; break; }
             }
             return out;
+        },
+
+        // ---- turn-card helpers (called from the template) ----------------
+        cardKey(c) { return "c" + c.iters[0].iter; },
+        cardLabel(c) {
+            const a = c.iters[0].iter, b = c.iters[c.iters.length - 1].iter;
+            return a === b ? "iter " + a : "iters " + a + "–" + b;
+        },
+        cardWall(c) { return c.iters.reduce((s, it) => s + (it.wall_ms || 0), 0); },
+        cardTokens(c) {
+            return c.iters.reduce((s, it) => s + ((it.tokens || {}).in || 0), 0);
+        },
+        cardMaxDrift(c) {
+            let m = 0;
+            for (const it of c.iters) { const d = Math.abs(it.context ? it.context.drift_pct : 0); if (d > m) m = d; }
+            return Math.round(m);
+        },
+        cardHasCompaction(c) { return c.iters.some(it => it.compaction); },
+        toolKey(c, ti) { return c.iters[0].iter + ":" + ti; },
+        toolExpanded(c, ti) {
+            return !!this.expandedTools[this.toolKey(c, ti)] || !!this.expandedCards[this.cardKey(c)];
+        },
+        toggleTool(c, ti) {
+            const k = this.toolKey(c, ti);
+            this.expandedTools[k] = !this.expandedTools[k];
+            // reactive: reassign so Alpine notices the object-key change
+            this.expandedTools = { ...this.expandedTools };
+        },
+        toggleCardTools(c) {
+            const k = this.cardKey(c);
+            this.expandedCards[k] = !this.expandedCards[k];
+            this.expandedCards = { ...this.expandedCards };
         },
 
         // Draw run-boundary dividers on a per-iter chart. `data` is the series

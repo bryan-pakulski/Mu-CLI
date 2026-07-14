@@ -1372,7 +1372,7 @@ def main():
     if args.gui_stop:
         from mu.gui.launcher import stop_gui
 
-        sys.exit(stop_gui())
+        sys.exit(stop_gui(args.port))
 
     if args.gui:
         from mu.gui.launcher import run_gui

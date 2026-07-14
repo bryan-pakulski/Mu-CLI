@@ -43,6 +43,12 @@ def run_gui(args, build_session) -> None:
         return
 
     existing = daemon.is_running()
+    if existing is None:
+        # PID file missing/stale — but an orphaned server may still be
+        # bound to the port (the file got removed while the server kept
+        # running). Detect it so we don't spawn a second child that fails
+        # to bind with EADDRINUSE.
+        existing = daemon.pid_for_port(port)
     if existing is not None:
         url = f"http://{host}:{port}/"
         print(f"  mucli GUI already running at {url} (pid {existing})")
@@ -121,9 +127,13 @@ def run_server_foreground(args, build_session, *, port: int, host: str = DEFAULT
         logger.info("GUI: server stopped")
 
 
-def stop_gui() -> int:
-    """`mucli --gui-stop` entry. Returns shell exit code."""
-    ok, msg = daemon.stop()
+def stop_gui(port: int | None = None) -> int:
+    """`mucli --gui-stop` entry. Returns shell exit code.
+
+    ``port`` is the port the GUI was started on (defaults to 30311) — used
+    as a fallback to locate an orphaned server whose PID file is missing.
+    """
+    ok, msg = daemon.stop(port=int(port or DEFAULT_PORT))
     print(f"  {msg}")
     return 0 if ok else 1
 

@@ -69,6 +69,79 @@ def is_running() -> int | None:
         return pid
 
 
+def _listener_inodes(port: int) -> set[str]:
+    """Socket inodes of LISTEN sockets on `port`, from /proc/net/tcp[6].
+
+    Linux-only. Returns the set of inode strings so the caller can cross-
+    reference them against /proc/*/fd socket symlinks to find the owning
+    PID. Empty set if /proc isn't available or nothing matches.
+    """
+    inodes: set[str] = set()
+    if not os.path.isdir("/proc"):
+        return inodes
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(table, "r") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+        for line in lines[1:]:  # skip header
+            parts = line.split()
+            if len(parts) < 10:
+                continue
+            local = parts[1]      # "IPHEX:PORTHEX"
+            state = parts[3]      # "0A" = LISTEN
+            inode = parts[9]
+            if state != "0A":
+                continue
+            try:
+                _ip, port_hex = local.rsplit(":", 1)
+                if int(port_hex, 16) == int(port):
+                    inodes.add(inode)
+            except ValueError:
+                continue
+    return inodes
+
+
+def pid_for_port(port: int) -> int | None:
+    """Find the PID of the process listening on `port` via /proc (Linux).
+
+    Fallback for when the PID file is missing/stale but a server is
+    genuinely bound to the port — `--gui-stop` and the start-path
+    "already running" check use this so an orphaned server is still
+    discoverable. Returns None off-Linux or if nothing is listening.
+    """
+    inodes = _listener_inodes(port)
+    if not inodes:
+        return None
+    self_pid = os.getpid()
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == self_pid:
+            continue
+        fd_dir = f"/proc/{pid}/fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink(f"{fd_dir}/{fd}")
+            except OSError:
+                continue
+            # target looks like "socket:[<inode>]"
+            if target.startswith("socket:[") and target.endswith("]"):
+                if target[8:-1] in inodes:
+                    return pid
+    return None
+
+
 def spawn_detached(args: list[str], *, port: int) -> int:
     """Spawn the foreground-server invocation as a detached child.
 
@@ -101,9 +174,21 @@ def write_pid(pid: int) -> None:
     path.write_text(str(pid))
 
 
-def stop(timeout: float = 5.0) -> tuple[bool, str]:
-    """SIGTERM the daemon. Returns ``(ok, message)``."""
+def stop(timeout: float = 5.0, port: int = 30311) -> tuple[bool, str]:
+    """SIGTERM the daemon. Returns ``(ok, message)``.
+
+    Resolves the target PID from the PID file first; if that's missing or
+    stale (a common failure: the file got removed but the server kept
+    running — a prior stop that deleted-then-missed, a direct
+    ``--gui-foreground`` launch, or the launcher parent dying before
+    writing it), falls back to the process listening on ``port`` via
+    ``pid_for_port`` so an orphaned server is still stoppable.
+    """
     pid = is_running()
+    source = "pid file"
+    if pid is None:
+        pid = pid_for_port(port)
+        source = f"port {port}"
     if pid is None:
         return False, "no GUI server is running"
     try:
@@ -121,7 +206,7 @@ def stop(timeout: float = 5.0) -> tuple[bool, str]:
                     pid_file().unlink()
                 except OSError:
                     pass
-                return True, f"stopped pid {pid}"
+                return True, f"stopped pid {pid} (found via {source})"
         time.sleep(0.1)
 
     # Still alive after timeout — escalate.
@@ -133,7 +218,7 @@ def stop(timeout: float = 5.0) -> tuple[bool, str]:
         pid_file().unlink()
     except OSError:
         pass
-    return True, f"force-killed pid {pid} (didn't respond to SIGTERM)"
+    return True, f"force-killed pid {pid} (found via {source}, didn't respond to SIGTERM)"
 
 
 def wait_for_port(port: int, *, host: str = "127.0.0.1", timeout: float = 8.0) -> bool:

@@ -62,6 +62,7 @@ from .web_ui import WebUI
 from mu.agent.hooks import HookContext, default_registry
 
 _MEMORY_HOOK_NAME = "gui_memory_snapshot"
+_SUBAGENT_HOOK_NAME = "gui_subagent_snapshot"
 
 
 def _register_memory_snapshot_hook() -> None:
@@ -91,6 +92,49 @@ def _register_memory_snapshot_hook() -> None:
         return None
 
     default_registry.register("pre_provider_call", name=_MEMORY_HOOK_NAME)(_snapshot)
+
+
+def _register_subagent_snapshot_hook() -> None:
+    """Register a ``pre_provider_call`` hook that pushes a live sub-agent
+    snapshot to the GUI each parent iteration while sub-agents are running,
+    so the chat-feed status panel reconciles progress / context / tokens
+    even if a granular ``subagent_progress`` event was missed.
+
+    Idempotent. Skips non-WebUI sessions (CLI/TUI unaffected) and sessions
+    with no active sub-agent registry. Fires on the parent agent thread.
+    """
+    if any(spec.name == _SUBAGENT_HOOK_NAME for spec in default_registry.list("pre_provider_call")):
+        return
+
+    def _snapshot(ctx: HookContext):
+        ui = getattr(ctx.session, "ui", None)
+        if not isinstance(ui, WebUI):
+            return None
+        registry = getattr(ctx.session, "_subagent_registry", None)
+        if registry is None:
+            return None
+        try:
+            children = registry.snapshot_all()
+        except Exception as exc:  # defensive — must never break a turn
+            _logger.warning("subagent snapshot hook failed: %s", exc)
+            return None
+        if not children:
+            return None
+        active = sum(1 for c in children if c.get("status") == "running")
+        stuck = sum(1 for c in children if c.get("stuck"))
+        stall = sum(1 for c in children if c.get("stall"))
+        ui._publish(
+            {
+                "kind": "subagent_snapshot",
+                "children": children,
+                "active": active,
+                "stuck": stuck,
+                "stall": stall,
+            }
+        )
+        return None
+
+    default_registry.register("pre_provider_call", name=_SUBAGENT_HOOK_NAME)(_snapshot)
 
 GUI_ROOT = Path(__file__).parent
 TEMPLATES_DIR = GUI_ROOT / "templates"
@@ -224,6 +268,9 @@ def create_app(
     # Live Memory Map: push a context snapshot per provider iteration so
     # the panel updates in real time while a turn runs. Idempotent.
     _register_memory_snapshot_hook()
+    # Live sub-agent status: push a registry snapshot per parent iteration
+    # while sub-agents run, so the chat-feed panel reconciles state. Idempotent.
+    _register_subagent_snapshot_hook()
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):

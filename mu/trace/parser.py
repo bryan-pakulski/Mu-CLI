@@ -358,7 +358,21 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
                 "iter": i.get("iter"),
                 "total_est": _num(ctx.get("total_est")),
                 "actual": _num(ctx.get("prompt_tokens_actual")),
+                # Drift-corrected real-prompt estimate — the representative
+                # real fill (Ollama's prompt_tokens_actual is the cached
+                # delta, near-zero in a warm loop). The GUI "Context growth"
+                # chart plots this as the real line so a looming overflow is
+                # visible instead of hidden behind a near-zero actual.
+                "real_est": _num(ctx.get("prompt_tokens_real_est")),
+                "drift_ratio": _num(ctx.get("drift_ratio")),
                 "drift_pct": _num(ctx.get("drift_pct")),
+                # Representative real fill for the chart's solid line: the
+                # drift-corrected estimate, but never below the provider's own
+                # reported count (frontier providers report the true full
+                # prompt; Ollama reports the cached delta, which real_est
+                # dominates).
+                "real": max(_num(ctx.get("prompt_tokens_actual")),
+                            _num(ctx.get("prompt_tokens_real_est"))),
             }
         )
         for key in layers_stacked:

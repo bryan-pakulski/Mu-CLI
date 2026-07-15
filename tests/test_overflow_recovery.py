@@ -203,6 +203,11 @@ def test_recovery_compacts_and_retries_on_overflow():
     # Compaction advanced the rolling-summary anchor (history was
     # summarized down to the last ~4 messages).
     assert session.session_manager.summary_anchor > anchor_before
+    # Repeat-prevention invariant: the reactive recovery persists the measured
+    # drift onto the session so the NEXT turn's proactive compaction gates fire
+    # at the right point instead of relying on the static safety factor.
+    assert getattr(session, "_observed_drift_ratio", None) is not None
+    assert 1.0 <= session._observed_drift_ratio <= 6.0
 
 
 def test_recovery_does_not_compact_on_non_overflow_error():

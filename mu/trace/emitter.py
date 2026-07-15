@@ -354,6 +354,17 @@ def build_iter_record(
     drift_pct = (
         round((actual - total_est) / max(1, actual) * 100, 2) if actual else 0.0
     )
+    # Drift-corrected real-prompt estimate + the drift ratio the compactor is
+    # assuming. `actual` (Ollama prompt_eval_count) is the non-cached delta —
+    # near-zero in a warm loop and a misleading "real" prompt size. The
+    # drift-corrected cl100k estimate is the representative real fill; the
+    # ratio makes the cl100k undercount auditable in the trace.
+    try:
+        from mu.session.budgets import effective_drift_ratio
+        eff_drift = float(effective_drift_ratio(session))
+    except Exception:  # noqa: BLE001
+        eff_drift = 1.0
+    real_est = int(total_est * eff_drift)
 
     tokens = {
         "in": int(getattr(response, "input_tokens", 0) or 0),
@@ -392,6 +403,8 @@ def build_iter_record(
             "l5": layers["l5"],
             "total_est": total_est,
             "prompt_tokens_actual": actual,
+            "prompt_tokens_real_est": real_est,
+            "drift_ratio": round(eff_drift, 3),
             "drift_pct": drift_pct,
         },
         "tokens": tokens,

@@ -158,6 +158,86 @@ def resolve_context_limit(session: Any) -> int:
     return limit
 
 
+def _static_safety_factor(session: Any) -> float:
+    """The provider's static compaction safety factor, normalised to >=1.0
+    (1.0 = trust the cl100k estimate verbatim)."""
+    try:
+        factor = float(session.provider.compaction_safety_factor())
+    except Exception:
+        factor = 1.0
+    return factor if factor > 1.0 else 1.0
+
+
+def effective_drift_ratio(session: Any) -> float:
+    """The cl100k→real-token drift multiplier the compactor should assume.
+
+    Floors at the provider's static ``compaction_safety_factor`` (the
+    conservative default baked into ``resolve_context_limit``) and ratchets
+    UP when the observed drift learned from overflow recoveries / cold-cache
+    calibration is worse. Never goes below the static factor, so a missing or
+    optimistic measurement can't make the proactive gates less conservative
+    than today's behaviour.
+    """
+    static = _static_safety_factor(session)
+    learned = getattr(session, "_observed_drift_ratio", None)
+    if learned is None:
+        return static
+    try:
+        learned = float(learned)
+    except (TypeError, ValueError):
+        return static
+    return max(static, max(1.0, learned))
+
+
+def drift_corrected_context_limit(session: Any) -> int:
+    """``resolve_context_limit`` (already divided by the static safety factor)
+    further divided when the *observed* drift exceeds the static factor.
+
+    The static factor in ``resolve_context_limit`` assumes a fixed drift
+    (2.5 for Ollama). Real drift varies ~2.2–3.2x by content; when the
+    observed drift exceeds the static factor the proactive compaction gates
+    (turn-start roll, auto-hook, preflight) fire too late — the real prompt
+    overflows before the cl100k gate trips. This replaces the static divisor
+    with the learned one when the learned is worse, so those gates fire at
+    the right point. No-op when observed drift is at or below the static
+    factor (or when there is no static factor).
+    """
+    limit = resolve_context_limit(session)  # already / static_sf
+    static = _static_safety_factor(session)
+    if static <= 1.0:
+        return limit
+    eff = effective_drift_ratio(session)
+    if eff > static:
+        return max(1024, int(limit * static / eff))
+    return limit
+
+
+def update_observed_drift(session: Any, observed: float) -> None:
+    """EWMA-smooth a real-token drift observation onto the session.
+
+    ``observed`` is ``real_tokens / cl100k_tokens`` (clamped to [1.0, 6.0]).
+    Weight 0.5 blends a new observation with the prior so a single outlier
+    doesn't whip the ratio, while still tracking a genuine shift in content
+    type. The proactive compaction gates read this via
+    ``effective_drift_ratio``; the reactive overflow path and the cold-cache
+    response calibration write it.
+    """
+    try:
+        observed = max(1.0, min(6.0, float(observed)))
+    except (TypeError, ValueError):
+        return
+    prev = getattr(session, "_observed_drift_ratio", None)
+    if prev is None:
+        session._observed_drift_ratio = observed
+    else:
+        try:
+            prev = float(prev)
+        except (TypeError, ValueError):
+            session._observed_drift_ratio = observed
+            return
+        session._observed_drift_ratio = 0.5 * prev + 0.5 * observed
+
+
 def resolve_response_reserve(session: Any) -> int:
     """How many tokens to leave free for the model's output.
 
@@ -197,7 +277,7 @@ def compaction_token_budget(session: Any) -> int:
     many auto-expanded skills tighten the compactor's threshold
     instead of being silently piled on top of the L5 budget.
     """
-    context_limit = resolve_context_limit(session)
+    context_limit = drift_corrected_context_limit(session)
     trim_threshold = float(
         session.variables.get("context_trim_threshold", 0.85) or 0.85
     )
@@ -218,6 +298,9 @@ def compaction_token_budget(session: Any) -> int:
 
 __all__ = [
     "resolve_context_limit",
+    "drift_corrected_context_limit",
+    "effective_drift_ratio",
+    "update_observed_drift",
     "resolve_response_reserve",
     "compaction_token_budget",
     "resolve_keep_recent",

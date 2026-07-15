@@ -83,6 +83,7 @@ def build_trace_snapshot(run: TraceRun, cols: int = 128) -> Dict[str, Any]:
     drift_vals: List[float] = []
     actual_vals: List[float] = []
     est_vals: List[float] = []
+    real_est_vals: List[float] = []
     for i in idxs:
         ctx = iters[i].get("context", {}) or {}
         for k in LAYER_ROWS:
@@ -90,6 +91,7 @@ def build_trace_snapshot(run: TraceRun, cols: int = 128) -> Dict[str, Any]:
         drift_vals.append(_num(ctx.get("drift_pct")))
         actual_vals.append(_num(ctx.get("prompt_tokens_actual")))
         est_vals.append(_num(ctx.get("total_est")))
+        real_est_vals.append(_num(ctx.get("prompt_tokens_real_est")))
 
     layer_vmax = {k: max(vals, default=0.0) for k, vals in per_layer_vals.items()}
     drift_abs_max = max((abs(d) for d in drift_vals), default=0.0) or 1.0
@@ -125,6 +127,7 @@ def build_trace_snapshot(run: TraceRun, cols: int = 128) -> Dict[str, Any]:
         "compaction_cols": compaction_cols,
         "context_actual": [int(v) for v in actual_vals],
         "context_est": [int(v) for v in est_vals],
+        "context_real_est": [int(v) for v in real_est_vals],
         "meta": {
             "layers": list(LAYER_ROWS),
             "labels": LAYER_LABELS,

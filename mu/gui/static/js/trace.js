@@ -438,7 +438,7 @@ function traceApp() {
             this._hoverAttached = true;
             const cfgs = [
                 { ref: "ctxCanvas", pad: { l: 56, r: 12 }, key: "context",
-                  label: it => `${this.fmtNum(it.actual)} actual · ${this.fmtNum(it.total_est)} est tok` },
+                  label: it => `${this.fmtNum(it.real || it.actual)} real · ${this.fmtNum(it.total_est)} est tok${it.drift_ratio ? " · drift ×" + it.drift_ratio : ""}` },
                 { ref: "driftCanvas", pad: { l: 56, r: 12 }, key: "drift",
                   label: it => `${it.drift_pct}% drift` },
                 { ref: "tokCanvas", pad: { l: 56, r: 12 }, key: "tokens",
@@ -513,14 +513,19 @@ function traceApp() {
             const ctxData = this.series.context || [];
             if (!ctxData.length) { this._empty(ctx, w, h, "no context data"); return; }
             const limit = this.summary ? this.summary.context_limit : 0;
-            const all = ctxData.flatMap(d => [d.actual, d.total_est]).concat(limit || 0);
+            // `real` is the representative real-prompt fill (drift-corrected
+            // estimate, floored at the provider's reported count). `total_est`
+            // is the raw cl100k estimate — the gap between them is the
+            // tokenizer drift that, uncorrected, causes the "prompt too long"
+            // 400 the old `actual` (Ollama cached delta) hid.
+            const all = ctxData.flatMap(d => [d.real || d.actual, d.total_est]).concat(limit || 0);
             const max = Math.max(1, ...all) * 1.08;
             this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: ctxData.map(d => d.iter), unit: "tokens" });
 
             const n = ctxData.length;
             const plotH = h - pad.t - pad.b;
 
-            // actual (solid) + total_est (dashed)
+            // real (solid) + total_est (dashed)
             const line = (key, color, dash) => {
                 ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.setLineDash(dash || []);
                 ctx.beginPath();
@@ -531,7 +536,7 @@ function traceApp() {
                 }
                 ctx.stroke(); ctx.setLineDash([]);
             };
-            line("actual", PALETTE.actual, []);
+            line("real", PALETTE.actual, []);
             line("total_est", PALETTE.est, [4, 3]);
 
             // context_limit reference — draw on-chart, or an off-chart label
@@ -555,13 +560,15 @@ function traceApp() {
             // legend
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textAlign = "left"; ctx.textBaseline = "top";
-            ctx.fillStyle = PALETTE.actual; ctx.fillText("● actual", w - pad.r - 150, 4);
-            ctx.fillStyle = PALETTE.est; ctx.fillText("┄ est", w - pad.r - 80, 4);
+            ctx.fillStyle = PALETTE.actual; ctx.fillText("● real est", w - pad.r - 150, 4);
+            ctx.fillStyle = PALETTE.est; ctx.fillText("┄ cl100k est", w - pad.r - 80, 4);
 
             // hover + selected
             if (this.hoverRef === "ctxCanvas" && this.hoverIdx != null) {
                 const it = ctxData[this.hoverIdx];
-                this._drawHover(ctx, w, h, pad, n, this.hoverIdx, this.fmtNum(it.actual) + " / " + this.fmtNum(it.total_est) + " tok");
+                const dr = it.drift_ratio ? (" · drift ×" + it.drift_ratio) : "";
+                this._drawHover(ctx, w, h, pad, n, this.hoverIdx,
+                    this.fmtNum(it.real || it.actual) + " real · " + this.fmtNum(it.total_est) + " est" + dr);
             }
             this._selectedMark(ctx, w, h, pad, n, ctxData);
         },

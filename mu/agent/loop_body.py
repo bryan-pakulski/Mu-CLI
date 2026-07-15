@@ -109,19 +109,31 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
     or with rebuilt messages after emergency compaction.
     """
     from mu.session.budgets import (
-        resolve_context_limit,
+        drift_corrected_context_limit,
         resolve_response_reserve,
         resolve_keep_recent,
         resolve_tool_result_floor,
     )
 
-    context_limit = resolve_context_limit(session)
+    # Use the drift-corrected limit so the last-line proactive defense fires
+    # at the right point once real-token drift has been learned (see
+    # budgets.effective_drift_ratio). Falls back to resolve_context_limit's
+    # static safety factor when no drift has been observed yet.
+    context_limit = drift_corrected_context_limit(session)
     response_reserve = resolve_response_reserve(session)
     max_prompt = context_limit - response_reserve
 
     prompt_tokens = estimate_tokens(system_prompt)
     msg_tokens = _estimate_messages_tokens(messages)
     total = prompt_tokens + msg_tokens
+    # Stash the cl100k estimate of the assembled prompt for the cold-cache
+    # drift calibration in the response handler: when Ollama's
+    # prompt_eval_count is a strong full-prompt signal (>= half the cl100k
+    # estimate), we can learn the real/cl100k drift ratio from it.
+    try:
+        session._last_prompt_cl100k_est = int(total)
+    except Exception:
+        pass
 
     if total <= max_prompt:
         return system_prompt, messages
@@ -251,6 +263,31 @@ def _overflow_drift_ratio(session, system_prompt, messages, overflow_error) -> f
     return max(1.0, factor or 1.0)
 
 
+def _calibrate_drift_from_response(session, response) -> None:
+    """EWMA-update ``session._observed_drift_ratio`` from a cold-cache
+    provider response, if the response's ``input_tokens`` is a strong
+    full-prompt signal.
+
+    For Ollama, ``response.input_tokens`` is the streamed
+    ``prompt_eval_count`` — normally only the non-cached delta (near-zero in
+    a warm loop, useless for drift). But on a cold cache (first call of a
+    session, or after the prompt changed substantially) it reflects (close
+    to) the FULL prompt, so ``real_tokens / cl100k_tokens`` is learnable from
+    it. The guard rejects the warm-cache near-zero delta: only calibrate when
+    the reported count is >= half the stashed cl100k estimate AND > 500
+    tokens AND that estimate is itself substantial (> 1000). Never raises.
+    """
+    try:
+        cl100k_est = int(getattr(session, "_last_prompt_cl100k_est", 0) or 0)
+        reported_in = int(getattr(response, "input_tokens", 0) or 0)
+        if cl100k_est > 1000 and reported_in > 500 and reported_in >= cl100k_est // 2:
+            from mu.session.budgets import update_observed_drift
+
+            update_observed_drift(session, reported_in / float(cl100k_est))
+    except Exception:  # noqa: BLE001 — telemetry must not break the loop
+        pass
+
+
 def _aggressive_compact_for_overflow(
     session, system_prompt, messages, *,
     overflow_error=None,
@@ -285,11 +322,18 @@ def _aggressive_compact_for_overflow(
     from mu.session.budgets import (
         resolve_response_reserve,
         resolve_tool_result_floor,
+        update_observed_drift,
     )
 
     real_max = _resolve_real_context_window(session)
     response_reserve = resolve_response_reserve(session)
     drift = _overflow_drift_ratio(session, system_prompt, messages, overflow_error)
+    # Persist the measured real/cl100k drift so the NEXT turn's proactive
+    # compaction gates (turn-start roll, auto-hook, preflight) fire at the
+    # right point instead of relying on the static safety factor. This is the
+    # fix for the repeat overflow: after one 400, every subsequent turn sees
+    # the learned drift via budgets.effective_drift_ratio.
+    update_observed_drift(session, drift)
 
     # Target (1 - margin) of the real window so drift variance across the
     # compacted content + tool schemas (not in the cl100k estimate) + the
@@ -1323,6 +1367,16 @@ def run_turn(session, text):
                 + getattr(response, "reasoning_tokens", 0)
             )
 
+            # Cold-cache drift calibration. For Ollama, response.input_tokens
+            # is the streamed prompt_eval_count — normally only the non-cached
+            # delta (near-zero in a warm loop). But on a cold cache (first
+            # call of a session, or after the prompt changed substantially)
+            # it reflects (close to) the FULL prompt, so real/cl100k drift is
+            # learnable from it. See budgets.update_observed_drift /
+            # effective_drift_ratio. Factored into _calibrate_drift_from_response
+            # so the warm-vs-cold gate is unit-testable.
+            _calibrate_drift_from_response(session, response)
+
             total_in += response.input_tokens
             total_out += response.output_tokens
 
@@ -1340,8 +1394,22 @@ def run_turn(session, text):
                 )
 
             if session.ui:
+                # Live real-prompt estimate for visibility. response.input_tokens
+                # is Ollama's cached prompt_eval_count delta (often tiny in a
+                # warm loop), so it UNDER-reports the real prompt that the model
+                # actually received. The drift-corrected cl100k estimate is the
+                # representative fill — shown here so a "prompt too long" is
+                # never a surprise hidden behind a near-zero In count.
+                try:
+                    from mu.session.budgets import effective_drift_ratio as _eff_drift
+                    _cl100k_est = int(getattr(session, "_last_prompt_cl100k_est", 0) or 0)
+                    _real_est = int(_cl100k_est * _eff_drift(session)) if _cl100k_est else 0
+                except Exception:  # noqa: BLE001
+                    _real_est = 0
+                _real_str = f" | ~Real est: {_real_est}" if _real_est else ""
                 session.ui.show_info(
-                    f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | Total {response.total_tokens} {cost_str}"
+                    f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | "
+                    f"Total {response.total_tokens}{_real_str} {cost_str}"
                 )
 
             # Run tracer: emit the per-iteration record at the post-response seam
@@ -1403,19 +1471,25 @@ def run_turn(session, text):
                     _tid = session.variables.get("subagent_parent_task_id")
                     if _tid:
                         from mu.session.budgets import (
-                            resolve_context_limit as _resolve_ctx_limit,
+                            effective_drift_ratio as _eff_drift,
                         )
 
                         try:
-                            _climit = int(_resolve_ctx_limit(session) or 0)
+                            _climit = int(_resolve_real_context_window(session) or 0)
                         except Exception:  # noqa: BLE001
                             _climit = 0
                         _actual = int(getattr(response, "input_tokens", 0) or 0)
-                        # Prefer the larger of (provider-reported, cl100k est):
-                        # Ollama's input_tokens is the cached delta (tiny),
-                        # so total_est is the representative fill. For
-                        # frontier providers the two agree.
-                        _fill = max(_actual, _ctx_est)
+                        # Drift-corrected real prompt estimate. Ollama's
+                        # input_tokens is the cached delta (tiny in a warm
+                        # loop), so total_est * effective_drift is the
+                        # representative real fill; for frontier providers
+                        # effective_drift is 1.0 and this collapses to the
+                        # cl100k estimate (which agrees with input_tokens).
+                        try:
+                            _real_est = int(_ctx_est * _eff_drift(session))
+                        except Exception:  # noqa: BLE001
+                            _real_est = _ctx_est
+                        _fill = max(_actual, _real_est)
                         _ctx_pct = (
                             round(_fill / _climit * 100, 1)
                             if _climit > 0 and _fill > 0

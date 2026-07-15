@@ -483,6 +483,8 @@ class InputHandler:
             "/history": NestedCompleter.from_nested_dict({"clear": None, "show": None}),
             "/session": session_subcommand_completer,
             "/continue": None,
+            # manual compaction (focus is free-form text — no subcommands)
+            "/compact": None,
             # workspace
             "/workspace": workspace_completer,
             # model / provider

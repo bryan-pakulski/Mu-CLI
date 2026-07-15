@@ -248,6 +248,54 @@ def context_status(args: Dict[str, Any], context) -> str:
     }, default=str, indent=2)
 
 
+# ================================================================ compact
+
+
+@tool(
+    name="compact",
+    description=(
+        "Manually compact the conversation history: summarize older turns into "
+        "the L2 conversation summary to free context, advancing the summary "
+        "anchor. Recent tool results (the active turn's) are protected and "
+        "[cache:KEY] tags are preserved so full results stay recallable. Call "
+        "this when context_status shows L5 is high and you want to reclaim "
+        "space proactively rather than waiting for auto-compaction. Unlike "
+        "checkpoint_progress, this ADVANCES the anchor — compacted entries "
+        "are replaced by their summary. Optional `focus` steers what the "
+        "summary preserves (a task, file, or decision to keep front-of-mind). "
+        "Returns before/after token estimates and the new summary anchor."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "focus": {
+                "type": "string",
+                "description": (
+                    "Optional short text steering what the summary preserves "
+                    "(e.g. 'the auth refactor and open decisions')."
+                ),
+            }
+        },
+    },
+    requires_approval=False,
+    execution_kind="mutate",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def compact(args: Dict[str, Any], context) -> str:
+    """Manual history compaction — back end shared with the /compact command."""
+    session = getattr(context, "session", None)
+    if session is None or not hasattr(session, "session_manager"):
+        return json.dumps({"error": "No session available."})
+
+    from mu.agent.compactor import manual_compact
+
+    focus = str(args.get("focus", "") or "").strip()
+    result = manual_compact(session, focus=focus)
+    return json.dumps(result, default=str, indent=2)
+
+
 # ============================================================ checkpoint_progress
 
 

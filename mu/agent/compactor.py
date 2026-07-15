@@ -130,6 +130,102 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     return None
 
 
+def manual_compact(session: any, *, focus: str = "") -> dict:
+    """Run a compaction pass on demand — the back end for the `/compact`
+    slash command and the agent `compact` tool.
+
+    Unlike the auto-hook, this is an *explicit* user/agent action: it fires
+    regardless of the once-per-turn gate, and (mirroring Claude Code's manual
+    `/compact`, which always summarizes) it rolls at least one bounded
+    segment even when history is under the budget — so an explicit request
+    always makes progress when there's anything left to summarize. Recent
+    tool results are still protected by `resolve_tool_result_floor` /
+    `resolve_keep_recent`, so a mid-turn agent invocation can't eat the
+    active turn's own results.
+
+    Marks the turn compacted so the auto-hook does not immediately re-fire
+    after this explicit pass; the flag resets at turn end.
+    """
+    session_manager = getattr(session, "session_manager", None)
+    if session_manager is None or not hasattr(
+        session_manager, "roll_history_summary_to_token_budget"
+    ):
+        return {"ok": False, "error": "no session manager available"}
+    if not hasattr(session, "_compaction_token_budget"):
+        return {"ok": False, "error": "session has no _compaction_token_budget"}
+
+    from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
+
+    keep_recent = resolve_keep_recent(session)
+    provider = getattr(session, "provider", None)
+    focus_val = (focus or "").strip() or (
+        getattr(session, "variables", None) or {}
+    ).get("compact_focus") or ""
+
+    try:
+        before_tokens = session_manager.estimate_runtime_history_tokens()
+    except Exception:  # noqa: BLE001
+        before_tokens = 0
+    before_len = len(session_manager.history)
+    before_anchor = int(getattr(session_manager, "summary_anchor", 0) or 0)
+
+    try:
+        session_manager._tool_result_floor = resolve_tool_result_floor(session)
+        session_manager._compact_focus = focus_val
+        session_manager._pending_compaction_kind = "manual"
+        session_manager._pending_compaction_iter = int(
+            getattr(session, "_trace_current_iter", 0) or 0
+        )
+        budget = int(session._compaction_token_budget())
+        rolled = session_manager.roll_history_summary_to_token_budget(
+            budget,
+            keep_recent=keep_recent,
+            provider=provider,
+        )
+        if not rolled:
+            # Honor the explicit manual request: roll one bounded segment
+            # even when the budget gate said we're under budget (matches
+            # Claude Code's manual `/compact`). No-op if the anchor is
+            # already at the keep-recent boundary — nothing left to summarize.
+            rolled = session_manager.roll_history_summary(
+                keep_recent=keep_recent,
+                provider=provider,
+            )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("Manual compaction raised %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+    try:
+        after_tokens = session_manager.estimate_runtime_history_tokens()
+    except Exception:  # noqa: BLE001
+        after_tokens = before_tokens
+    after_len = len(session_manager.history)
+    after_anchor = int(getattr(session_manager, "summary_anchor", 0) or 0)
+
+    # An explicit pass satisfies the turn's proactive compaction so the
+    # auto-hook doesn't immediately re-fire; re-baseline the watermark.
+    session._compacted_this_turn = True
+    session._compaction_watermark = after_len
+
+    return {
+        "ok": True,
+        "compacted": bool(rolled),
+        "budget_tokens": budget,
+        "keep_recent": keep_recent,
+        "focus": focus_val,
+        "before": {
+            "history_len": before_len,
+            "summary_anchor": before_anchor,
+            "est_tokens": before_tokens,
+        },
+        "after": {
+            "history_len": after_len,
+            "summary_anchor": after_anchor,
+            "est_tokens": after_tokens,
+        },
+    }
+
+
 def install(registry: Optional[HookRegistry] = None) -> None:
     reg = registry or default_registry
     reg.remove("auto_compact_pre_call")
@@ -146,4 +242,4 @@ def install(registry: Optional[HookRegistry] = None) -> None:
 install()
 
 
-__all__ = ["install"]
+__all__ = ["install", "manual_compact"]

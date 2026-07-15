@@ -1,0 +1,280 @@
+<aside class="mode-panel files-panel"
+       data-mode="files"
+       x-data="filesPanel()"
+       x-show="$store.mode.active === 'files'"
+       x-transition.opacity.duration.200ms>
+
+    <!-- Empty state: no workspace attached. Offer to attach one via the
+         existing fileBrowser modal + /api/workspace. -->
+    <template x-if="!$store.files.roots.length && !$store.files.loading && !$store.files.error">
+        <div class="files-empty">
+            <div class="files-empty-title">No workspace</div>
+            <p class="muted">Attach a folder to browse and edit its files.</p>
+            <button class="primary"
+                    @click="attachWorkspace($event)"
+                    title="Pick a workspace folder">attach folder</button>
+        </div>
+    </template>
+
+    <!-- Error banner -->
+    <div class="files-error" x-show="$store.files.error" x-text="$store.files.error"></div>
+
+    <!-- Main two-pane layout: tree | editor -->
+    <div class="files-split" x-show="$store.files.roots.length || $store.files.loading">
+
+        <!-- ── Tree pane ─────────────────────────────────────────── -->
+        <div class="files-tree-pane">
+            <div class="files-toolbar">
+                <button class="subtle" @click="$store.files.startNew(false)"
+                        :disabled="!$store.files.roots.length"
+                        title="New file">+ file</button>
+                <button class="subtle" @click="$store.files.startNew(true)"
+                        :disabled="!$store.files.roots.length"
+                        title="New folder">+ folder</button>
+                <button class="subtle" @click="$store.files.refreshTree()"
+                        title="Refresh tree">⟳</button>
+            </div>
+
+            <div class="files-tree" x-show="!$store.files.loading">
+                <template x-for="root in $store.files.roots" :key="root.path">
+                    <div class="files-tree-node">
+                        <template x-for="child in root.children" :key="child.path">
+                            <div class="files-entry-wrap">
+                                <template x-if="child.is_dir">
+                                    <div class="files-entry dir"
+                                         :class="{ selected: $store.files.selectedPath === child.path }"
+                                         @click="$store.files.expand(child.path)">
+                                        <span class="caret" x-text="$store.files.expanded[child.path] ? '▾' : '▸'"></span>
+                                        <span class="icon">📁</span>
+                                        <span class="name" x-text="child.name"></span>
+                                        <button class="files-act" @click.stop="$store.files.startRename(child.path)" title="Rename">✎</button>
+                                        <button class="files-act" @click.stop="$store.files.askDelete(child.path, true, $event)" title="Delete">🗑</button>
+                                    </div>
+                                </template>
+                                <template x-if="!child.is_dir">
+                                    <div class="files-entry file"
+                                         :class="{ selected: $store.files.selectedPath === child.path }"
+                                         @click="$store.files.openFile(child.path)">
+                                        <span class="caret-spacer"></span>
+                                        <span class="icon">📄</span>
+                                        <span class="name" x-text="child.name"></span>
+                                        <button class="files-act" @click.stop="$store.files.startRename(child.path)" title="Rename">✎</button>
+                                        <button class="files-act" @click.stop="$store.files.askDelete(child.path, false, $event)" title="Delete">🗑</button>
+                                    </div>
+                                </template>
+                                <!-- Lazy-expanded subtree -->
+                                <template x-if="child.is_dir && $store.files.expanded[child.path]">
+                                    <div class="files-subtree">
+                                        <template x-for="sub in (child.children || [])" :key="sub.path">
+                                            <div class="files-entry-wrap">
+                                                <template x-if="sub.is_dir">
+                                                    <div class="files-entry dir indent"
+                                                         :class="{ selected: $store.files.selectedPath === sub.path }"
+                                                         @click="$store.files.expand(sub.path)">
+                                                        <span class="caret" x-text="$store.files.expanded[sub.path] ? '▾' : '▸'"></span>
+                                                        <span class="icon">📁</span>
+                                                        <span class="name" x-text="sub.name"></span>
+                                                        <button class="files-act" @click.stop="$store.files.startRename(sub.path)">✎</button>
+                                                        <button class="files-act" @click.stop="$store.files.askDelete(sub.path, true, $event)">🗑</button>
+                                                    </div>
+                                                </template>
+                                                <template x-if="!sub.is_dir">
+                                                    <div class="files-entry file indent"
+                                                         :class="{ selected: $store.files.selectedPath === sub.path }"
+                                                         @click="$store.files.openFile(sub.path)">
+                                                        <span class="caret-spacer"></span>
+                                                        <span class="icon">📄</span>
+                                                        <span class="name" x-text="sub.name"></span>
+                                                        <button class="files-act" @click.stop="$store.files.startRename(sub.path)">✎</button>
+                                                        <button class="files-act" @click.stop="$store.files.askDelete(sub.path, false, $event)">🗑</button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <div class="files-entry muted indent"
+                                             x-show="(child.children || []).length === 0">
+                                            <span class="name">empty</span>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- ── Editor pane ───────────────────────────────────────── -->
+        <div class="files-editor-pane">
+            <template x-if="!$store.files.selectedPath">
+                <div class="files-editor-empty muted">Select a file to edit.</div>
+            </template>
+            <template x-if="$store.files.selectedPath">
+                <div class="files-editor">
+                    <div class="files-editor-header">
+                        <span class="files-path mono" x-text="$store.files.selectedPath"
+                              :title="$store.files.selectedPath"></span>
+                        <span class="files-dirty" x-show="$store.files.dirty" title="Unsaved changes">●</span>
+                        <div class="files-editor-actions">
+                            <button class="subtle" @click="reloadFile()" title="Reload from disk">reload</button>
+                            <button class="primary"
+                                    @click="saveCurrent()"
+                                    :disabled="!$store.files.dirty || $store.files.readOnly"
+                                    title="Save (Ctrl/Cmd-S)">save</button>
+                        </div>
+                    </div>
+                    <div class="files-readonly-banner" x-show="$store.files.readOnly"
+                         x-text="'read-only: ' + $store.files.readOnlyWhy"></div>
+                    <div class="files-cm-host" x-ref="cmHost"></div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Inline new-file/folder prompt -->
+    <template x-if="$store.files.newPrompt">
+        <div class="files-prompt">
+            <span class="label-mono" x-text="$store.files.newPrompt.isDir ? 'new folder' : 'new file'"></span>
+            <span class="muted mono" x-text="$store.files.newPrompt.parent + '/'"></span>
+            <input type="text" class="files-prompt-input"
+                   x-model="$store.files.newPrompt.name"
+                   @keydown.enter="$store.files.confirmNew()"
+                   @keydown.escape="$store.files.cancelNew()"
+                   :placeholder="'name'"
+                   x-init="$el.focus()">
+            <button class="subtle" @click="$store.files.confirmNew()">ok</button>
+            <button class="subtle" @click="$store.files.cancelNew()">cancel</button>
+        </div>
+    </template>
+
+    <!-- Inline rename prompt -->
+    <template x-if="$store.files.renameTarget">
+        <div class="files-prompt">
+            <span class="label-mono">rename</span>
+            <input type="text" class="files-prompt-input"
+                   x-model="$store.files.renameTarget.to"
+                   @keydown.enter="$store.files.confirmRename()"
+                   @keydown.escape="$store.files.cancelRename()"
+                   x-init="$el.focus(); $el.select()">
+            <button class="subtle" @click="$store.files.confirmRename()">ok</button>
+            <button class="subtle" @click="$store.files.cancelRename()">cancel</button>
+        </div>
+    </template>
+</aside>
+
+<script>
+function filesPanel() {
+    return {
+        cm: null,
+        _setting: false,
+
+        init() {
+            this._mountCM();
+            // When the store loads a new file (or closes), push its content
+            // into CodeMirror. _contentVersion bumps on every open/close.
+            this._unwatch = Alpine.effect(() => {
+                const _v = Alpine.store("files")._contentVersion;
+                const content = Alpine.store("files").content;
+                const ro = Alpine.store("files").readOnly;
+                this._setCMValue(content || "", ro);
+            });
+            // Ctrl/Cmd-S saves from the editor.
+            this._onKey = (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+                    e.preventDefault();
+                    this.saveCurrent();
+                }
+            };
+            window.addEventListener("keydown", this._onKey);
+            // CodeMirror mounted while the panel is display:none measures 0
+            // height; refresh it whenever this panel becomes the active view.
+            this._unwatchActive = Alpine.effect(() => {
+                if (Alpine.store("mode").active === "files" && this.cm) {
+                    this.$nextTick(() => this.cm && this.cm.refresh());
+                }
+            });
+        },
+
+        destroy() {
+            if (this._unwatch) this._unwatch();
+            if (this._unwatchActive) this._unwatchActive();
+            window.removeEventListener("keydown", this._onKey);
+            if (this.cm) { this.cm.toTextArea(); this.cm = null; }
+        },
+
+        _mountCM() {
+            if (this.cm || !window.CodeMirror) return;
+            const host = this.$refs.cmHost;
+            if (!host) return;
+            this.cm = CodeMirror(host, {
+                value: "",
+                mode: "text/plain",
+                lineNumbers: true,
+                indentUnit: 2,
+                tabSize: 2,
+                lineWrapping: true,
+                styleActiveLine: true,
+                readOnly: true,
+            });
+            this.cm.on("change", () => {
+                if (this._setting) return;
+                const store = Alpine.store("files");
+                store.dirty = this.cm.getValue() !== store.originalContent;
+            });
+        },
+
+        _setCMValue(value, readOnly) {
+            this._mountCM();
+            if (!this.cm) return;
+            this._setting = true;
+            this.cm.setOption("readOnly", !!readOnly);
+            this.cm.setOption("mode", this._guessMode(Alpine.store("files").selectedPath));
+            this.cm.setValue(value || "");
+            this.cm.clearHistory();
+            this._setting = false;
+        },
+
+        _guessMode(path) {
+            const ext = (path || "").split(".").pop().toLowerCase();
+            const map = {
+                py: "python", js: "javascript", mjs: "javascript",
+                md: "markdown", markdown: "markdown",
+                json: "json", sh: "shell", bash: "shell",
+                html: "htmlmixed", htm: "htmlmixed", css: "css",
+                yml: "yaml", yaml: "yaml", toml: "toml",
+                c: "clike", h: "clike", cpp: "clike",
+                sql: "sql", rs: "rust", go: "go",
+            };
+            return map[ext] || "text/plain";
+        },
+
+        saveCurrent() {
+            if (!this.cm) return;
+            Alpine.store("files").save(this.cm.getValue());
+        },
+
+        async reloadFile() {
+            const path = Alpine.store("files").selectedPath;
+            if (path) await Alpine.store("files").openFile(path);
+            Alpine.store("toast").show("reloaded", "info", 1500);
+        },
+
+        async attachWorkspace(ev) {
+            Alpine.store("fileBrowser").show("folder", async (p) => {
+                const r = await fetch("/api/workspace", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ path: p }),
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || "add failed", "error");
+                    return;
+                }
+                await Alpine.store("files").load();
+                await Alpine.store("inspector").loadWorkspace();
+            });
+        },
+    };
+}
+</script>

@@ -40,6 +40,7 @@ from .routers import (
     chat,
     debug as debug_router,
     feature as feature_router,
+    files as files_router,
     inspector,
     loop as loop_router,
     memory as memory_router,
@@ -258,6 +259,7 @@ def create_app(
     app.include_router(loop_router.router, prefix="/api/loop", tags=["loop"])
     app.include_router(debug_router.router, prefix="/api/debug", tags=["debug"])
     app.include_router(memory_router.router, prefix="/api/memory", tags=["memory"])
+    app.include_router(files_router.router, prefix="/api/files", tags=["files"])
     app.include_router(skills_router.router, prefix="/api/skills", tags=["skills"])
     app.include_router(audio_router.router, prefix="/api/audio", tags=["audio"])
     app.include_router(

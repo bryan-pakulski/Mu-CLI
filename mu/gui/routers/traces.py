@@ -9,6 +9,7 @@ the ``mucli trace`` CLI share one code path.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
@@ -37,6 +38,17 @@ def _find_trace(run_id: str) -> str:
     return path
 
 
+# The trace parser + snapshot builder are CPU-bound and can take seconds on a
+# huge run (a 1.1M-token trace has been seen in the wild). These handlers are
+# ``async def``, so running that work inline would block the single event loop
+# for the whole parse — freezing SSE, /api/sessions, and prompt-answer routes
+# (the "GUI freezes, can't load traces / navigate" symptom). Every heavy call
+# is offloaded to the default thread executor via ``asyncio.to_thread`` so the
+# loop stays free to serve everything else while a big trace parses on a
+# worker thread. The ``/raw`` streaming endpoint already runs its sync
+# generator in a threadpool (Starlette), so it needs no change.
+
+
 @router.get("")
 async def list_traces(session: str | None = None) -> List[Dict[str, Any]]:
     """List trace runs (newest first) with header metadata + iter count.
@@ -45,7 +57,7 @@ async def list_traces(session: str | None = None) -> List[Dict[str, Any]]:
     Analyzer is session-scoped, so when opened from the chat it passes the
     current session and ignores every other session's runs.
     """
-    runs = list_trace_runs()
+    runs = await asyncio.to_thread(list_trace_runs)
     if session:
         runs = [r for r in runs if r.get("session") == session]
     return runs
@@ -58,22 +70,22 @@ async def get_session_trace(session_name: str, cols: int = 128) -> Dict[str, Any
     bounds. The Trace Analyzer loads this (not a single run) when opened from
     the chat, so everything that happened in the session is visible at once.
     """
-    runs = load_session_runs(session_name)
+    runs = await asyncio.to_thread(load_session_runs, session_name)
     if not runs:
         raise HTTPException(
             status_code=404, detail=f"no trace runs for session: {session_name}"
         )
-    return build_session_view(runs, cols=cols)
+    return await asyncio.to_thread(build_session_view, runs, cols)
 
 
 @router.get("/{run_id}")
 async def get_trace(run_id: str, cols: int = 128) -> Dict[str, Any]:
     """Full parsed run + derived series + snapshot + overview summary."""
     path = _find_trace(run_id)
-    run = parse_trace(path)
-    series = build_series(run)
-    summary = build_summary(run, series)
-    snapshot = build_trace_snapshot(run, cols=cols)
+    run = await asyncio.to_thread(parse_trace, path)
+    series = await asyncio.to_thread(build_series, run)
+    snapshot = await asyncio.to_thread(build_trace_snapshot, run, cols)
+    summary = await asyncio.to_thread(build_summary, run, series)
     return {
         "run_id": run.run_id,
         "header": run.header,
@@ -109,6 +121,6 @@ async def get_trace_raw(run_id: str):
 async def get_trace_summary(run_id: str) -> Dict[str, Any]:
     """Just the overview cards — cheap for the run picker's hover detail."""
     path = _find_trace(run_id)
-    run = parse_trace(path)
-    series = build_series(run)
-    return build_summary(run, series)
+    run = await asyncio.to_thread(parse_trace, path)
+    series = await asyncio.to_thread(build_series, run)
+    return await asyncio.to_thread(build_summary, run, series)

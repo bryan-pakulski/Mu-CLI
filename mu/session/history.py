@@ -55,6 +55,34 @@ _SUMMARY_CANONICAL_ORDER = [
 # possible. See R2 in documentation/harness-investigation.md (FM-3).
 _SUMMARY_TRIM_ORDER = ["Progress", "Key decisions", "Current state"]
 
+# Portion-based compaction: the max rendered-characters of history one
+# `roll_history_summary` LLM call summarizes at a time (~6k tokens). Mirrors
+# the `_OVERFLOW_CHUNK_CHARS = 12_000` chunk size in `mu/session/messages.py`;
+# doubled here because a conversation segment mixes small text turns with
+# tool results and benefits from a little more per-call context. The budget
+# loop (`roll_history_summary_to_token_budget`) calls `roll_history_summary`
+# repeatedly, so the whole history is still summarized — just one bounded
+# portion per LLM call instead of all at once (Claude Code "context collapse").
+# ``None`` disables segmentation (legacy whole-block behavior).
+_COMPACTION_SEGMENT_CHARS = 24_000
+
+# How much of each tool result the LLM summarizer is allowed to see when
+# rendering history for a compaction summary (`_render_entries_for_llm`).
+# Was 300 — so little that the summarizer couldn't choose what mattered in
+# a big tool result. 4000 chars (~1k tokens) is enough for the model to
+# pick out the load-bearing paths/identifiers/findings, and the full
+# original stays recallable via the ``[cache:KEY]`` tag (tool-result sidecar),
+# so this is not lossy — it's "summarizer sees enough to decide".
+_COMPACT_RENDER_TOOL_RESULT_CHARS = 4000
+
+# Above this size, `_summarize_payload_via_llm` routes an oversized payload
+# through the chunked summarizer (`_chunk_summarize_text`) so the *whole*
+# payload is summarized across bounded chunks instead of just its head.
+# Below it, the whole payload goes to one generate() call (no first-8k
+# slice) — ~32k chars (~8k tokens) is a comfortable single summarization
+# call, so only genuinely huge tool results (100k+) pay for chunking.
+_PAYLOAD_SUMMARIZE_CHAR_THRESHOLD = 32_000
+
 
 def _parse_summary_sections(text: str) -> Dict[str, str]:
     """Split a structured (``###``-headed) summary into ``{header: body}``.
@@ -148,10 +176,13 @@ class HistoryMixin:
 
     _LLM_SUMMARY_SYSTEM_PROMPT = (
         "You are a conversation summarizer for an AI coding agent. "
-        "Summarize the following conversation segment into a structured "
-        "summary. Preserve all critical information the agent needs to "
-        "continue its work.\n\n"
-        "Output EXACTLY these sections, each starting with ###:\n\n"
+        "Summarize the following conversation segment so the agent can "
+        "continue its work with the essential context preserved. You "
+        "decide what matters — prioritize information the agent needs to "
+        "keep working and drop what is no longer relevant.\n\n"
+        "Suggested sections (use whichever apply; you may add, omit, or "
+        "reorganize them to fit what actually matters in this segment). "
+        "Start each section you use with ###:\n\n"
         "### Task\nThe user's original request or goal. Quote it if short, "
         "paraphrase if long. Never omit.\n\n"
         "### Progress\nWhat has been done so far. List concrete actions, "
@@ -166,9 +197,10 @@ class HistoryMixin:
         "Rules:\n"
         "- Preserve file paths, function names, error messages, and "
         "identifiers VERBATIM.\n"
-        "- Do NOT add commentary, headers, or text outside the sections.\n"
-        "- If a section has no content, write 'None' — do not skip it.\n"
-        "- Keep the summary concise but complete. Target 200-600 words.\n"
+        "- When a tool result is summarized, KEEP its [cache:KEY] tag so "
+        "the full original result can be recalled later — do not drop it.\n"
+        "- Do NOT add commentary outside the sections you choose.\n"
+        "- Be concise but complete. Target 200-600 words.\n"
     )
 
     def _generate_llm_summary(
@@ -193,15 +225,22 @@ class HistoryMixin:
 
         try:
             # Render the conversation segment as readable text for the
-            # summarizer. Use _summarize_history_message but with a
-            # much larger character budget than the default 140 — the
-            # LLM needs enough context to produce a good summary.
+            # summarizer. Use _render_entries_for_llm with a generous
+            # per-tool-result budget + [cache:KEY] tags so the model can
+            # choose what matters and mark recallable results.
             rendered = self._render_entries_for_llm(entries)
             if not rendered.strip():
                 return None
 
+            # Optional compact-focus steering (Claude Code `/compact <focus>`
+            # style): when set, the summary emphasizes the given focus.
+            focus = ""
+            focus_val = getattr(self, "_compact_focus", None)
+            if focus_val:
+                focus = f"Focus for this summary: {focus_val}\n\n"
+
             user_prompt = (
-                "Summarize this conversation segment:\n\n"
+                f"{focus}Summarize this conversation segment:\n\n"
                 f"{rendered}"
             )
 
@@ -223,16 +262,12 @@ class HistoryMixin:
             if not summary_text:
                 return None
 
-            # Validate that the summary has the expected structure.
-            # If the model didn't produce any ### headers, it probably
-            # didn't follow the prompt — fall back to mechanical.
-            if "###" not in summary_text:
-                logger.warning(
-                    "LLM summary missing expected ### sections; "
-                    "falling back to mechanical summarization."
-                )
-                return None
-
+            # The summary scaffold is now suggested (not mandated), so a
+            # freeform summary with no ### headers is valid — the model
+            # chose its own structure. `_merge_structured_summary` falls
+            # back to append when no ### sections are present, and
+            # `_clip_conversation_summary` bounds growth. Only empty text
+            # is rejected (handled above).
             return summary_text
 
         except Exception as exc:
@@ -251,8 +286,12 @@ class HistoryMixin:
 
         Unlike _summarize_history_message (which truncates to 140
         chars), this preserves much more content — up to 500 chars per
-        text part and 300 chars per tool result — so the LLM has
-        enough context to produce a meaningful structured summary.
+        text part and ``_COMPACT_RENDER_TOOL_RESULT_CHARS`` (4000) per
+        tool result — so the LLM has enough context to choose what
+        matters. Tool results also carry their ``[cache:KEY]`` tag (the
+        full original is recallable via ``recall`` / ``lookup_by_locator``
+        in ``mu/session/tool_cache.py``), so the summarizer can mark a
+        compacted result as recallable instead of losing it to truncation.
         """
         lines: List[str] = []
         for entry in entries:
@@ -271,11 +310,18 @@ class HistoryMixin:
                     )
                 elif part_type == "tool_result":
                     result = str(part.get("tool_result", "")).strip().replace("\n", " ")
-                    if len(result) > 300:
-                        result = result[:297] + "..."
+                    if len(result) > _COMPACT_RENDER_TOOL_RESULT_CHARS:
+                        result = result[: _COMPACT_RENDER_TOOL_RESULT_CHARS - 3] + "..."
                     if result:
+                        # cache_key tag: the full tool result lives in the
+                        # tool-result sidecar cache and can be recalled by key,
+                        # so the summarizer need not preserve every byte — it
+                        # just marks the result as recallable.
+                        cache_key = part.get("cache_key")
+                        cache_tag = f"[cache:{cache_key}] " if cache_key else ""
                         parts_text.append(
-                            f"tool_result:{part.get('tool_name', 'tool')} => {result}"
+                            f"tool_result:{part.get('tool_name', 'tool')} => "
+                            f"{cache_tag}{result}"
                         )
                 elif part_type == "file":
                     file_ref = part.get("file_ref", {})
@@ -466,7 +512,11 @@ class HistoryMixin:
     # ------------------------------------------------------ rolling summary
 
     def roll_history_summary(
-        self, keep_recent: int, provider: Optional[LLMProvider] = None
+        self,
+        keep_recent: int,
+        provider: Optional[LLMProvider] = None,
+        *,
+        max_segment_chars: Optional[int] = None,
     ) -> bool:
         keep_recent = max(1, int(keep_recent or 1))
         if self.summary_anchor > len(self.history):
@@ -500,6 +550,34 @@ class HistoryMixin:
         if target_anchor <= self.summary_anchor:
             return False
 
+        # Portion-based compaction (Claude Code "context collapse" style):
+        # when ``max_segment_chars`` is set, summarize only the OLDEST
+        # bounded segment in this call rather than the whole pre-target
+        # block. The budget loop (`roll_history_summary_to_token_budget`)
+        # calls us repeatedly, advancing segment-by-segment, so no single
+        # LLM summarization call ever ingests the entire history — each
+        # call is small, cheap, and lets the model focus on one portion.
+        # ``None`` (the default) reproduces the legacy whole-block behavior
+        # so existing call sites are unaffected.
+        end = target_anchor
+        if max_segment_chars and max_segment_chars > 0:
+            seg_end = self.summary_anchor
+            acc = 0
+            while seg_end < target_anchor:
+                msg_len = len(
+                    self._render_entries_for_llm([self.history[seg_end]])
+                )
+                # Always include at least one entry (a single oversized
+                # message becomes a one-entry segment; truly huge payloads
+                # are reclaimed by `_degrade_oldest_runtime_payload`).
+                if seg_end > self.summary_anchor and acc + msg_len > max_segment_chars:
+                    break
+                acc += msg_len
+                seg_end += 1
+            end = min(seg_end, target_anchor)
+            if end <= self.summary_anchor:
+                return False
+
         # Exclude protected messages from summarization — they stay
         # verbatim in L5 even after the anchor advances past them.
         # This preserves important context (initial user request, key
@@ -507,7 +585,7 @@ class HistoryMixin:
         protected = getattr(self, "protected_indices", set())
         entries_to_summarize = [
             msg
-            for idx, msg in enumerate(self.history[self.summary_anchor : target_anchor])
+            for idx, msg in enumerate(self.history[self.summary_anchor : end])
             if (self.summary_anchor + idx) not in protected
         ]
 
@@ -528,7 +606,7 @@ class HistoryMixin:
             self._last_summary_mode = "none"
 
         if not summary_batch:
-            self.summary_anchor = target_anchor
+            self.summary_anchor = end
             return True
 
         # Merge into existing summary. When the summary is LLM-generated
@@ -540,15 +618,15 @@ class HistoryMixin:
             self._merge_structured_summary(summary_batch)
         else:
             header = (
-                f"### Summarized conversation through message {target_anchor}\n"
+                f"### Summarized conversation through message {end}\n"
                 if not self.conversation_summary
-                else f"\n### Summarized conversation through message {target_anchor}\n"
+                else f"\n### Summarized conversation through message {end}\n"
             )
             self.conversation_summary = (
                 f"{self.conversation_summary}{header}{summary_batch}".strip()
             )
             self._clip_conversation_summary()
-        self.summary_anchor = target_anchor
+        self.summary_anchor = end
         return True
 
     def roll_history_summary_to_token_budget(
@@ -558,6 +636,7 @@ class HistoryMixin:
         keep_recent: int = 12,
         max_passes: int = 8,
         provider: Optional[LLMProvider] = None,
+        max_segment_chars: Optional[int] = _COMPACTION_SEGMENT_CHARS,
     ) -> bool:
         token_budget = max(1, int(token_budget or 1))
         # Run-tracer instrumentation: record one compaction event per call so
@@ -575,7 +654,11 @@ class HistoryMixin:
         for _ in range(max(1, int(max_passes or 1))):
             if self.estimate_runtime_history_tokens() <= token_budget:
                 break
-            if self.roll_history_summary(keep_recent=keep_recent, provider=provider):
+            if self.roll_history_summary(
+                keep_recent=keep_recent,
+                provider=provider,
+                max_segment_chars=max_segment_chars,
+            ):
                 changed = True
                 continue
             if self._degrade_oldest_runtime_payload(provider=provider):
@@ -713,11 +796,29 @@ class HistoryMixin:
         Returns the summary text (which should be shorter than the
         original), or None on any failure (caller falls back to
         mechanical truncation).
+
+        Payloads above ``_PAYLOAD_SUMMARIZE_CHAR_THRESHOLD`` are routed
+        through the chunked summarizer (``_chunk_summarize_text`` in
+        ``mu/session/messages.py``) so the *whole* payload is summarized
+        across bounded chunks — not just its first 8k. Smaller payloads
+        are summarized in a single call (no slice), so the model sees the
+        full content and can choose what matters.
         """
         if provider is None or not payload:
             return None
 
         try:
+            # Large payload: chunk-summarize the whole thing.
+            if len(payload) > _PAYLOAD_SUMMARIZE_CHAR_THRESHOLD:
+                from mu.session.messages import _chunk_summarize_text
+
+                summary = _chunk_summarize_text(
+                    provider, payload, budget_tokens=4_096
+                ).strip()
+                if summary and len(summary) < len(payload):
+                    return summary
+                return None
+
             system_prompt = (
                 "You are a context summarizer for an AI coding agent. "
                 "Summarize the following content into a concise but "
@@ -730,7 +831,7 @@ class HistoryMixin:
             messages = [
                 Message(
                     role="user",
-                    parts=[MessagePart(type="text", text=payload[:8000])],
+                    parts=[MessagePart(type="text", text=payload)],
                 ),
             ]
 

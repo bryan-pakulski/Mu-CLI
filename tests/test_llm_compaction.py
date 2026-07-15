@@ -154,13 +154,15 @@ def test_generate_llm_summary_returns_none_when_provider_is_none():
     assert result is None
 
 
-def test_generate_llm_summary_rejects_output_without_section_headers():
-    """If the model doesn't produce ### headers, it didn't follow the
-    prompt — fall back to mechanical."""
+def test_generate_llm_summary_accepts_freeform_output_without_section_headers():
+    """The summary scaffold is suggested, not mandated — a model that
+    chooses its own structure (no ### headers) is accepted, not rejected.
+    `_merge_structured_summary` falls back to append for non-### summaries
+    and `_clip_conversation_summary` bounds growth."""
     provider = _ScriptedProvider(response_text="Just a plain summary without headers.")
     host = _Host()
     result = host._generate_llm_summary(provider, _sample_entries())
-    assert result is None
+    assert result == "Just a plain summary without headers."
 
 
 def test_generate_llm_summary_rejects_empty_response_text():
@@ -451,3 +453,108 @@ def test_degrade_oldest_uses_16000_max_chars():
     truncated = host.history[0]["parts"][0]["text"]
     assert len(truncated) <= 16100  # 16000 + marker
     assert "truncated_to_16000_chars_for_context_budget" in truncated
+
+
+# ============================================================ portion-based / model-driven compaction
+
+
+def test_render_entries_for_llm_includes_cache_tag_and_larger_tool_result_cap():
+    """The summarizer renderer must (a) surface the [cache:KEY] tag so the
+    model knows a compacted tool result is recallable, and (b) cap a tool
+    result at the generous ~4000-char budget, NOT the old 300 — so the
+    model sees enough to choose what matters."""
+    host = _Host()
+    big = "PATH=/a/b/c.py RESULT=ok " * 200  # ~4800 chars of varied text
+    entries = [
+        {
+            "role": "tool",
+            "parts": [
+                {
+                    "type": "tool_result",
+                    "tool_name": "read_file",
+                    "tool_result": big,
+                    "cache_key": "abc123",
+                }
+            ],
+        }
+    ]
+    rendered = host._render_entries_for_llm(entries)
+    assert "[cache:abc123]" in rendered
+    # The old 300-char cap would have dropped everything after ~300 chars;
+    # 4000 lets the model see far more of the result.
+    assert len(rendered) > 1000
+    # And it's still capped (not the full ~4800).
+    assert "PATH=/a/b/c.py RESULT=ok " in rendered
+
+
+def test_roll_history_summary_segmented_advances_one_segment_per_call():
+    """With max_segment_chars set, one roll_history_summary call summarizes
+    only the oldest bounded segment (anchor advances partway), not the
+    whole pre-target block. A second call advances further — portion-based
+    compaction (Claude Code 'context collapse' style)."""
+    provider = _ScriptedProvider(response_text="### Progress\nsegment summary")
+    host = _Host()
+    # 8 user/assistant turns, each rendered long enough that a tiny segment
+    # cap holds them to ~2 messages per call.
+    host.history = []
+    for i in range(8):
+        host.history.append(
+            {"role": "user", "parts": [{"type": "text", "text": f"turn {i} " + "x" * 500}]}
+        )
+        host.history.append(
+            {"role": "assistant", "parts": [{"type": "text", "text": f"reply {i} " + "y" * 500}]}
+        )
+    host.summary_anchor = 0
+    host.conversation_summary = ""
+
+    small_segment = 1200  # ~1 message-pair of rendered text
+    first = host.roll_history_summary(
+        keep_recent=2, provider=provider, max_segment_chars=small_segment
+    )
+    assert first is True
+    after_first = host.summary_anchor
+    # Advanced only partway — NOT to len(history)-keep_recent (14).
+    assert 0 < after_first < 14
+    # conversation_summary now holds a segment summary.
+    assert "segment summary" in host.conversation_summary
+
+    second = host.roll_history_summary(
+        keep_recent=2, provider=provider, max_segment_chars=small_segment
+    )
+    assert second is True
+    assert host.summary_anchor > after_first  # advanced further
+
+    # With max_segment_chars=None (legacy), one call jumps the whole way.
+    host2 = _Host()
+    host2.history = list(host.history)
+    host2.summary_anchor = 0
+    host2.conversation_summary = ""
+    whole = host2.roll_history_summary(keep_recent=2, provider=provider)
+    assert whole is True
+    assert host2.summary_anchor >= 14  # whole block in one shot
+
+
+def test_summarize_payload_via_llm_routes_large_payload_through_chunks():
+    """A payload above the threshold is chunk-summarized (multiple
+    provider.generate calls), not sliced to its first 8k. A small payload
+    is summarized in a single call."""
+    from mu.session.history import _PAYLOAD_SUMMARIZE_CHAR_THRESHOLD
+
+    provider = _ScriptedProvider(response_text="condensed summary")
+    host = _Host()
+
+    huge = "INFO detailed log line content here\n" * 4000  # ~112k chars
+    assert len(huge) > _PAYLOAD_SUMMARIZE_CHAR_THRESHOLD
+    out = host._summarize_payload_via_llm(provider, huge)
+    assert out is not None
+    assert len(out) < len(huge)
+    # Chunked path makes >1 generate call.
+    assert len(provider.generate_calls) > 1
+
+    # Small payload: single call, no slicing.
+    provider2 = _ScriptedProvider(response_text="small summary")
+    small = "a short payload that is under the threshold"
+    assert len(small) <= _PAYLOAD_SUMMARIZE_CHAR_THRESHOLD
+    out2 = host._summarize_payload_via_llm(provider2, small)
+    assert out2 == "small summary"
+    assert len(provider2.generate_calls) == 1

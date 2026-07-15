@@ -4,7 +4,7 @@ Renders nothing locally; every UI side-effect becomes an event the
 browser receives via SSE. Blocking prompts pause the agent thread on
 a :class:`threading.Event` held by :class:`PromptStore`.
 
-Two non-obvious bits:
+Three non-obvious bits:
 
 - :meth:`stream_assistant_delta` lazily emits ``assistant_start`` on
   the first token because ``mu.ui.stream.build_default_renderer``
@@ -12,10 +12,26 @@ Two non-obvious bits:
   sees a "new bubble" signal.
 - :meth:`stream_assistant_end` is a no-op when no delta arrived (e.g.
   provider erred before any text), so there's no orphan bubble close.
+- **Delta coalescing.** Providers stream per-token (Ollama from a local
+  daemon is the worst case — hundreds of chunks/sec, no API rate limit),
+  and each delta used to be its own ``publish_threadsafe`` → its own
+  event-loop callback + its own SSE chunk. A long generation flooded the
+  event loop with per-token publishes and *starved every other HTTP
+  request* (loading traces, navigating sessions, reopening the GUI)
+  while the existing SSE stream kept trickpling — the GUI looked frozen
+  even though the live turn kept updating. :meth:`_flush_deltas` now
+  buffers ``assistant_delta``/``thinking_delta`` text on the agent
+  thread and publishes at most ~one batch every
+  :data:`_DELTAS_FLUSH_MS` (plus a size cap and a forced flush on every
+  boundary event). The frontend already concatenates deltas and
+  re-renders on a rAF, so batching is invisible to the user — but it
+  cuts event-loop publishes 10-50× and unblocks the rest of the server.
 """
 
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from typing import Any, Dict, Optional
 
@@ -23,6 +39,15 @@ from mu.ui.base import BaseUI
 
 from .bus import EventBus
 from .prompts import PromptStore
+
+
+# Delta coalescing thresholds. Flush a batch at most every this many
+# milliseconds (so ≤ ~20 publishes/sec regardless of provider chunk
+# rate), or when the buffered text exceeds this many characters, or
+# immediately on any boundary (tool_call / assistant_end / any non-delta
+# event, which routes through the flush-first :meth:`_publish`).
+_DELTAS_FLUSH_MS = 50.0
+_DELTAS_MAX_CHARS = 8192
 
 
 class WebUI(BaseUI):
@@ -41,11 +66,64 @@ class WebUI(BaseUI):
         # so the frontend can route streaming/prompt traffic to the
         # right per-session chat slot when multiple sessions are loaded.
         self.session_name: Optional[str] = session_name
+        # Delta coalescer state. Only the parent agent thread appends
+        # (subagents use a SubagentUI that doesn't override the streaming
+        # hooks), but the lock guards the buffer against any future
+        # cross-thread caller and costs nothing uncontended.
+        self._delta_lock = threading.Lock()
+        self._asst_buf: list[str] = []
+        self._think_buf: list[str] = []
+        self._last_delta_flush = 0.0
 
-    def _publish(self, event: Dict[str, Any]) -> None:
+    def _publish_raw(self, event: Dict[str, Any]) -> None:
+        """Low-level publish — stamps the session name and hands off to
+        the bus. Does NOT flush buffered deltas, so the coalescer can
+        publish batches without recursing through :meth:`_publish`."""
         if self.session_name is not None and "session_name" not in event:
             event = {**event, "session_name": self.session_name}
         self._bus.publish_threadsafe(event)
+
+    def _publish(self, event: Dict[str, Any]) -> None:
+        """Publish a non-delta event, draining any buffered deltas first
+        so ordering is preserved (the buffered text always precedes the
+        boundary / status / error / tool-result event)."""
+        self._flush_deltas(force=True)
+        self._publish_raw(event)
+
+    def _flush_deltas(self, *, force: bool = False) -> None:
+        """Publish + clear the buffered assistant/thinking deltas if the
+        time or size threshold is met (or ``force``). One batched
+        ``assistant_delta`` and one ``thinking_delta`` per flush, so the
+        event loop sees ≤ ~2 publishes per flush window instead of one
+        per provider chunk."""
+        now = time.monotonic()
+        with self._delta_lock:
+            size = sum(len(s) for s in self._asst_buf) + sum(
+                len(s) for s in self._think_buf
+            )
+            if not (
+                force
+                or size >= _DELTAS_MAX_CHARS
+                or (now - self._last_delta_flush) * 1000.0 >= _DELTAS_FLUSH_MS
+            ):
+                return
+            asst = "".join(self._asst_buf)
+            self._asst_buf.clear()
+            think = "".join(self._think_buf)
+            self._think_buf.clear()
+            self._last_delta_flush = now
+        turn_id = self._current_turn_id
+        # Thinking first so it reads above the assistant bubble in the
+        # trace; the two render in separate frontend regions, so the
+        # inter-kind order within one flush window is cosmetic.
+        if think:
+            self._publish_raw(
+                {"kind": "thinking_delta", "turn_id": turn_id, "text": think}
+            )
+        if asst:
+            self._publish_raw(
+                {"kind": "assistant_delta", "turn_id": turn_id, "text": asst}
+            )
 
     def _new_turn(self) -> str:
         self._current_turn_id = uuid.uuid4().hex[:12]
@@ -93,29 +171,31 @@ class WebUI(BaseUI):
             return
         if self._current_turn_id is None:
             self._new_turn()
-            self._publish(
+            self._publish_raw(
                 {"kind": "assistant_start", "turn_id": self._current_turn_id}
             )
-        self._publish(
-            {
-                "kind": "assistant_delta",
-                "turn_id": self._current_turn_id,
-                "text": text,
-            }
-        )
+        with self._delta_lock:
+            self._asst_buf.append(text)
+        self._flush_deltas()
 
     def stream_thinking_delta(self, text: str):
         if not text:
             return
-        self._publish(
-            {
-                "kind": "thinking_delta",
-                "turn_id": self._current_turn_id,
-                "text": text,
-            }
-        )
+        if self._current_turn_id is None:
+            # Thinking before any assistant text (reasoning models) — no
+            # turn bubble yet, so publish immediately the way we always
+            # did; the frontend renders it on the trace, not a turn.
+            self._publish_raw(
+                {"kind": "thinking_delta", "turn_id": None, "text": text}
+            )
+            return
+        with self._delta_lock:
+            self._think_buf.append(text)
+        self._flush_deltas()
 
     def stream_tool_call(self, tool_name: str):
+        # _publish flushes any buffered deltas first so the tool-call
+        # marker lands after the text that preceded it.
         self._publish(
             {
                 "kind": "tool_call",

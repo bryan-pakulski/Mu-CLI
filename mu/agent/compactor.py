@@ -39,6 +39,18 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     ):
         return None
 
+    # Once-per-turn proactive-compaction gate (Claude Code fires autocompact
+    # once per turn at the boundary; mid-turn overshoot is handled by the
+    # emergency preflight + reactive-overflow backstops, not by re-firing the
+    # proactive pass after every tool call). The turn-start roll sets this
+    # flag when it actually compacts; this hook sets it on its own first
+    # compaction. Either way: at most one proactive compaction per turn —
+    # reset to False in `_collect_turn_response`. Without this the hook fired
+    # on every `pre_provider_call`, and a turn with N tool calls compacted up
+    # to N times.
+    if getattr(session, "_compacted_this_turn", False):
+        return None
+
     # Re-compaction gate: allow when history has grown since the last
     # compaction pass.  The previous boolean flag suppressed ALL
     # re-compaction within a turn, which meant long turns with many tool
@@ -59,7 +71,12 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     # user-set harness default.  Falls back to the raw variable for
     # sessions that don't expose _compaction_token_budget.
     if hasattr(session, "_compaction_token_budget"):
-        budget = int(session._compaction_token_budget() * threshold)
+        # `compaction_token_budget()` already applies `context_trim_threshold`
+        # internally (see mu/session/budgets.py: `usable * trim_threshold`).
+        # Do NOT multiply by `threshold` again here — the prior `* threshold`
+        # double-applied it, collapsing the target from 85% to ~72% of the
+        # residual window and triggering compaction far too often.
+        budget = int(session._compaction_token_budget())
     else:
         try:
             context_limit = max(
@@ -79,6 +96,11 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
         from mu.session.budgets import resolve_keep_recent, resolve_tool_result_floor
 
         session_manager._tool_result_floor = resolve_tool_result_floor(session)
+        # Bridge the optional compact_focus variable (Claude Code
+        # `/compact <focus>` style) so the LLM summarizer emphasizes it.
+        session_manager._compact_focus = (
+            getattr(session, "variables", None) or {}
+        ).get("compact_focus") or ""
         # Tag this compaction for the run tracer (drained into the trace at the
         # post-response seam). `iter` comes from the loop's current-iter marker.
         session_manager._pending_compaction_kind = "auto_hook"
@@ -94,6 +116,11 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
         logger.warning("Auto-compaction raised %s; continuing without compacting", exc)
         return None
     if rolled:
+        # Mark this turn's proactive compaction as done so the hook (and the
+        # turn-start roll next turn) don't fire again, and re-baseline the
+        # watermark to the post-compaction history length.
+        session._compacted_this_turn = True
+        session._compaction_watermark = len(session_manager.history)
         logger.info(
             "Auto-compaction triggered (budget=%d tokens, threshold=%.2f).",
             budget,

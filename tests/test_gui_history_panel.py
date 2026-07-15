@@ -63,9 +63,18 @@ def test_api_modes_returns_views_array():
     data = r.json()
     assert "views" in data
     view_names = [v["name"] for v in data["views"]]
-    assert set(view_names) == {"history", "memory", "systemPrompts", "trace"}
+    assert set(view_names) == {"history", "memory", "systemPrompts", "trace", "files"}
     for v in data["views"]:
         assert v["view_only"] is True
+    # The Files panel is the only view that needs a workspace; the stub
+    # session has none, so it surfaces disabled. Every other panel is
+    # stateless and never needs a workspace.
+    files_view = next(v for v in data["views"] if v["name"] == "files")
+    assert files_view["needs_workspace"] is True
+    assert files_view["disabled"] is True
+    for v in data["views"]:
+        if v["name"] == "files":
+            continue
         assert v["needs_workspace"] is False
         assert v["disabled"] is False
     # The trace analyzer is an external full-page route, not an in-page panel.

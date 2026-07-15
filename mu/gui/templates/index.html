@@ -99,8 +99,9 @@
                         </template>
                         <template x-if="!v.external">
                             <button class="mode-option"
-                                    :class="{ active: $store.mode.active === v.name }"
-                                    @click="$store.mode.setView(v.name), open = false"
+                                    :class="{ active: $store.mode.active === v.name, disabled: v.disabled }"
+                                    :disabled="v.disabled"
+                                    @click="!v.disabled && ($store.mode.setView(v.name), open = false)"
                                     :title="v.description || v.name">
                                 <div class="mode-name">
                                     <span x-text="v.display_name"></span>
@@ -200,6 +201,7 @@
         {% include "fragments/history_panel.html" %}
         {% include "fragments/memory_panel.html" %}
         {% include "fragments/system_prompts_panel.html" %}
+        {% include "fragments/files_panel.html" %}
     </main>
 
     {% include "fragments/inspector.html" %}

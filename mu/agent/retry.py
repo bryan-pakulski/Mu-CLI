@@ -129,6 +129,54 @@ def is_context_overflow_error(error: Exception) -> bool:
     return False
 
 
+# Real prompt token count + the model's real maximum, parsed out of an
+# overflow error body. Ollama's wording is:
+#   "The prompt is too long: 1068887, model maximum context length: 1000000"
+# This is ground truth — the daemon's own BPE count of the prompt that just
+# overflowed — and is the key to estimation-independent reactive recovery:
+# paired with the harness's cl100k estimate of the same prompt it gives the
+# real per-content drift ratio, so the retry can target a budget that maps
+# to a *real* token count the daemon will accept (the static safety factor
+# alone can't, because drift varies ~2.2–3.2x by content).
+_OVERFLOW_PROMPT_RE = re.compile(r"too long[^0-9]{0,12}(\d{4,})", re.IGNORECASE)
+_OVERFLOW_MAX_RE = re.compile(
+    r"maximum context length[^0-9]{0,12}(\d{4,})", re.IGNORECASE
+)
+
+
+def parse_overflow_token_counts(error: Exception) -> tuple:
+    """Extract ``(real_prompt_tokens, real_max_tokens)`` from an overflow
+    error body, or ``(None, None)`` if the counts aren't present.
+
+    Both numbers are optional and independent — Ollama emits both, but other
+    providers (or future Ollama wordings) may emit only one. ``real_prompt``
+    is the daemon's count of the prompt that overflowed; ``real_max`` is the
+    model's context ceiling.
+    """
+    blob = str(error or "")
+    cause = getattr(error, "__cause__", None)
+    if cause is not None and cause is not error:
+        blob = f"{blob}\n{cause}"
+    actionable = getattr(error, "actionable", None)
+    if actionable:
+        blob = f"{blob}\n{actionable}"
+    real_prompt = None
+    real_max = None
+    m = _OVERFLOW_PROMPT_RE.search(blob)
+    if m:
+        try:
+            real_prompt = int(m.group(1))
+        except (TypeError, ValueError):
+            real_prompt = None
+    m = _OVERFLOW_MAX_RE.search(blob)
+    if m:
+        try:
+            real_max = int(m.group(1))
+        except (TypeError, ValueError):
+            real_max = None
+    return real_prompt, real_max
+
+
 def is_transient_provider_error(error: Exception) -> bool:
     """Classify whether `error` is worth retrying. String-match against
     known transient markers, then fall back to extracting an HTTP status

@@ -980,7 +980,7 @@ document.addEventListener("alpine:init", () => {
         realMode: "default",
         modes: [],
         views: [],
-        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory"],
+        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory", "files"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();
@@ -2968,6 +2968,279 @@ document.addEventListener("alpine:init", () => {
                 this.loading = false;
                 this._chunks = [];
             }
+        },
+    });
+
+    // ── Files: workspace explorer + editor ─────────────────────
+    //
+    // Holds tree state + open-file state for the "Files" view panel. The
+    // CodeMirror instance itself is owned by the `filesPanel()` component in
+    // the panel template (it needs $refs); this store owns the data + the
+    // /api/files endpoints. The component calls `setEditorValue()` after
+    // openFile and reads `pendingSaveContent()` on save so CM stays the
+    // source of truth for what's typed while the store tracks dirty state.
+    Alpine.store("files", {
+        roots: [],
+        selectedPath: "",
+        content: "",
+        originalContent: "",
+        dirty: false,
+        readOnly: false,
+        readOnlyWhy: "",
+        mtime: null,
+        loading: false,
+        error: "",
+        expanded: {},
+        // Inline prompt state for new-file / new-folder / rename. Each is a
+        // small object the template renders as an input; null = no prompt.
+        newPrompt: null,        // { isDir: false, parent: "<path>" }
+        renameTarget: null,     // { from: "<path>" }
+        confirmDelete: null,    // { path: "<path>", isDir: false }
+
+        async load() {
+            await this.refreshTree();
+        },
+
+        async refreshTree() {
+            this.loading = true;
+            this.error = "";
+            try {
+                const r = await fetch("/api/files/tree");
+                if (r.status === 409) {
+                    // No workspace — leave roots empty; the panel shows the
+                    // empty state with an "attach folder" affordance.
+                    this.roots = [];
+                    return;
+                }
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    this.error = d.detail || `tree failed (${r.status})`;
+                    return;
+                }
+                const d = await r.json();
+                this.roots = d.roots || [];
+            } catch (e) {
+                this.error = String(e);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async expand(path) {
+            if (this.expanded[path]) {
+                this.expanded[path] = false;
+                this._collapseInTree(path);
+                return;
+            }
+            this.expanded[path] = true;
+            // Fetch one level of children for this dir (lazy expand).
+            try {
+                const r = await fetch(`/api/files/tree?path=${encodeURIComponent(path)}`);
+                if (!r.ok) return;
+                const d = await r.json();
+                this._mergeChildren(path, d.entries || []);
+            } catch (e) {
+                console.error("files.expand", e);
+            }
+        },
+
+        // Recursively clear the `children` of a collapsed dir inside the
+        // cached tree so a re-expand re-fetches fresh state.
+        _collapseInTree(path) {
+            const walk = (nodes) => {
+                for (const n of nodes || []) {
+                    if (n.path === path) { n.children = null; return; }
+                    if (n.children) walk(n.children);
+                }
+            };
+            walk(this.roots);
+        },
+
+        _mergeChildren(path, entries) {
+            const walk = (nodes) => {
+                for (const n of nodes || []) {
+                    if (n.path === path) { n.children = entries; return true; }
+                    if (n.children && walk(n.children)) return true;
+                }
+                return false;
+            };
+            walk(this.roots);
+        },
+
+        async openFile(path) {
+            this.selectedPath = path;
+            this.loading = true;
+            this.error = "";
+            try {
+                const r = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    this.error = d.detail || `read failed (${r.status})`;
+                    return;
+                }
+                const d = await r.json();
+                this.content = d.content || "";
+                this.originalContent = this.content;
+                this.readOnly = !!d.readonly;
+                this.readOnlyWhy = d.why || "";
+                this.mtime = d.mtime ?? null;
+                this.dirty = false;
+                // Signal the component to push the new value into CodeMirror.
+                this._contentVersion = (this._contentVersion || 0) + 1;
+            } catch (e) {
+                this.error = String(e);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        closeFile() {
+            this.selectedPath = "";
+            this.content = "";
+            this.originalContent = "";
+            this.dirty = false;
+            this.readOnly = false;
+            this.readOnlyWhy = "";
+            this.mtime = null;
+            this._contentVersion = (this._contentVersion || 0) + 1;
+        },
+
+        // Called by the component on save — it passes CM's current value.
+        async save(cmValue) {
+            if (!this.selectedPath || this.readOnly) return;
+            const path = this.selectedPath;
+            try {
+                const r = await fetch("/api/files/save", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        path,
+                        content: cmValue,
+                        expected_mtime: this.mtime,
+                    }),
+                });
+                if (r.status === 409) {
+                    Alpine.store("toast").show(
+                        "File changed on disk — reload to see the new version.",
+                        "warn", 6000,
+                    );
+                    return;
+                }
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(d.detail || `save failed (${r.status})`, "error");
+                    return;
+                }
+                const d = await r.json();
+                this.originalContent = cmValue;
+                this.content = cmValue;
+                this.mtime = d.mtime ?? this.mtime;
+                this.dirty = false;
+                Alpine.store("toast").show("saved", "success", 2000);
+            } catch (e) {
+                Alpine.store("toast").show(String(e), "error");
+            }
+        },
+
+        // New file / folder prompt. `parent` is the dir to create in
+        // (defaults to the first root).
+        startNew(isDir) {
+            const parent = this._defaultParent();
+            this.newPrompt = { isDir: !!isDir, parent, name: "" };
+        },
+        cancelNew() { this.newPrompt = null; },
+        async confirmNew() {
+            if (!this.newPrompt) return;
+            const name = (this.newPrompt.name || "").trim();
+            if (!name) { this.newPrompt = null; return; }
+            const path = this.newPrompt.parent
+                ? this.newPrompt.parent + "/" + name
+                : name;
+            const isDir = this.newPrompt.isDir;
+            this.newPrompt = null;
+            const r = await fetch("/api/files/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path, is_dir: isDir }),
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || "create failed", "error");
+                return;
+            }
+            await this._afterFsChange(this.newPrompt ? null : path);
+            if (!isDir) await this.openFile(path);
+        },
+
+        startRename(path) {
+            this.renameTarget = { from: path, to: path };
+        },
+        cancelRename() { this.renameTarget = null; },
+        async confirmRename() {
+            if (!this.renameTarget) return;
+            const to = (this.renameTarget.to || "").trim();
+            const from = this.renameTarget.from;
+            this.renameTarget = null;
+            if (!to || to === from) return;
+            const r = await fetch("/api/files/rename", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ from, to }),
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || "rename failed", "error");
+                return;
+            }
+            // If the open file was the one renamed, follow it to the new path.
+            if (this.selectedPath === from) {
+                this.selectedPath = to;
+                this.originalContent = this.content;
+            }
+            await this._afterFsChange(to);
+        },
+
+        askDelete(path, isDir, ev) {
+            this.confirmDelete = { path, isDir };
+            Alpine.store("confirm").ask(
+                isDir ? `Delete directory '${path}'?` : `Delete file '${path}'?`,
+                ev, () => this.confirmDeleteGo(), { danger: true },
+            );
+        },
+        async confirmDeleteGo() {
+            const t = this.confirmDelete;
+            this.confirmDelete = null;
+            if (!t) return;
+            const recursive = t.isDir;
+            const r = await fetch(
+                `/api/files?path=${encodeURIComponent(t.path)}` +
+                (recursive ? "&recursive=true" : ""),
+                { method: "DELETE" },
+            );
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || "delete failed", "error");
+                return;
+            }
+            if (this.selectedPath === t.path ||
+                (this.selectedPath && this.selectedPath.startsWith(t.path + "/"))) {
+                this.closeFile();
+            }
+            await this._afterFsChange();
+        },
+
+        _defaultParent() {
+            if (this.selectedPath) {
+                // If a dir is selected, create in it; if a file, in its dir.
+                return this.selectedPath;
+            }
+            return this.roots[0] ? this.roots[0].path : "";
+        },
+
+        async _afterFsChange(focusPath) {
+            // Refresh the tree, then try to re-expand the relevant dir so the
+            // new/renamed entry is visible. Cheap: just refetch the top tree.
+            await this.refreshTree();
         },
     });
 

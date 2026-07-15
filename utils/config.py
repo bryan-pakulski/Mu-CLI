@@ -934,6 +934,19 @@ GUI_VIEW_PANELS = [
         ),
     },
     {
+        "name": "files",
+        "display_name": "Files",
+        "description": (
+            "Navigate and edit the session's workspace files — a tree, a "
+            "code editor (CodeMirror), and create / rename / delete. "
+            "Requires an attached workspace."
+        ),
+        # Unlike the other view panels, Files only makes sense with a
+        # workspace attached. modes.py honors this to disable the entry
+        # (and the tools button) when no folder is attached.
+        "needs_workspace": True,
+    },
+    {
         "name": "trace",
         "display_name": "Trace Analyzer",
         "description": (

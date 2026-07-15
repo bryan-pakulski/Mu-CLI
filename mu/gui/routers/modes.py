@@ -42,16 +42,18 @@ async def list_modes(request: Request):
                 "disabled": needs_workspace and not has_ws,
             }
         )
-    # GUI-only view panels — read-only, never settable as agent_mode, never
-    # require a workspace (they render off session state).
+    # GUI-only view panels — read-only, never settable as agent_mode. Most
+    # render off session state and never need a workspace; the Files panel
+    # is the exception (it edits workspace files), so it honors
+    # `needs_workspace` and is disabled when no folder is attached.
     views = [
         {
             "name": panel["name"],
             "display_name": panel["display_name"],
             "description": panel["description"],
             "view_only": True,
-            "needs_workspace": False,
-            "disabled": False,
+            "needs_workspace": bool(panel.get("needs_workspace")),
+            "disabled": bool(panel.get("needs_workspace")) and not has_ws,
             # External full-page routes (e.g. the Trace Analyzer) open in a
             # new tab rather than rendering as an in-page panel.
             "external": bool(panel.get("external")),

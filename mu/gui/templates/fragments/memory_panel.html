@@ -13,13 +13,21 @@
     </div>
 
     <div x-show="$store.memory.active" class="memory-body">
-        <!-- header: totals -->
+        <!-- Header: this is capacity, not merely a share of used layers. -->
         <div class="panel-head">
             <div class="panel-subject">context window</div>
             <div class="panel-meta mono muted">
                 <span x-text="$store.memory.totalTokens + ' / ' + ($store.memory.contextLimit || 0) + ' tok'"></span>
                 <span x-text="' · ' + $store.memory.fillPct + '%'"></span>
             </div>
+        </div>
+
+        <div class="memory-capacity" aria-label="Context capacity">
+            <div class="memory-capacity-used" :style="'width:' + Math.min(100, $store.memory.fillPct) + '%'"></div>
+        </div>
+        <div class="memory-capacity-label mono muted">
+            <span x-text="$store.memory.totalTokens + ' used' "></span>
+            <span x-text="$store.memory.freeTokens + ' free' "></span>
         </div>
 
         <!-- controls: view mode + resolution -->
@@ -54,7 +62,7 @@
                     x-init="$store.memory.bindCanvas($refs.grid)"></canvas>
             <!-- layer band dividers, positioned by row share -->
             <div class="memory-dividers">
-                <template x-for="l in $store.memory.layers" :key="l.id">
+                <template x-for="l in $store.memory.regions" :key="l.id">
                     <div class="memory-divider"
                          x-show="l.row_start > 0"
                          :style="'top:' + (l.row_start / $store.memory.rows * 100) + '%'"></div>
@@ -62,7 +70,7 @@
             </div>
         </div>
 
-        <!-- per-layer legend — click a row to open the layer's actual
+        <!-- Per-layer legend — click a layer to open its actual
              content in a modal (what the model sees at that layer). -->
         <div class="memory-legend">
             <template x-for="l in $store.memory.layers" :key="l.id">
@@ -87,10 +95,18 @@
                           title="chunks changed since first seen"></span>
                 </div>
             </template>
+            <div class="memory-legend-row memory-free-row">
+                <span class="memory-legend-swatch memory-free-swatch"></span>
+                <span class="memory-legend-id mono">free</span>
+                <span class="memory-legend-name">Available space</span>
+                <span class="memory-legend-tok mono muted"
+                      x-text="$store.memory.freeTokens + '  ·  ' + (100 - Math.min(100, $store.memory.fillPct)).toFixed(1) + '%'"></span>
+                <span class="memory-legend-delta mono">static</span>
+            </div>
         </div>
 
         <div class="panel-footnote muted mono" x-show="$store.memory.loaded">
-            <span x-text="'hue = layer · brightness = change frequency (sha256 per slice) · click a layer to view contents · live per iteration'"></span>
+            <span x-text="'height = total context capacity · grey = free · hue = layer · brightness = change frequency · live per iteration'"></span>
         </div>
     </div>
 

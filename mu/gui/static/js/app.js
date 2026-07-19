@@ -2122,9 +2122,11 @@ document.addEventListener("alpine:init", () => {
         cols: 128,
         rows: 128,
         layers: [],
+        regions: [],       // layers plus the explicit available-capacity band
         grid: [],
         totalTokens: 0,
         contextLimit: 0,
+        freeTokens: 0,
         fillPct: 0,
         _canvas: null,
         _renderPending: false,
@@ -2168,9 +2170,11 @@ document.addEventListener("alpine:init", () => {
             this.cols = d.cols || this.resolution;
             this.rows = d.rows || this.resolution;
             this.layers = d.layers || [];
+            this.regions = d.regions || this.layers;
             this.grid = d.grid || [];
             this.totalTokens = d.total_tokens || 0;
             this.contextLimit = d.context_limit || 0;
+            this.freeTokens = d.free_tokens || 0;
             this.fillPct = d.fill_pct || 0;
         },
 
@@ -2185,10 +2189,12 @@ document.addEventListener("alpine:init", () => {
         },
 
         // row index → layer hue. Built once per render from the legend
-        // (each layer carries row_start/row_end + hue).
+        // (each region carries row_start/row_end + hue). Regions include the
+        // neutral FREE band, so unallocated capacity is rendered rather than
+        // being mistaken for a tiny layer or omitted from the map.
         _rowHueMap() {
             const m = new Array(this.rows);
-            for (const l of this.layers) {
+            for (const l of this.regions) {
                 const hue = (typeof l.hue === "number") ? l.hue : 0;
                 const end = Math.min(l.row_end || 0, this.rows);
                 for (let i = l.row_start || 0; i < end; i++) m[i] = hue;

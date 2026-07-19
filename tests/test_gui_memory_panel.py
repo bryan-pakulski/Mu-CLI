@@ -438,19 +438,20 @@ def test_snapshot_change_increments_heat():
     assert after_max > before_max
 
 
-def test_snapshot_empty_layers_still_render_bands():
+def test_snapshot_reserves_a_real_free_capacity_band():
     from mu.gui.memory_snapshot import build_memory_snapshot
 
     session = _make_session()
     # Only L5 (history) carries content; the other six layers are empty.
     _add_user_turn(session, "alpha beta gamma delta epsilon")
     snap = build_memory_snapshot(session, cols=48, rows=48)
-    # Every layer gets at least one band row — empty space is still space.
-    for l in snap["layers"]:
-        assert (l["row_end"] - l["row_start"]) >= 1
-    # Bands tile the whole grid, so the canvas is never blank.
-    assert snap["layers"][0]["row_start"] == 0
-    assert snap["layers"][-1]["row_end"] == 48
+    # Empty layers do not masquerade as allocated context. The map reserves
+    # the unused window as a distinct FREE region instead.
+    assert any((l["row_end"] - l["row_start"]) == 0 for l in snap["layers"])
+    free = next(r for r in snap["regions"] if r["id"] == "FREE")
+    assert free["tokens"] == snap["context_limit"] - snap["total_tokens"]
+    assert free["row_end"] == 48
+    assert snap["free_tokens"] == free["tokens"]
 
 
 def test_snapshot_heat_keyed_per_resolution():

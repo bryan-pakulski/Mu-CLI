@@ -2,7 +2,9 @@
 
 ``build_memory_snapshot`` turns the layered system prompt the harness
 assembles each turn into a 2-D grid: one horizontal band per layer
-(L0..L5), band height proportional to the layer's token share. Each
+(L0..L5), plus an explicit free-space band. Band height is proportional
+to the *total available context window*, not merely the currently used
+layers. Each
 **cell carries a heat value** (0..255) rather than a raw color, so the
 frontend can render either a change-frequency heatmap or a solid
 per-layer color-coding from the same payload.
@@ -92,9 +94,10 @@ _LIVE_RES = 96
 # ~8 observed changes → fully hot; stable content stays dim.
 _HEAT_REF = 8.0
 
-# Minimum band height: every layer gets at least this many rows so an empty
-# layer still renders as a visible (dim) band rather than disappearing.
-_MIN_BAND = 1
+# Neutral blue-grey reserved for the unoccupied portion of the context
+# window. It is deliberately not a layer hue: it means capacity available to
+# every layer, rather than another prompt component.
+_FREE_HUE = 215
 
 
 def _clamp_res(value: int, default: int) -> int:
@@ -235,36 +238,38 @@ def _empty_state(cols: int, rows: int) -> Dict[str, Any]:
         "cols": cols,
         "rows": rows,
         "layers": [],
+        "regions": [],
         "grid": grid,
         "total_tokens": 0,
         "context_limit": 0,
+        "free_tokens": 0,
         "fill_pct": 0.0,
         "updated_at": None,
     }
 
 
-def _adjust_band_rows(
-    band_rows: Dict[str, int], layer_tokens: Dict[str, int], rows: int
-) -> None:
-    """Fix up band row counts so they sum to exactly ``rows`` without
-    dropping any layer below ``_MIN_BAND`` — every layer stays visible.
+def _capacity_rows(amounts: Dict[str, int], rows: int) -> Dict[str, int]:
+    """Allocate raster rows by each region's share of total capacity.
 
-    Shrinks the largest shrinkable band when over-allocated, grows the
-    largest token-bearing band (else the largest band) when under-allocated.
+    Largest-remainder allocation avoids silently giving every empty layer a
+    visible slice of the window (the old map did that), which made the map
+    look full even when most of the context was unused.
     """
-    total = sum(band_rows.values())
-    while total > rows:
-        cand = [lid for lid in _LAYER_ORDER if band_rows[lid] > _MIN_BAND]
-        if not cand:
-            break
-        big = max(cand, key=lambda lid: band_rows[lid])
-        band_rows[big] -= 1
-        total -= 1
-    while total < rows:
-        cand = [lid for lid in _LAYER_ORDER if layer_tokens[lid] > 0] or list(_LAYER_ORDER)
-        big = max(cand, key=lambda lid: band_rows[lid])
-        band_rows[big] += 1
-        total += 1
+    total = sum(max(0, value) for value in amounts.values())
+    out = {key: 0 for key in amounts}
+    if total <= 0:
+        return out
+    fractions = []
+    assigned = 0
+    for index, (key, value) in enumerate(amounts.items()):
+        exact = rows * max(0, value) / total
+        base = int(exact)
+        out[key] = base
+        assigned += base
+        fractions.append((exact - base, -index, key))
+    for _, _, key in sorted(fractions, reverse=True)[: rows - assigned]:
+        out[key] += 1
+    return out
 
 
 def build_memory_snapshot(
@@ -310,30 +315,24 @@ def build_memory_snapshot(
 
     fill_pct = round(100.0 * total_tokens / context_limit, 1) if context_limit > 0 else 0.0
 
-    # --- band sizing: proportional to token share, but every layer gets at
-    # least _MIN_BAND rows so empty layers still render ("empty space is
-    # still space"). Bands tile the grid exactly (sum == rows).
+    # --- Capacity layout. The grid is a scaled picture of the complete
+    # context window: used layers consume their current tokens and FREE is
+    # the genuinely available remainder. This is intentionally unlike a
+    # composition chart, where the used layers would always fill 100%.
     band_rows: Dict[str, int] = {}
     layer_tokens: Dict[str, int] = {}
     for lid in _LAYER_ORDER:
         layer_tokens[lid] = int((by_id.get(lid, {}) or {}).get("current") or 0)
-        band_rows[lid] = 0
-
-    if total_tokens > 0:
-        for lid in _LAYER_ORDER:
-            tok = layer_tokens[lid]
-            if tok <= 0:
-                band_rows[lid] = _MIN_BAND
-            else:
-                band_rows[lid] = max(_MIN_BAND, round(rows * tok / total_tokens))
-        _adjust_band_rows(band_rows, layer_tokens, rows)
+    displayed_tokens = min(total_tokens, context_limit) if context_limit > 0 else total_tokens
+    free_tokens = max(0, context_limit - displayed_tokens)
+    capacity_amounts = {lid: layer_tokens[lid] for lid in _LAYER_ORDER}
+    # If the prompt is over budget, retain the full used-layer proportions;
+    # there is no fictional free area to display.
+    if total_tokens > context_limit > 0:
+        capacity_amounts = layer_tokens.copy()
     else:
-        # No content anywhere: split the grid evenly so all layers show as
-        # visible (empty) bands rather than a blank canvas.
-        base = rows // len(_LAYER_ORDER)
-        rem = rows - base * len(_LAYER_ORDER)
-        for i, lid in enumerate(_LAYER_ORDER):
-            band_rows[lid] = base + (1 if i < rem else 0)
+        capacity_amounts["FREE"] = free_tokens
+    band_rows = _capacity_rows(capacity_amounts, rows)
 
     # --- change tracking: one hash per GRID CELL in the band (r*cols
     # row-major slices — one chunk per displayed cell), so changes light up
@@ -423,14 +422,29 @@ def build_memory_snapshot(
             }
         )
 
+    regions = list(layers_out)
+    free_rows = band_rows.get("FREE", 0)
+    if free_rows:
+        regions.append(
+            {
+                "id": "FREE", "name": "Available space", "tokens": free_tokens,
+                "max": context_limit, "fill_pct": round(100.0 * free_tokens / context_limit, 1),
+                "hue": _FREE_HUE, "change_count": 0,
+                "row_start": row_cursor, "row_end": min(row_cursor + free_rows, rows),
+                "free": True,
+            }
+        )
+
     return {
         "active": True,
         "cols": cols,
         "rows": rows,
         "layers": layers_out,
+        "regions": regions,
         "grid": grid,
         "total_tokens": total_tokens,
         "context_limit": context_limit,
+        "free_tokens": free_tokens,
         "fill_pct": fill_pct,
         "updated_at": None,
     }

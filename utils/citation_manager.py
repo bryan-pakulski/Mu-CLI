@@ -206,6 +206,25 @@ class CitationManager:
             The Source object if found, None otherwise
         """
         return self._sources.get(citation_id)
+
+    def assess_source(self, citation_id: int, importance: float, rationale: str = "") -> Source:
+        """Apply the model's evidence assessment, bounded by safety caps."""
+        source = self.get_source(citation_id)
+        if source is None:
+            raise ValueError(f"Citation ID {citation_id} not found")
+        caps = {
+            SourceType.ACADEMIC: 1.0, SourceType.DOCUMENTATION: 0.95,
+            SourceType.NEWS: 0.85, SourceType.WEB: 0.80,
+            SourceType.FORUM: 0.65, SourceType.SOCIAL: 0.60, SourceType.OTHER: 0.60,
+        }
+        requested = max(0.0, min(1.0, float(importance)))
+        cap = caps.get(source.source_type, 0.60)
+        source.credibility_score = min(requested, cap)
+        source.metadata["model_importance"] = requested
+        source.metadata["credibility_cap"] = cap
+        if rationale.strip():
+            source.metadata["assessment_rationale"] = rationale.strip()[:1000]
+        return source
     
     def generate_citation(self, citation_id: int) -> str:
         """
@@ -327,6 +346,64 @@ class CitationManager:
     def get_all_sources(self) -> List[Source]:
         """Return all registered sources in citation order."""
         return [self._sources[cid] for cid in sorted(self._sources.keys())]
+
+    def to_dict(self) -> List[Dict[str, Any]]:
+        """Return a JSON-safe snapshot suitable for session persistence."""
+        return [
+            {
+                "id": source.id,
+                "title": source.title,
+                "url": source.url,
+                "source_type": source.source_type.value,
+                "authors": list(source.authors or []),
+                "date": source.date,
+                "accessed_date": source.accessed_date,
+                "metadata": dict(source.metadata or {}),
+                "credibility_score": source.credibility_score,
+            }
+            for source in self.get_all_sources()
+        ]
+
+    def load_dict(self, records: Any) -> None:
+        """Replace sources from a persisted session snapshot.
+
+        Source IDs are retained so citations already present in the saved
+        conversation continue to point at the same bibliography entries.
+        Invalid legacy records are ignored rather than preventing a session
+        from loading.
+        """
+        self.clear()
+        if not isinstance(records, list):
+            return
+        for raw in records:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                source_id = int(raw.get("id"))
+                title = str(raw.get("title") or "").strip()
+                url = str(raw.get("url") or "").strip()
+                if source_id < 1 or not title or not url:
+                    continue
+                source_type = SourceType(str(raw.get("source_type") or "other"))
+            except (TypeError, ValueError):
+                continue
+            source = Source(
+                id=source_id,
+                title=title,
+                url=url,
+                source_type=source_type,
+                authors=list(raw.get("authors") or []),
+                date=raw.get("date"),
+                accessed_date=str(raw.get("accessed_date") or datetime.now().strftime("%Y-%m-%d")),
+                metadata=dict(raw.get("metadata") or {}),
+                credibility_score=float(raw.get("credibility_score") or 0.0),
+            )
+            # Preserve URL de-duplication and the original citation number.
+            if url in self._source_urls or source_id in self._sources:
+                continue
+            self._sources[source_id] = source
+            self._source_urls[url] = source_id
+            self._next_id = max(self._next_id, source_id + 1)
 
 
 # Global citation manager instance for use across tools

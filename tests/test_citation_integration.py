@@ -128,6 +128,18 @@ def test_source_credibility_calculated():
     assert source.credibility_score == 0.8  # Academic base score
 
 
+def test_model_assessment_varies_web_source_within_hard_cap():
+    manager = CitationManager()
+    source_id = manager.add_source("Evidence", "https://example.com", SourceType.WEB)
+    source = manager.assess_source(source_id, 0.37, "Weakly corroborated summary")
+    assert source.credibility_score == 0.37
+    assert source.metadata["model_importance"] == 0.37
+
+    capped = manager.assess_source(source_id, 0.99, "Useful, but still a web source")
+    assert capped.credibility_score == 0.80
+    assert capped.metadata["credibility_cap"] == 0.80
+
+
 def test_bibliography_includes_credibility():
     """Test that bibliography includes credibility indicators."""
     reset_citation_manager()

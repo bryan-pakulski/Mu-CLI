@@ -407,6 +407,7 @@ class InputHandler:
                 "bib": None,
                 "stats": None,
                 "clear": None,
+                "new": None,
             }
         )
         unset_completer = MergedCompleter(

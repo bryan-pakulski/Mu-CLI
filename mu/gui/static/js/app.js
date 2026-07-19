@@ -2013,13 +2013,6 @@ document.addEventListener("alpine:init", () => {
                 default: return "○";
             }
         },
-        activeTodoSummary() {
-            const items = this.backlog || [];
-            const active = items.find(item => item.status === "in_progress") || items[0];
-            if (!active || !active.content) return "";
-            const text = String(active.content).replace(/\s+/g, " ").trim();
-            return text.length > 64 ? `${text.slice(0, 61)}…` : text;
-        },
         formatTimestamp(unix) {
             if (!unix || typeof unix !== "number") return "";
             try { return new Date(unix * 1000).toLocaleString(); }
@@ -2809,6 +2802,9 @@ document.addEventListener("alpine:init", () => {
 
         // ----- shell
         async openDrawer() {
+            // The header control is settings-first; workspace, memory, and
+            // stats remain available as tabs in the centered modal.
+            this.tab = "settings";
             this.open = true;
             await this.refreshActiveTab();
         },

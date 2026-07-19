@@ -2,11 +2,10 @@
 
 - Resets SemanticCodeIndex singleton between tests to prevent cross-test state leaks.
 - Cleans up FolderContext snapshots to prevent memory accumulation.
-- Scrubs any `documentation/feature_req_*` or `courses/*` directories
-  created during the session — feature/teacher engines resolve their
-  workspace root from `os.getcwd()` when `folder_context=None`, which
-  in CI is the repo root, so tests that don't explicitly chdir end up
-  polluting the working tree.
+- Scrubs any `courses/*` directories created during the session —
+  teacher engines resolve their workspace root from `os.getcwd()` when
+  `folder_context=None`, which in CI is the repo root, so tests that
+  don't explicitly chdir end up polluting the working tree.
 """
 import glob
 import os
@@ -25,7 +24,6 @@ from mu.workspace.folder_context import FolderContext
 # session start.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TEST_ARTIFACT_PATTERNS = (
-    "documentation/feature_req_*",
     "courses",
     ".mucli",
 )

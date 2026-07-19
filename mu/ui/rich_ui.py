@@ -146,12 +146,12 @@ class RichUI:
             )
             return
         # Assistant path. If the text already streamed token-by-token, the
-        # user has seen it — don't redraw the whole panel. Otherwise (no
-        # streaming, or streaming disabled) fall back to the original panel.
+        # user has seen it — `_GenerationLive.__exit__` already re-emitted
+        # it via `render_response`. Don't redraw the panel (duplicate).
+        # The `_streamed_any_text` flag survives until the next stream's
+        # `__enter__` clears it. History replay and other non-streaming
+        # callers never set the flag, so they always render normally.
         if self._streamed_any_text:
-            # The stream already wrote header + body to the console; just
-            # close the visual unit. `stream_assistant_end` may have
-            # already emitted the trailing newline.
             return
         if model_name:
             self.console.print(f"\nAssistant ({model_name}) [{ts}]:")
@@ -218,13 +218,22 @@ class RichUI:
         return choice, reason
 
     def show_error(self, message):
-        self.console.print(Text(str(message), style="red"))
+        if isinstance(message, Text):
+            self.console.print(message, style="red")
+        else:
+            self.console.print(Text(str(message), style="red"))
 
     def show_info(self, message):
-        text = str(message)
+        if isinstance(message, Text):
+            text = message.plain
+        else:
+            text = str(message)
         if self._is_silenced_in_compact_mode(text):
             return
-        self.console.print(Text(text, style="blue"))
+        if isinstance(message, Text):
+            self.console.print(message, style="blue")
+        else:
+            self.console.print(Text(text, style="blue"))
 
     def _is_silenced_in_compact_mode(self, text: str) -> bool:
         """Filter noisy diagnostic messages when verbose rendering is off.

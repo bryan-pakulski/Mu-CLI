@@ -361,3 +361,145 @@ def test_render_skills_expanded_includes_header_and_body():
     out = render_skills_expanded(s)
     assert "SKILL: alpha" in out
     assert "big body here" in out
+
+
+# ----------------------------------------------------------- activation banner
+
+
+class _FakeConsole:
+    """Records what Rich would print, extracting the plain text from any
+    `rich.text.Text` argument so assertions can run on visible content."""
+
+    def __init__(self):
+        self.printed: list[str] = []
+
+    def print(self, *args, **kwargs):
+        for a in args:
+            self.printed.append(a.plain if hasattr(a, "plain") else str(a))
+
+
+class _FakeUI:
+    def __init__(self):
+        self.console = _FakeConsole()
+
+    @property
+    def banners(self) -> list[str]:
+        return self.console.printed
+
+
+def _banner_session(ui=None):
+    clear_skill_cache()
+    sm = SessionManager()
+    return Session(DummyProvider("dummy"), False, "system instruction", sm, ui=ui)
+
+
+def test_announce_skill_invoke_path_has_no_via_tag():
+    from mu.skills import announce_skill
+
+    ui = _FakeUI()
+    announce_skill(ui, "commit-message")  # invoke_skill style — no tag
+    assert len(ui.banners) == 1
+    assert "SKILL ACTIVE: commit-message" in ui.banners[0]
+    # The invoke path must not carry the auto-expand tag.
+    assert "trigger" not in ui.banners[0]
+    assert "·" not in ui.banners[0]
+
+
+def test_announce_skill_trigger_path_carries_trigger_tag():
+    from mu.skills import announce_skill
+
+    ui = _FakeUI()
+    announce_skill(ui, "commit-message", via="trigger")
+    assert len(ui.banners) == 1
+    assert "SKILL ACTIVE: commit-message" in ui.banners[0]
+    assert "trigger" in ui.banners[0]
+
+
+def test_announce_skill_falls_back_to_print_without_console(capfd):
+    from mu.skills import announce_skill
+
+    # No UI / no console — must still print something rather than crash.
+    announce_skill(None, "commit-message", via="trigger")
+    captured = capfd.readouterr()
+    assert "SKILL ACTIVE: commit-message" in captured.out
+    assert "trigger" in captured.out
+
+
+def test_build_skills_block_announces_on_trigger_match():
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session._pending_user_text = "please write a commit message for my staged diff"
+    session._build_skills_block(announce=True)
+    matched = [b for b in ui.banners if "commit-message" in b]
+    assert matched, "expected a SKILL ACTIVE banner for the triggered commit-message skill"
+    assert all("trigger" in b for b in matched)
+
+
+def test_build_skills_block_does_not_announce_without_trigger_match():
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session._pending_user_text = "tell me about the weather today"
+    session._build_skills_block(announce=True)
+    assert ui.banners == [], "no skill should activate for an unrelated message"
+
+
+def test_build_skills_block_memory_path_does_not_announce():
+    """The /memory size-measurement path calls _build_skills_block() with
+    no args → announce=False → must never print a banner, even when the
+    trigger matches the pending user text."""
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session._pending_user_text = "please write a commit message now"
+    session._build_skills_block()  # default announce=False
+    assert ui.banners == []
+
+
+def test_build_skills_block_dedupes_banner_within_same_turn():
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session._pending_user_text = "please write a commit message now"
+    session._build_skills_block(announce=True)
+    session._build_skills_block(announce=True)  # re-assembly (retry / re-inject)
+    matched = [b for b in ui.banners if "commit-message" in b]
+    assert len(matched) == 1, "re-assembly must not double-print the banner"
+
+
+def test_build_skills_block_re_announces_when_user_text_changes():
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session._pending_user_text = "please write a commit message now"
+    session._build_skills_block(announce=True)
+    # New turn, same trigger fires again → banner should reappear once.
+    session._pending_user_text = "help me write a commit message for this fix"
+    session._build_skills_block(announce=True)
+    matched = [b for b in ui.banners if "commit-message" in b]
+    assert len(matched) == 2
+
+
+def test_build_skills_block_no_announce_in_full_mode():
+    """Auto-expansion is a compact-mode concept; in full mode every body is
+    already inlined, so no hidden activation banner is needed."""
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session.variables["skills_mode"] = "full"
+    session._pending_user_text = "please write a commit message now"
+    session._build_skills_block(announce=True)
+    assert ui.banners == []
+
+
+def test_build_skills_block_does_not_announce_disabled_skill():
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session.disabled_skills = ["commit-message"]
+    session._pending_user_text = "please write a commit message now"
+    session._build_skills_block(announce=True)
+    assert ui.banners == []
+
+
+def test_build_skills_block_auto_expand_bumps_stats_counter():
+    ui = _FakeUI()
+    session = _banner_session(ui)
+    session._pending_user_text = "please write a commit message now"
+    session._build_skills_block(announce=True)
+    skills_stats = session.tool_stats.get("skills", {})
+    assert skills_stats.get("commit-message", {}).get("auto_expansions") == 1

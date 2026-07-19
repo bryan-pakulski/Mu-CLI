@@ -54,7 +54,7 @@ HTTP-only or relies on those subsystems, this client won't drive it.
 │   4. Send `notifications/initialized`                                │
 │   5. Request `tools/list` → parse MCPTool[]                          │
 │   6. Register each tool as `mcp__<server>__<tool>` in mu.tools       │
-│   7. Tool also appended to legacy mu.tools.descriptors.TOOLS for system prompt │
+│   7. Tool also appended to mu.tools.descriptors.TOOLS so it shows in the system prompt │
 └──────────────────────────────────────────────────────────────────────┘
                                 ↓
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -231,10 +231,17 @@ The handler:
 
 ### Approval / plan-mode
 
-Every MCP tool is registered with `requires_approval=True`. In plan
-mode they're treated as write-side tools (blocked). Disable individual
-ones with `/tool disable mcp__<server>__<tool>` if you need plan mode
-to allow specific reads.
+Every MCP tool is registered with `requires_approval=True`, so in
+non-YOLO mode each MCP call goes through the standard user-approval
+flow (with a diff preview when the tool reports file modifications).
+In YOLO mode they auto-approve like other tools.
+
+Plan mode does **not** block MCP tools. Plan mode short-circuits only
+the fixed `WRITE_TOOLS` set (`mu/agent/plan_mode.py`), and namespaced
+`mcp__<server>__<tool>` names are not in that set — so an MCP server
+that writes files is *not* refused by `/plan on`. If you need to keep
+the model from calling a specific MCP tool, disable it explicitly with
+`/tool disable mcp__<server>__<tool>`.
 
 ## Logging and troubleshooting
 

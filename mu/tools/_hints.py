@@ -4,8 +4,8 @@ When a tool fails, the harness now attaches a `hint` to the envelope
 guiding the model toward a fix. The hints live in this module so they
 are:
   * easy to audit and extend (one dict, one entry per case);
-  * decoupled from `core/tools.py` (so new tools registered via
-    `@tool` can contribute hints without touching the registry);
+  * decoupled from the tool registry (so new tools registered via
+    `@tool` can contribute hints without touching it);
   * skippable — if no specific hint matches, a generic per-code
     fallback is used.
 

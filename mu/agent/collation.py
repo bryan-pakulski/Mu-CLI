@@ -21,7 +21,7 @@ class CollationBuffer:
     plain ``dict`` to make JSON (de)serialisation straightforward.
     """
 
-    def __init__(self, max_bytes: int = 1_000_000) -> None:
+    def __init__(self, max_bytes: int = 2_000_000) -> None:
         self.entries: List[Tuple[str, Dict[str, Any], str]] = []
         self.max_bytes = max_bytes
 

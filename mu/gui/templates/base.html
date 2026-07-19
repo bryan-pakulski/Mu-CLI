@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}μcli{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>μ</text></svg>">
+    <!-- Set theme BEFORE first paint to avoid the dark→light flash on
+         reload when the user has picked light. The body class is also
+         used to swap the highlight.js stylesheets below. -->
+    <script>
+    (function () {
+        try {
+            var saved = localStorage.getItem('mucli-theme');
+            var sys = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)
+                ? 'light' : 'dark';
+            var theme = (saved === 'light' || saved === 'dark') ? saved : sys;
+            document.documentElement.setAttribute('data-theme', theme);
+            // Flip hljs sheets as soon as they appear in the DOM.
+            document.addEventListener('DOMContentLoaded', function () {
+                var d = document.getElementById('hljs-dark');
+                var l = document.getElementById('hljs-light');
+                if (d) d.disabled = (theme === 'light');
+                if (l) l.disabled = (theme === 'dark');
+            });
+        } catch (e) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+    </script>
+    <link id="hljs-dark" rel="stylesheet" href="/static/vendor/highlight-github-dark.min.css">
+    <link id="hljs-light" rel="stylesheet" href="/static/vendor/highlight-github-light.min.css" disabled>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <!-- MathJax (vendored, SVG output, no external fonts needed).
+         Config MUST precede the script load. startup.typeset=false
+         so we drive typesetting manually after each render (app.js
+         calls MathJax.typesetPromise on the changed subtree). -->
+    <script>
+    window.MathJax = {
+        tex: {
+            inlineMath:  [['$',  '$'],   ['\\(', '\\)']],
+            displayMath: [['$$', '$$'],  ['\\[', '\\]']],
+            processEscapes: true
+        },
+        svg: { fontCache: 'global' },
+        // Skip code blocks so `$` inside inline `code` / fenced ```code```
+        // is never mistaken for math delimiters.
+        options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code','option'] },
+        startup: { typeset: false }
+    };
+    </script>
+    <script src="/static/vendor/mathjax-tex-svg.js"></script>
+    <script src="/static/vendor/marked.min.js"></script>
+    <script src="/static/vendor/highlight.min.js"></script>
+    <link rel="stylesheet" href="/static/vendor/codemirror.min.css">
+    <script src="/static/vendor/codemirror.min.js"></script>
+    <script src="/static/vendor/codemirror-modes.min.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script src="/static/vendor/htmx.min.js" defer></script>
+    <script src="/static/vendor/alpine.min.js" defer></script>
+</head>
+<body>
+    {% block body %}{% endblock %}
+    <!-- Confirm popover (anchored near click) -->
+    <div class="confirm-pop"
+         x-data
+         x-show="$store.confirm.open"
+         x-transition.opacity.duration.120ms
+         :style="`left:${$store.confirm.x}px; top:${$store.confirm.y}px;`"
+         @click.outside="$store.confirm.cancel()"
+         @keydown.escape.window="$store.confirm.cancel()"
+         @keydown.enter.window="$store.confirm.open && $store.confirm.confirm()"
+         role="dialog">
+        <div class="confirm-message" x-text="$store.confirm.message"></div>
+        <div class="confirm-actions">
+            <button @click="$store.confirm.cancel()">cancel</button>
+            <button class="primary" :class="{ danger: $store.confirm.danger }"
+                    @click="$store.confirm.confirm()">confirm</button>
+        </div>
+    </div>
+
+    <!-- Loop: add backlog item modal -->
+    <div class="modal-backdrop"
+         x-data
+         x-show="$store.loop.showAddItem"
+         x-transition.opacity.duration.150ms
+         @keydown.escape.window="$store.loop.showAddItem && $store.loop.closeAddItem()">
+        <div class="modal" @click.stop>
+            <div class="modal-head">
+                <span class="modal-title">add backlog item</span>
+                <button class="icon-btn" @click="$store.loop.closeAddItem()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-field">
+                    <label class="modal-label">content</label>
+                    <textarea x-model="$store.loop.newItemContent"
+                              placeholder="What needs to be done?"
+                              rows="3"
+                              @keydown.stop></textarea>
+                </div>
+                <div class="modal-field">
+                    <label class="modal-label">status</label>
+                    <select x-model="$store.loop.newItemStatus">
+                        <option value="pending">pending</option>
+                        <option value="in_progress">in progress</option>
+                        <option value="blocked">blocked</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button @click="$store.loop.closeAddItem()">cancel</button>
+                <button class="primary" @click="$store.loop.addBacklogItem()">add</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feature: create feature modal -->
+    <div class="modal-backdrop"
+         x-data
+         x-show="$store.feature.showCreateModal"
+         x-transition.opacity.duration.150ms
+         @keydown.escape.window="$store.feature.showCreateModal && $store.feature.closeCreateModal()">
+        <div class="modal modal-lg" @click.stop>
+            <div class="modal-head">
+                <span class="modal-title">new feature</span>
+                <button class="icon-btn" @click="$store.feature.closeCreateModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-field">
+                    <label class="modal-label">name</label>
+                    <input type="text"
+                           x-model="$store.feature.createForm.name"
+                           placeholder="Feature name"
+                           @keydown.stop />
+                </div>
+                <div class="modal-field">
+                    <label class="modal-label">description</label>
+                    <textarea x-model="$store.feature.createForm.request"
+                              placeholder="What should this feature do?"
+                              rows="3"
+                              @keydown.stop></textarea>
+                </div>
+                <div class="modal-field">
+                    <label class="modal-label">directory</label>
+                    <div style="display:flex;gap:var(--space-2)">
+                        <input type="text"
+                               x-model="$store.feature.createForm.directory"
+                               placeholder="Working directory (default: cwd)"
+                               style="flex:1"
+                               @keydown.stop />
+                        <button class="subtle"
+                                @click="$store.fileBrowser.show('folder', p => $store.feature.createForm.directory = p)">browse</button>
+                    </div>
+                </div>
+
+                <!-- Phases -->
+                <div class="modal-section">
+                    <div class="modal-section-head">
+                        <span class="modal-label" style="margin-bottom:0">phases</span>
+                        <button class="modal-add-btn" @click="$store.feature.addPhase()">+ phase</button>
+                    </div>
+                    <template x-for="(phase, pi) in ($store.feature.createForm.phases || [])" :key="pi">
+                        <div class="modal-phase">
+                            <div class="modal-phase-head">
+                                <span class="modal-phase-num mono muted" x-text="'phase ' + (pi + 1)"></span>
+                                <button class="modal-remove-btn" @click="$store.feature.removePhase(pi)">&times;</button>
+                            </div>
+                            <div class="modal-field-row">
+                                <input type="text" x-model="phase.title"
+                                       placeholder="Phase title" @keydown.stop />
+                                <input type="text" x-model="phase.goal"
+                                       placeholder="Goal (optional)" @keydown.stop />
+                            </div>
+
+                            <!-- Tasks -->
+                            <div class="modal-tasks">
+                                <div class="modal-section-head small">
+                                    <span class="modal-label" style="margin-bottom:0;font-size:9.5px">tasks</span>
+                                    <button class="modal-add-btn small"
+                                            @click="$store.feature.addTask(pi)">+ task</button>
+                                </div>
+                                <template x-for="(task, ti) in (phase.tasks || [])" :key="ti">
+                                    <div class="modal-task">
+                                        <div class="modal-task-head">
+                                            <span class="muted mono" style="font-size:10px"
+                                                  x-text="'task ' + (ti + 1)"></span>
+                                            <button class="modal-remove-btn"
+                                                    @click="$store.feature.removeTask(pi, ti)">&times;</button>
+                                        </div>
+                                        <div class="modal-field">
+                                            <input type="text" x-model="task.title"
+                                                   placeholder="Task title" @keydown.stop />
+                                        </div>
+                                        <div class="modal-list-field">
+                                            <span class="modal-label" style="font-size:9px">objectives</span>
+                                            <template x-for="(obj, oi) in (task.objectives || [])" :key="oi">
+                                                <div class="modal-list-row">
+                                                    <input type="text" x-model="task.objectives[oi]"
+                                                           placeholder="Objective" @keydown.stop />
+                                                    <button class="modal-remove-btn"
+                                                            @click="$store.feature.removeListItem(pi, ti, 'objectives', oi)">&times;</button>
+                                                </div>
+                                            </template>
+                                            <button class="modal-add-btn small"
+                                                    @click="$store.feature.addListItem(pi, ti, 'objectives')">+</button>
+                                        </div>
+                                        <div class="modal-list-field">
+                                            <span class="modal-label" style="font-size:9px">exit criteria</span>
+                                            <template x-for="(crit, ci) in (task.exit_criteria || [])" :key="ci">
+                                                <div class="modal-list-row">
+                                                    <input type="text" x-model="task.exit_criteria[ci]"
+                                                           placeholder="Criterion" @keydown.stop />
+                                                    <button class="modal-remove-btn"
+                                                            @click="$store.feature.removeListItem(pi, ti, 'exit_criteria', ci)">&times;</button>
+                                                </div>
+                                            </template>
+                                            <button class="modal-add-btn small"
+                                                    @click="$store.feature.addListItem(pi, ti, 'exit_criteria')">+</button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <p class="muted" style="font-size:11px;margin-top:var(--space-2)"
+                       x-show="!($store.feature.createForm.phases || []).length">
+                        No phases — the agent can plan them later, or add them now.
+                    </p>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button @click="$store.feature.closeCreateModal()">cancel</button>
+                <button class="primary" @click="$store.feature.submitCreateFeature()">create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skills modal -->
+    <div class="modal-backdrop"
+         x-data
+         x-show="$store.skills.modalOpen"
+         x-transition.opacity.duration.150ms
+         @keydown.escape.window="$store.skills.modalOpen && $store.skills.view === 'list' && $store.skills.closeModal()">
+        <div class="modal modal-lg" @click.stop style="max-height:85vh;">
+
+            <!-- List view -->
+            <template x-if="$store.skills.view === 'list'">
+                <div style="display:flex;flex-direction:column;max-height:85vh;">
+                    <div class="modal-head">
+                        <span class="modal-title">skills</span>
+                        <button class="icon-btn" @click="$store.skills.closeModal()">&times;</button>
+                    </div>
+                    <div class="skills-toolbar">
+                        <span class="skills-count"
+                              x-text="$store.skills.enabledCount() + '/' + $store.skills.list.length + ' enabled'"></span>
+                        <div class="skills-toolbar-btns">
+                            <button class="modal-add-btn" @click="$store.skills.reload()">reload</button>
+                            <button class="modal-add-btn" @click="$store.skills.startCreate()">+ new</button>
+                        </div>
+                    </div>
+                    <div class="modal-body" style="padding:0;">
+                        <ul class="skills-list">
+                            <template x-for="s in $store.skills.list" :key="s.name">
+                                <li class="skill-row" :class="{ disabled: !s.enabled }">
+                                    <button class="skill-toggle-sw"
+                                            :class="{ on: s.enabled }"
+                                            @click="$store.skills.toggle(s.name)"
+                                            :title="s.enabled ? 'Disable' : 'Enable'"></button>
+                                    <div class="skill-info">
+                                        <div class="skill-name" x-text="s.name"></div>
+                                        <div class="skill-desc" x-text="s.description || '(no description)'" x-show="s.description"></div>
+                                        <div class="skill-meta">
+                                            <span x-text="s.trigger ? 'trigger: ' + s.trigger : 'no trigger'"></span>
+                                            <span> · </span>
+                                            <span x-text="$store.skills.isBuiltin(s) ? 'built-in' : (s.source.includes('/.mu/skills/') ? (s.source.startsWith('/root/.mu/') || s.source.startsWith(String.fromCharCode(126) + '/.mu/') ? 'global' : 'workspace') : 'built-in')"></span>
+                                        </div>
+                                    </div>
+                                    <div class="skill-actions">
+                                        <button class="modal-add-btn small"
+                                                @click="$store.skills.startEdit(s)"
+                                                :title="$store.skills.isBuiltin(s) ? 'View (built-in, read-only)' : 'Edit'">
+                                            <span x-text="$store.skills.isBuiltin(s) ? 'view' : 'edit'"></span>
+                                        </button>
+                                        <button class="modal-remove-btn"
+                                                x-show="!$store.skills.isBuiltin(s)"
+                                                @click="$store.confirm.ask('Delete skill \'' + s.name + '\'?', $event, () => $store.skills.deleteSkill(s.name), {danger:true})"
+                                                title="Delete">&times;</button>
+                                    </div>
+                                </li>
+                            </template>
+                        </ul>
+                        <div class="empty-row" x-show="!$store.skills.list.length"
+                             style="padding:var(--space-5);text-align:center;">no skills found</div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Edit / Create view -->
+            <template x-if="$store.skills.view === 'edit'">
+                <div style="display:flex;flex-direction:column;max-height:85vh;">
+                    <div class="modal-head">
+                        <div style="display:flex;align-items:center;gap:var(--space-2)">
+                            <button class="icon-btn" @click="$store.skills.backToList()" title="Back to list">&larr;</button>
+                            <span class="modal-title" x-text="$store.skills.editing ? 'edit skill' : 'new skill'"></span>
+                        </div>
+                        <button class="icon-btn" @click="$store.skills.closeModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="modal-field">
+                            <label class="modal-label">name</label>
+                            <input type="text"
+                                   x-model="$store.skills.form.name"
+                                   placeholder="my-skill (alphanumeric, hyphens, underscores)"
+                                   :disabled="!!$store.skills.editing"
+                                   @keydown.stop />
+                        </div>
+                        <div class="modal-field">
+                            <label class="modal-label">description</label>
+                            <input type="text"
+                                   x-model="$store.skills.form.description"
+                                   placeholder="What this skill does"
+                                   @keydown.stop />
+                        </div>
+                        <div class="modal-field">
+                            <label class="modal-label">trigger regex</label>
+                            <input type="text"
+                                   x-model="$store.skills.form.trigger"
+                                   placeholder="\b(commit|message)\b (optional)"
+                                   @keydown.stop />
+                        </div>
+                        <div class="modal-field">
+                            <label class="modal-label">scope</label>
+                            <select x-model="$store.skills.form.scope">
+                                <option value="global">global (~/.mu/skills/)</option>
+                                <option value="workspace">workspace (.mu/skills/)</option>
+                            </select>
+                        </div>
+                        <div class="modal-field">
+                            <label class="modal-label">body (markdown)</label>
+                            <textarea x-model="$store.skills.form.body"
+                                      placeholder="Skill instructions in markdown…"
+                                      rows="10"
+                                      style="font-family:var(--mono);font-size:12px;"
+                                      @keydown.stop></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-actions">
+                        <button @click="$store.skills.backToList()">cancel</button>
+                        <button class="primary" @click="$store.skills.save()">save</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" x-data>
+        <template x-for="m in $store.toast.messages" :key="m.id">
+            <div class="toast" :class="'toast--' + m.type"
+                 x-transition:enter="toast--enter"
+                 x-transition:enter-start="toast--enter-start"
+                 x-transition:enter-end="toast--enter-end"
+                 x-transition:leave="toast--leave"
+                 x-transition:leave-start="toast--leave-start"
+                 x-transition:leave-end="toast--leave-end">
+                <span class="toast__msg" x-text="m.msg"></span>
+                <button class="toast__close" @click="$store.toast.dismiss(m.id)">&times;</button>
+            </div>
+        </template>
+    </div>
+</body>
+</html>

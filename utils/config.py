@@ -20,6 +20,65 @@ if not os.path.exists(HISTORY_DIR):
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
+# --- Layer Char-Budget Ratio System ---
+# Layer char budgets scale with context_token_limit. At a reference limit
+# each layer has a target token budget; when context_token_limit changes,
+# budgets are recomputed proportionally but never drop below absolute floors
+# (the historical defaults), so smaller context windows keep usable budgets.
+TOKEN_TO_CHAR_RATIO = 4
+
+_REFERENCE_TOKEN_LIMIT = 900000
+
+# Target token budgets at the reference limit (in tokens, not chars).
+_LAYER_TOKEN_TARGETS = {
+    "workspace_context_max_chars": 10000,       # L1
+    "skills_max_chars": 10000,                   # L1B
+    "conversation_summary_char_limit": 20000,   # L2
+    "active_goal_context_char_limit": 4096,     # L3
+    "retrieval_context_char_limit": 10000,       # L4B
+}
+
+# Absolute floors — historical defaults, never scale below these.
+LAYER_CHAR_FLOORS = {
+    "workspace_context_max_chars": 16384,
+    "skills_max_chars": 6144,
+    "conversation_summary_char_limit": 24000,
+    "active_goal_context_char_limit": 4000,
+    "retrieval_context_char_limit": 10000,
+}
+
+
+def compute_layer_char_budgets(context_token_limit):
+    """Compute char budgets for all layer vars, scaled from reference
+    targets but never below floors.
+
+    Returns dict[var_name, chars].
+    """
+    ratio = context_token_limit / _REFERENCE_TOKEN_LIMIT
+    result = {}
+    for var_name, target_tokens in _LAYER_TOKEN_TARGETS.items():
+        scaled_chars = int(target_tokens * TOKEN_TO_CHAR_RATIO * ratio)
+        floor = LAYER_CHAR_FLOORS[var_name]
+        result[var_name] = max(scaled_chars, floor)
+    return result
+
+
+def reratio_layer_budgets(session):
+    """Recompute and apply layer char budgets when context_token_limit changes.
+
+    Called from /set and /unset when context_token_limit is modified.
+    """
+    ctx_limit = int(
+        session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT)
+    )
+    budgets = compute_layer_char_budgets(ctx_limit)
+    for var_name, chars in budgets.items():
+        session.variables[var_name] = chars
+
+
+_DEFAULT_CONTEXT_TOKEN_LIMIT = 900000
+_LAYER_CHAR_DEFAULTS = compute_layer_char_budgets(_DEFAULT_CONTEXT_TOKEN_LIMIT)
+
 # --- Variable Schema & Defaults ---
 VARIABLE_SCHEMA = {
     "agent_mode": {
@@ -28,7 +87,7 @@ VARIABLE_SCHEMA = {
     },  # Agent mode, determines the initial system prompt
     "ollama_host": {
         "type": str,
-        "default": "https://ollama.com",
+        "default": "",
     },  # Ollama server host
     "strict_mode": {"type": bool, "default": False},  # Forces approval for all tools
     "max_iterations": {
@@ -48,6 +107,14 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "",
     },  # The user's pinned top-level task for the CURRENT TURN. Rendered in L3 of the system prompt every iteration so the model retains direction even when the L2 conversation summary gets compacted mid-turn. Set with /goal <text> or the set_session_goal tool; clears automatically at end of turn (`Session._strip_session_goal_after_turn`) so it can't bias an unrelated next request. The durable mirror in task_memory (saved via `_ensure_session_goal_persistence`) stays — only the live variable resets.
+    "session_goal_sticky": {
+        "type": bool,
+        "default": False,
+    },  # When True (or in loop/feature mode, which default to sticky), the pinned `session_goal` is NOT cleared at end of turn — it persists across turns in L3 until the user clears it (/goal clear) or sets a new goal. Long-horizon multi-turn work needs the goal to survive turn boundaries; conversational default-mode use does not. See `Session._strip_session_goal_after_turn`.
+    "session_goal_sticky_explicit": {
+        "type": bool,
+        "default": False,
+    },  # Tracks whether the user has explicitly set `session_goal_sticky` via /set, so the mode-aware default (loop/feature = sticky) only applies until the user overrides it. Mirrors the `show_thinking_explicit` pattern.
     "show_thinking": {
         "type": bool,
         "default": True,
@@ -73,6 +140,18 @@ VARIABLE_SCHEMA = {
     "ollama_repeat_penalty": {"type": float, "default": 0.0},
     "ollama_seed": {"type": int, "default": 0},
     "ollama_mirostat": {"type": int, "default": 0},
+    "ollama_mode": {
+        "type": str,
+        "default": "auto",
+    },  # local | cloud | auto(legacy). Selecting ollama in the GUI sets this explicitly. "local" = OLLAMA_HOST env or localhost (never the API-key cloud auto-switch); "cloud" = ollama.com (needs ollama_api_key); "auto" preserves the pre-toggle env-driven resolution for backward compat.
+    "ollama_api_key": {
+        "type": str,
+        "default": "",
+    },  # Per-session Ollama cloud bearer token. Empty falls back to env OLLAMA_API_KEY. Ignored by a local daemon.
+    "ollama_token_safety_factor": {
+        "type": float,
+        "default": 2.5,
+    },  # Divides the compaction context limit so the compactor triggers before the real (larger) prompt overflows the model window. cl100k_base under-counts Ollama's tokenizer ~2.2x; 2.5 gives ~20% headroom. 1.0 disables. Read by OllamaProvider.compaction_safety_factor.
     "collation_enabled": {
         "type": bool,
         "default": True,
@@ -84,6 +163,68 @@ VARIABLE_SCHEMA = {
     "memory_max_entries": {
         "type": int,
         "default": 64,
+    },
+    "memory_stale_after_turns": {
+        # Auto-decay: at turn start, ACTIVE task-memory entries whose last
+        # explicit search/save hit was >= this many turns ago are demoted to
+        # STALE. Keeps the active set honest ("active" = recently mattered,
+        # not "ever saved") so search_memory (active-only by default) and L3
+        # injection stay high-signal instead of accumulating noise. Reversible
+        # — a search hit or re-save promotes a STALE entry back to ACTIVE.
+        # 0 disables decay. See BaseNoteStore.apply_staleness_decay.
+        "type": int,
+        "default": 12,
+    },
+    "progress_checkpoint_every": {
+        # Periodic L2 progress checkpoint: every N iterations, fold recent
+        # history into the structured conversation_summary (Progress / Key
+        # decisions / Current state / Open items) WITHOUT compacting (the
+        # anchor doesn't advance, entries stay in L5). This keeps L2 fresh
+        # on long turns that never hit the compaction budget, so the model
+        # stops re-deriving context it already gathered (the long-horizon
+        # stall). 0 disables. When unset, loop/feature modes default to 12
+        # (long-horizon work benefits); default/chat modes default to 0
+        # (short turns don't need it). See HistoryMixin.force_progress_checkpoint.
+        "type": int,
+        "default": 0,
+    },
+    "tool_result_floor": {
+        # R3/FM-8: number of trailing tool-result messages in the active
+        # turn that compaction must leave verbatim, even under emergency
+        # compaction with a tiny keep_recent. Prevents mid-turn compaction
+        # from dropping tool results just received. Mode-aware (Fix #10):
+        # loop/feature modes raise this to at least 8.
+        "type": int,
+        "default": 4,
+    },
+    "tool_result_cache_entries": {
+        # Max entries in the tool-result sidecar cache (recall() + auto-
+        # recall by locator, Fix #10). Mode-aware: loop/feature modes raise
+        # this to at least 256.
+        "type": int,
+        "default": 50,
+    },
+    "tool_result_cache_bytes": {
+        # Max bytes in the tool-result sidecar cache (Fix #10). Mode-aware:
+        # loop/feature modes raise this to at least 2 MB.
+        "type": int,
+        "default": 524288,
+    },
+    "recoverage_stall_threshold": {
+        # Context-gathering stall detection (Fix #12): number of consecutive
+        # iterations that re-read files already read this turn WITHOUT a
+        # concrete change (write/bash/spawn) before a "stop gathering, act"
+        # re-orient nudge is injected. 0 disables. See loop_detection.
+        "type": int,
+        "default": 4,
+    },
+    "emergency_keep_recent": {
+        # Trailing messages kept verbatim by EMERGENCY compaction
+        # (pre-flight context check). Smaller than the normal
+        # `compactor_keep_recent` so it reclaims budget fast; the
+        # `tool_result_floor` still protects recent tool results.
+        "type": int,
+        "default": 2,
     },
     "memory_summary_limit": {
         "type": int,
@@ -97,6 +238,10 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 24,
     },
+    "scratchpad_persist_across_turns": {
+        "type": bool,
+        "default": False,
+    },
     "tool_context_window": {
         "type": int,
         "default": 6,
@@ -105,8 +250,12 @@ VARIABLE_SCHEMA = {
         # Global cap on total prompt tokens (sum of all 7 layers + history).
         # The compactor reserves headroom for non-L5 layers before deciding
         # how much room L5 (conversation history) gets.
+        #
+        # When this changes via /set, reratio_layer_budgets() recomputes
+        # the per-layer char budgets proportionally (see
+        # compute_layer_char_budgets above).
         "type": int,
-        "default": 256000,
+        "default": _DEFAULT_CONTEXT_TOKEN_LIMIT,
     },
     "context_trim_threshold": {
         # Fraction of the global cap above which compaction kicks in.
@@ -150,9 +299,10 @@ VARIABLE_SCHEMA = {
     # ----- LAYER 1 — Workspace context files -----
     "workspace_context_max_chars": {
         # Char budget for LAYER 1 (workspace files like AGENTS.md, CLAUDE.md,
-        # .mu/CONTEXT.md per attached folder).
+        # .mu/CONTEXT.md per attached folder). Scales with context_token_limit
+        # via compute_layer_char_budgets; never drops below LAYER_CHAR_FLOORS.
         "type": int,
-        "default": 8192,
+        "default": _LAYER_CHAR_DEFAULTS["workspace_context_max_chars"],
     },
     "workspace_context_files": {
         # Comma-separated list of filenames to auto-load from each attached
@@ -164,35 +314,31 @@ VARIABLE_SCHEMA = {
     "skills_max_chars": {
         # Total budget for the AVAILABLE SKILLS block injected as LAYER 1B
         # of the system prompt. 0 disables skills entirely.
+        # Scales with context_token_limit via compute_layer_char_budgets.
         "type": int,
-        "default": 6144,
+        "default": _LAYER_CHAR_DEFAULTS["skills_max_chars"],
     },
     # ----- LAYER 2 — Conversation summary -----
     "conversation_summary_char_limit": {
         # Char budget for LAYER 2 (rolling summary of older history).
         # Clipped from the tail when exceeded so the most recent summary
-        # batches survive.
+        # batches survive. Scales with context_token_limit.
         "type": int,
-        "default": 8000,
+        "default": _LAYER_CHAR_DEFAULTS["conversation_summary_char_limit"],
     },
     # ----- LAYER 3 — Active goal context -----
     "active_goal_context_char_limit": {
         # Char budget for LAYER 3 (feature/task status + scratchpad snapshot).
+        # Scales with context_token_limit via compute_layer_char_budgets.
         "type": int,
-        "default": 4000,
-    },
-    # ----- LAYER 4 — Recent tool activity -----
-    "recent_tool_context_char_limit": {
-        # Char budget for LAYER 4 (compressed recent tool calls/results).
-        "type": int,
-        "default": 12000,
+        "default": _LAYER_CHAR_DEFAULTS["active_goal_context_char_limit"],
     },
     # ----- LAYER 4B — Retrieved snippets -----
     "retrieval_context_char_limit": {
         # Char budget for LAYER 4B (semantic-retrieval snippets injected
-        # for the current turn).
+        # for the current turn). Scales with context_token_limit.
         "type": int,
-        "default": 5000,
+        "default": _LAYER_CHAR_DEFAULTS["retrieval_context_char_limit"],
     },
     "retrieval_top_k": {
         # Number of semantic-retrieval hits to include in LAYER 4B.
@@ -226,8 +372,85 @@ VARIABLE_SCHEMA = {
     },
     "loop_detection_repeat_threshold": {
         "type": int,
+        "default": 5,
+    },
+    # ----- Sub-agent async orchestrator -----
+    # session_role drives LAYER 3B (Agent Role) injection in
+    # inject_hierarchical_context. Default "" => single-agent sessions skip
+    # LAYER 3B (backward compatible). Stamped "parent" on a session when it
+    # first spawns a child; "child" on every spawned sub-agent session.
+    "session_role": {
+        "type": str,
+        "default": "",
+    },
+    # Increments per spawn level; cap at MAX_SUBAGENT_DEPTH (2). Children
+    # read this to render depth-aware LAYER 3B sub-agent guidance.
+    "subagent_depth": {
+        "type": int,
+        "default": 0,
+    },
+    # Links a child to its parent's task_id for polling/correlation.
+    "subagent_parent_task_id": {
+        "type": str,
+        "default": "",
+    },
+    # Consecutive same-tool+same-args calls before the lifecycle manager
+    # flags the sub-agent as stuck (surfaced to parent via poll; not an
+    # auto-kill).
+    "subagent_stuck_threshold": {
+        "type": int,
         "default": 3,
     },
+    # Consecutive no-novel-output calls before the lifecycle manager flags
+    # the sub-agent as stalled (surfaced to parent via poll; not an
+    # auto-kill).
+    "subagent_stall_threshold": {
+        "type": int,
+        "default": 5,
+    },
+    # Hard runtime limit (seconds) before the lifecycle watchdog auto-kills
+    # a runaway sub-agent. The ONLY auto-kill path; stuck/stall are advisory.
+    "subagent_max_runtime_seconds": {
+        "type": int,
+        "default": 300,
+    },
+    # Master switch for lifecycle signal tracking + stuck/stall detection.
+    # When False, sub-agents still run async but no heuristics fire.
+    "subagent_lifecycle_enabled": {
+        "type": bool,
+        "default": True,
+    },
+    # Default model for spawned sub-agents. Empty (default) => the child
+    # inherits the parent's model (via clone_for_child). Set to any model
+    # installed on the active provider to run children on a different model
+    # (e.g. a smaller/faster one for cheap side quests). An uninstalled value
+    # falls back to the parent model with a warning rather than crashing the
+    # child's first generate() — this is the fix for "Ollama model 'sonnet-3.5'
+    # is not installed" errors, which happened when the agent passed a
+    # hallucinated model name to spawn_agent. A spawn_agent `model` arg, when
+    # valid+installed, overrides this for that one child. Set via /set or the
+    # GUI composer settings (dynamic model picker).
+    "subagent_model": {
+        "type": str,
+        "default": "",
+    },
+    # ----- TTS / STT (audio) -----
+    "tts_enabled": {
+        "type": bool,
+        "default": True,
+    },  # Show TTS speak button on assistant messages
+    "tts_voice": {
+        "type": str,
+        "default": "af_heart",
+    },  # Kokoro voice name (af_heart, af_sky, etc.)
+    "stt_enabled": {
+        "type": bool,
+        "default": True,
+    },  # Show mic button in composer for voice input
+    "stt_model": {
+        "type": str,
+        "default": "base",
+    },  # faster-whisper model size: tiny|base|small|medium|large-v3
 }
 
 DEFAULT_VARIABLES = {k: v["default"] for k, v in VARIABLE_SCHEMA.items()}
@@ -282,6 +505,7 @@ Respond like smart caveman. Cut articles, filler, pleasantries. Keep all technic
 - Technical terms stay exactly. "Polymorphism" stays "polymorphism"
 - Code blocks unchanged. Caveman speak around code, not in code.
 - Error messages quoted exact. Caveman only for explanation.
+- **Thinking/reasoning tokens: caveman mode too.** Internal thinking must be terse. Drop filler, hedging, narration. "Need check X" not "I should probably investigate X to understand whether..." Keep technical substance — symbols, file paths, function names, logic. Compress reasoning to bullet points or fragments. Saves thinking token budget significantly.
 
 ## Pattern
 ```
@@ -294,17 +518,12 @@ TOOL SURFACE:
 - Shell: `bash` covers everything else — git ops, make, grep, find, curl, anything not surfaced as a dedicated tool.
 - Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `url_grounding`, `read_document` (PDFs).
 - Memory: `save_memory` / `search_memory` / `list_memory` (durable, cross-turn), `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` (per-turn).
-- Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)` for per-session task plans the user can see.
+- Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
+- Context self-management: `context_status` (per-layer token fill + L2-staleness signal + entry counts), `checkpoint_progress` (fold recent history into L2 without compacting), `retire_thread(topic, reason)` (drop an abandoned thread — archives matching active memory + clears matching scratchpad notes).
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
 - Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
 - Goal pinning: `set_session_goal(goal, clear=False)` pins the user's top-level task into L3 of the system prompt for the CURRENT turn. Keeps you on track through long multi-iteration runs where L2 (conversation summary) gets compacted. **Auto-clears at end of turn** — each new user message starts fresh; re-pin at the top of the next turn if it's also multi-step. Don't carry stale goals into unrelated requests. The user can also `/goal <text>` manually. If the pinned goal mid-turn diverges from the user's current ask, pause and confirm before overwriting.
-- **Refinement surface** — use these for any clarification before acting, NOT free-flowing chat:
-  - `ask_user_choice(question, options, multi_select=False, allow_other=False, description="")` — single multiple-choice picker. 2-8 options. `multi_select=true` for select-all. `allow_other=true` to append an "Other (type your own)…" entry that opens a text prompt; the prose comes back in `other_text`. Result: `{selected, other_text, cancelled}`.
-  - `request_text(prompt, default?)` — single short-text input (filename, identifier, one-line spec). Blocks. Result: `{value, cancelled}`. Use INSTEAD OF asking in chat and waiting for the next user message.
-  - `gather_requirements(headline, fields=[{key, label, kind: "choice"|"text", options?, default?}])` — multi-field form. Composes pickers + text prompts into ONE atomic flow. Use whenever a task needs ≥ 2 clarifications. Result: `{answers: {key: value}, cancelled, skipped_keys}`.
-- **Review surface** — use these to surface artifacts for verification instead of narrating them:
-  - `propose_change(file, after, rationale, kind="edit"|"new"|"delete")` — show the diff to the user, BLOCK for approve/reject/revise, apply on approval. Use INSTEAD OF bare `write_file` / `apply_diff` for any user-visible change. Reserve raw writers for throwaway scaffolding. Result: `{applied, file, kind, revision_request?}` — when `revision_request` is set, iterate against the user's note.
-  - `propose_stopping_point(done, could_also=[...], recommendation?)` — for open-ended asks ("clean this up", "improve X"), surface what's done + 2-5 possible follow-ups and BLOCK for user pick. Use BEFORE you wander into scope creep or stop too early. Result: `{choice}` — either `"stop"` or one of the `could_also` strings.
+- **Clarification** — `ask_user_choice(question, options, multi_select=False, allow_other=False, description="")` — multiple-choice picker. 2-8 options. `multi_select=true` for select-all. `allow_other=true` for free-form fallback. Result: `{selected, other_text, cancelled}`.
 
 WHEN TO USE SUBAGENTS:
 - When a complex task can be broken into independent, smaller tasks.
@@ -312,10 +531,8 @@ WHEN TO USE SUBAGENTS:
 - When you need to contain errors from one specific task from impacting the whole workflow.
 
 GENERAL RULES:
-0. **Refine before you act.** For any non-trivial request where the user's intent isn't airtight, drill down with the refinement surface (`ask_user_choice` / `request_text` / `gather_requirements`) BEFORE writing code or running shell. Lock requirements in 1-2 picker calls, not 5 chat round-trips. Prefer `gather_requirements` when there are ≥ 2 things to clarify (target, scope, constraints). Prose questions in chat are the SLOW path — only fall back to them when the picker tools are unavailable or when the question is genuinely open-ended (a paragraph of context, not a value). One picker > one round-trip > one chat reply; pick the highest-bandwidth option you can.
-0a. **Review user-visible changes before they land.** For any edit a user cares about — code, config, docs, scripts they're working on — use `propose_change(file, after, rationale, kind)` instead of `write_file` / `apply_diff`. The tool shows the diff, blocks for approval, applies on accept. Reserve raw writers for throwaway scaffolding (test fixtures, temp files) where review would be noise. "Trust my narration" is not a workflow.
-0b. **Stop explicitly on open-ended tasks.** When the user's ask is vague ("clean this up", "improve X", "add tests"), after you've delivered the core thing call `propose_stopping_point(done, could_also)` to hand control back. Don't wander into scope creep; don't stop too early without checking. Tasks with a clear definition of done (passing test, specific bug fix) end by themselves — no hand-off needed.
-0c. **Tag your claims by confidence.** Every claim about the system or its behavior gets one of: `[verified]` (you ran it, observed the result), `[inferred]` (you read code, concluded by analysis), `[guess]` (extrapolation, not certain). Self-evident descriptions of code you just wrote don't need tags. Untagged claims read as `[verified]` — false confidence corrodes the working relationship. When in doubt, downgrade.
+0. **Clarify before you act.** For non-trivial requests where intent isn't clear, use `ask_user_choice` to lock down choices before writing code or running shell.
+0a. **Tag your claims by confidence.** Every claim about the system or its behavior gets one of: `[verified]` (you ran it, observed the result), `[inferred]` (you read code, concluded by analysis), `[guess]` (extrapolation, not certain). Self-evident descriptions of code you just wrote don't need tags. Untagged claims read as `[verified]` — false confidence corrodes the working relationship. When in doubt, downgrade.
 0d. **Explain surprising moves inline.** When you touch a file, run a command, or change a system the user did NOT explicitly name in their request, prefix the action with one short line: `(why: <reason>)`. Surprise without explanation is bad collaboration. This includes: editing files adjacent to the named target, running shell beyond the obvious next command, installing dependencies, modifying config.
 0e. **Flag disagreement, don't silently overwrite.** If your observation diverges from the user's description (they say "this function does X" but reading shows Y; they say "this is slow" but profiling shows no hotspot), surface it in one line: `I see X. You said Y. Which matches reality?` Then wait. Don't paper over either model — the divergence itself is the signal.
 1. Never guess file paths. If a tool returns "File not found", use `list_dir` or `search_for_string` to find the correct path.
@@ -334,10 +551,18 @@ GENERAL RULES:
 6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, etc.) results are stored in a collation buffer.
    You receive a status update when you call them; call `flush` when ready to consume the buffered context.
    Collect at MOST 3 turns of context before flushing and acting. Be loop-aware; do not repeatedly ask for the same information.
-7. YOU MUST use scratchpad for temporary observations and short-term plans; refer often to it to confirm you are on track.
-8. YOU MUST use task memory for durable facts, decisions, and verified findings. Keep memories concise and high-value.
-   Retrieve memory before conducting significant actions or repeating tool work.
-9. For long-horizon work, maintain `todo_*` as a visible progress ledger so the user can see what you're doing.
+7. YOU OWN YOUR CONTEXT. The harness enforces only hard limits (iteration cap, token budget, tight-repeat detection). What stays and what gets pruned is YOUR call — do not wait for a nudge.
+
+SELF-MANAGEMENT:
+- **Todo ledger is persistent and yours — keep it honest.** The `todo` ledger survives across turns (it is NOT cleared at turn start like ephemeral scratchpad notes). At the start of a non-trivial task, `todo_write` the plan. When a task is done → `todo_set_status(completed)`. When abandoned or no longer relevant → `todo_delete(id)` (or `todo_clear('completed')` to prune all finished items in one call). When the user's ask shifts mid-task, RECONCILE the ledger BEFORE starting new work: drop what no longer applies, repromote what does. Do not leave stale `in_progress` items lying around — that is the "clean up the stale task list" move, do it proactively.
+- **Promote durable, drop ephemeral.** When a fact/decision/finding will matter beyond this turn, `save_memory` it AND clear the scratchpad note it came from. Memory is the durable store; scratchpad is scratch. Use the memory lifecycle: `supersede_memory` when a finding changes, `retire_memory` when done, `archive_memory` when no longer relevant, `retire_thread(topic, reason)` to drop a whole abandoned thread in one call.
+- **Supersede, don't sibling.** When a finding/decision is UPDATED, `supersede_memory(old_id, new_id)` the old entry — do NOT save a sibling. Five progressively-better versions of the same fact, all `active`, is the fastest way to drown signal in noise. One source of truth per fact; the old one goes `superseded` (off the active set) the moment the new one lands.
+- **Decay keeps the active set honest — reconcile, don't accumulate.** Memory entries not searched or re-saved in the last `memory_stale_after_turns` turns auto-decay from `active` to `stale` at turn start, so "active" means recently mattered, not ever saved. A search hit or re-save promotes a stale entry back to `active` automatically — decay is reversible through use, it never loses what you're actually using. Your job is to FINISH the job decay starts: when `context_status` shows `stale_memory_count > 0`, `archive_memory` or `retire_thread` those entries before adding new state; when `stale_todos > 0`, `todo_clear('completed')`. Net metadata should stay flat or shrink over a turn — if you only ever add and never retire, you are accumulating the exact rot that confuses you about what's important. Watch `memory_pressure_pct`: curate BEFORE the cap forces a silent eviction that drops a high-value entry to make room for trivia.
+- **Watch your own context fill.** Call `context_status` before big gathers and when a turn feels long. It returns per-layer token fill plus `l2_stale_vs_l5`, `uncheckpointed_entries`, `stale_memory_count`, `stale_todos`, and `memory_pressure_pct`. If L2 is stale relative to L5 progress, call `checkpoint_progress` to fold recent work into the summary yourself — don't wait for the budget to force it.
+- **Recognize your own stall.** If you've re-read the same files two iterations running without a concrete change (no write/bash/spawn between), STOP gathering: reconcile the ledger, decide the next concrete action, and act. Re-reading is not progress.
+- **You write the handoffs.** When you near the iteration cap or the user ends the turn mid-work, leave a consolidation in memory (`kind=consolidation` via `save_memory`, or just `save_memory` with the what's-done / what-remains / blocker): the next turn starts from your handoff, not from re-derivation.
+8. YOU MUST use scratchpad for temporary observations and short-term plans; refer often to it to confirm you are on track. YOU MUST use task memory for durable facts, decisions, and verified findings — keep memories concise and high-value. Retrieve memory (`search_memory`) before conducting significant actions or repeating tool work.
+9. For long-horizon work, maintain `todo_*` as a visible progress ledger so the user can see what you're doing — and prune it (rule 7) so it reflects current reality, not history.
 10. For focused side-quests that would consume large parent context (deep research, multi-file refactors), call `spawn_agent` with a tight `tools` whitelist. The child returns a clean summary; parent stays uncluttered.
 11. Tool results may include structured summaries. Prefer the structured fields and summaries over raw blobs.
 12. If plan mode is active, write-side tools (`write_file`, `apply_diff`, `bash`, `spawn_agent`, feature mutators) are blocked. Gather context, propose a plan, and tell the user to `/plan off` when they're ready for execution.
@@ -346,7 +571,7 @@ GENERAL RULES:
 AGENTIC_MODES = {
     "default": """WORKFLOW (Collation-Aware Default):
 
-0a. **Refine when ambiguous.** If the request leaves real choices unresolved (which file? which language? scope? destructive ok?), use the refinement surface (`ask_user_choice` / `request_text` / `gather_requirements`) BEFORE acting. One picker > one chat round-trip. Skip this only when intent is unambiguous.
+0a. **Clarify when ambiguous.** If the request leaves real choices unresolved (which file? which language? scope? destructive ok?), use `ask_user_choice` BEFORE acting. One picker > one chat round-trip. Skip this only when intent is unambiguous.
 
 0b. **Recall before research.** Call `search_memory` for the topic / file paths / error patterns in the request. If you've seen this before, start from that grounding instead of re-deriving.
 
@@ -368,17 +593,23 @@ Delegation:
 - For self-contained side-quests that would bloat context (deep codebase research, large multi-file refactors), issue `spawn_agent` calls in parallel — 4 of them in one turn run concurrently capped at `parallel_tool_concurrency` (default 4). Children inherit folder context but have isolated history.""",
     "debug": """WORKFLOW (Debugging):
 
+SCRATCHPAD TAGGING — the GUI debug panel reads scratchpad tags to populate its sections. You MUST tag entries so the panel stays in sync:
+- Hypotheses: `save_scratchpad` with tags=["hypothesis"]. Add "supported", "disproved", or "confirmed" as a second tag when status changes.
+- Suspect locations: `save_scratchpad` with tags=["suspect"] — file:line or function name.
+- General notes (repro steps, bisect state): `save_scratchpad` with descriptive tags (e.g. ["repro"], ["bisect"]).
+- Durable findings: `save_memory` with tags=["debug", "root-cause"] plus the file path / module.
+
 0. **Recall.** Call `search_memory` with the error string / file path / suspect symbol. If this bug or a sibling has been seen before, start from that fix — do not re-derive.
 
-1. **Reproduce, deterministically.** Get the failing command via `bash` and capture full stderr. If the user gave a vague repro, narrow it: minimum command, minimum input, single failing test (`pytest path::test_x -xvs`, `cargo test -- name --nocapture`, `node --inspect-brk`). Write the repro to `save_scratchpad` so it survives across iterations.
+1. **Reproduce, deterministically.** Get the failing command via `bash` and capture full stderr. If the user gave a vague repro, narrow it: minimum command, minimum input, single failing test (`pytest path::test_x -xvs`, `cargo test -- name --nocapture`, `node --inspect-brk`). Write the repro to `save_scratchpad` (tags=["repro"]) so it survives across iterations.
 
-2. **Locate.** `search_for_string` for the exact error message — that lands you on the emit site fast. Then `search_references` on the failing function / symbol to map call sites. `retrieve_relevant_context` if the error is symptomatic (timeout, wrong result) rather than a literal string.
+2. **Locate.** `search_for_string` for the exact error message — that lands you on the emit site fast. Then `search_references` on the failing function / symbol to map call sites. `retrieve_relevant_context` if the error is symptomatic (timeout, wrong result) rather than a literal string. Save suspect locations via `save_scratchpad` with tags=["suspect"].
 
 3. **Inspect the actual code, in parallel.** Issue `read_file` on the emit site + `read_file` on direct callers + `read_file` on tests covering the symbol — all in one turn (parallel reads). Read full functions, not snippets.
 
-4. **Hypothesize root cause.** Distinguish *symptom* from *cause*. The line that raises is rarely the bug. Walk the call stack upstream. For dependency / library bugs, `stackoverflow_search` or `web_search` with the exact error string + library version.
+4. **Hypothesize root cause.** Distinguish *symptom* from *cause*. The line that raises is rarely the bug. Walk the call stack upstream. Save each hypothesis via `save_scratchpad` with tags=["hypothesis"]. For dependency / library bugs, `stackoverflow_search` or `web_search` with the exact error string + library version.
 
-5. **Bisect when stuck.** If the cause isn't obvious after step 4, use `bash` to bisect: `git log --oneline` for recent changes, `git bisect start/good/bad` for a binary search, or comment-out / early-return chunks to isolate. Save the bisect range to scratchpad.
+5. **Bisect when stuck.** If the cause isn't obvious after step 4, use `bash` to bisect: `git log --oneline` for recent changes, `git bisect start/good/bad` for a binary search, or comment-out / early-return chunks to isolate. Save the bisect range to scratchpad (tags=["bisect"]).
 
 6. **Fix surgically.** Prefer `search_and_replace_file` with 3-5 lines of context for one-off bugs; `apply_diff` for multi-hunk changes. Don't refactor surrounding code — fix the bug, ship.
 
@@ -386,8 +617,9 @@ Delegation:
    - Re-run the exact failing reproducer — must now pass.
    - Run the WHOLE test file (or wider suite) — your fix must not have broken siblings.
    - For race conditions / flake suspects, run the test 10× via `bash` to confirm.
+   - Update hypothesis status: `save_scratchpad` with tags=["hypothesis", "confirmed"] or tags=["hypothesis", "disproved"].
 
-8. **Persist the lesson.** `save_memory` with: the symptom signature, the actual root cause, the fix. Tag with the file path / module. Future sessions hit `search_memory` first (step 0) and skip the rediscovery.""",
+8. **Persist the lesson.** `save_memory` with tags=["debug", "root-cause"] plus the file path / module: the symptom signature, the actual root cause, the fix. Future sessions hit `search_memory` first (step 0) and skip the rediscovery.""",
     "feature": """WORKFLOW (Feature Task Engine):
 
 Hard rules:
@@ -527,7 +759,7 @@ PHASE 1 — Discovery:
 3. For each plausible vulnerability, `add_security_finding` with: title, vulnerability_class, severity (info/low/medium/high/critical), affected_paths, and a concrete `exploit_path` describing how an attacker triggers it.
 
 PHASE 2 — Per-finding proof-and-patch loop (run for EVERY finding):
-a. **Build the PoC.** `attach_security_proof` with a shell command that, when run from the workspace root, reproduces the vulnerability deterministically. Declare `expected_markers` that uniquely identify the exploit succeeding (e.g. "PWNED", a file that should not exist, a stack trace, a stolen secret string).
+a. **Build the PoC.** Write all repro/PoC scripts under `documentation/security_scan_<id>/` (the scan directory created by `create_security_report`). `attach_security_proof` with a shell command that, when run from that scan directory, reproduces the vulnerability deterministically. Declare `expected_markers` that uniquely identify the exploit succeeding (e.g. "PWNED", a file that should not exist, a stack trace, a stolen secret string).
 b. **Verify the PoC.** Call `verify_security_proof`. The engine runs the command and checks the markers literally appear. If False — revise the PoC and retry. If you cannot make the exploit trigger after 2-3 revisions, call `refute_finding`.
 c. **Engineer the patch.** Write the actual fix as a unified diff (typically by reading the file, then proposing the corrected code). `attach_remediation_patch` with: a description of the defensive principle (parameterized queries / context-aware escaping / safe deserializer / input validation), and the diff itself. Apply the patch via `apply_diff` so the working tree reflects the fix.
 d. **Verify the patch.** Call `verify_remediation`. The engine re-runs the SAME PoC against the now-patched code. The exploit must no longer trigger. If False — your patch doesn't actually fix the vulnerability; revise.
@@ -551,7 +783,7 @@ You are a one-on-one tutor. This is a personal session, not a generic lecture se
 ARCHITECTURE — read this carefully, it changes how you behave:
 - **Teach in chat, not via tools.** When you explain a concept, ask a comprehension question, or react to the learner, you do it by WRITING TO THE LEARNER IN CHAT. Do not call any `record_lecture_turn`-style tool. There is no such tool exposed to you. A watcher subsystem reads the chat and writes the structured transcript into the engine automatically — explanations, checks, learner responses are all classified out of what you actually say. Your job is the teaching, not the bookkeeping.
 - **One explanation per message, then end.** Each assistant message in a lecture should contain ONE substantive explanation chunk followed by ONE comprehension check question. Then END THE MESSAGE and wait for the learner to reply. Do not chain multiple explanations into one wall-of-text — the watcher will only record the first one, and walls of text don't teach.
-- **The engine remains the source of truth for state transitions.** You still call `start_lesson`, `assign_exercise`, `submit_assignment`, `grade_assignment`, `decide_next`, `close_dialog`, `complete_module`, `finalize_course`, `schedule_review`, `complete_review`, `record_diagnostic`, `update_learner_profile`, `propose_curriculum`, `approve_curriculum`, `record_dialog_turn`, `get_course_state`, `raise_teacher_blocker`. The lecture-recording tools are gone.
+- **The engine remains the source of truth for state transitions.** You still call `start_lesson`, `assign_exercise`, `submit_assignment`, `grade_assignment`, `decide_next`, `close_dialog`, `complete_module`, `finalize_course`, `schedule_review`, `complete_review`, `record_diagnostic`, `update_learner_profile`, `propose_curriculum`, `approve_curriculum`, `record_dialog_turn`, `get_course_state`, `raise_teacher_blocker`, `register_exercise_file`, `write_lecture_transcript`. The lecture-recording tools are gone.
 
 Hard contract — non-negotiable:
 - Personalize, don't lecture. The LEARNER PROFILE (auto-injected into your system prompt every turn once `record_diagnostic` has run) is the source of truth for voice, examples, pace, and difficulty. If you find yourself writing the same explanation you'd give anyone, stop and re-anchor against the profile.
@@ -593,6 +825,10 @@ c. **Cover the material in chat, one chunk per message.** Cadence:
    5. If the learner asks a question mid-lecture instead of answering, the watcher records it as a `learner_question`. Answer it before returning to your planned next chunk.
    When you observe a profile-relevant signal — an analogy lands hard, a new stumbling block emerges, they're way faster/slower than expected, jargon tolerance is higher/lower than assumed — call `update_learner_profile` with a one-line `observation` and only the changed fields. Don't wait for the lesson to end.
    Skip the lecture chunks ONLY when the diagnostic shows the learner already knows this concept. In that case, write a one-line acknowledgement and go straight to (d). The watcher won't fabricate lecture turns from chatter that isn't actually teaching.
+c2. **Author dual-presentation artifacts.** Before assigning the graded exercise, produce two persisted artifacts so the learner has a curated lecture transcript and self-contained example files on disk:
+   1. `register_exercise_file` — for each example / dry-code / scaffold file you want the learner to study: call `register_exercise_file(lesson_id, path, content)`. File names are agent-chosen; extensions match the subject language (`.py`, `.pl`, `.md`, etc.). Files land in `lessons/<lesson_id>/exercises/`. Exercise files are ILLUSTRATIVE — they are not graded and carry no `verify_cmd`. If the artifact needs verification, it's an `assign_exercise` assignment, not an exercise file.
+   2. `write_lecture_transcript` — after the exercise files are registered, call `write_lecture_transcript(lesson_id, content)` with a lecture-style markdown narrative that explains the topic end-to-end and embeds relative-path references to each exercise file (e.g. `exercises/example_01.py`). The transcript is the primary served content the learner reads; the exercises demonstrate. Both must exist before you call `assign_exercise`.
+   For pure-theory lessons with no code examples, skip step 1 and just write the lecture transcript (step 2 still required).
 d. `assign_exercise` — pick the SMALLEST exercise that proves the concept. For code, prefer `fix-broken-code` (you write the broken file via `artifact_files`; learner edits) over `implement-from-scratch` for early lessons. Define exact `expected_markers` and a runnable `verify_cmd`. The watcher auto-fires `conclude_lecture` for you when comprehension across recorded learner_responses meets the threshold; assigning before then is fine, but the lesson stays in `lecturing` status until the threshold is met.
    - For pure-concept lessons (theory, design tradeoffs, "why does X work this way"), use `socratic-dialog`: set `verification.min_turns` and `verification.required_concepts`, then drive the lesson through `record_dialog_turn` (one call per turn — agent_question, then learner_answer).
    - For factual recall, use `multiple-choice` or `fill-blank` with `quiz_questions`. `assign_exercise` tries to launch the live quiz UI immediately and returns `live_quiz_launch: {attempted, launched, reason, ...}`. READ THAT FIELD before narrating — if `launched=false`, surface the reason and fall back to chat-flow Q&A.
@@ -666,7 +902,78 @@ AGENT_MODE_METADATA = {
     },
 }
 
+# GUI-only view panels — read-only visualization surfaces exposed through
+# the GUI "tools" menu. These are NOT agent modes: they never appear in the
+# composer mode picker, `/mode`, the splash banner, or `/set agent_mode`
+# autocomplete, and `POST /api/modes/{name}` rejects them. They drive no
+# system-prompt workflow text. Each entry: name, display_name, description.
+GUI_VIEW_PANELS = [
+    {
+        "name": "history",
+        "display_name": "History",
+        "description": (
+            "Searchable conversation history (keyword, role, and "
+            "tool-name filters)."
+        ),
+    },
+    {
+        "name": "memory",
+        "display_name": "Memory Map",
+        "description": (
+            "Live context-window map: a color grid fingerprinting every "
+            "layer (system prompt, workspace, skills, summary, goal, "
+            "history) as it evolves each turn and each iteration."
+        ),
+    },
+    {
+        "name": "systemPrompts",
+        "display_name": "System Prompts",
+        "description": (
+            "Edit the base + per-mode system-prompt templates "
+            "(view, edit, save, reload, init, reset)."
+        ),
+    },
+    {
+        "name": "files",
+        "display_name": "Files",
+        "description": (
+            "Navigate and edit the session's workspace files — a tree, a "
+            "code editor (CodeMirror), and create / rename / delete. "
+            "Requires an attached workspace."
+        ),
+        # Unlike the other view panels, Files only makes sense with a
+        # workspace attached. modes.py honors this to disable the entry
+        # (and the tools button) when no folder is attached.
+        "needs_workspace": True,
+    },
+    {
+        "name": "trace",
+        "display_name": "Trace Analyzer",
+        "description": (
+            "Per-run visualization of context growth, tokenizer drift, "
+            "compaction/nudge/tool timelines, redundant reads, subagents, "
+            "and memory — the data for harness-performance decisions. "
+            "Opens in a new tab."
+        ),
+        # External full-page route (not an in-page panel). The tools
+        # dropdown renders external views as a new-tab link to `route`
+        # instead of calling setView.
+        "external": True,
+        "route": "/trace",
+        # Session-scoped: the tools dropdown appends ?session=<current session>
+        # so the analyzer opens on this session's combined run view, not a
+        # global run picker.
+        "route_session": True,
+    },
+]
+
 NUDGE_EMPTY_RESPONSE = "You have completed your tool executions but provided no textual response. Please provide a clear, textual summary of your findings or a final answer to the user."
+
+NUDGE_EMPTY_RESPONSE_CHILD = (
+    "You have completed your tool executions but provided no textual response. "
+    "Return a concise summary of your findings to the parent orchestrator now — "
+    "partial results are valuable. Do not wait for further input."
+)
 
 
 # --- Pricing & Models ---

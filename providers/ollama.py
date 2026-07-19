@@ -101,18 +101,29 @@ class OllamaError(RuntimeError):
         self.actionable = actionable or message
 
 
-def _resolve_host(explicit: Optional[str] = None) -> str:
+def _resolve_host(explicit: Optional[str] = None, mode: str = "auto") -> str:
     """Pick the right Ollama endpoint.
 
-    Priority:
-      1. Explicit constructor `host=` argument
-      2. `OLLAMA_HOST` environment variable (official CLI convention)
-      3. `https://ollama.com` if `OLLAMA_API_KEY` is set (hosted service)
-      4. `http://localhost:11434` (default local daemon)
+    ``mode`` is the ``ollama_mode`` session variable ("local" | "cloud" |
+    "auto"). Priority:
+
+      1. Explicit ``host`` argument / ``ollama_host`` variable (always wins —
+         power-user override for a custom daemon)
+      2. ``mode == "cloud"`` → ``https://ollama.com`` (hosted service; needs an
+         API key via ``ollama_api_key`` / ``OLLAMA_API_KEY``)
+      3. ``mode == "local"`` → ``OLLAMA_HOST`` env if set, else the local
+         daemon. The legacy ``OLLAMA_API_KEY``→cloud auto-switch is
+         *suppressed* here so "local" always means local.
+      4. ``mode == "auto"`` (legacy default) → ``OLLAMA_HOST`` env →
+         ``https://ollama.com`` if ``OLLAMA_API_KEY`` is set → localhost.
     """
     if explicit:
         host = explicit
-    else:
+    elif mode == "cloud":
+        host = "https://ollama.com"
+    elif mode == "local":
+        host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+    else:  # auto / legacy
         env_host = os.environ.get("OLLAMA_HOST")
         if env_host:
             host = env_host
@@ -196,8 +207,17 @@ def _classify_api_error_body(host: str, model: str, body: str) -> OllamaError:
                 f"To list installed models: `ollama list`."
             ),
         )
-    if "prompt too long" in lowered or (
-        "exceed" in lowered and "context" in lowered
+    # Ollama's actual wording is "The prompt is too long: N, model maximum
+    # context length: M" — match that plus the common variants. The harness
+    # reacts to this with reactive overflow recovery (compact + retry), so
+    # this classification must fire for the real daemon message, not just
+    # the literal "prompt too long" substring.
+    if (
+        "prompt too long" in lowered
+        or "prompt is too long" in lowered
+        or "maximum context length" in lowered
+        or ("too long" in lowered and "context" in lowered)
+        or ("exceed" in lowered and "context" in lowered)
     ):
         return OllamaError(
             f"Ollama context overflow for '{model}': {body[:200]}",
@@ -222,12 +242,16 @@ class OllamaProvider(LLMProvider):
         model_name: str = "",
         host: Optional[str] = None,
         *,
+        api_key: Optional[str] = None,
         options: Optional[OllamaOptions] = None,
         request_timeout: float = 300.0,
     ):
         super().__init__(model_name)
         self.name = "ollama"
         self.host = _resolve_host(host)
+        # Cloud auth: explicit per-session key wins, else env OLLAMA_API_KEY.
+        # A local daemon ignores the bearer token.
+        self.api_key = api_key if api_key is not None else os.getenv("OLLAMA_API_KEY")
         self.options = options or OllamaOptions()
         self.request_timeout = float(request_timeout)
         # Cache the preflight result so we don't probe the daemon on every
@@ -366,8 +390,8 @@ class OllamaProvider(LLMProvider):
     # -------------------------------------------------------- API helpers
 
     def _auth_headers(self) -> Dict[str, str]:
-        if self.API_KEY:
-            return {"Authorization": f"Bearer {self.API_KEY}"}
+        if self.api_key:
+            return {"Authorization": f"Bearer {self.api_key}"}
         return {}
 
     def _fetch_models(self) -> List[str]:
@@ -377,7 +401,7 @@ class OllamaProvider(LLMProvider):
             )
             with urllib.request.urlopen(req, timeout=self.request_timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
-            return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+            return [m.get("name", "") for m in data.get("models", [])]
         except urllib.error.URLError as exc:
             raise _classify_url_error(self.host, exc)
         except (json.JSONDecodeError, OSError) as exc:
@@ -687,6 +711,51 @@ class OllamaProvider(LLMProvider):
         constructing the provider; safe to omit in standalone use.
         """
         self._session_variables = variables
+
+    def apply_session_host(self, variables: Dict[str, Any]) -> None:
+        """Recompute ``self.host`` / ``self.api_key`` from the session's
+        ``ollama_host`` / ``ollama_mode`` / ``ollama_api_key`` variables and
+        invalidate the preflight cache. Called by the harness
+        (`mucli.sync_provider_settings`) on provider construction and whenever
+        one of those variables changes via `/set` or the GUI.
+
+        Priority: explicit ``ollama_host`` wins; otherwise ``ollama_mode``
+        selects local (env/localhost) vs cloud (ollama.com) vs auto (legacy
+        env-driven). The API key falls back to ``OLLAMA_API_KEY`` env.
+        """
+        host_var = variables.get("ollama_host") or None
+        mode = variables.get("ollama_mode") or "auto"
+        self.host = _resolve_host(host_var, mode)
+        key = variables.get("ollama_api_key")
+        self.api_key = key if key else os.getenv("OLLAMA_API_KEY")
+        self.invalidate_preflight()
+
+    def apply_session_variables(self, variables: Dict[str, Any]) -> None:
+        """One-call wiring: bind the variables dict AND recompute host/key."""
+        self._session_variables = variables
+        self.apply_session_host(variables)
+
+    def compaction_safety_factor(self) -> float:
+        """Ollama's cl100k_base estimate under-counts the model's real
+        tokenizer (observed ~2.2x for qwen-class models), and the streamed
+        ``prompt_eval_count`` only reflects the non-cached prompt delta — so
+        the compactor must target a reduced limit or the real prompt
+        overflows before compaction fires (the "prompt is too long" 400).
+
+        Tunable via the ``ollama_token_safety_factor`` session variable
+        (``/set ollama_token_safety_factor <n>``); default 2.5 gives ~20%
+        headroom beyond the observed drift. Set to 1.0 to disable.
+        """
+        try:
+            vars_ = getattr(self, "_session_variables", None) or {}
+            raw = vars_.get("ollama_token_safety_factor")
+            if raw is not None:
+                f = float(raw)
+                if f > 0:
+                    return f
+        except (TypeError, ValueError):
+            pass
+        return 2.5
 
 
 __all__ = [

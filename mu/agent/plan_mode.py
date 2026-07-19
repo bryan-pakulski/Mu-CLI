@@ -68,13 +68,24 @@ WRITE_TOOLS: Set[str] = {
     "finalize_course",
     "schedule_review",
     "complete_review",
+    # Dual-presentation write tools (author lecture.md + exercise files
+    # to disk; blocked in plan mode like other teacher mutators).
+    "write_lecture_transcript",
+    "register_exercise_file",
+    # Memory lifecycle mutators (status transitions mutate store state;
+    # blocked in plan mode consistent with save_memory behavior).
+    "update_memory_status",
+    "supersede_memory",
+    "retire_memory",
+    "reactivate_memory",
+    "archive_memory",
 }
 
 
 def _build_envelope(tool_name: str) -> dict:
     """Build a tool-result envelope that mimics what `_handle_*` returns
     when a tool is denied. The schema matches `_build_tool_envelope` in
-    `core/tools.py` so the agent loop's structured-result wrapping does
+    `mu/tools/_envelope.py` so the agent loop's structured-result wrapping does
     not need a special case.
     """
     return {

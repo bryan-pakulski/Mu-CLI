@@ -3,7 +3,7 @@
 Two checks run before `bash` / `bash_background` reach the shell:
 
 1. **Argument-path scan** — every path-shaped token in the command is
-   passed through `core.secret_paths.is_denied_path`. Catches direct
+   passed through `mu.security.secret_paths.is_denied_path`. Catches direct
    exfiltration like `cat ~/.ssh/id_rsa`, `cp ~/.aws/credentials /tmp/x`,
    or `tar czf - ~/.ssh`.
 
@@ -15,7 +15,7 @@ The session variable `security_allow_secret_paths` (truthy) bypasses both
 checks. Set with `/set security_allow_secret_paths true` only for
 deliberate one-off work; it does not survive a session reload.
 
-The output scrubber in `core.secret_paths.redact_secrets` continues to
+The output scrubber in `mu.security.secret_paths.redact_secrets` continues to
 apply even when this guard is bypassed.
 """
 

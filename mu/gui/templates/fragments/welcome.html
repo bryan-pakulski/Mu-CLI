@@ -1,0 +1,216 @@
+<div class="welcome" x-data="welcomeView()" x-init="load()">
+    <h1>μcli</h1>
+    <p class="lede">
+        Pick a session below to resume, or create a new one.
+        Providers read credentials from
+        <code>OPENAI_API_KEY</code>,
+        <code>GEMINI_API_KEY</code>,
+        <code>OLLAMA_HOST</code>.
+    </p>
+
+    <div x-show="sessions.length">
+        <h4 class="label-mono">Existing</h4>
+        <div class="session-list">
+            <template x-for="s in sessions" :key="s.name">
+                <div class="row">
+                    <span class="name" x-text="s.name"
+                          :title="'last modified: ' + (s.modified_at || '')"></span>
+                    <span class="meta" x-text="s.modified_at"></span>
+                    <button class="subtle" @click="load_session(s.name)"
+                            :title="'Load session ' + s.name">load</button>
+                    <button @click="$store.confirm.ask('Delete session \'' + s.name + '\'?', $event, () => remove(s.name), {danger:true})"
+                            title="Delete session (asks first)">delete</button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <h4 class="label-mono">Create new</h4>
+    <form @submit.prevent="createSession()">
+        <div class="form-row">
+            <label>name</label>
+            <input type="text" x-model="form.name" placeholder="my-project" required>
+        </div>
+        <div class="form-row">
+            <label>provider</label>
+            <select x-model="form.provider" @change="onProviderChange()" required>
+                <option value="">—</option>
+                <template x-for="p in providers" :key="p.name">
+                    <option :value="p.name" x-text="p.name + (p.configured ? '' : ' (unconfigured)')"></option>
+                </template>
+            </select>
+        </div>
+        <!-- ollama local/cloud first-class toggle (ollama only) -->
+        <div class="form-row ollama-mode-row"
+             x-show="form.provider === 'ollama'" x-cloak>
+            <label>endpoint</label>
+            <div class="ollama-mode-toggle">
+                <button type="button"
+                        class="ollama-mode-btn"
+                        :class="{ active: form.ollamaMode === 'local' }"
+                        @click="setOllamaMode('local')"
+                        title="Your daemon: OLLAMA_HOST env or localhost">local</button>
+                <button type="button"
+                        class="ollama-mode-btn"
+                        :class="{ active: form.ollamaMode === 'cloud' }"
+                        @click="setOllamaMode('cloud')"
+                        title="ollama.com cloud (needs API key)">cloud</button>
+            </div>
+        </div>
+        <div class="form-row ollama-key-row"
+             x-show="form.provider === 'ollama' && form.ollamaMode === 'cloud'" x-cloak>
+            <label>api key</label>
+            <input type="password" x-model="form.ollamaApiKey"
+                   placeholder="ollama.com API key"
+                   @change="loadModels()"
+                   autocomplete="off" />
+        </div>
+        <div class="form-row" x-show="form.provider">
+            <label>model</label>
+            <select x-model="form.model" x-show="models.length" required>
+                <option value="">—</option>
+                <template x-for="m in models" :key="m">
+                    <option :value="m" x-text="m"></option>
+                </template>
+            </select>
+            <input type="text" x-model="form.model" x-show="!models.length"
+                   placeholder="gpt-4o-mini" required>
+        </div>
+        <div x-show="modelError" style="color:var(--text-dim);font-size:11.5px;margin-top:-4px;margin-bottom:8px;"
+             x-text="'could not list models: ' + modelError + ' — type one above.'"></div>
+        <div class="form-row">
+            <label>workspace</label>
+            <div style="display:flex;gap:4px;flex:1;">
+                <input type="text" x-model="form.workspace" placeholder="~/my-project (optional)" style="flex:1;">
+                <button type="button" class="subtle" style="flex-shrink:0;padding:8px 10px;"
+                        @click="$store.fileBrowser.show('folder', (p) => { form.workspace = p })"
+                        title="Browse for folder">browse</button>
+            </div>
+        </div>
+        <p style="color:var(--text-dim);font-size:11.5px;line-height:1.5;margin:-4px 0 12px 0;">
+            Without a workspace the agent runs in chat-only mode.
+        </p>
+        <div class="actions">
+            <span class="err" x-text="error"></span>
+            <button type="submit" class="primary">create & load</button>
+        </div>
+    </form>
+</div>
+
+<script>
+function welcomeView() {
+    return {
+        sessions: [],
+        providers: [],
+        models: [],
+        modelError: null,
+        error: null,
+        form: {
+            name: "", provider: "", model: "", workspace: "",
+            ollamaMode: "local", ollamaApiKey: "",
+        },
+        async load() {
+            const [sR, pR] = await Promise.all([
+                fetch("/api/sessions"),
+                fetch("/api/providers"),
+            ]);
+            this.sessions = (await sR.json()).sessions || [];
+            this.providers = (await pR.json()).providers || [];
+        },
+        async onProviderChange() {
+            this.form.model = "";
+            if (this.form.provider === "ollama") {
+                // Reset the toggle to the sensible default for a fresh
+                // session (local daemon); the user can switch to cloud.
+                this.form.ollamaMode = "local";
+                this.form.ollamaApiKey = "";
+            }
+            await this.loadModels();
+        },
+        async setOllamaMode(mode) {
+            this.form.ollamaMode = mode;
+            this.form.model = "";
+            await this.loadModels();
+        },
+        async loadModels() {
+            this.models = [];
+            this.modelError = null;
+            this.form.model = "";
+            if (!this.form.provider) return;
+            // Cloud without a key can't list models — surface that
+            // instead of a confusing empty dropdown.
+            if (this.form.provider === "ollama"
+                && this.form.ollamaMode === "cloud"
+                && !this.form.ollamaApiKey) {
+                this.modelError = "enter an ollama.com API key to list cloud models";
+                return;
+            }
+            try {
+                let url = `/api/providers/${this.form.provider}/models`;
+                if (this.form.provider === "ollama") {
+                    const qs = new URLSearchParams();
+                    qs.set("ollama_mode", this.form.ollamaMode);
+                    if (this.form.ollamaApiKey) qs.set("ollama_api_key", this.form.ollamaApiKey);
+                    url += `?${qs.toString()}`;
+                }
+                const r = await fetch(url);
+                const d = await r.json();
+                this.models = d.models || [];
+                this.modelError = d.error || null;
+            } catch (e) { this.modelError = String(e); }
+        },
+        async load_session(name) {
+            this.error = null;
+            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}/load`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({}),
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                this.error = d.detail || `load failed (${r.status})`;
+                return;
+            }
+            location.reload();
+        },
+        async createSession() {
+            this.error = null;
+            const body = {
+                name: this.form.name,
+                provider: this.form.provider,
+                model: this.form.model,
+                activate: true,
+            };
+            if (this.form.workspace.trim()) body.workspace = this.form.workspace.trim();
+            if (this.form.provider === "ollama") {
+                body.ollama_mode = this.form.ollamaMode;
+                body.ollama_host =
+                    this.form.ollamaMode === "cloud" ? "https://ollama.com" : "";
+                if (this.form.ollamaApiKey) body.ollama_api_key = this.form.ollamaApiKey;
+            }
+            const r = await fetch("/api/sessions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                this.error = d.detail || `create failed (${r.status})`;
+                return;
+            }
+            location.reload();
+        },
+        async remove(name) {
+            // Caller dispatches via $store.confirm.ask so no native popup.
+            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || `Delete failed (${r.status})`, "error");
+                return;
+            }
+            Alpine.store("toast").show(`Session '${name}' deleted`, "success");
+            location.reload();
+        },
+    };
+}
+</script>

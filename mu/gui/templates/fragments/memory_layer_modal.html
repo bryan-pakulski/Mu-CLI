@@ -1,0 +1,54 @@
+<!-- Layer-content modal for the Memory Map panel. Clicking a layer in the
+     legend opens this overlay with the actual text the harness injects for
+     that layer, shown as selectable + copyable preformatted text (the
+     model's real view — the assembled system prompt for L0, the rendered
+     conversation for L5, workspace files for L1, etc.). Lives outside the
+     panel's x-show so it stays open even if the panel view changes. -->
+<div class="modal-backdrop"
+     x-show="$store.memory.layerModal.open"
+     x-cloak
+     x-transition.opacity.duration.150ms
+     @click.self="$store.memory.closeLayer()"
+     @keydown.escape.window="$store.memory.layerModal.open && $store.memory.closeLayer()">
+    <div class="modal modal-lg memory-layer-modal">
+        <div class="modal-head">
+            <div class="memory-layer-heading">
+                <span class="memory-layer-swatch"
+                      :style="'background:hsl(' + ($store.memory.layerModal.hue || 0) + ',68%,42%)'"></span>
+                <span class="modal-title"
+                      x-text="$store.memory.layerModal.id + ' · ' + $store.memory.layerModal.name"></span>
+            </div>
+            <button class="icon-btn"
+                    @click="$store.memory.closeLayer()"
+                    title="Close (Esc)">×</button>
+        </div>
+
+        <div class="memory-layer-meta mono muted">
+            <span x-text="$store.memory.layerModal.tokens + ' tok'"></span>
+            <span x-text="' · ' + $store.memory.layerModal.chars + ' chars'"></span>
+        </div>
+
+        <div class="modal-body memory-layer-body">
+            <div class="memory-layer-loading muted" x-show="$store.memory.layerModal.loading">loading…</div>
+            <div class="memory-layer-error"
+                 x-show="!$store.memory.layerModal.loading && $store.memory.layerModal.error"
+                 x-text="$store.memory.layerModal.error"></div>
+            <pre class="memory-layer-pre"
+                 x-show="!$store.memory.layerModal.loading && !$store.memory.layerModal.error"
+                 x-text="$store.memory.layerModal.content"></pre>
+            <div class="memory-layer-empty muted"
+                 x-show="!$store.memory.layerModal.loading && !$store.memory.layerModal.content && !$store.memory.layerModal.error">
+                this layer is empty
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button @click="$store.memory.copyLayer()"
+                    :disabled="$store.memory.layerModal.loading || !$store.memory.layerModal.content"
+                    :title="'Copy layer contents to clipboard'">
+                <span x-text="$store.memory.layerModal.copied ? 'copied ✓' : 'copy'"></span>
+            </button>
+            <button class="primary" @click="$store.memory.closeLayer()">close</button>
+        </div>
+    </div>
+</div>

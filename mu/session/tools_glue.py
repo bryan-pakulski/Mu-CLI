@@ -74,6 +74,30 @@ def execute_tool_with_memory(
     if feature_violation:
         return f"Error: {feature_violation}"
 
+    # --- Pre-write snapshot for workspace diff tracking ---
+    # Write tools (write_file, apply_diff, search_and_replace_file) modify
+    # files.  We snapshot the file's CURRENT content BEFORE the tool runs
+    # so that folder_context.get_context_diff_xml() can later produce a
+    # real diff (original vs modified).  Without this, lazy-loading would
+    # read the already-modified content as the "original", producing no diff.
+    if tool_name in {"write_file", "apply_diff", "search_and_replace_file"}:
+        _filename = tool_args.get("filename", "")
+        if _filename and session.folder_context:
+            try:
+                import os as _os
+                _full = _os.path.abspath(_filename)
+                _fc = session.folder_context
+                # Only snapshot if not already tracked (first write this turn)
+                if _full not in _fc.initial_snapshots and _fc._is_text_file(_full):
+                    try:
+                        _content = _fc._load_file_content(_full)
+                    except Exception:
+                        _content = None
+                    _fc.initial_snapshots[_full] = _content
+            except Exception:
+                pass
+    # --- End pre-write snapshot ---
+
     # Memory and scratchpad tools used to short-circuit here; they now
     # route through the normal dispatcher to the `@tool`-registered
     # handlers in `mu/tools/memory/handlers.py`, which resolve the
@@ -228,7 +252,7 @@ def build_structured_tool_result(
         )
     elif tool_name == "get_workspace_details":
         structured["data"] = session._parse_workspace_details(raw_text)
-    elif tool_name in {"write_file", "apply_diff"}:
+    elif tool_name in {"write_file", "apply_diff", "search_and_replace_file"}:
         filename = tool_args.get("filename", "")
         structured["data"] = {
             "filename": filename,

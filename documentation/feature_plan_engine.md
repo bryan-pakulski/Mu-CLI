@@ -4,10 +4,10 @@
 
 The feature plan engine provides a persistent workflow for implementing new features in phases instead of relying on a single free-form implementation turn.
 
-The engine is centered around a generated directory under `documentation/feature_req_<id>/` containing:
+The engine is centered around a single `feature_plan.json` file (stored in the workspace root or session directory) containing:
 
 - `feature_plan.json` — machine-readable plan metadata for the harness and server APIs.
-- `phase_1.md`, `phase_2.md`, ... — human-readable implementation phases that the model updates as work progresses.
+- Phase definitions embedded in the JSON plan, with human-readable descriptions the model updates as work progresses.
 
 This design allows a harness to:
 
@@ -18,18 +18,11 @@ This design allows a harness to:
 5. run a final review pass before returning success, and
 6. pause safely when the model raises a blocker that requires user input.
 
-In addition to the plan files on disk, the latest feature-loop runtime state can be stored in the active session JSON so blocked or interrupted loops can be reloaded after a disconnect or application restart.
+The feature plan and its phase/task state are persisted (to `feature_plan.json` and mirrored into the active session JSON), so a blocked or interrupted feature run can be reloaded after a disconnect or application restart and resumed from the last saved task.
 
-## Directory Layout
+## File Layout
 
-```text
-documentation/
-  feature_req_example_feature/
-    feature_plan.json
-    phase_1.md
-    phase_2.md
-    phase_3.md
-```
+The plan metadata is stored as a single `feature_plan.json` file in either the workspace root or the session directory. No `documentation/feature_req_<id>/` directory structure is created.
 
 ## Phase File Format
 
@@ -100,8 +93,8 @@ The user or harness sets plan approval metadata once the proposed phases are acc
 
 Approval can be updated through:
 
-- the `update_feature_plan` tool, or
-- the `/api/feature-plan/approve` server endpoint.
+- the `approve_feature_task` tool, or
+- the `POST /api/feature/{feature_id}/approve` server endpoint.
 
 ### 3. Implementation Loop
 
@@ -124,9 +117,9 @@ That blocker should include:
 - the exact input needed from the user,
 - any focused follow-up questions.
 
-When a blocker is raised, the harness should pause the feature loop, expose the task state and conversation history to the user, collect additional context, and then resume the loop with that context.
+When a blocker is raised, the agent pauses the feature run, exposes the task state and conversation history to the user, collects additional context, and then resumes with that context.
 
-The persisted feature-loop state should include the current directory, last completed cycle, blocker payload, and the most recent summarized result so the harness can reconstruct the paused task after reconnecting.
+The persisted feature state (plan + task statuses in the session JSON and `feature_plan.json`) captures the current directory, last completed task, and blocker payload, so the harness can reconstruct the paused run after reconnecting.
 
 ### 5. Review Loop
 
@@ -149,11 +142,15 @@ The engine now exposes staged planning, execution, review, and archive tools:
 - `create_feature`
 - `create_phases`
 - `create_task`
+- `create_feature_task` (legacy single-shot compatibility — staged calls above are the default)
 
 ### Execution
 
 - `get_execution_state`
+- `get_tasks`
+- `get_current_task`
 - `update_task_status`
+- `update_feature_task`
 - `block_task`
 - `resume_task`
 - `raise_blocker`
@@ -162,11 +159,13 @@ The engine now exposes staged planning, execution, review, and archive tools:
 
 - `review_all_completed_tasks`
 - `review_completed_tasks`
+- `complete_review`
+- `schedule_review`
+- `get_due_reviews`
 - `propose_task_diff`
 - `decide_task_diff`
 - `archive_task`
-
-`approve_feature_task` / metadata updates still control final review completion status.
+- `approve_feature_task` (sets plan approval / final review completion status)
 
 ## CLI (Phase 5 command loop)
 
@@ -186,29 +185,29 @@ Feature mode now includes a command surface that maps directly to workflow steps
 
 ## Server Endpoints
 
-The headless server exposes feature-plan endpoints for GUI and external harnesses:
+The GUI server exposes feature endpoints under the `/api/feature` prefix
+(router in `mu/gui/routers/feature.py`) for the web UI and external
+harnesses:
 
-- `GET /api/feature-plan?directory=<path>`
-- `POST /api/feature-plan/approve`
-- `POST /api/feature-loop`
-- `POST /api/feature-loop/resolve`
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/feature/state` | Active feature + plan summary (kanban phase columns, task list, metadata path). Returns `{active: false, ...}` when no session is active. |
+| `POST` | `/api/feature/create` | Create a new feature with optional `phases`/`tasks` in the body (`feature_name` required, `directory` and `feature_request` optional). |
+| `POST` | `/api/feature/{feature_id}/approve` | Mark the plan approved so implementation can begin. |
+| `POST` | `/api/feature/{feature_id}/load` | Load a feature into the active slot. |
+| `POST` | `/api/feature/{feature_id}/unload` | Clear the active feature (alias of `/feature exit`). |
+| `POST` | `/api/feature/{feature_id}/archive` | Archive a completed feature. |
+| `POST` | `/api/feature/{feature_id}/unarchive` | Restore an archived feature. |
+| `DELETE` | `/api/feature/{feature_id}` | Delete a feature (refuses 409 if it is currently loaded). |
+| `POST` | `/api/feature/tasks/{task_id}/transition` | Move a task to a new status (`to_status`, optional `notes`/`blocked_reason`). Invalid transitions return 409. |
+| `POST` | `/api/feature/tasks/{task_id}/exit-criteria/{idx}/toggle` | Flip one exit-criterion checkbox for a task. |
 
-### `/api/feature-loop`
-
-`/api/feature-loop` runs the approved feature implementation loop on the server side.
-
-Behavior:
-
-1. refreshes plan state from disk,
-2. verifies the plan is approved,
-3. prompts the model for the next incomplete phase,
-4. repeats until phases are complete,
-5. triggers a review prompt,
-6. pauses when a blocker is raised,
-7. resumes after user input is supplied,
-8. stops when review is completed or the loop becomes permanently blocked.
-
-If the server process is restarted, it can restore the latest persisted feature-loop state from the session and continue from the next saved cycle instead of starting from scratch.
+There is **no** server-side `/api/feature-loop` runner. The phase-by-phase
+implementation loop is driven by the agent in feature mode (the system
+prompt's prompting contract below), not by a long-running server
+endpoint. The server endpoints above are short request/response calls the
+UI uses to read and mutate plan state between agent turns; the agent
+itself advances phases, raises blockers, and runs review via the tools.
 
 ## Prompting Contract
 
@@ -227,9 +226,9 @@ Feature mode prompts should instruct the agent to:
 ## Recommended Harness Flow
 
 1. User requests a feature.
-2. Agent runs in feature mode and creates the phased plan.
-3. User reviews and approves the plan.
-4. Harness starts `/api/feature-loop`.
-5. Harness monitors the returned plan summary after each cycle.
-6. If review passes, report completion to the user.
-7. If review fails, continue the loop until the plan truly satisfies its criteria.
+2. Agent runs in feature mode and creates the phased plan (`create_feature` → `create_phases` → `create_task`).
+3. User reviews and approves the plan (`approve_feature_task` tool, `POST /api/feature/{feature_id}/approve`, or the `/feature` approval flow).
+4. Agent advances phase-by-phase in feature mode, updating task status via `update_task_status` and the `/api/feature/tasks/{task_id}/transition` endpoint; the UI reads `GET /api/feature/state` between turns.
+5. If the agent hits a missing requirement, it calls `raise_blocker` and pauses for user input; the user supplies context and the agent resumes.
+6. Once all phases are complete, the agent runs review (`review_all_completed_tasks` or `/feature review auto`).
+7. If review passes, report completion; if it fails, the agent reopens the relevant tasks and continues until the plan satisfies its exit criteria.

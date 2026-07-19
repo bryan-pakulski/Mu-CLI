@@ -5,7 +5,7 @@ before doing anything. Two checks, in order:
 
   1. **Secret-path denylist** — unconditional. Denied paths (~/.ssh, /etc/shadow,
      ~/.aws, .env*, *.pem, etc.) are refused even when no workspace is attached.
-     See `core/secret_paths.py:is_denied_path`. There is no per-call override
+     See `mu/security/secret_paths.py:is_denied_path`. There is no per-call override
      at this layer; bash callers can opt in to relaxed checks via the
      `security_allow_secret_paths` session variable.
 

@@ -1,5 +1,8 @@
-"""Memory / scratchpad slash command: /memory status|list|clear."""
+"""Memory / scratchpad slash command: /memory status|list|clear|save|load."""
 
+import json
+import os
+import time
 from typing import Any, Dict
 
 from utils.helpers import safe_markup
@@ -20,11 +23,18 @@ def _build_stats(store: Any) -> Dict[str, Any]:
         key=lambda e: (int(getattr(e, "hits", 0) or 0), float(getattr(e, "updated_at", 0) or 0)),
         reverse=True,
     )[:3]
+    # Count entries by lifecycle status so /memory status shows the
+    # active/done/superseded/archived/stale breakdown.
+    status_counts: Dict[str, int] = {}
+    for e in entries:
+        s = getattr(e, "status", "active") or "active"
+        status_counts[s] = status_counts.get(s, 0) + 1
     return {
         "entries": len(entries),
         "total_hits": total_hits,
         "avg_hits": (total_hits / len(entries)) if entries else 0.0,
         "top_entries": [e.to_dict() for e in top],
+        "status_counts": status_counts,
     }
 
 
@@ -172,8 +182,6 @@ LIST_TARGETS = (
     "L1B",
     "L2",
     "L3",
-    "L4",
-    "L4B",
     "L5",
 )
 _LIST_TARGETS_LOWER = {t.lower(): t for t in LIST_TARGETS}
@@ -184,8 +192,7 @@ _LAYER_BUILDERS = {
     "L1B": ("_build_skills_block", "Installed skills"),
     "L2": (None, "Conversation summary"),  # straight off session_manager
     "L3": ("_build_active_goal_context", "Active goal"),
-    "L4": ("_build_recent_tool_context", "Recent tool activity"),
-    "L4B": (None, "Retrieved snippets"),  # off session._pending_retrieved_context
+
     "L5": (None, "Conversation history"),  # off session_manager.history
 }
 
@@ -268,8 +275,6 @@ def _layer_content(session: Any, layer_id: str) -> str:
         return compose_base_system_prompt(session)
     if layer_id == "L2":
         return str(getattr(session.session_manager, "conversation_summary", "") or "")
-    if layer_id == "L4B":
-        return str(getattr(session, "_pending_retrieved_context", "") or "")
     if layer_id == "L5":
         history = list(getattr(session.session_manager, "history", []) or [])
         return _render_conversation_history(history)
@@ -284,6 +289,25 @@ def _layer_content(session: Any, layer_id: str) -> str:
         return ""
 
 
+def _status_style(status: str) -> str:
+    """Rich style for a memory entry's lifecycle status.
+
+    active=green, done=dim, superseded=yellow, archived=dim+strike, stale=red.
+    """
+    s = (status or "active").lower()
+    if s == "active":
+        return "green"
+    if s == "done":
+        return "dim"
+    if s == "superseded":
+        return "yellow"
+    if s == "archived":
+        return "dim strike"
+    if s == "stale":
+        return "red"
+    return "white"
+
+
 def _print_store_table(console, store, title) -> None:
     from rich import box
     from rich.table import Table
@@ -295,14 +319,17 @@ def _print_store_table(console, store, title) -> None:
 
     table = Table(title=title, box=box.SIMPLE)
     table.add_column("ID", style="dim", justify="right")
+    table.add_column("Status", justify="left")
     table.add_column("Hits", style="yellow", justify="right")
     table.add_column("Tags", style="yellow")
     table.add_column("Source", style="blue")
     table.add_column("Content")
     for entry in store.entries:
         tags = ", ".join(entry.tags) if entry.tags else "-"
+        status = getattr(entry, "status", "active") or "active"
         table.add_row(
             f"#{entry.id}",
+            Text(status, style=_status_style(status)),
             str(entry.hits),
             Text(tags),
             Text(entry.source or "-"),
@@ -411,6 +438,159 @@ def _clear(session: Any, target: str, allow_prompt: bool) -> CommandResult:
     return CommandResult(ok=True, message=msg)
 
 
+# --------------------------------------------------------------- /memory save/load
+
+def _memory_dir() -> str:
+    from utils.config import HISTORY_DIR
+    return os.path.join(HISTORY_DIR, "memory")
+
+
+def _save_memory(session: Any, name: str, allow_prompt: bool) -> CommandResult:
+    name = (name or "").strip()
+    if not name:
+        return CommandResult(ok=False, message="Usage: /memory save <name>")
+
+    mem_dir = _memory_dir()
+    os.makedirs(mem_dir, exist_ok=True)
+    filepath = os.path.join(mem_dir, f"{name}.json")
+
+    entries = [e.to_dict() for e in session.task_memory.entries]
+    payload = {
+        "entries": entries,
+        "saved_at": time.time(),
+        "session": getattr(session.session_manager, "current_session_name", "") or "",
+    }
+
+    try:
+        with open(filepath, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, default=str)
+    except OSError as exc:
+        return CommandResult(ok=False, message=f"Failed to save memory: {exc}")
+
+    msg = f"Saved {len(entries)} memory entries to {filepath}"
+    if allow_prompt:
+        console = _console(session)
+        if console is not None:
+            try:
+                console.print(f"[green]{msg}[/green]")
+            except Exception:
+                pass
+    return CommandResult(ok=True, message=msg, data={"saved_count": len(entries), "filepath": filepath})
+
+
+def _load_memory(session: Any, name: str, allow_prompt: bool) -> CommandResult:
+    name = (name or "").strip()
+    if not name:
+        return CommandResult(ok=False, message="Usage: /memory load <name>")
+
+    filepath = os.path.join(_memory_dir(), f"{name}.json")
+    if not os.path.isfile(filepath):
+        return CommandResult(ok=False, message=f"No saved memory named {name!r} at {filepath}")
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        return CommandResult(ok=False, message=f"Failed to load memory: {exc}")
+
+    entries = payload.get("entries") or []
+    loaded = 0
+    for entry_dict in entries:
+        content = str(entry_dict.get("content", "")).strip()
+        if not content:
+            continue
+        tags = list(entry_dict.get("tags") or [])
+        source = str(entry_dict.get("source") or "")
+        kind = str(entry_dict.get("kind") or "")
+        session.task_memory.save(content, tags=tags, source=source, kind=kind)
+        loaded += 1
+
+    msg = f"Loaded {loaded} memory entries from {filepath}"
+    if allow_prompt:
+        console = _console(session)
+        if console is not None:
+            try:
+                console.print(f"[green]{msg}[/green]")
+            except Exception:
+                pass
+    return CommandResult(ok=True, message=msg, data={"loaded_count": loaded, "filepath": filepath})
+
+
+def _list_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
+    mem_dir = _memory_dir()
+    if not os.path.isdir(mem_dir):
+        msg = "No saved memory files."
+        if allow_prompt:
+            console = _console(session)
+            if console is not None:
+                try:
+                    console.print(f"[dim]{msg}[/dim]")
+                except Exception:
+                    pass
+        return CommandResult(ok=True, message=msg, data={"saved_files": []})
+
+    import glob
+    files = sorted(glob.glob(os.path.join(mem_dir, "*.json")))
+    saved = []
+    for filepath in files:
+        name = os.path.splitext(os.path.basename(filepath))[0]
+        try:
+            with open(filepath, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            count = len(data.get("entries") or [])
+            saved_at = data.get("saved_at") or 0
+        except Exception:
+            count = 0
+            saved_at = 0
+        saved.append({"name": name, "entries": count, "saved_at": saved_at, "filepath": filepath})
+
+    if allow_prompt:
+        console = _console(session)
+        if console is not None:
+            try:
+                from rich import box
+                from rich.table import Table
+
+                table = Table(title="Saved Memory Files", box=box.SIMPLE)
+                table.add_column("Name", style="cyan")
+                table.add_column("Entries", style="green", justify="right")
+                table.add_column("Saved", style="dim")
+                for item in saved:
+                    ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(item["saved_at"])) if item["saved_at"] else "-"
+                    table.add_row(item["name"], str(item["entries"]), ts)
+                console.print(table)
+            except Exception:
+                pass
+
+    return CommandResult(ok=True, message=f"{len(saved)} saved memory file(s).", data={"saved_files": saved})
+
+
+def _clear_saved_memory(session: Any, allow_prompt: bool) -> CommandResult:
+    mem_dir = _memory_dir()
+    if not os.path.isdir(mem_dir):
+        return CommandResult(ok=True, message="No saved memory files to clear.")
+
+    import glob
+    files = glob.glob(os.path.join(mem_dir, "*.json"))
+    cleared = 0
+    for filepath in files:
+        try:
+            os.unlink(filepath)
+            cleared += 1
+        except OSError:
+            pass
+
+    msg = f"Cleared {cleared} saved memory file(s)."
+    if allow_prompt:
+        console = _console(session)
+        if console is not None:
+            try:
+                console.print(f"[green]{msg}[/green]")
+            except Exception:
+                pass
+    return CommandResult(ok=True, message=msg, data={"cleared_count": cleared})
+
+
 # --------------------------------------------------------------- dispatch
 
 
@@ -418,7 +598,9 @@ def _clear(session: Any, target: str, allow_prompt: bool) -> CommandResult:
     "/memory",
     help=(
         "Inspect the harness state: /memory [status|list <target>|clear <target>]. "
-        "List targets: all, task, scratchpad, L1, L1B, L2, L3, L4, L4B, L5."
+        "List targets: all, task, scratchpad, L1, L1B, L2, L3, L5. "
+        "Cross-session: /memory save <name>, /memory load <name>, "
+        "/memory list saved, /memory clear saved."
     ),
 )
 def memory_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
@@ -429,10 +611,19 @@ def memory_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Command
     if sub in ("status", ""):
         return _status(session, allow_prompt)
     if sub == "list":
+        if rest.lower() == "saved":
+            return _list_saved_memory(session, allow_prompt)
         return _list(session, rest, allow_prompt)
     if sub == "clear":
+        if rest.lower() == "saved":
+            return _clear_saved_memory(session, allow_prompt)
         return _clear(session, rest, allow_prompt)
+    if sub == "save":
+        return _save_memory(session, rest, allow_prompt)
+    if sub == "load":
+        return _load_memory(session, rest, allow_prompt)
 
     return CommandResult(
-        ok=False, message=f"Unknown subcommand {sub!r}. Usage: /memory [status|list|clear]"
+        ok=False,
+        message=f"Unknown subcommand {sub!r}. Usage: /memory [status|list|clear|save|load]"
     )

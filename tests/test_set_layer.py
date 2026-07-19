@@ -9,6 +9,7 @@ from mu.session.session import Session, SessionManager
 from mu.commands.variables import LAYER_BUDGET_VARS
 from providers.base import LLMProvider, ProviderResponse
 from mu.ui.input import InputHandler
+from utils.config import _LAYER_CHAR_DEFAULTS
 
 
 class _DummyProvider(LLMProvider):
@@ -37,9 +38,9 @@ def session():
 
 
 def test_layer_budget_vars_cover_l1_through_l4b():
-    """Every layer with a per-layer budget (L1, L1B, L2, L3, L4, L4B)
-    has an entry. L5 is intentionally absent."""
-    assert set(LAYER_BUDGET_VARS.keys()) == {"L1", "L1B", "L2", "L3", "L4", "L4B"}
+    """Every layer with a per-layer budget (L1, L1B, L2, L3, L4B)
+    has an entry. L4 removed from system prompt; L5 intentionally absent."""
+    assert set(LAYER_BUDGET_VARS.keys()) == {"L1", "L1B", "L2", "L3", "L4B"}
     for layer_id, (var_name, _label, _desc) in LAYER_BUDGET_VARS.items():
         assert var_name, f"{layer_id} has empty variable name"
 
@@ -61,15 +62,15 @@ def test_layer_budget_vars_match_schema():
 def test_set_layer_value_is_tokens_not_chars(session):
     """The value passed to /set layer is TOKENS (matching the unit
     shown in /memory). Internally it's stored as chars at the 4:1
-    ratio — so `/set layer L4 6000` should land 24000 in the
+    ratio — so `/set layer L2 6000` should land 24000 in the
     `_chars` variable. This is the regression-pin for the bug where
     bumping L1 made it smaller because the user typed tokens but the
     command interpreted chars."""
-    result = mc.dispatch(session, "/set layer L4 6000", allow_prompt=False)
+    result = mc.dispatch(session, "/set layer L2 6000", allow_prompt=False)
     assert result.ok
-    assert session.variables["recent_tool_context_char_limit"] == 24000
-    assert result.data["layer"] == "L4"
-    assert result.data["variable"] == "recent_tool_context_char_limit"
+    assert session.variables["conversation_summary_char_limit"] == 24000
+    assert result.data["layer"] == "L2"
+    assert result.data["variable"] == "conversation_summary_char_limit"
     assert result.data["tokens"] == 6000
     assert result.data["chars"] == 24000
 
@@ -89,7 +90,6 @@ def test_set_layer_is_case_insensitive(session):
         ("L1B", "skills_max_chars"),
         ("L2", "conversation_summary_char_limit"),
         ("L3", "active_goal_context_char_limit"),
-        ("L4", "recent_tool_context_char_limit"),
         ("L4B", "retrieval_context_char_limit"),
     ],
 )
@@ -168,11 +168,11 @@ def test_set_layer_round_trip_in_tokens(session):
 
 def test_get_layer_with_id_returns_current_value(session):
     """1000 tokens stored, /get should report tokens AND chars."""
-    session.variables["recent_tool_context_char_limit"] = 4000
-    result = mc.dispatch(session, "/get layer L4", allow_prompt=False)
+    session.variables["conversation_summary_char_limit"] = 4000
+    result = mc.dispatch(session, "/get layer L2", allow_prompt=False)
     assert result.ok
-    assert result.data["layer"] == "L4"
-    assert result.data["variable"] == "recent_tool_context_char_limit"
+    assert result.data["layer"] == "L2"
+    assert result.data["variable"] == "conversation_summary_char_limit"
     assert result.data["tokens"] == 1000
     assert result.data["chars"] == 4000
 
@@ -181,9 +181,9 @@ def test_get_layer_no_id_lists_all_budgets(session):
     result = mc.dispatch(session, "/get layer", allow_prompt=False)
     assert result.ok
     budgets = result.data["layer_budgets"]
-    assert len(budgets) == 6
+    assert len(budgets) == 5
     layer_ids = {row["layer"] for row in budgets}
-    assert layer_ids == {"L1", "L1B", "L2", "L3", "L4", "L4B"}
+    assert layer_ids == {"L1", "L1B", "L2", "L3", "L4B"}
 
 
 def test_get_layer_l5_explains_no_budget(session):
@@ -218,12 +218,17 @@ def test_unset_works_via_underlying_variable_name(session):
     """`/unset` operates on the underlying variable name, not the layer ID.
     This is intentional — `/unset layer L4` would be a separate UX
     decision; for now, restore the default via the variable name."""
-    session.variables["recent_tool_context_char_limit"] = 24000
+    session.variables["conversation_summary_char_limit"] = 24000
     result = mc.dispatch(
-        session, "/unset recent_tool_context_char_limit", allow_prompt=False
+        session, "/unset conversation_summary_char_limit", allow_prompt=False
     )
     assert result.ok
-    assert session.variables["recent_tool_context_char_limit"] == 12000  # schema default
+    # The schema default is the scaled layer-char budget (not a hardcoded
+    # constant) — assert against the same source VARIABLE_SCHEMA uses.
+    assert (
+        session.variables["conversation_summary_char_limit"]
+        == _LAYER_CHAR_DEFAULTS["conversation_summary_char_limit"]
+    )
 
 
 # ----------------------------------------------- autocomplete
@@ -247,11 +252,12 @@ def test_autocomplete_set_layer_suggests_keyword():
 
 
 def test_autocomplete_set_layer_id_suggestions():
-    """`/set layer <Tab>` should offer the 6 layer IDs (no L5)."""
+    """`/set layer <Tab>` should offer the 5 layer IDs (no L4, no L5)."""
     handler = InputHandler()
     completions = _completion_texts(handler, "/set layer ")
-    for layer_id in ("L1", "L1B", "L2", "L3", "L4", "L4B"):
+    for layer_id in ("L1", "L1B", "L2", "L3", "L4B"):
         assert layer_id in completions, f"missing {layer_id}"
+    assert "L4" not in completions
     assert "L5" not in completions
 
 
@@ -265,8 +271,9 @@ def test_autocomplete_set_layer_prefix_filter():
 
 
 def test_autocomplete_get_layer_id_suggestions():
-    """`/get layer <Tab>` should suggest layer IDs too."""
+    """`/get layer <Tab>` should suggest layer IDs too (no L4)."""
     handler = InputHandler()
     completions = _completion_texts(handler, "/get layer ")
-    for layer_id in ("L1", "L1B", "L2", "L3", "L4", "L4B"):
+    for layer_id in ("L1", "L1B", "L2", "L3", "L4B"):
         assert layer_id in completions, f"missing {layer_id}"
+    assert "L4" not in completions

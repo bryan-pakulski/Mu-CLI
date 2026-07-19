@@ -1,0 +1,127 @@
+<aside class="mode-panel"
+       data-mode="systemPrompts"
+       x-show="$store.mode.active === 'systemPrompts'"
+       x-transition.opacity.duration.200ms>
+
+    <!-- empty state when no prompts loaded -->
+    <div class="panel-empty" x-show="!$store.systemPrompts.items.length && !$store.systemPrompts.loading">
+        <h3>system prompts</h3>
+        <p class="muted">No prompts loaded. Click reload to fetch from the
+        backend API.</p>
+    </div>
+
+    <!-- header -->
+    <div class="panel-head" x-show="$store.systemPrompts.items.length">
+        <div class="panel-subject">System Prompts</div>
+        <div class="panel-meta mono muted">
+            <span x-text="$store.systemPrompts.items.length + ' prompts'"></span>
+            <span x-show="$store.systemPrompts.selected"
+                  x-text="' · ' + $store.systemPrompts.selected"></span>
+        </div>
+    </div>
+
+    <!-- prompt list -->
+    <section class="panel-section"
+             x-show="$store.systemPrompts.items.length"
+             :class="{ open: $store.systemPrompts.openSections.list }">
+        <button class="panel-section-head"
+                @click="$store.systemPrompts.toggleSection('list')"
+                :aria-expanded="$store.systemPrompts.openSections.list">
+            <span class="caret">›</span>
+            <span class="panel-section-name">prompts</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.systemPrompts.items.length"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.systemPrompts.openSections.list"
+             x-transition.opacity.duration.150ms>
+            <template x-for="item in $store.systemPrompts.items" :key="item.name">
+                <div class="feature-row"
+                     :class="{ 'is-current': item.name === $store.systemPrompts.selected }"
+                     @click="$store.systemPrompts.select(item.name)"
+                     :title="'source: ' + (item.source || '?')">
+                    <span class="feature-name" x-text="item.name"></span>
+                    <span class="tag" x-text="item.source"></span>
+                    <span class="mono muted small" x-show="item.chars"
+                          x-text="item.chars + ' chars'"></span>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- editor -->
+    <section class="panel-section"
+             x-show="$store.systemPrompts.selected"
+             :class="{ open: $store.systemPrompts.openSections.editor }">
+        <button class="panel-section-head"
+                @click="$store.systemPrompts.toggleSection('editor')"
+                :aria-expanded="$store.systemPrompts.openSections.editor">
+            <span class="caret">›</span>
+            <span class="panel-section-name">editor</span>
+            <span class="panel-section-count mono muted"
+                  x-text="$store.systemPrompts.sourceLabel()"></span>
+        </button>
+        <div class="panel-section-body" x-show="$store.systemPrompts.openSections.editor"
+             x-transition.opacity.duration.150ms>
+
+            <!-- metadata bar -->
+            <div class="panel-meta mono muted" x-show="$store.systemPrompts.selected">
+                <span class="tag" x-text="$store.systemPrompts.sourceLabel()"></span>
+                <span x-show="$store.systemPrompts.version !== null"
+                      x-text="'v' + $store.systemPrompts.version"></span>
+                <span x-text="$store.systemPrompts.chars + ' chars'"></span>
+                <span x-show="$store.systemPrompts.dirty"
+                      style="color: var(--accent)">· unsaved</span>
+            </div>
+
+            <!-- validation warnings -->
+            <div x-show="$store.systemPrompts.hasValidationIssues()"
+                 style="margin: var(--space-2) 0; padding: var(--space-2) var(--space-3);
+                        background: rgba(248,113,113,0.06); border-radius: var(--radius);">
+                <h5 style="margin: 0 0 var(--space-1); font-family: var(--mono);
+                          font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px;
+                          color: var(--err); font-weight: 600;">missing anchors</h5>
+                <template x-for="anchor in $store.systemPrompts.validation" :key="anchor">
+                    <div class="mono small" style="color: var(--err); padding: 2px 0;"
+                         x-text="'⚠ ' + anchor"></div>
+                </template>
+            </div>
+
+            <!-- textarea editor -->
+            <textarea x-model="$store.systemPrompts.text"
+                      @input="$store.systemPrompts.markDirty()"
+                      :disabled="$store.systemPrompts.loading"
+                      style="width: 100%; min-height: 300px; font-family: var(--mono);
+                             font-size: 12px; line-height: 1.55; resize: vertical;
+                             margin: var(--space-2) 0;"
+                      placeholder="Prompt text will appear here..."></textarea>
+
+            <!-- actions -->
+            <div class="finding-actions" style="margin-top: var(--space-3);">
+                <button class="finding-action-btn approve"
+                        @click="$store.systemPrompts.save()"
+                        :disabled="$store.systemPrompts.saving || !$store.systemPrompts.dirty"
+                        x-text="$store.systemPrompts.saving ? 'saving…' : 'save'"></button>
+                <button class="finding-action-btn"
+                        @click="$store.systemPrompts.reload()">reload</button>
+                <button class="finding-action-btn"
+                        @click="$store.systemPrompts.init($store.systemPrompts.selected)"
+                        title="Seed template file from hardcoded fallback">init</button>
+                <button class="finding-action-btn refute"
+                        @click="$store.systemPrompts.reset()"
+                        title="Delete file override, revert to hardcoded fallback">reset</button>
+            </div>
+
+            <!-- error display -->
+            <div class="history-error" x-show="$store.systemPrompts.error">
+                <p class="err-text" x-text="$store.systemPrompts.error"></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- footnote -->
+    <div class="panel-footnote muted mono"
+         x-show="$store.systemPrompts.path"
+         :title="'Override file: ' + $store.systemPrompts.path"
+         x-text="'↳ ' + $store.systemPrompts.path"></div>
+
+</aside>

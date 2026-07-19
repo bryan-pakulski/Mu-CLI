@@ -184,6 +184,13 @@ class Lesson:
     lecture_concluded: bool = False
     min_lecture_checks: int = 2
     lecture_comprehension_threshold: int = 60
+    # ---- dual presentation artifacts ------------------------------
+    # Authored lecture transcript (markdown) and exercise/example
+    # file paths are presentation artifacts layered on top of the
+    # existing presenting/lecturing states.  They do NOT alter the
+    # lesson lifecycle.
+    lecture_transcript_path: str | None = None
+    exercise_file_paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -381,6 +388,8 @@ def _lesson_from_dict(raw: dict[str, Any]) -> Lesson:
         lecture_concluded=bool(raw.get("lecture_concluded", False)),
         min_lecture_checks=int(raw.get("min_lecture_checks", 2)),
         lecture_comprehension_threshold=int(raw.get("lecture_comprehension_threshold", 60)),
+        lecture_transcript_path=raw.get("lecture_transcript_path"),
+        exercise_file_paths=list(raw.get("exercise_file_paths", [])),
     )
 
 
@@ -987,6 +996,93 @@ def complete_review(
     return review
 
 
+# --- dual presentation artifacts ------------------------------------------
+
+
+def write_lecture_transcript(
+    course: Course, lesson_id: str, markdown_content: str
+) -> str:
+    """Write the authored lecture transcript for a lesson.
+
+    Creates ``lessons/<lesson_id>/lecture.md`` on disk, sets
+    ``lesson.lecture_transcript_path`` to the relative path, and returns
+    the absolute path written.  Does NOT call ``save_course`` — the
+    caller is responsible for persisting the course state.
+
+    This is a presentation artifact layered on top of the existing
+    ``presenting`` / ``lecturing`` states; it does NOT alter the lesson
+    lifecycle status.
+    """
+    lesson = find_lesson(course, lesson_id)
+    if lesson is None:
+        raise ValueError(
+            f"write_lecture_transcript: lesson {lesson_id!r} not found"
+        )
+    lesson_dir = _storage.ensure_lesson_directory(course.course_id, lesson_id)
+    path = os.path.join(lesson_dir, "lecture.md")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(str(markdown_content or ""))
+    # Store relative path so the GUI can resolve it against the course dir.
+    lesson.lecture_transcript_path = os.path.join("lessons", lesson_id, "lecture.md")
+    return path
+
+
+def register_exercise_file(
+    course: Course,
+    lesson_id: str,
+    relative_path: str,
+    content: str,
+) -> str:
+    """Write an exercise/example file for a lesson.
+
+    Creates ``lessons/<lesson_id>/exercises/<relative_path>`` on disk,
+    appends the relative path to ``lesson.exercise_file_paths``, and
+    returns the absolute path written.  Does NOT call ``save_course``.
+
+    Rejects absolute paths and ``..`` segments to prevent path traversal
+    (same guard as the existing ``_write_assignment_artifacts`` helper
+    in the handler layer).
+
+    This is a presentation artifact; it does NOT alter the lesson
+    lifecycle status and the file is NOT a graded assignment.
+    """
+    lesson = find_lesson(course, lesson_id)
+    if lesson is None:
+        raise ValueError(
+            f"register_exercise_file: lesson {lesson_id!r} not found"
+        )
+    rel = str(relative_path or "").strip()
+    if not rel:
+        raise ValueError("register_exercise_file: relative_path is required")
+    if rel.startswith("/") or rel.startswith("~"):
+        raise ValueError(
+            f"register_exercise_file: absolute paths not allowed ({rel!r})"
+        )
+    if ".." in rel.split(os.sep):
+        raise ValueError(
+            f"register_exercise_file: '..' segments not allowed ({rel!r})"
+        )
+
+    lesson_dir = _storage.ensure_lesson_directory(course.course_id, lesson_id)
+    exercises_dir = os.path.join(lesson_dir, "exercises")
+    os.makedirs(exercises_dir, exist_ok=True)
+
+    target = os.path.join(exercises_dir, rel)
+    # Defensive: ensure the resolved path is still under exercises_dir.
+    if not os.path.abspath(target).startswith(os.path.abspath(exercises_dir)):
+        raise ValueError(
+            f"register_exercise_file: path escapes exercises/ ({rel!r})"
+        )
+    os.makedirs(os.path.dirname(target) or exercises_dir, exist_ok=True)
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write(str(content or ""))
+
+    stored_rel = os.path.join("lessons", lesson_id, "exercises", rel)
+    if stored_rel not in (lesson.exercise_file_paths or []):
+        lesson.exercise_file_paths.append(stored_rel)
+    return target
+
+
 # --- metrics for HUD ------------------------------------------------------
 
 
@@ -1079,4 +1175,6 @@ __all__ = [
     "save_course",
     "schedule_review",
     "start_lecture",
+    "write_lecture_transcript",
+    "register_exercise_file",
 ]

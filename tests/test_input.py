@@ -1,3 +1,4 @@
+import json
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from types import SimpleNamespace
@@ -274,8 +275,11 @@ def test_memory_list_completion_includes_layers():
     )
     completion_texts = {completion.text for completion in completions}
     for target in (
+        # L4 (recent tool activity) and L4B (auto-retrieval) were removed
+        # from the layered context architecture — tool activity now lives
+        # in messages and retrieval is on-demand via retrieve_relevant_context.
         "all", "task", "scratchpad",
-        "L0", "L1", "L1B", "L2", "L3", "L4", "L4B", "L5",
+        "L0", "L1", "L1B", "L2", "L3", "L5",
     ):
         assert target in completion_texts, f"/memory list {target!r} not suggested"
 
@@ -331,9 +335,15 @@ def test_feature_completion_includes_exit_subcommand():
 
 
 def test_feature_delete_completion_suggests_feature_ids(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "documentation" / "feature_req_alpha").mkdir(parents=True)
-    (tmp_path / "documentation" / "feature_req_beta").mkdir(parents=True)
+    monkeypatch.setattr("mu.ui.input.HISTORY_DIR", str(tmp_path))
+    features_dir = tmp_path / "sessions" / "my_session" / "features"
+    features_dir.mkdir(parents=True)
+    (features_dir / "alpha.json").write_text(
+        json.dumps({"feature_id": "alpha"}), encoding="utf-8"
+    )
+    (features_dir / "beta.json").write_text(
+        json.dumps({"feature_id": "beta"}), encoding="utf-8"
+    )
 
     handler = InputHandler()
     document = Document(text="/feature delete a", cursor_position=len("/feature delete a"))

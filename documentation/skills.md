@@ -62,10 +62,20 @@ Two paths put a skill's full body into context:
    any installed skill's full body. Use this when the index shows a
    relevant skill that the trigger didn't catch.
 
-When `invoke_skill` fires, mucli prints a visible banner —
-`🎯 SKILL ACTIVE: <name>` — so you can see in real time when the
-model is applying a skill. Each invocation is also tallied per skill
-in `/stats` so you can audit how often the model reaches for each one.
+mucli prints a visible banner — `🎯 SKILL ACTIVE: <name>` — whenever a
+skill becomes active, so you can see in real time when one is being
+applied. There are two activation paths and both surface the banner:
+
+- **Auto-expansion** (trigger regex matches the latest user message):
+  `🎯 SKILL ACTIVE: <name> · trigger`. This is the compact-mode path —
+  the banner fires during system-prompt assembly, once per turn per
+  matched skill (deduped across retries / re-injection).
+- **`invoke_skill` tool call**: `🎯 SKILL ACTIVE: <name>` (no tag).
+
+Each activation is tallied per skill in `/stats`: explicit
+`invoke_skill` calls bump `invocations`, trigger-regex auto-expansions
+bump `auto_expansions` — so you can audit both how often the model
+reaches for a skill and how often its trigger fires on its own.
 
 In both cases the model just reads the body and follows its
 instructions; there is no separate execution surface.
@@ -79,7 +89,8 @@ Configured via session variables:
     `invoke_skill`.
   - `"full"`: every skill body inlined up to the budget (v1 behavior).
 - `skills_max_chars` — total char budget for the LAYER 1B block. Default
-  `6144`. Set to `0` to disable skills entirely.
+  `40000` chars at the default `context_token_limit` (scales with it,
+  floor `6144`). Set to `0` to disable skills entirely.
 
 When the budget is exceeded the renderer emits a
 `... and N more skill(s) not shown (budget reached)` trailer so the

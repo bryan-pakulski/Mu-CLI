@@ -40,24 +40,24 @@ def test_memory_tool_registered_in_new_registry(name):
     assert descriptor.preview_policy == "none"
 
 
-def test_legacy_core_tools_no_longer_has_memory_descriptors():
-    """Pin the cleanup: `core/tools.py` should no longer carry separate
-    descriptors for the 7 memory tools. The registry still surfaces them
-    (via the @tool decorator in mu/tools/memory/handlers.py) — verifying
-    the descriptor's home module is the new package, not the legacy one."""
-    from mu.tools import descriptors as legacy
+def test_descriptors_no_longer_carry_memory_placeholder():
+    """Pin the cleanup: `mu/tools/descriptors.py` no longer carries the
+    `_handle_memory_placeholder` helper from the pre-split layout. The 7
+    memory tools are registered via the `@tool` decorator in
+    `mu/tools/memory/handlers.py` and surface in the aggregated
+    `descriptors.TOOLS` list — but no placeholder helper remains in the
+    descriptor module itself."""
+    from mu.tools import descriptors as desc
 
     for name in REGISTERED_MEMORY_TOOLS:
-        # Legacy module no longer holds a separate ToolDefinition for these.
-        legacy_defs = [t for t in legacy.TOOLS if t.name == name]
-        # The aggregated TOOLS list is built from descriptors in the new
-        # registry too, so the names DO show up — but the legacy
-        # `_TOOL_METADATA` should not have a per-tool entry, and the
-        # legacy `_handle_memory_placeholder` helper is removed.
+        # The aggregated TOOLS list surfaces these names (registered via
+        # @tool in the memory package), but the descriptor module itself
+        # should not carry the old `_handle_memory_placeholder` helper.
+        desc_defs = [t for t in desc.TOOLS if t.name == name]
         # Both `_TOOL_METADATA` and `_handle_memory_placeholder` are
         # internal — pin via attribute absence.
-        assert not hasattr(legacy, "_handle_memory_placeholder"), (
-            "Legacy placeholder helper should be removed after migration."
+        assert not hasattr(desc, "_handle_memory_placeholder"), (
+            "Placeholder helper should be removed after the package split."
         )
 
 
@@ -83,7 +83,7 @@ def test_save_memory_writes_to_session_store():
     ctx = _ctx_with_session()
     result = mt.execute(
         "save_memory",
-        {"content": "auth lives in core/session.py", "tags": ["arch"]},
+        {"content": "auth lives in mu/session.py", "tags": ["arch"]},
         ctx,
     )
     assert result["ok"] is True

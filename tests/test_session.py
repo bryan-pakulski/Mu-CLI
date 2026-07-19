@@ -15,7 +15,7 @@ from providers.base import LLMProvider, MessagePart, ProviderResponse
 @pytest.fixture(autouse=True)
 def _isolate_feature_writes(tmp_path, monkeypatch):
     """Feature plans default their workspace root to `os.getcwd()`.
-    Chdir to tmp_path so any `documentation/feature_req_*` directory
+    Chdir to tmp_path so any `feature_plan.json` file
     created during a test lands in /tmp instead of the repo."""
     monkeypatch.chdir(tmp_path)
 
@@ -133,7 +133,15 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
 
     assert prepared[0]["role"] == "user"
     assert prepared[1]["role"] == "system"
-    assert "LAYER 4 — Recent tool activity (compressed for budget)." in prepared[1]["parts"][0]["text"]
+    # L4a system prompt block removed; L4b messages compression still active.
+    # The compression block may be labelled either "compressed for budget"
+    # (mechanical fallback) or "LLM-summarized for budget" (when a provider
+    # is available — the R1/FM-1 `summarized_pairs_msgs` fix routes the real
+    # pairs to `_llm_summarize_tool_batch`). Both indicate the older tool
+    # pairs were rolled into a LAYER 4 system summary, which is the intent.
+    l4_text = prepared[1]["parts"][0]["text"]
+    assert "LAYER 4 — Recent tool activity" in l4_text
+    assert "Older tool call/result pairs from this turn were summarized." in l4_text
     assert len(prepared) == 4
 
 
@@ -193,7 +201,7 @@ def test_roll_history_summary_to_token_budget_clips_large_payload_when_stuck():
 
     assert changed is True
     payload = sm.history[0]["parts"][0]["tool_result"]
-    assert "truncated_to_4000_chars_for_context_budget" in payload
+    assert "truncated_to_16000_chars_for_context_budget" in payload
 
 
 def test_clip_conversation_summary_marks_truncation_boundary():
@@ -258,11 +266,16 @@ def test_send_message_injects_hierarchical_context_layers():
     assert "LAYER 2 — Conversation summary:" in provider.last_system_prompt
     assert "LAYER 5 — Current turn:" in provider.last_system_prompt
     assert "turn 1" in provider.last_system_prompt
-    assert sm.summary_anchor == 2
+    # With keep_recent=12 (default after LLM-compaction change), pre-turn
+    # compaction won't fire for only 7 entries. Emergency compaction
+    # (keep_recent=2) fires instead, advancing the anchor further.
+    assert sm.summary_anchor > 0
     assert "turn 1" in sm.conversation_summary
 
 
-def test_layered_context_prefers_retrieved_snippets(tmp_path):
+def test_layered_context_no_longer_injects_l4b_retrieval(tmp_path):
+    """L4B auto-retrieval removed — model uses retrieve_relevant_context
+    tool on demand instead of pre-injected snippets."""
     class CaptureProvider(LLMProvider):
         def __init__(self):
             super().__init__("dummy")
@@ -298,24 +311,22 @@ def test_layered_context_prefers_retrieved_snippets(tmp_path):
     session.variables["retrieval_top_k"] = 2
     session.send_message("where is authentication token validated?")
 
-    assert "LAYER 4B — Retrieved workspace snippets:" in provider.last_system_prompt
-    assert "auth.py" in provider.last_system_prompt
+    # L4B should NOT be in the system prompt anymore.
+    assert "LAYER 4B" not in provider.last_system_prompt
+    # But L5 (current turn) should still be there.
+    assert "LAYER 5" in provider.last_system_prompt
 
 
 def test_layer_budgets_eviction_policies():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
     session.variables["conversation_summary_char_limit"] = 20
-    session.variables["recent_tool_context_char_limit"] = 40
-    session.variables["retrieval_context_char_limit"] = 30
     sm.conversation_summary = "0123456789abcdefghijklmnopqrstuvwxyz"
-    session._pending_retrieved_context = "x" * 200
     layered = session._inject_hierarchical_context("system instruction")
 
     assert "[budget: 20 chars | eviction: keep newest]" in layered
-    assert "[budget: 40 chars | eviction: drop oldest tool records]" not in layered
-    assert "LAYER 4B — Retrieved workspace snippets:" in layered
-    assert "[budget: 30 chars | eviction: drop lowest-ranked snippets]" in layered
+    # L4B removed — no longer in layered output.
+    assert "LAYER 4B" not in layered
 
 
 def test_prepare_runtime_history_keeps_signed_tool_messages():
@@ -737,7 +748,7 @@ def test_feature_mode_blocks_direct_feature_plan_access(tmp_path, monkeypatch):
     session.folder_context.add_folder(str(tmp_path))
     session.sync_runtime_state()
     session.variables["agent_mode"] = "feature"
-    plan_path = tmp_path / "documentation" / "feature_req_demo" / "feature_plan.json"
+    plan_path = tmp_path / "feature_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_text("{}", encoding="utf-8")
     session.session_manager.set_feature_state(

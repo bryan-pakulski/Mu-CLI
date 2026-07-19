@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}μcli{% if session_active %} — {{ session_name }}{% endif %}{% endblock %}
+{% block body %}
+{% if not session_active %}
+<div class="welcome-shell" x-data>
+    {% include "fragments/welcome.html" %}
+    {% include "fragments/file_browser.html" %}
+</div>
+{% else %}
+<div class="app"
+     x-data
+     :class="{
+        'has-panel': $store.mode.panelModes.includes($store.mode.active),
+        'sidebar-hidden': !$store.layout.sidebarOpen,
+        'panel-hidden': !$store.layout.panelOpen
+     }"
+     :style="'--sidebar-w:' + ($store.layout.sidebarOpen ? $store.layout.sidebarWidth + 'px' : '0px') + ';--panel-w:' + $store.layout.panelWidth + 'px'">
+    <header class="header">
+        <button class="icon-btn sidebar-toggle"
+                @click="$store.layout.toggleSidebar()"
+                :title="$store.layout.sidebarOpen ? 'Hide sidebar' : 'Show sidebar'"
+                aria-label="Toggle sidebar">
+            <span x-text="$store.layout.sidebarOpen ? '«' : '»'"></span>
+        </button>
+        <div class="brand">μcli</div>
+        <div class="crumb"
+             x-data="{
+                get _provider() { return $store.inspector.currentProvider || '{{ provider }}'; },
+                get _model() { return $store.inspector.currentModel || '{{ model }}'; }
+             }"
+             :title="'session: ' + ($store.sessions.current || '{{ session_name }}') + ' · ' + _provider + '/' + _model">
+            <span x-text="$store.sessions.current || '{{ session_name }}'" style="color:var(--text);font-weight:500;">{{ session_name }}</span>
+            <span class="meta" x-text="_provider + '·' + _model">{{ provider }}·{{ model }}</span>
+        </div>
+        <div class="spacer"></div>
+
+        <!-- View picker: changes which panel the UI shows, NOT the backend mode.
+             Backend mode is controlled from the chat composer area. -->
+        <div class="mode-picker" x-data="{ open: false }"
+             @click.outside="open = false"
+             @keydown.escape.window="open = false">
+            <button class="mode-pill" @click="open = !open"
+                    :class="{ open: open }"
+                    title="Switch view (panel only — mode is set in chat composer)"
+                    aria-haspopup="listbox" :aria-expanded="open">
+                <span class="label">view</span>
+                <span class="value mono" x-text="$store.mode.active"></span>
+                <span class="caret">▾</span>
+            </button>
+            <div class="mode-popout" x-show="open"
+                 x-transition.opacity.duration.150ms
+                 role="listbox">
+                <template x-for="m in $store.mode.modes" :key="m.name">
+                    <button class="mode-option"
+                            :class="{ active: $store.mode.active === m.name, disabled: m.disabled }"
+                            @click="!m.disabled && ($store.mode.setView(m.name), open = false)"
+                            :title="m.disabled ? 'Requires a workspace — add one in the inspector' : (m.description || m.name)"
+                            :disabled="m.disabled">
+                        <div class="mode-name">
+                            <span x-text="m.display_name"></span>
+                            <span class="mode-key mono muted" x-text="m.name"></span>
+                        </div>
+                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace' : m.description"></div>
+                    </button>
+                </template>
+            </div>
+        </div>
+
+        <!-- Tools menu: read-only view panels (history, memory map, system
+             prompts). These are NOT agent modes — they never change the
+             backend `agent_mode`, they just switch the panel view. -->
+        <div class="mode-picker tools-picker" x-data="{ open: false }"
+             @click.outside="open = false"
+             @keydown.escape.window="open = false">
+            <button class="mode-pill" @click="open = !open"
+                    :class="{ open: open, highlight: $store.mode.views.some(v => v.name === $store.mode.active) }"
+                    title="Tools — view-only panels (history, memory map, system prompts)"
+                    aria-haspopup="listbox" :aria-expanded="open">
+                <span class="label">tools</span>
+                <span class="caret">▾</span>
+            </button>
+            <div class="mode-popout" x-show="open"
+                 x-transition.opacity.duration.150ms
+                 role="listbox">
+                <template x-for="v in $store.mode.views" :key="v.name">
+                    <div class="mode-option-wrap">
+                        <template x-if="v.external">
+                            <a class="mode-option mode-option--ext"
+                               :href="v.route_session ? (v.route + '?session=' + encodeURIComponent($store.chat.currentName || '')) : v.route"
+                               target="_blank" rel="noopener"
+                               @click="open = false"
+                               :title="v.description || v.name">
+                                <div class="mode-name">
+                                    <span x-text="v.display_name"></span>
+                                    <span class="mode-key mono muted">↗</span>
+                                </div>
+                                <div class="mode-desc" x-text="v.description"></div>
+                            </a>
+                        </template>
+                        <template x-if="!v.external">
+                            <button class="mode-option"
+                                    :class="{ active: $store.mode.active === v.name, disabled: v.disabled }"
+                                    :disabled="v.disabled"
+                                    @click="!v.disabled && ($store.mode.setView(v.name), open = false)"
+                                    :title="v.description || v.name">
+                                <div class="mode-name">
+                                    <span x-text="v.display_name"></span>
+                                    <span class="mode-key mono muted" x-text="v.name"></span>
+                                </div>
+                                <div class="mode-desc" x-text="v.description"></div>
+                            </button>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <div class="util" title="Token totals for this session">
+            <span x-text="'tok·' + ($store.tokens.total || 0)"></span>
+        </div>
+        <button class="yolo-toggle"
+                :class="{ active: $store.yolo.active }"
+                @click="$store.yolo.toggle()"
+                :title="$store.yolo.active ? 'YOLO mode ON — no tool approvals. Click to disable.' : 'YOLO mode OFF — tools require approval. Click to enable.'">
+            <span class="yolo-label">yolo</span>
+            <span class="yolo-dot"></span>
+        </button>
+        <button class="icon-btn"
+                x-show="$store.mode.panelModes.includes($store.mode.active)"
+                @click="$store.layout.togglePanel()"
+                :title="$store.layout.panelOpen ? 'Hide panel' : 'Show panel'"
+                aria-label="Toggle panel">
+            <span x-text="$store.layout.panelOpen ? '»' : '«'"></span>
+        </button>
+        <button class="icon-btn" @click="$store.inspector.openDrawer()"
+                title="Workspace · memory · stats · settings"
+                aria-label="Open inspector">⚙</button>
+        <button class="icon-btn" @click="$store.theme.toggle()"
+                title="Toggle light/dark theme"
+                aria-label="Toggle theme">
+            <span x-text="$store.theme.current === 'dark' ? '☾' : '☼'"></span>
+        </button>
+        <button @click="$store.sessions.deactivate()"
+                title="Leave this session and return to the picker">leave</button>
+    </header>
+
+    <aside class="sidebar" style="position:relative;">
+        <div class="resize-handle-sidebar"
+             @mousedown="$store.layout.startDrag('sidebar', $event)"></div>
+        <h3 class="label-mono">Sessions</h3>
+        <template x-for="s in $store.sessions.list" :key="s.name">
+            <div class="nav-item"
+                 :class="{
+                    active: s.name === $store.chat.currentName,
+                    loaded: $store.sessions.isLoaded(s.name),
+                    busy: $store.sessions.isBusy(s.name)
+                 }"
+                 @click="s.name !== $store.chat.currentName && $store.sessions.switchTo(s.name)"
+                 :title="(s.name === $store.chat.currentName ? s.name + ' (focused)' : 'Switch to ' + s.name)
+                    + (s.modified_at ? ' — last modified ' + s.modified_at : '')
+                    + ($store.sessions.isBusy(s.name) ? ' · turn in flight' : '')
+                    + ($store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName ? ' · loaded' : '')">
+                <!-- Status dot: busy → pulsing accent; loaded → solid muted; cold → empty. -->
+                <span class="dot"
+                      :class="{
+                        busy: $store.sessions.isBusy(s.name),
+                        loaded: $store.sessions.isLoaded(s.name) && !$store.sessions.isBusy(s.name)
+                      }"
+                      aria-hidden="true"></span>
+                <span class="name" x-text="s.name"></span>
+                <span class="prompt-badge"
+                      x-show="$store.prompts.queue.some(p => p.session_name === s.name) && s.name !== $store.chat.currentName"
+                      title="Awaiting input">!</span>
+                <!-- Unload (only meaningful for loaded background sessions). -->
+                <span class="u"
+                      x-show="$store.sessions.isLoaded(s.name) && s.name !== $store.chat.currentName"
+                      @click.stop="$store.sessions.unload(s.name)"
+                      title="Drop this session from memory (file is preserved)">⌫</span>
+                <span class="x"
+                      @click.stop="$store.confirm.ask('Delete session \'' + s.name + '\'?', $event, () => $store.sessions.remove(s.name), {danger:true})"
+                      title="Delete session (asks first)">×</span>
+            </div>
+        </template>
+        <div class="nav-action" @click="$store.sessions.deactivate()"
+             title="Leave this session and return to the welcome picker">+ new</div>
+    </aside>
+
+    <main class="main">
+        <div class="chat-column">
+            {% include "fragments/chat.html" %}
+        </div>
+        <div class="resize-handle"
+             x-show="$store.mode.panelModes.includes($store.mode.active) && $store.layout.panelOpen"
+             @mousedown="$store.layout.startDrag('panel', $event)"></div>
+        {% include "fragments/teacher_panel.html" %}
+        {% include "fragments/feature_panel.html" %}
+        {% include "fragments/research_panel.html" %}
+        {% include "fragments/security_panel.html" %}
+        {% include "fragments/loop_panel.html" %}
+        {% include "fragments/debug_panel.html" %}
+        {% include "fragments/history_panel.html" %}
+        {% include "fragments/memory_panel.html" %}
+        {% include "fragments/system_prompts_panel.html" %}
+        {% include "fragments/files_panel.html" %}
+    </main>
+
+    {% include "fragments/inspector.html" %}
+    {% include "fragments/file_browser.html" %}
+    {% include "fragments/memory_layer_modal.html" %}
+
+</div>
+{% endif %}
+{% endblock %}

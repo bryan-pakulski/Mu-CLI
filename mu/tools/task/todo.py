@@ -294,4 +294,144 @@ def todo_list(args: Dict[str, Any], context) -> Dict[str, Any]:
     }
 
 
-__all__ = ["todo_write", "todo_set_status", "todo_list", "VALID_STATUSES"]
+# ------------------------------------------------------------------- delete
+
+
+@tool(
+    name="todo_delete",
+    description=(
+        "Remove a task from the todo ledger by id. Use to prune stale or "
+        "abandoned items so the ledger stays honest — the agent owns which "
+        "tasks are still relevant. Unlike todo_set_status(completed), this "
+        "fully removes the entry."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "id": {
+                "type": "integer",
+                "description": "The numeric id returned by todo_write.",
+            },
+        },
+        "required": ["id"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    result_mode="json",
+)
+def todo_delete(args: Dict[str, Any], context) -> Dict[str, Any]:
+    try:
+        todo_id = int(args.get("id"))
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error_code": "invalid_args",
+            "message": "todo_delete requires integer 'id'.",
+            "data": {},
+            "artifacts": [],
+            "telemetry": {"tool_name": "todo_delete"},
+        }
+
+    store = _store(context)
+    entry = next(
+        (e for e in store.entries if e.id == todo_id and _TODO_TAG in e.tags),
+        None,
+    )
+    if entry is None:
+        return {
+            "ok": False,
+            "error_code": "not_found",
+            "message": f"No todo with id #{todo_id}.",
+            "data": {"id": todo_id},
+            "artifacts": [],
+            "telemetry": {"tool_name": "todo_delete"},
+        }
+    store.entries = [e for e in store.entries if e.id != todo_id]
+    return {
+        "ok": True,
+        "error_code": None,
+        "message": f"Deleted todo #{todo_id}: {entry.content}",
+        "data": {"id": todo_id, "content": entry.content},
+        "artifacts": [],
+        "telemetry": {"tool_name": "todo_delete"},
+    }
+
+
+# -------------------------------------------------------------------- clear
+
+
+@tool(
+    name="todo_clear",
+    description=(
+        "Bulk-remove todos from the ledger. With no argument, removes every "
+        "completed todo (the everyday prune after a turn's work). Pass "
+        "status='completed' explicitly to prune finished items, or "
+        "status='all' to wipe the whole ledger and start fresh (use when the "
+        "user's ask has shifted and the old plan no longer applies)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "description": (
+                    "Which todos to remove: 'completed' (default) prunes "
+                    "finished items; 'all' wipes the ledger."
+                ),
+            },
+        },
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    result_mode="json",
+)
+def todo_clear(args: Dict[str, Any], context) -> Dict[str, Any]:
+    scope = str(args.get("status") or "completed").strip().lower()
+    store = _store(context)
+    before = [e for e in store.entries if _TODO_TAG in e.tags]
+
+    if scope == "all":
+        removed = list(before)
+        store.entries = [e for e in store.entries if _TODO_TAG not in e.tags]
+    elif scope == "completed":
+        removed = [e for e in before if _entry_status(e) == "completed"]
+        _ids = {e.id for e in removed}
+        store.entries = [e for e in store.entries if not (_TODO_TAG in e.tags and e.id in _ids)]
+    else:
+        return {
+            "ok": False,
+            "error_code": "invalid_args",
+            "message": (
+                f"Unknown scope {scope!r}. Use 'completed' (default) or 'all'."
+            ),
+            "data": {},
+            "artifacts": [],
+            "telemetry": {"tool_name": "todo_clear"},
+        }
+
+    # Recompute _next_id so new saves don't collide with retained entries.
+    remaining = [e for e in store.entries if _TODO_TAG in e.tags]
+    store._next_id = (max(e.id for e in store.entries) + 1) if store.entries else 1
+
+    return {
+        "ok": True,
+        "error_code": None,
+        "message": f"Cleared {len(removed)} todo(s) (scope={scope}).",
+        "data": {
+            "removed": len(removed),
+            "scope": scope,
+            "remaining": len(remaining),
+        },
+        "artifacts": [],
+        "telemetry": {"tool_name": "todo_clear"},
+    }
+
+
+__all__ = [
+    "todo_write",
+    "todo_set_status",
+    "todo_list",
+    "todo_delete",
+    "todo_clear",
+    "VALID_STATUSES",
+]

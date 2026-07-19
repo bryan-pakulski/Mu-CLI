@@ -11,8 +11,9 @@ This document covers what's implemented, the two registration paths
 
 The registry lives at `mu/agent/hooks.py`. Shell-hook loading lives at
 `mu/agent/hooks_config.py`. The loop fires hooks from
-`core/session.py` (tool + provider points) and `mu/agent/loop.py`
-(`on_stop`).
+`mu/session/tools_glue.py` (`pre_tool` / `post_tool`),
+`mu/agent/retry.py` (`pre_provider_call` / `post_provider_call`), and
+`mu/agent/loop.py` (`on_stop`).
 
 | Hook point | Fires when | `short_circuit` honored? | `abort` honored? |
 | --- | --- | --- | --- |
@@ -70,9 +71,9 @@ Remove them with `default_registry.remove("<name>")` if you need to.
 | Name | Point | Purpose |
 | --- | --- | --- |
 | `plan_mode_block_writes` | `pre_tool` (pri 10) | Short-circuits write-side tools when `plan_mode` is on (`mu/agent/plan_mode.py`) |
-| `bash_secret_guard` | `pre_tool` | Short-circuits `bash` / `bash_background` commands targeting denied paths (~/.ssh, /etc/shadow, ~/.aws, etc.) or matching risky patterns (`env`, `find / -name id_rsa`, …). Bypass with `/set security_allow_secret_paths true`. (`mu/agent/secret_guard.py`) |
-| `usage_tracker_pre` / `usage_tracker_post` | `pre_tool` / `post_tool` | Per-tool counters, elapsed-time tracking, skill-invocation banner. Feeds `/stats`. (`mu/agent/usage_tracker.py`) |
-| `auto_compactor` | `pre_provider_call` | Rolls history into the conversation summary when estimated tokens exceed `context_token_limit * context_trim_threshold` (default 0.85). (`mu/agent/compactor.py`) |
+| `secret_guard_bash` | `pre_tool` (pri 5) | Short-circuits `bash` / `bash_background` commands targeting denied paths (~/.ssh, /etc/shadow, ~/.aws, etc.) or matching risky patterns (`env`, `find / -name id_rsa`, …). Runs before `plan_mode_block_writes` so a deliberately-secret path can't slip past plan mode. Bypass with `/set security_allow_secret_paths true`. (`mu/agent/secret_guard.py`) |
+| `usage_tracker_pre` / `usage_tracker_post` | `pre_tool` (pri 50) / `post_tool` (pri 200) | Per-tool counters, elapsed-time tracking, skill-invocation banner. Feeds `/stats`. (`mu/agent/usage_tracker.py`) |
+| `auto_compact_pre_call` | `pre_provider_call` (pri 50) | Rolls history into the conversation summary when estimated tokens exceed `context_token_limit * context_trim_threshold` (default 0.85). (`mu/agent/compactor.py`) |
 
 ## Adding a Python hook
 

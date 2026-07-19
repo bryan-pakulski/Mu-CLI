@@ -266,10 +266,12 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
         skill_table = Table(title="Skills invoked", box=box.SIMPLE)
         skill_table.add_column("Skill", style="cyan", no_wrap=True)
         skill_table.add_column("Invocations", style="green", justify="right")
+        skill_table.add_column("Auto-expanded", style="yellow", justify="right")
         skill_table.add_column("Last used", style="dim")
         ranked_skills = sorted(
             skills.items(),
-            key=lambda kv: int(kv[1].get("invocations", 0) or 0),
+            key=lambda kv: int(kv[1].get("invocations", 0) or 0)
+            + int(kv[1].get("auto_expansions", 0) or 0),
             reverse=True,
         )
         from rich.text import Text as _Text
@@ -278,6 +280,7 @@ def _render_stats(session: Any, snapshot: dict, allow_prompt: bool) -> None:
             skill_table.add_row(
                 _Text(str(name)),
                 str(int(bucket.get("invocations", 0) or 0)),
+                str(int(bucket.get("auto_expansions", 0) or 0)),
                 _ago(bucket.get("last_used_at"), now),
             )
         console.print(skill_table)

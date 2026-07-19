@@ -1,0 +1,435 @@
+"""GUI Files panel — workspace explorer + editor backend.
+
+Covers ``mu/gui/routers/files.py`` (tree / read / save / create / rename /
+delete) and the panel-registration wiring (config ``GUI_VIEW_PANELS`` +
+``modes.py`` workspace gating + index.html disabled binding + the vendored
+CodeMirror script tag + the panel template / store / CSS).
+
+Path safety is the heart of this panel: every mutating endpoint funnels
+through ``_resolve_within``, which realpath's first and containment-checks via
+``os.path.commonpath`` (stronger than the agent's ``check_bounds`` startswith),
+then refuses secret paths via ``is_denied_path`` and ignored paths via
+``FolderContext.is_ignored``. Writes are atomic (temp + ``os.replace``) and
+keep a ``.bak``; save guards on ``expected_mtime`` so the agent editing the
+file under the user doesn't get silently clobbered.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import threading
+import types
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from mu.gui.app import session_by_name
+from mu.gui.routers import files as files_mod
+from mu.gui.routers import modes as modes_mod
+from mu.workspace.folder_context import FolderContext
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_JS = os.path.join(REPO, "mu", "gui", "static", "js", "app.js")
+INDEX_HTML = os.path.join(REPO, "mu", "gui", "templates", "index.html")
+BASE_HTML = os.path.join(REPO, "mu", "gui", "templates", "base.html")
+FILES_PANEL = os.path.join(REPO, "mu", "gui", "templates", "fragments", "files_panel.html")
+APP_CSS = os.path.join(REPO, "mu", "gui", "static", "css", "app.css")
+CM_JS = os.path.join(REPO, "mu", "gui", "static", "vendor", "codemirror.min.js")
+CM_CSS = os.path.join(REPO, "mu", "gui", "static", "vendor", "codemirror.min.css")
+CM_MODES = os.path.join(REPO, "mu", "gui", "static", "vendor", "codemirror-modes.min.js")
+
+
+# ---------------------------------------------------------------------------
+# fixtures
+# ---------------------------------------------------------------------------
+
+
+def _fake_session(folder_context):
+    sm = SimpleNamespace(folder_context=folder_context)
+    return SimpleNamespace(
+        folder_context=folder_context,
+        variables={},
+        session_manager=sm,
+    )
+
+
+def _make_app(router, prefix, session):
+    app = FastAPI()
+    app.state.sessions = {"s1": session}
+    app.state.session_locks = {"s1": threading.Lock()}
+    app.state.current_session_name = "s1"
+    app.state._fallback_lock = threading.Lock()
+    app.state.session_by_name = lambda name=None: session_by_name(app, name)
+    app.include_router(router, prefix=prefix)
+    return app
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    """A temp workspace with a couple of files, a secret, and a gitignore."""
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "hello.py").write_text("print('hi')\n")
+    (root / "sub").mkdir()
+    (root / "sub" / "note.md").write_text("# note\n")
+    (root / ".env").write_text("SECRET=1\n")
+    (root / "ignored.log").write_text("x" * 50)
+    (root / ".gitignore").write_text("*.log\n")
+    fc = FolderContext()
+    fc.add_folder(str(root))
+    return str(root), fc
+
+
+@pytest.fixture
+def client(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    return TestClient(app), root, fc
+
+
+# ---------------------------------------------------------------------------
+# tree
+# ---------------------------------------------------------------------------
+
+
+def test_tree_lists_files_dirs_first(client):
+    c, root, _ = client
+    r = c.get("/api/files/tree")
+    assert r.status_code == 200
+    roots = r.json()["roots"]
+    assert len(roots) == 1
+    children = roots[0]["children"]
+    names = [child["name"] for child in children]
+    assert "hello.py" in names
+    assert "sub" in names
+    # gitignored file filtered out
+    assert "ignored.log" not in names
+    # secret file filtered out (FolderContext ignores .env by default)
+    assert ".env" not in names
+    # dirs first
+    is_dirs = [child["is_dir"] for child in children]
+    assert is_dirs == sorted(is_dirs, reverse=True)
+
+
+def test_tree_no_workspace_returns_409(tmp_path):
+    fc = FolderContext()  # no folders
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).get("/api/files/tree")
+    assert r.status_code == 409
+
+
+def test_tree_subtree_expand(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).get("/api/files/tree", params={"path": os.path.join(root, "sub")})
+    assert r.status_code == 200
+    entries = r.json()["entries"]
+    assert any(e["name"] == "note.md" and not e["is_dir"] for e in entries)
+
+
+# ---------------------------------------------------------------------------
+# read
+# ---------------------------------------------------------------------------
+
+
+def test_read_text_file(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).get("/api/files/read", params={"path": os.path.join(root, "hello.py")})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["content"] == "print('hi')\n"
+    assert d["readonly"] is False
+    assert "mtime" in d
+
+
+def test_read_secret_path_refused(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).get("/api/files/read", params={"path": os.path.join(root, ".env")})
+    assert r.status_code == 403
+
+
+def test_read_out_of_workspace_refused(workspace, tmp_path):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    outside = tmp_path / "elsewhere.txt"
+    outside.write_text("nope")
+    r = TestClient(app).get("/api/files/read", params={"path": str(outside)})
+    assert r.status_code == 403
+
+
+def test_read_traversal_refused(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    # /etc/hosts via .. from the workspace root
+    r = TestClient(app).get("/api/files/read", params={"path": os.path.join(root, "..", "..", "etc", "hosts")})
+    assert r.status_code == 403
+
+
+def test_read_binary_returns_readonly(workspace, tmp_path):
+    root, fc = workspace
+    (tmp_path / "ws" / "blob.bin").write_bytes(b"\x00\x01\x02\x00binary")
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).get("/api/files/read", params={"path": os.path.join(root, "blob.bin")})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["readonly"] is True
+    assert "binary" in d["why"].lower()
+
+
+def test_read_oversized_returns_readonly(workspace):
+    root, fc = workspace
+    big = os.path.join(root, "big.txt")
+    with open(big, "w") as f:
+        f.write("a" * (files_mod._MAX_EDITABLE_BYTES + 10))
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).get("/api/files/read", params={"path": big})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["readonly"] is True
+    assert "large" in d["why"].lower()
+
+
+# ---------------------------------------------------------------------------
+# save
+# ---------------------------------------------------------------------------
+
+
+def test_save_atomic_with_backup(workspace):
+    root, fc = workspace
+    path = os.path.join(root, "hello.py")
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).post("/api/files/save", json={
+        "path": path, "content": "print('bye')\n",
+    })
+    assert r.status_code == 200, r.text
+    assert open(path).read() == "print('bye')\n"
+    # backup of the previous content kept
+    assert os.path.exists(path + ".bak")
+    assert open(path + ".bak").read() == "print('hi')\n"
+
+
+def test_save_stale_mtime_returns_409(workspace):
+    root, fc = workspace
+    path = os.path.join(root, "hello.py")
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).post("/api/files/save", json={
+        "path": path, "content": "x\n", "expected_mtime": 1.0,
+    })
+    assert r.status_code == 409
+    # file untouched
+    assert open(path).read() == "print('hi')\n"
+
+
+def test_save_out_of_workspace_refused(workspace, tmp_path):
+    root, fc = workspace
+    outside = tmp_path / "elsewhere.py"
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).post("/api/files/save", json={
+        "path": str(outside), "content": "x\n",
+    })
+    assert r.status_code == 403
+    assert not outside.exists()
+
+
+def test_save_creates_new_file_no_backup(workspace):
+    root, fc = workspace
+    new = os.path.join(root, "brand_new.py")
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).post("/api/files/save", json={
+        "path": new, "content": "new\n",
+    })
+    assert r.status_code == 200, r.text
+    assert open(new).read() == "new\n"
+    # brand-new file has no prior content → no .bak
+    assert not os.path.exists(new + ".bak")
+
+
+# ---------------------------------------------------------------------------
+# create / rename / delete
+# ---------------------------------------------------------------------------
+
+
+def test_create_file_and_dir(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).post("/api/files/create", json={
+        "path": os.path.join(root, "made.py"), "is_dir": False,
+    })
+    assert r.status_code == 200
+    assert os.path.isfile(os.path.join(root, "made.py"))
+    r = TestClient(app).post("/api/files/create", json={
+        "path": os.path.join(root, "madefolder"), "is_dir": True,
+    })
+    assert r.status_code == 200
+    assert os.path.isdir(os.path.join(root, "madefolder"))
+
+
+def test_create_outside_workspace_refused(workspace, tmp_path):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).post("/api/files/create", json={
+        "path": str(tmp_path / "outside_ws" / "x.py"), "is_dir": False,
+    })
+    assert r.status_code == 403
+
+
+def test_rename_containment(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    src = os.path.join(root, "hello.py")
+    dst = os.path.join(root, "hello_renamed.py")
+    r = TestClient(app).post("/api/files/rename", json={"from": src, "to": dst})
+    assert r.status_code == 200
+    assert os.path.isfile(dst)
+    assert not os.path.exists(src)
+
+
+def test_rename_outside_refused(workspace, tmp_path):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    src = os.path.join(root, "hello.py")
+    dst = str(tmp_path / "elsewhere_renamed.py")
+    r = TestClient(app).post("/api/files/rename", json={"from": src, "to": dst})
+    assert r.status_code == 403
+    # source untouched
+    assert os.path.isfile(src)
+
+
+def test_delete_file_keeps_backup(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    path = os.path.join(root, "hello.py")
+    r = TestClient(app).delete("/api/files", params={"path": path})
+    assert r.status_code == 200
+    assert not os.path.exists(path)
+    # recoverable
+    assert os.path.exists(path + ".bak")
+
+
+def test_delete_nonempty_dir_refused_without_recursive(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).delete("/api/files", params={"path": os.path.join(root, "sub")})
+    assert r.status_code == 409
+    assert os.path.isdir(os.path.join(root, "sub"))
+
+
+def test_delete_dir_recursive(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).delete(
+        "/api/files", params={"path": os.path.join(root, "sub"), "recursive": "true"}
+    )
+    assert r.status_code == 200
+    assert not os.path.exists(os.path.join(root, "sub"))
+
+
+def test_delete_workspace_root_refused(workspace):
+    root, fc = workspace
+    app = _make_app(files_mod.router, "/api/files", _fake_session(fc))
+    r = TestClient(app).delete("/api/files", params={"path": root})
+    assert r.status_code == 400
+    assert os.path.isdir(root)
+
+
+# ---------------------------------------------------------------------------
+# modes.py workspace gating
+# ---------------------------------------------------------------------------
+
+
+def test_modes_surfaces_files_panel_with_workspace(workspace):
+    _, fc = workspace
+    app = _make_app(modes_mod.router, "/api/modes", _fake_session(fc))
+    d = TestClient(app).get("/api/modes").json()
+    files_view = [v for v in d["views"] if v["name"] == "files"][0]
+    assert files_view["needs_workspace"] is True
+    assert files_view["disabled"] is False
+
+
+def test_modes_disables_files_when_no_workspace():
+    fc = FolderContext()
+    app = _make_app(modes_mod.router, "/api/modes", _fake_session(fc))
+    d = TestClient(app).get("/api/modes").json()
+    files_view = [v for v in d["views"] if v["name"] == "files"][0]
+    assert files_view["needs_workspace"] is True
+    assert files_view["disabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# static-content wiring
+# ---------------------------------------------------------------------------
+
+
+def test_gui_view_panels_has_files_with_needs_workspace():
+    from utils.config import GUI_VIEW_PANELS
+    files = [p for p in GUI_VIEW_PANELS if p["name"] == "files"]
+    assert files, "files panel missing from GUI_VIEW_PANELS"
+    assert files[0].get("needs_workspace") is True
+
+
+def test_app_js_has_files_store_and_panel_mode():
+    src = open(APP_JS, encoding="utf-8").read()
+    assert "Alpine.store(\"files\"" in src
+    assert '"files"' in src  # panelModes entry
+    assert "openFile" in src
+    assert "/api/files/tree" in src
+    assert "/api/files/read" in src
+    assert "/api/files/save" in src
+    assert "/api/files/create" in src
+    assert "/api/files/rename" in src
+
+
+def test_base_html_loads_codemirror_vendor():
+    src = open(BASE_HTML, encoding="utf-8").read()
+    assert "codemirror.min.js" in src
+    assert "codemirror.min.css" in src
+    assert "codemirror-modes.min.js" in src
+    # CM must load before app.js (Alpine boot order: app.js before alpine)
+    assert src.index("codemirror.min.js") < src.index("/static/js/app.js")
+
+
+def test_index_html_includes_files_panel_and_disabled_binding():
+    src = open(INDEX_HTML, encoding="utf-8").read()
+    assert "fragments/files_panel.html" in src
+    # the non-external tools button honors v.disabled
+    assert "v.disabled" in src
+    assert ":disabled=\"v.disabled\"" in src
+
+
+def test_files_panel_template_exists_with_cm_host_and_store():
+    src = open(FILES_PANEL, encoding="utf-8").read()
+    assert 'data-mode="files"' in src
+    assert "$store.files" in src
+    assert "filesPanel()" in src
+    assert "cmHost" in src
+    assert "CodeMirror(" in src
+
+
+def test_css_has_files_panel_and_codemirror_theme():
+    src = open(APP_CSS, encoding="utf-8").read()
+    assert ".files-panel" in src
+    assert ".files-tree" in src
+    assert ".files-editor" in src
+    assert ".CodeMirror" in src
+    assert "var(--bg)" in src
+
+
+def test_codemirror_vendor_files_present():
+    assert os.path.isfile(CM_JS) and os.path.getsize(CM_JS) > 100_000
+    assert os.path.isfile(CM_CSS) and os.path.getsize(CM_CSS) > 1000
+    assert os.path.isfile(CM_MODES) and os.path.getsize(CM_MODES) > 50_000
+    # the modes bundle registers the languages we use
+    modes_src = open(CM_MODES, encoding="utf-8").read()
+    for marker in (
+        'defineMIME("text/x-python"',
+        'defineMIME("application/json"',
+        'defineMIME("text/markdown"',
+        'defineMIME("text/x-sh"',
+        'defineMIME("text/html"',
+    ):
+        assert marker in modes_src, f"missing mode: {marker}"

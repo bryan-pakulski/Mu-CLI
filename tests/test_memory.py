@@ -5,7 +5,7 @@ def test_task_memory_save_search_and_summary():
     store = TaskMemoryStore(max_entries=3, summary_char_limit=500)
 
     first = store.save(
-        "Parser lives in core/session.py and owns the agent loop.",
+        "Parser lives in mu/session.py and owns the agent loop.",
         tags=["parser", "agent"],
         source="read_file",
     )
@@ -18,7 +18,7 @@ def test_task_memory_save_search_and_summary():
 
     summary = store.render_summary(limit=5)
     assert "In-Task Memory" in summary
-    assert "core/session.py" in summary
+    assert "mu/session.py" in summary
 
 
 def test_task_memory_evicts_low_value_entries():

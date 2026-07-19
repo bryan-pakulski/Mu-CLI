@@ -1,4 +1,4 @@
-"""Session-management primitives for the new harness.
+"""Session-management primitives for the harness.
 
 Modules:
   * history  — `HistoryMixin` with token-budget rolling, summarization,
@@ -9,7 +9,7 @@ Modules:
   * helpers  — shared primitives (`_HookAbort`, `_shorten_tool_args`, ...)
 
 `SessionManager` is exposed via a lazy attribute so this module can be
-imported by `core/session.py` itself without causing a partial-import
+imported by `mu/session/session.py` itself without causing a partial-import
 cycle. Use `from mu.session.manager import SessionManager` or
 `from mu.session import SessionManager`.
 """

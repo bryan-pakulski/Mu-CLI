@@ -2,7 +2,7 @@
 
 Specifically:
   * `/memory list <layer>` shows the actual injected content for each
-    of the 7 hierarchical layers (L1, L1B, L2, L3, L4, L4B, L5).
+    of the hierarchical layers (L1, L1B, L2, L3, L5).
   * Aliases removed in the cleanup pass (`ls`, `s`, `scratch`,
     `longterm`, `long-term`) are NOT silently accepted.
 """
@@ -55,8 +55,6 @@ def test_list_targets_export_matches_layers_and_stores():
         "L1B",
         "L2",
         "L3",
-        "L4",
-        "L4B",
         "L5",
     }
 
@@ -85,7 +83,7 @@ def test_list_scratchpad_omits_task(session):
 # ----------------------------------------------- layer listing
 
 
-@pytest.mark.parametrize("layer", ["L0", "L1", "L1B", "L2", "L3", "L4", "L4B", "L5"])
+@pytest.mark.parametrize("layer", ["L0", "L1", "L1B", "L2", "L3", "L5"])
 def test_list_each_layer_returns_content_field(session, layer):
     """Every layer ID must resolve. Content may be empty in a fresh
     session but the data shape must be consistent."""
@@ -184,10 +182,13 @@ def test_list_l2_reflects_conversation_summary(session):
 
 
 def test_list_l4b_reflects_pending_retrieved_context(session):
+    """L4B removed — listing it should fail cleanly."""
     session._pending_retrieved_context = "[retrieved] payments/charge.py:14 — process_card(...)"
     result = memory_cmd(session, "list L4B", allow_prompt=False)
-    assert result.ok
-    assert "payments/charge.py" in result.data["content"]
+    assert not result.ok
+    # L4B is no longer a valid target — the command should return an error,
+    # not attempt to access removed _pending_retrieved_context data.
+    assert "L4B" in result.message or "Unknown" in result.message
 
 
 def test_list_l0_includes_user_system_instruction(session):

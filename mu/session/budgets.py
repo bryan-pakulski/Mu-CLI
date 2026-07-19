@@ -26,6 +26,97 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.config import _DEFAULT_CONTEXT_TOKEN_LIMIT
+
+
+# ── Compaction keep-recent policy (R3, FM-8) ─────────────────────────────
+# Single source of truth for how many trailing messages the compactor
+# keeps verbatim. Previously these were inline magic numbers scattered
+# across the call sites (12 / 12 / 2), which made the relationship
+# between normal roll, auto-compaction, and emergency compaction opaque.
+KEEP_RECENT_DEFAULT = 12
+KEEP_RECENT_EMERGENCY = 2
+# Per-turn tool-result floor: the last K tool-result messages of the
+# active turn are never summarized or degraded, even under emergency
+# compaction with a tiny keep_recent. Prevents the "compaction mid-turn
+# drops tool results just received" failure mode (FM-8) at the cost of
+# slightly higher steady-state token usage.
+TOOL_RESULT_FLOOR_DEFAULT = 4
+
+
+def resolve_keep_recent(session: Any, *, emergency: bool = False) -> int:
+    """How many trailing messages the compactor keeps verbatim.
+
+    Normal/auto compaction uses `compactor_keep_recent` (default
+    `KEEP_RECENT_DEFAULT`). Emergency compaction (pre-flight context
+    check) uses `emergency_keep_recent` (default `KEEP_RECENT_EMERGENCY`)
+    — smaller so it can reclaim budget fast, but the tool-result floor
+    (`resolve_tool_result_floor`) still protects recent tool results
+    regardless of this value.
+    """
+    if emergency:
+        raw = session.variables.get("emergency_keep_recent", KEEP_RECENT_EMERGENCY)
+    else:
+        raw = session.variables.get("compactor_keep_recent", KEEP_RECENT_DEFAULT)
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return KEEP_RECENT_EMERGENCY if emergency else KEEP_RECENT_DEFAULT
+
+
+def resolve_tool_result_floor(session: Any) -> int:
+    """Number of trailing tool-result messages in the active turn that
+    compaction must leave verbatim (R3, FM-8).
+
+    Mode-aware (Fix #10): long-horizon modes (loop/feature) re-cover many
+    files, so a larger floor keeps more recent read results verbatim in L5
+    instead of compacting them away and forcing re-reads. Only raises the
+    configured value — a user's explicit higher setting always wins.
+    """
+    raw = session.variables.get("tool_result_floor", TOOL_RESULT_FLOOR_DEFAULT)
+    try:
+        floor = max(0, int(raw))
+    except (TypeError, ValueError):
+        floor = TOOL_RESULT_FLOOR_DEFAULT
+    mode = str(session.variables.get("agent_mode", "default") or "default").lower()
+    if mode in ("loop", "feature"):
+        floor = max(floor, 8)
+    return floor
+
+
+# Default tool-result cache bounds (Fix #10). Raised in long-horizon modes
+# so more on-disk reads stay recallable instead of being evicted under the
+# small default 50-entry / 512KB cap.
+TOOL_CACHE_ENTRIES_DEFAULT = 50
+TOOL_CACHE_BYTES_DEFAULT = 524_288  # 512 KB
+
+
+def resolve_tool_cache_bounds(session: Any) -> tuple[int, int]:
+    """(max_entries, max_bytes) for the tool-result sidecar cache.
+
+    Mode-aware (Fix #10): loop/feature modes do far more read-only tool
+    calls, so the cache is grown to keep more results recallable (and
+    auto-recallable by locator). Only raises the configured bounds — a
+    user's explicit larger setting always wins.
+    """
+    try:
+        entries = max(1, int(
+            session.variables.get("tool_result_cache_entries", TOOL_CACHE_ENTRIES_DEFAULT)
+        ))
+    except (TypeError, ValueError):
+        entries = TOOL_CACHE_ENTRIES_DEFAULT
+    try:
+        nbytes = max(1, int(
+            session.variables.get("tool_result_cache_bytes", TOOL_CACHE_BYTES_DEFAULT)
+        ))
+    except (TypeError, ValueError):
+        nbytes = TOOL_CACHE_BYTES_DEFAULT
+    mode = str(session.variables.get("agent_mode", "default") or "default").lower()
+    if mode in ("loop", "feature"):
+        entries = max(entries, 256)
+        nbytes = max(nbytes, 2_097_152)  # 2 MB
+    return entries, nbytes
+
 
 def resolve_context_limit(session: Any) -> int:
     """Pick the smaller of (user-set `context_token_limit`, real
@@ -36,7 +127,10 @@ def resolve_context_limit(session: Any) -> int:
     user_limit = max(
         1024,
         int(
-            session.variables.get("context_token_limit", 256000) or 256000
+            session.variables.get(
+                "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
+            )
+            or _DEFAULT_CONTEXT_TOKEN_LIMIT
         ),
     )
     try:
@@ -46,8 +140,102 @@ def resolve_context_limit(session: Any) -> int:
     except Exception:
         provider_window = None
     if provider_window and provider_window > 0:
-        return min(user_limit, int(provider_window))
-    return user_limit
+        limit = min(user_limit, int(provider_window))
+    else:
+        limit = user_limit
+    # Apply a provider-aware safety factor so the compactor targets a reduced
+    # ceiling for providers whose real tokenizer diverges from the harness's
+    # cl100k_base estimate (notably Ollama, where cl100k under-counts ~2x and
+    # streamed prompt_eval_count is only the non-cached delta). Without this
+    # the real prompt overflows the window before the cl100k-based compaction
+    # guard fires — the Ollama "prompt is too long" 400. 1.0 = trust cl100k.
+    try:
+        factor = float(session.provider.compaction_safety_factor())
+    except Exception:
+        factor = 1.0
+    if factor > 1.0:
+        limit = max(1024, int(limit / factor))
+    return limit
+
+
+def _static_safety_factor(session: Any) -> float:
+    """The provider's static compaction safety factor, normalised to >=1.0
+    (1.0 = trust the cl100k estimate verbatim)."""
+    try:
+        factor = float(session.provider.compaction_safety_factor())
+    except Exception:
+        factor = 1.0
+    return factor if factor > 1.0 else 1.0
+
+
+def effective_drift_ratio(session: Any) -> float:
+    """The cl100k→real-token drift multiplier the compactor should assume.
+
+    Floors at the provider's static ``compaction_safety_factor`` (the
+    conservative default baked into ``resolve_context_limit``) and ratchets
+    UP when the observed drift learned from overflow recoveries / cold-cache
+    calibration is worse. Never goes below the static factor, so a missing or
+    optimistic measurement can't make the proactive gates less conservative
+    than today's behaviour.
+    """
+    static = _static_safety_factor(session)
+    learned = getattr(session, "_observed_drift_ratio", None)
+    if learned is None:
+        return static
+    try:
+        learned = float(learned)
+    except (TypeError, ValueError):
+        return static
+    return max(static, max(1.0, learned))
+
+
+def drift_corrected_context_limit(session: Any) -> int:
+    """``resolve_context_limit`` (already divided by the static safety factor)
+    further divided when the *observed* drift exceeds the static factor.
+
+    The static factor in ``resolve_context_limit`` assumes a fixed drift
+    (2.5 for Ollama). Real drift varies ~2.2–3.2x by content; when the
+    observed drift exceeds the static factor the proactive compaction gates
+    (turn-start roll, auto-hook, preflight) fire too late — the real prompt
+    overflows before the cl100k gate trips. This replaces the static divisor
+    with the learned one when the learned is worse, so those gates fire at
+    the right point. No-op when observed drift is at or below the static
+    factor (or when there is no static factor).
+    """
+    limit = resolve_context_limit(session)  # already / static_sf
+    static = _static_safety_factor(session)
+    if static <= 1.0:
+        return limit
+    eff = effective_drift_ratio(session)
+    if eff > static:
+        return max(1024, int(limit * static / eff))
+    return limit
+
+
+def update_observed_drift(session: Any, observed: float) -> None:
+    """EWMA-smooth a real-token drift observation onto the session.
+
+    ``observed`` is ``real_tokens / cl100k_tokens`` (clamped to [1.0, 6.0]).
+    Weight 0.5 blends a new observation with the prior so a single outlier
+    doesn't whip the ratio, while still tracking a genuine shift in content
+    type. The proactive compaction gates read this via
+    ``effective_drift_ratio``; the reactive overflow path and the cold-cache
+    response calibration write it.
+    """
+    try:
+        observed = max(1.0, min(6.0, float(observed)))
+    except (TypeError, ValueError):
+        return
+    prev = getattr(session, "_observed_drift_ratio", None)
+    if prev is None:
+        session._observed_drift_ratio = observed
+    else:
+        try:
+            prev = float(prev)
+        except (TypeError, ValueError):
+            session._observed_drift_ratio = observed
+            return
+        session._observed_drift_ratio = 0.5 * prev + 0.5 * observed
 
 
 def resolve_response_reserve(session: Any) -> int:
@@ -89,7 +277,7 @@ def compaction_token_budget(session: Any) -> int:
     many auto-expanded skills tighten the compactor's threshold
     instead of being silently piled on top of the L5 budget.
     """
-    context_limit = resolve_context_limit(session)
+    context_limit = drift_corrected_context_limit(session)
     trim_threshold = float(
         session.variables.get("context_trim_threshold", 0.85) or 0.85
     )
@@ -110,6 +298,17 @@ def compaction_token_budget(session: Any) -> int:
 
 __all__ = [
     "resolve_context_limit",
+    "drift_corrected_context_limit",
+    "effective_drift_ratio",
+    "update_observed_drift",
     "resolve_response_reserve",
     "compaction_token_budget",
+    "resolve_keep_recent",
+    "resolve_tool_result_floor",
+    "resolve_tool_cache_bounds",
+    "KEEP_RECENT_DEFAULT",
+    "KEEP_RECENT_EMERGENCY",
+    "TOOL_RESULT_FLOOR_DEFAULT",
+    "TOOL_CACHE_ENTRIES_DEFAULT",
+    "TOOL_CACHE_BYTES_DEFAULT",
 ]

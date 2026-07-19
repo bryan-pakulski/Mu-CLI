@@ -48,15 +48,10 @@ LAYER_BUDGET_VARS: Dict[str, Tuple[str, str, str]] = {
         "Active goal",
         "Feature/task status + scratchpad snapshot",
     ),
-    "L4": (
-        "recent_tool_context_char_limit",
-        "Recent tool activity",
-        "Compressed recent tool calls/results",
-    ),
     "L4B": (
         "retrieval_context_char_limit",
         "Retrieved snippets",
-        "Semantic-retrieval context injected for the current turn",
+        "Semantic workspace retrieval context",
     ),
 }
 
@@ -80,7 +75,10 @@ def _refresh_hud(session: Any) -> None:
 
 
 def _sync_provider_if_needed(session: Any, key: str) -> None:
-    if key == "ollama_host":
+    # Any of these ollama variables changes the running provider's
+    # endpoint (host/mode) or auth (api key) or compaction headroom, so
+    # re-apply them live rather than waiting for the next session load.
+    if key in {"ollama_host", "ollama_mode", "ollama_api_key", "ollama_token_safety_factor"}:
         try:
             from mucli import sync_provider_settings
 
@@ -146,7 +144,7 @@ def _list_layer_budgets(session: Any, allow_prompt: bool) -> CommandResult:
                 console.print(table)
                 console.print(
                     "[dim]Set with[/dim] [bold]/set layer <id> <tokens>[/bold]"
-                    " — e.g. /set layer L4 6000\n"
+                    " — e.g. /set layer L2 6000\n"
                     "[dim]L5 has no per-layer budget; tighten[/dim] "
                     "[bold]context_token_limit[/bold] [dim]instead.[/dim]"
                 )
@@ -168,7 +166,7 @@ def _set_layer_budget(
     internally because the underlying truncation is char-based."""
     parts = raw_args.split(None, 1)
     if len(parts) < 2:
-        msg = "Usage: /set layer <id> <tokens>  (e.g. /set layer L4 6000)"
+        msg = "Usage: /set layer <id> <tokens>  (e.g. /set layer L2 6000)"
         _emit(session, msg, allow_prompt, error=True)
         return CommandResult(ok=False, message=msg)
 
@@ -337,6 +335,17 @@ def set_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
     _persist(session)
     _sync_provider_if_needed(session, key)
     _refresh_hud(session)
+    # When context_token_limit changes, reratio all per-layer char budgets
+    # so the layers scale proportionally with the new global cap.
+    if key == "context_token_limit":
+        from utils.config import reratio_layer_budgets
+
+        reratio_layer_budgets(session)
+    # Mark session_goal_sticky as explicitly set so the mode-aware default
+    # (loop/feature = sticky) yields to the user's explicit choice. See
+    # Session._session_goal_is_sticky.
+    if key == "session_goal_sticky":
+        session.variables["session_goal_sticky_explicit"] = True
     casted = session.variables[key]
     _emit(
         session,
@@ -366,22 +375,24 @@ def get_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandRes
 
     if not key:
         if allow_prompt:
-            ui = getattr(session, "ui", None)
-            console = getattr(ui, "console", None) if ui is not None else None
-            if console is not None:
-                from utils.helpers import safe_markup
+            from utils.helpers import safe_markup
 
-                for k, v in session.variables.items():
-                    console.print(f"[blue]{safe_markup(k)}[/blue] = {safe_markup(v)}")
+            lines = [
+                f"{safe_markup(k)} = {safe_markup(v)}"
+                for k, v in session.variables.items()
+            ]
+            _emit(session, "\n".join(lines), allow_prompt)
         return CommandResult(
             ok=True,
             message="Listed variables.",
             data={"variables": dict(session.variables)},
         )
+    value = session.variables.get(key)
+    _emit(session, f"{key} = {value}", allow_prompt)
     return CommandResult(
         ok=True,
-        message=f"{key} = {session.variables.get(key)}",
-        data={"key": key, "value": session.variables.get(key)},
+        message=f"{key} = {value}",
+        data={"key": key, "value": value},
     )
 
 
@@ -412,9 +423,21 @@ def unset_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         session.variables[key] = VARIABLE_SCHEMA[key]["default"]
     else:
         del session.variables[key]
+    # Clearing session_goal_sticky reverts to the mode-aware default (loop/
+    # feature = sticky, default = clear-per-turn), so the explicit tracker
+    # must be reset too — otherwise a stale explicit flag would keep forcing
+    # the cleared value. See Session._session_goal_is_sticky.
+    if key == "session_goal_sticky":
+        session.variables["session_goal_sticky_explicit"] = False
     _persist(session)
     _sync_provider_if_needed(session, key)
     _refresh_hud(session)
+    # When context_token_limit is reset, reratio all per-layer char budgets
+    # so the layers scale proportionally with the restored global cap.
+    if key == "context_token_limit":
+        from utils.config import reratio_layer_budgets
+
+        reratio_layer_budgets(session)
     return CommandResult(
         ok=True,
         message=f"Unset variable: {key}",

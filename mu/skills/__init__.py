@@ -23,6 +23,9 @@ v2 design:
   * `### AUTO-EXPANDED SKILLS` carries full bodies for skills whose
     trigger matched the latest user message;
   * model can call `invoke_skill(name)` to expand any other skill;
+  * both activation paths print a visible `🎯 SKILL ACTIVE` banner via
+    `announce_skill` (auto-expansion tags itself `· trigger`) and bump
+    a per-skill counter in `/stats`;
   * users list / inspect / reload / enable / disable via `/skills`.
 
 Budget knob: `skills_max_chars` (default 6144).
@@ -36,7 +39,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import yaml  # type: ignore
@@ -254,6 +257,42 @@ def _index_line(skill: Skill) -> str:
     return line
 
 
+def announce_skill(ui: Any, skill_name: str, via: Optional[str] = None) -> None:
+    """Print a visible banner when a skill becomes active.
+
+    Used for both activation paths so the user sees the same highlight
+    regardless of how the skill entered context:
+      * `invoke_skill` tool call (via=None — banner text unchanged)
+      * trigger-regex auto-expansion (via="trigger")
+
+    Renders the static styling via Rich markup but escapes the dynamic
+    skill name (and `via` tag) so a bracketed name can never derail the
+    markup parser. Falls back to a plain print when no Rich console is
+    attached (headless / non-TTY).
+    """
+    from rich.markup import escape as _esc
+
+    label = skill_name or "?"
+    tag = f" · {_esc(via)}" if via else ""
+    body = (
+        f"[bold black on yellow] 🎯 SKILL ACTIVE: {_esc(label)}{tag} "
+        f"[/bold black on yellow]"
+    )
+    console = getattr(ui, "console", None) if ui is not None else None
+    if console is not None:
+        try:
+            from rich.text import Text as _Text
+
+            console.print(_Text.from_markup(body))
+            return
+        except Exception:
+            pass
+    try:
+        print(f"[SKILL ACTIVE: {label}{' · ' + via if via else ''}]")
+    except Exception:
+        pass
+
+
 def render_skills_expanded(skill: Skill) -> str:
     """Format a single skill's full body for inclusion in context."""
     header = f"#### SKILL: {skill.name}\n{skill.description}".strip()
@@ -351,6 +390,7 @@ def render_skills_block(
 
 __all__ = [
     "Skill",
+    "announce_skill",
     "discover_skills",
     "get_skill",
     "match_trigger",

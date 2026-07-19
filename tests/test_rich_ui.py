@@ -12,7 +12,7 @@ from utils.runtime_metrics import build_live_status_line
 @pytest.fixture(autouse=True)
 def _isolate_feature_writes(tmp_path, monkeypatch):
     """Feature plans default their workspace root to `os.getcwd()`.
-    Chdir to tmp_path so any `documentation/feature_req_*` directory
+    Chdir to tmp_path so any `feature_plan.json` file
     created during a test lands in /tmp instead of the repo."""
     monkeypatch.chdir(tmp_path)
 

@@ -29,7 +29,6 @@ from mu.agent.collation import CollationBuffer
 from mu.memory.stores import ScratchpadStore, TaskMemoryStore
 from mu.workspace.folder_context import FolderContext
 from utils.config import (
-    DEFAULT_SESSION_NAME,
     DEFAULT_VARIABLES,
     validate_and_cast,
 )
@@ -39,6 +38,8 @@ import utils.config as _config
 
 from .helpers import _slugify_feature_id, derive_feature_state_status
 from .history import HistoryMixin
+from .history_search import HistorySearchMixin
+from .tool_cache import ToolResultCache
 
 
 def _history_dir() -> str:
@@ -49,19 +50,25 @@ def _history_dir() -> str:
     return _config.HISTORY_DIR
 
 
-class SessionManager(HistoryMixin):
+class SessionManager(HistoryMixin, HistorySearchMixin):
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
         logger.info(f"Initializing SessionManager (session_name={session_name})")
-        self.current_session_name = DEFAULT_SESSION_NAME
-        self.history = []  # Stores standardized list of dicts representing messages
+        self.current_session_name = session_name or ""
+        self.history = []
         self.conversation_summary = ""
-        self.provider_config = {}  # Stores { "provider": "...", "model": "..." }
+        self.provider_config = {}
         self.collation_buffer = CollationBuffer()
         self.summary_anchor = 0
+        self.protected_indices: set[int] = set()
+        # Active-turn start index, mirrored from the agent loop so the
+        # compaction paths can compute the per-turn tool-result floor
+        # (R3, FM-8). None outside an active turn.
+        self._active_turn_start_index: int | None = None
         self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
+        self.tool_result_cache = ToolResultCache()
         self.token_counts = {
             "input": 0,
             "output": 0,
@@ -80,8 +87,6 @@ class SessionManager(HistoryMixin):
 
         if session_name:
             self._load_session(session_name)
-        else:
-            self._load_session(DEFAULT_SESSION_NAME)
 
     def _get_filepath(self, name):
         return os.path.join(self._get_session_dir(name), "session.json")
@@ -96,11 +101,13 @@ class SessionManager(HistoryMixin):
         self.history = []
         self.conversation_summary = ""
         self.summary_anchor = 0
+        self.protected_indices = set()
         self.provider_config = {}
         self.collation_buffer = CollationBuffer()
         self.folder_context = FolderContext()
         self.task_memory = TaskMemoryStore()
         self.turn_scratchpad = ScratchpadStore()
+        self.tool_result_cache = ToolResultCache()
         self.variables.clear()
         self.token_counts = {
             "input": 0,
@@ -129,6 +136,7 @@ class SessionManager(HistoryMixin):
                         data.get("conversation_summary", "") or ""
                     )
                     self.summary_anchor = data.get("summary_anchor", 0)
+                    self.protected_indices = set(data.get("protected_indices", []))
                     self.provider_config = data.get("provider_config", {})
                     self.collation_buffer = CollationBuffer.from_dict(
                         data.get("collation_buffer", {})
@@ -215,7 +223,96 @@ class SessionManager(HistoryMixin):
             return data.get("history", [])
         return []
 
+    # ----- Protected messages: key messages preserved through compaction -----
+    _PROTECTED_CAP = 20
+
+    def _maybe_protect(self, idx: int, role: str, text: str, *, is_turn_prompt: bool = False) -> None:
+        """Mark a history index as protected if it meets importance criteria.
+
+        Rules:
+        - No index is permanently protected — index 0 follows the same rules.
+        - The turn's starting prompt (is_turn_prompt=True) is always protected during active turn.
+        - Other user messages >50 chars and not starting with '/' are protected.
+        - Slash commands and short messages are NOT protected.
+        - After adding, enforce cap: if > _PROTECTED_CAP protected indices,
+          evict oldest (smallest idx), no special case for index 0.
+        - Call _cleanup_protected() at end of turn to unset turn-prompt
+          protections that are no longer needed.
+        """
+        if role != "user":
+            return
+        text = (text or "").strip()
+        # Index 0 is NOT permanently protected — it follows the same rules
+        # as any other message: protected during active turn (is_turn_prompt)
+        # or if substantial (>50 chars, not a /command). After the task/
+        # feature completes, index 0 can be wiped/summarized away.
+        if is_turn_prompt or (len(text) > 50 and not text.startswith("/")):
+            self.protected_indices.add(idx)
+        # Enforce cap with age-based eviction (keep newest, no special case)
+        self._enforce_protected_cap()
+
+    def _enforce_protected_cap(self) -> None:
+        """Evict oldest protected indices when count exceeds cap."""
+        while len(self.protected_indices) > self._PROTECTED_CAP:
+            evictable = sorted(self.protected_indices)
+            if evictable:
+                self.protected_indices.discard(evictable[0])
+            else:
+                break
+
+    def tool_result_floor_indices(
+        self, turn_start_index: int | None, floor: int
+    ) -> set[int]:
+        """Indices of the last ``floor`` tool-result-bearing messages
+        within the active turn (``>= turn_start_index``).
+
+        These are protected from summarization/degradation (R3, FM-8) so
+        compaction mid-turn cannot drop tool results just received.
+        Returns an empty set when ``floor <= 0`` or no active turn is set.
+        """
+        if floor <= 0 or turn_start_index is None:
+            return set()
+        start = max(0, int(turn_start_index))
+        if start >= len(self.history):
+            return set()
+        indices: list[int] = []
+        for idx in range(start, len(self.history)):
+            msg = self.history[idx]
+            parts = msg.get("parts") or []
+            if any(p.get("type") == "tool_result" for p in parts):
+                indices.append(idx)
+        if len(indices) <= floor:
+            return set(indices)
+        return set(indices[-floor:])
+
+    def _cleanup_protected(self, turn_start_index: int) -> None:
+        """Clean up protected indices after a turn ends.
+
+        - Remove the turn-prompt protection (turn_start_index) if it's
+          not otherwise worthy of long-term protection (not a substantial
+          user message >50 chars).
+        - Index 0 is NOT specially protected — it follows the same rules.
+        - This keeps the protected set bounded: only genuinely important
+          messages survive across turns; the turn's starting prompt is
+          protected only while that turn is active.
+        """
+        # Check if the turn prompt qualifies for long-term protection
+        if turn_start_index < len(self.history):
+            msg = self.history[turn_start_index]
+            text = ""
+            for part in msg.get("parts", []):
+                if part.get("type") == "text":
+                    text = (part.get("text") or "").strip()
+                    break
+            if len(text) > 50 and not text.startswith("/"):
+                return  # qualifies on its own merits, keep protected
+        # Not otherwise worthy — unprotect the turn prompt
+        self.protected_indices.discard(turn_start_index)
+
     def save_history(self, folder_context_obj=None):
+        if not self.current_session_name:
+            logger.debug("save_history skipped — no session name set")
+            return
         logger.debug(f"Saving history for session: {self.current_session_name}")
         filepath = self._get_filepath(self.current_session_name)
         if folder_context_obj:
@@ -224,9 +321,16 @@ class SessionManager(HistoryMixin):
         try:
             os.makedirs(self._get_session_dir(self.current_session_name), exist_ok=True)
             data = {
+                # Cross-process write attribution. The GUI's file watcher
+                # uses this to tell its OWN writes apart from concurrent
+                # TUI writes on the same session.json. Safe to ignore on
+                # load — it's just a marker.
+                "__writer_pid__": os.getpid(),
+                "__writer_at__": time.time(),
                 "history": self.history,
                 "conversation_summary": self.conversation_summary,
                 "summary_anchor": self.summary_anchor,
+                "protected_indices": sorted(self.protected_indices),
                 "provider_config": self.provider_config,
                 "folder_context": self.folder_context.to_dict(),
                 "variables": self.variables,
@@ -313,6 +417,29 @@ class SessionManager(HistoryMixin):
             return None
         self.active_feature_id = record["feature_id"]
         self.feature_state = deepcopy(record)
+        self.save_history()
+        return deepcopy(record)
+
+    def archive_feature(self, feature_id: str) -> dict | None:
+        resolved = _slugify_feature_id(feature_id)
+        record = self.feature_registry.get(resolved)
+        if not isinstance(record, dict):
+            return None
+        record["archived"] = True
+        record["updated_at"] = time.time()
+        if self.active_feature_id == resolved:
+            self.active_feature_id = None
+            self.feature_state = None
+        self.save_history()
+        return deepcopy(record)
+
+    def unarchive_feature(self, feature_id: str) -> dict | None:
+        resolved = _slugify_feature_id(feature_id)
+        record = self.feature_registry.get(resolved)
+        if not isinstance(record, dict):
+            return None
+        record.pop("archived", None)
+        record["updated_at"] = time.time()
         self.save_history()
         return deepcopy(record)
 
@@ -513,7 +640,7 @@ class SessionManager(HistoryMixin):
 
     def list_sessions(self):
         logger.debug("Listing sessions")
-        if not os.path.exists(self._get_filepath(self.current_session_name)):
+        if self.current_session_name and not os.path.exists(self._get_filepath(self.current_session_name)):
             self.save_history()
 
         files = glob.glob(os.path.join(_history_dir(), "sessions", "*", "session.json"))

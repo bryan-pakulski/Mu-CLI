@@ -29,7 +29,7 @@ from mu.feature.engine import (
 )
 from mu.tools._dispatcher import execute_tool
 from mu.ui.rich_ui import RichUI
-from utils.config import AGENT_MODE_METADATA
+from utils.config import AGENT_MODE_METADATA, _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 console = Console()
 
@@ -570,6 +570,7 @@ _HELP_GROUPS = [
         [
             ("/skills [<name>|reload|enable <n>|disable <n>]", "", "Manage installed skills"),
             ("/docs [<name>]", "", "Browse bundled documentation"),
+            ("/prompts [reload|init|show|validate|edit]", "", "Manage file-based system-prompt overrides"),
         ],
     ),
     (
@@ -703,7 +704,7 @@ def print_splash(session):
     # cap, not only when conversation history gets long.
     from utils.runtime_metrics import estimate_active_context_tokens
 
-    context_limit = int(session.variables.get("context_token_limit", 256000) or 256000)
+    context_limit = int(session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT) or _DEFAULT_CONTEXT_TOKEN_LIMIT)
     trim_threshold = float(session.variables.get("context_trim_threshold", 0.85) or 0.85)
     trim_threshold = max(0.10, min(trim_threshold, 1.0))
     context_tokens = int(estimate_active_context_tokens(session) or 0)
@@ -765,7 +766,10 @@ def select_provider_and_model(
     if not provider:
         raise ValueError(f"Unknown provider: {provider_name}")
 
-    models = provider.get_available_models()
+    models = sorted(
+        provider.get_available_models() or [],
+        key=lambda m: str(m).lower(),
+    )
     model_name = args_model
 
     if not models:
@@ -808,18 +812,15 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
     yet. Temporarily clear it so any session can be deleted, then
     restore.
 
-    If we just deleted the session named in `prior_active`, fall back
-    to `DEFAULT_SESSION_NAME` instead of leaving `current_session_name`
-    as `None` — downstream calls (`save_history`, `new_session`, …)
-    build paths from this and crash on `None`.
+    If we just deleted the session named in `prior_active`, leave
+    `current_session_name` empty — the caller (choose_session) will
+    prompt for a new one.
 
     When `silent=True` the SessionManager's UI is detached for the
     duration of the call so its `show_info("Deleted session: ...")`
     print doesn't punch a hole through an active TUI render (the
     interactive picker uses this).
     """
-    from utils.config import DEFAULT_SESSION_NAME as _DEFAULT_SESSION_NAME
-
     prior_active = session_manager.current_session_name
     prior_ui = getattr(session_manager, "ui", None)
     session_manager.current_session_name = None
@@ -831,7 +832,7 @@ def _safe_delete_session(session_manager, name: str, *, silent: bool = False) ->
         if prior_active and prior_active != name:
             session_manager.current_session_name = prior_active
         else:
-            session_manager.current_session_name = _DEFAULT_SESSION_NAME
+            session_manager.current_session_name = ""
         if silent:
             session_manager.ui = prior_ui
 
@@ -939,15 +940,18 @@ def _delete_session_flow(session_manager, sessions):
 
 def sync_provider_settings(session):
     if isinstance(session.provider, OllamaProvider):
-        # Respect a per-session override for ollama_host; otherwise let the
-        # provider's own resolution (OLLAMA_HOST env → OLLAMA_API_KEY hosted
-        # → localhost) stand.
+        # `apply_session_variables` binds the variables dict AND recomputes
+        # host + api_key from `ollama_host` / `ollama_mode` / `ollama_api_key`
+        # in one shot — so a `/set ollama_mode cloud`, a GUI local/cloud
+        # toggle, or a provider switch all live-update the running provider.
+        if hasattr(session.provider, "apply_session_variables"):
+            session.provider.apply_session_variables(session.variables)
+            return
+        # Fallback for older provider objects without the unified applier.
         host_override = session.variables.get("ollama_host")
         if host_override:
             session.provider.host = host_override
             session.provider.invalidate_preflight()
-        # Bind variables so the provider picks up `/set ollama_num_ctx`
-        # etc. on the next call.
         if hasattr(session.provider, "bind_session_variables"):
             session.provider.bind_session_variables(session.variables)
 
@@ -956,8 +960,10 @@ def build_session(args, ui, allow_prompt=True):
     session_manager = SessionManager(ui=ui, session_name=args.session)
     if ui and hasattr(ui, "set_variables"):
         ui.set_variables(session_manager.variables)
-
-    ollama_host = session_manager.variables.get("ollama_host")
+    
+    # Let automatic selection occur in provider class
+    host_str = session_manager.variables.get("ollama_host")
+    ollama_host = host_str if host_str != "" else None
 
     if allow_prompt and not args.session:
         action, session_name = choose_session(session_manager)
@@ -1034,6 +1040,18 @@ def build_session(args, ui, allow_prompt=True):
         debug=args.debug,
     )
 
+    # File-based system-prompt overrides. --system-file replaces the
+    # non-agentic base instruction; --mode-prompt NAME=PATH installs a
+    # runtime override for the base agentic prompt or a per-mode workflow
+    # (same keys /set uses: agentic_system_base_override /
+    # agentic_mode_prompt_<mode>). Both accept '-' for stdin.
+    try:
+        from mu.commands._prompt_flags import apply_prompt_flags
+
+        apply_prompt_flags(session, args)
+    except ImportError:
+        pass
+
     # If the session we just loaded has in-flight teacher / feature
     # state, queue a resumption briefing so the agent's first turn
     # knows what's already running without making the user re-explain.
@@ -1048,6 +1066,30 @@ def build_session(args, ui, allow_prompt=True):
         for workspace in args.workspace:
             session.folder_context.add_folder(workspace)
         session.session_manager.save_history(session.folder_context)
+    elif not session.folder_context.folders and allow_prompt:
+        try:
+            from prompt_toolkit import prompt as _pt_prompt
+            from prompt_toolkit.completion import PathCompleter as _PathCompleter
+
+            console.print(
+                "[dim]Workspace folder (optional — press enter to skip)\n"
+                "Without a workspace the agent runs in chat-only mode[/dim]"
+            )
+            ws_path = _pt_prompt(
+                "workspace> ",
+                completer=_PathCompleter(expanduser=True, only_directories=True),
+                default="",
+            ).strip()
+        except (ImportError, EOFError, KeyboardInterrupt):
+            ws_path = ""
+        if ws_path:
+            ws_path = os.path.expanduser(ws_path)
+            if os.path.isdir(ws_path):
+                session.folder_context.add_folder(ws_path)
+                session.session_manager.save_history(session.folder_context)
+                console.print(f"[dim]workspace → {ws_path}[/dim]")
+            else:
+                console.print(f"[yellow]not a directory: {ws_path} — skipping[/yellow]")
 
     if args.yolo:
         session.variables["yolo"] = True
@@ -1129,6 +1171,72 @@ def handle_command(session, user_input, allow_prompt=True):
     )
 
 
+def _trace_analyze_cli(path: str) -> int:
+    """Headless terminal summary of one trace JSONL file (``--trace-analyze``).
+
+    Thin wrapper over the shared ``mu.trace`` parser + summary builder so the
+    CLI and the GUI dashboard show identical numbers. Prints overview cards
+    and the headline compaction/drift/nudge/tool counts; returns an exit code.
+    """
+    import os
+
+    from mu.trace import build_series, build_summary, parse_trace
+
+    if not os.path.exists(path):
+        console.print(f"[red]trace file not found: {safe_markup(path)}[/red]")
+        return 1
+    run = parse_trace(path)
+    if not run.header and not run.iters:
+        console.print(
+            f"[red]no trace records parsed from: {safe_markup(path)}[/red]"
+        )
+        return 1
+    series = build_series(run)
+    s = build_summary(run, series)
+
+    console.print(
+        f"[bold]Trace run[/bold] {s['run_id']}  "
+        f"session=[cyan]{safe_markup(s['session'])}[/cyan]  "
+        f"model={safe_markup(s['model'])}  mode={safe_markup(s['mode'])}"
+    )
+    console.print(
+        f"  iters={s['iters']}  status={s['status']}  "
+        f"tokens in={s['total_in']} out={s['total_out']}  "
+        f"cost=${s['total_cost']}"
+    )
+    console.print(
+        f"  peak_context={s['peak_context']}  peak_estimated={s['peak_estimated']}  "
+        f"peak|drift|={s['peak_drift_abs']}%  mean_drift={s['mean_drift']}%  "
+        f"context_limit={s['context_limit']}"
+    )
+    console.print(
+        f"  compactions={s['compaction_count']} by_kind={s['compaction_by_kind']}  "
+        f"mechanical_fallbacks={s['mechanical_fallback_count']}"
+    )
+    console.print(
+        f"  nudges={s['nudge_count']} by_kind={s['nudge_by_kind']}  "
+        f"broke_loop={s['nudges_broken']}  "
+        f"redundant_reads={s['redundant_reads']}  tool_calls={s['tool_calls']}"
+    )
+    if series["tool_histogram"]:
+        console.print("  tools:")
+        for h in sorted(series["tool_histogram"], key=lambda x: -x["count"]):
+            console.print(
+                f"    {h['name']:<24} n={h['count']:<4} ok={h['ok']:<4} "
+                f"err={h['error']:<3} avg_lat={h['avg_latency_ms']}ms "
+                f"cache={h['cache_hit_rate']}"
+            )
+    if series["compaction_timeline"]:
+        console.print("  compaction timeline:")
+        for c in series["compaction_timeline"]:
+            console.print(
+                f"    iter={c['iter']:<4} {c['kind']:<20} "
+                f"{c['tokens_before']}→{c['tokens_after']} "
+                f"(saved {c['tokens_saved']})  summarizer={c['summarizer']}"
+            )
+    return 0
+
+
 def main():
     logger.info("μCLI starting...")
 
@@ -1158,6 +1266,52 @@ def main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the browser GUI in the background (frees the terminal). Default port 30311.",
+    )
+    parser.add_argument(
+        "--gui-stop",
+        action="store_true",
+        help="Stop the running GUI daemon and exit.",
+    )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help=(
+            "Launch the GUI and open the Trace Analyzer dashboard (/trace) "
+            "to visualize per-run context growth, tokenizer drift, "
+            "compaction/nudge/tool timelines, and more."
+        ),
+    )
+    parser.add_argument(
+        "--trace-analyze",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Print a terminal summary of a trace JSONL file and exit "
+            "(headless quick-look — no GUI)."
+        ),
+    )
+    parser.add_argument(
+        "--gui-foreground",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Port for --gui (default 30311).",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Bind address for --gui (default 127.0.0.1; use 0.0.0.0 for LAN access).",
+    )
+    parser.add_argument(
         "--system",
         type=str,
         default="""You are a helpful assistant, answer all questions succinctly.
@@ -1171,7 +1325,70 @@ def main():
   """,
         help="Initial system instruction",
     )
+    parser.add_argument(
+        "--system-file",
+        type=str,
+        default=None,
+        help=(
+            "Load the initial system instruction from a file (overrides --system). "
+            "Use '-' to read from stdin."
+        ),
+    )
+    parser.add_argument(
+        "--mode-prompt",
+        type=str,
+        action="append",
+        default=None,
+        metavar="NAME=PATH",
+        help=(
+            "Load a file-based prompt override for the base or a mode. Repeatable. "
+            "NAME is 'base' or a mode name (default, debug, feature, research, "
+            "loop, security, history, teacher); PATH is a file (use '-' for stdin). "
+            "Examples: --mode-prompt base=./prompts/base.md "
+            "--mode-prompt default=./prompts/default.md"
+        ),
+    )
     args = parser.parse_args()
+
+    if getattr(args, "trace_analyze", None):
+        sys.exit(_trace_analyze_cli(args.trace_analyze))
+
+    if getattr(args, "trace", False):
+        # Launch the GUI and point the user at the Trace Analyzer dashboard.
+        args.gui = True
+        from mu.gui.launcher import run_gui
+
+        host = getattr(args, "host", None) or "127.0.0.1"
+        port = int(getattr(args, "port", None) or 30311)
+        try:
+            run_gui(args, build_session)
+        except Exception as exc:
+            console.print(
+                f"[red]Failed to launch GUI: {safe_markup(str(exc))}[/red]"
+            )
+            sys.exit(1)
+        console.print(
+            f"  Trace Analyzer → http://{host}:{port}/trace"
+        )
+        return
+
+    if args.gui_stop:
+        from mu.gui.launcher import stop_gui
+
+        sys.exit(stop_gui(args.port))
+
+    if args.gui:
+        from mu.gui.launcher import run_gui
+
+        try:
+            run_gui(args, build_session)
+        except Exception as exc:
+            console.print(
+                f"[red]Failed to launch GUI: {safe_markup(str(exc))}[/red]"
+            )
+            sys.exit(1)
+        return
+
     ui = RichUI()
 
     try:
@@ -1183,39 +1400,47 @@ def main():
     print_splash(session)
     refresh_memory_hud(session, ui)
 
-    while True:
-        try:
-            current_task = get_current_feature_task_label(session)
-            feature_context = get_feature_prompt_context(session)
-            user_input = ui.get_input(
-                session.session_manager.current_session_name,
-                session.staged_files,
-                agent_mode=session.variables.get("agent_mode", "default"),
-                current_task=current_task,
-                feature_context=feature_context,
-            )
-
-            if not user_input:
-                continue
-
-            if user_input.startswith("/"):
-                result = handle_command(session, user_input, allow_prompt=True)
-                if result.get("data", {}).get("exit"):
-                    break
-                continue
-
-            send_result = session.send_message(user_input)
-            if send_result.get("status") == "interrupted":
-                console.print(
-                    "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
+    try:
+        while True:
+            try:
+                current_task = get_current_feature_task_label(session)
+                feature_context = get_feature_prompt_context(session)
+                user_input = ui.get_input(
+                    session.session_manager.current_session_name,
+                    session.staged_files,
+                    agent_mode=session.variables.get("agent_mode", "default"),
+                    current_task=current_task,
+                    feature_context=feature_context,
                 )
-            refresh_memory_hud(session, ui)
 
-        except KeyboardInterrupt:
-            console.print("\n(Interrupted. Type /quit to exit)")
-        except EOFError:
-            console.print("\nGoodbye!")
-            break
+                if not user_input:
+                    continue
+
+                if user_input.startswith("/"):
+                    result = handle_command(session, user_input, allow_prompt=True)
+                    if result.get("data", {}).get("exit"):
+                        break
+                    continue
+
+                send_result = session.send_message(user_input)
+                if send_result.get("status") == "interrupted":
+                    console.print(
+                        "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
+                    )
+                refresh_memory_hud(session, ui)
+
+            except KeyboardInterrupt:
+                console.print("\n(Interrupted. Type /quit to exit)")
+            except EOFError:
+                console.print("\nGoodbye!")
+                break
+    finally:
+        # Cancel any still-running async sub-agents and reap background bash
+        # tasks so nothing outlives the session. No-op when none are active.
+        try:
+            session.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

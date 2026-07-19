@@ -3,7 +3,7 @@ import json
 import os
 import time
 
-from utils.config import HISTORY_DIR
+from utils.config import HISTORY_DIR, _DEFAULT_CONTEXT_TOKEN_LIMIT
 
 
 def collect_feature_progress(session):
@@ -85,7 +85,7 @@ def collect_runtime_metrics(session):
     if anchor > hist_len:
         anchor = 0
     active_turns = max(0, hist_len - anchor)
-    context_limit = _max_int(session.variables.get("context_token_limit", 256000))
+    context_limit = _max_int(session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT))
     if hasattr(session.session_manager, "estimate_runtime_history_tokens"):
         context_tokens = int(session.session_manager.estimate_runtime_history_tokens() or 0)
     else:
@@ -222,16 +222,16 @@ def compose_base_system_prompt(session) -> str:
     agentic = bool(getattr(session, "agentic", False))
     if agentic:
         try:
-            from utils.config import AGENTIC_MODES, AGENTIC_SYSTEM_BASE
+            from mu.prompts import get_base as _get_base_prompt
+            from mu.prompts import get_mode as _get_mode_prompt
 
             agentic_base = str(
-                variables.get("agentic_system_base_override", AGENTIC_SYSTEM_BASE)
-                or AGENTIC_SYSTEM_BASE
+                variables.get("agentic_system_base_override")
+                or _get_base_prompt()
             )
-            default_mode = AGENTIC_MODES.get(active_mode, AGENTIC_MODES.get("default", ""))
             mode_instruction = str(
-                variables.get(f"agentic_mode_prompt_{active_mode}", default_mode)
-                or default_mode
+                variables.get(f"agentic_mode_prompt_{active_mode}")
+                or _get_mode_prompt(active_mode)
             )
             parts.append(
                 f"{agentic_base}\n\n### CURRENT STRATEGY MODE: "
@@ -277,7 +277,7 @@ def collect_context_layers(session):
     """Per-layer breakdown of the active context, in **tokens**.
 
     Every layer matches the system-prompt assembly in
-    `core/session.py:_inject_hierarchical_context` so the table in
+    `mu/session/context.py:inject_hierarchical_context` so the table in
     `/memory` reflects the real prompt cost (not just a slice of it).
     The estimator (`utils.token_estimator.estimate_tokens`) is the
     same one the compactor uses, so the numbers here, the splash
@@ -291,23 +291,57 @@ def collect_context_layers(session):
         model = ""
 
     # --- char-budgeted layers (the variable schema names them in chars) ---
+    from utils.config import LAYER_CHAR_FLOORS
+
     workspace_limit_chars = max(
-        1, int(session.variables.get("workspace_context_max_chars", 8192) or 8192)
+        1,
+        int(
+            session.variables.get(
+                "workspace_context_max_chars",
+                LAYER_CHAR_FLOORS["workspace_context_max_chars"],
+            )
+            or LAYER_CHAR_FLOORS["workspace_context_max_chars"]
+        ),
     )
     skills_limit_chars = max(
-        1, int(session.variables.get("skills_max_chars", 6144) or 6144)
+        1,
+        int(
+            session.variables.get(
+                "skills_max_chars",
+                LAYER_CHAR_FLOORS["skills_max_chars"],
+            )
+            or LAYER_CHAR_FLOORS["skills_max_chars"]
+        ),
     )
     summary_limit_chars = max(
-        1, int(session.variables.get("conversation_summary_char_limit", 8000) or 8000)
+        1,
+        int(
+            session.variables.get(
+                "conversation_summary_char_limit",
+                LAYER_CHAR_FLOORS["conversation_summary_char_limit"],
+            )
+            or LAYER_CHAR_FLOORS["conversation_summary_char_limit"]
+        ),
     )
     goal_limit_chars = max(
-        1, int(session.variables.get("active_goal_context_char_limit", 4000) or 4000)
-    )
-    tool_limit_chars = max(
-        1, int(session.variables.get("recent_tool_context_char_limit", 12000) or 12000)
+        1,
+        int(
+            session.variables.get(
+                "active_goal_context_char_limit",
+                LAYER_CHAR_FLOORS["active_goal_context_char_limit"],
+            )
+            or LAYER_CHAR_FLOORS["active_goal_context_char_limit"]
+        ),
     )
     retrieval_limit_chars = max(
-        1, int(session.variables.get("retrieval_context_char_limit", 5000) or 5000)
+        1,
+        int(
+            session.variables.get(
+                "retrieval_context_char_limit",
+                LAYER_CHAR_FLOORS["retrieval_context_char_limit"],
+            )
+            or LAYER_CHAR_FLOORS["retrieval_context_char_limit"]
+        ),
     )
 
     # --- materialize the layer bodies the same way the prompt builder does ---
@@ -324,10 +358,6 @@ def collect_context_layers(session):
         goal_text = str(session._build_active_goal_context() or "")
     except Exception:
         goal_text = ""
-    try:
-        tool_text = str(session._build_recent_tool_context(max_chars=tool_limit_chars) or "")
-    except Exception:
-        tool_text = ""
     retrieved_text = str(getattr(session, "_pending_retrieved_context", "") or "")
 
     # --- L5 / history: total tokens for everything *not* covered by the
@@ -341,7 +371,13 @@ def collect_context_layers(session):
         history_tokens = 0
 
     history_limit_tokens = max(
-        1, int(session.variables.get("context_token_limit", 256000) or 256000)
+        1,
+        int(
+            session.variables.get(
+                "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
+            )
+            or _DEFAULT_CONTEXT_TOKEN_LIMIT
+        ),
     )
 
     # L0 — base system prompt (persona + agentic harness + mode workflow).
@@ -383,13 +419,6 @@ def collect_context_layers(session):
             "current": _chars_to_tokens(goal_text, model),
             "maximum": _budget_chars_to_tokens(goal_limit_chars),
             "description": "Feature/task status + scratchpad snapshot.",
-        },
-        {
-            "layer": "L4",
-            "name": "Recent tool activity",
-            "current": _chars_to_tokens(tool_text, model),
-            "maximum": _budget_chars_to_tokens(tool_limit_chars),
-            "description": "Compressed recent tool calls/results.",
         },
         {
             "layer": "L4B",

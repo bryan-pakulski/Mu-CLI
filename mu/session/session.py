@@ -32,7 +32,6 @@ from utils.logger import logger
 from utils.helpers import get_safe_mime_type, display_image_in_terminal
 from utils.runtime_metrics import build_live_status_line
 from utils.config import (
-    DEFAULT_SESSION_NAME,
     calculate_cost,
     AGENTIC_SYSTEM_BASE,
     AGENTIC_MODES,
@@ -88,6 +87,14 @@ class Session:
         self.retrieval_index = _RETRIEVAL_INDEX
         self._pending_retrieved_context = ""
         self._pending_user_text = ""
+        # Per-turn dedup for skill auto-expansion banners: which skills we
+        # already announced for the current `_pending_user_text`, so a
+        # re-assembly of the system prompt (retry / re-inject) doesn't
+        # double-print. Reset when the user text changes. Only the
+        # `announce=True` path (real turn assembly) touches this — the
+        # `/memory` size-measurement path leaves it alone.
+        self._skills_announced_text: str = ""
+        self._skills_announced: set[str] = set()
         # One-shot system-prompt briefings queued by load/switch commands.
         # Drained at the top of every agent turn so the model knows it
         # just resumed an in-flight course / feature / session and can
@@ -108,6 +115,28 @@ class Session:
         # the aborting hook for the turn-response error field.
         self._hook_abort_requested: bool = False
         self._hook_abort_reason: str | None = None
+        # Reactive overflow recovery (Claude Code Tier 5): counts compact-and-
+        # retry attempts on a "prompt too long" provider error so we never loop
+        # compact-and-fail, while still letting a later iteration in the same
+        # turn recover from a fresh overflow. Capped at
+        # _MAX_OVERFLOW_RECOVERIES_PER_TURN (in mu.agent.loop_body). Reset per
+        # turn in run_turn + _collect_turn_response.
+        self._overflow_recoveries_this_turn: int = 0
+        # Async sub-agent orchestrator state. `_subagent_cancelled` is the
+        # cooperative kill flag (read at the top of each run_turn iteration,
+        # mirroring `_hook_abort_requested`); `_subagent_kill_reason` carries
+        # the reason ("killed_by_parent" | "runtime_exceeded" | ...).
+        # `_subagent_lifecycle` is set per-child by spawn_agent so the child's
+        # own loop can feed tool calls to its SubagentLifecycleManager.
+        # `_subagent_registry` is the per-parent control plane for async
+        # sub-agent runs (task_id -> running child). All absent / default for
+        # single-agent sessions.
+        self._subagent_cancelled: bool = False
+        self._subagent_kill_reason: str | None = None
+        self._subagent_lifecycle = None
+        from mu.agent.registry import SubagentRegistry
+
+        self._subagent_registry = SubagentRegistry()
         # Per-session usage tracker. Populated by the pre_tool /
         # post_tool hooks in `mu/agent/usage_tracker.py`. Surfaced via
         # `/stats`. Reset via `/stats clear`.
@@ -212,6 +241,7 @@ class Session:
         self.collation_buffer = self.session_manager.collation_buffer
         self.task_memory = self.session_manager.task_memory
         self.turn_scratchpad = self.session_manager.turn_scratchpad
+        self.tool_result_cache = self.session_manager.tool_result_cache
         self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
         setattr(
@@ -350,7 +380,9 @@ class Session:
     def _summarize_message_parts(self, msg_dict: dict) -> str:
         from mu.session.messages import summarize_message_parts
 
-        return summarize_message_parts(msg_dict)
+        return summarize_message_parts(
+            msg_dict, provider=getattr(self, "provider", None)
+        )
 
     # Budget helpers (`_resolve_context_limit`, `_resolve_response_reserve`,
     # `_compaction_token_budget`) moved to `mu/session/budgets.py`. These
@@ -379,7 +411,9 @@ class Session:
         `mu/session/messages.py:prepare_runtime_history`."""
         from mu.session.messages import prepare_runtime_history
 
-        return prepare_runtime_history(self, turn_start_index)
+        return prepare_runtime_history(
+            self, turn_start_index, provider=getattr(self, "provider", None)
+        )
 
     def _inject_conversation_summary(self, system_prompt: str) -> str:
         summary = str(
@@ -387,11 +421,18 @@ class Session:
         ).strip()
         if not summary:
             return system_prompt
+        # Prepend the pinned session_goal as a preamble to the L2 summary.
+        # This ensures the goal survives compaction even if L3 is small
+        # or the session_goal variable is cleared at end of turn.
+        session_goal = str(self.variables.get("session_goal", "") or "").strip()
+        preamble = ""
+        if session_goal:
+            preamble = f"[Active Goal: {session_goal}]\n\n"
         return (
             f"{system_prompt}\n\n"
             "A rolling summary of older conversation history is available below. "
             "Use it for long-term continuity before re-reading or re-deriving prior work.\n"
-            f"{summary}"
+            f"{preamble}{summary}"
         )
 
     def _build_active_goal_context(self) -> str:
@@ -455,18 +496,44 @@ class Session:
         truth for L3 rendering; the memory entry is a durable audit
         trace and a recovery hatch if the variable ever gets cleared
         accidentally.
+
+        Lifecycle: saves with kind='goal', status='active'. Stores
+        the entry ID on ``self._active_goal_memory_id`` so the strip
+        / clear path can mark it 'done' (audit trail retained).
+        On goal shift (new text while old is active), marks the old
+        entry 'done' before creating the new one.
         """
         session_goal = str(self.variables.get("session_goal", "") or "").strip()
         if not session_goal:
             return
+        # Check if this exact goal text is already persisted as an active
+        # goal entry — if so, just record the ID and return (idempotent).
         existing = self.task_memory.search("session goal", limit=12)
-        if any(session_goal in str(entry.content or "") for entry in existing):
-            return
-        self.task_memory.save(
+        for entry in existing:
+            if (
+                session_goal in str(entry.content or "")
+                and getattr(entry, "status", "active") == "active"
+                and getattr(entry, "kind", "") == "goal"
+            ):
+                self._active_goal_memory_id = entry.id
+                return
+        # Goal shift: mark the previous active goal entry as done before
+        # creating the new one. The old entry stays in the store for
+        # audit trail — it's just deprioritized.
+        old_id = getattr(self, "_active_goal_memory_id", None)
+        if old_id is not None:
+            old_entry = self.task_memory.get_entry(old_id)
+            if old_entry is not None and getattr(old_entry, "status", "active") == "active":
+                self.task_memory.update_status(old_id, "done")
+        # Save new goal entry with lifecycle metadata.
+        entry = self.task_memory.save(
             f"Locked session goal: {session_goal}",
-            tags=["session", "goal", "locked"],
+            tags=["goal", "session-goal", "locked"],
             source="session_goal",
+            kind="goal",
+            status="active",
         )
+        self._active_goal_memory_id = entry.id
 
     def _ensure_loop_goal_persistence(self) -> None:
         if str(self.variables.get("agent_mode", "default")).lower() != "loop":
@@ -538,27 +605,6 @@ class Session:
 
     # ── End loop state management ─────────────────────────────────────
 
-    def _build_recent_tool_context(self, max_chars: int = 8000) -> str:
-        if max_chars <= 0:
-            return ""
-        recent = []
-        consumed = 0
-        for msg in reversed(self.session_manager.history):
-            if msg.get("role") not in {"assistant", "tool"}:
-                continue
-            for part in reversed(msg.get("parts", [])):
-                if part.get("type") not in {"tool_call", "tool_result"}:
-                    continue
-                line = self._summarize_message_parts({"role": msg.get("role"), "parts": [part]})
-                if not line:
-                    continue
-                entry = line + "\n"
-                if consumed + len(entry) > max_chars and recent:
-                    return "".join(reversed(recent)).strip()
-                recent.append(entry)
-                consumed += len(entry)
-        return "".join(reversed(recent)).strip()
-
     def _build_retrieved_workspace_context(self, query: str) -> str:
         if not self.folder_context or not self.folder_context.folders:
             return ""
@@ -567,7 +613,7 @@ class Session:
             return ""
         top_k = max(1, int(self.variables.get("retrieval_top_k", 5) or 5))
         char_budget = max(
-            1, int(self.variables.get("retrieval_context_char_limit", 5000) or 5000)
+            1, int(self.variables.get("retrieval_context_char_limit", 10000) or 10000)
         )
         self.retrieval_index.refresh_incremental(self.folder_context)
         payload = self.retrieval_index.retrieve(request, top_k=top_k, filters={})
@@ -594,14 +640,25 @@ class Session:
 
         return build_workspace_context_files(self)
 
-    def _build_skills_block(self) -> str:
+    def _build_skills_block(self, *, announce: bool = False) -> str:
         """LAYER 1B — render the installed skills (from `mu/skills/`,
         `~/.mu/skills/`, and `<workspace>/.mu/skills/`) into a labelled
         system-prompt block. Capped by `skills_max_chars` (default 6144).
         Mode is controlled by `skills_mode` (`"compact"` default).
+
+        When `announce` is True (the real per-turn system-prompt assembly
+        path), every skill whose `trigger` regex matches the current
+        user message prints the same `🎯 SKILL ACTIVE` banner the
+        `invoke_skill` tool uses — so trigger-regex auto-expansion is
+        visible, not silent. The `/memory` size-measurement path calls
+        this with `announce=False` (the default) and never banners.
         """
         try:
-            from mu.skills import discover_skills, render_skills_block
+            from mu.skills import (
+                announce_skill,
+                discover_skills,
+                render_skills_block,
+            )
         except ImportError:
             return ""
         raw = self.variables.get("skills_max_chars", 6144)
@@ -624,16 +681,79 @@ class Session:
         if mode not in {"compact", "full"}:
             mode = "compact"
         user_text = str(getattr(self, "_pending_user_text", "") or "")
+
+        # Trigger-regex auto-expansion is a compact-mode concept (in "full"
+        # mode every body is already inlined, so there's no hidden
+        # activation to surface). Announce matched skills once per turn.
+        if announce and mode == "compact" and user_text:
+            try:
+                self._announce_auto_expanded_skills(skills, user_text, announce_skill)
+            except Exception:
+                logger.debug("skill auto-expand banner failed", exc_info=True)
+
         return render_skills_block(
             skills, budget=budget, user_text=user_text, mode=mode
         )
 
-    def _inject_hierarchical_context(self, system_prompt: str) -> str:
+    def _announce_auto_expanded_skills(self, skills, user_text, announce_skill) -> None:
+        """Print the activation banner for each skill whose trigger regex
+        matches `user_text`, deduped per turn so a re-injected system
+        prompt doesn't double-print. Also bumps a per-skill
+        `auto_expansions` counter on `tool_stats` so `/stats` can audit
+        trigger effectiveness alongside explicit `invoke_skill` calls."""
+        if user_text != self._skills_announced_text:
+            self._skills_announced_text = user_text
+            self._skills_announced = set()
+        ui = getattr(self, "ui", None)
+        stats = getattr(self, "tool_stats", None)
+        from mu.skills import match_trigger
+
+        for skill in skills:
+            if not match_trigger(skill, user_text):
+                continue
+            if skill.name in self._skills_announced:
+                continue
+            self._skills_announced.add(skill.name)
+            announce_skill(ui, skill.name, via="trigger")
+            # Defensive, optional stats bump — never let accounting break
+            # the turn.
+            if isinstance(stats, dict):
+                try:
+                    sk_bucket = stats.setdefault(
+                        "skills", {}
+                    ).setdefault(
+                        skill.name,
+                        {"invocations": 0, "auto_expansions": 0, "last_used_at": None},
+                    )
+                    sk_bucket.setdefault("auto_expansions", 0)
+                    sk_bucket.setdefault("invocations", 0)
+                    sk_bucket.setdefault("last_used_at", None)
+                    sk_bucket["auto_expansions"] = int(sk_bucket["auto_expansions"]) + 1
+                except Exception:
+                    pass
+
+    def _inject_hierarchical_context(
+        self,
+        system_prompt: str,
+        *,
+        cached_workspace: str | None = None,
+        cached_skills: str | None = None,
+    ) -> str:
         """Layered system-prompt assembly. Body moved to
-        `mu/session/context.py:inject_hierarchical_context`."""
+        `mu/session/context.py:inject_hierarchical_context`.
+
+        ``cached_workspace`` / ``cached_skills`` forward per-turn-cached
+        L1 / L1B text so the agent loop can rebuild L2 / L3 fresh every
+        iteration without re-reading files from disk each time.
+        """
         from mu.session.context import inject_hierarchical_context
 
-        return inject_hierarchical_context(self, system_prompt)
+        return inject_hierarchical_context(
+            self,
+            system_prompt,
+            cached_workspace=cached_workspace,
+            cached_skills=cached_skills,
+        )
 
     def queue_resumption_briefing(self, briefing: str) -> None:
         """Add a one-shot resumption note to the next agent turn.
@@ -938,17 +1058,21 @@ class Session:
             return "retry"
         return "abort"
 
-    def _announce_retryable_failure(self, tool_name: str, raw_result):
+    def _announce_retryable_failure(self, tool_name: str, raw_result) -> int:
         """If `raw_result` is a structured failure envelope with `retryable=True`,
         surface its `hint` on the live UI so the human can see what the agent
-        saw. Also tracks repeat retryable failures of the same (tool, fingerprint)
-        and escalates to an error banner on the third strike so the user knows
-        the agent is stuck.
+        saw. Also tracks repeat retryable failures of the same (tool, error_code)
+        and escalates to an error banner on the third strike.
+
+        Returns the current retryable-failure count for this (tool_name,
+        error_code) pair, or 0 if the result is not a retryable failure.
+        The caller (loop_body) uses the return value to inject a corrective
+        message into the conversation when the count exceeds a threshold,
+        breaking retryable-failure loops that pattern-based loop detection
+        cannot catch (different tool args each time → different fingerprints).
         """
-        if not self.ui:
-            return
         if not bool(self.variables.get("reflective_retry_enabled", True)):
-            return
+            return 0
         envelope = None
         if isinstance(raw_result, dict):
             envelope = raw_result
@@ -960,15 +1084,15 @@ class Session:
             except (ValueError, TypeError):
                 envelope = None
         if not envelope:
-            return
+            return 0
         if envelope.get("ok") is not False:
-            return
+            return 0
         if not envelope.get("retryable"):
-            return
+            return 0
         error_code = str(envelope.get("error_code") or "unknown")
         hint = str(envelope.get("hint") or "").strip()
         if not hint:
-            return
+            return 0
 
         # Track repeats — `_retryable_failure_counts` is a dict keyed by
         # (tool_name, error_code) -> count. Reset each turn (cleared in
@@ -979,15 +1103,26 @@ class Session:
         self._retryable_failure_counts[key] = self._retryable_failure_counts.get(key, 0) + 1
         count = self._retryable_failure_counts[key]
 
-        if count >= 3:
-            self.ui.show_error(
-                f"🔁 {tool_name} has hit {error_code} {count}x this turn. "
-                f"Hint stays the same: {hint[:160]}"
-            )
-        else:
-            self.ui.show_info(
-                f"  [retryable {error_code}] {hint[:200]}"
-            )
+        # Expose the latest retryable error_code so the agent loop can feed
+        # a synthetic `retryable~<error_code>` fingerprint into loop
+        # detection (R8, FM-6). Retryable-failure storms use different
+        # args each call, so their normal tool fingerprints never repeat
+        # and pattern-based loop detection cannot catch them. A dedicated
+        # retryable-fingerprint history lane closes that gap.
+        self._last_retryable_error_code = error_code
+
+        if self.ui:
+            if count >= 3:
+                self.ui.show_error(
+                    f"🔁 {tool_name} has hit {error_code} {count}x this turn. "
+                    f"Hint stays the same: {hint[:160]}"
+                )
+            else:
+                self.ui.show_info(
+                    f"  [retryable {error_code}] {hint[:200]}"
+                )
+
+        return count
 
     # Retry helpers moved to `mu/agent/retry.py`. Static-method
     # forwarders preserve the `Session._is_transient_provider_error`
@@ -1016,10 +1151,10 @@ class Session:
     # call sites used by the iteration loop and tests.
 
     @staticmethod
-    def _coarse_tool_args(tool_args):
+    def _coarse_tool_args(tool_args, tool_name=""):
         from mu.agent.loop_detection import coarse_tool_args
 
-        return coarse_tool_args(tool_args)
+        return coarse_tool_args(tool_args, tool_name)
 
     @staticmethod
     def _tool_call_fingerprint(tool_name: str, tool_args, *, pattern_only: bool = False) -> str:
@@ -1040,6 +1175,19 @@ class Session:
         from mu.agent.loop_detection import is_repeated_tool_sequence
 
         return is_repeated_tool_sequence(sequence_history, repeat_threshold)
+
+    @staticmethod
+    def _is_periodic_sequence(
+        sequence_history: list[str],
+        *,
+        max_period: int = 6,
+        min_repeats: int = 2,
+    ) -> bool:
+        from mu.agent.loop_detection import is_periodic_sequence
+
+        return is_periodic_sequence(
+            sequence_history, max_period=max_period, min_repeats=min_repeats
+        )
 
     def _provider_generate_with_retry(
         self,
@@ -1105,8 +1253,13 @@ class Session:
         total_cost: float,
         error: str | None = None,
     ) -> dict:
-        # Clear the rolling flag so a future turn starts fresh.
-        self._history_rolled_this_turn = False
+        # Reset the compaction watermark so a future turn starts fresh.
+        self._compaction_watermark = 0
+        # Reset the once-per-turn proactive-compaction flag so the next turn's
+        # turn-start roll + auto-compaction hook can fire again.
+        self._compacted_this_turn = False
+        # Reset the reactive-overflow-recovery counter for the next turn.
+        self._overflow_recoveries_this_turn = 0
         # Reset per-turn retry counters so the next turn isn't penalised for
         # failures the previous turn already escalated on.
         if hasattr(self, "_retryable_failure_counts"):
@@ -1140,7 +1293,7 @@ class Session:
                         }
                     )
 
-        return {
+        response = {
             "ok": error is None and status not in {"error"},
             "status": status,
             "error": error,
@@ -1160,6 +1313,23 @@ class Session:
             },
             "session_totals": dict(self.session_manager.token_counts),
         }
+        # Stash a compact turn summary for the run tracer. The `send_message`
+        # finally block reads this and emits the `turn_end` line + flushes the
+        # trace file. Kept small — full content lives in session.json.
+        try:
+            self._trace_turn_summary = {
+                "status": status,
+                "total_in": int(total_in or 0),
+                "total_out": int(total_out or 0),
+                "total_cost": float(total_cost or 0.0),
+                "tool_calls": len(tool_calls),
+                "tool_results": len(tool_results),
+                "error": error,
+                "session_totals": dict(self.session_manager.token_counts),
+            }
+        except Exception:  # noqa: BLE001 — telemetry must never break a turn
+            pass
+        return response
 
     def send_message(self, text):
         """Body moved to `mu/agent/loop_body.py:run_turn`.
@@ -1179,22 +1349,108 @@ class Session:
             return run_turn(self, text)
         finally:
             self._strip_session_goal_after_turn()
+            # Lazy LAYER 3B: clear the orchestrator role once no children are
+            # active so a session that spawned sub-agents earlier doesn't keep
+            # emitting ORCHESTRATOR guidance on unrelated future turns. The
+            # role is re-stamped on the next spawn_agent call.
+            try:
+                if not self._subagent_registry.has_active():
+                    if str(self.variables.get("session_role", "") or "") == "parent":
+                        self.variables["session_role"] = ""
+            except Exception:
+                pass
+            # Clean up turn-prompt protection now that the turn is over.
+            # The turn's starting prompt was protected during the active
+            # turn; after the turn, unprotect it if it's not otherwise
+            # worthy of long-term protection (e.g. short/slash commands).
+            turn_idx = getattr(self, "_current_turn_start_index", None)
+            if turn_idx is not None:
+                self.session_manager._cleanup_protected(turn_idx)
+                self._current_turn_start_index = None
+            # Run tracer: emit the turn_end line and flush+close the trace
+            # file. Runs on every exit path (normal completion, hook abort,
+            # sub-agent kill, exception) — telemetry must never be lost and
+            # must never propagate a failure into the turn.
+            try:
+                from mu.trace.emitter import get_emitter
+
+                _em = get_emitter(self)
+                if _em is not None and not _em._closed:
+                    _summary = getattr(self, "_trace_turn_summary", {}) or {}
+                    _em.turn_end(
+                        {
+                            "status": _summary.get("status", "unknown"),
+                            "total_in": _summary.get("total_in", 0),
+                            "total_out": _summary.get("total_out", 0),
+                            "total_cost": _summary.get("total_cost", 0.0),
+                            "tool_calls": _summary.get("tool_calls", 0),
+                            "tool_results": _summary.get("tool_results", 0),
+                            "error": _summary.get("error"),
+                            "session_totals": _summary.get("session_totals", {}),
+                            "iters": _em.iter_count,
+                        }
+                    )
+                    _em.close()
+            except Exception:  # noqa: BLE001 — telemetry must never break a turn
+                pass
+
+    def _session_goal_is_sticky(self) -> bool:
+        """Should the pinned session_goal survive the end of this turn?
+
+        True when the user opted in via ``session_goal_sticky`` or the
+        active mode is a long-horizon mode (loop / feature) that defaults
+        to keeping the goal across turn boundaries. Explicit opt-out
+        (``session_goal_sticky=False`` set by the user) is honored even
+        in long-horizon modes. Uses ``session_goal_sticky_explicit`` to
+        tell a user override apart from the schema default (mirrors
+        ``show_thinking_explicit``).
+        """
+        if bool(self.variables.get("session_goal_sticky_explicit", False)):
+            return bool(self.variables.get("session_goal_sticky", False))
+        mode = str(self.variables.get("agent_mode", "default") or "default").lower()
+        return mode in ("loop", "feature")
 
     def _strip_session_goal_after_turn(self) -> None:
-        """Clear `session_goal` at the end of every agent turn.
+        """Clear `session_goal` at the end of every agent turn — unless
+        the goal is *sticky*, in which case it persists across turns in
+        L3 until the user clears it (/goal clear) or sets a new goal.
+
+        Sticky when: ``session_goal_sticky`` is set True, OR the active
+        mode is a long-horizon mode (loop / feature) that defaults to
+        keeping the goal across turn boundaries. Long-horizon multi-turn
+        work needs the goal to survive turn boundaries so the model
+        doesn't lose the thread between turns; conversational default
+        use strips it so a pinned goal can't bias an unrelated next
+        request.
 
         The variable is the only thing that gets reset — the durable
         `task_memory` audit entry (saved by
         `_ensure_session_goal_persistence`) stays as history. So
         `/memory search` can still surface the original ask, but L3
-        no longer renders it after the turn completes.
+        no longer renders it after the turn completes (when non-sticky).
+
+        Lifecycle: marks the active goal memory entry (tracked via
+        ``self._active_goal_memory_id``) as ``status='done'`` so
+        future searches don't resurface it unless explicitly requested
+        via ``include_all=True``.
 
         Safe to call even when no goal was set — it's a no-op then.
         """
         current = str(self.variables.get("session_goal", "") or "").strip()
         if not current:
             return
+        if self._session_goal_is_sticky():
+            # Keep the goal pinned across turns. Don't mark the memory
+            # entry done — it's still the active objective.
+            return
         self.variables["session_goal"] = ""
+        # Mark the goal memory entry as done (audit trail retained).
+        goal_id = getattr(self, "_active_goal_memory_id", None)
+        if goal_id is not None:
+            entry = self.task_memory.get_entry(goal_id)
+            if entry is not None and getattr(entry, "status", "active") == "active":
+                self.task_memory.update_status(goal_id, "done")
+            self._active_goal_memory_id = None
         # Clear the explicit flag so future modes' defaults apply
         # cleanly on the next turn. (See
         # `show_thinking_explicit` for the same pattern.)
@@ -1213,3 +1469,20 @@ class Session:
                 )
             except Exception:
                 pass
+
+    def shutdown(self) -> None:
+        """Release resources held for the lifetime of the session.
+
+        Cancels any still-running async sub-agents and reaps background
+        bash tasks. Called from the REPL's top-level ``finally`` on exit
+        so no child threads or subprocesses outlive the session. Safe to
+        call more than once.
+        """
+        try:
+            self._subagent_registry.shutdown()
+        except Exception:
+            logger.debug("subagent registry shutdown failed", exc_info=True)
+        try:
+            self.background_tasks.shutdown()
+        except Exception:
+            logger.debug("background task shutdown failed", exc_info=True)

@@ -1,0 +1,125 @@
+<aside class="mode-panel"
+       data-mode="history"
+       x-show="$store.mode.active === 'history'"
+       x-transition.opacity.duration.200ms>
+
+    <!-- search bar -->
+    <div class="history-search-bar">
+        <input type="text"
+               class="history-search-input"
+               x-model="$store.history.query"
+               @keydown.enter="$store.history.search()"
+               placeholder="Search conversation history…"
+               aria-label="Search query">
+        <button class="history-search-btn"
+                @click="$store.history.search()"
+                :disabled="$store.history.loading"
+                title="Search">search</button>
+    </div>
+
+    <!-- filters -->
+    <div class="history-filters">
+        <select x-model="$store.history.role" aria-label="Filter by role" class="history-filter-select">
+            <option value="">all roles</option>
+            <option value="user">user</option>
+            <option value="assistant">assistant</option>
+        </select>
+        <input type="text"
+               x-model="$store.history.tool_name"
+               placeholder="tool name filter"
+               class="history-filter-input"
+               aria-label="Filter by tool name">
+    </div>
+
+    <!-- loading state -->
+    <div class="history-loading" x-show="$store.history.loading">
+        <div class="thinking-dots"><span></span><span></span><span></span></div>
+        <span class="muted">Searching history…</span>
+    </div>
+
+    <!-- error state -->
+    <div class="history-error" x-show="$store.history.error">
+        <p class="err-text" x-text="$store.history.error"></p>
+    </div>
+
+    <!-- empty state (no search yet) -->
+    <div class="panel-empty" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length === 0 && !$store.history.searched">
+        <h3>search history</h3>
+        <p class="muted">Search across all conversation messages — including those
+        compacted behind the summary anchor. Enter a query above to find
+        past decisions, tool calls, and results.</p>
+    </div>
+
+    <!-- no results -->
+    <div class="panel-empty" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length === 0 && $store.history.searched">
+        <h3>no matches</h3>
+        <p class="muted">No messages matched your query. Try different keywords
+        or remove filters.</p>
+    </div>
+
+    <!-- results -->
+    <div class="history-results" x-show="!$store.history.loading && !$store.history.error && $store.history.results.length > 0">
+        <!-- summary line -->
+        <div class="history-results-summary muted mono">
+            <span x-text="$store.history.totalMatches + ' match(es)'"></span>
+            <span x-show="$store.history.hasMore" class="history-more-flag">· more available</span>
+        </div>
+
+        <!-- result cards -->
+        <template x-for="(hit, idx) in $store.history.results" :key="idx">
+            <div class="history-result-card">
+                <!-- header: index + role + anchor badge -->
+                <div class="history-result-header">
+                    <span class="history-index mono" x-text="'[' + hit.index + ']'"></span>
+                    <span class="history-role" x-text="hit.role"></span>
+                    <span class="history-anchor-badge"
+                          x-show="hit.before_anchor"
+                          title="This message was compacted behind the summary anchor">compacted</span>
+                </div>
+
+                <!-- matched parts -->
+                <template x-for="(pm, pi) in hit.parts_matched" :key="pi">
+                    <div class="history-match">
+                        <span class="history-match-tag" x-text="pm.match_type"></span>
+                        <span class="history-snippet" x-text="pm.snippet"></span>
+                    </div>
+                </template>
+
+                <!-- context before -->
+                <template x-if="hit.context_before && hit.context_before.length > 0">
+                    <div class="history-context">
+                        <template x-for="(ctx, ci) in hit.context_before" :key="ci">
+                            <div class="history-context-line muted">
+                                <span class="mono" x-text="'↑ [' + ctx.index + '] ' + ctx.role + ': '"></span>
+                                <span x-text="ctx.preview"></span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- context after -->
+                <template x-if="hit.context_after && hit.context_after.length > 0">
+                    <div class="history-context">
+                        <template x-for="(ctx, ci) in hit.context_after" :key="ci">
+                            <div class="history-context-line muted">
+                                <span class="mono" x-text="'↓ [' + ctx.index + '] ' + ctx.role + ': '"></span>
+                                <span x-text="ctx.preview"></span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- cache key -->
+                <div class="history-cache-key mono muted" x-show="hit.cache_key">
+                    <span x-text="'cache: ' + hit.cache_key"></span>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <!-- footnote -->
+    <div class="panel-footnote muted mono" x-show="$store.history.results.length > 0">
+        <span x-text="$store.history.totalMatches + ' total matches'"></span>
+    </div>
+
+</aside>

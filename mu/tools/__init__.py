@@ -1,4 +1,4 @@
-"""Tool registry for the new agent loop.
+"""Tool registry for the agent loop.
 
 The registry exposes three primary operations:
 
@@ -73,7 +73,7 @@ def tool(
     error_mode: str = "text_error",
     summary_builder: Optional[str] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator that registers a handler as a tool in the new registry.
+    """Decorator that registers a handler as a tool in the registry.
 
     The handler signature is `(args: dict, context: ToolExecutionContext)`
     and may return either a string, a dict with an envelope shape, or a
@@ -199,7 +199,7 @@ def execute(name: str, args: Dict[str, Any], context: ToolExecutionContext) -> D
 
     `dispatch` returns a JSON-encoded envelope string (the wire format
     the agent loop inlines into message history). We parse it back into
-    a dict here because the new agent loop wants structured access.
+    a dict here because the agent loop wants structured access.
     """
 
     import json as _json
@@ -274,7 +274,7 @@ def _load_builtin_tools() -> None:
             "mu.tools: failed to load agent tool package: %s", exc
         )
     try:
-        from . import memory as _memory_tools  # noqa: F401 — registers save/search/list_{memory,scratchpad} + clear_scratchpad
+        from . import memory as _memory_tools  # noqa: F401 — registers save/search/list_{memory,scratchpad} + clear_scratchpad + recall
     except Exception as exc:  # pragma: no cover — defensive
         import logging
         logging.getLogger("mucli").warning(
@@ -349,6 +349,20 @@ def _load_builtin_tools() -> None:
         import logging
         logging.getLogger("mucli").warning(
             "mu.tools: failed to load prompt tool package: %s", exc
+        )
+    try:
+        from . import session as _session_tools  # noqa: F401 — registers search_history
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load session tool package: %s", exc
+        )
+    try:
+        from . import trace as _trace_tools  # noqa: F401 — registers list_traces/trace_summary/trace_series/trace_iteration
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load trace tool package: %s", exc
         )
 
 

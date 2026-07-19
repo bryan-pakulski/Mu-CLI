@@ -20,12 +20,41 @@ def test_tool_fingerprint_pattern_mode_includes_argument_fingerprint():
     assert pattern.startswith("read_file~")
 
 
-def test_bash_pattern_fingerprint_changes_with_command_args():
+def test_bash_pattern_fingerprint_differs_on_string_content():
+    # bash is NOT a pattern-sensitive tool, so different string content
+    # should produce DIFFERENT pattern fingerprints — legitimate
+    # sequential bash calls with different commands must not trip loop
+    # detection.
     first = Session._tool_call_fingerprint(
         "bash", {"command": "ls -la"}, pattern_only=True
     )
     second = Session._tool_call_fingerprint(
         "bash", {"command": "cat README.md"}, pattern_only=True
+    )
+    assert first != second
+
+
+def test_search_tool_pattern_fingerprint_collapses_string_content():
+    # Pattern-sensitive tools (search_for_string, etc.) SHOULD collapse
+    # string content so repeated searches with different queries collide
+    # on the same pattern fingerprint — the hallmark of a search-loop.
+    first = Session._tool_call_fingerprint(
+        "search_for_string", {"string": "foo"}, pattern_only=True
+    )
+    second = Session._tool_call_fingerprint(
+        "search_for_string", {"string": "bar"}, pattern_only=True
+    )
+    assert first == second
+
+
+def test_bash_pattern_fingerprint_differs_on_arg_structure():
+    # Pattern fingerprints SHOULD differ when the argument STRUCTURE differs
+    # (e.g. different keys, different non-string values).
+    first = Session._tool_call_fingerprint(
+        "bash", {"command": "ls -la"}, pattern_only=True
+    )
+    second = Session._tool_call_fingerprint(
+        "bash", {"command": "ls -la", "cwd": "/tmp"}, pattern_only=True
     )
     assert first != second
 

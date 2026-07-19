@@ -156,7 +156,7 @@ def test_compaction_falls_back_to_payload_truncation_when_one_huge_message():
     )
     assert changed is True
     payload = sm.history[0]["parts"][0]["tool_result"]
-    assert "truncated_to_4000_chars_for_context_budget" in payload
+    assert "truncated_to_16000_chars_for_context_budget" in payload
 
 
 def test_agent_loop_uses_provider_aware_budget_before_provider_call(monkeypatch):
@@ -216,3 +216,101 @@ def test_compaction_no_op_when_history_already_fits():
     assert changed is False
     assert sm.summary_anchor == before_anchor
     assert sm.conversation_summary == before_summary
+
+
+def test_auto_compact_hook_does_not_double_apply_threshold(monkeypatch):
+    """The auto-compaction hook must pass `compaction_token_budget()` as the
+    budget — NOT `compaction_token_budget() * threshold`. The latter
+    double-applied `context_trim_threshold` (already applied inside
+    `compaction_token_budget`), collapsing the target from 85% to ~72% of
+    the residual window and firing compaction far too often.
+    """
+    from mu.agent.compactor import _compact_history
+    from mu.agent.hooks import HookContext
+
+    session = _make_session()
+    sm = session.session_manager
+    _stuff_history_over_budget(sm, n_turns=10, size=1500)
+    session.variables["context_token_limit"] = 256_000
+    session._compaction_watermark = 0  # arm the watermark gate
+    session._compacted_this_turn = False  # arm the once-per-turn gate
+
+    captured: dict = {}
+    real = sm.roll_history_summary_to_token_budget
+
+    def _spy(budget, *args, **kwargs):
+        captured.setdefault("budgets", []).append(budget)
+        # Don't actually run the LLM summarizer in this unit test — return
+        # False so the hook's "rolled" branch is exercised only when we want.
+        return False
+
+    monkeypatch.setattr(sm, "roll_history_summary_to_token_budget", _spy)
+
+    ctx = HookContext(point="pre_provider_call", session=session)
+    _compact_history(ctx)
+
+    assert captured.get("budgets"), "hook did not invoke the roller"
+    expected = int(session._compaction_token_budget())
+    for budget in captured["budgets"]:
+        # Must equal compaction_token_budget() exactly — not that × threshold.
+        assert budget == expected, (
+            f"hook budget {budget} != compaction_token_budget() {expected}; "
+            f"threshold was double-applied (target collapsed to ~72%)"
+        )
+        # And it must be strictly larger than the buggy double-applied value.
+        assert budget > int(expected * 0.85), (
+            "hook budget is at or below the old double-applied value — "
+            "the fix regressed"
+        )
+
+
+def test_auto_compact_hook_fires_at_most_once_per_turn(monkeypatch):
+    """The per-iteration auto-compaction hook must fire at most once per turn
+    (Claude Code fires autocompact once per turn at the boundary). Once
+    `_compacted_this_turn` is set — by the turn-start roll or by the hook's
+    own first compaction — subsequent `pre_provider_call` invocations skip.
+    """
+    from mu.agent.compactor import _compact_history
+    from mu.agent.hooks import HookContext
+
+    session = _make_session()
+    sm = session.session_manager
+    _stuff_history_over_budget(sm, n_turns=10, size=1500)
+    session._compaction_watermark = 0
+
+    call_count = {"n": 0}
+    real = sm.roll_history_summary_to_token_budget
+
+    def _spy(budget, *args, **kwargs):
+        call_count["n"] += 1
+        return real(budget, *args, **kwargs)
+
+    monkeypatch.setattr(sm, "roll_history_summary_to_token_budget", _spy)
+
+    # First invocation: history is over budget → compacts → sets the flag.
+    ctx = HookContext(point="pre_provider_call", session=session)
+    res1 = _compact_history(ctx)
+    assert res1 is not None, "first invocation should compact"
+    assert session._compacted_this_turn is True, "hook did not set the flag"
+
+    # Simulate history growing (another tool result landed) past the
+    # watermark — the old behavior would re-fire here.
+    sm.history.append(
+        {"role": "user", "parts": [{"type": "text", "text": "more" * 1500}]}
+    )
+    sm.history.append(
+        {"role": "assistant", "parts": [{"type": "text", "text": "more" * 1500}]}
+    )
+    assert len(sm.history) > session._compaction_watermark
+
+    # Second + third invocations this turn: must skip (flag is set).
+    assert _compact_history(ctx) is None
+    assert _compact_history(ctx) is None
+    assert call_count["n"] == 1, (
+        f"hook compacted {call_count['n']} times this turn, expected once"
+    )
+
+    # After the turn ends (`_collect_turn_response`), the flag resets and the
+    # next turn can fire again.
+    session._compacted_this_turn = False
+    assert _compact_history(ctx) is not None

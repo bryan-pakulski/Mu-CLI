@@ -11,7 +11,7 @@ The mode's anti-hallucination contract:
     no longer triggers).
   * `approve_security_finding` refuses unless both flags are True.
 
-Persistence layout (mirrors `documentation/feature_req_<id>/`):
+Persistence layout (per-scan directory under `documentation/`):
 
   documentation/security_scan_<id>/
     report.json           # SecurityReport state

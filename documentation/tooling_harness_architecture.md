@@ -8,10 +8,10 @@ This document defines a staged plan for evolving Mu-CLI's tooling harness into a
 
 The repository already contains the core building blocks for a tooling harness:
 
-- `core/tools.py` defines tool metadata, approval requirements, modification previews, and the dispatch layer for tool execution.
-- `core/session.py` coordinates tool-call execution inside the conversational loop, including approvals, structured tool results, memory promotion, and collation-aware behavior.
-- `core/server.py` exposes headless execution through async tasks, approval workflows, direct tool execution, and server-sent events for external clients.
-- `tests/test_batch_tool.py` and `tests/test_server_mode.py` cover important pieces of batch execution and approval-aware orchestration.
+- `mu/tools/descriptors.py` defines tool metadata (`ToolDefinition`, `ToolExecutionContext`), the `TOOLS` registry, approval flags, collated-tool membership, modification-preview helpers, bounds checks, and the descriptor-backed dispatch surface (`mu/tools/_dispatcher.py`).
+- `mu/session/session.py` coordinates tool-call execution inside the conversational loop, including approvals, structured tool results, memory promotion, and collation-aware behavior; `mu/agent/loop_body.py` drives the per-iteration tool loop.
+- `mu/gui/` exposes headless execution through async tasks, approval workflows, direct tool execution, and server-sent events for external clients (FastAPI app in `mu/gui/web_ui.py`, SSE via `sse_starlette` in `mu/gui/routers/chat.py`, REST routers under `mu/gui/routers/`).
+- `tests/test_batch_tool.py` and `tests/test_harness_layers.py` cover important pieces of batch execution and approval-aware orchestration.
 
 That means this work is not a greenfield design. It is a refinement effort: formalize the harness boundaries, clarify responsibilities, and create a roadmap for implementation.
 
@@ -37,7 +37,7 @@ That means this work is not a greenfield design. It is a refinement effort: form
 
 ### Action Points
 
-- [x] Inventory the existing tool lifecycle across `core/tools.py`, `core/session.py`, and `core/server.py`.
+- [x] Inventory the existing tool lifecycle across `mu/tools/descriptors.py`, `mu/session/session.py`, and `mu/gui/`.
 - [x] Define a canonical execution flow covering:
   1. tool lookup
   2. argument validation
@@ -59,9 +59,9 @@ That means this work is not a greenfield design. It is a refinement effort: form
 
 | Layer | Primary responsibility | What it currently owns |
 | --- | --- | --- |
-| `core/tools.py` | Tool registry and raw execution primitives | Declares `ToolDefinition` metadata, approval flags, collated-tool membership, modification preview helpers, bounds checks, and the dispatcher that calls the underlying tool functions. |
-| `core/session.py` | Conversational harness orchestration | Collects model tool calls, pre-computes approval candidates, renders diffs, requests approval, executes tools through memory-aware helpers, applies collation rules, emits tool traces, shapes structured results, and appends persisted `tool_result` records. |
-| `core/server.py` | Headless and API-facing orchestration | Wraps message/tool execution in async tasks, converts approvals into first-class server objects, publishes SSE events, validates API payloads, and exposes direct tool execution through `/api/tool` and chat execution through `/api/message`. |
+| `mu/tools/descriptors.py` | Tool registry and raw execution primitives | Declares `ToolDefinition` metadata, `ToolExecutionContext`, the `TOOLS` registry, approval flags, collated-tool membership, modification-preview helpers, bounds checks, and the descriptor-backed dispatch surface (`mu/tools/_dispatcher.py`). |
+| `mu/session/session.py` + `mu/agent/loop_body.py` | Conversational harness orchestration | Collects model tool calls, pre-computes approval candidates, renders diffs, requests approval, executes tools through memory-aware helpers, applies collation rules, emits tool traces, shapes structured results, and appends persisted `tool_result` records. |
+| `mu/gui/` | Headless and API-facing orchestration | Wraps message/tool execution in async tasks, converts approvals into first-class server objects, publishes SSE events (`mu/gui/routers/chat.py`), validates API payloads, and exposes direct tool execution and chat execution through the FastAPI routers under `mu/gui/routers/`. |
 
 #### Implementation concerns vs orchestration concerns
 
@@ -117,12 +117,11 @@ Every current tool can be mapped to the same minimum contract model:
 
 | Tool(s) | Approval behavior | Side-effect classification | Result shape expectations | Error-handling expectations |
 | --- | --- | --- | --- | --- |
-| `get_workspace_details`, `read_file`, `search_for_string`, `get_chunk`, `list_dir`, `list_agent_tasks`, `git_status`, `git_log`, `git_diff`, `git_branch`, `url_grounding`, `read_document` | No approval by default | Read-only discovery / inspection | Eligible for collation; can also be emitted as structured results with previews and parsed metadata | Return textual errors directly to the harness; collate only non-error results |
-| `get_current_time` | No approval | Read-only utility | Immediate raw text or structured summary | Return textual errors directly |
-| `write_file`, `apply_diff`, `run_agent_task`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_init`, `git_merge_request` | Requires approval unless `yolo` is enabled; may be forced by `strict_mode` | Mutating filesystem, process, or git actions | Immediate execution after approval; structured results may include changed-file/task previews | Preview errors or malformed patch errors must block approval; execution failures return textual errors |
+| `get_workspace_details`, `read_file`, `search_for_string`, `get_chunk`, `list_dir`, `url_grounding`, `read_document`, `retrieve_relevant_context`, `search_references`, `search_history`, `web_search`, `stackoverflow_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `hackernews_search` | No approval by default | Read-only discovery / inspection | Eligible for collation; can also be emitted as structured results with previews and parsed metadata | Return textual errors directly to the harness; collate only non-error results |
+| `write_file`, `apply_diff`, `search_and_replace_file`, `bash`, `bash_background` | Requires approval unless `yolo` is enabled; may be forced by `strict_mode` | Mutating filesystem or process actions (git operations are performed through `bash`) | Immediate execution after approval; structured results may include changed-file previews | Preview errors or malformed patch errors must block approval; execution failures return textual errors |
 | `batch_job` | Approval depends on nested commands via recursive inspection | Composite orchestration across mixed read/write tools | Aggregates child tool output into a batch result; approval planning and modifications expand over nested commands | Rejects nested `batch_job`; child failures are surfaced in the combined output |
 | `flush` | No approval | Control-plane / collation | Emits buffered collated content or a no-op message | Empty buffer is surfaced as a textual no-data result |
-| `save_memory`, `search_memory`, `list_memory`, `save_scratchpad`, `search_scratchpad`, `list_scratchpad`, `clear_scratchpad` | No approval | Memory and scratchpad control-plane | Returned through session-managed memory helpers and structured summaries | Return textual status/errors directly |
+| `save_memory`, `search_memory`, `list_memory`, `archive_memory`, `supersede_memory`, `retire_memory`, `reactivate_memory`, `update_memory_status`, `save_scratchpad`, `search_scratchpad`, `list_scratchpad`, `clear_scratchpad`, `recall` | No approval | Memory and scratchpad control-plane | Returned through session-managed memory helpers and structured summaries | Return textual status/errors directly |
 
 ### Contractual vs Incidental Behaviors
 
@@ -189,12 +188,13 @@ The current `ToolDefinition` surface is enough for model-facing tool schema expo
 
 | Descriptor group | Tools |
 | --- | --- |
-| Read / collatable | `get_workspace_details`, `read_file`, `search_for_string`, `get_chunk`, `list_dir`, `list_agent_tasks`, `git_status`, `git_log`, `git_diff`, `git_branch`, `url_grounding`, `read_document` |
-| Read / immediate | `get_current_time` |
-| Mutating with preview or approval planning | `write_file`, `apply_diff`, `run_agent_task`, `git_checkout`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_init`, `git_merge_request` |
+| Read / collatable | `get_workspace_details`, `read_file`, `search_for_string`, `get_chunk`, `list_dir`, `url_grounding`, `read_document`, `retrieve_relevant_context`, `search_references`, `search_history`, `web_search`, `stackoverflow_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `hackernews_search` |
+| Mutating with preview or approval planning | `write_file`, `apply_diff`, `search_and_replace_file`, `bash`, `bash_background` |
 | Composite | `batch_job` |
 | Control-plane | `flush` |
-| Memory-plane | `save_memory`, `search_memory`, `list_memory`, `save_scratchpad`, `search_scratchpad`, `list_scratchpad`, `clear_scratchpad` |
+| Memory-plane | `save_memory`, `search_memory`, `list_memory`, `archive_memory`, `supersede_memory`, `retire_memory`, `reactivate_memory`, `update_memory_status`, `save_scratchpad`, `search_scratchpad`, `list_scratchpad`, `clear_scratchpad`, `recall` |
+
+The registry has since grown to ~95 tools across additional planes (task/`todo_*`, feature-plan, security, teacher/curriculum, skill `invoke_skill`, sub-agent `spawn_agent`, shell `bash*`). The contract model above still classifies every one of them; the table lists the representative members of each group rather than the full inventory.
 
 ### Composite Tool Review
 
@@ -286,7 +286,7 @@ Stage 2 clarifies that the registry should become the authoritative explanation 
 
 ### Implementation Notes
 
-- A shared approval-planning layer now lives in `core/approval.py`.
+- A shared approval-planning layer now lives in `mu/agent/approval.py`.
 - `ApprovalPlan` and `ModificationPreview` provide the common data model for approval eligibility, preview state, normalized errors, and serialized review payloads.
 - Session-driven execution and direct server tool execution now both use the same plan-building rules before prompting for approval.
 - Approval payloads now include `preview_error` and `error_code` fields so GUI clients can distinguish a renderable diff from a preview failure.
@@ -375,10 +375,10 @@ Stage 2 clarifies that the registry should become the authoritative explanation 
 
 ### Implementation Notes
 
-- `tests/test_harness_layers.py` now provides layer-oriented harness tests instead of only feature-specific coverage.
+- `tests/test_harness_layers.py` now provides layer-oriented harness tests (descriptor metadata, approval planning, structured results) instead of only feature-specific coverage.
 - `tests/test_batch_tool.py` covers composite flow behavior and approval-plan aggregation details.
-- `tests/test_server_mode.py` now includes both approval success and rejection paths for direct server tool execution.
 - `tests/test_session.py` exercises structured result envelopes, normalized errors, and modified-file telemetry.
+- The FastAPI GUI server (`mu/gui/`) is exercised through `tests/test_gui_history_panel.py` and the harness-layer tests; approval accept/reject paths are covered by `tests/test_harness_layers.py` and `tests/test_batch_tool.py`.
 
 ### Exit Criteria
 

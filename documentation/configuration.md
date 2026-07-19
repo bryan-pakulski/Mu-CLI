@@ -21,6 +21,9 @@ Invoke via `python mucli.py [flags]`.
 | `--yolo` | Start in YOLO mode (auto-approve writes). |
 | `--debug` | Verbose logging. |
 | `--system <prompt>` | Override the initial system instruction. |
+| `--gui` | Launch the browser GUI in the background (default port 30311). |
+| `--trace` | Launch the GUI and open the Trace Analyzer dashboard (`/trace`). See [tracing.md](tracing.md). |
+| `--trace-analyze <file>` | Print a terminal summary of a trace JSONL file and exit (headless quick-look). See [tracing.md](tracing.md). |
 
 ## Environment variables
 
@@ -35,6 +38,7 @@ Sessions and logs live under `MUCLI_HOME`:
 
 - `~/.mucli/sessions/` — saved session JSON files
 - `~/.mucli/logs/` — log output
+- `~/.mucli/trace/` — per-run JSONL traces (one file per run; see [tracing.md](tracing.md))
 
 ## Configuration files
 
@@ -98,8 +102,9 @@ AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md
 
 For each attached workspace folder, mucli loads the first matching file
 (or all of them, in order) into LAYER 1 of the system prompt, capped by
-`workspace_context_max_chars` (default `8192` chars). Set the variable
-to an empty string to disable.
+`workspace_context_max_chars` (default `40000` chars at the default
+`context_token_limit`; scales with it — see [Per-layer budgets](#per-layer-budgets)).
+Set `workspace_context_files` to an empty string to disable.
 
 ## Session variables
 
@@ -114,10 +119,13 @@ inspectable via `/get <key>` or `/variables`. Defaults come from
 | `agent_mode` | str | `default` | Active agent mode. Same set as `/mode`. |
 | `strict_mode` | bool | `false` | Force user approval for every tool call. |
 | `yolo` | bool | `false` | Auto-approve write-side tools. |
-| `max_iterations` | int | `1000` | Hard cap on iterations per conversation turn. |
+| `max_iterations` | int | `1000` | Hard cap on iterations per conversation turn. When reached mid-work, the agent runs one final consolidation turn (tools disabled) and writes a handoff summary to memory instead of stopping silently. |
+| `session_goal` | str | `""` | The user's pinned top-level task for the current turn, rendered in L3 every iteration so the model keeps direction even when L2 is compacted. Set with `/goal <text>`; clears at end of turn unless `session_goal_sticky` is in effect. |
+| `session_goal_sticky` | bool | `false` | When true (or in `loop`/`feature` mode, which default to sticky), `session_goal` is **not** cleared at end of turn — it persists across turns in L3 until cleared (`/goal clear`) or replaced. Long-horizon multi-turn work needs the goal to survive turn boundaries; conversational default-mode use does not. The `session_goal_sticky_explicit` tracker records whether the user set this via `/set`, so the mode-aware default only applies until overridden. |
 | `reflective_retry_enabled` | bool | `true` | Show retryable tool failures + remediation hints inline. |
 | `streaming_enabled` | bool | `true` | Stream tokens one-by-one instead of one final panel. |
 | `structured_tool_results` | bool | `true` | Use structured envelope for tool results (vs. raw text). |
+| `trace_enabled` | bool | `true` | Write a per-run JSONL trace of every iteration to `~/.mucli/trace/` (context layers, real vs estimated tokens, compactions, nudges, tools, subagents, memory). The Trace Analyzer dashboard (`/trace`, or `mucli --trace`) visualizes it. Set `false` to disable. See [tracing.md](tracing.md). |
 
 ### Context — global cap
 
@@ -131,11 +139,17 @@ skills will trigger compaction sooner.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `context_token_limit` | int | `256000` | **Global** token cap (sum of all 7 layers + response reserve). Capped further by the provider's real context window if smaller. |
+| `context_token_limit` | int | `900000` | **Global** token cap (sum of all 7 layers + response reserve). Capped further by the provider's real context window if smaller. Changing this reratios the per-layer char budgets proportionally (see [Per-layer budgets](#per-layer-budgets)). |
 | `context_trim_threshold` | float | `0.85` | Fraction of the cap above which compaction kicks in. |
 | `response_token_reserve` | int | `4096` | Tokens reserved for the model's reply. Tune down for small-context models (Ollama 8k). |
 | `tool_context_window` | int | `6` | Recent tool messages kept uncompressed in history. |
+| `tool_result_floor` | int | `4` | Trailing tool-result messages in the active turn that compaction (including emergency compaction) must leave verbatim (R3). Prevents mid-turn compaction from dropping results just received. Mode-aware: `loop`/`feature` modes raise this to at least 8 (long-horizon work re-covers more files). |
+| `tool_result_cache_entries` | int | `50` | Max entries in the tool-result sidecar cache (`recall()` + auto-recall by locator). Mode-aware: `loop`/`feature` modes raise this to at least 256. |
+| `tool_result_cache_bytes` | int | `524288` | Max bytes in the tool-result sidecar cache. Mode-aware: `loop`/`feature` modes raise this to at least 2 MB. |
+| `emergency_keep_recent` | int | `2` | Trailing messages kept verbatim by emergency (pre-flight) compaction — smaller than the normal keep-recent so budget is reclaimed fast; `tool_result_floor` still protects recent tool results. |
 | `compact_history` | bool | `true` | Auto-compact tooling history after each finished turn. |
+| `progress_checkpoint_every` | int | `0` | Periodic L2 progress checkpoint: every N iterations, fold recent history into the structured `conversation_summary` (Progress / Key decisions / Current state / Open items) **without compacting** (the anchor doesn't advance, entries stay in L5). Keeps L2 fresh on long turns that never hit the compaction budget so the model stops re-deriving context it already gathered. `0` disables; when unset, `loop`/`feature` modes default to 12, `default`/`chat` to 0. |
+| `recoverage_stall_threshold` | int | `4` | Context-gathering stall detection: number of consecutive iterations that re-read files already read this turn **without** a concrete change (write/bash/spawn) before a "stop gathering, act" re-orient nudge is injected. `0` disables. Catches the diffuse re-coverage stall that doesn't form a clean repeated/periodic tool sequence. |
 
 ### Provider retry (transient failures)
 
@@ -161,21 +175,30 @@ Each layer's budget is a soft cap on how much of *that* content gets
 included on a turn. All are settable via `/set` and visible in
 `/variables`.
 
-| Variable | Type | Default | Layer | Description |
-| --- | --- | --- | --- | --- |
-| `workspace_context_max_chars` | int | `8192` | **L1** | Workspace files (AGENTS.md, CLAUDE.md, MUCLI.md, .mu/CONTEXT.md per attached folder). |
-| `workspace_context_files` | str | `AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md` | **L1** | Comma-separated list of files to auto-load per workspace. Empty disables. |
-| `skills_max_chars` | int | `6144` | **L1B** | AVAILABLE SKILLS block (compact index + auto-expanded bodies). `0` disables skills entirely. |
-| `skills_mode` | str | `compact` | **L1B** | `compact` (index + auto-expand on trigger) or `full` (every body inlined up to the budget). |
-| `conversation_summary_char_limit` | int | `8000` | **L2** | Rolling conversation summary. Clipped from the tail when exceeded. |
-| `active_goal_context_char_limit` | int | `4000` | **L3** | Feature/task status + scratchpad snapshot. |
-| `recent_tool_context_char_limit` | int | `12000` | **L4** | Compressed recent tool calls/results. |
-| `retrieval_context_char_limit` | int | `5000` | **L4B** | Semantic-retrieval snippets injected for the current turn. |
-| `retrieval_top_k` | int | `5` | **L4B** | Number of semantic-retrieval hits to consider when assembling L4B. |
+The five char-budget variables below **scale proportionally with
+`context_token_limit`** (`utils/config.py:compute_layer_char_budgets`):
+at the reference limit of `900000` each lands on its target token
+budget × 4 chars, and it never drops below an absolute floor (the
+historical minimum). So the "default" column is the value at the
+default `context_token_limit = 900000`; lowering the global cap
+shrinks these toward their floors, and raising it grows them.
 
-L5 (conversation history) has no per-layer budget of its own — it
-gets whatever the global cap minus the response reserve and the
-non-L5 layers leaves over.
+| Variable | Type | Default | Floor | Layer | Description |
+| --- | --- | --- | --- | --- | --- |
+| `workspace_context_max_chars` | int | `40000` | `16384` | **L1** | Workspace files (AGENTS.md, CLAUDE.md, MUCLI.md, .mu/CONTEXT.md per attached folder). |
+| `workspace_context_files` | str | `AGENTS.md,CLAUDE.md,MUCLI.md,.mu/CONTEXT.md` | — | **L1** | Comma-separated list of files to auto-load per workspace. Empty disables. |
+| `skills_max_chars` | int | `40000` | `6144` | **L1B** | AVAILABLE SKILLS block (compact index + auto-expanded bodies). `0` disables skills entirely. |
+| `skills_mode` | str | `compact` | — | **L1B** | `compact` (index + auto-expand on trigger) or `full` (every body inlined up to the budget). |
+| `conversation_summary_char_limit` | int | `80000` | `24000` | **L2** | Rolling conversation summary. Clipped from the tail when exceeded. |
+| `active_goal_context_char_limit` | int | `16384` | `4000` | **L3** | Feature/task status + scratchpad snapshot. |
+| `retrieval_context_char_limit` | int | `40000` | `10000` | **L4B** | Semantic-retrieval snippets injected for the current turn. |
+| `retrieval_top_k` | int | `5` | — | **L4B** | Number of semantic-retrieval hits to consider when assembling L4B. |
+
+**L4** (recent tool activity) and **L5** (conversation history) have no
+per-layer char budget of their own. L4 is governed by `tool_context_window`
+(how many recent tool messages stay uncompressed) plus the compaction
+summary; L5 gets whatever the global cap minus the response reserve and
+the other layers leaves over. Neither is settable via `/set layer`.
 
 #### Layer-budget shortcuts
 
@@ -183,10 +206,10 @@ Layer IDs are easier to remember than the underlying variable names.
 Both `/set` and `/get` accept a `layer` subcommand:
 
 ```
-/set layer L4 6000         # 6000 tokens; stored as 24000 chars in
-                           # recent_tool_context_char_limit
+/set layer L1 6000         # 6000 tokens; stored as 24000 chars in
+                           # workspace_context_max_chars
 /get layer L1              # tokens + underlying chars
-/get layer                 # table of all six layer budgets
+/get layer                 # table of all five layer budgets
 ```
 
 The value is in **tokens** — matching the unit shown in `/memory` and
@@ -194,7 +217,9 @@ the splash banner — and is converted to chars at a 4:1 ratio for the
 underlying `_chars` variable. (Setting the variable directly in chars
 via `/set workspace_context_max_chars 16384` still works.)
 
-Layer IDs autocomplete on Tab. L5 is rejected — adjust
+Layer IDs autocomplete on Tab. Valid IDs are `L1`, `L1B`, `L2`, `L3`,
+`L4B`. `L4` and `L5` are rejected — L4 is governed by `tool_context_window`
+and the compaction summary, and L5 is the global-cap remainder; adjust
 `context_token_limit` instead.
 
 ### Notes
@@ -218,6 +243,7 @@ Layer IDs autocomplete on Tab. L5 is rejected — adjust
 | `memory_summary_limit` | int | `8` | Memory entries shown in the system prompt summary. |
 | `scratchpad_enabled` | bool | `true` | Enable turn-local scratchpad. |
 | `scratchpad_max_entries` | int | `24` | Max scratchpad entries before eviction. |
+| `scratchpad_persist_across_turns` | bool | `false` | Keep the scratchpad across turns. Mode-aware: `loop`/`feature` modes persist regardless; `default`/`teacher` clear at turn start unless this is `true`. |
 
 ### Collation
 
@@ -232,7 +258,9 @@ Layer IDs autocomplete on Tab. L5 is rejected — adjust
 | `loop_active` | bool | `false` | Whether loop mode is currently engaged. |
 | `loop_features` | str | `""` | JSON list of features created during the current loop run. |
 | `loop_detection_enabled` | bool | `true` | Detect and break tight repeat loops. |
-| `loop_detection_repeat_threshold` | int | `3` | Repeat count that trips loop detection. |
+| `loop_detection_repeat_threshold` | int | `5` | Repeat count that trips (tight) pattern-based loop detection. |
+| `loop_detection_periodic_max_period` | int | `6` | Soft knob (not in the canonical schema, but settable via `/set` and read with `int()`): max spacing, in tool calls, between two equal tool-name sequences for the *periodic* loop detector (R7) to flag a repeat. Lower = stricter. |
+| `retryable_escalation_threshold` | int | `3` | Soft knob (settable via `/set`, read with `int()`): when a tool hits the same retryable error this many times in one turn with different args (which evades pattern detection), inject an escalation telling the model to change approach (R8). |
 
 ### Ollama tuning
 

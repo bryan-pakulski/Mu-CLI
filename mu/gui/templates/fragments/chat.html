@@ -1,0 +1,505 @@
+<div class="chat-history">
+    <template x-for="t in $store.chat.turns" :key="t.id">
+        <div class="turn-wrap">
+
+            <!-- user / assistant message bubbles -->
+            <template x-if="t.role === 'user' || t.role === 'assistant'">
+                <div :class="'msg ' + t.role + (t.streaming ? ' streaming' : '')">
+                    <div class="role" x-text="t.role"></div>
+                    <div class="body" x-html="t.html"></div>
+                    <!-- TTS speak button (assistant messages only, not while streaming) -->
+                    <div class="msg-actions" x-show="t.role === 'assistant' && !t.streaming">
+                        <button class="msg-action-btn"
+                                @click="$store.tts.speak(t.text || '', t.id)"
+                                :class="{ 'is-loading': $store.tts.isLoading(t.id), 'is-speaking': $store.tts.isSpeaking(t.id) }"
+                                :title="$store.tts.isSpeaking(t.id) ? 'Stop audio' : 'Speak this message'"
+                                x-show="$store.tts.enabled">
+                            <span x-show="!$store.tts.isLoading(t.id) && !$store.tts.isSpeaking(t.id)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6v4h2l3 3V3L4 6H2z"/><path d="M9 5.5c1 .5 1.5 1.5 1.5 2.5S10 10 9 10.5"/><path d="M11 4c1.5 .75 2.5 2 2.5 4s-1 3.25-2.5 4"/></svg></span>
+                            <span x-show="$store.tts.isLoading(t.id)" class="thinking-dots"><span></span><span></span><span></span></span>
+                            <span x-show="$store.tts.isSpeaking(t.id)"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg></span>
+                        </button>
+                    </div>
+                </div>
+            </template>
+
+            <!-- collapsed trace block: tool calls, thinking, results -->
+            <template x-if="t.role === 'trace'">
+                <div class="trace" :class="{ open: t.open, running: t.running }">
+                    <div class="trace-header"
+                         @click="t.open = !t.open"
+                         :aria-expanded="t.open"
+                         role="button"
+                         tabindex="0"
+                         @keydown.enter.prevent="t.open = !t.open"
+                         @keydown.space.prevent="t.open = !t.open">
+                        <span class="caret">›</span>
+                        <span class="label" x-text="t.running ? 'thinking' : 'trace'"></span>
+                        <span class="summary" x-text="summarizeTrace(t, $store.chat.clock)"></span>
+                        <span x-show="t.running" class="thinking-dots" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                        </span>
+                    </div>
+                    <div class="trace-events"
+                         x-show="t.open"
+                         x-transition.opacity.duration.180ms>
+                        <template x-for="ev in t.events" :key="ev.id">
+                            <div :class="'trace-event te-' + ev.kind">
+                                <div class="te-line">
+                                    <span class="te-label" x-text="eventLabel(ev)"></span>
+                                    <span class="te-name" x-show="ev.name" x-text="ev.name || ''"></span>
+                                </div>
+                                <div class="te-text" x-show="ev.text" x-text="ev.text || ''"></div>
+                                <pre class="te-json"
+                                     x-show="ev.jsonHtml"
+                                     x-html="ev.jsonHtml || ''"></pre>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <!-- live sub-agent status panel: one per session, inline in the
+                 feed. Expanded while agents run (tool / context / tokens),
+                 collapses to a one-line summary when all finish. -->
+            <template x-if="t.role === 'subagent_panel'">
+                <div class="subagent-panel" :class="{ open: t.open, running: t.running }">
+                    <div class="sap-header"
+                         @click="t.open = !t.open"
+                         :aria-expanded="t.open"
+                         role="button"
+                         tabindex="0"
+                         @keydown.enter.prevent="t.open = !t.open"
+                         @keydown.space.prevent="t.open = !t.open">
+                        <span class="caret">›</span>
+                        <span class="label">subagents</span>
+                        <span class="summary" x-text="summarizeSubagentPanel(t)"></span>
+                        <span x-show="t.running" class="thinking-dots" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                        </span>
+                    </div>
+                    <div class="sap-rows"
+                         x-show="t.open"
+                         x-transition.opacity.duration.180ms>
+                        <template x-for="a in t.agents" :key="a.task_id">
+                            <div class="sap-row" :class="'is-' + a.status">
+                                <div class="sap-row-head">
+                                    <span class="sap-depth" x-text="'d=' + a.depth"></span>
+                                    <span class="sap-task" x-text="a.task"></span>
+                                    <span class="sap-status" x-text="subagentStatusText(a)"></span>
+                                    <span class="sap-elapsed"
+                                          x-show="a.elapsed"
+                                          x-text="(a.elapsed || 0).toFixed(1) + 's'"></span>
+                                </div>
+                                <div class="sap-meta">
+                                    <span class="sap-tools"
+                                          x-show="a.tool_count > 0"
+                                          x-text="a.tool_count + ' call' + (a.tool_count > 1 ? 's' : '')"></span>
+                                    <span class="sap-tokens"
+                                          x-show="a.tokens_in > 0"
+                                          x-text="_fmtTok(a.tokens_in) + ' in'"></span>
+                                    <span class="sap-iter"
+                                          x-show="a.max_iter > 0"
+                                          x-text="'iter ' + a.iter + '/' + a.max_iter"></span>
+                                    <div class="sap-ctx"
+                                         x-show="a.context_pct > 0"
+                                         :title="'context ' + (a.context_pct || 0).toFixed(1) + '%'">
+                                        <div class="sap-ctx-fill"
+                                             :class="{ warn: (a.context_pct || 0) > 80 }"
+                                             :style="'width:' + Math.min(100, a.context_pct || 0) + '%'"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <!-- standalone error -->
+            <template x-if="t.role === 'error'">
+                <div class="msg error">
+                    <div class="role" x-text="t.role"></div>
+                    <div class="body" x-html="t.html"></div>
+                </div>
+            </template>
+
+            <!-- standalone info (live-mirror notices etc.) -->
+            <template x-if="t.role === 'info'">
+                <div class="msg info">
+                    <div class="role" x-text="t.role"></div>
+                    <div class="body" x-html="t.html"></div>
+                </div>
+            </template>
+
+            <!-- command result -->
+            <template x-if="t.role === 'command'">
+                <div class="msg command" :class="{ 'cmd-err': !t.ok }">
+                    <div class="cmd-head">
+                        <span class="cmd-name mono" x-text="t.command"></span>
+                        <span class="cmd-status" x-text="t.ok ? 'ok' : 'error'"></span>
+                        <span class="cmd-message muted" x-show="t.isPreformatted && t.message" x-text="t.message"></span>
+                    </div>
+                    <template x-if="t.isPreformatted && t.body">
+                        <pre class="cmd-pre" x-text="t.body"></pre>
+                    </template>
+                    <template x-if="!t.isPreformatted && t.body">
+                        <div class="cmd-body" x-html="t.html"></div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- resolved prompt: the breadcrumb left behind after the
+                 live inline prompt card is dismissed. Quiet record so
+                 scrolling back shows what was asked + what was picked. -->
+            <template x-if="t.role === 'prompt_resolved'">
+                <div class="msg prompt-resolved" :class="{ cancelled: t.cancelled }">
+                    <div class="resolved-meta">
+                        <span class="resolved-kind"
+                              x-text="t.cancelled ? 'cancelled' : 'decided'"></span>
+                        <span class="resolved-shape"
+                              x-show="t.shape"
+                              x-text="t.shape.replace('_', ' ')"></span>
+                    </div>
+                    <div class="resolved-q markdown" x-html="t.titleHtml"></div>
+                    <div class="resolved-a" x-show="!t.cancelled">
+                        <span class="arrow">→</span>
+                        <span class="answer markdown" x-html="t.answerHtml"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    <!-- Inline pending prompts: each entry in the prompts queue renders
+         as its own chat item. They sit at the bottom of the chat flow
+         instead of a centered modal so the rest of the conversation
+         stays visible and the user can scroll history while answering. -->
+    <template x-for="item in $store.prompts.visibleQueue" :key="item.id">
+        <div class="msg prompt"
+             x-data="promptModal()"
+             x-effect="sync(item)"
+             @keydown.escape.window="cancel()">
+            <div class="role">awaiting input</div>
+            <div class="prompt-body">
+                <h4 class="title markdown" x-html="titleHtml()"></h4>
+                <div class="desc markdown"
+                     x-show="!!description"
+                     x-html="descriptionHtml()"></div>
+
+                <!-- choice / choices -->
+                <div class="options" x-show="['choice','choices'].includes(shape)">
+                    <template x-for="(opt, idx) in (prompt.options || prompt.choices || [])" :key="idx">
+                        <label>
+                            <input :type="multi ? 'checkbox' : 'radio'" :name="'opt-' + item.id"
+                                   :value="optValue(opt)" x-model="value">
+                            <span x-html="optLabelHtml(opt)"></span>
+                        </label>
+                    </template>
+                    <label x-show="prompt.allow_other">
+                        <input :type="multi ? 'checkbox' : 'radio'" :name="'opt-' + item.id"
+                               value="__other__" x-model="value">
+                        <input type="text" placeholder="other…"
+                               x-model="otherText"
+                               style="margin-left:8px;flex:1;width:auto;">
+                    </label>
+                </div>
+
+                <!-- input -->
+                <input type="text" x-show="shape === 'input'"
+                       x-model="text"
+                       :placeholder="prompt.default || ''">
+
+                <!-- confirm -->
+                <div class="desc" x-show="shape === 'confirm'">
+                    <strong x-text="prompt.message || ''"></strong>
+                </div>
+
+                <!-- quiz -->
+                <div x-show="shape === 'quiz'" class="quiz">
+                    <template x-for="(q, qi) in (prompt.questions || [])"
+                              :key="q.qid || q.id || ('q' + qi)">
+                        <div class="quiz-q">
+                            <div class="quiz-prompt markdown"
+                                 x-html="renderMarkdownInline(q.prompt || q.question || '')"></div>
+                            <div class="options" x-show="q.kind !== 'fill_blank'">
+                                <template x-for="(opt, oi) in (q.options || [])" :key="oi">
+                                    <label>
+                                        <!-- name MUST be scoped per-card AND per-question so two
+                                             concurrent quiz prompts don't share radio groups. -->
+                                        <input type="radio"
+                                               :name="'quiz-' + id + '-' + (q.qid || q.id || qi)"
+                                               :value="quizOptionValue(opt)"
+                                               @change="answers[q.qid || q.id || q.prompt] = $event.target.value">
+                                        <span x-html="renderMarkdownInline(quizOptionLabel(opt))"></span>
+                                    </label>
+                                </template>
+                            </div>
+                            <input type="text" x-show="q.kind === 'fill_blank'"
+                                   :placeholder="q.placeholder || 'your answer…'"
+                                   @input="answers[q.qid || q.id || q.prompt] = $event.target.value">
+                        </div>
+                    </template>
+                </div>
+
+                <!-- tool_approval -->
+                <div x-show="shape === 'tool_approval'">
+                    <div class="desc">
+                        tool:
+                        <strong x-text="prompt.tool_name || '(unknown tool)'"></strong>
+                        <span x-show="prompt.risk"
+                              style="margin-left:8px;color:var(--err);font-family:var(--mono);font-size:11.5px;letter-spacing:1px;text-transform:uppercase;"
+                              x-text="prompt.risk"></span>
+                    </div>
+                    <pre class="diff-pane" x-text="formatArgs(prompt.tool_args)"></pre>
+                    <label style="display:flex;gap:8px;margin-top:8px;color:var(--text-soft);font-size:13px;cursor:pointer;">
+                        <input type="checkbox" x-model="remember" style="width:auto;accent-color:var(--accent);">
+                        <span>remember for this session</span>
+                    </label>
+                </div>
+
+                <!-- diff -->
+                <div x-show="shape === 'diff'">
+                    <pre class="diff-pane" x-text="prompt.diff || ''"></pre>
+                </div>
+
+                <div class="actions">
+                    <button @click="cancel()">cancel</button>
+                    <button class="primary"
+                            @click="submit()"
+                            x-text="okLabel()"></button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <div x-show="$store.chat.turns.length === 0 && $store.prompts.queue.length === 0"
+         class="empty-state">
+        <h2>READY</h2>
+        <p>Type below to start. <code>/help</code> lists commands.</p>
+    </div>
+</div>
+<div class="composer" x-data="{ get cc() { return $store.cmdComplete }, modeOpen: false, settingsOpen: false }"
+     @click.outside="modeOpen = false; settingsOpen = false"
+     @keydown.escape.window="modeOpen = false; settingsOpen = false">
+    <!-- Composer toolbar: mode selector (real backend mode) + settings hamburger -->
+    <div class="composer-toolbar">
+        <!-- Mode selector: changes actual MuCLI backend mode -->
+        <div class="composer-mode-picker">
+            <button class="composer-mode-pill" @click="modeOpen = !modeOpen; settingsOpen = false"
+                    :class="{ open: modeOpen }"
+                    title="Switch agent mode (backend)"
+                    aria-haspopup="listbox" :aria-expanded="modeOpen">
+                <span class="label">mode</span>
+                <span class="value mono" x-text="$store.mode.realMode"></span>
+                <span class="caret">▾</span>
+            </button>
+            <div class="composer-mode-popout" x-show="modeOpen"
+                 x-transition.opacity.duration.150ms
+                 role="listbox">
+                <template x-for="m in $store.mode.modes" :key="m.name">
+                    <button class="mode-option"
+                            :class="{ active: $store.mode.realMode === m.name, disabled: m.disabled }"
+                            @click="!m.disabled && ($store.mode.set(m.name), modeOpen = false)"
+                            :title="m.disabled ? 'Requires a workspace' : (m.description || m.name)"
+                            :disabled="m.disabled">
+                        <div class="mode-name">
+                            <span x-text="m.display_name"></span>
+                            <span class="mode-key mono muted" x-text="m.name"></span>
+                        </div>
+                        <div class="mode-desc" x-text="m.disabled ? 'requires workspace' : m.description"></div>
+                    </button>
+                </template>
+            </div>
+        </div>
+
+        <!-- Settings hamburger: quick access to session variables -->
+        <div class="composer-settings">
+            <button class="composer-settings-btn"
+                    @click="settingsOpen = !settingsOpen; modeOpen = false; if (settingsOpen) { $store.inspector.loadVariables(); $store.inspector.loadCurrentProvider(); }"
+                    :class="{ open: settingsOpen }"
+                    title="Session settings"
+                    aria-haspopup="true" :aria-expanded="settingsOpen">
+                <span class="dots">···</span>
+            </button>
+            <div class="composer-settings-popout" x-show="settingsOpen"
+                 x-transition.opacity.duration.150ms
+                 x-init="$store.inspector.loadVariables()">
+                <div class="settings-header">session settings</div>
+                <!-- provider / model switching -->
+                <div class="settings-group provider-model-section">
+                    <div class="settings-group-label">provider &amp; model</div>
+                    <label class="settings-var">
+                        <span class="settings-var-key mono">provider</span>
+                        <select class="settings-var-select"
+                                x-model="$store.inspector.currentProvider"
+                                @change="$store.inspector.onProviderChange()">
+                            <option value="">—</option>
+                            <template x-for="p in $store.inspector.providers" :key="p.name">
+                                <option :value="p.name" x-text="p.name + (p.configured ? '' : ' (not configured)')"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <!-- ollama local/cloud first-class toggle (ollama only) -->
+                    <div class="ollama-mode-row"
+                         x-show="$store.inspector.currentProvider === 'ollama'"
+                         x-cloak>
+                        <span class="settings-var-key mono">endpoint</span>
+                        <div class="ollama-mode-toggle">
+                            <button type="button"
+                                    class="ollama-mode-btn"
+                                    :class="{ active: $store.inspector.ollamaMode === 'local' }"
+                                    @click="$store.inspector.onOllamaModeChange('local')"
+                                    title="Your daemon: OLLAMA_HOST env or localhost">local</button>
+                            <button type="button"
+                                    class="ollama-mode-btn"
+                                    :class="{ active: $store.inspector.ollamaMode === 'cloud' }"
+                                    @click="$store.inspector.onOllamaModeChange('cloud')"
+                                    title="ollama.com cloud (needs API key)">cloud</button>
+                        </div>
+                    </div>
+                    <label class="ollama-key-row"
+                           x-show="$store.inspector.currentProvider === 'ollama' && $store.inspector.ollamaMode === 'cloud'"
+                           x-cloak>
+                        <span class="settings-var-key mono">api key</span>
+                        <input class="ollama-key-input"
+                               type="password"
+                               :placeholder="$store.inspector.ollamaKeySet ? 'key set — type to replace' : 'ollama.com API key'"
+                               x-model="$store.inspector.ollamaApiKey"
+                               @change="$store.inspector.onOllamaKeyChange()"
+                               autocomplete="off" />
+                    </label>
+                    <label class="settings-var">
+                        <span class="settings-var-key mono">model</span>
+                        <select class="settings-var-select"
+                                x-model="$store.inspector.currentModel"
+                                @change="$store.inspector.onModelChange()">
+                            <option value="" :hidden="$store.inspector.currentModel ? true : null">—</option>
+                            <template x-for="m in $store.inspector.modelOptions($store.inspector.currentModel)" :key="m">
+                                <option :value="m" x-text="m"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label class="settings-var"
+                           title="Model used by spawned sub-agents. Empty = inherit the parent (session) model. Uninstalled values fall back to the parent model. Set via /set subagent_model too.">
+                        <span class="settings-var-key mono">subagent model</span>
+                        <select class="settings-var-select"
+                                x-model="$store.inspector.subagentModel"
+                                @change="$store.inspector.onSubagentModelChange()">
+                            <option value="" :hidden="$store.inspector.subagentModel ? true : null">inherit parent</option>
+                            <template x-for="m in $store.inspector.modelOptions($store.inspector.subagentModel)" :key="m">
+                                <option :value="m" x-text="m"></option>
+                            </template>
+                        </select>
+                    </label>
+                </div>
+                <template x-for="g in $store.inspector.variables.groups" :key="g.name">
+                    <div class="settings-group">
+                        <button class="settings-group-toggle"
+                                @click="$store.inspector.toggleGroup(g.name)"
+                                :aria-expanded="$store.inspector.isGroupOpen(g.name)">
+                            <span class="caret" x-text="$store.inspector.isGroupOpen(g.name) ? '▾' : '▸'"></span>
+                            <span x-text="g.name"></span>
+                        </button>
+                        <div class="settings-vars" x-show="$store.inspector.isGroupOpen(g.name)">
+                            <template x-for="v in g.variables" :key="v.key">
+                                <label class="settings-var" :title="v.description || v.key">
+                                    <span class="settings-var-key mono" x-text="v.key"></span>
+                                    <input class="settings-var-input"
+                                           :type="v.type === 'bool' ? 'checkbox' : 'text'"
+                                           :checked="v.type === 'bool' ? v.value === true || v.value === 'true' : false"
+                                           :value="v.type === 'bool' ? '' : (v.value ?? '')"
+                                           @change="v.type === 'bool'
+                                               ? $store.inspector.setVariable(v.key, $event.target.checked)
+                                               : $store.inspector.setVariable(v.key, $event.target.value)">
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+    <form @submit.prevent="$store.chat.send($refs.input.value); $refs.input.value=''; $refs.input.style.height='auto'; cc.close()">
+        <div class="composer-input-wrap">
+            <!-- command completion popup -->
+            <div class="cmd-complete" x-show="cc.visible && cc.items.length" x-transition.opacity.duration.100ms>
+                <template x-for="(item, i) in cc.items" :key="item.value + i">
+                    <div class="cmd-complete-row"
+                         :class="{ selected: i === cc.selectedIdx }"
+                         @mousedown.prevent="cc.selectedIdx = i; cc.accept($refs.input); $refs.input.focus()">
+                        <span class="cmd-complete-name mono" x-text="item.label"></span>
+                        <span class="cmd-complete-help" x-show="item.desc" x-text="item.desc"></span>
+                    </div>
+                </template>
+            </div>
+            <textarea
+                x-ref="input"
+                placeholder="Ask anything. / for commands. Enter to send, Shift+Enter for newline."
+                @input="autoSize($el); (() => {
+                    const v = $el.value;
+                    if (v.startsWith('/') && !v.includes('\n')) {
+                        cc.update(v);
+                    } else {
+                        cc.close();
+                    }
+                })()"
+                @keydown="(() => {
+                    if (cc.visible && cc.items.length) {
+                        if ($event.key === 'ArrowUp') { $event.preventDefault(); cc.moveUp(); return; }
+                        if ($event.key === 'ArrowDown') { $event.preventDefault(); cc.moveDown(); return; }
+                        if ($event.key === 'Tab' || ($event.key === 'Enter' && !$event.shiftKey)) {
+                            $event.preventDefault(); cc.accept($refs.input); return;
+                        }
+                        if ($event.key === 'Escape') { $event.preventDefault(); cc.close(); return; }
+                    }
+                    if ($event.key==='Enter' && !$event.shiftKey) {
+                        $event.preventDefault();
+                        $store.chat.send($refs.input.value);
+                        $refs.input.value='';
+                        $el.style.height='auto';
+                        cc.close();
+                    }
+                })()"
+            ></textarea>
+        </div>
+        <button type="button" class="icon-btn attach-btn"
+                @click="$store.fileBrowser.show('file', (path) => {
+                    const ta = $refs.input;
+                    const prefix = ta.value && !ta.value.endsWith(' ') && !ta.value.endsWith('\n') ? ' ' : '';
+                    ta.value += prefix + '[file:' + path + ']';
+                    ta.dispatchEvent(new Event('input'));
+                    ta.focus();
+                })"
+                title="Attach a file">📎</button>
+        <!-- STT mic button (only when stt_enabled) -->
+        <button type="button" class="icon-btn mic-btn"
+                x-show="$store.stt.enabled"
+                @click="$store.stt.toggleRecording()"
+                :class="{ recording: $store.stt.recording, loading: $store.stt.loading }"
+                :title="$store.stt.recording ? 'Stop recording' : 'Voice input'">
+            <span x-show="!$store.stt.recording && !$store.stt.loading"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="1.5" width="4" height="8" rx="2"/><path d="M3 8c0 2.8 2.2 5 5 5s5-2.2 5-5"/><line x1="8" y1="13" x2="8" y2="15.5"/><line x1="5.5" y1="15.5" x2="10.5" y2="15.5"/></svg></span>
+            <span x-show="$store.stt.recording" class="rec-dot"></span>
+            <span x-show="$store.stt.loading" class="thinking-dots"><span></span><span></span><span></span></span>
+        </button>
+        <button type="submit" class="primary send-btn">send</button>
+    </form>
+    <div class="hint">
+        <span x-show="$store.chat.busy && $store.prompts.queue.length === 0" class="busy">
+            <span class="thinking-dots inline" aria-hidden="true">
+                <span></span><span></span><span></span>
+            </span>
+            <span style="margin-left:6px;">generating</span>
+            <button class="interrupt-btn"
+                    @click="$store.chat.interrupt()"
+                    title="Interrupt — pause execution (like Ctrl-C in TUI). Use /continue to resume.">stop</button>
+        </span>
+        <span x-show="$store.prompts.queue.length > 0" class="busy" style="color:var(--accent);">
+            ↑ awaiting your input above
+        </span>
+        <span x-show="$store.chat.connected === false" class="down">
+            reconnecting…
+            <button style="margin-left:8px;font-size:11px;padding:2px 8px;"
+                    @click="location.reload()">reload</button>
+        </span>
+        <span x-show="$store.chat.externalActive" class="shared">↻ shared with another mucli process</span>
+    </div>
+</div>

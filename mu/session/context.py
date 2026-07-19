@@ -11,15 +11,15 @@ sending to the provider:
   * `inject_hierarchical_context(session, system_prompt)` — assemble
     the full layered system prompt: time prelude → LAYER 1
     (workspace files) → LAYER 1B (skills) → LAYER 2 (summary) →
-    LAYER 3 (active goal) → LAYER 4 (recent tool activity) → LAYER
-    4B (retrieved snippets) → LAYER 5 (current turn). Per-layer
+    LAYER 3 (active goal) →
+    LAYER 5 (current turn). Per-layer
     budgets + eviction policies are surfaced inline so they show up
     verbatim in `/memory list L*`.
 
 These helpers delegate to other session methods that stay on the
-`Session` class: `_build_active_goal_context`, `_build_recent_tool_context`,
-`_build_skills_block`. They also read `session.session_manager.conversation_summary`
-and `session._pending_retrieved_context` for the L2 and L4B blocks.
+`Session` class: `_build_active_goal_context`, `_build_skills_block`.
+They also read `session.session_manager.conversation_summary`
+and `session.session_manager.conversation_summary` for the L2 block.
 
 Tests: `tests/test_workspace_context_files.py` (LAYER 1),
 `tests/test_skills.py` (LAYER 1B injection),
@@ -30,7 +30,58 @@ Tests: `tests/test_workspace_context_files.py` (LAYER 1),
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Optional
+
+
+# Depth cap for sub-agent spawning (mirrors mu/tools/agent/spawn.py).
+_MAX_SUBAGENT_DEPTH = 2
+
+
+def _build_role_layer(role: str, session: Any) -> str:
+    """LAYER 3B — Agent Role guidance. Kept under 500 chars.
+
+    * ``parent``  — orchestrator instructions: delegate, don't block, poll,
+      kill/extend, synthesize. Rendered only after the session has spawned
+      at least one child (lazy gating via ``session_role``).
+    * ``child``   — focused sub-agent instructions with depth + depth-cap
+      message. Rendered for spawned sub-agent sessions.
+    """
+    role = (role or "").strip().lower()
+    if role == "parent":
+        # Count currently-registered children for context.
+        n_active = 0
+        try:
+            n_active = sum(
+                1 for r in session._subagent_registry.list() if r.status == "running"
+            )
+        except Exception:
+            n_active = 0
+        children = f"{n_active} child sub-agent(s) running" if n_active else "child sub-agents may be running"
+        return (
+            "You are the ORCHESTRATOR. You may spawn sub-agents for research, deep dives, and focused tasks.\n"
+            f"- {children}. Do NOT block waiting for them. Dispatch, continue other work, then poll.\n"
+            "- Use poll_subagent(task_id) to check progress / retrieve results. Use kill_subagent(task_id) to cancel a stuck or unneeded child.\n"
+            "- Sub-agents return summaries via poll. You synthesize their findings into the final response.\n"
+            "- You can extend a child that needs more time (keep polling) or kill one that is looping."
+        )
+    if role == "child":
+        try:
+            depth = int(session.variables.get("subagent_depth", 1) or 1)
+        except Exception:
+            depth = 1
+        remaining = max(0, _MAX_SUBAGENT_DEPTH - depth)
+        if remaining <= 0:
+            cap_line = "Do NOT spawn further sub-agents (depth cap reached)."
+        else:
+            cap_line = f"You may spawn up to {remaining} further sub-agent level(s)."
+        return (
+            f"You are a SUB-AGENT (depth={depth}), spawned by the parent orchestrator.\n"
+            "- Complete your assigned task. Return a concise summary of findings via your final response.\n"
+            f"- {cap_line}\n"
+            "- Do NOT interact with the user. Return results to the parent only.\n"
+            "- If you cannot complete the task, return what you have — partial results are valuable."
+        )
+    return ""
 
 
 def build_workspace_context_files(session: Any) -> str:
@@ -53,7 +104,7 @@ def build_workspace_context_files(session: Any) -> str:
         return ""
     budget = max(
         0,
-        int(session.variables.get("workspace_context_max_chars", 8192) or 8192),
+        int(session.variables.get("workspace_context_max_chars", 16384) or 16384),
     )
     if budget == 0:
         return ""
@@ -91,7 +142,13 @@ def build_workspace_context_files(session: Any) -> str:
     return "\n\n".join(blocks).strip()
 
 
-def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
+def inject_hierarchical_context(
+    session: Any,
+    system_prompt: str,
+    *,
+    cached_workspace: Optional[str] = None,
+    cached_skills: Optional[str] = None,
+) -> str:
     """Compose the full layered system prompt sent to the provider.
 
     Layer order (each is omitted when empty):
@@ -100,10 +157,17 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
       L1B Installed skills (compact index or full bodies)
       L2  Conversation summary
       L3  Active task plan / current goal
-      L4  Recent tool activity
-      L4B Retrieved workspace snippets
       L5  Current-turn marker (telling the model to prioritize the
           live user message + current-turn tool results)
+
+    ``cached_workspace`` / ``cached_skills`` let the caller reuse L1 / L1B
+    text built once per turn (those read files from disk and are expensive
+    to rebuild every iteration). When omitted (``None``), the layers are
+    rebuilt from session as before. L2 and L3 are always rebuilt fresh from
+    in-memory state so mid-turn updates (auto-compaction rewriting the
+    summary, tools updating feature_state / scratchpad) reach the model
+    the same turn — the frozen-at-turn-start bug that caused long-horizon
+    amnesia.
     """
     # L0 — prepend a time-awareness banner so the model isn't guessing
     # at the wall clock. Cheap (~25 tokens) and reflected in L0 of
@@ -118,8 +182,8 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
     summary_limit = max(
         0,
         int(
-            session.variables.get("conversation_summary_char_limit", 8000)
-            or 8000
+            session.variables.get("conversation_summary_char_limit", 24000)
+            or 12000
         ),
     )
     summary = str(
@@ -128,25 +192,32 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
     if summary_limit and len(summary) > summary_limit:
         summary = summary[-summary_limit:].lstrip()
 
+    # Prepend pinned session_goal to L2 summary as a durable preamble.
+    # This ensures the goal survives compaction even if L3 is empty or
+    # the session_goal variable is cleared at end of turn.
+    session_goal = str(session.variables.get("session_goal", "") or "").strip()
+    if session_goal and summary:
+        summary = f"[Active Goal: {session_goal}]\n\n{summary}"
+
     goal_context = session._build_active_goal_context()
-    tool_context = session._build_recent_tool_context(
-        max_chars=max(
-            0,
-            int(
-                session.variables.get("recent_tool_context_char_limit", 12000)
-                or 12000
-            ),
-        )
-    )
+    # L4 (Recent tool activity) removed from system prompt — tool activity
+    # now lives in messages: verbatim for recent calls, compressed with
+    # [cache:KEY] tags for older calls (see prepare_runtime_history in
+    # messages.py). The model can recall() cached results on demand.
+    # This eliminates ~3000 tokens of redundant system-prompt content.
 
     layers: list[str] = []
 
-    workspace_files = build_workspace_context_files(session)
+    workspace_files = (
+        cached_workspace
+        if cached_workspace is not None
+        else build_workspace_context_files(session)
+    )
     if workspace_files:
         ws_limit = max(
             0,
             int(
-                session.variables.get("workspace_context_max_chars", 8192)
+                session.variables.get("workspace_context_max_chars", 16384)
                 or 8192
             ),
         )
@@ -156,7 +227,11 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
             + workspace_files
         )
 
-    skills_block = session._build_skills_block()
+    skills_block = (
+        cached_skills
+        if cached_skills is not None
+        else session._build_skills_block(announce=True)
+    )
     if skills_block:
         sk_limit = max(
             0, int(session.variables.get("skills_max_chars", 6144) or 6144)
@@ -177,44 +252,24 @@ def inject_hierarchical_context(session: Any, system_prompt: str) -> str:
         layers.append(
             "LAYER 3 — Active task plan / current goal:\n" + goal_context
         )
-
-    if tool_context:
-        tool_limit = max(
-            0,
-            int(
-                session.variables.get("recent_tool_context_char_limit", 12000)
-                or 12000
-            ),
-        )
-        layers.append(
-            "LAYER 4 — Recent tool activity (latest first):\n"
-            f"[budget: {tool_limit} chars | eviction: drop oldest tool records]\n"
-            + tool_context
-        )
-
-    retrieved_context = str(
-        getattr(session, "_pending_retrieved_context", "") or ""
-    ).strip()
-    if retrieved_context:
-        retrieval_limit = max(
-            1,
-            int(
-                session.variables.get("retrieval_context_char_limit", 5000)
-                or 5000
-            ),
-        )
-        if len(retrieved_context) > retrieval_limit:
-            retrieved_context = retrieved_context[:retrieval_limit].rstrip()
-        layers.append(
-            "LAYER 4B — Retrieved workspace snippets:\n"
-            f"[budget: {retrieval_limit} chars | eviction: drop lowest-ranked snippets]\n"
-            + retrieved_context
-        )
+    # LAYER 3B — Agent Role (parent orchestrator / child sub-agent). Skipped
+    # when `session_role` is unset (single-agent sessions) so the prompt is
+    # unchanged for the common case. Lazy: the parent is stamped "parent"
+    # only on its first spawn; children are stamped "child" at creation.
+    session_role = str(session.variables.get("session_role", "") or "").strip()
+    if session_role:
+        role_block = _build_role_layer(session_role, session)
+        if role_block:
+            layers.append("LAYER 3B — Agent role:\n" + role_block)
+    # L4B auto-retrieval removed — model uses retrieve_relevant_context
+    # tool on demand instead of pre-injected snippets.
 
     layers.append(
         "LAYER 5 — Current turn:\n"
         "Always prioritize the live user message and current turn tool "
-        "results over older context."
+        "results over older context. "
+        "Some older messages marked [PRESERVED CONTEXT] are kept verbatim "
+        "and protected from summarisation — they are NOT stale or duplicated."
     )
 
     if not layers:

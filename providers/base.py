@@ -180,6 +180,24 @@ class LLMProvider(ABC):
         """
         return None
 
+    def compaction_safety_factor(self) -> float:
+        """Multiplier the session compactor uses to leave headroom for
+        tokenizer drift between the harness's cl100k_base estimate and the
+        provider's real tokenizer.
+
+        The compactor targets ``context_limit / safety_factor`` so it fires
+        before the *real* token count (which the harness can only estimate)
+        overflows the window. ``1.0`` means the cl100k estimate is trusted
+        verbatim — correct for providers whose tokenizer matches cl100k_base
+        (or that report true ``input_tokens`` the compactor can rely on).
+        Ollama overrides this: its models use model-specific BPE tokenizers
+        that can under-count vs cl100k by ~2x+, and its streamed
+        ``prompt_eval_count`` only reflects the non-cached prompt delta (not
+        the full prompt), so neither available signal is safe to trust at
+        the wire. See ``mu/session/budgets.resolve_context_limit``.
+        """
+        return 1.0
+
     @abstractmethod
     def generate(
         self,
@@ -363,6 +381,21 @@ class LLMProvider(ABC):
     @abstractmethod
     def upload_file(self, file_path: str, mime_type: str) -> Optional[FileReference]:
         """Upload a file to the provider's storage mechanism (if required)."""
+
+    def clone_for_child(self) -> "LLMProvider":
+        """Return a provider instance for a spawned sub-agent.
+
+        Sub-agents run on background threads and may override ``model_name``;
+        the default shallow ``copy.copy`` gives each child its own
+        ``model_name`` slot while sharing the underlying (thread-safe) HTTP
+        client — eliminating the race where concurrent children clobbered a
+        single shared ``model_name``. Providers that carry per-call mutable
+        instance state beyond ``model_name`` should override this to copy
+        that state safely.
+        """
+        import copy as _copy
+
+        return _copy.copy(self)
 
 
 __all__ = [

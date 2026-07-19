@@ -24,7 +24,7 @@ workflow (finding vulnerabilities *in your code*) see
 
 ## 1. Workspace sandboxing
 
-Wire-in: `core/tools.py:_check_bounds`. Every file-touching tool
+Wire-in: `mu/tools/_bounds.py:check_bounds`. Every file-touching tool
 (`read_file`, `write_file`, `apply_diff`, `search_and_replace_file`,
 `get_chunk`, `search_for_string`, `search_references`, `list_dir`,
 `read_document`) routes through it before doing anything.
@@ -56,12 +56,12 @@ Limitations (read these — they're load-bearing):
   only file-level protection is the secret-path denylist. Always attach
   the working folder.
 - **Bash is unbounded.** `bash` and `bash_background` are NOT gated by
-  `_check_bounds`. The model can `cd /tmp && cat /etc/hostname` freely.
+  `check_bounds`. The model can `cd /tmp && cat /etc/hostname` freely.
   Bash is the intentional escape hatch for system work. Harden it with
   `.mu/hooks.json` if your environment needs it.
 - **Symlinks are NOT resolved at the bounds check.** A symlink inside
   the workspace pointing at `/etc/foo` will be accepted by
-  `_check_bounds` because `os.path.abspath` doesn't follow links. The
+  `check_bounds` because `os.path.abspath` doesn't follow links. The
   secret-path layer uses `realpath` and does catch links to denied
   basenames, but a link to an arbitrary outside path is allowed.
 - **No write-quota.** A model that decides to fill the workspace with
@@ -78,7 +78,7 @@ Limitations (read these — they're load-bearing):
 Three layers, all on by default. Full reference:
 [security_controls.md](security_controls.md). One-paragraph summary:
 
-- **Path denylist** (`core/secret_paths.py:is_denied_path`) — refuses
+- **Path denylist** (`mu/security/secret_paths.py:is_denied_path`) — refuses
   every file tool when the target is in `~/.ssh`, `~/.aws`, `~/.gnupg`,
   `~/.config/gcloud`, `~/.kube`, `~/.docker/config.json`, `~/.config/gh`,
   `.env*`, `*.pem`, `*.key`, `*.pfx`, `*.jks`, `*.p12`, `*.keystore`,
@@ -90,9 +90,11 @@ Three layers, all on by default. Full reference:
   arguments hit the denylist or whose command matches a risky pattern
   (`env`, `printenv`, `find / -name id_rsa`, history dumps, base64
   exfil pattern). Override per-session with
-  `/set security_allow_secret_paths true`.
-- **Output scrubber** (`core/secret_paths.py:redact_secrets`) — applied
-  to outputs of `read_file`, `bash_command`, `get_chunk`,
+  `/set security_allow_secret_paths true` (an ad-hoc soft knob — it is
+  not declared in `VARIABLE_SCHEMA`, just read as a truthy value, so
+  `/set` stores it as a string and the guard checks truthiness).
+- **Output scrubber** (`mu/security/secret_paths.py:redact_secrets`) — applied
+  to outputs of `read_file`, `bash`, `get_chunk`,
   `search_for_string`, `search_references`. Replaces AWS/GitHub/GitLab/
   Slack/Anthropic/OpenAI/Google API keys, PEM blocks, and JWTs with
   `[REDACTED:<label>]`. **Always on**; the override flag doesn't relax it.
@@ -107,8 +109,8 @@ for the full list):
 ## 3. Tool approval
 
 Tools declare `requires_approval=True` in their descriptors (see
-`core/tools.py`). Approval is requested in the UI by
-`build_approval_plan` (`core/approval.py:74`) before the tool runs.
+`mu/tools/descriptors.py`). Approval is requested in the UI by
+`build_approval_plan` (`mu/agent/approval.py:75`) before the tool runs.
 
 Required-approval tools include the file mutators (`write_file`,
 `apply_diff`, `search_and_replace_file`), shell tools (`bash`,
@@ -135,7 +137,7 @@ Two bypasses:
   you want explicit consent before each step.
 
 Order of precedence: `yolo=True` wins over `strict_mode` (see
-`core/approval.py:82`).
+`mu/agent/approval.py:84`).
 
 Limitations:
 
@@ -251,7 +253,7 @@ have full access to `HookContext` and can do richer checks. See
 [hooks.md](hooks.md) for the registration patterns and the env vars
 shell hooks receive.
 
-Priority ordering matters for layering: the built-in `bash_secret_guard`
+Priority ordering matters for layering: the built-in `secret_guard_bash`
 runs at priority 5, `plan_mode_block_writes` at priority 10, the
 `cfg:*` shell hooks default to priority 100. Lower fires first.
 
@@ -332,15 +334,15 @@ it deliberately.
 
 | Defense | Source |
 | --- | --- |
-| Workspace sandbox | `core/tools.py:_check_bounds` |
-| Secret-path denylist | `core/secret_paths.py:is_denied_path` |
+| Workspace sandbox | `mu/tools/_bounds.py:check_bounds` |
+| Secret-path denylist | `mu/security/secret_paths.py:is_denied_path` |
 | Bash secret guard | `mu/agent/secret_guard.py` |
-| Output scrubber | `core/secret_paths.py:redact_secrets` |
-| Approval plan | `core/approval.py:build_approval_plan` |
+| Output scrubber | `mu/security/secret_paths.py:redact_secrets` |
+| Approval plan | `mu/agent/approval.py:build_approval_plan` |
 | Plan-mode hook | `mu/agent/plan_mode.py` |
 | Sub-agent isolation | `mu/tools/agent/spawn.py` |
 | Hook registry / loader | `mu/agent/hooks.py`, `mu/agent/hooks_config.py` |
-| Security audit engine | `core/security_mode.py` |
+| Security audit engine | `mu/security/engine.py` |
 
 Tests: `tests/test_secret_paths.py`, `tests/test_secret_scrubber.py`,
 `tests/test_bash_secret_guard.py`, `tests/test_workspace.py` (sandbox +

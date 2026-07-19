@@ -91,7 +91,7 @@ class GetCompleter(Completer):
 
             self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
         except Exception:
-            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4", "L4B")
+            self._layer_ids = ("L1", "L1B", "L2", "L3", "L5")
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -118,14 +118,6 @@ class GetCompleter(Completer):
 class DynamicFeatureIdCompleter(Completer):
     def get_completions(self, document, complete_event):
         feature_ids = set()
-
-        # Workspace feature directories: documentation/feature_req_<feature_id>
-        for path in glob.glob(os.path.join("documentation", "feature_req_*")):
-            if not os.path.isdir(path):
-                continue
-            name = os.path.basename(path)
-            if name.startswith("feature_req_"):
-                feature_ids.add(name.replace("feature_req_", "", 1))
 
         # Session-managed feature metadata records.
         for path in glob.glob(
@@ -236,7 +228,7 @@ class SetCompleter(Completer):
 
             self._layer_ids = tuple(LAYER_BUDGET_VARS.keys())
         except Exception:
-            self._layer_ids = ("L1", "L1B", "L2", "L3", "L4", "L4B")
+            self._layer_ids = ("L1", "L1B", "L2", "L3", "L5")
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
@@ -392,7 +384,7 @@ class InputHandler:
         except ImportError:
             _MEMORY_LIST_TARGETS = (
                 "all", "task", "scratchpad",
-                "L1", "L1B", "L2", "L3", "L4", "L4B", "L5",
+                "L1", "L1B", "L2", "L3", "L5",
             )
         memory_completer = NestedCompleter.from_nested_dict(
             {
@@ -491,6 +483,8 @@ class InputHandler:
             "/history": NestedCompleter.from_nested_dict({"clear": None, "show": None}),
             "/session": session_subcommand_completer,
             "/continue": None,
+            # manual compaction (focus is free-form text — no subcommands)
+            "/compact": None,
             # workspace
             "/workspace": workspace_completer,
             # model / provider
@@ -530,6 +524,16 @@ class InputHandler:
             "/skills": _SkillNameCompleter(),
             # docs
             "/docs": _DocsNameCompleter(),
+            # prompts (file-based system-prompt overrides)
+            "/prompts": NestedCompleter.from_nested_dict(
+                {
+                    "reload": None,
+                    "init": None,
+                    "show": None,
+                    "validate": None,
+                    "edit": None,
+                }
+            ),
             # mcp
             "/mcp": NestedCompleter.from_nested_dict(
                 {

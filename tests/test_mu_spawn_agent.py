@@ -1,10 +1,16 @@
-"""Tests for the real `spawn_agent` implementation.
+"""Tests for the real `spawn_agent` implementation (async orchestrator).
 
-Strategy: build a fake provider that scripts a child's per-iteration
-behaviour, point the parent's session at it, and call `spawn_agent`.
-The fake provider is shared between parent and child so we can verify
-the child sees the right system prompt and tool inventory.
+`spawn_agent` dispatches a child Session to a background daemon thread and
+returns immediately with a ``task_id``. The parent retrieves results by
+polling the registry. These tests script a child's per-iteration behaviour
+via a fake provider, dispatch it, then poll until the child finishes.
+
+The fake provider boxes its capture state in a shared dict so the shallow
+copy made by ``clone_for_child()`` shares it — the background child thread's
+``generate()`` writes are visible to the test thread.
 """
+
+import time
 
 import pytest
 
@@ -19,22 +25,29 @@ class _ScriptedProvider(LLMProvider):
     """Provider that returns a queued sequence of ProviderResponses.
 
     Each call to `generate()` pops the next response. Captures the
-    system_prompt and tools for assertions.
+    system_prompt and tools in a SHARED dict so a shallow copy (made by
+    `clone_for_child`) sees the child's writes — the child runs on a
+    background thread with its own provider copy.
     """
 
-    def __init__(self, responses):
+    def __init__(self, responses, available=None):
         super().__init__("scripted-model")
         self.name = "scripted"
         self.queue = list(responses)
-        self.last_system_prompt = ""
-        self.last_tool_names = None
+        # Models this provider advertises as installed. Defaults to just the
+        # parent's own model; tests that exercise a model override pass a
+        # wider list so the override is considered "installed".
+        self._available = list(available) if available is not None else ["scripted-model"]
+        # Shared by reference across copy.copy() — the child's copy writes
+        # here and the test thread reads here.
+        self._captures = {"system_prompt": None, "tool_names": None}
 
     def get_available_models(self):
-        return ["scripted-model"]
+        return list(self._available)
 
     def generate(self, messages, system_prompt=None, thinking=False, tools=None):
-        self.last_system_prompt = system_prompt or ""
-        self.last_tool_names = (
+        self._captures["system_prompt"] = system_prompt or ""
+        self._captures["tool_names"] = (
             [t.name for t in tools] if tools is not None else None
         )
         if not self.queue:
@@ -64,6 +77,33 @@ def _ctx_for(parent):
     )
 
 
+def _poll_until(parent, task_id, target=("done", "killed", "error"), timeout=10.0):
+    """Poll the registry until the child reaches a terminal status."""
+    registry = parent._subagent_registry
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        snap = registry.snapshot(task_id)
+        if snap.get("status") in target:
+            return snap
+        time.sleep(0.02)
+    return registry.snapshot(task_id)
+
+
+# ---------------------------------------------------------------- happy path
+
+
+def test_subagent_model_is_in_variable_schema():
+    """subagent_model is a real session variable so /set and the GUI can drive
+    it; default "" means children inherit the parent model."""
+    from utils.config import VARIABLE_SCHEMA, DEFAULT_VARIABLES
+
+    entry = VARIABLE_SCHEMA.get("subagent_model")
+    assert entry is not None, "subagent_model missing from VARIABLE_SCHEMA"
+    assert entry["type"] is str
+    assert entry["default"] == ""
+    assert DEFAULT_VARIABLES["subagent_model"] == ""
+
+
 # ---------------------------------------------------------------- happy path
 
 
@@ -88,11 +128,17 @@ def test_spawn_agent_runs_child_and_returns_assistant_text(tmp_path, monkeypatch
         _ctx_for(parent),
     )
 
+    # Async contract: dispatch returns immediately with task_id + running.
     assert result["ok"] is True
-    assert result["message"] == "subagent says: done"
+    assert result["data"]["status"] == "running"
+    task_id = result["data"]["task_id"]
     assert result["data"]["depth"] == 1
-    # The child's task tokens are surfaced.
-    assert result["data"]["tokens"]["total"] >= 15
+
+    # Poll for completion and assert the final summary + tokens.
+    snap = _poll_until(parent, task_id)
+    assert snap["status"] == "done"
+    assert "subagent says: done" in snap["summary"]
+    assert snap["tokens"].get("total", 0) >= 15
 
 
 def test_spawn_agent_passes_task_into_child_system_prompt(tmp_path, monkeypatch):
@@ -105,11 +151,16 @@ def test_spawn_agent_passes_task_into_child_system_prompt(tmp_path, monkeypatch)
     )
     parent = _build_parent(tmp_path, provider, monkeypatch)
 
-    execute("spawn_agent", {"task": "refactor module X"}, _ctx_for(parent))
+    res = execute("spawn_agent", {"task": "refactor module X"}, _ctx_for(parent))
+    task_id = res["data"]["task_id"]
+    # Wait for the child to have made at least one generate() call.
+    _poll_until(parent, task_id)
 
-    assert "refactor module X" in provider.last_system_prompt
+    child_prompt = provider._captures["system_prompt"]
+    assert child_prompt is not None, "child never called generate()"
+    assert "refactor module X" in child_prompt
     # The subagent system prompt should NOT contain the parent's system text.
-    assert "system" not in provider.last_system_prompt or "Sub-agent task" in provider.last_system_prompt
+    assert "system" not in child_prompt or "Sub-agent task" in child_prompt
 
 
 def test_spawn_agent_does_not_pollute_parent_history(tmp_path, monkeypatch):
@@ -124,7 +175,8 @@ def test_spawn_agent_does_not_pollute_parent_history(tmp_path, monkeypatch):
     parent = _build_parent(tmp_path, provider, monkeypatch)
     parent_len_before = len(parent.session_manager.history)
 
-    execute("spawn_agent", {"task": "go"}, _ctx_for(parent))
+    res = execute("spawn_agent", {"task": "go"}, _ctx_for(parent))
+    _poll_until(parent, res["data"]["task_id"])
 
     assert len(parent.session_manager.history) == parent_len_before
 
@@ -173,11 +225,14 @@ def test_spawn_agent_disables_further_spawn_at_depth_cap(tmp_path, monkeypatch):
     parent = _build_parent(tmp_path, provider, monkeypatch)
     parent._subagent_depth = MAX_SUBAGENT_DEPTH - 1  # one level above cap
 
-    execute("spawn_agent", {"task": "z"}, _ctx_for(parent))
+    res = execute("spawn_agent", {"task": "z"}, _ctx_for(parent))
+    _poll_until(parent, res["data"]["task_id"])
 
-    # The child's tool list (captured by provider) must not include spawn_agent.
-    if provider.last_tool_names is not None:
-        assert "spawn_agent" not in provider.last_tool_names
+    # The child's tool list (captured by the shared provider dict) must not
+    # include spawn_agent.
+    tool_names = provider._captures["tool_names"]
+    if tool_names is not None:
+        assert "spawn_agent" not in tool_names
 
 
 # ---------------------------------------------------------- plan-mode block
@@ -206,15 +261,17 @@ def test_spawn_agent_whitelist_filters_child_tool_surface(tmp_path, monkeypatch)
     )
     parent = _build_parent(tmp_path, provider, monkeypatch)
 
-    execute(
+    res = execute(
         "spawn_agent",
         {"task": "ping", "tools": ["read_file", "list_dir"]},
         _ctx_for(parent),
     )
+    _poll_until(parent, res["data"]["task_id"])
 
     # The child saw only read_file, list_dir, and flush (always-on).
-    if provider.last_tool_names is not None:
-        names = set(provider.last_tool_names)
+    tool_names = provider._captures["tool_names"]
+    if tool_names is not None:
+        names = set(tool_names)
         # Allowed
         assert "read_file" in names
         assert "list_dir" in names
@@ -228,25 +285,130 @@ def test_spawn_agent_whitelist_filters_child_tool_surface(tmp_path, monkeypatch)
 # ---------------------------------------------------------- model override
 
 
-def test_spawn_agent_model_override_restores_parent_model(tmp_path, monkeypatch):
+def test_spawn_agent_model_override_does_not_mutate_parent(tmp_path, monkeypatch):
+    """The child gets a cloned provider; the parent's model_name is never
+    touched (the old race where concurrent children clobbered a single
+    shared model_name is gone)."""
     provider = _ScriptedProvider(
         responses=[
             ProviderResponse(
                 text="ok", parts=[MessagePart(type="text", text="ok")]
             )
-        ]
+        ],
+        # Advertise the override as installed so the new validation honors it.
+        available=["scripted-model", "different-model"],
     )
     parent = _build_parent(tmp_path, provider, monkeypatch)
     parent.provider.model_name = "original-model"
 
-    execute(
+    res = execute(
         "spawn_agent",
         {"task": "do", "model": "different-model"},
         _ctx_for(parent),
     )
+    task_id = res["data"]["task_id"]
+    record = parent._subagent_registry.get(task_id)
+    _poll_until(parent, task_id)
 
-    # Parent's provider must be restored to its original model.
+    # Parent's provider is untouched.
     assert parent.provider.model_name == "original-model"
+    # The child's cloned provider carries the override.
+    assert record.child.provider.model_name == "different-model"
+
+
+def test_spawn_agent_defaults_to_parent_model(tmp_path, monkeypatch):
+    """With no subagent_model config and no model arg, the child inherits
+    the parent's model — the documented default."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ]
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+
+    res = execute("spawn_agent", {"task": "do"}, _ctx_for(parent))
+    task_id = res["data"]["task_id"]
+    record = parent._subagent_registry.get(task_id)
+    _poll_until(parent, task_id)
+
+    assert record.child.provider.model_name == "parent-model"
+    assert parent.provider.model_name == "parent-model"
+
+
+def test_spawn_agent_subagent_model_config_overrides_arg(tmp_path, monkeypatch):
+    """The subagent_model session variable takes priority over the agent's
+    per-call `model` arg, and is applied when installed."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ],
+        available=["scripted-model", "config-model", "arg-model"],
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+    parent.variables["subagent_model"] = "config-model"
+
+    res = execute(
+        "spawn_agent",
+        {"task": "do", "model": "arg-model"},
+        _ctx_for(parent),
+    )
+    record = parent._subagent_registry.get(res["data"]["task_id"])
+    _poll_until(parent, res["data"]["task_id"])
+
+    # Config wins over the arg; the child runs on config-model.
+    assert record.child.provider.model_name == "config-model"
+    assert parent.provider.model_name == "parent-model"
+
+
+def test_spawn_agent_uninstalled_arg_falls_back_to_parent(tmp_path, monkeypatch, caplog):
+    """A hallucinated/uninstalled `model` arg no longer crashes the child —
+    it falls back to the parent model with a warning. This is the fix for
+    "Ollama model 'sonnet-3.5' is not installed"."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ],
+        available=["scripted-model"],  # "sonnet-3.5" is NOT installed
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="mucli"):
+        res = execute(
+            "spawn_agent",
+            {"task": "do", "model": "sonnet-3.5"},
+            _ctx_for(parent),
+        )
+    record = parent._subagent_registry.get(res["data"]["task_id"])
+    _poll_until(parent, res["data"]["task_id"])
+
+    # The uninstalled arg was ignored; child runs on the parent model.
+    assert record.child.provider.model_name == "parent-model"
+    assert parent.provider.model_name == "parent-model"
+    assert any("sonnet-3.5" in r.getMessage() for r in caplog.records)
+
+
+def test_spawn_agent_uninstalled_config_falls_back_to_parent(tmp_path, monkeypatch):
+    """An uninstalled subagent_model config also falls back to parent."""
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(text="ok", parts=[MessagePart(type="text", text="ok")])
+        ],
+        available=["scripted-model"],
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+    parent.provider.model_name = "parent-model"
+    parent.variables["subagent_model"] = "ghost-model"
+
+    res = execute("spawn_agent", {"task": "do"}, _ctx_for(parent))
+    record = parent._subagent_registry.get(res["data"]["task_id"])
+    _poll_until(parent, res["data"]["task_id"])
+
+    assert record.child.provider.model_name == "parent-model"
 
 
 # ---------------------------------------------------------- YOLO inheritance
@@ -289,5 +451,65 @@ def test_spawn_agent_runs_yolo_in_child(tmp_path, monkeypatch):
     )
 
     assert result["ok"] is True
+    snap = _poll_until(parent, result["data"]["task_id"])
+    assert snap["status"] == "done"
     assert target.exists()
     assert target.read_text() == "subagent payload"
+
+
+# ---------------------------------------------------------- async contract
+
+
+def test_spawn_agent_returns_running_within_one_second(tmp_path, monkeypatch):
+    """Success criterion 1 & 2: dispatch is non-blocking. A child scripted
+    to make several tool calls must not delay the dispatch envelope."""
+    target = tmp_path / "slow.txt"
+    target.write_text("payload")
+    provider = _ScriptedProvider(
+        responses=[
+            ProviderResponse(
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="read_file",
+                        tool_args={"filename": str(target)},
+                    )
+                ],
+            ),
+            ProviderResponse(
+                text="",
+                parts=[
+                    MessagePart(
+                        type="tool_call",
+                        tool_name="list_dir",
+                        tool_args={"path": str(tmp_path)},
+                    )
+                ],
+            ),
+            ProviderResponse(
+                text="finished after two tools",
+                parts=[MessagePart(type="text", text="finished after two tools")],
+            ),
+        ]
+    )
+    parent = _build_parent(tmp_path, provider, monkeypatch)
+
+    t0 = time.monotonic()
+    result = execute("spawn_agent", {"task": "multi-step"}, _ctx_for(parent))
+    elapsed = time.monotonic() - t0
+
+    assert result["ok"] is True
+    assert result["data"]["status"] == "running"
+    assert result["data"]["task_id"]
+    # Dispatch must return well inside the 1s budget (the child is still
+    # running its tool loop in the background).
+    assert elapsed < 1.0, f"dispatch took {elapsed:.2f}s — not async"
+
+    # While the child is still running, a poll should report running OR a
+    # terminal state if it already finished (both acceptable). Confirm the
+    # child eventually completes with the multi-tool summary.
+    snap = _poll_until(parent, result["data"]["task_id"])
+    assert snap["status"] == "done"
+    assert "finished after two tools" in snap["summary"]
+    assert snap["tool_calls"] >= 2

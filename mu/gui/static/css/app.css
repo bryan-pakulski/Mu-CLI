@@ -4208,6 +4208,25 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
 
 .memory-panel { display: flex; flex-direction: column; }
 
+.memory-capacity {
+    height: 7px;
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: hsl(215, 20%, 19%);
+}
+.memory-capacity-used {
+    height: 100%;
+    min-width: 0;
+    background: linear-gradient(90deg, var(--accent-line), var(--warn, #e0a800));
+    transition: width 0.2s ease;
+}
+.memory-capacity-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+}
+
 .memory-controls {
     display: flex;
     align-items: center;
@@ -4328,6 +4347,9 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
     white-space: nowrap;
 }
 .memory-legend-delta.hot { color: var(--warn, #e0a800); }
+.memory-free-row { cursor: default; }
+.memory-free-row:hover { background: transparent; }
+.memory-free-swatch { background: hsl(215, 20%, 38%); }
 
 /* ── Files panel: workspace explorer + CodeMirror editor ─────────────── */
 

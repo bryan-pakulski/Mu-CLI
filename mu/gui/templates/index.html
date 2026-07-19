@@ -118,6 +118,21 @@
         <div class="util" title="Token totals for this session">
             <span x-text="'tok·' + ($store.tokens.total || 0)"></span>
         </div>
+        <!-- The task ledger is deliberately global rather than loop-mode
+             specific: agents use todos in every visual mode (notably
+             research), so progress must remain visible while those panels
+             are active. -->
+        <button class="todo-field"
+                x-show="$store.loop.loaded"
+                @click="$store.mode.setView('loop')"
+                title="Open the task ledger">
+            <span class="todo-field-label">todos</span>
+            <span class="todo-field-count mono" x-text="$store.loop.backlog.length"></span>
+            <span class="todo-field-current"
+                  x-show="$store.loop.backlog.length"
+                  x-text="$store.loop.activeTodoSummary()"></span>
+            <span class="todo-field-empty" x-show="!$store.loop.backlog.length">none</span>
+        </button>
         <button class="yolo-toggle"
                 :class="{ active: $store.yolo.active }"
                 @click="$store.yolo.toggle()"

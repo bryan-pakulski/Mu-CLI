@@ -125,7 +125,11 @@
                     </div>
                     <div class="files-readonly-banner" x-show="$store.files.readOnly"
                          x-text="'read-only: ' + $store.files.readOnlyWhy"></div>
-                    <div class="files-cm-host" x-ref="cmHost"></div>
+                    <!-- x-if creates this host after the component's init().
+                         Initialise after insertion so CodeMirror receives a
+                         real DOM node instead of silently leaving the editor
+                         blank. -->
+                    <div class="files-cm-host" x-ref="cmHost" x-init="mountEditor()"></div>
                 </div>
             </template>
         </div>
@@ -221,6 +225,12 @@ function filesPanel() {
                 const store = Alpine.store("files");
                 store.dirty = this.cm.getValue() !== store.originalContent;
             });
+        },
+
+        mountEditor() {
+            this._mountCM();
+            const store = Alpine.store("files");
+            this._setCMValue(store.content || "", store.readOnly);
         },
 
         _setCMValue(value, readOnly) {

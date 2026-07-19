@@ -4479,6 +4479,31 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
     line-height: 1.5;
 }
 
+/* Persistent task summary in the header.  Unlike the loop panel this is
+ * intentionally available in every view, including research and files. */
+.todo-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 300px;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-lift);
+    color: var(--text-soft);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+}
+.todo-field:hover { border-color: var(--accent); color: var(--text); }
+.todo-field-label { color: var(--accent); font-weight: 700; text-transform: uppercase; }
+.todo-field-count { color: var(--text); }
+.todo-field-current,
+.todo-field-empty { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.todo-field-current { flex: 1; text-align: left; }
+@media (max-width: 900px) { .todo-field-current { display: none; } .todo-field { max-width: none; } }
+
 /* Inline new/rename prompt bar, overlaid at the bottom of the panel. */
 .files-prompt {
     display: flex;

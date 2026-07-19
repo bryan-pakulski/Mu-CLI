@@ -64,6 +64,8 @@ def _load_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
                 provider_config["provider"],
                 provider_config["model"],
                 ollama_host,
+                session.variables.get("ollama_mode"),
+                session.variables.get("ollama_api_key") or None,
             )
             sync_provider_settings(session)
         except ImportError:
@@ -149,6 +151,10 @@ def _new_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
                 None,
                 None,
                 ollama_host=ollama_host,
+                # No mode deliberately: the picker asks local vs cloud for
+                # each newly-created Ollama session.
+                ollama_mode=None,
+                ollama_api_key=session.variables.get("ollama_api_key") or None,
                 allow_prompt=allow_prompt,
             )
             session.provider = new_provider
@@ -156,11 +162,17 @@ def _new_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
             # Tests without mucli: reuse the existing provider.
             pass
 
+    selected_ollama_mode = getattr(session.provider, "_mu_ollama_mode", None)
     session.session_manager.new_session(
         target_name,
         session.provider.name,
         session.provider.model_name,
     )
+    if session.provider.name == "ollama" and selected_ollama_mode:
+        session.variables["ollama_mode"] = selected_ollama_mode
+        if selected_ollama_mode == "local":
+            session.variables["ollama_host"] = ""
+        session.session_manager.save_history(session.folder_context)
     session.staged_files = []
     session.sync_runtime_state()
 

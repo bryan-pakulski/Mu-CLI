@@ -647,10 +647,18 @@ document.addEventListener("alpine:init", () => {
             // session keeps streaming its turn into its own slot.
             if (this.isLoaded(name)) {
                 try {
-                    await fetch(`/api/sessions/${encodeURIComponent(name)}/focus`, {
+                    const r = await fetch(`/api/sessions/${encodeURIComponent(name)}/focus`, {
                         method: "POST",
                     });
-                } catch (e) { /* non-fatal; UI still flips */ }
+                    if (!r.ok) {
+                        const d = await r.json().catch(() => ({}));
+                        Alpine.store("toast").show(d.detail || `Could not switch sessions (${r.status})`, "error");
+                        return;
+                    }
+                } catch (e) {
+                    Alpine.store("toast").show(`Could not switch sessions: ${e}`, "error");
+                    return;
+                }
                 this.current = name;
                 Alpine.store("chat").focus(name);
                 // Ensure history is populated (it may be a session the
@@ -694,14 +702,30 @@ document.addEventListener("alpine:init", () => {
             await this.load();
         },
         async unload(name) {
-            await fetch(`/api/sessions/${encodeURIComponent(name)}/unload`, {
+            const r = await fetch(`/api/sessions/${encodeURIComponent(name)}/unload`, {
                 method: "POST",
             });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(
+                    d.detail || `Unload failed (${r.status})`, "error", 6000,
+                );
+                return false;
+            }
             await this.load();
+            return true;
         },
         async deactivate() {
-            await fetch("/api/sessions/active", { method: "DELETE" });
+            // Detach is intentionally non-blocking: a failed or wedged
+            // provider turn must never trap the user in this GUI view.
+            const r = await fetch("/api/sessions/active/detach", { method: "POST" });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                Alpine.store("toast").show(d.detail || `Leave failed (${r.status})`, "error");
+                return false;
+            }
             location.reload();
+            return true;
         },
     });
 
@@ -1045,7 +1069,7 @@ document.addEventListener("alpine:init", () => {
             if (i >= 0) this.queue.splice(i, 1);
         },
         async answer(id, value) {
-            if (!id) return;
+            if (!id) return false;
             try {
                 const r = await fetch(`/api/prompts/${id}/answer`, {
                     method: "POST",
@@ -1056,19 +1080,33 @@ document.addEventListener("alpine:init", () => {
                     Alpine.store("chat").addError(
                         `prompt answer failed (${r.status})`
                     );
+                    return false;
                 }
-            } finally {
                 this._remove(id);
+                return true;
+            } catch (e) {
+                Alpine.store("chat").addError(`prompt answer failed: ${e}`);
+                return false;
             }
         },
         async cancel(id) {
             if (id) {
-                try { await fetch(`/api/prompts/${id}/cancel`, { method: "POST" }); }
-                catch (e) {}
-                this._remove(id);
+                try {
+                    const r = await fetch(`/api/prompts/${id}/cancel`, { method: "POST" });
+                    if (!r.ok) {
+                        Alpine.store("chat").addError(`prompt cancel failed (${r.status})`);
+                        return false;
+                    }
+                    this._remove(id);
+                    return true;
+                } catch (e) {
+                    Alpine.store("chat").addError(`prompt cancel failed: ${e}`);
+                    return false;
+                }
             } else {
                 // Edge case (no id): drop the head item to unstick the UI.
                 this.queue.shift();
+                return true;
             }
         },
     });
@@ -1974,6 +2012,13 @@ document.addEventListener("alpine:init", () => {
                 case "blocked": return "⚠";
                 default: return "○";
             }
+        },
+        activeTodoSummary() {
+            const items = this.backlog || [];
+            const active = items.find(item => item.status === "in_progress") || items[0];
+            if (!active || !active.content) return "";
+            const text = String(active.content).replace(/\s+/g, " ").trim();
+            return text.length > 64 ? `${text.slice(0, 61)}…` : text;
         },
         formatTimestamp(unix) {
             if (!unix || typeof unix !== "number") return "";
@@ -3988,6 +4033,22 @@ function promptModal() {
         // a paragraph wrapper doesn't get inserted).
         optLabelHtml(o) { return renderMarkdownInline(this.optLabel(o)); },
         optValue(o) { return typeof o === "string" ? o : (o.value !== undefined ? o.value : (o.id || o.label)); },
+        isChoiceSelected(value) {
+            return this.multi
+                ? Array.isArray(this.value) && this.value.includes(value)
+                : this.value === value;
+        },
+        setChoice(value, checked) {
+            if (!this.multi) {
+                this.value = checked ? value : null;
+                return;
+            }
+            const selected = Array.isArray(this.value) ? [...this.value] : [];
+            const index = selected.indexOf(value);
+            if (checked && index < 0) selected.push(value);
+            if (!checked && index >= 0) selected.splice(index, 1);
+            this.value = selected;
+        },
 
         // Quiz options: the TUI submits the option STRING (q.options[idx]),
         // so the GUI does the same — graders expect the literal option
@@ -4023,10 +4084,17 @@ function promptModal() {
                         : (this.value !== null && this.value !== undefined ? [this.value] : []);
                     const hasOther = selected.includes("__other__");
                     const real = selected.filter(v => v !== "__other__");
-                    payload = {
-                        selected: real,
-                        other_text: hasOther ? this.otherText : "",
-                    };
+                    // `choice` is the tool-facing multi/single picker and
+                    // returns all selected labels. `choices` is the runtime
+                    // recovery picker (`prompt_choices`) and expects one
+                    // scalar `value`; returning `selected` there silently
+                    // caused it to fall back to retry every time.
+                    payload = this.shape === "choices"
+                        ? { value: real[0] || (hasOther ? this.otherText : "") }
+                        : {
+                            selected: real,
+                            other_text: hasOther ? this.otherText : "",
+                        };
                     break;
                 }
                 case "input":         payload = { value: this.text }; break;
@@ -4036,9 +4104,11 @@ function promptModal() {
                 case "diff":          payload = { approved: true }; break;
                 default:              payload = { value: this.value };
             }
-            // Stash the decision in the chat scrollback BEFORE clearing
-            // the live card, so the user has a breadcrumb of what they
-            // picked when scrolling back.
+            const answered = await Alpine.store("prompts").answer(this.id, payload);
+            // Keep the prompt card in place if the POST did not reach the
+            // server; otherwise the blocked agent thread has no way to
+            // receive a recovery/retry/abort decision.
+            if (!answered) return;
             Alpine.store("chat").addPromptResolved({
                 shape: this.shape,
                 title: this.title(),
@@ -4046,10 +4116,11 @@ function promptModal() {
                 toolName: this.prompt.tool_name || "",
                 cancelled: false,
             });
-            await Alpine.store("prompts").answer(this.id, payload);
         },
         async cancel() {
             if (this.id) {
+                const cancelled = await Alpine.store("prompts").cancel(this.id);
+                if (!cancelled) return;
                 Alpine.store("chat").addPromptResolved({
                     shape: this.shape,
                     title: this.title(),
@@ -4057,7 +4128,6 @@ function promptModal() {
                     toolName: this.prompt.tool_name || "",
                     cancelled: true,
                 });
-                await Alpine.store("prompts").cancel(this.id);
             } else {
                 Alpine.store("prompts").queue.shift();
             }
@@ -4141,11 +4211,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // the panel populates the instant the user lands in a panel mode,
     // no extra mode-flip round-trip needed.
     Alpine.store("mode").load();
+    // Todos are a cross-mode visualisation, not loop-mode-only state. Load
+    // them independently so the header field is populated in research,
+    // teacher, feature, and every other view.
+    Alpine.store("loop").load();
     Alpine.store("yolo").load();
     Alpine.store("skills").load();
     Alpine.store("cmdComplete").load();
     Alpine.store("inspector").loadProviders();
     setInterval(() => Alpine.store("sessions").load(), 5000);
+    setInterval(() => Alpine.store("loop").load(), 5000);
     // Live clock: bump while ANY session's turn is in flight so the
     // running trace header re-renders its elapsed time. (One global tick
     // is enough — we re-render every slot's clock; backgrounded ones

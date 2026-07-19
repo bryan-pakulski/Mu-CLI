@@ -190,13 +190,17 @@
                     <template x-for="(opt, idx) in (prompt.options || prompt.choices || [])" :key="idx">
                         <label>
                             <input :type="multi ? 'checkbox' : 'radio'" :name="'opt-' + item.id"
-                                   :value="optValue(opt)" x-model="value">
+                                   :value="optValue(opt)"
+                                   :checked="isChoiceSelected(optValue(opt))"
+                                   @change="setChoice(optValue(opt), $event.target.checked)">
                             <span x-html="optLabelHtml(opt)"></span>
                         </label>
                     </template>
                     <label x-show="prompt.allow_other">
                         <input :type="multi ? 'checkbox' : 'radio'" :name="'opt-' + item.id"
-                               value="__other__" x-model="value">
+                               value="__other__"
+                               :checked="isChoiceSelected('__other__')"
+                               @change="setChoice('__other__', $event.target.checked)">
                         <input type="text" placeholder="other…"
                                x-model="otherText"
                                style="margin-left:8px;flex:1;width:auto;">

@@ -125,6 +125,16 @@ Body should mention which CI workflow exercises the change.
 EOF
 ```
 
+## Built-in deep research
+
+The `deep-research` skill auto-activates for requests such as “deep dive,”
+“comprehensive research,” and “research report.” It is intentionally distinct
+from ordinary research: it requires hypothesis mapping and testing,
+independent-source comparison, validation/review, and a final gap analysis.
+It writes a top-level `REPORT.md` plus a `supporting_data/` evidence trail in
+the working directory, including the research plan, source register, evidence
+log, hypotheses, validation log, and gap analysis.
+
 After `/skills reload`, the workspace version shadows the bundled
 `commit-message` skill while you're attached to this folder.
 

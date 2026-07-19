@@ -25,12 +25,14 @@ class _ThreeIterProvider(LLMProvider):
     def __init__(self, model_name="dummy"):
         self.calls = 0
         self.model_name = model_name
+        self.requests = []
 
     def get_available_models(self):
         return ["dummy"]
 
     def generate(self, messages, system_prompt=None, thinking=False, tools=None):
         self.calls += 1
+        self.requests.append((system_prompt or "", messages))
         if self.calls <= 2:
             return ProviderResponse(
                 text="",
@@ -141,6 +143,22 @@ def test_tool_records_emitted_for_tool_iters(session, tmp_path):
         assert "latency_ms" in tr
         assert "arg_fp" in tr
         assert tr["ok"] is True
+
+
+def test_trace_estimate_is_snapshotted_before_response_is_archived(session, tmp_path):
+    """Trace drift must compare the provider request, not mutated history."""
+    from mu.agent.loop_body import _estimate_messages_tokens
+    from utils.token_estimator import estimate_tokens
+
+    session.send_message("do the thing")
+    records = _read_trace(_trace_files(tmp_path)[0])
+    iter_records = [record for record in records if record["type"] == "iter"]
+
+    for record, (system_prompt, messages) in zip(iter_records, session.provider.requests):
+        expected = estimate_tokens(system_prompt) + _estimate_messages_tokens(messages)
+        context = record["context"]
+        assert context["total_est"] == expected
+        assert context["estimate_source"] == "pre_request"
 
 
 def test_trace_disabled_writes_no_file(tmp_path, monkeypatch):

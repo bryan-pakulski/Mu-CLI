@@ -169,6 +169,7 @@ def test_agent_loop_uses_provider_aware_budget_before_provider_call(monkeypatch)
     the user-set `context_token_limit`."""
     session = _make_session()
     sm = session.session_manager
+    session.variables["auto_compaction_enabled"] = True
     _stuff_history_over_budget(sm, n_turns=10, size=1500)
 
     # User has the harness-wide default (256k); provider says 8k.
@@ -230,6 +231,7 @@ def test_auto_compact_hook_does_not_double_apply_threshold(monkeypatch):
 
     session = _make_session()
     sm = session.session_manager
+    session.variables["auto_compaction_enabled"] = True
     _stuff_history_over_budget(sm, n_turns=10, size=1500)
     session.variables["context_token_limit"] = 256_000
     session._compaction_watermark = 0  # arm the watermark gate
@@ -262,6 +264,26 @@ def test_auto_compact_hook_does_not_double_apply_threshold(monkeypatch):
             "hook budget is at or below the old double-applied value — "
             "the fix regressed"
         )
+
+
+def test_auto_compact_hook_is_disabled_by_default(monkeypatch):
+    """Normal cleanup is model-directed; automatic trimming is opt-in."""
+    from mu.agent.compactor import _compact_history
+    from mu.agent.hooks import HookContext
+
+    session = _make_session()
+    called = False
+
+    def _unexpected(*args, **kwargs):
+        nonlocal called
+        called = True
+        return False
+
+    monkeypatch.setattr(
+        session.session_manager, "roll_history_summary_to_token_budget", _unexpected
+    )
+    assert _compact_history(HookContext(point="pre_provider_call", session=session)) is None
+    assert called is False
 
 
 def test_auto_compact_hook_fires_at_most_once_per_turn(monkeypatch):

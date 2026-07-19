@@ -106,11 +106,13 @@ class MemoryEntry:
 
 **Key features:**
 - **Active context window:** Configurable (default 150 messages)
-- **Tool message compression:** Older tool calls/results are summarized when exceeding `tool_context_window`
+- **Tool message compression:** Active investigation evidence remains verbatim; the agent calls `compact` when it decides history is safe to summarize.
 - **Compact mode:** Option to collapse completed turns (removes intermediate tool metadata)
 - **Structured tool results:** Rich metadata about tool execution (file counts, match counts, etc.)
 
-**Why implemented:** Balances between keeping full context and managing token costs. Tool-heavy conversations are compressed while preserving the essential information.
+**Why implemented:** Keeps evidence available until the agent has made the
+cleanup decision. The hard provider context ceiling remains a safety backstop,
+not a normal history-management policy.
 
 ---
 
@@ -405,7 +407,7 @@ When `query` is empty this reproduces the original recency-only ordering exactly
 | `scratchpad_max_entries` | `24` | Max scratchpad entries |
 | `scratchpad_persist_across_turns` | `False` | Keep scratchpad across turns. Mode-aware: `loop`/`feature` modes persist regardless; `default`/`teacher` clear at turn start unless this is `True`. |
 | `collation_enabled` | `True` | Enable deferred tool results |
-| `tool_context_window` | `6` | Recent tool messages to keep uncompressed |
+| `auto_compaction_enabled` | `false` | Opt in to proactive automatic compaction; default is model-directed `compact` with provider-overflow recovery as a safety backstop |
 | `tool_result_floor` | `4` | Trailing tool-result messages compaction leaves verbatim. Mode-aware: loop/feature raise to ≥8. |
 | `tool_result_cache_entries` | `50` | Max entries in the tool-result sidecar cache. Mode-aware: loop/feature raise to ≥256. |
 | `tool_result_cache_bytes` | `524288` | Max bytes in the tool-result sidecar cache. Mode-aware: loop/feature raise to ≥2 MB. |

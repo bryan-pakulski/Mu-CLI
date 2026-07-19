@@ -358,7 +358,7 @@ class Session:
         )
 
     # Message helpers (`_build_messages_from_history`,
-    # `_summarize_message_parts`, `_message_has_thought_signature`,
+    # `_summarize_message_parts`,
     # `_clip_preview`, `_prepare_runtime_history`) moved to
     # `mu/session/messages.py`. Forwarders preserve the bound-method
     # interface for the agent loop and tests.
@@ -371,11 +371,6 @@ class Session:
         return build_messages_from_history(
             recent_history_dicts, new_user_message_dict
         )
-
-    def _message_has_thought_signature(self, msg_dict: dict) -> bool:
-        from mu.session.messages import message_has_thought_signature
-
-        return message_has_thought_signature(msg_dict)
 
     def _summarize_message_parts(self, msg_dict: dict) -> str:
         from mu.session.messages import summarize_message_parts

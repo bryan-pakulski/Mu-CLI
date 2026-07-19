@@ -122,10 +122,14 @@ The headline field is **`context.drift_pct`**:
 drift_pct = (prompt_tokens_actual - total_est) / max(1, prompt_tokens_actual) * 100
 ```
 
-`prompt_tokens_actual` is `response.input_tokens` — the provider's real prompt
-size (including cached tokens). `total_est` is the tiktoken `cl100k_base`
-estimate of the assembled prompt (the sum of the L0–L5 layer estimates). On a
-model whose tokenizer is not `cl100k_base` (e.g. glm), this drift is
+`prompt_tokens_actual` is the provider-reported input count. For providers
+that expose cache deltas (notably some Ollama configurations), it can be a
+non-cached delta rather than the full prompt, so compare it with
+`prompt_tokens_real_est` as well. `total_est` is the harness's tiktoken
+`cl100k_base` estimate captured immediately before that exact provider request
+(`estimate_source: "pre_request"`); it does not include the response that was
+archived afterward. On a model whose tokenizer is not `cl100k_base` (e.g.
+glm), this drift is
 systematic and is the primary signal for diagnosing long-horizon compaction
 failures: if the estimate is wrong, the compaction budget is wrong.
 

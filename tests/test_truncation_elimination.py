@@ -165,12 +165,13 @@ def test_scratchpad_store_summary_char_limit_is_8000():
 # ============================================================ CollationBuffer expansion
 
 
-def test_collation_buffer_max_bytes_is_2mb():
-    """CollationBuffer default max_bytes should be 2_000_000."""
+def test_collation_buffer_is_lossless_by_default():
+    """Deferred evidence is retained until explicit model-directed cleanup."""
     from mu.agent.collation import CollationBuffer
 
     buf = CollationBuffer()
-    assert buf.max_bytes == 2_000_000
+    buf.add("read_file", {"filename": "a.py"}, "A" * 3_000_000)
+    assert len(buf.entries) == 1
 
 
 # ============================================================ Context injection budgets

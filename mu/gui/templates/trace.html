@@ -96,8 +96,18 @@
                 <div class="trace-card" :class="{'trace-card--warn': summary.redundant_reads > 0}">
                     <div class="tc-label">redundant reads</div><div class="tc-val" x-text="summary.redundant_reads"></div></div>
                 <div class="trace-card"><div class="tc-label">tool calls</div><div class="tc-val" x-text="summary.tool_calls"></div></div>
+                <div class="trace-card"><div class="tc-label">context delivered / discarded</div><div class="tc-val"><span x-text="(summary.context_artifact_counts || {}).delivered || 0"></span> / <span x-text="(summary.context_artifact_counts || {}).discarded || 0"></span></div></div>
                 <div class="trace-card"><div class="tc-label">subagent iters</div><div class="tc-val" x-text="summary.subagent_iters"></div></div>
             </div>
+        </section>
+
+        <section class="trace-section">
+            <h2 class="trace-h2">Context artifact lifecycle <span class="trace-sub">deferred evidence, delivery, and explicit cleanup</span></h2>
+            <table class="trace-table" x-show="series.context_artifacts && series.context_artifacts.length">
+                <thead><tr><th>iter</th><th>artifact</th><th>state</th><th>tool/path</th><th>bytes</th><th>reason</th></tr></thead>
+                <tbody><template x-for="a in series.context_artifacts" :key="a.artifact_id + ':' + a.state + ':' + a.iter"><tr @click="selectIter(a.iter)"><td x-text="a.iter"></td><td x-text="a.artifact_id"></td><td x-text="a.state"></td><td x-text="a.tool_name + ' ' + (a.path || '')"></td><td x-text="fmtNum(a.bytes)"></td><td x-text="a.reason"></td></tr></template></tbody>
+            </table>
+            <p class="trace-muted" x-show="!series.context_artifacts || !series.context_artifacts.length">No deferred context artifacts recorded.</p>
         </section>
 
         <!-- 2 + 3. Context growth (lines + layer heat strip) -->

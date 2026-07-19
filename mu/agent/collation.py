@@ -10,6 +10,7 @@ restores any pending collation entries.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Dict, List, Tuple
 
@@ -21,9 +22,10 @@ class CollationBuffer:
     plain ``dict`` to make JSON (de)serialisation straightforward.
     """
 
-    def __init__(self, max_bytes: int = 2_000_000) -> None:
+    def __init__(self) -> None:
+        # A deferred result is evidence, not a cache entry. Keep it until the
+        # model explicitly delivers or discards it.
         self.entries: List[Tuple[str, Dict[str, Any], str]] = []
-        self.max_bytes = max_bytes
 
     # ---------------------------------------------------------------------
     # Persistence helpers
@@ -58,51 +60,47 @@ class CollationBuffer:
     # Core API
     # ---------------------------------------------------------------------
     def add(self, tool_name: str, args: Dict[str, Any], result: str) -> None:
-        """Add a new result to the buffer.
-
-        If the total byte size would exceed ``max_bytes`` the oldest entry is
-        dropped and a placeholder entry is inserted to inform the model that a
-        truncation occurred.
-        """
+        """Add a result; only explicit model cleanup removes it."""
         self.entries.append((tool_name, args, result))
-        self._enforce_limit()
 
-    def _enforce_limit(self) -> None:
-        """Ensure the buffer does not exceed ``max_bytes``.
+    def artifact_id(self, index: int) -> str:
+        """Stable opaque identifier exposed to the model and trace."""
+        name, args, result = self.entries[index]
+        payload = json.dumps([name, args, result], default=str, sort_keys=True)
+        return "ctx_" + hashlib.sha256(payload.encode()).hexdigest()[:12]
 
-        The size is approximated by the sum of ``len(result)`` for each entry.
-        When the limit is crossed, entries are removed from the front until the
-        size is back under the threshold. A synthetic entry describing the
-        truncation is inserted at the beginning so the model knows data was
-        lost.
-        """
-        total = sum(len(r) for _, _, r in self.entries)
-        if total <= self.max_bytes:
-            return
-        removed = 0
-        while self.entries and total > self.max_bytes:
-            _, _, res = self.entries.pop(0)
-            total -= len(res)
-            removed += 1
-        if removed:
-            notice = f"[Collation] {removed} older entry(ies) were truncated due to size limits."
-            self.entries.insert(0, ("truncation_notice", {}, notice))
+    def manifest(self) -> List[Dict[str, Any]]:
+        return [
+            {"id": self.artifact_id(i), "tool_name": name, "args": args,
+             "bytes": len(result.encode("utf-8", errors="replace"))}
+            for i, (name, args, result) in enumerate(self.entries)
+        ]
 
-    def flush(self) -> List[str]:
-        """Return formatted messages and clear the buffer.
+    def flush_selected(self, artifact_ids: List[str] | None = None) -> List[Tuple[str, str]]:
+        """Deliver selected artifacts (or all) and remove only those entries."""
+        wanted = set(artifact_ids or [])
+        selected = []
+        kept = []
+        for i, entry in enumerate(self.entries):
+            aid = self.artifact_id(i)
+            if not wanted or aid in wanted:
+                name, args, result = entry
+                header = f"### Collated Data – {name}\n**Parameters:**\n```json\n{json.dumps(args, indent=2, sort_keys=True)}\n```\n**Result:**\n{result}"
+                selected.append((aid, header))
+            else:
+                kept.append(entry)
+        self.entries = kept
+        return selected
 
-        Each message follows the template used by the original implementation:
-        ``"### Collated Data – {tool_name}\n**Parameters:** <json>\n**Result:**\n{result}"``
-        """
-        formatted: List[str] = []
-        for tool_name, args, result in self.entries:
-            if tool_name == "truncation_notice":
-                formatted.append(f"⚠️ **TRUNCATION NOTICE:** {result}")
-                continue
-
-            header = f"### Collated Data – {tool_name}"
-            params = json.dumps(args, indent=2, sort_keys=True)
-            body = f"{header}\n**Parameters:**\n```json\n{params}\n```\n**Result:**\n{result}"
-            formatted.append(body)
-        self.entries.clear()
-        return formatted
+    def discard(self, artifact_ids: List[str]) -> List[str]:
+        """Explicit model-directed cleanup with an auditable return value."""
+        wanted = set(artifact_ids)
+        removed, kept = [], []
+        for i, entry in enumerate(self.entries):
+            aid = self.artifact_id(i)
+            if aid in wanted:
+                removed.append(aid)
+            else:
+                kept.append(entry)
+        self.entries = kept
+        return removed

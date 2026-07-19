@@ -158,6 +158,7 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
     # reactive overflow recovery in `_generate_with_overflow_recovery`
     # is the estimation-independent backstop if this still isn't enough.
     for round_idx in range(3):
+        _before_anchor = int(getattr(session.session_manager, "summary_anchor", 0) or 0)
         try:
             session.session_manager._pending_compaction_kind = "emergency_preflight"
             session.session_manager._pending_compaction_iter = int(
@@ -170,6 +171,16 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
                 provider=session.provider,
             )
             session._compaction_watermark = len(session.session_manager.history)
+            _after_anchor = int(getattr(session.session_manager, "summary_anchor", 0) or 0)
+            if _after_anchor > _before_anchor:
+                try:
+                    from mu.trace.emitter import emit_context_artifact
+                    emit_context_artifact(session,
+                        iteration=int(getattr(session, "_trace_current_iter", 0) or 0),
+                        artifact_id=f"history:{_before_anchor}-{_after_anchor}",
+                        state="compacted", reason="hard_context_preflight")
+                except Exception:
+                    pass
         except Exception as exc:
             logger.warning("Emergency compaction failed: %s", exc)
             return system_prompt, messages
@@ -928,11 +939,16 @@ def run_turn(session, text):
     session.session_manager._compact_focus = (
         session.variables.get("compact_focus") or ""
     )
-    _turn_start_rolled = session.session_manager.roll_history_summary_to_token_budget(
-        session._compaction_token_budget(),
-        keep_recent=resolve_keep_recent(session),
-        provider=session.provider,
-    )
+    # Normal history cleanup is model-directed via the `compact` tool. Keep
+    # proactive automatic compaction as an explicit deployment opt-in; the
+    # preflight/overflow paths below still enforce the provider's hard ceiling.
+    _turn_start_rolled = False
+    if session.variables.get("auto_compaction_enabled", False):
+        _turn_start_rolled = session.session_manager.roll_history_summary_to_token_budget(
+            session._compaction_token_budget(),
+            keep_recent=resolve_keep_recent(session),
+            provider=session.provider,
+        )
     # This is the turn's proactive compaction pass. If it actually compacted,
     # mark the turn so the per-iteration auto-compaction hook does not fire
     # again this turn (Claude Code fires autocompact once per turn; mid-turn
@@ -1247,6 +1263,26 @@ def run_turn(session, text):
                 session, dynamic_system_prompt, messages,
                 turn_start_index=turn_start_index,
             )
+            # Capture the estimate at the same seam as the provider request.
+            # The trace event is written after the response is archived, so
+            # deriving its estimate from live history there would incorrectly
+            # include the newly generated assistant message.
+            request_token_estimate = (
+                estimate_tokens(dynamic_system_prompt)
+                + _estimate_messages_tokens(messages)
+            )
+            try:
+                from mu.trace.emitter import build_request_record, get_emitter
+                _request_emitter = get_emitter(session)
+                if _request_emitter is not None:
+                    _request_emitter.request(build_request_record(
+                        iteration=iteration, system_prompt=dynamic_system_prompt,
+                        messages=messages,
+                        tools=active_tools if (session.folder_context.folders and session.agentic) else None,
+                        token_estimate=request_token_estimate,
+                    ))
+            except Exception:
+                pass
 
             if session.ui and hasattr(session.ui, "build_live_status"):
                 status_msg = session.ui.build_live_status(
@@ -1448,6 +1484,7 @@ def run_turn(session, text):
                         iter_start=_trace_iter_start,
                         cost_delta=float(est_cost or 0.0),
                         compaction=_comps[-1] if _comps else None,
+                        request_token_estimate=request_token_estimate,
                     )
                     _tr.iter_record(_rec)
                     try:
@@ -1936,6 +1973,7 @@ def run_turn(session, text):
                         _iteration_retryable_codes.add(str(_code))
                 # --- Collation Logic ---
                 is_flush = part.tool_name == "flush"
+                is_discard_deferred = part.tool_name == "discard_deferred_context"
                 should_collate = (
                     part.tool_name in COLLATED_TOOLS
                     and session.variables.get("collation_enabled", True)
@@ -1943,7 +1981,9 @@ def run_turn(session, text):
                 )
 
                 if is_flush:
-                    collated_data = session.collation_buffer.flush()
+                    requested_ids = part.tool_args.get("artifact_ids") if isinstance(part.tool_args, dict) else None
+                    collated_pairs = session.collation_buffer.flush_selected(requested_ids)
+                    collated_data = [body for _, body in collated_pairs]
                     if not collated_data:
                         raw_result = "No data in collation buffer to flush."
                     else:
@@ -1954,17 +1994,34 @@ def run_turn(session, text):
                         session.ui.show_info(
                             f"  [Flushed {len(collated_data)} items from buffer]"
                         )
+                    try:
+                        from mu.trace.emitter import emit_context_artifact
+                        for artifact_id, body in collated_pairs:
+                            emit_context_artifact(session, iteration=iteration,
+                                artifact_id=artifact_id, state="delivered",
+                                bytes=len(body.encode("utf-8", errors="replace")),
+                                reason="model_flush")
+                    except Exception:
+                        pass
+                elif is_discard_deferred:
+                    ids = part.tool_args.get("artifact_ids", []) if isinstance(part.tool_args, dict) else []
+                    removed = session.collation_buffer.discard(ids if isinstance(ids, list) else [])
+                    raw_result = f"Discarded {len(removed)} deferred context artifact(s): {', '.join(removed)}"
+                    try:
+                        from mu.trace.emitter import emit_context_artifact
+                        for artifact_id in removed:
+                            emit_context_artifact(session, iteration=iteration,
+                                artifact_id=artifact_id, state="discarded",
+                                reason=str(part.tool_args.get("reason", "model_cleanup")))
+                    except Exception:
+                        pass
                 elif should_collate:
                     # Don't collate if there was an error
                     collation_cache_key = None
                     if raw_result and not str(raw_result).startswith("Error"):
-                        # Cache the raw result BEFORE deferring it into the
-                        # collation buffer. The buffer's _enforce_limit can
-                        # drop the oldest entry (max_bytes) before the model
-                        # calls flush — without this cache entry, that raw
-                        # payload would be unrecoverable and the model would
-                        # have to re-read the file (the exact redundant-read
-                        # loop collation exists to prevent). force=True
+                        # Cache remains a fast recall path, but collation is
+                        # lossless: deferred evidence is retained until the
+                        # model delivers or explicitly discards it. force=True
                         # caches even tools not in _CACHEABLE_TOOLS (e.g.
                         # web_search, read_document) so every collated
                         # read-only result has a recall() path. See R11
@@ -1982,6 +2039,7 @@ def run_turn(session, text):
                             part.tool_name, part.tool_args, raw_result
                         )
                         count = len(session.collation_buffer.entries)
+                        artifact = session.collation_buffer.manifest()[-1]
                         cache_hint = (
                             f" [cache:{collation_cache_key}]"
                             if collation_cache_key
@@ -1989,10 +2047,21 @@ def run_turn(session, text):
                         )
                         raw_result = (
                             f"Stored '{part.tool_name}' result in collation buffer. "
-                            f"{count} item(s) currently pending. "
-                            "Continue gathering or call 'flush' when ready to receive all context."
+                            f"artifact_id={artifact['id']} bytes={artifact['bytes']}. "
+                            f"{count} item(s) currently pending. Call `flush` with artifact_ids "
+                            "for selected evidence, omit IDs for all, or `discard_deferred_context` "
+                            "when deliberately cleaning up."
                             f"{cache_hint}"
                         )
+                        try:
+                            from mu.trace.emitter import emit_context_artifact
+                            emit_context_artifact(session, iteration=iteration,
+                                artifact_id=artifact["id"], state="deferred",
+                                tool_name=part.tool_name,
+                                path=str(part.tool_args.get("filename") or part.tool_args.get("path") or "") if isinstance(part.tool_args, dict) else "",
+                                bytes=artifact["bytes"], reason="collation")
+                        except Exception:
+                            pass
                     if session.ui and active_mode != "loop":
                         session.ui.show_info(f"  [Collated: {part.tool_name}]")
                     else:

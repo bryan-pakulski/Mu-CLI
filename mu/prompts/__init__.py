@@ -6,7 +6,7 @@ from files on disk without editing Python source. Resolution priority
 
   1. **runtime session-variable override** set via ``/set`` —
      ``agentic_system_base_override`` or ``agentic_mode_prompt_<mode>``.
-  2. **file** under ``$MUCLI_HOME/prompts/`` — ``base.md`` or ``<mode>.md``.
+  2. **bundled template** under ``mu/prompts/templates/``.
   3. **hardcoded fallback** in ``utils/config.py`` —
      ``AGENTIC_SYSTEM_BASE`` / ``AGENTIC_MODES``.
 
@@ -170,6 +170,19 @@ def _resolve_file(name: str) -> Optional[ResolvedPrompt]:
     return resolved
 
 
+def _resolve_builtin(name: str) -> Optional[ResolvedPrompt]:
+    """Resolve repository-owned prompt templates before legacy fallback."""
+    path = os.path.join(_builtin_templates_dir(), f"{name}.md")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    meta, body = _split_frontmatter(raw)
+    return ResolvedPrompt(name=name, text=body, source="builtin", path=path,
+                          version=_coerce_version(meta))
+
+
 def _hardcoded(name: str) -> ResolvedPrompt:
     if name == "base":
         text = AGENTIC_SYSTEM_BASE
@@ -183,7 +196,7 @@ def _hardcoded(name: str) -> ResolvedPrompt:
 def get_base() -> str:
     """Resolved base prompt text (file > hardcoded). Layer 1 (runtime var)
     is applied by the call site, not here."""
-    return (_resolve_file("base") or _hardcoded("base")).text
+    return (_resolve_file("base") or _resolve_builtin("base") or _hardcoded("base")).text
 
 
 def get_mode(mode: str) -> str:
@@ -191,14 +204,14 @@ def get_mode(mode: str) -> str:
     ``default`` when ``mode`` is unknown."""
     if mode not in AGENTIC_MODES:
         mode = "default"
-    return (_resolve_file(mode) or _hardcoded(mode)).text
+    return (_resolve_file(mode) or _resolve_builtin(mode) or _hardcoded(mode)).text
 
 
 def get_resolved(name: str) -> ResolvedPrompt:
-    """Full resolution (with meta) for one prompt name — file > hardcoded."""
+    """Full resolution (with meta) — user file > bundled > fallback."""
     if name not in known_names():
         raise KeyError(f"unknown prompt name: {name!r}")
-    return _resolve_file(name) or _hardcoded(name)
+    return _resolve_file(name) or _resolve_builtin(name) or _hardcoded(name)
 
 
 def resolved_snapshot(session: Any = None) -> Dict[str, Dict[str, Any]]:

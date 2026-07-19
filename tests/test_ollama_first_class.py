@@ -17,6 +17,7 @@ Coverage:
 import io
 import json
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -500,6 +501,30 @@ def test_resolve_host_auto_legacy_api_key_cloud(monkeypatch):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setenv("OLLAMA_API_KEY", "x")
     assert _resolve_host(None, "auto") == "https://ollama.com"
+
+
+def test_interactive_ollama_auto_mode_prompts_before_model_discovery(monkeypatch):
+    """The saved ``auto`` default must not skip the local/cloud picker."""
+    import mucli
+
+    provider = SimpleNamespace(model_name="", get_available_models=lambda: ["local-model"])
+    captured = {}
+
+    def fake_init(name, model_name, host, mode, api_key):
+        captured.update(name=name, model_name=model_name, host=host, mode=mode, api_key=api_key)
+        return provider
+
+    monkeypatch.setattr(mucli, "init_provider", fake_init)
+    monkeypatch.setattr(mucli.Prompt, "ask", lambda *args, **kwargs: "local")
+    monkeypatch.setattr(mucli.IntPrompt, "ask", lambda *args, **kwargs: "1")
+
+    selected = mucli.select_provider_and_model(
+        "ollama", None, ollama_mode="auto", allow_prompt=True
+    )
+
+    assert captured["mode"] == "local"
+    assert selected.model_name == "local-model"
+    assert selected._mu_ollama_mode == "local"
 
 
 # ============================================== api_key precedence + apply_session

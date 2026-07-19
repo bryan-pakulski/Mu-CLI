@@ -690,12 +690,13 @@ CITATION REQUIREMENTS:
 - End with a bibliography via `compile_bibliography()`.
 
 SOURCE CREDIBILITY (apply when weighting conflicting claims):
-- ★0.8 Academic (arXiv, DOI, peer-reviewed)
-- ★0.7 Official documentation / vendor sources
-- ★0.6 Reputable news / industry analysis
-- ★0.5 Web search hits (varies — inspect the host)
-- ★0.4 Forums (Reddit, HN — useful for "is this really what people hit?" not for facts)
-- ★0.3 Social media
+- Do NOT treat source type as a flat score. After reading a source, call
+  `assess_source(citation_id, importance, rationale)` with your own 0–1
+  evidence assessment based on authority, methodology, relevance, recency,
+  conflicts, and corroboration.
+- Source type is only a hard safety cap: academic 1.0, official docs 0.95,
+  news 0.85, web 0.80, forums 0.65, social/other 0.60. A weak academic paper
+  can score low; an excellent web source can be strong but cannot exceed 0.80.
 
 Cross-reference important claims across ≥2 sources. Prefer recent sources for fast-moving topics. Note any conflicts of interest in your write-up.
 

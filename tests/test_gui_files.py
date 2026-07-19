@@ -424,15 +424,36 @@ def test_css_has_files_panel_and_codemirror_theme():
     assert "var(--bg)" in src
 
 
-def test_global_todo_field_is_rendered_and_refreshed_across_views():
+def test_todos_are_available_from_the_view_picker_across_modes():
     index = open(INDEX_HTML, encoding="utf-8").read()
     js = open(APP_JS, encoding="utf-8").read()
-    css = open(APP_CSS, encoding="utf-8").read()
-    assert 'class="todo-field"' in index
-    assert "activeTodoSummary()" in js
+    assert 'class="mode-option todo-view-option"' in index
+    assert "Todos</span>" in index
+    assert "$store.mode.setView('loop'); open = false" in index
+    assert 'class="todo-field"' not in index
     assert 'Alpine.store("loop").load();' in js
     assert 'setInterval(() => Alpine.store("loop").load(), 5000)' in js
-    assert ".todo-field" in css
+
+
+def test_shell_animates_side_panels_and_centers_settings_modal():
+    index = open(INDEX_HTML, encoding="utf-8").read()
+    css = open(APP_CSS, encoding="utf-8").read()
+    inspector = open(
+        os.path.join(REPO, "mu", "gui", "templates", "fragments", "inspector.html"),
+        encoding="utf-8",
+    ).read()
+
+    assert "transition: grid-template-columns" in css
+    assert ".app.sidebar-hidden .sidebar" in css
+    assert "transform: translateX(-16px)" in css
+    assert ".app.panel-hidden .mode-panel" in css
+    assert "flex-basis 0.28s" in css
+    assert "transform: translateX(16px)" in css
+    assert 'class="inspector-backdrop"' in inspector
+    assert "place-items: center" in css
+    assert 'role="dialog"' in inspector
+    assert 'aria-modal="true"' in inspector
+    assert "$store.inspector.openDrawer()" in index
 
 
 def test_prompt_picker_preserves_all_multi_select_values_and_recovery_choice():

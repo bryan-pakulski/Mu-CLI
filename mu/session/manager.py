@@ -83,6 +83,10 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_state = None
         self.teacher_registry = {}
         self.active_course_id = None
+        # Structured research sources are session-owned.  The citation engine
+        # itself is process-global, so retaining this snapshot prevents an
+        # unload/reload from silently dropping a research trail.
+        self.research_sources: list[dict] = []
         self.variables = DEFAULT_VARIABLES.copy()
 
         if session_name:
@@ -123,6 +127,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_state = None
         self.teacher_registry = {}
         self.active_course_id = None
+        self.research_sources = []
         self.variables.update(DEFAULT_VARIABLES)
 
         data = self.read_session_data(name)
@@ -190,6 +195,12 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                         self.teacher_state = deepcopy(
                             self.teacher_registry[self.active_course_id]
                         )
+
+                    saved_sources = data.get("research_sources", [])
+                    self.research_sources = (
+                        saved_sources if isinstance(saved_sources, list) else []
+                    )
+                    self.restore_research_sources()
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -344,6 +355,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 "teacher_state": self.teacher_state,
                 "teacher_registry": self.teacher_registry,
                 "active_course_id": self.active_course_id,
+                "research_sources": self.research_sources,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -351,6 +363,24 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             if self.ui:
                 self.ui.show_error(f"Warning: Could not save chat history: {e}")
             logger.error(f"Failed to save history: {e}")
+
+    def restore_research_sources(self) -> None:
+        """Hydrate the global citation engine from this session's snapshot."""
+        try:
+            from utils.citation_manager import get_citation_manager
+
+            get_citation_manager().load_dict(self.research_sources)
+        except Exception:
+            logger.debug("Could not restore persisted research sources", exc_info=True)
+
+    def snapshot_research_sources(self) -> None:
+        """Capture sources immediately after a research tool updates them."""
+        try:
+            from utils.citation_manager import get_citation_manager
+
+            self.research_sources = get_citation_manager().to_dict()
+        except Exception:
+            logger.debug("Could not snapshot research sources", exc_info=True)
 
     def get_feature_state(self):
         return (
@@ -620,6 +650,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_state = None
         self.teacher_registry = {}
         self.active_course_id = None
+        self.research_sources = []
         self.conversation_summary = ""
         self.summary_anchor = 0
         self.history = []
@@ -825,5 +856,3 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
 
         self.history = new_history
         self.summary_anchor = min(self.summary_anchor, len(self.history))
-
-

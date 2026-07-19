@@ -102,6 +102,30 @@ def test_status_when_empty(session):
     assert result.data["avg_credibility"] == 0.0
 
 
+def test_sources_survive_session_unload_and_reload(tmp_path, monkeypatch):
+    """Research evidence is stored with its session, not just the process."""
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path))
+    manager = SessionManager(session_name="research_resume")
+    register_source(
+        title="Persistent research source",
+        url="https://example.test/persistent",
+        source_type=SourceType.DOCUMENTATION,
+    )
+    manager.snapshot_research_sources()
+    manager.save_history()
+
+    # Simulate the in-memory session being unloaded (and the daemon's
+    # process-global citation registry no longer retaining its sources).
+    reset_citation_manager()
+    reloaded = SessionManager(session_name="research_resume")
+
+    sources = get_citation_manager().get_all_sources()
+    assert len(reloaded.research_sources) == 1
+    assert [(source.id, source.url) for source in sources] == [
+        (1, "https://example.test/persistent")
+    ]
+
+
 # ----------------------------------------------- sources listing
 
 
@@ -274,5 +298,5 @@ def test_research_autocomplete_lists_subcommands():
         handler.completer.get_completions(doc, CompleteEvent(completion_requested=True))
     )
     texts = {c.text for c in completions}
-    for sub in ("status", "sources", "show", "bibliography", "stats", "clear"):
+    for sub in ("status", "sources", "show", "bibliography", "stats", "clear", "new"):
         assert sub in texts, f"missing /research subcommand {sub!r} in autocomplete"

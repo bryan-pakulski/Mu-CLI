@@ -203,11 +203,16 @@ input::placeholder, textarea::placeholder { color: var(--text-dimmer); }
         "header  header"
         "sidebar main";
     height: 100vh;
+    transition: grid-template-columns 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .app.sidebar-hidden {
     grid-template-columns: 0px 1fr;
 }
-.app.sidebar-hidden .sidebar { display: none; }
+.app.sidebar-hidden .sidebar {
+    opacity: 0;
+    transform: translateX(-16px);
+    pointer-events: none;
+}
 
 .header {
     grid-area: header;
@@ -378,9 +383,11 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
 
 .sidebar {
     grid-area: sidebar;
+    min-width: 0;
     overflow-y: auto;
     padding: var(--space-4) var(--space-3) var(--space-6);
     color: var(--text-dim);
+    transition: opacity 0.18s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .sidebar h3 {
     margin: var(--space-5) var(--space-3) var(--space-2);
@@ -544,9 +551,27 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     overflow-y: auto;
     padding: var(--space-5) var(--space-5) var(--space-6);
     background: var(--bg);
+    opacity: 1;
+    transform: none;
+    transition:
+        flex-basis 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        padding 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.16s ease,
+        transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.2s ease;
 }
 .app.has-panel .mode-panel { display: block; }
-.app.panel-hidden .mode-panel { display: none; }
+.app.panel-hidden .mode-panel {
+    flex-basis: 0;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 0;
+    padding-right: 0;
+    border-left-color: transparent;
+    opacity: 0;
+    transform: translateX(16px);
+    pointer-events: none;
+}
 
 /* Per-mode accent override — surfaces use --accent for current-state
  * highlights (progress bars, current-lesson rail, etc.). Modes can
@@ -2766,31 +2791,27 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
     line-height: 1.45;
 }
 
-/* ------------------------------------------------------------ inspector
- *
- * Right-side drawer exposing the TUI's workspace/memory/stats/settings
- * surface to the GUI. Slides in from the right with a subtle fade.
- */
+/* ------------------------------------------------------------ inspector modal */
 
-.inspector {
+.inspector-backdrop {
     position: fixed;
-    top: 56px;
-    right: 0;
-    bottom: 0;
-    width: min(420px, 100vw);
-    background: var(--bg);
-    border-left: 1px solid var(--border);
+    inset: 0;
     z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: var(--space-5);
+    background: rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(3px);
+}
+.inspector {
+    width: min(720px, calc(100vw - var(--space-10)));
+    max-height: min(760px, calc(100vh - var(--space-10)));
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) * 2);
     display: flex;
     flex-direction: column;
-    transform: translateX(20px);
-    opacity: 0;
-    transition: transform 0.22s ease, opacity 0.18s ease;
-    box-shadow: -16px 0 40px rgba(0, 0, 0, 0.18);
-}
-.inspector.open {
-    transform: none;
-    opacity: 1;
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.35);
 }
 
 .inspector-head {
@@ -4478,31 +4499,6 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
     font-size: 12.5px;
     line-height: 1.5;
 }
-
-/* Persistent task summary in the header.  Unlike the loop panel this is
- * intentionally available in every view, including research and files. */
-.todo-field {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 300px;
-    min-width: 0;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--bg-lift);
-    color: var(--text-soft);
-    cursor: pointer;
-    font: inherit;
-    font-size: 11px;
-}
-.todo-field:hover { border-color: var(--accent); color: var(--text); }
-.todo-field-label { color: var(--accent); font-weight: 700; text-transform: uppercase; }
-.todo-field-count { color: var(--text); }
-.todo-field-current,
-.todo-field-empty { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
-.todo-field-current { flex: 1; text-align: left; }
-@media (max-width: 900px) { .todo-field-current { display: none; } .todo-field { max-width: none; } }
 
 /* Inline new/rename prompt bar, overlaid at the bottom of the panel. */
 .files-prompt {

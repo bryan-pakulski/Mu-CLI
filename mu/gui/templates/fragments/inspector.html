@@ -1,8 +1,13 @@
-<div class="inspector"
-     :class="{ open: $store.inspector.open }"
+<div class="inspector-backdrop"
      x-show="$store.inspector.open"
      x-transition.opacity.duration.180ms
+     @click.self="$store.inspector.close()"
      @keydown.escape.window="$store.inspector.close()">
+    <div class="inspector"
+         role="dialog"
+         aria-modal="true"
+         aria-label="Settings"
+         @click.stop>
 
     <header class="inspector-head">
         <nav class="inspector-tabs" role="tablist">
@@ -265,5 +270,6 @@
                 no matches
             </div>
         </section>
+    </div>
     </div>
 </div>

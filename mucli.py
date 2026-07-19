@@ -774,7 +774,15 @@ def select_provider_and_model(
     # An Ollama API key traditionally selected ollama.com implicitly.  Ask
     # terminal users explicitly so local models remain selectable even when
     # OLLAMA_API_KEY is present in their environment.
-    if provider_name == "ollama" and allow_prompt and not ollama_mode:
+    # ``auto`` is the persisted legacy default, not a user choice.  Treat it
+    # like an unset mode in the interactive TUI so the connection target is
+    # chosen before model discovery (and, crucially, before a cloud API key
+    # can make discovery list cloud models by default).
+    if (
+        provider_name == "ollama"
+        and allow_prompt
+        and ollama_mode not in {"local", "cloud"}
+    ):
         ollama_mode = Prompt.ask(
             "Ollama connection", choices=["local", "cloud"], default="local"
         )

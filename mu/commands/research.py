@@ -8,7 +8,8 @@ Subcommands:
     /research show <id>             — full record for one source
     /research bibliography          — emit the compiled markdown bibliography
     /research stats                 — counts by source type + averages
-    /research clear                 — wipe the citation engine
+    /research clear                 — wipe the current research trail
+    /research new <query>           — start a fresh research trail
 
 Filters for `/research sources`:
     --type <web|academic|social|forum|news|documentation|other>
@@ -35,13 +36,30 @@ def _refresh_hud(session: Any) -> None:
         pass
 
 
-def _engine():
+def _engine(session: Any = None):
     """The global CitationManager singleton. Lazy-imported so the
     command module doesn't pull in `utils.citation_manager` at module
     load (it's heavier than it needs to be for /help generation)."""
     from utils.citation_manager import SourceType, get_citation_manager
 
+    if session is not None:
+        manager = getattr(session, "session_manager", None)
+        if (
+            manager is not None
+            and getattr(manager, "current_session_name", "")
+            and hasattr(manager, "restore_research_sources")
+        ):
+            manager.restore_research_sources()
     return get_citation_manager(), SourceType
+
+
+def _save_sources(session: Any) -> None:
+    """Persist explicit research-engine mutations immediately."""
+    manager = getattr(session, "session_manager", None)
+    if manager is None or not hasattr(manager, "snapshot_research_sources"):
+        return
+    manager.snapshot_research_sources()
+    manager.save_history(getattr(session, "folder_context", None))
 
 
 def _emit(session: Any, body: str, allow_prompt: bool, *, error: bool = False) -> None:
@@ -130,7 +148,7 @@ def _parse_source_filters(rest: str) -> Tuple[Optional[str], Optional[float], Op
 
 
 def _status(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, SourceType = _engine()
+    engine, SourceType = _engine(session)
     sources = engine.get_all_sources()
     by_type: Dict[str, int] = {}
     for src in sources:
@@ -164,7 +182,7 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
 
 
 def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
-    engine, SourceType = _engine()
+    engine, SourceType = _engine(session)
 
     type_filter, min_cred, query, err = _parse_source_filters(rest)
     if err:
@@ -245,7 +263,7 @@ def _list_sources(session: Any, rest: str, allow_prompt: bool) -> CommandResult:
 
 
 def _show_source(session: Any, raw_id: str, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine()
+    engine, _ = _engine(session)
     raw_id = (raw_id or "").lstrip("#").strip()
     if not raw_id:
         msg = "Usage: /research show <id>"
@@ -299,7 +317,7 @@ def _show_source(session: Any, raw_id: str, allow_prompt: bool) -> CommandResult
 
 
 def _bibliography(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine()
+    engine, _ = _engine(session)
     body = engine.compile_bibliography() or ""
     if allow_prompt:
         console = _console(session)
@@ -323,7 +341,7 @@ def _bibliography(session: Any, allow_prompt: bool) -> CommandResult:
 
 
 def _stats(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine()
+    engine, _ = _engine(session)
     sources = engine.get_all_sources()
     by_type: Dict[str, int] = {}
     cred_buckets = {"★★★★★": 0, "★★★★": 0, "★★★": 0, "★★": 0, "★": 0, "☆": 0}
@@ -375,9 +393,10 @@ def _stats(session: Any, allow_prompt: bool) -> CommandResult:
 
 
 def _clear(session: Any, allow_prompt: bool) -> CommandResult:
-    engine, _ = _engine()
+    engine, _ = _engine(session)
     prev = engine.source_count
     engine.clear()
+    _save_sources(session)
     _emit(
         session,
         f"Citation engine cleared — dropped {prev} source(s).",
@@ -415,7 +434,7 @@ def _run_query(session: Any, query: str, allow_prompt: bool) -> CommandResult:
 # ----------------------------------------------- dispatch
 
 
-SUBCOMMANDS = ("sources", "show", "bibliography", "stats", "clear", "status")
+SUBCOMMANDS = ("sources", "show", "bibliography", "stats", "clear", "new", "status")
 
 
 @command(
@@ -423,7 +442,7 @@ SUBCOMMANDS = ("sources", "show", "bibliography", "stats", "clear", "status")
     help=(
         "Research workflow / citation engine. "
         "Subcommands: status, sources [--type X --min N --query Q], "
-        "show <id>, bibliography, stats, clear. "
+        "show <id>, bibliography, stats, clear, new <query>. "
         "Anything else is treated as a query."
     ),
 )
@@ -449,6 +468,13 @@ def research_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
         return _stats(session, allow_prompt)
     if sub == "clear":
         return _clear(session, allow_prompt)
+    if sub == "new":
+        if not rest:
+            msg = "Usage: /research new <query>"
+            _emit(session, msg, allow_prompt, error=True)
+            return CommandResult(ok=False, message=msg)
+        _clear(session, allow_prompt=False)
+        return _run_query(session, rest, allow_prompt)
 
     # Anything else → query.
     return _run_query(session, raw, allow_prompt)

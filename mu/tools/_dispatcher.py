@@ -31,6 +31,22 @@ from ._envelope import _build_tool_envelope, _envelope_from_handler_result
 
 TOOL_HANDLERS: dict[str, Callable[[dict, Any], str]] = {}
 
+# These tools register bibliography entries in CitationManager.  The manager
+# is process-global for backwards compatibility, but its contents are
+# snapshotted on the owning SessionManager so unloaded research sessions can
+# resume with their evidence intact.
+_RESEARCH_SOURCE_TOOLS = {
+    "url_grounding",
+    "web_search",
+    "arxiv_search",
+    "doi_resolve",
+    "reddit_search",
+    "stackoverflow_search",
+    "hackernews_search",
+    "read_document",
+    "assess_source",
+}
+
 
 def _path_arg_error(key: str) -> str:
     return (
@@ -197,8 +213,21 @@ def dispatch(
         session=session,
     )
     try:
+        if tool_name in _RESEARCH_SOURCE_TOOLS and session is not None:
+            manager = getattr(session, "session_manager", None)
+            if (
+                manager is not None
+                and getattr(manager, "current_session_name", "")
+                and hasattr(manager, "restore_research_sources")
+            ):
+                manager.restore_research_sources()
         raw_result = handler(args, context)
         envelope = _envelope_from_handler_result(tool_name, raw_result)
+        if tool_name in _RESEARCH_SOURCE_TOOLS and session is not None:
+            manager = getattr(session, "session_manager", None)
+            if manager is not None and hasattr(manager, "snapshot_research_sources"):
+                manager.snapshot_research_sources()
+                manager.save_history(getattr(session, "folder_context", None))
         if "execution_source" not in envelope.get("telemetry", {}):
             envelope.setdefault("telemetry", {})["execution_source"] = (
                 invocation_source

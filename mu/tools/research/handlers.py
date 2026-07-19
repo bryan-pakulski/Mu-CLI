@@ -26,6 +26,36 @@ from utils.citation_manager import SourceType, register_source
 from utils.logger import logger
 
 
+@tool(
+    name="assess_source",
+    description=(
+        "Rate a registered research source after evaluating its authority, "
+        "methodology, relevance, and corroboration. Use 0.0–1.0; source "
+        "type supplies a hard safety cap, not a flat rating."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "citation_id": {"type": "integer", "description": "Source citation ID."},
+            "importance": {"type": "number", "description": "Model-assessed evidence strength from 0.0 to 1.0."},
+            "rationale": {"type": "string", "description": "Brief reason for the assessment."},
+        },
+        "required": ["citation_id", "importance"],
+    },
+    requires_approval=False,
+    execution_kind="read",
+    preview_policy="none",
+    result_mode="structured+collated",
+)
+def _assess_source_tool(args: Dict[str, Any], context) -> str:
+    from utils.citation_manager import get_citation_manager
+
+    source = get_citation_manager().assess_source(
+        int(args.get("citation_id")), float(args.get("importance")), str(args.get("rationale") or "")
+    )
+    return json.dumps({"citation_id": source.id, "credibility_score": source.credibility_score})
+
+
 # ============================================================== url_grounding
 
 def url_grounding(url: str, folder_context) -> str:

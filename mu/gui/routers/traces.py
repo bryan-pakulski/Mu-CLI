@@ -93,6 +93,8 @@ async def get_trace(run_id: str, cols: int = 128) -> Dict[str, Any]:
         "tools": run.tools,
         "nudges": run.nudges,
         "compactions": run.compactions,
+        "requests": run.requests,
+        "context_artifacts": run.context_artifacts,
         "turn_end": run.turn_end,
         "series": series,
         "snapshot": snapshot,

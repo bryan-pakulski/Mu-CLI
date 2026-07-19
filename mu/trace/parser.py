@@ -36,6 +36,8 @@ class TraceRun:
     tools: List[Dict[str, Any]] = field(default_factory=list)
     nudges: List[Dict[str, Any]] = field(default_factory=list)
     compactions: List[Dict[str, Any]] = field(default_factory=list)
+    requests: List[Dict[str, Any]] = field(default_factory=list)
+    context_artifacts: List[Dict[str, Any]] = field(default_factory=list)
     turn_end: Optional[Dict[str, Any]] = None
     bytes: int = 0
 
@@ -83,6 +85,10 @@ def parse_trace(path: str) -> TraceRun:
             run.nudges.append(obj)
         elif t == "compaction":
             run.compactions.append(obj)
+        elif t == "request":
+            run.requests.append(obj)
+        elif t == "context_artifact":
+            run.context_artifacts.append(obj)
         elif t == "turn_end":
             run.turn_end = obj
             if not run.run_id:
@@ -241,6 +247,10 @@ def combine_runs(runs: List["TraceRun"]) -> "TraceRun":
             nc = dict(c)
             nc["iter"] = iter_map.get(c.get("iter"), fallback)
             merged.compactions.append(nc)
+        for req in run.requests:
+            nr = dict(req); nr["iter"] = iter_map.get(req.get("iter"), fallback); merged.requests.append(nr)
+        for artifact in run.context_artifacts:
+            na = dict(artifact); na["iter"] = iter_map.get(artifact.get("iter"), fallback); merged.context_artifacts.append(na)
     return merged
 
 
@@ -301,6 +311,8 @@ def build_session_view(
         "tools": merged.tools,
         "nudges": merged.nudges,
         "compactions": merged.compactions,
+        "requests": merged.requests,
+        "context_artifacts": merged.context_artifacts,
         "turn_end": merged.turn_end,
         "series": series,
         "snapshot": snapshot,
@@ -385,6 +397,13 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
                 "total_est": _num(ctx.get("total_est")),
             }
         )
+
+    # --- model-directed context artifact lifecycle ---
+    context_artifacts = sorted(run.context_artifacts, key=lambda a: (_iter_of(a.get("iter")), str(a.get("artifact_id", ""))))
+    artifact_counts = {}
+    for artifact in context_artifacts:
+        state = str(artifact.get("state") or "unknown")
+        artifact_counts[state] = artifact_counts.get(state, 0) + 1
 
     # --- token breakdown per iter ---
     tokens = []
@@ -518,6 +537,9 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
         "redundant_reads": redundant_reads,
         "subagent_timeline": subagent_timeline,
         "memory_series": memory_series,
+        "context_artifacts": context_artifacts,
+        "context_artifact_counts": artifact_counts,
+        "requests": sorted(run.requests, key=lambda req: _iter_of(req.get("iter"))),
     }
 
 
@@ -687,6 +709,8 @@ def build_summary(run: TraceRun, series: Dict[str, Any]) -> Dict[str, Any]:
         "peak_wall_ms": int(peak_wall),
         "mean_wall_ms": int(mean_wall),
         "tool_calls": len(run.tools),
+        "request_count": len(run.requests),
+        "context_artifact_counts": series.get("context_artifact_counts", {}),
         "redundant_reads": len(series["redundant_reads"]),
         "status": (run.turn_end or {}).get("status", "running"),
         "bytes": run.bytes,

@@ -91,6 +91,16 @@ def test_workspace_skills_shadow_builtins(tmp_path):
     assert by_name["commit-message"].description == "Local override."
 
 
+def test_builtin_deep_research_skill_has_precise_trigger_and_artifacts():
+    clear_skill_cache()
+    skill = get_skill("deep-research", [])
+    assert skill is not None
+    assert match_trigger(skill, "Please perform a deep dive into this topic")
+    assert "REPORT.md" in skill.body
+    assert "supporting_data/" in skill.body
+    assert "hypotheses.md" in skill.body
+
+
 def test_render_skills_block_compact_index_excludes_bodies():
     s1 = Skill(name="alpha", description="A first skill.", body="A body.", source="/a")
     s2 = Skill(name="beta", description="A second skill.", body="B body.", source="/b")

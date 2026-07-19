@@ -54,17 +54,15 @@ def test_known_names_includes_base_and_all_modes():
         assert panel not in names
 
 
-def test_fallback_to_hardcoded_when_no_file(tmp_prompts_dir):
-    """No file present → library returns the hardcoded constants verbatim."""
-    from utils.config import AGENTIC_MODES, AGENTIC_SYSTEM_BASE
-
-    assert get_base() == AGENTIC_SYSTEM_BASE
-    assert get_mode("default") == AGENTIC_MODES["default"]
-    assert get_mode("debug") == AGENTIC_MODES["debug"]
+def test_fallback_to_bundled_templates_when_no_override(tmp_prompts_dir):
+    """Fresh sessions use repository templates, not duplicated strings."""
+    assert "Operating style" in get_base()
+    assert "WORKFLOW" in get_mode("default")
+    assert "WORKFLOW" in get_mode("debug")
 
     resolved = get_resolved("base")
-    assert resolved.source == "hardcoded"
-    assert resolved.path is None
+    assert resolved.source == "builtin"
+    assert resolved.path is not None
 
 
 def test_file_override_wins_over_hardcoded(tmp_prompts_dir):
@@ -108,12 +106,12 @@ def test_runtime_var_beats_file_beats_hardcoded(tmp_prompts_dir):
     effective2 = session2.variables.get("agentic_system_base_override") or get_base()
     assert effective2 == "FILE BASE"
 
-    # no file, no var → hardcoded
+    # no file, no var → bundled template
     os.remove(os.path.join(str(tmp_prompts_dir), "base.md"))
     reload()
     session3 = SimpleNamespace(variables={})
     effective3 = session3.variables.get("agentic_system_base_override") or get_base()
-    assert effective3 == AGENTIC_SYSTEM_BASE
+    assert "Operating style" in effective3
 
 
 def test_resolved_snapshot_layers_runtime_override(tmp_prompts_dir):
@@ -124,8 +122,8 @@ def test_resolved_snapshot_layers_runtime_override(tmp_prompts_dir):
     assert snap["default"]["source"] == "override"
     assert snap["default"]["has_override"] is True
     assert snap["default"]["chars"] == len("RUNTIME")
-    # base has no override and no file → hardcoded
-    assert snap["base"]["source"] == "hardcoded"
+    # base has no override and no user file → bundled template
+    assert snap["base"]["source"] == "builtin"
 
 
 # ----------------------------------------------------------- cache + reload
@@ -155,10 +153,10 @@ def test_init_templates_writes_refined_base_and_default(tmp_prompts_dir):
     assert set(written.keys()) == {"base", "default"}
     for name in ("base", "default"):
         assert os.path.isfile(written[name])
-    # The bundled templates are the refined versions (frontmatter version: 2).
+    # The bundled templates are the refined versions.
     base_resolved = get_resolved("base")
     assert base_resolved.source == "file"
-    assert base_resolved.version == 2
+    assert base_resolved.version == 3
 
 
 def test_init_templates_seeds_other_modes_from_hardcoded(tmp_prompts_dir):

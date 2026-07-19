@@ -181,7 +181,6 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "workspace_context_files",
             "skills_max_chars",
             "skills_mode",
-            "tool_context_window",
             "collation_enabled",
             "structured_tool_results",
         ),

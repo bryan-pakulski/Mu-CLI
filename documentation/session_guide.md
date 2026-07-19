@@ -46,10 +46,10 @@ is told the verbatim text is not in context.
 | `context_token_limit` | 900000 | Global token cap (sum of all 7 layers + response reserve). |
 | `context_trim_threshold` | 0.85 | Fraction of the cap above which compaction kicks in. |
 | `response_token_reserve` | 4096 | Tokens reserved for the model's reply. |
-| `tool_context_window` | 6 | Recent tool messages kept uncompressed in history. |
+| `auto_compaction_enabled` | false | Opt in to proactive automatic compaction. Default is model-directed cleanup; hard provider-overflow recovery remains enabled. |
 | `tool_result_floor` | 4 | Trailing tool-result messages in the active turn that compaction (including emergency compaction) must leave verbatim, so mid-turn compaction can't drop results just received. |
 | `emergency_keep_recent` | 2 | Trailing messages kept verbatim by emergency (pre-flight) compaction — smaller than the normal keep-recent so budget is reclaimed fast; `tool_result_floor` still protects recent tool results. |
-| `compact_history` | true | Auto-compact tooling history after each finished turn. |
+| `compact_history` | false | Remove completed-turn tool metadata after a response. Disabled by default. |
 | `conversation_summary_char_limit` | 80000 | Char budget for L2 rolling summary (scales with `context_token_limit`, floor `24000`). |
 | `workspace_context_max_chars` | 40000 | Char budget for L1 workspace files (scales with `context_token_limit`, floor `16384`). |
 | `skills_max_chars` | 40000 | Char budget for L1B skills block (scales with `context_token_limit`, floor `6144`). |

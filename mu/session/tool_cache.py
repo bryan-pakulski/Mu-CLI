@@ -146,8 +146,7 @@ class ToolResultCache:
         ``force=True`` bypasses the ``_CACHEABLE_TOOLS`` filter so the result
         is cached even for tools not on the default allowlist. Used by the
         collation path: when a read-only result is deferred into the
-        collation buffer (and may later be dropped by ``_enforce_limit``
-        before the model calls ``flush``), caching the raw payload gives
+        collation buffer before the model calls ``flush``), caching the raw payload gives
         the model a ``recall(cache_key)`` recovery path it would otherwise
         not have. See R11 in documentation/harness-investigation.md (FM-4).
         """

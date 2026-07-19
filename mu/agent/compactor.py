@@ -33,6 +33,11 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     session = ctx.session
     if session is None:
         return None
+    variables = getattr(session, "variables", None) or ctx.variables or {}
+    # Manual/model-directed `compact` is the default. Retain this hook only
+    # for deployments that explicitly choose automatic proactive trimming.
+    if not bool(variables.get("auto_compaction_enabled", False)):
+        return None
     session_manager = getattr(session, "session_manager", None)
     if session_manager is None or not hasattr(
         session_manager, "roll_history_summary_to_token_budget"
@@ -60,7 +65,6 @@ def _compact_history(ctx: HookContext) -> Optional[HookResult]:
     if history_len <= watermark:
         return None
 
-    variables = getattr(session, "variables", None) or ctx.variables or {}
     try:
         threshold = float(variables.get("context_trim_threshold", 0.85) or 0.85)
     except (TypeError, ValueError):

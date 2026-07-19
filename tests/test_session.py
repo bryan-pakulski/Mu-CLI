@@ -80,10 +80,9 @@ def test_build_messages_from_history():
     assert messages[2].parts[0].text == "hello"
 
 
-def test_prepare_runtime_history_compresses_old_tool_messages():
+def test_prepare_runtime_history_keeps_old_tool_messages_verbatim():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
-    session.variables["tool_context_window"] = 2
 
     sm.history = [
         {"role": "user", "parts": [{"type": "text", "text": "Implement feature"}]},
@@ -131,18 +130,10 @@ def test_prepare_runtime_history_compresses_old_tool_messages():
 
     prepared = session._prepare_runtime_history(turn_start_index=0)
 
-    assert prepared[0]["role"] == "user"
-    assert prepared[1]["role"] == "system"
-    # L4a system prompt block removed; L4b messages compression still active.
-    # The compression block may be labelled either "compressed for budget"
-    # (mechanical fallback) or "LLM-summarized for budget" (when a provider
-    # is available — the R1/FM-1 `summarized_pairs_msgs` fix routes the real
-    # pairs to `_llm_summarize_tool_batch`). Both indicate the older tool
-    # pairs were rolled into a LAYER 4 system summary, which is the intent.
-    l4_text = prepared[1]["parts"][0]["text"]
-    assert "LAYER 4 — Recent tool activity" in l4_text
-    assert "Older tool call/result pairs from this turn were summarized." in l4_text
-    assert len(prepared) == 4
+    assert [message["role"] for message in prepared] == [
+        "user", "assistant", "tool", "assistant", "tool"
+    ]
+    assert prepared[2]["parts"][0]["tool_result"] == "alpha"
 
 
 def test_roll_history_summary_keeps_recent_turns_and_persists_summary():
@@ -329,10 +320,44 @@ def test_layer_budgets_eviction_policies():
     assert "LAYER 4B" not in layered
 
 
+def test_default_tool_window_preserves_active_multi_file_read_pass():
+    """Default runtime history must not count-compress active investigation.
+
+    This specifically exceeds the prior 24-message default (twelve complete
+    pairs). The model, not an arbitrary pair count, chooses cleanup through
+    the context-management tools.
+    """
+    sm = SessionManager()
+    session = Session(DummyProvider("dummy"), False, "system instruction", sm)
+    sm.history = [{"role": "user", "parts": [{"type": "text", "text": "Fix the bug"}]}]
+    for index in range(13):
+        filename = f"module_{index}.py"
+        contents = f"def important_{index}():\n    return {index}\n"
+        sm.history.extend([
+            {"role": "assistant", "parts": [{
+                "type": "tool_call", "tool_name": "read_file",
+                "tool_args": {"filename": filename},
+            }]},
+            {"role": "tool", "parts": [{
+                "type": "tool_result", "tool_name": "read_file",
+                "tool_result": contents,
+            }]},
+        ])
+
+    prepared = session._prepare_runtime_history(turn_start_index=0)
+    rendered = "\n".join(
+        str(part.get("tool_result", ""))
+        for message in prepared
+        for part in message.get("parts", [])
+    )
+    assert "LAYER 4 — Recent tool activity" not in rendered
+    for index in range(13):
+        assert f"def important_{index}" in rendered
+
+
 def test_prepare_runtime_history_keeps_signed_tool_messages():
     sm = SessionManager()
     session = Session(DummyProvider("dummy"), False, "system instruction", sm)
-    session.variables["tool_context_window"] = 2
 
     sm.history = [
         {"role": "user", "parts": [{"type": "text", "text": "Investigate bug"}]},

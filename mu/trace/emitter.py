@@ -27,6 +27,7 @@ so an I/O error cannot propagate into the agent loop.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import re
@@ -133,6 +134,16 @@ class TraceEmitter:
         out.update(rec)
         self.emit(out)
 
+    def context_artifact(self, rec: Dict[str, Any]) -> None:
+        out = {"type": "context_artifact", "run_id": self.run_id}
+        out.update(rec)
+        self.emit(out)
+
+    def request(self, rec: Dict[str, Any]) -> None:
+        out = {"type": "request", "run_id": self.run_id}
+        out.update(rec)
+        self.emit(out)
+
     def turn_end(self, rec: Dict[str, Any]) -> None:
         out = {"type": "turn_end", "run_id": self.run_id}
         out.update(rec)
@@ -214,6 +225,43 @@ def emit_tool(
             )
     except Exception:  # noqa: BLE001
         pass
+
+
+def emit_context_artifact(session: Any, *, iteration: int, artifact_id: str,
+                          state: str, tool_name: str = "", path: str = "",
+                          bytes: int = 0, reason: str = "") -> None:
+    """Record model-visible context lifecycle, including explicit discard."""
+    try:
+        em = get_emitter(session)
+        if em is not None:
+            em.context_artifact({"iter": iteration, "artifact_id": artifact_id,
+                "state": state, "tool_name": tool_name, "path": path,
+                "bytes": int(bytes or 0), "reason": reason})
+    except Exception:
+        pass
+
+
+def build_request_record(*, iteration: int, system_prompt: str, messages: Any,
+                         tools: Any, token_estimate: int) -> Dict[str, Any]:
+    """Privacy-preserving immutable manifest of the exact provider request.
+
+    Raw prompts are intentionally not copied into telemetry; hashes, byte
+    counts and message-part structure let traces prove which request was sent
+    without leaking repository contents into another retention surface.
+    """
+    def _hash(value: Any) -> str:
+        return hashlib.sha256(str(value).encode("utf-8", errors="replace")).hexdigest()[:16]
+    message_parts = []
+    for msg in messages or []:
+        parts = getattr(msg, "parts", []) or []
+        message_parts.append({"role": getattr(msg, "role", ""), "parts": len(parts),
+                              "bytes": sum(len(str(getattr(p, "text", None) or getattr(p, "tool_result", None) or getattr(p, "tool_args", None) or "").encode("utf-8", errors="replace")) for p in parts)})
+    tool_names = [getattr(t, "name", "") for t in (tools or [])]
+    return {"iter": iteration, "system_prompt_bytes": len(system_prompt.encode("utf-8", errors="replace")),
+            "system_prompt_hash": _hash(system_prompt), "messages": message_parts,
+            "messages_hash": _hash([(m.get("role"), m.get("bytes")) for m in message_parts]),
+            "tool_names": tool_names, "tools_hash": _hash(tool_names),
+            "token_estimate": int(token_estimate)}
 
 
 # ----------------------------------------------------------- record builders
@@ -337,6 +385,7 @@ def build_iter_record(
     cost_delta: float = 0.0,
     compaction: Optional[Dict[str, Any]] = None,
     status: str = "running",
+    request_token_estimate: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Assemble the per-iteration trace record from in-scope loop state.
 
@@ -349,7 +398,18 @@ def build_iter_record(
 
     wall_ms = int((_time.monotonic() - iter_start) * 1000)
     layers = _layer_tokens(session)
-    total_est = layers["total_est"]
+    # This record is emitted after the provider returns, by which point the
+    # response has already been appended to history.  Measuring L5 from that
+    # mutable state counts assistant output that was *not* in this request and
+    # made the advertised actual-vs-predicted comparison invalid.  The loop
+    # therefore snapshots the exact pre-request estimate and supplies it here.
+    # Keep the layer values for the UI breakdown, but make the headline total
+    # (and drift) use the request snapshot whenever it is available.
+    total_est = (
+        max(0, int(request_token_estimate))
+        if request_token_estimate is not None
+        else layers["total_est"]
+    )
     actual = int(getattr(response, "input_tokens", 0) or 0)
     drift_pct = (
         round((actual - total_est) / max(1, actual) * 100, 2) if actual else 0.0
@@ -402,6 +462,9 @@ def build_iter_record(
             "l4b": layers["l4b"],
             "l5": layers["l5"],
             "total_est": total_est,
+            "estimate_source": (
+                "pre_request" if request_token_estimate is not None else "post_response_layers"
+            ),
             "prompt_tokens_actual": actual,
             "prompt_tokens_real_est": real_est,
             "drift_ratio": round(eff_drift, 3),

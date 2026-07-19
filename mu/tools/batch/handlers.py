@@ -179,11 +179,14 @@ def batch_job(args: Dict[str, Any], context) -> str:
 @tool(
     name="flush",
     description=(
-        "Flushes the collation buffer and returns all the gathered "
-        "context to the model. Use this when you have finished gathering "
-        "all the necessary information and are ready to process it."
+        "Delivers selected deferred context artifacts, or all pending artifacts "
+        "when `artifact_ids` is omitted. Use manifests in deferred-result "
+        "messages to retrieve only evidence needed for the next decision."
     ),
-    parameters={"type": "object", "properties": {}},
+    parameters={"type": "object", "properties": {"artifact_ids": {
+        "type": "array", "items": {"type": "string"},
+        "description": "Optional deferred artifact IDs to deliver; omit for all."
+    }}},
     requires_approval=False,
     execution_kind="control",
     preview_policy="none",
@@ -196,3 +199,18 @@ def flush(args: Dict[str, Any], context) -> str:
     this body is a safety net for any caller that invokes the
     dispatcher directly with `tool_name="flush"`."""
     return "Buffer flushed."
+
+
+@tool(
+    name="discard_deferred_context",
+    description="Explicitly discard deferred context artifacts you no longer need. "
+                "This is model-directed cleanup; provide artifact IDs and a reason.",
+    parameters={"type": "object", "properties": {
+        "artifact_ids": {"type": "array", "items": {"type": "string"}},
+        "reason": {"type": "string"},
+    }, "required": ["artifact_ids", "reason"]},
+    requires_approval=False, execution_kind="control", preview_policy="none",
+    result_mode="raw", server_policy="session_only",
+)
+def discard_deferred_context(args: Dict[str, Any], context) -> str:
+    return "Deferred context discard is handled by the agent loop."

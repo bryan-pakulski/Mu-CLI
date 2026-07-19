@@ -142,12 +142,12 @@ skills will trigger compaction sooner.
 | `context_token_limit` | int | `900000` | **Global** token cap (sum of all 7 layers + response reserve). Capped further by the provider's real context window if smaller. Changing this reratios the per-layer char budgets proportionally (see [Per-layer budgets](#per-layer-budgets)). |
 | `context_trim_threshold` | float | `0.85` | Fraction of the cap above which compaction kicks in. |
 | `response_token_reserve` | int | `4096` | Tokens reserved for the model's reply. Tune down for small-context models (Ollama 8k). |
-| `tool_context_window` | int | `6` | Recent tool messages kept uncompressed in history. |
+| `auto_compaction_enabled` | bool | `false` | Opt in to proactive automatic history compaction. Default is model-directed cleanup with `context_status`, `checkpoint_progress`, and `compact`; provider-overflow recovery always remains enabled. |
 | `tool_result_floor` | int | `4` | Trailing tool-result messages in the active turn that compaction (including emergency compaction) must leave verbatim (R3). Prevents mid-turn compaction from dropping results just received. Mode-aware: `loop`/`feature` modes raise this to at least 8 (long-horizon work re-covers more files). |
 | `tool_result_cache_entries` | int | `50` | Max entries in the tool-result sidecar cache (`recall()` + auto-recall by locator). Mode-aware: `loop`/`feature` modes raise this to at least 256. |
 | `tool_result_cache_bytes` | int | `524288` | Max bytes in the tool-result sidecar cache. Mode-aware: `loop`/`feature` modes raise this to at least 2 MB. |
 | `emergency_keep_recent` | int | `2` | Trailing messages kept verbatim by emergency (pre-flight) compaction — smaller than the normal keep-recent so budget is reclaimed fast; `tool_result_floor` still protects recent tool results. |
-| `compact_history` | bool | `true` | Auto-compact tooling history after each finished turn. |
+| `compact_history` | bool | `false` | Remove completed-turn tool metadata after a response. Disabled by default to preserve inspectable history. |
 | `progress_checkpoint_every` | int | `0` | Periodic L2 progress checkpoint: every N iterations, fold recent history into the structured `conversation_summary` (Progress / Key decisions / Current state / Open items) **without compacting** (the anchor doesn't advance, entries stay in L5). Keeps L2 fresh on long turns that never hit the compaction budget so the model stops re-deriving context it already gathered. `0` disables; when unset, `loop`/`feature` modes default to 12, `default`/`chat` to 0. |
 | `recoverage_stall_threshold` | int | `4` | Context-gathering stall detection: number of consecutive iterations that re-read files already read this turn **without** a concrete change (write/bash/spawn) before a "stop gathering, act" re-orient nudge is injected. `0` disables. Catches the diffuse re-coverage stall that doesn't form a clean repeated/periodic tool sequence. |
 
@@ -195,8 +195,9 @@ shrinks these toward their floors, and raising it grows them.
 | `retrieval_top_k` | int | `5` | — | **L4B** | Number of semantic-retrieval hits to consider when assembling L4B. |
 
 **L4** (recent tool activity) and **L5** (conversation history) have no
-per-layer char budget of their own. L4 is governed by `tool_context_window`
-(how many recent tool messages stay uncompressed) plus the compaction
+per-layer char budget of their own. L4 is retained verbatim; the agent manages
+cleanup with `context_status`, `checkpoint_progress`, and `compact`, while the
+hard context ceiling remains the safety backstop.
 summary; L5 gets whatever the global cap minus the response reserve and
 the other layers leaves over. Neither is settable via `/set layer`.
 
@@ -218,8 +219,8 @@ underlying `_chars` variable. (Setting the variable directly in chars
 via `/set workspace_context_max_chars 16384` still works.)
 
 Layer IDs autocomplete on Tab. Valid IDs are `L1`, `L1B`, `L2`, `L3`,
-`L4B`. `L4` and `L5` are rejected — L4 is governed by `tool_context_window`
-and the compaction summary, and L5 is the global-cap remainder; adjust
+`L4B`. `L4` and `L5` are rejected — L4 is agent-managed and L5 is the
+global-cap remainder; use `context_status` / `compact` or adjust
 `context_token_limit` instead.
 
 ### Notes

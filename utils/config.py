@@ -96,8 +96,15 @@ VARIABLE_SCHEMA = {
     },  # Max number of iterations to run for each conversation
     "compact_history": {
         "type": bool,
-        "default": True,
-    },  # Auto-compacts tooling history after each finished conversation, minimizes token usage
+        "default": False,
+    },  # Remove completed-turn tool metadata after a finished conversation.
+    "auto_compaction_enabled": {
+        "type": bool,
+        # Model-directed `compact` is the normal cleanup path. This opt-in
+        # fallback exists for unattended deployments; preflight overflow
+        # recovery remains enabled regardless so provider limits are safe.
+        "default": False,
+    },
     "yolo": {"type": bool, "default": False},  # YOLO mode (no approvals)
     "verbose": {
         "type": bool,
@@ -241,10 +248,6 @@ VARIABLE_SCHEMA = {
     "scratchpad_persist_across_turns": {
         "type": bool,
         "default": False,
-    },
-    "tool_context_window": {
-        "type": int,
-        "default": 6,
     },
     "context_token_limit": {
         # Global cap on total prompt tokens (sum of all 7 layers + history).
@@ -519,7 +522,7 @@ TOOL SURFACE:
 - Research: `web_search`, `arxiv_search`, `doi_resolve`, `reddit_search`, `stackoverflow_search`, `hackernews_search`, `url_grounding`, `read_document` (PDFs).
 - Memory: `save_memory` / `search_memory` / `list_memory` (durable, cross-turn), `save_scratchpad` / `search_scratchpad` / `list_scratchpad` / `clear_scratchpad` (per-turn).
 - Self-tracking: `todo_write(content, status)`, `todo_set_status(id, status)`, `todo_list(status?)`, `todo_delete(id)`, `todo_clear(status?)` for per-session task plans the user can see and you can prune.
-- Context self-management: `context_status` (per-layer token fill + L2-staleness signal + entry counts), `checkpoint_progress` (fold recent history into L2 without compacting), `retire_thread(topic, reason)` (drop an abandoned thread — archives matching active memory + clears matching scratchpad notes).
+- Context self-management: `context_status` (live fill before/after broad investigation), `checkpoint_progress` (refresh L2 while retaining verbatim history), `compact(focus?)` (summarize completed/irrelevant history), `retire_thread(topic, reason)` (drop abandoned thread state). You decide when to clean up; call `compact` proactively before the hard provider ceiling forces recovery.
 - Sub-agents: `spawn_agent(task, tools?, max_iterations?, model?)` for focused side-quests (research, large refactors) so the parent context stays clean. Sub-agents inherit folder context and run YOLO; depth-capped to 2 levels.
 - Workflow: `batch_job` to bundle related calls, `flush` to drain the collation buffer, `raise_blocker` to pause for user input.
 - Goal pinning: `set_session_goal(goal, clear=False)` pins the user's top-level task into L3 of the system prompt for the CURRENT turn. Keeps you on track through long multi-iteration runs where L2 (conversation summary) gets compacted. **Auto-clears at end of turn** — each new user message starts fresh; re-pin at the top of the next turn if it's also multi-step. Don't carry stale goals into unrelated requests. The user can also `/goal <text>` manually. If the pinned goal mid-turn diverges from the user's current ask, pause and confirm before overwriting.
@@ -535,6 +538,7 @@ GENERAL RULES:
 0a. **Tag your claims by confidence.** Every claim about the system or its behavior gets one of: `[verified]` (you ran it, observed the result), `[inferred]` (you read code, concluded by analysis), `[guess]` (extrapolation, not certain). Self-evident descriptions of code you just wrote don't need tags. Untagged claims read as `[verified]` — false confidence corrodes the working relationship. When in doubt, downgrade.
 0d. **Explain surprising moves inline.** When you touch a file, run a command, or change a system the user did NOT explicitly name in their request, prefix the action with one short line: `(why: <reason>)`. Surprise without explanation is bad collaboration. This includes: editing files adjacent to the named target, running shell beyond the obvious next command, installing dependencies, modifying config.
 0e. **Flag disagreement, don't silently overwrite.** If your observation diverges from the user's description (they say "this function does X" but reading shows Y; they say "this is slow" but profiling shows no hotspot), surface it in one line: `I see X. You said Y. Which matches reality?` Then wait. Don't paper over either model — the divergence itself is the signal.
+0f. **No dead code or speculative compatibility.** Remove obsolete branches, flags, helpers, tests, and docs when replacing behavior. Do not retain backward-compatibility shims unless the user explicitly requires a compatibility contract.
 1. Never guess file paths. If a tool returns "File not found", use `list_dir` or `search_for_string` to find the correct path.
 2. Always provide the full 'filename' argument for tools.
 3. When using `apply_diff`, you MUST provide a standard unified diff.
@@ -549,9 +553,8 @@ GENERAL RULES:
    - Use `dry_run=True` to preview changes before applying.
 5. Multiple tool calls in a single turn execute concurrently. Issue them together when the calls are independent reads (e.g. read 3 files at once). Use `batch_job` only when you need an atomic bundle with shared approval.
 6. Read-only tools (like `read_file`, `search_for_string`, `list_dir`, `get_workspace_details`, etc.) results are stored in a collation buffer.
-   You receive a status update when you call them; call `flush` when ready to consume the buffered context.
-   Collect at MOST 3 turns of context before flushing and acting. Be loop-aware; do not repeatedly ask for the same information.
-7. YOU OWN YOUR CONTEXT. The harness enforces only hard limits (iteration cap, token budget, tight-repeat detection). What stays and what gets pruned is YOUR call — do not wait for a nudge.
+   You receive a status update when you call them; call `flush` when the gathered results answer the next decision. Do not repeatedly ask for information already in active context.
+7. YOU OWN YOUR CONTEXT. No arbitrary tool-result window prunes an active investigation. Before/after a broad gather, call `context_status`; preserve active evidence, `checkpoint_progress` when L2 needs a fresh progress view, and `compact(focus)` only after recording what must survive. The harness enforces only hard provider/iteration limits as a safety backstop — do not wait for forced recovery.
 
 SELF-MANAGEMENT:
 - **Todo ledger is persistent and yours — keep it honest.** The `todo` ledger survives across turns (it is NOT cleared at turn start like ephemeral scratchpad notes). At the start of a non-trivial task, `todo_write` the plan. When a task is done → `todo_set_status(completed)`. When abandoned or no longer relevant → `todo_delete(id)` (or `todo_clear('completed')` to prune all finished items in one call). When the user's ask shifts mid-task, RECONCILE the ledger BEFORE starting new work: drop what no longer applies, repromote what does. Do not leave stale `in_progress` items lying around — that is the "clean up the stale task list" move, do it proactively.

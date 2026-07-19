@@ -220,6 +220,21 @@ async def create_session(request: Request, payload: Dict[str, Any]):
         return {"ok": True, "name": name, "active": False}
 
     ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
+    # Persist the connection selection *before* building the session.  Model
+    # discovery during build must use the same endpoint as the welcome modal;
+    # otherwise an OLLAMA_API_KEY can make a locally selected model appear to
+    # be missing from ollama.com before the later variable sync runs.
+    data: Dict[str, Any] = {
+        "history": [],
+        "provider_config": {"provider": provider, "model": model},
+    }
+    if ollama_vars:
+        data["variables"] = ollama_vars
+    path = os.path.join(_config.HISTORY_DIR, "sessions", name)
+    os.makedirs(path, exist_ok=True)
+    with open(os.path.join(path, "session.json"), "w") as fh:
+        json.dump(data, fh, indent=2)
+
     load_payload: Dict[str, Any] = {"provider": provider, "model": model}
     load_payload.update(ollama_vars)
     result = await load_session(name, request, payload=load_payload)
@@ -298,9 +313,30 @@ async def unload_active_session(request: Request):
     state = request.app.state
     cur = state.current_session_name
     if cur and cur in state.sessions:
+        # Never wait behind an agent turn while servicing a UI action.  The
+        # old lock acquisition made the Leave button appear frozen exactly
+        # when it was most needed.  The client can interrupt first, or use
+        # /detach below to leave the GUI without touching the running session.
+        if state.session_busy_for(cur).is_set():
+            raise HTTPException(
+                status_code=409,
+                detail="Session has a turn in flight; interrupt it before unloading.",
+            )
         with state.session_lock_for(cur):
             state.unload_session(name=cur)
     return {"ok": True, "active": False}
+
+
+@router.post("/active/detach")
+async def detach_active_session(request: Request):
+    """Leave the current GUI session without unloading it.
+
+    This is deliberately safe during a stuck/erroring turn: it only clears
+    the browser focus target, leaving the in-memory session and its worker
+    intact until the user returns and interrupts/unloads it deliberately.
+    """
+    request.app.state.current_session_name = None
+    return {"ok": True, "active": False, "detached": True}
 
 
 @router.post("/{name}/unload")

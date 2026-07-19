@@ -90,13 +90,23 @@ def provider_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> Comma
     try:
         from mucli import print_splash, select_provider_and_model
 
+        selecting_ollama = arg.lower() == "ollama" or (not arg and allow_prompt)
         ollama_host = session.variables.get("ollama_host")
+        ollama_mode = None if (allow_prompt and selecting_ollama) else session.variables.get("ollama_mode")
         session.provider = select_provider_and_model(
             arg if arg else None,
             session.provider.model_name if not allow_prompt else None,
             ollama_host=ollama_host,
+            ollama_mode=ollama_mode,
+            ollama_api_key=session.variables.get("ollama_api_key") or None,
             allow_prompt=allow_prompt,
         )
+        if session.provider.name == "ollama":
+            mode = getattr(session.provider, "_mu_ollama_mode", None)
+            if mode:
+                session.variables["ollama_mode"] = mode
+                if mode == "local":
+                    session.variables["ollama_host"] = ""
         session.session_manager.provider_config = {
             "provider": session.provider.name,
             "model": session.provider.model_name,

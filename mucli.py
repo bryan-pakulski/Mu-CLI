@@ -729,13 +729,17 @@ def print_splash(session):
     console.print("[dim] Type '/help' for commands.[/dim]\n")
 
 
-def init_provider(provider_name, model_name, ollama_host=None):
+def init_provider(
+    provider_name, model_name, ollama_host=None, ollama_mode=None, ollama_api_key=None
+):
     # Init provider contextually
     if provider_name == "ollama":
-        if ollama_host:
-            provider = OllamaProvider(model_name=model_name, host=ollama_host)
-        else:
-            provider = OllamaProvider(model_name=model_name)
+        provider = OllamaProvider(
+            model_name=model_name,
+            host=ollama_host or None,
+            mode=ollama_mode or "auto",
+            api_key=ollama_api_key,
+        )
     elif provider_name == "gemini":
         provider = GeminiProvider(model_name=model_name)
     elif provider_name == "openai":
@@ -746,7 +750,12 @@ def init_provider(provider_name, model_name, ollama_host=None):
 
 
 def select_provider_and_model(
-    args_provider, args_model, ollama_host=None, allow_prompt=True
+    args_provider,
+    args_model,
+    ollama_host=None,
+    ollama_mode=None,
+    ollama_api_key=None,
+    allow_prompt=True,
 ):
     providers = ["gemini", "ollama", "openai"]
     provider_name = args_provider
@@ -762,7 +771,21 @@ def select_provider_and_model(
         )
         provider_name = providers[int(choice) - 1]
 
-    provider = init_provider(provider_name, "", ollama_host)
+    # An Ollama API key traditionally selected ollama.com implicitly.  Ask
+    # terminal users explicitly so local models remain selectable even when
+    # OLLAMA_API_KEY is present in their environment.
+    if provider_name == "ollama" and allow_prompt and not ollama_mode:
+        ollama_mode = Prompt.ask(
+            "Ollama connection", choices=["local", "cloud"], default="local"
+        )
+
+    provider = init_provider(
+        provider_name,
+        "",
+        ollama_host,
+        ollama_mode,
+        ollama_api_key,
+    )
     if not provider:
         raise ValueError(f"Unknown provider: {provider_name}")
 
@@ -800,6 +823,10 @@ def select_provider_and_model(
         model_name = models[int(choice) - 1]
 
     provider.model_name = model_name
+    # Callers that own session variables use this to persist the interactive
+    # connection choice after the selected provider is returned.
+    if provider_name == "ollama" and ollama_mode:
+        provider._mu_ollama_mode = ollama_mode
     return provider
 
 
@@ -964,6 +991,8 @@ def build_session(args, ui, allow_prompt=True):
     # Let automatic selection occur in provider class
     host_str = session_manager.variables.get("ollama_host")
     ollama_host = host_str if host_str != "" else None
+    ollama_mode = session_manager.variables.get("ollama_mode") or "auto"
+    ollama_api_key = session_manager.variables.get("ollama_api_key") or None
 
     if allow_prompt and not args.session:
         action, session_name = choose_session(session_manager)
@@ -975,12 +1004,16 @@ def build_session(args, ui, allow_prompt=True):
                     provider_config["provider"],
                     provider_config["model"],
                     ollama_host=ollama_host,
+                    ollama_mode=ollama_mode,
+                    ollama_api_key=ollama_api_key,
                 )
             else:
                 provider = select_provider_and_model(
                     args.provider,
                     args.model,
                     ollama_host=ollama_host,
+                    ollama_mode=ollama_mode,
+                    ollama_api_key=ollama_api_key,
                     allow_prompt=allow_prompt,
                 )
                 session_manager.provider_config = {
@@ -993,6 +1026,8 @@ def build_session(args, ui, allow_prompt=True):
                 args.provider,
                 args.model,
                 ollama_host=ollama_host,
+                ollama_mode=ollama_mode,
+                ollama_api_key=ollama_api_key,
                 allow_prompt=allow_prompt,
             )
             session_manager.new_session(
@@ -1009,6 +1044,8 @@ def build_session(args, ui, allow_prompt=True):
                 provider_name,
                 model_name,
                 ollama_host=ollama_host,
+                ollama_mode=ollama_mode,
+                ollama_api_key=ollama_api_key,
                 allow_prompt=allow_prompt,
             )
             session_manager.provider_config = {
@@ -1021,9 +1058,14 @@ def build_session(args, ui, allow_prompt=True):
                 provider_config["provider"],
                 provider_config["model"],
                 ollama_host=ollama_host,
+                ollama_mode=ollama_mode,
+                ollama_api_key=ollama_api_key,
             )
         elif provider_name and model_name:
-            provider = init_provider(provider_name, model_name, ollama_host=ollama_host)
+            provider = init_provider(
+                provider_name, model_name, ollama_host=ollama_host,
+                ollama_mode=ollama_mode, ollama_api_key=ollama_api_key,
+            )
 
         if not provider:
             raise ValueError(

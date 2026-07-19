@@ -242,13 +242,15 @@ class OllamaProvider(LLMProvider):
         model_name: str = "",
         host: Optional[str] = None,
         *,
+        mode: str = "auto",
         api_key: Optional[str] = None,
         options: Optional[OllamaOptions] = None,
         request_timeout: float = 300.0,
     ):
         super().__init__(model_name)
         self.name = "ollama"
-        self.host = _resolve_host(host)
+        self.host = _resolve_host(host, mode)
+        self.connection_mode = mode
         # Cloud auth: explicit per-session key wins, else env OLLAMA_API_KEY.
         # A local daemon ignores the bearer token.
         self.api_key = api_key if api_key is not None else os.getenv("OLLAMA_API_KEY")
@@ -488,6 +490,36 @@ class OllamaProvider(LLMProvider):
             ollama_msgs.append(message_dict)
         return ollama_msgs
 
+    def _prepare_chat_messages(
+        self, messages: List[Message], system_prompt: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Return an Ollama-compatible transcript with one leading system message.
+
+        Several Ollama model templates (including Qwen-derived templates) reject
+        a system turn anywhere but the beginning of the conversation. The
+        harness can add system messages later in a run for tool/recovery
+        guidance, so simply inserting ``system_prompt`` at index zero is not
+        sufficient. Fold every system turn into a single preamble while
+        preserving its order, then leave the non-system transcript untouched.
+        """
+        converted = self._convert_messages(messages)
+        system_parts: List[str] = []
+        if system_prompt and system_prompt.strip():
+            system_parts.append(system_prompt.strip())
+
+        conversation: List[Dict[str, Any]] = []
+        for message in converted:
+            if message.get("role") == "system":
+                content = str(message.get("content") or "").strip()
+                if content:
+                    system_parts.append(content)
+            else:
+                conversation.append(message)
+
+        if system_parts:
+            return [{"role": "system", "content": "\n\n".join(system_parts)}, *conversation]
+        return conversation
+
     # -------------------------------------------------- option resolution
 
     def _build_options(
@@ -559,9 +591,7 @@ class OllamaProvider(LLMProvider):
 
         # Pull session variables off the provider if a caller set them.
         session_variables = getattr(self, "_session_variables", None)
-        ollama_messages = self._convert_messages(messages)
-        if system_prompt:
-            ollama_messages.insert(0, {"role": "system", "content": system_prompt})
+        ollama_messages = self._prepare_chat_messages(messages, system_prompt)
 
         payload: Dict[str, Any] = {
             "model": self.model_name,
@@ -725,6 +755,7 @@ class OllamaProvider(LLMProvider):
         """
         host_var = variables.get("ollama_host") or None
         mode = variables.get("ollama_mode") or "auto"
+        self.connection_mode = mode
         self.host = _resolve_host(host_var, mode)
         key = variables.get("ollama_api_key")
         self.api_key = key if key else os.getenv("OLLAMA_API_KEY")

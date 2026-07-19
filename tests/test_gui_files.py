@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 from mu.gui.app import session_by_name
 from mu.gui.routers import files as files_mod
 from mu.gui.routers import modes as modes_mod
+from mu.gui.routers import sessions as sessions_mod
 from mu.workspace.folder_context import FolderContext
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -408,6 +409,10 @@ def test_files_panel_template_exists_with_cm_host_and_store():
     assert "filesPanel()" in src
     assert "cmHost" in src
     assert "CodeMirror(" in src
+    # The host is inserted by x-if only after a file is selected. Its x-init
+    # must mount and populate CodeMirror at that point.
+    assert "x-init=\"mountEditor()\"" in src
+    assert "mountEditor()" in src
 
 
 def test_css_has_files_panel_and_codemirror_theme():
@@ -417,6 +422,72 @@ def test_css_has_files_panel_and_codemirror_theme():
     assert ".files-editor" in src
     assert ".CodeMirror" in src
     assert "var(--bg)" in src
+
+
+def test_global_todo_field_is_rendered_and_refreshed_across_views():
+    index = open(INDEX_HTML, encoding="utf-8").read()
+    js = open(APP_JS, encoding="utf-8").read()
+    css = open(APP_CSS, encoding="utf-8").read()
+    assert 'class="todo-field"' in index
+    assert "activeTodoSummary()" in js
+    assert 'Alpine.store("loop").load();' in js
+    assert 'setInterval(() => Alpine.store("loop").load(), 5000)' in js
+    assert ".todo-field" in css
+
+
+def test_prompt_picker_preserves_all_multi_select_values_and_recovery_choice():
+    chat = open(
+        os.path.join(REPO, "mu", "gui", "templates", "fragments", "chat.html"),
+        encoding="utf-8",
+    ).read()
+    js = open(APP_JS, encoding="utf-8").read()
+    # Explicit change handling keeps all checkbox values in the array rather
+    # than allowing a reactive re-render to collapse the selection to one.
+    assert "setChoice(optValue(opt), $event.target.checked)" in chat
+    assert "isChoiceSelected(optValue(opt))" in chat
+    assert "const selected = Array.isArray(this.value) ? [...this.value] : [];" in js
+    # `prompt_choices` needs a scalar `value`, unlike ask_user_choice's list.
+    assert 'this.shape === "choices"' in js
+    assert ' ? { value: real[0] || (hasOther ? this.otherText : "") }' in js
+
+
+def test_prompt_card_remains_visible_when_answer_or_cancel_post_fails():
+    js = open(APP_JS, encoding="utf-8").read()
+    assert "if (!answered) return;" in js
+    assert "if (!cancelled) return;" in js
+    # Queue removal happens only after the endpoint accepted the response.
+    assert "if (!r.ok) {\n                    Alpine.store(\"chat\").addError" in js
+    assert "this._remove(id);\n                return true;" in js
+
+
+def test_busy_session_can_be_detached_without_waiting_for_its_turn():
+    """Leaving a broken turn must not block on the per-session agent lock."""
+    app = FastAPI()
+    busy = threading.Event()
+    busy.set()
+    app.state.current_session_name = "stuck"
+    app.state.sessions = {"stuck": SimpleNamespace()}
+    app.state.session_busy = {"stuck": busy}
+    app.state.session_locks = {"stuck": threading.Lock()}
+    app.state._fallback_lock = threading.Lock()
+    app.state.session_busy_for = lambda name=None: app.state.session_busy[name or "stuck"]
+    app.state.session_lock_for = lambda name=None: app.state.session_locks[name or "stuck"]
+    app.state.unload_session = lambda **_kwargs: pytest.fail("busy session was unloaded")
+    app.include_router(sessions_mod.router, prefix="/api/sessions")
+    client = TestClient(app)
+
+    blocked = client.delete("/api/sessions/active")
+    assert blocked.status_code == 409
+    detached = client.post("/api/sessions/active/detach")
+    assert detached.status_code == 200
+    assert detached.json()["detached"] is True
+    assert app.state.current_session_name is None
+
+
+def test_session_controls_use_nonblocking_detach_and_show_unload_errors():
+    js = open(APP_JS, encoding="utf-8").read()
+    assert 'fetch("/api/sessions/active/detach", { method: "POST" })' in js
+    assert "d.detail || `Unload failed (${r.status})`" in js
 
 
 def test_codemirror_vendor_files_present():

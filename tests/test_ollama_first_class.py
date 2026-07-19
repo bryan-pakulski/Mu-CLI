@@ -66,6 +66,16 @@ def test_resolve_host_defaults_to_localhost(monkeypatch):
     assert _resolve_host() == "http://localhost:11434"
 
 
+def test_constructor_local_mode_ignores_cloud_api_key(monkeypatch):
+    """Explicit local construction must not be redirected by cloud env auth."""
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("OLLAMA_API_KEY", "cloud-key")
+
+    provider = OllamaProvider("local-model", mode="local")
+
+    assert provider.host == "http://localhost:11434"
+
+
 def test_resolve_host_trailing_slash_stripped(monkeypatch):
     monkeypatch.setenv("OLLAMA_HOST", "http://foo:1234/")
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
@@ -165,6 +175,22 @@ def test_image_input_without_image_data_is_skipped():
     ]
     converted = provider._convert_messages(msgs)
     assert converted == [{"role": "user", "content": ""}]
+
+
+def test_prepare_chat_messages_merges_late_system_messages_into_preamble():
+    """Some Ollama templates reject system messages after conversation turns.
+    The provider must retain that guidance without sending an invalid shape."""
+    provider = OllamaProvider("qwen")
+    messages = [
+        Message(role="user", parts=[MessagePart(type="text", text="first")]),
+        Message(role="system", parts=[MessagePart(type="text", text="late guidance")]),
+        Message(role="assistant", parts=[MessagePart(type="text", text="reply")]),
+    ]
+
+    prepared = provider._prepare_chat_messages(messages, "base guidance")
+
+    assert [message["role"] for message in prepared] == ["system", "user", "assistant"]
+    assert prepared[0]["content"] == "base guidance\n\nlate guidance"
 
 
 # ============================================================ options

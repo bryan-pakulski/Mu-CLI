@@ -2286,6 +2286,15 @@ body.resizing * { cursor: col-resize !important; user-select: none !important; }
     border: 1px solid var(--border);
     border-radius: var(--radius);
     cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    transition: color 0.12s, background 0.12s;
+}
+.code-copy-btn svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+    pointer-events: none;
 }
 .code-copy-btn:hover { color: var(--text); background: var(--bg-hover); }
 .msg .body code {
@@ -2821,8 +2830,8 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
     backdrop-filter: blur(3px);
 }
 .inspector {
-    width: min(720px, calc(100vw - var(--space-10)));
-    max-height: min(760px, calc(100vh - var(--space-10)));
+    width: min(900px, calc(100vw - var(--space-10)));
+    max-height: min(85vh, calc(100vh - var(--space-10)));
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: calc(var(--radius) * 2);
@@ -2957,6 +2966,8 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
     line-height: 1.55;
     white-space: pre-wrap;
     word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
 /* ---- stats ---- */
@@ -3850,23 +3861,20 @@ a.mode-option--ext { text-decoration: none; color: var(--text); }
 }
 
 .composer-settings-popout {
-    position: fixed;
-    top: 0;
-    bottom: 0;
+    position: absolute;
+    top: 100%;
     right: 0;
     z-index: 90;
     width: min(620px, 48vw);
     min-width: min(420px, 92vw);
     max-width: 92vw;
-    max-height: none;
+    max-height: min(560px, 80vh);
     overflow-y: auto;
     background: var(--bg-lift);
     border: 1px solid var(--border-strong);
-    border-right: 0;
-    border-radius: 14px 0 0 14px;
+    border-radius: var(--radius);
     padding: var(--space-5);
-    box-shadow: -16px 0 42px rgba(0, 0, 0, 0.38);
-    animation: slide-in-right 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .settings-header {

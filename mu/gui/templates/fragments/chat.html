@@ -330,7 +330,7 @@
                     aria-haspopup="true" :aria-expanded="settingsOpen">
                 <span class="dots">···</span>
             </button>
-            <div class="composer-settings-popout settings-side-modal" x-show="settingsOpen"
+            <div class="composer-settings-popout" x-show="settingsOpen"
                  x-transition.opacity.duration.150ms
                  x-init="$store.inspector.loadVariables()">
                 <div class="settings-header">

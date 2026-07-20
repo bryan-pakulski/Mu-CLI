@@ -50,6 +50,31 @@ def _history_dir() -> str:
     return _config.HISTORY_DIR
 
 
+def _empty_tool_stats() -> dict[str, Any]:
+    return {
+        "session_started_at": time.time(),
+        "first_call_at": None,
+        "last_call_at": None,
+        "tools": {},
+        "skills": {},
+        "approvals": {"approved": 0, "denied": 0},
+        "errors": {},
+    }
+
+
+def _normalize_tool_stats(value: Any) -> dict[str, Any]:
+    stats = _empty_tool_stats()
+    if not isinstance(value, dict):
+        return stats
+    for key in ("session_started_at", "first_call_at", "last_call_at"):
+        if key in value:
+            stats[key] = value[key]
+    for key in ("tools", "skills", "approvals", "errors"):
+        if isinstance(value.get(key), dict):
+            stats[key].update(value[key])
+    return stats
+
+
 class SessionManager(HistoryMixin, HistorySearchMixin):
     def __init__(self, ui=None, session_name=None):
         self.ui = ui
@@ -87,6 +112,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         # itself is process-global, so retaining this snapshot prevents an
         # unload/reload from silently dropping a research trail.
         self.research_sources: list[dict] = []
+        self.tool_stats = _empty_tool_stats()
         self.variables = DEFAULT_VARIABLES.copy()
 
         if session_name:
@@ -128,6 +154,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_registry = {}
         self.active_course_id = None
         self.research_sources = []
+        self.tool_stats = _empty_tool_stats()
         self.variables.update(DEFAULT_VARIABLES)
 
         data = self.read_session_data(name)
@@ -201,6 +228,8 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                         saved_sources if isinstance(saved_sources, list) else []
                     )
                     self.restore_research_sources()
+
+                    self.tool_stats = _normalize_tool_stats(data.get("tool_stats"))
 
                     saved_vars = data.get("variables", {})
                     for k, v in saved_vars.items():
@@ -356,6 +385,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 "teacher_registry": self.teacher_registry,
                 "active_course_id": self.active_course_id,
                 "research_sources": self.research_sources,
+                "tool_stats": self.tool_stats,
             }
             with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
@@ -544,6 +574,13 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             suffix += 1
 
     def set_feature_state(self, state: dict | None, folder_context_obj=None):
+        """Persist the active feature state.
+
+        A completed feature is terminal for the active workflow.  Preserve its
+        final plan in the registry, but archive it and clear the active state
+        so the next interaction starts from the feature list rather than a
+        finished board.
+        """
         if isinstance(state, dict):
             # Re-derive status from feature_plan when caller did not provide
             # an explicit status override.
@@ -557,7 +594,17 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         if isinstance(self.feature_state, dict):
             record = self.upsert_feature(self.feature_state)
             if record:
-                self.active_feature_id = record["feature_id"]
+                feature_id = record["feature_id"]
+                if record.get("status") == "completed":
+                    # Keep the completed record available under Archived, but
+                    # do not leave a completed feature loaded.
+                    archived_record = self.feature_registry[feature_id]
+                    archived_record["archived"] = True
+                    archived_record["updated_at"] = time.time()
+                    self.feature_state = None
+                    self.active_feature_id = None
+                else:
+                    self.active_feature_id = feature_id
         self.save_history(folder_context_obj)
 
     def clear_feature_state(self, folder_context_obj=None):

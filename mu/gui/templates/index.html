@@ -63,19 +63,6 @@
                         <div class="mode-desc" x-text="m.disabled ? 'requires workspace' : m.description"></div>
                     </button>
                 </template>
-                <!-- Todos are a view, not a backend mode.  Keep the task
-                     ledger reachable from every mode, including modes that
-                     cannot switch to the loop agent mode. -->
-                <button class="mode-option todo-view-option"
-                        :class="{ active: $store.mode.active === 'loop' }"
-                        @click="$store.mode.setView('loop'); open = false"
-                        title="View the task ledger">
-                    <div class="mode-name">
-                        <span>Todos</span>
-                        <span class="mode-key mono muted">tasks</span>
-                    </div>
-                    <div class="mode-desc">View the current task ledger</div>
-                </button>
             </div>
         </div>
 

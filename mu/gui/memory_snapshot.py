@@ -273,7 +273,11 @@ def _capacity_rows(amounts: Dict[str, int], rows: int) -> Dict[str, int]:
 
 
 def build_memory_snapshot(
-    session: Any, cols: int = _DEFAULT_RES, rows: int = _DEFAULT_RES
+    session: Any,
+    cols: int = _DEFAULT_RES,
+    rows: int = _DEFAULT_RES,
+    *,
+    request_token_estimate: int | None = None,
 ) -> Dict[str, Any]:
     """Build a layer-banded heat-grid snapshot of the active context.
 
@@ -303,7 +307,35 @@ def build_memory_snapshot(
         return _empty_state(cols, rows)
 
     by_id = {entry["layer"]: entry for entry in token_layers}
-    total_tokens = sum(int((by_id.get(lid, {}) or {}).get("current") or 0) for lid in _LAYER_ORDER)
+    layer_tokens = {
+        lid: int((by_id.get(lid, {}) or {}).get("current") or 0)
+        for lid in _LAYER_ORDER
+    }
+    layer_total = sum(layer_tokens.values())
+
+    # The layer inspector is assembled independently from the exact provider
+    # request.  In particular, it cannot infer provider message framing or
+    # transient prompt additions.  Prefer the request estimate captured at
+    # the pre-provider seam (the same value written to the Trace Analyzer),
+    # and reconcile that small remainder into L0 rather than displaying a
+    # context total that disagrees with the trace.
+    if request_token_estimate is None:
+        request_token_estimate = getattr(
+            session, "_memory_map_request_token_estimate", None
+        )
+    try:
+        request_total = max(0, int(request_token_estimate))
+    except (TypeError, ValueError):
+        request_total = 0
+    if request_total:
+        layer_tokens["L0"] = max(
+            0, layer_tokens["L0"] + request_total - layer_total
+        )
+        total_tokens = sum(layer_tokens.values())
+        token_source = "pre_request_estimate"
+    else:
+        total_tokens = layer_total
+        token_source = "layer_estimate"
 
     context_limit = 0
     try:
@@ -320,9 +352,6 @@ def build_memory_snapshot(
     # the genuinely available remainder. This is intentionally unlike a
     # composition chart, where the used layers would always fill 100%.
     band_rows: Dict[str, int] = {}
-    layer_tokens: Dict[str, int] = {}
-    for lid in _LAYER_ORDER:
-        layer_tokens[lid] = int((by_id.get(lid, {}) or {}).get("current") or 0)
     displayed_tokens = min(total_tokens, context_limit) if context_limit > 0 else total_tokens
     free_tokens = max(0, context_limit - displayed_tokens)
     capacity_amounts = {lid: layer_tokens[lid] for lid in _LAYER_ORDER}
@@ -394,7 +423,7 @@ def build_memory_snapshot(
     row_cursor = 0
     for lid in _LAYER_ORDER:
         meta = by_id.get(lid, {}) or {}
-        tokens = int(meta.get("current") or 0)
+        tokens = layer_tokens[lid]
         maximum = int(meta.get("maximum") or 0)
         r = band_rows.get(lid, 0)
         row_start = row_cursor
@@ -413,6 +442,7 @@ def build_memory_snapshot(
                 "id": lid,
                 "name": meta.get("name", lid),
                 "tokens": tokens,
+                "chars": len(_layer_text(session, lid)),
                 "max": maximum,
                 "fill_pct": round(100.0 * tokens / maximum, 1) if maximum > 0 else 0.0,
                 "hue": LAYER_HUES.get(lid, 0),
@@ -443,6 +473,7 @@ def build_memory_snapshot(
         "regions": regions,
         "grid": grid,
         "total_tokens": total_tokens,
+        "token_source": token_source,
         "context_limit": context_limit,
         "free_tokens": free_tokens,
         "fill_pct": fill_pct,

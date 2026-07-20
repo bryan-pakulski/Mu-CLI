@@ -311,6 +311,8 @@ def stats_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandR
         import time as _time_mod
 
         session.tool_stats = _empty_stats(_time_mod.time())
+        session.session_manager.tool_stats = session.tool_stats
+        session.session_manager.save_history(getattr(session, "folder_context", None))
         ui = getattr(session, "ui", None)
         if ui is not None and hasattr(ui, "show_info") and allow_prompt:
             ui.show_info(

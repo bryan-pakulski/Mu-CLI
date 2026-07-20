@@ -25,6 +25,7 @@ document.addEventListener("alpine:init", () => {
         _renderRaf: 0,
         _scrollRaf: 0,
         _highlightRaf: 0,
+        copiedMessageId: null,
 
         // ---------- per-session slot management ----------------------
 
@@ -71,6 +72,13 @@ document.addEventListener("alpine:init", () => {
 
         _id(prefix) {
             return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        },
+        async copyMessage(text, messageId) {
+            if (!text || !(await copyToClipboard(text))) return;
+            this.copiedMessageId = messageId;
+            setTimeout(() => {
+                if (this.copiedMessageId === messageId) this.copiedMessageId = null;
+            }, 1500);
         },
         _lastTurn(slot) {
             const turns = slot.turns;
@@ -460,6 +468,12 @@ document.addEventListener("alpine:init", () => {
         _atBottom(el, threshold = 120) {
             return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
         },
+        isSlashCommand(text) {
+            return /^\/[A-Za-z][\w-]*/.test((text || "").trim());
+        },
+        canSend(text) {
+            return !this.busy || this.isSlashCommand(text);
+        },
         scroll(force = false) {
             if (this._scrollRaf) return;
             this._scrollRaf = requestAnimationFrame(() => {
@@ -475,9 +489,13 @@ document.addEventListener("alpine:init", () => {
             const name = this.currentName;
             if (!text) return;
             const slot = this._slot(name);
-            if (slot.busy) return;
+            const isCommand = this.isSlashCommand(text);
+            if (slot.busy && !isCommand) return false;
             this.addUser(text, name);
-            slot.busy = true;
+            // A command can be submitted alongside an active turn. Do not
+            // toggle the slot's existing busy state; the server handles the
+            // command path independently of normal turn submission.
+            if (!isCommand) slot.busy = true;
             try {
                 const resp = await fetch("/api/chat/send", {
                     method: "POST",
@@ -486,16 +504,17 @@ document.addEventListener("alpine:init", () => {
                 });
                 if (resp.status === 409) {
                     this.addError("A turn is already in flight.", name);
-                    slot.busy = false;
+                    if (!isCommand) slot.busy = false;
                 } else if (!resp.ok) {
                     const data = await resp.json().catch(() => ({}));
                     this.addError(data.detail || `send failed (${resp.status})`, name);
-                    slot.busy = false;
+                    if (!isCommand) slot.busy = false;
                 }
             } catch (err) {
                 this.addError(`Network error: ${err}`, name);
-                slot.busy = false;
+                if (!isCommand) slot.busy = false;
             }
+            return true;
         },
         async interrupt() {
             const name = this.currentName;
@@ -800,8 +819,6 @@ document.addEventListener("alpine:init", () => {
             "/stats":         { subs: ["clear"] },
             "/skills":        { dynamic: { "": "skills" } },
             "/docs":          { dynamic: { "": "docs" } },
-            "/mcp":           { subs: ["list", "status", "reload", "debug"],
-                                dynamic: { debug: "mcp" } },
         },
 
         async load() {
@@ -2130,6 +2147,8 @@ document.addEventListener("alpine:init", () => {
         fillPct: 0,
         _canvas: null,
         _renderPending: false,
+        cellHover: { visible: false, x: 0, y: 0, row: 0, col: 0, index: 0, cellCount: 0, layer: "", hue: 0, heat: 0, changeCount: 0, tokens: 0, max: 0, chars: 0, content: "", loading: false },
+        _hoverTimer: null,
 
         bindCanvas(canvas) {
             this._canvas = canvas;
@@ -2236,6 +2255,35 @@ document.addEventListener("alpine:init", () => {
                     ctx.fillRect(ci, ri, 1, 1);
                 }
             }
+        },
+
+        hoverCell(event) {
+            const canvas = this._canvas;
+            if (!canvas || !this.grid.length) return;
+            const rect = canvas.getBoundingClientRect();
+            const col = Math.min(this.cols - 1, Math.max(0, Math.floor((event.clientX - rect.left) / rect.width * this.cols)));
+            const row = Math.min(this.rows - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * this.rows)));
+            const region = (this.regions || []).find(r => row >= r.row_start && row < r.row_end);
+            if (!region) return this.clearHover();
+            const index = (row - region.row_start) * this.cols + col;
+            const key = `${region.id}:${row}:${col}:${this.cols}:${this.rows}`;
+            if (this.cellHover.key === key) return;
+            if (this._hoverTimer) clearTimeout(this._hoverTimer);
+            this.cellHover = { visible: true, key, x: event.clientX - rect.left + 12, y: event.clientY - rect.top + 12, row, col, index, cellCount: (region.row_end - region.row_start) * this.cols, layer: region.id, hue: region.hue || 0, heat: (this.grid[row] || [])[col] || 0, changeCount: region.change_count || 0, tokens: region.tokens || 0, max: region.max || 0, chars: 0, content: "", loading: region.id !== "FREE" };
+            if (region.id === "FREE") return;
+            this._hoverTimer = setTimeout(async () => {
+                try {
+                    const r = await fetch(`/api/memory/cell?layer=${encodeURIComponent(region.id)}&cols=${this.cols}&rows=${this.rows}&row=${row}&col=${col}`);
+                    const d = await r.json();
+                    if (this.cellHover.key === key) Object.assign(this.cellHover, { content: d.content || "", chars: d.chars || 0, loading: false });
+                } catch (e) { if (this.cellHover.key === key) this.cellHover.loading = false; }
+            }, 120);
+        },
+
+        clearHover() {
+            if (this._hoverTimer) clearTimeout(this._hoverTimer);
+            this._hoverTimer = null;
+            this.cellHover.visible = false;
         },
 
         // ---- Layer-content modal ----
@@ -2650,6 +2698,7 @@ document.addEventListener("alpine:init", () => {
             const d = await r.json();
             this.currentProvider = d.provider || "";
             this.currentModel = d.model || "";
+            this.ollamaKeySet = !!d.ollama_api_key_set;
             if (this.currentProvider === "ollama") {
                 await this._loadOllamaState();
             }
@@ -2666,7 +2715,10 @@ document.addEventListener("alpine:init", () => {
             const host = this._readVariable("ollama_host") || "";
             const modeVar = this._readVariable("ollama_mode") || "";
             const keyEntry = this._readVariableEntry("ollama_api_key");
-            this.ollamaKeySet = !!(keyEntry && keyEntry.is_set);
+            // The endpoint additionally knows about OLLAMA_API_KEY inherited
+            // by mucli. Keep that usable without ever returning the secret to
+            // the browser; the password field remains visually masked.
+            this.ollamaKeySet = this.ollamaKeySet || !!(keyEntry && keyEntry.is_set);
             this.ollamaApiKey = "";
             // Infer the toggle position: an ollama.com host → cloud;
             // else an explicit "cloud" mode → cloud; else "local" (the
@@ -3521,11 +3573,49 @@ function escapeHtml(s) {
 function renderMarkdown(text) {
     if (typeof marked === "undefined") return escapeHtml(text);
     try {
-        return marked.parse(text, { breaks: true, gfm: true });
+        const html = marked.parse(text, { breaks: true, gfm: true });
+        // x-html content is not compiled by Alpine, so a delegated listener
+        // handles these controls after each streamed markdown re-render.
+        return html.replace(
+            /<pre><code([^>]*)>/g,
+            '<pre class="code-block"><button class="code-copy-btn" type="button" title="Copy code" aria-label="Copy code"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.75A1.25 1.25 0 0 0 9.25 2.5H3.75A1.25 1.25 0 0 0 2.5 3.75v5.5a1.25 1.25 0 0 0 1.25 1.25H5.5"/></svg></button><code$1>'
+        );
     } catch {
         return escapeHtml(text);
     }
 }
+
+async function copyToClipboard(text) {
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.style.cssText = "position:fixed;opacity:0";
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            textarea.remove();
+        }
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+document.addEventListener("click", async (event) => {
+    const button = event.target.closest(".code-copy-btn");
+    if (!button) return;
+    const code = button.parentElement && button.parentElement.querySelector("code");
+    if (!code || !(await copyToClipboard(code.textContent || ""))) return;
+    button.classList.add("copied");
+    button.title = "Copied";
+    setTimeout(() => {
+        button.classList.remove("copied");
+        button.title = "Copy code";
+    }, 1500);
+});
 
 // Alias for clarity inside the modal — same rendering, just named so
 // the call site reads intent ("block markdown for the title/desc").

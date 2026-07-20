@@ -288,11 +288,30 @@ async def transition_task(
         # views (TUI, future panels) see the new state without reload.
         summary = summarize_feature_plan(plan)
         if isinstance(sm.feature_state, dict):
-            sm.feature_state["feature_plan"] = summary
-        if sm.active_feature_id and sm.active_feature_id in (sm.feature_registry or {}):
-            sm.feature_registry[sm.active_feature_id]["feature_plan"] = summary
+            sm.set_feature_state(
+                {**sm.feature_state, "feature_plan": summary, "status": ""},
+                session.folder_context,
+            )
+        elif sm.active_feature_id and sm.active_feature_id in (sm.feature_registry or {}):
+            # Defensive fallback for a partially restored session.  Normal
+            # active features always have feature_state, but preserve the same
+            # completion/unload behavior when only the registry is present.
+            sm.set_feature_state(
+                {
+                    **sm.feature_registry[sm.active_feature_id],
+                    "feature_plan": summary,
+                    "status": "",
+                },
+                session.folder_context,
+            )
 
-    return {"ok": True, "task_id": task_id, "to_status": body.to_status}
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "to_status": body.to_status,
+        "active_feature_id": sm.active_feature_id,
+        "features": _features_list(sm),
+    }
 
 
 @router.post("/tasks/{task_id}/exit-criteria/{idx}/toggle")

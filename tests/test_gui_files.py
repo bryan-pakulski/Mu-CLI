@@ -424,12 +424,12 @@ def test_css_has_files_panel_and_codemirror_theme():
     assert "var(--bg)" in src
 
 
-def test_todos_are_available_from_the_view_picker_across_modes():
+def test_todos_are_not_offered_as_a_separate_view():
     index = open(INDEX_HTML, encoding="utf-8").read()
     js = open(APP_JS, encoding="utf-8").read()
-    assert 'class="mode-option todo-view-option"' in index
-    assert "Todos</span>" in index
-    assert "$store.mode.setView('loop'); open = false" in index
+    assert 'class="mode-option todo-view-option"' not in index
+    assert "Todos</span>" not in index
+    assert "$store.mode.setView('loop'); open = false" not in index
     assert 'class="todo-field"' not in index
     assert 'Alpine.store("loop").load();' in js
     assert 'setInterval(() => Alpine.store("loop").load(), 5000)' in js

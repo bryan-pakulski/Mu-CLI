@@ -10,7 +10,7 @@ live panel that shows one row per active sub-agent:
     ┌─ Sub-agents (3 active, 1 done) ────────────────────────┐
     │ d │ task                  │ status              │ calls │ elapsed │
     │ 1 │ Review agent loop ar… │ 🔨 read_file        │   3   │  12.4s  │
-    │ 1 │ Review tools & MCP    │ 🔨 search_for_str…  │   5   │  12.4s  │
+    │ 1 │ Review available tools │ 🔨 search_for_str… │   5   │  12.4s  │
     │ 1 │ Review commands & UI  │ ✓ done — All 11…    │   4   │   8.1s  │
     │ 1 │ Review tests & core   │ 🔨 list_dir         │   2   │   9.2s  │
     └────────────────────────────────────────────────────────┘

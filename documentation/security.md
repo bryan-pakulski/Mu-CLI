@@ -282,10 +282,6 @@ Read this before deploying mucli in a sensitive environment.
   apply. The output scrubber redacts known secret patterns *before*
   the model sees them, so cached payloads carry the redacted form —
   but anything the user types directly is unscrubbed.
-- **MCP servers** (see [mcp.md](mcp.md)). mucli spawns MCP servers as
-  subprocesses inheriting the parent env. A malicious or compromised
-  server has the parent's privileges. Pin server versions; review
-  commands in `.mu/mcp.json`.
 - **The user typing a secret.** Chat history is not scrubbed. Treat
   history like any other secret store.
 - **Dependencies.** mucli installs from `requirements.txt`; the

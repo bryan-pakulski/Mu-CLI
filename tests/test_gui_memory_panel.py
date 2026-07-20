@@ -72,6 +72,8 @@ def test_memory_panel_has_canvas():
         content = f.read()
     assert "<canvas" in content
     assert "$store.memory.bindCanvas" in content
+    assert "$store.memory.hoverCell" in content
+    assert "memory-cell-tooltip" in content
 
 
 def test_memory_panel_has_resolution_control():
@@ -127,6 +129,8 @@ def test_app_js_memory_store_has_render_method():
         content = f.read()
     assert "render()" in content
     assert "fillRect" in content
+    assert "hoverCell(event)" in content
+    assert "/api/memory/cell" in content
 
 
 def test_app_js_memory_store_has_apply_snapshot():
@@ -350,6 +354,36 @@ def test_snapshot_is_deterministic():
     a = build_memory_snapshot(session, cols=48, rows=48)
     b = build_memory_snapshot(session, cols=48, rows=48)
     assert a["grid"] == b["grid"]
+
+
+def test_snapshot_uses_captured_request_estimate_for_trace_alignment(monkeypatch):
+    import mu.gui.memory_snapshot as snapshot
+
+    monkeypatch.setattr(
+        snapshot,
+        "collect_context_layers",
+        lambda _session: [
+            {
+                "layer": lid,
+                "name": lid,
+                "current": 10 if lid == "L0" else 0,
+                "maximum": 4096,
+            }
+            for lid in snapshot._LAYER_ORDER
+        ],
+    )
+
+    class _Session:
+        pass
+
+    session = _Session()
+    snap = snapshot.build_memory_snapshot(
+        session, cols=48, rows=48, request_token_estimate=1234
+    )
+
+    assert snap["total_tokens"] == 1234
+    assert snap["token_source"] == "pre_request_estimate"
+    assert sum(layer["tokens"] for layer in snap["layers"]) == 1234
 
 
 def test_snapshot_changed_history_changes_grid():

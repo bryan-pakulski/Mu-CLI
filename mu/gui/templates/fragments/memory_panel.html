@@ -59,7 +59,20 @@
         <div class="memory-canvas-wrap">
             <canvas x-ref="grid"
                     class="memory-canvas"
-                    x-init="$store.memory.bindCanvas($refs.grid)"></canvas>
+                    x-init="$store.memory.bindCanvas($refs.grid)"
+                    @pointermove="$store.memory.hoverCell($event)"
+                    @pointerleave="$store.memory.clearHover()"></canvas>
+            <div class="memory-cell-tooltip"
+                 x-show="$store.memory.cellHover.visible"
+                 x-cloak
+                 :style="'left:' + $store.memory.cellHover.x + 'px;top:' + $store.memory.cellHover.y + 'px'">
+                <div class="memory-cell-title" x-text="$store.memory.cellHover.layer + ' · cell ' + $store.memory.cellHover.index"></div>
+                <div x-text="$store.memory.cellHover.row + ',' + $store.memory.cellHover.col + ' · heat ' + $store.memory.cellHover.heat + ' · Δ' + $store.memory.cellHover.changeCount"></div>
+                <div x-text="'cell ' + ($store.memory.cellHover.index + 1) + '/' + $store.memory.cellHover.cellCount + ' · hue ' + $store.memory.cellHover.hue"></div>
+                <div x-text="$store.memory.cellHover.tokens + ' / ' + $store.memory.cellHover.max + ' layer tok · ' + $store.memory.cellHover.chars + ' chars' "></div>
+                <pre x-show="$store.memory.cellHover.content" x-text="$store.memory.cellHover.content"></pre>
+                <div x-show="$store.memory.cellHover.loading">loading cell content…</div>
+            </div>
             <!-- layer band dividers, positioned by row share -->
             <div class="memory-dividers">
                 <template x-for="l in $store.memory.regions" :key="l.id">

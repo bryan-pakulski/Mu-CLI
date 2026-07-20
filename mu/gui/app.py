@@ -85,7 +85,22 @@ def _register_memory_snapshot_hook() -> None:
         if not isinstance(ui, WebUI):
             return None
         try:
-            snap = build_memory_snapshot(ctx.session, cols=LIVE_RESOLUTION, rows=LIVE_RESOLUTION)
+            # Keep the Memory Map's headline total on the exact same
+            # pre-request estimate that the trace records for this iteration.
+            # Layer estimates omit message framing and transient prompt text.
+            from mu.agent.loop_body import _estimate_messages_tokens
+            from utils.token_estimator import estimate_tokens
+
+            request_tokens = estimate_tokens(ctx.system_prompt or "") + _estimate_messages_tokens(
+                ctx.messages or []
+            )
+            ctx.session._memory_map_request_token_estimate = int(request_tokens)
+            snap = build_memory_snapshot(
+                ctx.session,
+                cols=LIVE_RESOLUTION,
+                rows=LIVE_RESOLUTION,
+                request_token_estimate=request_tokens,
+            )
         except Exception as exc:  # defensive — must never break a turn
             _logger.warning("memory snapshot hook failed: %s", exc)
             return None

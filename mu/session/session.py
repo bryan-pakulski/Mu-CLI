@@ -242,6 +242,7 @@ class Session:
         self.task_memory = self.session_manager.task_memory
         self.turn_scratchpad = self.session_manager.turn_scratchpad
         self.tool_result_cache = self.session_manager.tool_result_cache
+        self.tool_stats = self.session_manager.tool_stats
         self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
         setattr(

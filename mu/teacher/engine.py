@@ -171,6 +171,9 @@ class Lesson:
     title: str
     learning_objectives: list[str] = field(default_factory=list)
     concept_brief: str = ""
+    # Curated learner-facing grounding material: compact {title, url, kind,
+    # note} mappings selected during curriculum research.
+    sources: list[dict[str, str]] = field(default_factory=list)
     status: str = LESSON_PENDING
     assignment_ids: list[str] = field(default_factory=list)
     remediation_count: int = 0
@@ -378,6 +381,11 @@ def _lesson_from_dict(raw: dict[str, Any]) -> Lesson:
         title=raw.get("title", raw["lesson_id"]),
         learning_objectives=list(raw.get("learning_objectives", [])),
         concept_brief=raw.get("concept_brief", ""),
+        sources=[
+            {str(key): str(value) for key, value in source.items()}
+            for source in raw.get("sources", [])
+            if isinstance(source, dict) and source.get("url")
+        ],
         status=raw.get("status", LESSON_PENDING),
         assignment_ids=list(raw.get("assignment_ids", [])),
         remediation_count=int(raw.get("remediation_count", 0)),

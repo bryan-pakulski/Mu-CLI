@@ -171,7 +171,7 @@ def test_help_includes_legacy_and_registry_commands(session):
     must_appear = {
         # registry-ported
         "/quit", "/clear", "/history", "/session", "/workspace",
-        "/skills", "/docs", "/mcp", "/stats", "/plan",
+        "/skills", "/docs", "/stats", "/plan",
         "/agentic", "/thinking", "/yolo",
         # still in legacy mucli.py dispatcher
         "/continue", "/model", "/provider",

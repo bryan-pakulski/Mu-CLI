@@ -157,7 +157,6 @@ def test_command_completion_covers_curated_command_set():
         # memory / tools / features
         "/memory",
         "/tool",
-        "/mcp",
         "/feature",
         # diagnostics
         "/stats",

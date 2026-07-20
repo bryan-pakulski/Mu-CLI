@@ -5,6 +5,7 @@ the static wiring of the local/cloud toggle + API-key field in the
 settings popout and the welcome/new-session modal.
 """
 
+import asyncio
 import os
 import threading
 from types import SimpleNamespace
@@ -76,6 +77,19 @@ def test_discovery_overrides_falls_back_to_session_vars():
 def test_discovery_overrides_empty_when_nothing_set():
     req = _fake_request(query={}, session_vars=None)
     assert providers_mod._ollama_discovery_overrides(req) == {}
+
+
+def test_current_provider_reports_environment_key_presence(monkeypatch):
+    monkeypatch.setenv("OLLAMA_API_KEY", "environment-secret")
+    session = SimpleNamespace(
+        variables={"ollama_api_key": ""},
+        session_manager=SimpleNamespace(provider_config={"provider": "ollama", "model": "cloud-model"}),
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(session_by_name=lambda: session)))
+    result = asyncio.run(providers_mod.current_provider(request))
+
+    assert result["ollama_api_key_set"] is True
+    assert "environment-secret" not in str(result)
 
 
 def test_discovery_overrides_ignores_empty_session_values():
@@ -233,6 +247,8 @@ def test_welcome_modal_has_local_cloud_toggle_and_key_field():
     assert "form.ollamaApiKey" in content
     assert "ollama_mode" in content  # sent in createSession body
     assert "ollama_api_key" in content
+    assert "ollamaKeySet" in content
+    assert "key available — type to replace" in content
 
 
 def test_css_has_toggle_styles():

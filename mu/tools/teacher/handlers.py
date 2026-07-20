@@ -263,6 +263,12 @@ def _write_curriculum_md(course: Course) -> None:
             lines.append(f"- **{lesson.title}** ({lesson.status})")
             for objective in lesson.learning_objectives:
                 lines.append(f"  - {objective}")
+            for source in lesson.sources:
+                title = source.get("title") or source.get("url") or "Source"
+                kind = source.get("kind") or "reference"
+                lines.append(f"  - Source: [{title}]({source.get('url')}) ({kind})")
+                if source.get("note"):
+                    lines.append(f"    - {source['note']}")
         lines.append("")
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines))
@@ -614,6 +620,19 @@ def update_learner_profile_tool(args: dict[str, Any], context) -> str:
                                         "items": {"type": "string"},
                                     },
                                     "concept_brief": {"type": "string"},
+                                    "sources": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "title": {"type": "string"},
+                                                "url": {"type": "string"},
+                                                "kind": {"type": "string"},
+                                                "note": {"type": "string"},
+                                            },
+                                            "required": ["title", "url"],
+                                        },
+                                    },
                                 },
                                 "required": ["lesson_id", "title"],
                             },
@@ -657,6 +676,15 @@ def propose_curriculum_tool(args: dict[str, Any], context) -> str:
                         str(x) for x in (raw_lesson.get("learning_objectives") or [])
                     ],
                     concept_brief=str(raw_lesson.get("concept_brief", "") or ""),
+                    sources=[
+                        {
+                            str(key): str(value)
+                            for key, value in source.items()
+                            if key in {"title", "url", "kind", "note"}
+                        }
+                        for source in (raw_lesson.get("sources") or [])
+                        if isinstance(source, dict) and str(source.get("url") or "").strip()
+                    ],
                 )
                 course.lessons.append(lesson)
                 module.lesson_ids.append(lesson_id)

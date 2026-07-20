@@ -167,20 +167,6 @@ class _DocsNameCompleter(Completer):
         yield from FuzzyWordCompleter(names).get_completions(document, complete_event)
 
 
-class _MCPServerNameCompleter(Completer):
-    """Completes server names from `.mu/mcp.json` (used by `/mcp debug`)."""
-
-    def get_completions(self, document, complete_event):
-        try:
-            from mu.mcp import discover
-        except ImportError:
-            return
-        names = sorted(discover().keys())
-        if not names:
-            return
-        yield from FuzzyWordCompleter(names).get_completions(document, complete_event)
-
-
 class DynamicToolCompleter(Completer):
     def get_completions(self, document, complete_event):
         try:
@@ -533,15 +519,6 @@ class InputHandler:
                     "show": None,
                     "validate": None,
                     "edit": None,
-                }
-            ),
-            # mcp
-            "/mcp": NestedCompleter.from_nested_dict(
-                {
-                    "list": None,
-                    "status": None,
-                    "reload": None,
-                    "debug": _MCPServerNameCompleter(),
                 }
             ),
         }

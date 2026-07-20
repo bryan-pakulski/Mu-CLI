@@ -546,7 +546,6 @@ _HELP_GROUPS = [
         [
             ("/memory <status|list <target>|clear <target>>", "", "Inspect memory, scratchpad, or any layer (L1-L5)"),
             ("/tool <enable|disable|list>", "", "Enable/disable tools or list all"),
-            ("/mcp [list|status|reload|debug <s>]", "", "Manage MCP servers"),
             (
                 "/feature <list|new|load|delete|status|phases|create|show|move|block|review|archive|monitor>",
                 "",
@@ -1145,30 +1144,13 @@ def build_session(args, ui, allow_prompt=True):
         session.variables["yolo"] = True
         session.session_manager.save_history(session.folder_context)
 
-    # Auto-load hooks.json and MCP servers from `.mu/`. Failures log a
-    # warning and continue — one bad config file should not block the REPL.
+    # Auto-load hooks.json from `.mu/`. Failures log a warning and continue.
     try:
         from mu.agent.hooks_config import load_hooks_from_config
 
         load_hooks_from_config()
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("hooks.json: load failed: %s", exc)
-    try:
-        import atexit as _atexit
-
-        from mu.mcp import close_all as _mcp_close_all
-        from mu.mcp import register_all as _mcp_register_all
-
-        session._mcp_clients = _mcp_register_all()
-        if session._mcp_clients:
-            # Make sure subprocess'd MCP servers don't outlive the REPL.
-            # The closure captures the list reference, so `/mcp reload`
-            # replacing `session._mcp_clients` is also picked up here.
-            _atexit.register(lambda: _mcp_close_all(session._mcp_clients))
-    except Exception as exc:  # pragma: no cover — defensive
-        logger.warning("mcp.json: load failed: %s", exc)
-        session._mcp_clients = []
-
     sync_provider_settings(session)
     return session
 

@@ -164,28 +164,6 @@ def list_descriptors() -> List["ToolDescriptor"]:
     return list(_REGISTRY.values())
 
 
-def unregister(name: str) -> bool:
-    """Remove a tool from this registry and the descriptor/dispatcher mirrors.
-
-    Returns True if the tool existed and was removed. Used by `/mcp reload`
-    to drop stale MCP tools before re-registering from a fresh handshake.
-    """
-    desc = _import_registry()
-    disp = _import_dispatcher()
-    found = False
-    if name in _REGISTRY:
-        del _REGISTRY[name]
-        found = True
-    _HANDLERS.pop(name, None)
-    if hasattr(desc, "TOOL_DESCRIPTORS"):
-        desc.TOOL_DESCRIPTORS.pop(name, None)
-    if hasattr(disp, "TOOL_HANDLERS"):
-        disp.TOOL_HANDLERS.pop(name, None)
-    if hasattr(desc, "TOOLS"):
-        desc.TOOLS[:] = [t for t in desc.TOOLS if t.name != name]
-    return found
-
-
 # ----------------------------------------------------------------- execution
 
 

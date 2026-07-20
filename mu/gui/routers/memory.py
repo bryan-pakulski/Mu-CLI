@@ -13,7 +13,13 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Request
 
-from ..memory_snapshot import LAYER_HUES, _LAYER_ORDER, build_memory_snapshot
+from ..memory_snapshot import (
+    LAYER_HUES,
+    _LAYER_ORDER,
+    _layer_text,
+    _sample_chunks,
+    build_memory_snapshot,
+)
 
 router = APIRouter()
 
@@ -96,4 +102,33 @@ async def get_memory_layer_content(
         "tokens": tokens,
         "chars": len(content or ""),
         "error": "",
+    }
+
+
+@router.get("/cell")
+async def get_memory_cell(
+    request: Request, layer: str = "", cols: int = 128, rows: int = 128,
+    row: int = -1, col: int = -1,
+) -> Dict[str, Any]:
+    """Return the metadata and exact text slice represented by one grid cell."""
+    session = request.app.state.session_by_name()
+    lid = (layer or "").strip().upper()
+    snapshot = build_memory_snapshot(session, cols=cols, rows=rows)
+    region = next((item for item in snapshot.get("regions", []) if item["id"] == lid), None)
+    if region is None or not (region["row_start"] <= row < region["row_end"]) or not (0 <= col < snapshot["cols"]):
+        return {"error": "cell is outside the current memory map", "content": ""}
+    if lid == "FREE":
+        return {"error": "", "content": "", "free": True, "tokens": 0, "chars": 0}
+
+    cell_count = (region["row_end"] - region["row_start"]) * snapshot["cols"]
+    cell_index = (row - region["row_start"]) * snapshot["cols"] + col
+    text = _layer_text(session, lid)
+    content = _sample_chunks(text, cell_count)[cell_index] if cell_count else ""
+    return {
+        "error": "",
+        "content": content,
+        "chars": len(content),
+        "tokens": int(region.get("tokens", 0) or 0),
+        "cell_index": cell_index,
+        "cell_count": cell_count,
     }

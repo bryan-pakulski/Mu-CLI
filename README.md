@@ -60,7 +60,6 @@ mucli --trace-analyze ~/.mucli/trace/X.jsonl  # headless trace summary
 - Feature mode with persistent plans stored in session metadata.
 - Plan mode (`/plan`) — read-only tool enforcement.
 - Hooks (`.mu/hooks.json`) — shell-cmd hooks at five lifecycle points; plus built-in Python hooks for plan-mode enforcement, secret-path guarding, auto-compaction, and usage tracking. See [documentation/hooks.md](documentation/hooks.md).
-- MCP support (`.mu/mcp.json`) — discover and register tools from any MCP server. See [documentation/mcp.md](documentation/mcp.md).
 - TodoWrite-style task tracking (`todo_write`, `todo_set_status`, `todo_list` tools).
 - Sub-agent spawning (`spawn_agent`) — isolated child sessions for focused side quests, depth-capped, plan-mode-aware.
 - Skills (`mu/skills/`, `~/.mu/skills/`, `<ws>/.mu/skills/`) — declarative agent extensions with regex triggers; compact index injected by default, bodies auto-load on trigger match or via `invoke_skill`. See [documentation/skills.md](documentation/skills.md).
@@ -85,7 +84,6 @@ The most common day-to-day commands — see [documentation/commands.md](document
 | `/workspace file <path>` (`clear`) | Stage or drop files |
 | `/workspace clear` | Drop everything (folders + staged files) |
 | `/tool <list\|enable\|disable> [name]` | Show or toggle tools |
-| `/mcp [list\|status\|reload\|debug <server>]` | Manage MCP servers |
 | `/skills [<name>\|reload\|enable <name>\|disable <name>]` | List, inspect, reload, or toggle skills |
 | `/docs [<name>]` | List or render bundled documentation (Tab autocompletes names) |
 | `/memory [status\|list <target>\|clear <target>\|save <name>\|load <name>]` | Inspect / wipe stores, inspect any prompt layer (`L0`, `L1`, `L1B`, `L2`, `L3`, `L5`), or snapshot/restore memory across sessions |
@@ -104,17 +102,6 @@ The most common day-to-day commands — see [documentation/commands.md](document
 
 `.mu/hooks.json` — shell-command hooks fired at five lifecycle points (`pre_provider_call`, `post_provider_call`, `pre_tool`, `post_tool`, `on_stop`). Exit 0 = continue; non-zero with `on_failure: short_circuit` at `pre_tool` denies the call. Full reference, env vars, and the Python decorator path in [documentation/hooks.md](documentation/hooks.md).
 
-`.mu/mcp.json` — Model Context Protocol servers to auto-start:
-```json
-{
-  "servers": {
-    "fs":  {"command": ["npx", "@modelcontextprotocol/server-filesystem", "/workspace"]},
-    "git": {"command": ["mcp-server-git"], "env": {"GIT_REPO": "/workspace"}}
-  }
-}
-```
-Each server's tools register as `mcp__<server>__<tool>` in the unified tool registry — e.g. `mcp__fs__read_file`, `mcp__git__log`. They show up alongside built-in tools in `/tool list`.
-
 **Workspace context files** — by default mucli auto-loads any of `AGENTS.md`, `CLAUDE.md`, `MUCLI.md`, and `.mu/CONTEXT.md` from each attached workspace folder, injecting them as LAYER 1 of the system prompt (up to `workspace_context_max_chars`, default `40000` chars at the default `context_token_limit`; scales with it). Customize the list via `/set workspace_context_files <comma-separated>`.
 
 **Session variables** — every knob (memory limits, context budgets, skill mode, Ollama parameters, etc.) is a session variable settable via `/set <key> <value>`. See [documentation/configuration.md](documentation/configuration.md) for the full reference.
@@ -129,7 +116,6 @@ mu/
   commands/       Slash-command registry with @command decorator
   feature/        Feature plan engine
   gui/            FastAPI web UI server (SSE chat, inspector, multi-session)
-  mcp/            MCP stdio client + auto-registry
   memory/         TaskMemoryStore + ScratchpadStore (lifecycle, eviction)
   retrieval/      SemanticCodeIndex for L4B context retrieval
   security/       Always-on secret_paths denylist + scrubber
@@ -137,8 +123,7 @@ mu/
                   budgets/tools_glue, history search, tool-result cache
   skills/         Bundled skills (markdown)
   teacher/        Teacher-mode course engine
-  tools/          @tool decorator + per-domain handlers (~95 native tools
-                  + N MCP tools registered as mcp__<server>__<tool>)
+  tools/          @tool decorator + per-domain handlers
   trace/          Per-run JSONL trace emitter + parser/snapshot (Trace
                   Analyzer dashboard data foundation)
   ui/             RichUI, stream renderer, input handler, subagent UI
@@ -157,7 +142,6 @@ See `documentation/`:
 - [`commands.md`](documentation/commands.md) — every slash command and its arguments
 - [`configuration.md`](documentation/configuration.md) — env vars, session variables, config files
 - [`skills.md`](documentation/skills.md) — declarative agent extensions
-- [`mcp.md`](documentation/mcp.md) — Model Context Protocol setup, auth, and management
 - [`hooks.md`](documentation/hooks.md) — lifecycle hooks (Python decorator + `.mu/hooks.json`)
 - [`security.md`](documentation/security.md) — full security model: workspace sandbox, secret filtering, approval flow, plan mode, sub-agent isolation, limitations
 - [`security_controls.md`](documentation/security_controls.md) — the always-on secret-path denylist and scrubber controls

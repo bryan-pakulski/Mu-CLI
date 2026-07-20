@@ -232,6 +232,24 @@ def test_stats_clear_resets_session_start_timestamp(session):
     assert new > old
 
 
+def test_tool_stats_persist_through_session_reload(tmp_path, monkeypatch):
+    from mu.session.session import Session, SessionManager
+
+    monkeypatch.setattr("utils.config.HISTORY_DIR", str(tmp_path / "history"))
+    manager = SessionManager(session_name="stats-persistence")
+    session = Session(_DummyProvider("dummy"), False, "system", manager)
+    pre = _fire("pre_tool", session=session, tool_name="read_file", tool_args={"filename": "a.py"})
+    pre.point = "post_tool"
+    pre.tool_result = {"ok": True}
+    default_registry.fire("post_tool", pre)
+    manager.save_history()
+
+    restored = Session(
+        _DummyProvider("dummy"), False, "system", SessionManager(session_name="stats-persistence")
+    )
+    assert restored.tool_stats["tools"]["read_file"]["count"] == 1
+
+
 def test_stats_rejects_unknown_subcommand(session):
     result = mc.dispatch(session, "/stats wibble", allow_prompt=False)
     assert not result.ok

@@ -79,10 +79,6 @@ workflow, tools, and quality bar.
 | `/skills reload` | Clear the discovery cache and rescan. |
 | `/skills enable <name>` | Re-enable a disabled skill. |
 | `/skills disable <name>` | Hide a skill from the prompt for this session. |
-| `/mcp` or `/mcp list` | List configured MCP servers with status. |
-| `/mcp status` | Per-server tool count + capabilities reported in `initialize`. |
-| `/mcp reload` | Re-spawn every MCP server from `.mu/mcp.json`. |
-| `/mcp debug <server>` | Show recent stderr / error for one MCP server. See [mcp.md](mcp.md). |
 
 ## Memory and context
 

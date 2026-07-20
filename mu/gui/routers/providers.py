@@ -97,8 +97,11 @@ async def list_providers() -> Dict[str, Any]:
             },
             {
                 "name": "ollama",
+                # Ollama is usable locally without credentials; cloud-key
+                # presence is a separate capability for the UI to consume.
                 "configured": True,
-                "requires": "ollama daemon (OLLAMA_HOST optional)",
+                "cloud_key_set": bool(os.environ.get("OLLAMA_API_KEY")),
+                "requires": "ollama daemon (OLLAMA_HOST optional) or OLLAMA_API_KEY for cloud",
             },
         ]
     }
@@ -132,9 +135,21 @@ async def current_provider(request: Request) -> Dict[str, Any]:
     """Return the active session's current provider and model."""
     session = request.app.state.session_by_name()
     if session is None:
-        return {"provider": None, "model": None}
+        return {
+            "provider": None,
+            "model": None,
+            "ollama_api_key_set": bool(os.environ.get("OLLAMA_API_KEY")),
+        }
     cfg = session.session_manager.provider_config
-    return {"provider": cfg.get("provider"), "model": cfg.get("model")}
+    return {
+        "provider": cfg.get("provider"),
+        "model": cfg.get("model"),
+        # Deliberately expose presence, never the secret. This includes keys
+        # supplied by the environment and per-session/CLI configuration.
+        "ollama_api_key_set": bool(
+            session.variables.get("ollama_api_key") or os.environ.get("OLLAMA_API_KEY")
+        ),
+    }
 
 
 @router.post("/switch")

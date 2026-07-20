@@ -61,7 +61,7 @@
              x-show="form.provider === 'ollama' && form.ollamaMode === 'cloud'" x-cloak>
             <label>api key</label>
             <input type="password" x-model="form.ollamaApiKey"
-                   placeholder="ollama.com API key"
+                   :placeholder="form.ollamaKeySet ? '•••••••• key available — type to replace' : 'ollama.com API key'"
                    @change="loadModels()"
                    autocomplete="off" />
         </div>
@@ -107,7 +107,7 @@ function welcomeView() {
         error: null,
         form: {
             name: "", provider: "", model: "", workspace: "",
-            ollamaMode: "local", ollamaApiKey: "",
+            ollamaMode: "local", ollamaApiKey: "", ollamaKeySet: false,
         },
         async load() {
             const [sR, pR] = await Promise.all([
@@ -116,6 +116,8 @@ function welcomeView() {
             ]);
             this.sessions = (await sR.json()).sessions || [];
             this.providers = (await pR.json()).providers || [];
+            const ollama = this.providers.find(p => p.name === "ollama");
+            this.form.ollamaKeySet = !!(ollama && ollama.cloud_key_set);
         },
         async onProviderChange() {
             this.form.model = "";
@@ -141,7 +143,7 @@ function welcomeView() {
             // instead of a confusing empty dropdown.
             if (this.form.provider === "ollama"
                 && this.form.ollamaMode === "cloud"
-                && !this.form.ollamaApiKey) {
+                && !this.form.ollamaApiKey && !this.form.ollamaKeySet) {
                 this.modelError = "enter an ollama.com API key to list cloud models";
                 return;
             }

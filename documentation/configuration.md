@@ -64,23 +64,6 @@ Hook points: `pre_provider_call`, `post_provider_call`, `pre_tool`,
 (lower first). A non-zero exit at `pre_tool` with
 `on_failure: short_circuit` denies the call.
 
-### `.mu/mcp.json` — MCP servers
-
-```json
-{
-  "servers": {
-    "fs":  {"command": ["npx", "@modelcontextprotocol/server-filesystem", "/workspace"]},
-    "git": {"command": ["mcp-server-git"], "env": {"GIT_REPO": "/workspace"}}
-  }
-}
-```
-
-Tools register as `mcp__<server>__<tool>` and appear in `/tool list`
-alongside built-ins. Manage servers at runtime with the `/mcp` slash
-command (`list`, `status`, `reload`, `debug <server>`). Full setup
-guide, authentication patterns, and gap list in
-[mcp.md](mcp.md).
-
 ### `.mu/skills/<name>/SKILL.md` — workspace skills
 
 Workspace-local skills shadow built-ins of the same name. See
@@ -285,8 +268,8 @@ These map directly to Ollama generation parameters. `0` typically means
 1. **CLI flags** (`--provider`, `--model`, `--workspace`, `--yolo`, ...)
    set initial state for the session.
 2. **Environment variables** provide credentials and host URLs.
-3. **`.mu/*.json` files** declare durable infrastructure (hooks, MCP
-   servers) and are loaded per-workspace.
+3. **`.mu/*.json` files** declare durable infrastructure (hooks) and are
+   loaded per-workspace.
 4. **Session variables** (`/set`) override defaults at runtime and
    persist with the session via `/list` / `/load`.
 

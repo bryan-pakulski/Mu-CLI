@@ -1025,10 +1025,14 @@ def test_sync_feature_state_refreshes_after_feature_task_status_change(
     )
 
     feature_state = sm.get_feature_state()
-    assert feature_state is not None
-    assert feature_state["feature_plan"]["phases"][0]["status"] == "completed"
-    assert feature_state["feature_plan"]["next_phase"] is None
-    assert feature_state["status"] == "completed"
+    assert feature_state is None
+    feature = sm.get_feature(updated_summary["feature_id"])
+    assert feature is not None
+    assert feature["feature_plan"]["phases"][0]["status"] == "completed"
+    assert feature["feature_plan"]["next_phase"] is None
+    assert feature["status"] == "completed"
+    assert feature["archived"] is True
+    assert sm.active_feature_id is None
 
 
 def test_summarize_feature_plan_uses_task_status_for_task_counts(tmp_path):

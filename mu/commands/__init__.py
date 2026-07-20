@@ -137,7 +137,6 @@ def _load_command_modules() -> None:
     from . import docs  # noqa: F401 — registers /docs
     from . import session  # noqa: F401 — registers /session
     from . import workspace  # noqa: F401 — registers /workspace (folder/file/clear)
-    from . import mcp  # noqa: F401 — registers /mcp
     from . import runtime  # noqa: F401 — registers /continue, /flush
     from . import variables  # noqa: F401 — registers /set, /get, /unset, /variables
     from . import provider  # noqa: F401 — registers /model, /provider, /system

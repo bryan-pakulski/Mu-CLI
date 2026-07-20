@@ -101,6 +101,14 @@ def test_create_course_writes_state(isolated_workspace):
 
 def test_full_round_trip_preserves_nested_structures(isolated_workspace):
     course = _seed_course()
+    course.lessons[0].sources = [
+        {
+            "title": "Perl documentation",
+            "url": "https://perldoc.perl.org/",
+            "kind": "official documentation",
+            "note": "Language reference",
+        }
+    ]
     spec = VerificationSpec(
         method="exec_markers",
         verify_cmd="echo PASS",
@@ -121,6 +129,8 @@ def test_full_round_trip_preserves_nested_structures(isolated_workspace):
     save_course(course)
 
     reloaded = load_course(course.course_id)
+    assert reloaded is not None
+    assert reloaded.lessons[0].sources[0]["url"] == "https://perldoc.perl.org/"
     a2 = find_assignment(reloaded, "a1")
     assert a2 is not None
     assert a2.verification.expected_markers == ["PASS"]

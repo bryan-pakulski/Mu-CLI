@@ -86,7 +86,7 @@ async def completions_endpoint(request: Request, kind: str = ""):
     """Return dynamic completion lists for subcommand arguments.
 
     Query param ``kind`` selects which list to return:
-      sessions, features, tools, models, modes, variables, skills, docs, mcp
+      sessions, features, tools, models, modes, variables, skills, docs
     """
     if kind == "sessions":
         import glob as _glob
@@ -169,14 +169,6 @@ async def completions_endpoint(request: Request, kind: str = ""):
         except Exception:
             return {"items": []}
 
-    if kind == "mcp":
-        try:
-            from mu.mcp import discover
-
-            return {"items": sorted(discover().keys())}
-        except Exception:
-            return {"items": []}
-
     if kind == "memory_targets":
         try:
             from mu.commands.memory import LIST_TARGETS
@@ -204,15 +196,18 @@ async def send_message(request: Request, payload: Dict[str, Any]):
     name = session.session_manager.current_session_name
 
     busy = request.app.state.session_busy_for(name)
-    if busy.is_set():
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    # Commands are deliberately permitted while the model works: they are
+    # operational controls (for example /status or /interrupt), whereas a
+    # second natural-language turn would race the active agent loop.
+    if busy.is_set() and not text.startswith("/"):
         raise HTTPException(
             status_code=409,
             detail=f"Session {name!r} already has a turn in flight.",
         )
-
-    text = str(payload.get("text") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
 
     bus = request.app.state.bus
     # Echo the user's message to the per-session stream so the browser

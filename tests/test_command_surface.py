@@ -213,7 +213,6 @@ def test_core_commands_are_present():
         "/thinking",
         "/memory",
         "/tool",
-        "/mcp",
         "/feature",
         "/stats",
         "/continue",

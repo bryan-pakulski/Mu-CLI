@@ -86,7 +86,35 @@ def _estimate_messages_tokens(messages) -> int:
     return total
 
 
-def _preflight_context_check(session, system_prompt, messages, turn_start_index=None):
+def _estimate_tools_tokens(tools) -> int:
+    """Estimate the provider-visible tool schema payload.
+
+    Tool definitions are sent alongside the messages rather than embedded in
+    ``system_prompt``.  Omitting them here made the preflight guard (and its
+    trace estimate) materially smaller than the request providers actually
+    received, so compacting L5 could never solve a prompt dominated by tool
+    schemas.
+    """
+    total = 0
+    for tool in tools or []:
+        try:
+            payload = {
+                "name": getattr(tool, "name", ""),
+                "description": getattr(tool, "description", ""),
+                "parameters": getattr(tool, "parameters", None),
+            }
+            total += estimate_tokens(
+                json.dumps(payload, default=str, sort_keys=True)
+            )
+        except Exception:
+            # A malformed optional tool must not make the safety check fail.
+            total += estimate_tokens(str(tool))
+    return total
+
+
+def _preflight_context_check(
+    session, system_prompt, messages, turn_start_index=None, tools=None
+):
     """Emergency-compact history if the assembled prompt exceeds the
     provider's context window.
 
@@ -125,7 +153,8 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
 
     prompt_tokens = estimate_tokens(system_prompt)
     msg_tokens = _estimate_messages_tokens(messages)
-    total = prompt_tokens + msg_tokens
+    tool_tokens = _estimate_tools_tokens(tools)
+    total = prompt_tokens + msg_tokens + tool_tokens
     # Stash the cl100k estimate of the assembled prompt for the cold-cache
     # drift calibration in the response handler: when Ollama's
     # prompt_eval_count is a strong full-prompt signal (>= half the cl100k
@@ -145,7 +174,7 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
         "Emergency compaction triggered.",
         total, context_limit, response_reserve, max_prompt, overshoot,
     )
-    emergency_budget = max(512, max_prompt - prompt_tokens)
+    emergency_budget = max(512, max_prompt - prompt_tokens - tool_tokens)
     base_keep_recent = resolve_keep_recent(session, emergency=True)
     # R3 / FM-8: even emergency compaction must respect the per-turn
     # tool-result floor so tool results just received stay verbatim.
@@ -185,8 +214,12 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
             logger.warning("Emergency compaction failed: %s", exc)
             return system_prompt, messages
 
+        # Preserve the authoritative system prompt. Under emergency pressure,
+        # compact completed, older tool-call/result pairs in the runtime view
+        # instead; their full results remain in history and the sidecar cache.
         recent_history = session._prepare_runtime_history(
             turn_start_index=turn_start_index,
+            compact_transient_tools=True,
         )
         messages = session._build_messages_from_history(
             recent_history,
@@ -194,7 +227,7 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
         )[:-1]
 
         new_msg_tokens = _estimate_messages_tokens(messages)
-        new_total = prompt_tokens + new_msg_tokens
+        new_total = prompt_tokens + new_msg_tokens + tool_tokens
         if new_total <= max_prompt:
             logger.info(
                 "Emergency compaction round %d complete: messages %d -> %d tokens.",
@@ -213,7 +246,7 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
     logger.warning(
         "Emergency compaction exhausted 3 rounds; est %d still over max_prompt %d. "
         "Reactive overflow recovery will backstop the provider call.",
-        prompt_tokens + _estimate_messages_tokens(messages), max_prompt,
+        prompt_tokens + _estimate_messages_tokens(messages) + tool_tokens, max_prompt,
     )
     return system_prompt, messages
 
@@ -498,6 +531,7 @@ def _generate_with_overflow_recovery(
             # Final pre-flight (re-checks + may compact more) before the retry.
             system_prompt, messages = _preflight_context_check(
                 session, system_prompt, messages, turn_start_index=turn_start_index,
+                tools=tools,
             )
 
 
@@ -1262,6 +1296,11 @@ def run_turn(session, text):
             dynamic_system_prompt, messages = _preflight_context_check(
                 session, dynamic_system_prompt, messages,
                 turn_start_index=turn_start_index,
+                tools=(
+                    active_tools
+                    if (session.folder_context.folders and session.agentic)
+                    else None
+                ),
             )
             # Capture the estimate at the same seam as the provider request.
             # The trace event is written after the response is archived, so
@@ -1270,6 +1309,11 @@ def run_turn(session, text):
             request_token_estimate = (
                 estimate_tokens(dynamic_system_prompt)
                 + _estimate_messages_tokens(messages)
+                + _estimate_tools_tokens(
+                    active_tools
+                    if (session.folder_context.folders and session.agentic)
+                    else None
+                )
             )
             try:
                 from mu.trace.emitter import build_request_record, get_emitter
@@ -2170,6 +2214,7 @@ def run_turn(session, text):
                                     tool_name=part.tool_name,
                                     tool_args=part.tool_args,
                                     result=source_result,
+                                    force=True,
                                 )
                             )
                         except Exception:
@@ -2177,6 +2222,7 @@ def run_turn(session, text):
                                 call_id=getattr(part, "tool_call_id", ""),
                                 tool_name=part.tool_name,
                                 result=source_result,
+                                force=True,
                             )
                 except Exception:
                     pass

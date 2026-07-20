@@ -13,9 +13,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mu.agent.loop_body import (
+    _estimate_tools_tokens,
     _estimate_messages_tokens,
     _preflight_context_check,
 )
+from mu.session.messages import _compact_transient_tool_activity
 from providers.base import Message, MessagePart
 
 
@@ -101,6 +103,49 @@ def test_estimate_messages_tokens_empty():
     assert _estimate_messages_tokens([]) == 0
 
 
+def test_estimate_tools_tokens_includes_schema_payload():
+    tool = MagicMock()
+    tool.name = "large_tool"
+    tool.description = "schema documentation " * 100
+    tool.parameters = {"type": "object", "properties": {"path": {"type": "string"}}}
+    assert _estimate_tools_tokens([tool]) > 100
+
+
+def test_runtime_tool_compaction_preserves_latest_pair_and_history_input():
+    history = []
+    for name in ("first", "second", "latest"):
+        history.extend(
+            [
+                {
+                    "role": "assistant",
+                    "parts": [{"type": "tool_call", "tool_name": name}],
+                },
+                {
+                    "role": "tool",
+                    "parts": [
+                        {
+                            "type": "tool_result",
+                            "tool_name": name,
+                            "tool_result": f"{name} result " * 500,
+                            "cache_key": f"cache-{name}",
+                        }
+                    ],
+                },
+            ]
+        )
+
+    compacted = _compact_transient_tool_activity(
+        history, turn_start_index=0, keep_recent_tool_results=1
+    )
+
+    assert len(compacted) == 4
+    assert "CACHED TOOL ACTIVITY" in compacted[0]["parts"][0]["text"]
+    assert "[cache:cache-first]" in compacted[0]["parts"][0]["text"]
+    assert "first result" not in compacted[0]["parts"][0]["text"]
+    assert compacted[-2:] == history[-2:]
+    assert history[1]["parts"][0]["tool_result"].startswith("first result")
+
+
 # --------------------------------------------------------- pre-flight check
 
 
@@ -140,8 +185,22 @@ def test_over_budget_triggers_emergency_compaction():
 
     # Messages should have been rebuilt
     assert result_msgs is not big_messages
-    # System prompt unchanged (only messages get compacted)
+    # The system prompt is authoritative and never clobbered by compaction.
     assert result_prompt is big_prompt
+
+
+def test_tool_schema_tokens_trigger_preflight_compaction():
+    session = _stub_session(context_limit=100, response_reserve=20)
+    tool = MagicMock()
+    tool.name = "large_tool"
+    tool.description = "schema documentation " * 500
+    tool.parameters = {"type": "object"}
+
+    _preflight_context_check(
+        session, "small", _make_messages(["small"]), tools=[tool]
+    )
+
+    session.session_manager.roll_history_summary_to_token_budget.assert_called()
 
 
 def test_over_budget_escalates_keep_recent_when_still_over():

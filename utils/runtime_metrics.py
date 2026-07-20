@@ -370,27 +370,50 @@ def collect_context_layers(session):
     except Exception:
         history_tokens = 0
 
-    history_limit_tokens = max(
-        1,
-        int(
-            session.variables.get(
-                "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
-            )
-            or _DEFAULT_CONTEXT_TOKEN_LIMIT
-        ),
-    )
+    # The configured context_token_limit is only an upper bound. The memory
+    # map must show the same provider-window/drift-corrected ceiling used by
+    # preflight compaction, otherwise it can report hundreds of thousands of
+    # fictional "free" tokens on a smaller real provider window.
+    try:
+        from mu.session.budgets import drift_corrected_context_limit
 
-    # L0 — base system prompt (persona + agentic harness + mode workflow).
-    # Not user-budgeted — its cap is the global context limit.
+        history_limit_tokens = max(1, int(drift_corrected_context_limit(session)))
+    except Exception:
+        history_limit_tokens = max(
+            1,
+            int(
+                session.variables.get(
+                    "context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT
+                )
+                or _DEFAULT_CONTEXT_TOKEN_LIMIT
+            ),
+        )
+
+    # L0 — base system prompt plus provider-visible tool schemas. Tool
+    # definitions are not Message objects, so omitting them here made the
+    # memory map's "free" band disagree with the actual provider request.
     system_prompt_text = compose_base_system_prompt(session)
+    tool_schema_tokens = 0
+    try:
+        if bool(getattr(session, "agentic", False)) and bool(
+            getattr(getattr(session, "folder_context", None), "folders", [])
+        ):
+            from mu.agent.loop_body import _estimate_tools_tokens
+            from mu.tools.descriptors import TOOLS
+
+            disabled = set(getattr(session, "disabled_tools", set()) or set())
+            active_tools = [tool for tool in TOOLS if tool.name not in disabled]
+            tool_schema_tokens = int(_estimate_tools_tokens(active_tools) or 0)
+    except Exception:
+        tool_schema_tokens = 0
 
     layers = [
         {
             "layer": "L0",
-            "name": "System prompt",
-            "current": _chars_to_tokens(system_prompt_text, model),
+            "name": "System prompt + tool schemas",
+            "current": _chars_to_tokens(system_prompt_text, model) + tool_schema_tokens,
             "maximum": history_limit_tokens,
-            "description": "Base system prompt — persona + agentic harness + mode workflow.",
+            "description": "Base system prompt plus provider-visible tool definitions.",
         },
         {
             "layer": "L1",

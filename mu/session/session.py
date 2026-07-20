@@ -401,14 +401,20 @@ class Session:
         return compaction_token_budget(self)
 
     def _prepare_runtime_history(
-        self, turn_start_index: int | None = None
+        self,
+        turn_start_index: int | None = None,
+        *,
+        compact_transient_tools: bool = True,
     ) -> list[dict]:
-        """History slicing + tool-window compression. Body moved to
+        """History slicing + cached tool-activity compression. Body moved to
         `mu/session/messages.py:prepare_runtime_history`."""
         from mu.session.messages import prepare_runtime_history
 
         return prepare_runtime_history(
-            self, turn_start_index, provider=getattr(self, "provider", None)
+            self,
+            turn_start_index,
+            provider=getattr(self, "provider", None),
+            compact_transient_tools=compact_transient_tools,
         )
 
     def _inject_conversation_summary(self, system_prompt: str) -> str:

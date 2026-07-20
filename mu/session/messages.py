@@ -303,16 +303,100 @@ def _maybe_summarize_oversized(
     return {**msg, "parts": new_parts}
 
 
+def _has_thought_signature(msg: dict) -> bool:
+    """Whether a message has provider state that must round-trip verbatim."""
+    return any(
+        part.get("thought_signature")
+        for part in (msg.get("parts", []) or [])
+    )
+
+
+def _compact_transient_tool_activity(
+    history: List[dict],
+    *,
+    turn_start_index: Optional[int],
+    keep_recent_tool_results: int,
+) -> List[dict]:
+    """Compress completed older tool-call/result pairs for one request.
+
+    This is deliberately a runtime-only transformation: ``history`` and the
+    tool-result cache retain the full output for recall, while the provider
+    receives only a cache reference for completed transient activity. Signed
+    provider messages and the most recent tool results remain verbatim.
+    """
+    if turn_start_index is None:
+        return history
+    turn_start_index = max(0, int(turn_start_index))
+    keep_count = max(0, int(keep_recent_tool_results or 0))
+    tool_indices = [
+        idx
+        for idx, message in enumerate(history)
+        if idx >= turn_start_index and message.get("role") == "tool"
+    ]
+    protected_tool_indices = set(tool_indices[-keep_count:]) if keep_count else set()
+
+    compacted: List[dict] = []
+    idx = 0
+    while idx < len(history):
+        current = history[idx]
+        following = history[idx + 1] if idx + 1 < len(history) else None
+        is_pair = (
+            idx >= turn_start_index
+            and current.get("role") == "assistant"
+            and following is not None
+            and following.get("role") == "tool"
+            and idx + 1 not in protected_tool_indices
+            and not _has_thought_signature(current)
+            and not _has_thought_signature(following)
+        )
+        if is_pair:
+            result_parts = following.get("parts", []) or []
+            result_part = next(
+                (part for part in result_parts if part.get("type") == "tool_result"),
+                {},
+            )
+            tool_name = str(result_part.get("tool_name") or "tool")
+            cache_key = str(result_part.get("cache_key") or "").strip()
+            if cache_key:
+                text = (
+                    "[CACHED TOOL ACTIVITY — completed result omitted from "
+                    f"context; [cache:{cache_key}]] {tool_name}. "
+                    f"Call recall(cache_key='{cache_key}') only if full result is needed."
+                )
+            else:
+                # Older sessions or a cache-store failure have no retrievable
+                # payload. Keep a small fallback record rather than silently
+                # losing the only copy visible to the agent.
+                text = (
+                    "[COMPACTED TRANSIENT TOOL ACTIVITY — result was not cached]\n"
+                    + clip_preview(summarize_message_parts(current), 160)
+                    + "\n"
+                    + clip_preview(summarize_message_parts(following), 240)
+                )
+            compacted.append(
+                {
+                    "role": "assistant",
+                    "parts": [{"type": "text", "text": text}],
+                }
+            )
+            idx += 2
+            continue
+        compacted.append(current)
+        idx += 1
+    return compacted
+
+
 def prepare_runtime_history(
     session: Any,
     turn_start_index: Optional[int] = None,
     provider: Optional[LLMProvider] = None,
+    compact_transient_tools: bool = True,
 ) -> List[dict]:
     """Pick the slice of `session.session_manager.history` to send to
     the provider this turn, then (within the current-turn region)
-    compress older `assistant`/`tool` message pairs into a single
-    without arbitrary tool-message compression. Active evidence remains
-    verbatim until model-directed compaction or a hard provider-limit recovery.
+    retain only recent tool evidence verbatim. Completed older tool-call/result
+    pairs become cache references in this runtime view; persisted history and
+    cache entries remain unchanged.
 
     Skips compression for any message carrying a thought signature —
     those must round-trip verbatim or the provider rejects subsequent
@@ -351,6 +435,20 @@ def prepare_runtime_history(
         )
         for i, msg in enumerate(raw_slice)
     ]
+    if compact_transient_tools:
+        floor = getattr(session_manager, "_tool_result_floor", 0)
+        active_turn_start = (
+            turn_start_index
+            if turn_start_index is not None
+            else getattr(session_manager, "_active_turn_start_index", None)
+        )
+        runtime_slice = _compact_transient_tool_activity(
+            runtime_slice,
+            turn_start_index=max(0, active_turn_start - start_index)
+            if active_turn_start is not None
+            else None,
+            keep_recent_tool_results=floor,
+        )
     # Inject protected messages that are below the summary anchor back
     # into the runtime history.  These messages were excluded from LLM
     # summarisation in roll_history_summary() and must appear verbatim

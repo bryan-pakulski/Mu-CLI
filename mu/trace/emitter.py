@@ -11,6 +11,8 @@ Records one structured event per line to
   * ``nudge``      — one per corrective nudge injection (standalone)
   * ``compaction`` — one per compaction pass (standalone; drained from the
                      session manager's ``_compaction_log``)
+  * ``request``    — privacy-safe component and per-message token manifest for
+                     the exact provider request
   * ``turn_end``   — one per turn, with totals; flushes the file
 
 The headline field is ``iter.context.drift_pct``: the signed percent difference
@@ -249,19 +251,101 @@ def build_request_record(*, iteration: int, system_prompt: str, messages: Any,
     counts and message-part structure let traces prove which request was sent
     without leaking repository contents into another retention surface.
     """
+    from utils.token_estimator import estimate_tokens
+
     def _hash(value: Any) -> str:
         return hashlib.sha256(str(value).encode("utf-8", errors="replace")).hexdigest()[:16]
+
+    def _get(value: Any, key: str, default: Any = None) -> Any:
+        return value.get(key, default) if isinstance(value, dict) else getattr(value, key, default)
+
+    def _serialized(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+
+    component_tokens = {
+        "system": estimate_tokens(system_prompt),
+        "user": 0,
+        "assistant": 0,
+        "tool_calls": 0,
+        "tool_results": 0,
+        "files_images": 0,
+        "other": 0,
+        "tool_schemas": 0,
+    }
     message_parts = []
-    for msg in messages or []:
-        parts = getattr(msg, "parts", []) or []
-        message_parts.append({"role": getattr(msg, "role", ""), "parts": len(parts),
-                              "bytes": sum(len(str(getattr(p, "text", None) or getattr(p, "tool_result", None) or getattr(p, "tool_args", None) or "").encode("utf-8", errors="replace")) for p in parts)})
-    tool_names = [getattr(t, "name", "") for t in (tools or [])]
-    return {"iter": iteration, "system_prompt_bytes": len(system_prompt.encode("utf-8", errors="replace")),
-            "system_prompt_hash": _hash(system_prompt), "messages": message_parts,
-            "messages_hash": _hash([(m.get("role"), m.get("bytes")) for m in message_parts]),
-            "tool_names": tool_names, "tools_hash": _hash(tool_names),
-            "token_estimate": int(token_estimate)}
+    for message_index, msg in enumerate(messages or []):
+        role = str(_get(msg, "role", "") or "")
+        part_records = []
+        for part_index, part in enumerate(_get(msg, "parts", []) or []):
+            part_type = str(_get(part, "type", "") or "other")
+            if _get(part, "text") is not None:
+                serialized = str(_get(part, "text"))
+            elif _get(part, "tool_result") is not None:
+                # Match loop_body._estimate_messages_tokens exactly so the
+                # component stack adds up to the compaction estimate.
+                serialized = str(_get(part, "tool_result"))
+            elif _get(part, "tool_args") is not None:
+                serialized = json.dumps(_get(part, "tool_args"))
+            elif _get(part, "inline_data") is not None:
+                serialized = _serialized(_get(part, "inline_data"))
+            else:
+                serialized = ""
+            byte_count = len(serialized.encode("utf-8", errors="replace"))
+            token_count = estimate_tokens(serialized)
+            if part_type == "tool_result":
+                bucket = "tool_results"
+            elif part_type == "tool_call":
+                bucket = "tool_calls"
+            elif part_type in {"file", "image_inline", "image_input"}:
+                bucket = "files_images"
+            elif part_type == "text" and role == "user":
+                bucket = "user"
+            elif part_type == "text" and role == "assistant":
+                bucket = "assistant"
+            else:
+                bucket = "other"
+            component_tokens[bucket] += token_count
+            part_records.append({
+                "index": part_index,
+                "type": part_type,
+                "tool_name": str(_get(part, "tool_name", "") or ""),
+                "bytes": byte_count,
+                "tokens": token_count,
+            })
+        message_parts.append({
+            "index": message_index,
+            "role": role,
+            # Keep the original numeric field for trace-schema compatibility;
+            # the new detail lives alongside it.
+            "parts": len(part_records),
+            "part_details": part_records,
+            "bytes": sum(part["bytes"] for part in part_records),
+            "tokens": sum(part["tokens"] for part in part_records),
+        })
+
+    tool_payload = [{
+        "name": getattr(tool, "name", ""),
+        "description": getattr(tool, "description", ""),
+        "parameters": getattr(tool, "parameters", {}) or {},
+    } for tool in (tools or [])]
+    tool_json = json.dumps(tool_payload, sort_keys=True, default=str, ensure_ascii=False)
+    component_tokens["tool_schemas"] = estimate_tokens(tool_json) if tool_payload else 0
+    tool_names = [tool["name"] for tool in tool_payload]
+    return {
+        "iter": iteration,
+        "system_prompt_bytes": len(system_prompt.encode("utf-8", errors="replace")),
+        "system_prompt_hash": _hash(system_prompt),
+        "messages": message_parts,
+        "messages_hash": _hash([(msg["role"], msg["bytes"]) for msg in message_parts]),
+        "tool_names": tool_names,
+        "tool_schema_bytes": len(tool_json.encode("utf-8")) if tool_payload else 0,
+        "tools_hash": _hash(tool_payload),
+        "component_tokens": component_tokens,
+        "component_total_tokens": sum(component_tokens.values()),
+        "token_estimate": int(token_estimate),
+    }
 
 
 # ----------------------------------------------------------- record builders
@@ -269,7 +353,7 @@ def build_request_record(*, iteration: int, system_prompt: str, messages: Any,
 def _layer_tokens(session: Any) -> Dict[str, Any]:
     """Sum context-layer estimates via the harness's own estimator (cl100k_base).
 
-    Returns ``{l0,l1,l1b,l2,l3,l4b,l5,total_est}``. Each value is the layer's
+    Returns ``{l0,l1,l1c,l1b,l2,l3,l4b,l5,total_est}``. Each value is the layer's
     estimated token ``current``; ``total_est`` is their sum — the harness's
     estimate of the assembled prompt, directly comparable to
     ``response.input_tokens``.
@@ -283,7 +367,7 @@ def _layer_tokens(session: Any) -> Dict[str, Any]:
     out: Dict[str, int] = {}
     total = 0
     for layer in layers:
-        key = (layer.get("layer") or "").lower()  # "l0","l1","l1b","l2","l3","l4b","l5"
+        key = (layer.get("layer") or "").lower()  # "l0","l1","l1c","l1b","l2","l3","l4b","l5"
         try:
             val = int(layer.get("current") or 0)
         except Exception:  # noqa: BLE001
@@ -293,6 +377,7 @@ def _layer_tokens(session: Any) -> Dict[str, Any]:
     return {
         "l0": out.get("l0", 0),
         "l1": out.get("l1", 0),
+        "l1c": out.get("l1c", 0),
         "l1b": out.get("l1b", 0),
         "l2": out.get("l2", 0),
         "l3": out.get("l3", 0),
@@ -411,9 +496,26 @@ def build_iter_record(
         else layers["total_est"]
     )
     actual = int(getattr(response, "input_tokens", 0) or 0)
-    drift_pct = (
-        round((actual - total_est) / max(1, actual) * 100, 2) if actual else 0.0
+    # drift_pct compares the provider's reported prompt size (actual) to the
+    # cl100k estimate (total_est). It is only meaningful when `actual` is a
+    # reliable FULL-prompt signal. For Ollama, `actual` is the streamed
+    # prompt_eval_count — the non-cached prompt DELTA, near-zero in a warm
+    # loop and far smaller than total_est. Normalising by that near-zero
+    # value ((actual−est)/actual) blew up to ±thousands of percent even
+    # though the prompt was fine. Gate: actual is a real full-prompt count
+    # when it is NOT a tiny fraction of the estimate (actual*4 >= total_est,
+    # i.e. actual is at least ~25% of the estimate). When the estimate is 0
+    # (missing/zero layer sum) any nonzero actual is reliable. When gated
+    # out (Ollama warm cache), zero drift_pct and flag unreliable so the UI
+    # doesn't paint "0% drift = perfect estimate"; the learned cl100k→real
+    # `drift_ratio` is the representative diagnostic instead.
+    drift_pct_reliable = bool(
+        actual > 0 and (total_est == 0 or actual * 4 >= total_est)
     )
+    if drift_pct_reliable:
+        drift_pct = round((actual - total_est) / max(1, actual) * 100, 2)
+    else:
+        drift_pct = 0.0
     # Drift-corrected real-prompt estimate + the drift ratio the compactor is
     # assuming. `actual` (Ollama prompt_eval_count) is the non-cached delta —
     # near-zero in a warm loop and a misleading "real" prompt size. The
@@ -456,6 +558,7 @@ def build_iter_record(
         "context": {
             "l0": layers["l0"],
             "l1": layers["l1"],
+            "l1c": layers["l1c"],
             "l1b": layers["l1b"],
             "l2": layers["l2"],
             "l3": layers["l3"],
@@ -469,6 +572,7 @@ def build_iter_record(
             "prompt_tokens_real_est": real_est,
             "drift_ratio": round(eff_drift, 3),
             "drift_pct": drift_pct,
+            "drift_pct_reliable": drift_pct_reliable,
         },
         "tokens": tokens,
         "has_text": bool(has_text),

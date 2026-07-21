@@ -21,6 +21,11 @@ const PALETTE = {
     tokOut: "#7ec96b",        // green
     tokCached: "#5b9bd0",     // blue
     tokReasoning: "#c08ae0",  // purple
+    attribution: {
+        system: "#8f7ac8", user: "#5b9bd0", assistant: "#7ec96b",
+        tool_calls: "#d0b05b", tool_results: "#e08b40",
+        files_images: "#54b6b0", other: "#8b8b8b", tool_schemas: "#c06b8a",
+    },
     taskMem: "#7ec96b",
     scratchpad: "#c98a4b",    // amber-brown (distinct from taskMem)
     subBar: "#5b9bd0",
@@ -58,7 +63,7 @@ function traceApp() {
                   latency: [],
                   tool_histogram: [], compaction_timeline: [], nudge_timeline: [],
                   nudge_efficacy: [], redundant_reads: [], subagent_timeline: [],
-                  memory_series: [] },
+                  memory_series: [], context_attribution: [], top_context_spikes: [] },
         iters: [],
         tools: [],
         snapshot: { grid: [], drift_strip: [], xs: [], compaction_cols: [],
@@ -75,6 +80,10 @@ function traceApp() {
         theme: "dark",          // current data-theme (for the toggle button glyph)
         expandedTools: {},      // toolKey -> true: that tool's result preview is expanded
         expandedCards: {},      // cardKey -> true: all tool previews in that turn expanded
+        VIEW_CAP: 100,          // max iters drawn across the plot width (X pan window)
+        xStart: 0,              // first iter index visible in the X pan window
+        xCount: 100,            // iters currently visible (≤ VIEW_CAP, or totalIters if fewer)
+        readHover: null,        // {x, y, label} read-map hover tooltip state
 
         async init() {
             // Session scope: the analyzer is opened from the chat with
@@ -118,6 +127,7 @@ function traceApp() {
                 this.snapshot = d.snapshot || this.snapshot;
                 this.runBounds = d.run_bounds || [];
                 this.runId = d.run_id || "";
+                this._resetWindow();
                 this.$nextTick(() => {
                     this.attachHovers();
                     this.renderAll();
@@ -159,6 +169,7 @@ function traceApp() {
                 this.iters = d.iters || [];
                 this.tools = d.tools || [];
                 this.snapshot = d.snapshot || this.snapshot;
+                this._resetWindow();
                 this.$nextTick(() => {
                     this.attachHovers();
                     this.renderAll();
@@ -188,8 +199,54 @@ function traceApp() {
         fmtMs(v) { v = Number(v || 0); if (v >= 60000) return (v / 60000).toFixed(1) + "m"; if (v >= 1000) return (v / 1000).toFixed(1) + "s"; return Math.round(v) + "ms"; },
         fmtCost(v) { v = Number(v || 0); return v ? "$" + (v < 0.01 ? v.toFixed(6) : v.toFixed(4)) : "—"; },
         fmtStatus(r) { return r.iters > 0 ? "done" : "—"; },
+        attributionLabel(key) {
+            return ({system: "system", user: "user", assistant: "assistant",
+                tool_calls: "tool calls", tool_results: "tool results",
+                files_images: "files/images", other: "other",
+                tool_schemas: "tool schemas"})[key] || key || "other";
+        },
         toolHistSorted() { return [...(this.series.tool_histogram || [])].sort((a, b) => b.count - a.count); },
         maxToolCount() { return Math.max(1, ...this.toolHistSorted().map(h => h.count)); },
+
+        // ---- X pan window (cap ~VIEW_CAP iters visible; pan the rest) ------
+        // All per-iter series + the heat grid are indexed identically (one
+        // point per iter, aligned with `iters`), so a single [xStart, xStart+
+        // xCount) window pans every chart together. When total iters ≤
+        // VIEW_CAP the window covers everything and the scrollbar is hidden.
+        totalIters() { return (this.iters || []).length; },
+        _winStart(total) {
+            const cnt = Math.min(this.xCount, total);
+            return Math.max(0, Math.min(this.xStart, Math.max(0, total - cnt)));
+        },
+        _winCount(total) { return Math.min(this.xCount, total); },
+        _view(arr) {
+            if (!arr || !arr.length) return [];
+            const t = arr.length, s = this._winStart(t);
+            return arr.slice(s, s + this._winCount(t));
+        },
+        _resetWindow() {
+            this.xStart = 0;
+            this.xCount = Math.min(this.VIEW_CAP, (this.iters || []).length);
+        },
+        xScrollMax() { return Math.max(0, this.totalIters() - this.xCount); },
+        xScrollStep() { return Math.max(1, Math.floor(this.totalIters() / 200)); },
+        onXScroll(e) {
+            // Read the slider's value directly (x-model may not have applied
+            // yet depending on listener order) — clamp + re-render.
+            const v = Number((e && e.target ? e.target.value : this.xStart) || 0);
+            this.xStart = Math.max(0, Math.min(v, this.xScrollMax()));
+            this.renderAll();
+        },
+        // Label for the scrollbar: "iters A–B of N" in actual iter numbers.
+        xScrollLabel() {
+            const all = this.iters || [];
+            const n = all.length;
+            if (!n) return "";
+            const s = this._winStart(n), c = this._winCount(n);
+            const a = all[s] ? all[s].iter : "?";
+            const b = all[Math.min(n - 1, s + c - 1)] ? all[Math.min(n - 1, s + c - 1)].iter : "?";
+            return "iters " + a + "–" + b + " / " + n;
+        },
         errorCodes(h) { return Object.entries(h.error_codes || {}); },
         selectedToolSeries() {
             const h = (this.series.tool_histogram || []).find(h => h.name === this.selectedTool);
@@ -213,6 +270,13 @@ function traceApp() {
 
         selectIter(it) {
             this.selectedIter = it;
+            // Pan the X window to include the selected iter so chart clicks
+            // on off-screen iters bring them into view.
+            const idx = (this.iters || []).findIndex(x => x.iter === it);
+            if (idx >= 0 && (idx < this._winStart(this.iters.length) || idx >= this._winStart(this.iters.length) + this.xCount)) {
+                const maxStart = this.xScrollMax();
+                this.xStart = Math.max(0, Math.min(idx - Math.floor(this.xCount / 2), maxStart));
+            }
             this.$nextTick(() => {
                 // The conversation view groups iters into turn cards, so the
                 // exact `iter-<it>` id may not exist (the card is keyed by its
@@ -438,7 +502,9 @@ function traceApp() {
             this._hoverAttached = true;
             const cfgs = [
                 { ref: "ctxCanvas", pad: { l: 56, r: 12 }, key: "context",
-                  label: it => `${this.fmtNum(it.real || it.actual)} real · ${this.fmtNum(it.total_est)} est tok${it.drift_ratio ? " · drift ×" + it.drift_ratio : ""}` },
+                  label: it => `${this.fmtNum(it.actual)} actual · ${this.fmtNum(it.total_est)} est tok${it.drift_ratio ? " · drift ×" + it.drift_ratio : ""}` },
+                { ref: "attrCanvas", pad: { l: 56, r: 12 }, key: "context_attribution",
+                  label: it => `${this.fmtNum(it.total)} request · ${(it.delta >= 0 ? "+" : "") + this.fmtNum(it.delta)} · ${this.attributionLabel(it.growth_source)}` },
                 { ref: "driftCanvas", pad: { l: 56, r: 12 }, key: "drift",
                   label: it => `${it.drift_pct}% drift` },
                 { ref: "tokCanvas", pad: { l: 56, r: 12 }, key: "tokens",
@@ -455,14 +521,25 @@ function traceApp() {
                 });
                 cv.addEventListener("click", (e) => {
                     const idx = this._hoverIdxAt(e, cv); if (idx == null) return;
-                    const s = this.series[c.key] || []; if (s[idx]) this.selectIter(s[idx].iter);
+                    const s = this._view(this.series[c.key] || []); if (s[idx]) this.selectIter(s[idx].iter);
+                });
+            }
+            // Read-state map uses a 2D (row + col) hover instead of the x-only
+            // line-chart hover: the popup shows the path under the cursor and,
+            // when the cursor is on a cell, the iter + read/redundant state.
+            const rc = this.$refs.readCanvas;
+            if (rc && !rc._readHoverAttached) {
+                rc._readHoverAttached = true;
+                rc.addEventListener("mousemove", (e) => this._onReadHover(e, rc));
+                rc.addEventListener("mouseleave", () => {
+                    if (this.hoverRef === "readCanvas") { this.hoverRef = null; this.readHover = null; this.renderAll(); }
                 });
             }
         },
         _hoverIdxAt(e, cv) {
             const c = cv._cfg; const rect = cv.getBoundingClientRect();
             const x = e.clientX - rect.left;
-            const s = this.series[c.key] || []; const n = s.length; if (!n) return null;
+            const s = this._view(this.series[c.key] || []); const n = s.length; if (!n) return null;
             const w = cv.clientWidth || cv.width;
             const plotL = c.pad.l, plotR = w - c.pad.r;
             if (x < plotL || x > plotR) return null;
@@ -494,6 +571,7 @@ function traceApp() {
         // ---- renderers -------------------------------------------------
         renderAll() {
             this.renderContext();
+            this.renderAttribution();
             this.renderHeatStrip();
             this.renderDrift();
             this.renderReads();
@@ -504,39 +582,107 @@ function traceApp() {
             this.renderTool();
         },
 
+        renderAttribution() {
+            const s = this._setupCanvas("attrCanvas"); if (!s) return;
+            const { ctx, w, h } = s; const t = this._theme();
+            ctx.clearRect(0, 0, w, h);
+            this._curRef = "attrCanvas";
+            const dataAll = this.series.context_attribution || [];
+            const data = this._view(dataAll);
+            if (!data.length) { this._empty(ctx, w, h, "no request attribution data"); return; }
+            const keys = ["system", "user", "assistant", "tool_calls", "tool_results", "files_images", "other", "tool_schemas"];
+            const pad = { l: 56, r: 12, t: 38, b: 20 };
+            const n = data.length;
+            const max = Math.max(1, ...dataAll.map(d => d.total || keys.reduce((sum, key) => sum + (d[key] || 0), 0))) * 1.08;
+            const plotH = h - pad.t - pad.b;
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: data.map(d => d.iter), unit: "tokens" });
+            const slotW = (w - pad.l - pad.r) / Math.max(1, n);
+            const barW = Math.max(1, Math.min(18, slotW * 0.8));
+            data.forEach((point, i) => {
+                const x = this._iterX(i, n, pad, w) - barW / 2;
+                let yBottom = h - pad.b;
+                for (const key of keys) {
+                    const value = point[key] || 0;
+                    const height = value / max * plotH;
+                    if (height > 0) {
+                        ctx.fillStyle = PALETTE.attribution[key];
+                        ctx.fillRect(x, yBottom - height, barW, height);
+                        yBottom -= height;
+                    }
+                }
+                if ((point.delta || 0) > 0) {
+                    const top = h - pad.b - ((point.total || 0) / max * plotH);
+                    ctx.fillStyle = point.delta > max * 0.1 ? PALETTE.err : "rgba(220,160,60,0.85)";
+                    ctx.beginPath(); ctx.moveTo(x + barW / 2, Math.max(pad.t + 2, top - 7));
+                    ctx.lineTo(x + barW / 2 - 3, Math.max(pad.t + 8, top - 1));
+                    ctx.lineTo(x + barW / 2 + 3, Math.max(pad.t + 8, top - 1));
+                    ctx.closePath(); ctx.fill();
+                }
+            });
+            this._runMarks(ctx, w, h, pad, data);
+            ctx.font = "9px " + (getComputedStyle(document.body).fontFamily);
+            ctx.textAlign = "left"; ctx.textBaseline = "top";
+            let lx = pad.l + 2, ly = 3;
+            for (const key of keys) {
+                const label = this.attributionLabel(key);
+                const width = ctx.measureText(label).width + 17;
+                if (lx + width > w - pad.r) { lx = pad.l + 2; ly += 13; }
+                ctx.fillStyle = PALETTE.attribution[key]; ctx.fillRect(lx, ly + 2, 7, 7);
+                ctx.fillStyle = t.dim; ctx.fillText(label, lx + 10, ly);
+                lx += width;
+            }
+            if (this.hoverRef === "attrCanvas" && this.hoverIdx != null) {
+                const point = data[this.hoverIdx];
+                this._drawHover(ctx, w, h, pad, n, this.hoverIdx,
+                    this.fmtNum(point.total) + " request · " + (point.delta >= 0 ? "+" : "") + this.fmtNum(point.delta) + " · " + this.attributionLabel(point.growth_source));
+            }
+            this._selectedMark(ctx, w, h, pad, n, data);
+        },
+
         renderContext() {
             const s = this._setupCanvas("ctxCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             const pad = { l: 56, r: 12, t: 14, b: 20 };
             ctx.clearRect(0, 0, w, h);
             this._curRef = "ctxCanvas";
-            const ctxData = this.series.context || [];
+            const ctxAll = this.series.context || [];
+            const ctxData = this._view(ctxAll);
             if (!ctxData.length) { this._empty(ctx, w, h, "no context data"); return; }
             const limit = this.summary ? this.summary.context_limit : 0;
-            // `real` is the representative real-prompt fill (drift-corrected
-            // estimate, floored at the provider's reported count). `total_est`
-            // is the raw cl100k estimate — the gap between them is the
-            // tokenizer drift that, uncorrected, causes the "prompt too long"
-            // 400 the old `actual` (Ollama cached delta) hid.
-            const all = ctxData.flatMap(d => [d.real || d.actual, d.total_est]).concat(limit || 0);
-            const max = Math.max(1, ...all) * 1.08;
+            // The solid line is the provider's *reported* prompt size
+            // (`actual`) — the ground truth, which can never exceed the model's
+            // context window. The old code plotted the drift-corrected
+            // `real_est` (cl100k × effective_drift_ratio, ×2.5 for Ollama) as
+            // "real", which is a *conservative compaction guardrail*, not a
+            // measurement: whenever the cl100k estimate overshot the
+            // drift-corrected ceiling (emergency compaction territory) it
+            // extrapolated to ~2× the raw window — an impossible "real prompt
+            // size" that read as "reporting double the max context size."
+            // `actual` for frontier providers is the true full prompt; for
+            // Ollama it is the non-cached prompt delta (near-zero in a warm
+            // loop = cache hit), shown honestly here. The drift-corrected
+            // estimate is still surfaced in the hover tooltip + the dedicated
+            // drift chart. `total_est` is the raw cl100k estimate.
+            // y-scale is from the FULL series so it stays stable as you pan.
+            const maxAll = ctxAll.flatMap(d => [d.actual, d.total_est]).concat(limit || 0);
+            const max = Math.max(1, ...maxAll) * 1.08;
             this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: ctxData.map(d => d.iter), unit: "tokens" });
 
             const n = ctxData.length;
             const plotH = h - pad.t - pad.b;
 
-            // real (solid) + total_est (dashed)
+            // actual (solid, provider-reported) + total_est (dashed, cl100k)
             const line = (key, color, dash) => {
                 ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.setLineDash(dash || []);
                 ctx.beginPath();
                 for (let i = 0; i < n; i++) {
                     const x = this._iterX(i, n, pad, w);
-                    const y = pad.t + plotH - (ctxData[i][key] / max) * plotH;
+                    const y = pad.t + plotH - ((ctxData[i][key] || 0) / max) * plotH;
                     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 }
                 ctx.stroke(); ctx.setLineDash([]);
             };
-            line("real", PALETTE.actual, []);
+            line("actual", PALETTE.actual, []);
             line("total_est", PALETTE.est, [4, 3]);
 
             // context_limit reference — draw on-chart, or an off-chart label
@@ -560,7 +706,7 @@ function traceApp() {
             // legend
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textAlign = "left"; ctx.textBaseline = "top";
-            ctx.fillStyle = PALETTE.actual; ctx.fillText("● real est", w - pad.r - 150, 4);
+            ctx.fillStyle = PALETTE.actual; ctx.fillText("● actual (provider)", w - pad.r - 168, 4);
             ctx.fillStyle = PALETTE.est; ctx.fillText("┄ cl100k est", w - pad.r - 80, 4);
 
             // hover + selected
@@ -568,7 +714,8 @@ function traceApp() {
                 const it = ctxData[this.hoverIdx];
                 const dr = it.drift_ratio ? (" · drift ×" + it.drift_ratio) : "";
                 this._drawHover(ctx, w, h, pad, n, this.hoverIdx,
-                    this.fmtNum(it.real || it.actual) + " real · " + this.fmtNum(it.total_est) + " est" + dr);
+                    this.fmtNum(it.actual) + " actual · " + this.fmtNum(it.total_est) + " est · "
+                    + this.fmtNum(it.real_est) + " real_est" + dr);
             }
             this._selectedMark(ctx, w, h, pad, n, ctxData);
         },
@@ -578,13 +725,16 @@ function traceApp() {
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
             const snap = this.snapshot || {};
-            const grid = snap.grid || [];
             const meta = snap.meta || {};
             const layers = meta.layers || [];
             const labels = meta.labels || {};
-            const xs = snap.xs || [];
-            const driftStrip = snap.drift_strip || [];
-            const compCols = snap.compaction_cols || [];
+            const xsAll = snap.xs || [];
+            const ws = this._winStart(xsAll.length), cnt = this._winCount(xsAll.length);
+            const xs = xsAll.slice(ws, ws + cnt);
+            const gridAll = snap.grid || [];
+            const grid = gridAll.map(row => (row || []).slice(ws, ws + cnt));
+            const driftStrip = (snap.drift_strip || []).slice(ws, ws + cnt);
+            const compCols = (snap.compaction_cols || []).map(ci => ci - ws).filter(ci => ci >= 0 && ci < cnt);
             if (!grid.length || !layers.length) { this._empty(ctx, w, h, "no layer data"); return; }
 
             const driftH = 14, gap = 3;
@@ -669,18 +819,22 @@ function traceApp() {
             const pad = { l: 56, r: 12, t: 14, b: 20 };
             ctx.clearRect(0, 0, w, h);
             this._curRef = "driftCanvas";
-            const drift = this.series.drift || [];
+            const driftAll = this.series.drift || [];
+            const drift = this._view(driftAll);
             if (!drift.length) { this._empty(ctx, w, h, "no drift data"); return; }
             const n = drift.length;
             const plotH = h - pad.t - pad.b;
 
-            // raw values
+            // raw values (window); clamp p99 from the FULL series so the
+            // ±warn band + y-scale stay stable as you pan.
             const raw = drift.map(d => d.drift_pct);
-            const absSorted = raw.map(Math.abs).sort((a, b) => a - b);
-            const p99 = absSorted[Math.min(absSorted.length - 1, Math.floor(absSorted.length * 0.99))];
+            const absAll = driftAll.map(d => Math.abs(d.drift_pct)).sort((a, b) => a - b);
+            const p99 = absAll[Math.min(absAll.length - 1, Math.floor(absAll.length * 0.99))];
             // Clamp the linear axis so the ±15% warn band stays visible; values
-            // beyond the clamp get an off-chart cap triangle. (drift_pct blows up
-            // when prompt_tokens_actual is small, so a few iters can reach ±2000%.)
+            // beyond the clamp get an off-chart cap triangle. (drift_pct is now
+            // gated to reliable full-prompt readings — Ollama's near-zero cached
+            // delta is zeroed instead of producing ±2000% spikes — but a cold
+            // cache can still show a large real divergence, so keep the clamp.)
             const CLAMP = Math.min(200, Math.max(15, p99 || 15));
             const useLog = this.driftLog;
             // y transform: linear within ±CLAMP (capped), or signed-log
@@ -769,11 +923,15 @@ function traceApp() {
         _compactionMarks(ctx, w, h, pad, n) {
             const comps = this.series.compaction_timeline || [];
             if (!comps.length || !n) return;
+            const all = this.series.context || [];
+            const start = this._winStart(all.length);
             ctx.fillStyle = PALETTE.compaction;
             for (const c of comps) {
-                const idx = (this.series.context || []).findIndex(d => d.iter === c.iter);
+                const idx = all.findIndex(d => d.iter === c.iter);
                 if (idx < 0) continue;
-                const x = this._iterX(idx, n, pad, w);
+                const local = idx - start;   // window-local index
+                if (local < 0 || local >= n) continue;
+                const x = this._iterX(local, n, pad, w);
                 ctx.fillRect(x - 1, pad.t, 2, h - pad.t - pad.b);
             }
         },
@@ -782,7 +940,9 @@ function traceApp() {
             const s = this._setupCanvas("readCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
-            const iters = this.iters || [];
+            const itersAll = this.iters || [];
+            const start = this._winStart(itersAll.length);
+            const iters = this._view(itersAll);
             const n = iters.length;
             // Only genuine read tools, keyed by tool + path (a path can be read
             // by more than one tool). Writes carry paths too — exclude them.
@@ -794,7 +954,10 @@ function traceApp() {
                 const k = tool.name + "|" + tool.path;
                 if (!seen[k]) { seen[k] = 1; rows.push({ name: tool.name, path: tool.path }); }
             }
-            const pad = { l: 170, r: 12, t: 10, b: 18 };
+            // No Y-axis filename labels: the concern is *duplicate* reads (red
+            // cells), which the grid makes visible without per-row text. The
+            // full path + read/redundant state pops up on hover (see _onReadHover).
+            const pad = { l: 12, r: 12, t: 10, b: 18 };
             const plotH = h - pad.t - pad.b;
             const cellW = (w - pad.l - pad.r) / Math.max(1, n);
             // cap rows to what fits; floor rowH at 6px; note overflow
@@ -810,14 +973,15 @@ function traceApp() {
                 const k = tool.name + "|" + tool.path;
                 (byRow[k] = byRow[k] || {})[tool.iter] = tool;
             }
+            // publish geometry for the hover handler (row/col hit testing)
+            const cv = this.$refs.readCanvas;
+            if (cv) cv._geom = { pad, cellW, rowH, n, rows: shownRows, iters, byRow, redundant, w, h };
+
             ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
             ctx.textBaseline = "middle";
             shownRows.forEach((r, ri) => {
                 const y = pad.t + ri * rowH;
                 const k = r.name + "|" + r.path;
-                const lbl = r.path.length > 26 ? "…" + r.path.slice(-25) : r.path;
-                ctx.fillStyle = t.dim; ctx.textAlign = "right";
-                ctx.fillText((r.name + " " + lbl), pad.l - 6, y + rowH / 2);
                 const cells = byRow[k] || {};
                 for (let i = 0; i < n; i++) {
                     const it = iters[i].iter;
@@ -832,8 +996,8 @@ function traceApp() {
                 }
             });
             if (overflow > 0) {
-                ctx.fillStyle = t.dim; ctx.textAlign = "right"; ctx.textBaseline = "bottom";
-                ctx.fillText("+" + overflow + " more paths", pad.l - 6, h - pad.b - 2);
+                ctx.fillStyle = t.dim; ctx.textAlign = "right"; ctx.textBaseline = "top";
+                ctx.fillText("+" + overflow + " more paths (hover the grid to identify a row)", w - pad.r - 2, 2);
             }
             // x labels
             ctx.fillStyle = t.dim; ctx.textAlign = "center"; ctx.textBaseline = "top";
@@ -849,18 +1013,60 @@ function traceApp() {
             ctx.fillStyle = t.dim; ctx.fillText("read", 20, 13);
             ctx.fillStyle = PALETTE.redundant; ctx.fillRect(54, 8, 9, 9);
             ctx.fillStyle = t.dim; ctx.fillText("redundant re-read", 66, 13);
+
+            // hover tooltip (filename popup on mouse-over)
+            if (this.hoverRef === "readCanvas" && this.readHover && this.readHover.label) {
+                const { x, y, label } = this.readHover;
+                ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+                const tw = ctx.measureText(label).width + 10;
+                let cx = x + 10, cy = y - 18;
+                if (cx + tw > w - pad.r) cx = x - tw - 10;
+                if (cx < pad.l) cx = pad.l;
+                if (cy < pad.t) cy = y + 14;
+                ctx.fillStyle = t.bg; ctx.strokeStyle = t.border;
+                ctx.fillRect(cx, cy, tw, 16); ctx.strokeRect(cx, cy, tw, 16);
+                ctx.fillStyle = t.text; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+                ctx.fillText(label, cx + 5, cy + 8);
+            }
+        },
+
+        _onReadHover(e, cv) {
+            const g = cv._geom; if (!g) return;
+            const rect = cv.getBoundingClientRect();
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            const plotR = g.w - g.pad.r, plotB = g.h - g.pad.b;
+            if (y < g.pad.t || y > plotB || x < g.pad.l || x > plotR) {
+                if (this.hoverRef === "readCanvas") { this.readHover = null; this.hoverRef = null; this.renderAll(); }
+                return;
+            }
+            const col = Math.max(0, Math.min(g.n - 1, Math.floor((x - g.pad.l) / Math.max(0.6, g.cellW))));
+            const row = Math.floor((y - g.pad.t) / g.rowH);
+            if (row < 0 || row >= g.rows.length) {
+                if (this.hoverRef === "readCanvas") { this.readHover = null; this.hoverRef = null; this.renderAll(); }
+                return;
+            }
+            const r = g.rows[row];
+            const it = g.iters[col] ? g.iters[col].iter : null;
+            const isRed = it != null && g.redundant.has(it + "|" + r.path);
+            const cell = it != null ? (g.byRow[r.name + "|" + r.path] || {})[it] : undefined;
+            let label = r.name + " " + r.path;
+            if (it != null) label += " · iter " + it + (isRed ? " · redundant re-read" : (cell ? " · read" : ""));
+            this.hoverRef = "readCanvas";
+            this.readHover = { x, y, label };
+            this.renderAll();
         },
 
         renderSub() {
             const s = this._setupCanvas("subCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
-            const sa = this.series.subagent_timeline || [];
+            const saAll = this.series.subagent_timeline || [];
+            const sa = this._view(saAll);
             const n = sa.length;
-            const anyActive = sa.some(d => d.active > 0 || d.stuck || d.stall);
+            const anyActive = saAll.some(d => d.active > 0 || d.stuck || d.stall);
             if (!n || !anyActive) { this._empty(ctx, w, h, "no subagents spawned this run"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 18 };
-            const maxActive = Math.max(1, ...sa.map(d => d.active));
+            const maxActive = Math.max(1, ...saAll.map(d => d.active));
             const plotH = h - pad.t - pad.b;
             this._drawAxes(ctx, w, h, pad, { min: 0, max: maxActive }, { xs: sa.map(d => d.iter), unit: "active" });
             ctx.fillStyle = PALETTE.subBar;
@@ -895,14 +1101,16 @@ function traceApp() {
             const s = this._setupCanvas("memCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
-            const mem = this.series.memory_series || [];
+            const memAll = this.series.memory_series || [];
+            const mem = this._view(memAll);
             const n = mem.length;
             if (!n) { this._empty(ctx, w, h, "no memory data"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 18 };
             const counts = mem.map(d => Math.max(d.task_memory_count, d.scratchpad_count));
-            // include by_status stack peaks in the y max so the stack doesn't overflow
-            const statusKeys = this._statusKeys(mem);
-            const stackPeaks = mem.map(d => statusKeys.reduce((a, k) => a + ((d.by_status || {})[k] || 0), 0));
+            // include by_status stack peaks in the y max so the stack doesn't overflow;
+            // status keys from the FULL run so the legend lists every status seen.
+            const statusKeys = this._statusKeys(memAll);
+            const stackPeaks = memAll.map(d => statusKeys.reduce((a, k) => a + ((d.by_status || {})[k] || 0), 0));
             const max = Math.max(1, ...counts, ...stackPeaks) * 1.1;
             const plotH = h - pad.t - pad.b;
             this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: mem.map(d => d.iter), unit: "count" });
@@ -973,11 +1181,12 @@ function traceApp() {
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
             this._curRef = "tokCanvas";
-            const tk = this.series.tokens || [];
+            const tkAll = this.series.tokens || [];
+            const tk = this._view(tkAll);
             const n = tk.length;
             if (!n) { this._empty(ctx, w, h, "no token data"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 20 };
-            const max = Math.max(1, ...tk.map(d => Math.max(d.in, d.out, d.cached, d.reasoning))) * 1.1;
+            const max = Math.max(1, ...tkAll.map(d => Math.max(d.in, d.out, d.cached, d.reasoning))) * 1.1;
             const plotH = h - pad.t - pad.b;
             this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: tk.map(d => d.iter), unit: "tokens" });
             const line = (key, color) => {
@@ -1014,11 +1223,12 @@ function traceApp() {
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
             this._curRef = "latCanvas";
-            const lat = this.series.latency || [];
+            const latAll = this.series.latency || [];
+            const lat = this._view(latAll);
             const n = lat.length;
             if (!n) { this._empty(ctx, w, h, "no latency data"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 18 };
-            const max = Math.max(1, ...lat.map(d => d.wall_ms)) * 1.1;
+            const max = Math.max(1, ...latAll.map(d => d.wall_ms)) * 1.1;
             const plotH = h - pad.t - pad.b;
             this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: lat.map(d => d.iter), unit: "wall ms" });
             const barW = Math.max(2, (w - pad.l - pad.r) / n - 1);
@@ -1039,10 +1249,11 @@ function traceApp() {
             const s = this._setupCanvas("toolCanvas"); if (!s) return;
             const { ctx, w, h } = s; const t = this._theme();
             ctx.clearRect(0, 0, w, h);
-            const ts = this.selectedToolSeries();
+            const tsAll = this.selectedToolSeries();
+            const ts = this._view(tsAll);
             if (!ts.length) { this._empty(ctx, w, h, this.selectedTool ? "no calls" : "select a tool"); return; }
             const pad = { l: 56, r: 12, t: 14, b: 18 };
-            const max = Math.max(1, ...ts.map(d => d.latency_ms)) * 1.1;
+            const max = Math.max(1, ...tsAll.map(d => d.latency_ms)) * 1.1;
             const n = ts.length;
             const plotH = h - pad.t - pad.b;
             this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: ts.map(d => d.iter), unit: "ms" });

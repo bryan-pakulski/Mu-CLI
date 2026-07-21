@@ -101,9 +101,10 @@ def test_layers_include_l1_and_l1b(session):
 
 
 def test_layers_include_all_seven_slots(session):
-    """L0 (system prompt) added; L4 removed from system prompt; total is now 7 layers."""
+    """L0 (system prompt) added; L4 removed from system prompt; L1C
+    (workspace tree & diffs) added; total is now 8 layers."""
     layers = collect_context_layers(session)
-    expected = {"L0", "L1", "L1B", "L2", "L3", "L4B", "L5"}
+    expected = {"L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5"}
     assert {layer["layer"] for layer in layers} == expected
 
 

@@ -88,11 +88,20 @@ def _register_memory_snapshot_hook() -> None:
             # Keep the Memory Map's headline total on the exact same
             # pre-request estimate that the trace records for this iteration.
             # Layer estimates omit message framing and transient prompt text.
-            from mu.agent.loop_body import _estimate_messages_tokens
+            # Include tool schemas — the trace's request_token_estimate adds
+            # `_estimate_tools_tokens(tools)`, so the Memory Map must too or
+            # its headline undercounts the trace by the whole tool-schema
+            # cost (thousands of tokens in agentic mode).
+            from mu.agent.loop_body import (
+                _estimate_messages_tokens,
+                _estimate_tools_tokens,
+            )
             from utils.token_estimator import estimate_tokens
 
-            request_tokens = estimate_tokens(ctx.system_prompt or "") + _estimate_messages_tokens(
-                ctx.messages or []
+            request_tokens = (
+                estimate_tokens(ctx.system_prompt or "")
+                + _estimate_messages_tokens(ctx.messages or [])
+                + _estimate_tools_tokens(ctx.tools or [])
             )
             ctx.session._memory_map_request_token_estimate = int(request_tokens)
             snap = build_memory_snapshot(

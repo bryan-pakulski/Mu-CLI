@@ -213,8 +213,21 @@ class FolderContext:
             return 0
 
     def _scan_and_snapshot(self, folder_path):
-        """Fast scan: only stores file paths, not content. Content is lazy loaded.
-        Respects max_files_to_load cap to prevent unbounded memory growth.
+        """Scan and snapshot file CONTENT at add time.
+
+        Each tracked file's initial content is materialized here so that
+        ``get_context_diff_xml`` can compare the true initial state against
+        the current (possibly mutated) state. The previous lazy
+        placeholder (``None``) design broke diff detection once
+        ``get_initial_context_xml`` switched to tree-only: nothing
+        materialized the snapshots, so the diff loaded the *current*
+        post-mutation content as the "original" and never detected
+        changes.
+
+        ``None`` now means "tracked but content unavailable" (file too
+        large, or a new file added later via ``track_file``) — the diff
+        treats such entries as new files. Respects ``max_files_to_load``
+        and ``max_file_size_bytes`` to bound memory.
         """
         files_tracked = len(self.initial_snapshots)
         for root, dirs, files in os.walk(folder_path):
@@ -233,8 +246,10 @@ class FolderContext:
 
                 # Only track if not already tracked
                 if full_path not in self.initial_snapshots and self._is_text_file(full_path):
-                    # Store None as placeholder - content loaded lazily on demand
-                    self.initial_snapshots[full_path] = None
+                    # Materialize the initial content now so diffs can
+                    # compare against it later. None means "unavailable"
+                    # (too large); the diff skips those by size anyway.
+                    self.initial_snapshots[full_path] = self._load_file_content(full_path)
                     files_tracked += 1
 
     def _load_file_content(self, filepath):
@@ -278,10 +293,47 @@ class FolderContext:
 
         return "\n".join(tree)
 
-    def get_initial_context_xml(self):
-        """Returns cached content of files at the time they were added.
-        Uses lazy loading with size limits to prevent OOM on large workspaces.
+    def get_initial_context_xml(self, *, tree_only: bool = True):
+        """Returns the initial workspace context as XML.
+
+        When ``tree_only=True`` (default, fix for L0 system-prompt bloat),
+        emits only the file tree — paths under the tracked folders, no
+        file contents. The agent has ``read_file``/``get_chunk`` for
+        content on demand; dumping up to 50 full file bodies into the
+        system prompt every iteration was the root cause of the 787k
+        L0 bloat in long-horizon runs.
+
+        When ``tree_only=False``, preserves the legacy behavior of
+        embedding cached file contents inside ``<file path=...>`` tags.
+        Kept for callers/tests that explicitly want contents.
         """
+        if not self.initial_snapshots and tree_only:
+            # Tree-only view still needs the folder list; fall through
+            # to get_tree_map when there are folders but no snapshots.
+            if self.folders:
+                tree = self.get_tree_map()
+                return (
+                    "<initial_folder_context>\n"
+                    "Tracked files in the workspace (tree only — use "
+                    "read_file/get_chunk to inspect contents):\n"
+                    + tree
+                    + "\n</initial_folder_context>"
+                ) if tree else ""
+            return ""
+
+        if tree_only:
+            tree = self.get_tree_map()
+            if not tree:
+                return ""
+            return (
+                "<initial_folder_context>\n"
+                "Tracked files in the workspace (tree only — use "
+                "read_file/get_chunk to inspect contents):\n"
+                + tree
+                + "\n</initial_folder_context>"
+            )
+
+        # Legacy path: embed full file contents (kept for opt-in callers).
         if not self.initial_snapshots:
             return ""
 
@@ -310,10 +362,29 @@ class FolderContext:
             + "\n</initial_folder_context>"
         )
 
-    def get_context_diff_xml(self):
-        """Refreshes and returns the context string with diffs."""
+    def get_context_diff_xml(self, *, max_chars: int | None = None):
+        """Refreshes and returns the context string with per-file diffs.
+
+        NOTE: this is a standalone utility — it is **no longer injected
+        into the system prompt**. Per-file diffs were the original source
+        of unbounded L0 system-prompt growth (~787k tokens in long-horizon
+        runs), and budgeting them with drop-oldest eviction risked silently
+        discarding relevant changes. L1C (`_build_folder_context_block`) is
+        now tree-only; the model reads file contents on demand. This method
+        is kept for ad-hoc/debug use (e.g. a future `/diff` command) and is
+        exercised by its own unit tests.
+
+        ``max_chars`` caps the total diff XML size (default 8192). When
+        the cumulative diff exceeds the budget, the oldest entries are
+        dropped first (drop-oldest eviction) so the most recent changes
+        stay visible.
+        """
         if not self.folders:
             return ""
+
+        # Default budget; can be overridden by caller or config.
+        if max_chars is None:
+            max_chars = 8192
 
         updates = []
         current_files = set()
@@ -346,12 +417,23 @@ class FolderContext:
                     except Exception:
                         continue
 
-                    # Compare with snapshot (lazy load if needed)
+                    # Compare with the snapshotted initial content. A None
+                    # snapshot means the file was tracked without its
+                    # content being captured — either a new file added
+                    # later via track_file/sync_with_filesystem, or a file
+                    # too large to snapshot. Treat both as a new file
+                    # (show current content) rather than loading the
+                    # current content as the "original" (which would hide
+                    # all changes — the bug that left L1C diffs empty).
                     original = self.initial_snapshots.get(full_path)
-                    if original is None:
-                        original = self._load_file_content(full_path)
-                        if original is None:
-                            continue  # Skip if can't load
+                    if full_path not in self.initial_snapshots or original is None:
+                        # New / unsnapshotted file → emit current content.
+                        updates.append(
+                            f"""
+<new_file path='{full_path}'>\n{current_content}\n</new_file>
+"""
+                        )
+                        continue
 
                     if original != current_content:
                         diff = difflib.unified_diff(
@@ -382,13 +464,6 @@ class FolderContext:
  └──────────────────────────────────────────────────────────────────
 """
                             )
-                    elif full_path not in self.initial_snapshots:
-                        # New file found after initial snapshot
-                        updates.append(
-                            f"""
-<new_file path='{full_path}'>\n{current_content}\n</new_file>
-"""
-                        )
                     else:  # No change
                         pass
         # 2. Detect deletions
@@ -401,11 +476,35 @@ class FolderContext:
         if not updates:
             return ""
 
-        return (
-            f"<folder_context_diffs>\nThe following changes have been detected in the workspace relative to the initial context:\n"
-            + "\n".join(updates)
-            + "\n</folder_context_diffs>"
+        header = (
+            "<folder_context_diffs>\nThe following changes have been "
+            "detected in the workspace relative to the initial context:\n"
         )
+        footer = "\n</folder_context_diffs>"
+
+        # Enforce the char budget with drop-oldest eviction: the diff is
+        # rebuilt every turn/iteration from the full workspace walk, and in
+        # long-horizon runs where the agent writes many files the cumulative
+        # diff grew unbounded (the root cause of the ~787k L0 system-prompt
+        # bloat). Drop entries from the FRONT of `updates` (oldest in
+        # path-walk order) until the remainder fits, so the most recent
+        # changes stay visible.
+        budget_for_body = max(0, max_chars - len(header) - len(footer))
+        body = "\n".join(updates)
+        dropped = 0
+        if len(body) > budget_for_body and len(updates) > 1:
+            while updates and len("\n".join(updates)) > budget_for_body:
+                updates.pop(0)
+                dropped += 1
+            body = "\n".join(updates)
+        if dropped:
+            marker = (
+                f"...[diffs truncated: {dropped} older change(s) dropped "
+                f"to fit {max_chars}-char budget]\n"
+            )
+            body = marker + body
+
+        return header + body + footer
 
     def get_file_list(self):
         return list(self.initial_snapshots.keys())

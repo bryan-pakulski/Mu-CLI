@@ -697,23 +697,37 @@ def print_splash(session):
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
 """
-    # Total context (sum of all 7 layers) vs. the global cap. Using the
-    # total instead of just history tokens means the warning fires when
-    # heavy workspace files + skills + tool activity push us toward the
-    # cap, not only when conversation history gets long.
+    # Total context (sum of all layers) vs. the compactor's effective
+    # ceiling (drift_corrected_context_limit), not the raw provider window.
+    # The compactor fires on the effective ceiling — the raw
+    # context_token_limit divided by the provider's safety factor (2.5 for
+    # Ollama) and any learned cl100k→real drift — so the warning must use the
+    # same ceiling or it can read "60% full" while emergency compaction is
+    # already firing. No-op for providers with no safety factor (OpenAI/Gemini).
     from utils.runtime_metrics import estimate_active_context_tokens
 
-    context_limit = int(session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT) or _DEFAULT_CONTEXT_TOKEN_LIMIT)
+    raw_limit = int(session.variables.get("context_token_limit", _DEFAULT_CONTEXT_TOKEN_LIMIT) or _DEFAULT_CONTEXT_TOKEN_LIMIT)
+    try:
+        from mu.session.budgets import drift_corrected_context_limit
+
+        context_limit = max(1, int(drift_corrected_context_limit(session)))
+    except Exception:  # noqa: BLE001
+        context_limit = raw_limit
     trim_threshold = float(session.variables.get("context_trim_threshold", 0.85) or 0.85)
     trim_threshold = max(0.10, min(trim_threshold, 1.0))
     context_tokens = int(estimate_active_context_tokens(session) or 0)
     threshold_tokens = int(context_limit * trim_threshold)
+    cap_note = (
+        f" [dim](effective cap ÷ safety; raw {raw_limit:,})[/dim]"
+        if context_limit < raw_limit
+        else ""
+    )
     if context_tokens >= threshold_tokens:
         info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens  [bold yellow]⚠[/bold yellow] [dim](trim threshold: {int(trim_threshold * 100)}%)[/dim]"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens  [bold yellow]⚠[/bold yellow] [dim](trim threshold: {int(trim_threshold * 100)}%)[/dim]{cap_note}"""
     else:
         info_grid += f"""
-    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens"""
+    [bold magenta]Context:[/bold magenta]   [bold cyan]{context_tokens:,}[/bold cyan] / {context_limit:,} tokens{cap_note}"""
 
     info_grid += "\n    "
 

@@ -14,9 +14,10 @@ import pytest
 
 from mu.agent.loop_body import (
     _estimate_messages_tokens,
+    _estimate_tools_tokens,
     _preflight_context_check,
 )
-from providers.base import Message, MessagePart
+from providers.base import Message, MessagePart, ToolDefinition
 
 
 # --------------------------------------------------------- helpers
@@ -99,6 +100,21 @@ def test_estimate_messages_tokens_tool_args():
 
 def test_estimate_messages_tokens_empty():
     assert _estimate_messages_tokens([]) == 0
+
+
+def test_tool_schemas_are_counted_by_preflight():
+    tools = [ToolDefinition(
+        name="verbose_tool",
+        description="schema " * 5000,
+        parameters={"type": "object", "properties": {}},
+    )]
+    assert _estimate_tools_tokens(tools) > 1000
+
+    session = _stub_session(context_limit=500, response_reserve=100)
+    _preflight_context_check(session, "small", _make_messages(["small"]), tools=tools)
+
+    session.session_manager.roll_history_summary_to_token_budget.assert_called()
+    assert session._last_prompt_cl100k_est > 1000
 
 
 # --------------------------------------------------------- pre-flight check

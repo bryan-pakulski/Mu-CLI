@@ -55,7 +55,7 @@ mucli --trace-analyze ~/.mucli/trace/myrun_run_abc123.jsonl
 ## The dashboard
 
 Open it from the GUI's **tools** dropdown → **Trace Analyzer** (opens
-`/trace` in a new tab), or with `mucli --trace`. It renders twelve sections,
+`/trace` in a new tab), or with `mucli --trace`. It renders thirteen sections,
 all with custom `<canvas>` (no charting library):
 
 1. **Run picker** — list of runs (session / model / mode / iters / status).
@@ -67,24 +67,28 @@ all with custom `<canvas>` (no charting library):
    `prompt_tokens_actual` (the provider's real prompt size) per iteration,
    with a context-limit reference line and compaction markers. Toggle the
    stacked L0–L5 layer breakdown.
-4. **Tokenizer drift** — `drift_pct` per iteration (the headline diagnostic,
+4. **Request context attribution** — stacked system, user, assistant,
+   tool-call, tool-result, file/image, other, and tool-schema token estimates.
+   A ranked table identifies the component and individual message part behind
+   each large request-to-request jump.
+5. **Tokenizer drift** — `drift_pct` per iteration (the headline diagnostic,
    see below). A ±15% warn band is shaded.
-5. **Compaction timeline** — kind, tokens saved, summarizer mode
+6. **Compaction timeline** — kind, tokens saved, summarizer mode
    (`llm` vs `mechanical`), `keep_recent`, budget. Click a row to jump to
    that iteration.
-6. **Tool histogram** — per tool: count, success/error split, average
+7. **Tool histogram** — per tool: count, success/error split, average
    latency, cache-hit rate. Click a tool for its per-iteration latency series.
-7. **Read-state / redundant reads** — a heatmap of read paths × iterations;
+8. **Read-state / redundant reads** — a heatmap of read paths × iterations;
    re-reads of a path with no intervening write are flagged red.
-8. **Nudge timeline + efficacy** — each nudge on the iteration axis by kind,
+9. **Nudge timeline + efficacy** — each nudge on the iteration axis by kind,
    with whether a materially different action (a write, or a novel tool call)
    followed within 3 iterations.
-9. **Subagent timeline** — active children per iteration with stuck/stall
+10. **Subagent timeline** — active children per iteration with stuck/stall
    flags.
-10. **Memory & scratchpad counts** — task-memory and scratchpad counts per
+11. **Memory & scratchpad counts** — task-memory and scratchpad counts per
     iteration.
-11. **Token breakdown** — in / out / cached / reasoning per iteration.
-12. **Conversation view** — iter-aligned message previews (assistant text,
+12. **Token breakdown** — in / out / cached / reasoning per iteration.
+13. **Conversation view** — iter-aligned message previews (assistant text,
     tool calls + args, result previews). Click any iteration in any
     chart/table to scroll here and highlight it.
 
@@ -105,8 +109,10 @@ Line 1 is a header; subsequent lines are events keyed by `type`.
 ### `iter` (one per agent-loop iteration, at the post-response seam)
 ```jsonc
 { "type": "iter", "iter": 0, "max_iter": 1000, "wall_ms": 120,
-  "context": { "l0":…,"l1":…,"l1b":…,"l2":…,"l3":…,"l4b":…,"l5":…,
-               "total_est":…, "prompt_tokens_actual":…, "drift_pct":… },
+  "context": { "l0":…,"l1":…,"l1c":…,"l1b":…,"l2":…,"l3":…,"l4b":…,"l5":…,
+               "total_est":…, "prompt_tokens_actual":…, "prompt_tokens_real_est":…,
+               "drift_ratio":…, "drift_pct":…, "drift_pct_reliable":…,
+               "estimate_source":… },
   "tokens": { "in":…,"out":…,"cached":…,"reasoning":…,"cost_delta":… },
   "has_text": true, "has_tool_call": true,
   "assistant_preview": "…",
@@ -116,17 +122,49 @@ Line 1 is a header; subsequent lines are events keyed by `type`.
   "status": "running" }
 ```
 
+### `request` (one privacy-preserving manifest per provider request)
+
+Records token and byte counts—but not raw prompt content—for the system
+prompt, every message part, and tool schemas. `component_tokens` drives request
+attribution, while hashes make repeated payloads detectable without creating a
+second store of repository content.
+
+```jsonc
+{ "type": "request", "iter": 0, "token_estimate": 42000,
+  "component_tokens": {
+    "system": 8000, "user": 500, "assistant": 2500,
+    "tool_calls": 1000, "tool_results": 25000,
+    "files_images": 0, "other": 0, "tool_schemas": 5000
+  },
+  "messages": [
+    { "index": 4, "role": "tool", "bytes": 100000, "tokens": 25000,
+      "parts": 1, "part_details": [
+        { "index": 0, "type": "tool_result", "tool_name": "bash",
+          "bytes": 100000, "tokens": 25000 }
+      ] }
+  ] }
+```
+
 The headline field is **`context.drift_pct`**:
 
 ```
-drift_pct = (prompt_tokens_actual - total_est) / max(1, prompt_tokens_actual) * 100
+if prompt_tokens_actual is a reliable full-prompt signal (actual*4 >= total_est, or total_est == 0):
+    drift_pct = (prompt_tokens_actual - total_est) / max(1, prompt_tokens_actual) * 100
+else:
+    drift_pct = 0.0     # actual is a cached delta, not a full prompt — see drift_pct_reliable
 ```
 
 `prompt_tokens_actual` is the provider-reported input count. For providers
-that expose cache deltas (notably some Ollama configurations), it can be a
-non-cached delta rather than the full prompt, so compare it with
-`prompt_tokens_real_est` as well. `total_est` is the harness's tiktoken
-`cl100k_base` estimate captured immediately before that exact provider request
+that expose cache deltas (notably Ollama), `prompt_tokens_actual` is the
+non-cached prompt **delta** — near-zero in a warm loop, NOT the prompt size.
+Normalising by that near-zero value used to blow `drift_pct` up to ±2000%;
+it is now gated: when `actual` is a tiny fraction of the estimate the field
+is zeroed and `drift_pct_reliable` is `false` (the UI renders it as
+"drift unknown" rather than "0% drift = perfect estimate"). The
+representative real-prompt size in that case is
+`prompt_tokens_real_est = total_est * drift_ratio` (the drift-corrected
+cl100k estimate). `total_est` is the harness's tiktoken `cl100k_base`
+estimate captured immediately before that exact provider request
 (`estimate_source: "pre_request"`); it does not include the response that was
 archived afterward. On a model whose tokenizer is not `cl100k_base` (e.g.
 glm), this drift is

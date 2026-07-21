@@ -636,6 +636,61 @@ class Session:
 
         return build_workspace_context_files(self)
 
+    def _build_folder_context_block(self) -> str:
+        """LAYER 1C — workspace file tree (paths only).
+
+        Single source for the folder-context layer used by both
+        `inject_hierarchical_context` (the live system prompt) and
+        `collect_context_layers` (the `/memory` + trace accounting).
+        Replaces the old raw-append of folder diffs onto the system-prompt
+        base (L0), which grew unbounded in long-horizon runs and hid from
+        layer accounting.
+
+        Tree-only by design: the model gets the file *map* so it knows what
+        exists and can read files on demand, but per-file change diffs are
+        NOT injected into the system prompt. Diffs were the original L0
+        bloat source (~787k in long-horizon runs), and budgeting them with
+        drop-oldest eviction risked silently discarding relevant changes —
+        so the diffs are dropped entirely rather than trimmed. The file tree
+        is small and stable; `folder_context_max_chars` (default 8192) is a
+        tail-truncation guard for workspaces with thousands of tracked
+        files. Returns ``""`` when no folders are attached.
+        """
+        fc = getattr(self, "folder_context", None)
+        if not fc or not getattr(fc, "folders", None):
+            return ""
+        budget = int(
+            self.variables.get("folder_context_max_chars", 8192) or 8192
+        )
+        if budget <= 0:
+            return ""
+        try:
+            tree = fc.get_initial_context_xml(tree_only=True) or ""
+        except Exception:  # noqa: BLE001
+            tree = ""
+        if not tree:
+            return ""
+        # Tail-truncate the tree to the char budget (path-only trees are
+        # small; this only bites on workspaces with many thousands of
+        # tracked files). Cut on a line boundary when possible so the
+        # closing </initial_folder_context> tag stays well-formed.
+        if len(tree) <= budget:
+            return tree
+        cut = tree.rfind("\n", 0, budget - 64)
+        if cut < 0:
+            cut = max(0, budget - 64)
+        marker = (
+            f"\n...[file tree truncated: {len(tree) - cut} chars dropped "
+            f"to fit {budget}-char budget]\n"
+        )
+        # Preserve the closing tag if the truncation point landed inside
+        # the <initial_folder_context>…</initial_folder_context> block.
+        tail = ""
+        close_tag = "</initial_folder_context>"
+        if close_tag in tree:
+            tail = "\n" + close_tag
+        return tree[:cut] + marker + tail
+
     def _build_skills_block(self, *, announce: bool = False) -> str:
         """LAYER 1B — render the installed skills (from `mu/skills/`,
         `~/.mu/skills/`, and `<workspace>/.mu/skills/`) into a labelled
@@ -734,6 +789,7 @@ class Session:
         *,
         cached_workspace: str | None = None,
         cached_skills: str | None = None,
+        cached_folder_context: str | None = None,
     ) -> str:
         """Layered system-prompt assembly. Body moved to
         `mu/session/context.py:inject_hierarchical_context`.
@@ -741,6 +797,8 @@ class Session:
         ``cached_workspace`` / ``cached_skills`` forward per-turn-cached
         L1 / L1B text so the agent loop can rebuild L2 / L3 fresh every
         iteration without re-reading files from disk each time.
+        ``cached_folder_context`` does the same for L1C (workspace file tree
+        + diffs).
         """
         from mu.session.context import inject_hierarchical_context
 
@@ -749,6 +807,7 @@ class Session:
             system_prompt,
             cached_workspace=cached_workspace,
             cached_skills=cached_skills,
+            cached_folder_context=cached_folder_context,
         )
 
     def queue_resumption_briefing(self, briefing: str) -> None:

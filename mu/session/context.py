@@ -148,6 +148,7 @@ def inject_hierarchical_context(
     *,
     cached_workspace: Optional[str] = None,
     cached_skills: Optional[str] = None,
+    cached_folder_context: Optional[str] = None,
 ) -> str:
     """Compose the full layered system prompt sent to the provider.
 
@@ -163,7 +164,9 @@ def inject_hierarchical_context(
     ``cached_workspace`` / ``cached_skills`` let the caller reuse L1 / L1B
     text built once per turn (those read files from disk and are expensive
     to rebuild every iteration). When omitted (``None``), the layers are
-    rebuilt from session as before. L2 and L3 are always rebuilt fresh from
+    rebuilt from session as before. ``cached_folder_context`` does the same
+    for L1C (workspace file tree + diffs), which is rebuilt per turn and
+    refreshed mid-turn only when files change. L2 and L3 are always rebuilt fresh from
     in-memory state so mid-turn updates (auto-compaction rewriting the
     summary, tools updating feature_state / scratchpad) reach the model
     the same turn — the frozen-at-turn-start bug that caused long-horizon
@@ -225,6 +228,32 @@ def inject_hierarchical_context(
             "LAYER 1 — Workspace context files (user-curated, authoritative):\n"
             f"[budget: {ws_limit} chars | eviction: truncate-after-budget]\n"
             + workspace_files
+        )
+
+    # LAYER 1C — Workspace file tree (paths only). Previously appended raw
+    # to the system-prompt base (L0), where per-file change diffs grew
+    # unbounded in long-horizon runs (~787k L0 bloat) and hid from layer
+    # accounting. Now a tree-only layer (no diffs) bounded by
+    # folder_context_max_chars, so the compactor and the /memory table see
+    # it. The model reads file contents on demand via read_file/get_chunk.
+    # Cached per turn; refreshed mid-turn only on file add/remove.
+    folder_context_block = (
+        cached_folder_context
+        if cached_folder_context is not None
+        else session._build_folder_context_block()
+    )
+    if folder_context_block:
+        fc_limit = max(
+            0,
+            int(
+                session.variables.get("folder_context_max_chars", 8192)
+                or 8192
+            ),
+        )
+        layers.append(
+            "LAYER 1C — Workspace file tree:\n"
+            f"[budget: {fc_limit} chars | tree-only, no diffs]\n"
+            + folder_context_block
         )
 
     skills_block = (

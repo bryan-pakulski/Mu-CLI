@@ -65,6 +65,16 @@
 
     <main class="trace-main" x-show="!loading && summary" style="display:none;">
 
+        <!-- X pan window: charts cap at ~100 iters in view; drag to pan the
+             rest. Hidden when the whole run fits in the window. -->
+        <div class="trace-xscroll" x-show="totalIters() > xCount">
+            <span class="trace-xscroll-label" x-text="xScrollLabel()"></span>
+            <input type="range" class="trace-xscroll-range" x-model.number="xStart"
+                   :min="0" :max="xScrollMax()" :step="xScrollStep()"
+                   @input="onXScroll($event)">
+            <span class="trace-xscroll-hint">drag to pan · click any chart to jump</span>
+        </div>
+
         <!-- 1. Overview cards -->
         <section class="trace-section">
             <h2 class="trace-h2">Overview
@@ -84,6 +94,8 @@
                 <div class="trace-card"><div class="tc-label">cost</div><div class="tc-val" x-text="fmtCost(summary.total_cost)"></div></div>
                 <div class="trace-card"><div class="tc-label">wall time</div><div class="tc-val" x-text="fmtMs(summary.total_wall_ms)"></div></div>
                 <div class="trace-card"><div class="tc-label">peak context</div><div class="tc-val" x-text="fmtNum(summary.peak_context)"></div></div>
+                <div class="trace-card"><div class="tc-label">peak request estimate</div><div class="tc-val" x-text="fmtNum(summary.peak_request_estimate || 0)"></div></div>
+                <div class="trace-card" :class="{'trace-card--warn': (summary.peak_request_delta || 0) > 10000}"><div class="tc-label">largest context jump</div><div class="tc-val" x-text="fmtNum(summary.peak_request_delta || 0)"></div></div>
                 <div class="trace-card" :class="{'trace-card--warn': Math.abs(summary.peak_drift_abs) >= 15}">
                     <div class="tc-label">peak |drift|</div><div class="tc-val" x-text="summary.peak_drift_abs + '%'"></div></div>
                 <div class="trace-card"><div class="tc-label">median drift</div><div class="tc-val" x-text="summary.median_drift + '%'"></div></div>
@@ -103,10 +115,12 @@
 
         <section class="trace-section">
             <h2 class="trace-h2">Context artifact lifecycle <span class="trace-sub">deferred evidence, delivery, and explicit cleanup</span></h2>
-            <table class="trace-table" x-show="series.context_artifacts && series.context_artifacts.length">
-                <thead><tr><th>iter</th><th>artifact</th><th>state</th><th>tool/path</th><th>bytes</th><th>reason</th></tr></thead>
-                <tbody><template x-for="a in series.context_artifacts" :key="a.artifact_id + ':' + a.state + ':' + a.iter"><tr @click="selectIter(a.iter)"><td x-text="a.iter"></td><td x-text="a.artifact_id"></td><td x-text="a.state"></td><td x-text="a.tool_name + ' ' + (a.path || '')"></td><td x-text="fmtNum(a.bytes)"></td><td x-text="a.reason"></td></tr></template></tbody>
-            </table>
+            <div class="trace-scroll" x-show="series.context_artifacts && series.context_artifacts.length">
+                <table class="trace-table">
+                    <thead><tr><th>iter</th><th>artifact</th><th>state</th><th>tool/path</th><th>bytes</th><th>reason</th></tr></thead>
+                    <tbody><template x-for="a in series.context_artifacts" :key="a.artifact_id + ':' + a.state + ':' + a.iter"><tr @click="selectIter(a.iter)"><td x-text="a.iter"></td><td x-text="a.artifact_id"></td><td x-text="a.state"></td><td x-text="a.tool_name + ' ' + (a.path || '')"></td><td x-text="fmtNum(a.bytes)"></td><td x-text="a.reason"></td></tr></template></tbody>
+                </table>
+            </div>
             <p class="trace-muted" x-show="!series.context_artifacts || !series.context_artifacts.length">No deferred context artifacts recorded.</p>
         </section>
 
@@ -116,9 +130,9 @@
                 <button class="trace-info-btn" @click.stop="toggleInfo('ctx')" :class="{open: infoOpen==='ctx'}" title="What this panel shows">ⓘ</button>
                 <div class="trace-info-popout" x-show="infoOpen==='ctx'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
                     <div class="tip-title">Context growth</div>
-                    <p><b>Shows:</b> top — the harness's cl100k_base <em>estimate</em> (dashed) vs the provider's <em>real</em> prompt size (solid) per iteration, with the context limit and compaction events marked. Bottom — a heat strip of which context layer (L0–L5) dominates each iteration, plus a diverging drift strip.</p>
+                    <p><b>Shows:</b> top — the harness's cl100k_base <em>estimate</em> (dashed) vs the provider's <em>reported</em> prompt tokens (solid) per iteration, with the context limit and compaction events marked. Bottom — a heat strip of which context layer (L0–L5) dominates each iteration, plus a diverging drift strip.</p>
                     <p><b>Why:</b> suspect #1 lives here. If the estimate diverges from actual, the compaction budget (computed in cl100k tokens) fires at the wrong point. The heat strip shows <i>which layer</i> is eating the budget — usually L5 history ballooning.</p>
-                    <p><b>Read:</b> dashed above solid = the harness over-estimates (compaction fires too early). Solid above dashed = under-estimate (fires too late, may blow the window). Blue verticals = compaction. If the limit line is off-chart, its value is printed top-right.</p>
+                    <p><b>Read:</b> the solid line is the provider's own count — it can never exceed the context window, so it is the honest "how full is the prompt." For Ollama in a warm loop the solid line is the non-cached prompt <i>delta</i> (near-zero = cache hit), not the full prompt; the dashed cl100k line is the harness's fill view in that case. The drift-corrected real estimate and drift ratio are in the hover tooltip; the drift chart carries the estimate-error diagnosis. Blue verticals = compaction. If the limit line is off-chart, its value is printed top-right.</p>
                 </div>
             </h2>
             <div class="trace-canvas-wrap">
@@ -130,15 +144,48 @@
             </div>
         </section>
 
+        <section class="trace-section">
+            <h2 class="trace-h2">Request context attribution <span class="trace-sub">what is consuming the wire request, per iteration</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('attrib')" :class="{open: infoOpen==='attrib'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='attrib'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Request context attribution</div>
+                    <p><b>Shows:</b> stacked estimated tokens for the system prompt, user and assistant text, tool calls, tool results, files/images, other message parts, and tool schemas. Red markers flag positive jumps from the previous request.</p>
+                    <p><b>Why:</b> this identifies the payload responsible for a context spike. A growing <em>tool results</em> band points to oversized command/file output; a flat but large <em>tool schemas</em> band means too many or verbose tools; <em>system</em> points to repeatedly injected workspace/memory context.</p>
+                    <p><b>Read:</b> hover or click a bar for the iteration. The table ranks the largest jumps and names both the fastest-growing component and the single largest message part. Older traces without per-part token telemetry are labelled approximate.</p>
+                </div>
+            </h2>
+            <div class="trace-canvas-wrap">
+                <canvas x-ref="attrCanvas" class="trace-canvas" width="1200" height="230"></canvas>
+            </div>
+            <div class="trace-scroll" x-show="series.top_context_spikes && series.top_context_spikes.length">
+                <table class="trace-table">
+                    <thead><tr><th>iter</th><th>request est</th><th>jump</th><th>growth source</th><th>largest message part</th><th>provider input / gap</th></tr></thead>
+                    <tbody>
+                        <template x-for="spike in (series.top_context_spikes || [])" :key="'spike-' + spike.iter">
+                            <tr @click="selectIter(spike.iter)" :class="{'trace-row--mech': spike.delta > 10000}">
+                                <td x-text="spike.iter"></td>
+                                <td x-text="fmtNum(spike.total) + (spike.approximate ? ' ~' : '')"></td>
+                                <td x-text="(spike.delta >= 0 ? '+' : '') + fmtNum(spike.delta)"></td>
+                                <td x-text="attributionLabel(spike.growth_source) + ' ' + (spike.growth_tokens >= 0 ? '+' : '') + fmtNum(spike.growth_tokens)"></td>
+                                <td x-text="spike.largest_item && spike.largest_item.label ? spike.largest_item.label + ' · ' + fmtNum(spike.largest_item.tokens) : '—'"></td>
+                                <td x-text="fmtNum(spike.provider_input) + ' / ' + (spike.provider_gap >= 0 ? '+' : '') + fmtNum(spike.provider_gap)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <p class="trace-muted" x-show="!series.context_attribution || !series.context_attribution.length">No request manifests recorded. Run a new traced task to capture component-level attribution.</p>
+        </section>
+
         <!-- 4. Drift -->
         <section class="trace-section">
-            <h2 class="trace-h2">Tokenizer drift <span class="trace-sub">(actual − est) / actual · 100 — the headline diagnostic</span>
+            <h2 class="trace-h2">Tokenizer drift <span class="trace-sub">(actual − est) / actual · 100 — gated to reliable full-prompt readings</span>
                 <button class="trace-info-btn" @click.stop="toggleInfo('drift')" :class="{open: infoOpen==='drift'}" title="What this panel shows">ⓘ</button>
                 <div class="trace-info-popout" x-show="infoOpen==='drift'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
                     <div class="tip-title">Tokenizer drift</div>
                     <p><b>Shows:</b> per-iteration drift between the real prompt size and the harness estimate, centered at 0%. The ±15% band is shaded — inside it the estimate is "good enough".</p>
                     <p><b>Why:</b> this single chart decides suspect #1. Persistent drift outside the band means the compaction budget is systematically wrong for this model's tokenizer.</p>
-                    <p><b>Caveat:</b> the formula normalizes by the <i>real</i> prompt, so when that is small early in a turn the percentage can spike to ±2000% and the mean becomes meaningless (use <i>median</i>). The y-axis is clamped to keep the warn band visible; ▲▼ caps mark values beyond the clamp. Toggle <b>signed-log</b> to read the full range. Absolute drift is visible in Context growth.</p>
+                    <p><b>Caveat:</b> drift_pct is only computed when the provider reports a real <i>full-prompt</i> count. Ollama's <code>prompt_tokens_actual</code> is the non-cached prompt <i>delta</i> (near-zero in a warm loop) — those iterations are zeroed and flagged <code>drift_pct_reliable=false</code> (rendered as "drift unknown", not "0% = perfect"). The y-axis is clamped to keep the warn band visible; ▲▼ caps mark values beyond the clamp. Toggle <b>signed-log</b> to read the full range. Absolute drift is visible in Context growth.</p>
                 </div>
             </h2>
             <div class="trace-canvas-wrap">
@@ -158,23 +205,25 @@
                     <p><b>Read:</b> click a row to jump the conversation view to that iteration. Compactions also appear as blue verticals on Context growth.</p>
                 </div>
             </h2>
-            <table class="trace-table" x-show="series.compaction_timeline.length">
-                <thead><tr><th>iter</th><th>kind</th><th>before → after</th><th>saved</th><th>summarizer</th><th>keep_recent</th><th>budget</th></tr></thead>
-                <tbody>
-                    <template x-for="c in series.compaction_timeline" :key="c.iter + '-' + c.kind + '-' + (c.tokens_before||0)">
-                        <tr :class="{'trace-row--mech': c.summarizer === 'mechanical'}"
-                            @click="selectIter(c.iter)">
-                            <td x-text="c.iter"></td>
-                            <td x-text="c.kind"></td>
-                            <td><span x-text="fmtNum(c.tokens_before)"></span> → <span x-text="fmtNum(c.tokens_after)"></span></td>
-                            <td x-text="fmtNum(c.tokens_saved)"></td>
-                            <td x-text="c.summarizer"></td>
-                            <td x-text="c.keep_recent"></td>
-                            <td x-text="fmtNum(c.budget)"></td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
+            <div class="trace-scroll" x-show="series.compaction_timeline.length">
+                <table class="trace-table">
+                    <thead><tr><th>iter</th><th>kind</th><th>before → after</th><th>saved</th><th>summarizer</th><th>keep_recent</th><th>budget</th></tr></thead>
+                    <tbody>
+                        <template x-for="c in series.compaction_timeline" :key="c.iter + '-' + c.kind + '-' + (c.tokens_before||0)">
+                            <tr :class="{'trace-row--mech': c.summarizer === 'mechanical'}"
+                                @click="selectIter(c.iter)">
+                                <td x-text="c.iter"></td>
+                                <td x-text="c.kind"></td>
+                                <td><span x-text="fmtNum(c.tokens_before)"></span> → <span x-text="fmtNum(c.tokens_after)"></span></td>
+                                <td x-text="fmtNum(c.tokens_saved)"></td>
+                                <td x-text="c.summarizer"></td>
+                                <td x-text="c.keep_recent"></td>
+                                <td x-text="fmtNum(c.budget)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
             <p class="trace-muted" x-show="!series.compaction_timeline.length">No compactions fired — the run stayed under the trim threshold.</p>
         </section>
 
@@ -243,20 +292,22 @@
                     <p><b>Read:</b> green rows broke the loop. Click a row to jump to that iteration.</p>
                 </div>
             </h2>
-            <table class="trace-table" x-show="series.nudge_timeline.length">
-                <thead><tr><th>iter</th><th>kind</th><th>broke loop?</th><th>how</th><th>extra</th></tr></thead>
-                <tbody>
-                    <template x-for="(nd, i) in series.nudge_timeline" :key="i">
-                        <tr @click="selectIter(nd.iter)" :class="{'trace-row--good': series.nudge_efficacy[i] && series.nudge_efficacy[i].broke}">
-                            <td x-text="nd.iter"></td>
-                            <td x-text="nd.kind"></td>
-                            <td x-text="(series.nudge_efficacy[i] && series.nudge_efficacy[i].broke) ? 'yes' : 'no'"></td>
-                            <td x-text="(series.nudge_efficacy[i] && series.nudge_efficacy[i].how) || '—'"></td>
-                            <td class="trace-muted" x-text="JSON.stringify(nd.extra) || ''"></td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
+            <div class="trace-scroll" x-show="series.nudge_timeline.length">
+                <table class="trace-table">
+                    <thead><tr><th>iter</th><th>kind</th><th>broke loop?</th><th>how</th><th>extra</th></tr></thead>
+                    <tbody>
+                        <template x-for="(nd, i) in series.nudge_timeline" :key="i">
+                            <tr @click="selectIter(nd.iter)" :class="{'trace-row--good': series.nudge_efficacy[i] && series.nudge_efficacy[i].broke}">
+                                <td x-text="nd.iter"></td>
+                                <td x-text="nd.kind"></td>
+                                <td x-text="(series.nudge_efficacy[i] && series.nudge_efficacy[i].broke) ? 'yes' : 'no'"></td>
+                                <td x-text="(series.nudge_efficacy[i] && series.nudge_efficacy[i].how) || '—'"></td>
+                                <td class="trace-muted" x-text="JSON.stringify(nd.extra) || ''"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
             <p class="trace-muted" x-show="!series.nudge_timeline.length">No nudges fired.</p>
         </section>
 

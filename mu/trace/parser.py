@@ -360,7 +360,7 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
     # --- context growth (total_est vs prompt_tokens_actual) + per-layer ---
     context = []
     layers_stacked: Dict[str, List[float]] = {
-        "l0": [], "l1": [], "l1b": [], "l2": [], "l3": [], "l4b": [], "l5": []
+        "l0": [], "l1": [], "l1c": [], "l1b": [], "l2": [], "l3": [], "l4b": [], "l5": []
     }
     drift: List[Dict[str, Any]] = []
     for i in iters:
@@ -393,6 +393,11 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
             {
                 "iter": i.get("iter"),
                 "drift_pct": _num(ctx.get("drift_pct")),
+                # Whether drift_pct is a real full-prompt comparison or was
+                # zeroed because the provider reported only a cached delta
+                # (Ollama warm cache). Summary stats exclude unreliable 0.0
+                # readings so median/peak drift reflect real estimate error.
+                "reliable": bool(ctx.get("drift_pct_reliable")),
                 "actual": _num(ctx.get("prompt_tokens_actual")),
                 "total_est": _num(ctx.get("total_est")),
             }
@@ -404,6 +409,71 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
     for artifact in context_artifacts:
         state = str(artifact.get("state") or "unknown")
         artifact_counts[state] = artifact_counts.get(state, 0) + 1
+
+    # --- exact request composition + spike attribution -----------------
+    # New traces carry privacy-preserving per-part token counts.  Older
+    # traces only have byte totals; keep them useful with a clearly marked
+    # bytes/4 approximation instead of hiding the panel entirely.
+    attribution_keys = (
+        "system", "user", "assistant", "tool_calls", "tool_results",
+        "files_images", "other", "tool_schemas",
+    )
+    iter_actual = {
+        _iter_of(item.get("iter")): _num((item.get("tokens") or {}).get("in"))
+        for item in iters
+    }
+    context_attribution = []
+    previous = {key: 0.0 for key in attribution_keys}
+    previous_total = 0.0
+    for req in sorted(run.requests, key=lambda item: _iter_of(item.get("iter"))):
+        raw_components = req.get("component_tokens") or {}
+        approximate = not bool(raw_components)
+        components = {key: _num(raw_components.get(key)) for key in attribution_keys}
+        if approximate:
+            components["system"] = _num(req.get("system_prompt_bytes")) / 4.0
+            components["tool_schemas"] = _num(req.get("tool_schema_bytes")) / 4.0
+            for msg in req.get("messages") or []:
+                role = str(msg.get("role") or "")
+                bucket = role if role in {"user", "assistant"} else "other"
+                components[bucket] += _num(msg.get("bytes")) / 4.0
+        total = _num(req.get("token_estimate"), sum(components.values()))
+        deltas = {key: components[key] - previous[key] for key in attribution_keys}
+        growth_source = max(deltas, key=deltas.get) if deltas else "other"
+        largest_item = {"label": "", "tokens": 0.0}
+        for msg in req.get("messages") or []:
+            parts = msg.get("part_details") or msg.get("parts") or []
+            if not isinstance(parts, list):
+                continue
+            for part in parts:
+                part_tokens = _num(part.get("tokens"))
+                if part_tokens > largest_item["tokens"]:
+                    label = f"msg {msg.get('index', '?')} {msg.get('role', '')}/{part.get('type', '')}"
+                    if part.get("tool_name"):
+                        label += f" ({part.get('tool_name')})"
+                    largest_item = {"label": label, "tokens": part_tokens}
+        iteration = _iter_of(req.get("iter"))
+        request_delta = total - previous_total if context_attribution else 0.0
+        point = {
+            "iter": iteration,
+            **{key: round(value, 2) for key, value in components.items()},
+            "total": round(total, 2),
+            # The first request is the baseline, not a growth spike.
+            "delta": round(request_delta, 2),
+            "growth_source": growth_source,
+            "growth_tokens": round(deltas.get(growth_source, 0.0), 2),
+            "provider_input": iter_actual.get(iteration, 0.0),
+            "provider_gap": round(iter_actual.get(iteration, 0.0) - total, 2),
+            "largest_item": largest_item,
+            "approximate": approximate,
+        }
+        context_attribution.append(point)
+        previous = components
+        previous_total = total
+    top_context_spikes = sorted(
+        context_attribution,
+        key=lambda point: point.get("delta", 0),
+        reverse=True,
+    )[:12]
 
     # --- token breakdown per iter ---
     tokens = []
@@ -539,6 +609,8 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
         "memory_series": memory_series,
         "context_artifacts": context_artifacts,
         "context_artifact_counts": artifact_counts,
+        "context_attribution": context_attribution,
+        "top_context_spikes": top_context_spikes,
         "requests": sorted(run.requests, key=lambda req: _iter_of(req.get("iter"))),
     }
 
@@ -635,7 +707,14 @@ def _redundant_reads(run: TraceRun) -> List[Dict[str, Any]]:
 
 def build_summary(run: TraceRun, series: Dict[str, Any]) -> Dict[str, Any]:
     """Overview cards: totals, peaks, counts by type — the at-a-glance read."""
-    drift_pts = [d["drift_pct"] for d in series["drift"]]
+    # Drift stats use only reliable readings — Ollama warm-cache iters
+    # report a near-zero cached delta, so their drift_pct is zeroed (not a
+    # real 0% estimate error). Including those 0.0s would drag the median
+    # down and hide real cl100k undercount. Fall back to all readings only
+    # when none are reliable (e.g. a fully warm Ollama loop).
+    reliable_drift = [d for d in series["drift"] if d.get("reliable")]
+    drift_src = reliable_drift if reliable_drift else series["drift"]
+    drift_pts = [d["drift_pct"] for d in drift_src]
     peak_ctx = max(
         (c["actual"] for c in series["context"]), default=0.0
     )
@@ -710,6 +789,14 @@ def build_summary(run: TraceRun, series: Dict[str, Any]) -> Dict[str, Any]:
         "mean_wall_ms": int(mean_wall),
         "tool_calls": len(run.tools),
         "request_count": len(run.requests),
+        "peak_request_estimate": int(max(
+            (point.get("total", 0) for point in series.get("context_attribution", [])),
+            default=0,
+        )),
+        "peak_request_delta": int(max(
+            (point.get("delta", 0) for point in series.get("context_attribution", [])),
+            default=0,
+        )),
         "context_artifact_counts": series.get("context_artifact_counts", {}),
         "redundant_reads": len(series["redundant_reads"]),
         "status": (run.turn_end or {}).get("status", "running"),

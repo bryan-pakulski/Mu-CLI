@@ -228,3 +228,34 @@
 /* Tool histogram row: widen stats to fit error codes */
 .trace-hist-row { grid-template-columns: 160px 1fr 320px; }
 .th-stats { flex-wrap: wrap; row-gap: 2px; }
+/* ---- X pan window (cap ~100 iters in view; drag to pan the rest) ---- */
+.trace-xscroll {
+    display: flex; align-items: center; gap: var(--space-3);
+    padding: 6px 10px;
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11px; color: var(--text-dim);
+}
+.trace-xscroll-label { font-family: var(--mono); color: var(--text-soft); min-width: 130px; }
+.trace-xscroll-range { flex: 1; max-width: 760px; cursor: pointer; }
+.trace-xscroll-hint { font-size: 10px; color: var(--text-dimmer); white-space: nowrap; }
+
+/* ---- Tall lists/tables: scroll instead of stretching the page ---- */
+/* Wrap wide tables in .trace-scroll so the header stays pinned while the
+   body scrolls. Keeps the dashboard compact when a run has many
+   compactions / nudges / artifacts / spikes. */
+.trace-scroll {
+    max-height: 340px; overflow-y: auto; display: block;
+    border: 1px solid var(--border); border-radius: 6px;
+}
+.trace-scroll > .trace-table { width: 100%; }
+.trace-scroll thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--bg-lift);
+    /* keep the header border visible above the first scrolling row */
+    box-shadow: inset 0 -1px 0 var(--border);
+}
+/* Tool histogram + subagent children are div lists, not tables. */
+.trace-hist { max-height: 260px; overflow-y: auto; }
+.trace-sub-children { max-height: 220px; overflow-y: auto; }

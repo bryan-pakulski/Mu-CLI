@@ -303,6 +303,16 @@ def collect_context_layers(session):
             or LAYER_CHAR_FLOORS["workspace_context_max_chars"]
         ),
     )
+    folder_context_limit_chars = max(
+        1,
+        int(
+            session.variables.get(
+                "folder_context_max_chars",
+                LAYER_CHAR_FLOORS["folder_context_max_chars"],
+            )
+            or LAYER_CHAR_FLOORS["folder_context_max_chars"]
+        ),
+    )
     skills_limit_chars = max(
         1,
         int(
@@ -349,6 +359,10 @@ def collect_context_layers(session):
         workspace_text = str(session._build_workspace_context_files() or "")
     except Exception:
         workspace_text = ""
+    try:
+        folder_context_text = str(session._build_folder_context_block() or "")
+    except Exception:
+        folder_context_text = ""
     try:
         skills_text = str(session._build_skills_block() or "")
     except Exception:
@@ -398,6 +412,13 @@ def collect_context_layers(session):
             "current": _chars_to_tokens(workspace_text, model),
             "maximum": _budget_chars_to_tokens(workspace_limit_chars),
             "description": "AGENTS.md / CLAUDE.md / .mu/CONTEXT.md per attached folder.",
+        },
+        {
+            "layer": "L1C",
+            "name": "Workspace file tree",
+            "current": _chars_to_tokens(folder_context_text, model),
+            "maximum": _budget_chars_to_tokens(folder_context_limit_chars),
+            "description": "Workspace file tree (paths only, no diffs); contents read on demand.",
         },
         {
             "layer": "L1B",

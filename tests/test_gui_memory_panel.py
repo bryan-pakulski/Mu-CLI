@@ -343,7 +343,7 @@ def test_snapshot_empty_session_returns_grid_dims():
     assert all(len(r) == 64 for r in snap["grid"])
     # Every layer is represented in the legend, even if empty.
     ids = [l["id"] for l in snap["layers"]]
-    assert ids == ["L0", "L1", "L1B", "L2", "L3", "L4B", "L5"]
+    assert ids == ["L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5"]
 
 
 def test_snapshot_is_deterministic():

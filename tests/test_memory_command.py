@@ -52,6 +52,7 @@ def test_list_targets_export_matches_layers_and_stores():
         "scratchpad",
         "L0",
         "L1",
+        "L1C",
         "L1B",
         "L2",
         "L3",
@@ -83,7 +84,7 @@ def test_list_scratchpad_omits_task(session):
 # ----------------------------------------------- layer listing
 
 
-@pytest.mark.parametrize("layer", ["L0", "L1", "L1B", "L2", "L3", "L5"])
+@pytest.mark.parametrize("layer", ["L0", "L1", "L1C", "L1B", "L2", "L3", "L5"])
 def test_list_each_layer_returns_content_field(session, layer):
     """Every layer ID must resolve. Content may be empty in a fresh
     session but the data shape must be consistent."""

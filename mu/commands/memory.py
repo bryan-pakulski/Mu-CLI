@@ -47,11 +47,34 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
     task_stats = _build_stats(session.task_memory)
     scratch_stats = _build_stats(session.turn_scratchpad)
     layer_stats = collect_context_layers(session)
-    context_limit = max(
+    # The raw provider window vs. the compactor's *effective* ceiling.
+    # The compactor fires on `drift_corrected_context_limit` — the raw
+    # `context_token_limit` divided by the provider's safety factor (2.5 for
+    # Ollama) and any learned cl100k→real drift — NOT on the raw window. The
+    # old fill% compared against the raw window, so /memory could read "60%
+    # full" while emergency compaction was already firing. Use the effective
+    # ceiling so the displayed fill matches what the compactor actually
+    # enforces. (For providers with no safety factor — OpenAI/Gemini — the
+    # effective ceiling equals the raw window, so this is a no-op there.)
+    from mu.session.budgets import (
+        drift_corrected_context_limit,
+        effective_drift_ratio,
+    )
+
+    raw_limit = max(
         1, int(session.variables.get("context_token_limit", 256000) or 256000)
     )
+    try:
+        effective_limit = max(1, int(drift_corrected_context_limit(session)))
+    except Exception:  # noqa: BLE001
+        effective_limit = raw_limit
+    try:
+        safety_factor = float(effective_drift_ratio(session))
+    except Exception:  # noqa: BLE001
+        safety_factor = 1.0
+    context_limit = effective_limit
     total_tokens = int(estimate_active_context_tokens(session) or 0)
-    total_pct = min(100, int(round(100 * total_tokens / context_limit)))
+    total_pct = min(999, int(round(100 * total_tokens / max(1, effective_limit))))
 
     if allow_prompt:
         console = _console(session)
@@ -131,18 +154,33 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                         f"{pct}%",
                         _Text(str(layer.get("description", ""))),
                     )
-                # Aggregate row — the global cap (context_token_limit) is
-                # what the provider actually enforces, not any single layer.
+                # Aggregate row — the compactor's effective ceiling
+                # (drift_corrected_context_limit), not the raw window. The
+                # layer sums are cl100k estimates; the effective ceiling is
+                # the raw window ÷ the safety/drift factor, so the ratio is
+                # the true real-token fill even though numerator and
+                # denominator are in different absolute units.
                 total_color = (
                     "red" if total_pct >= 85 else "yellow" if total_pct >= 60 else "green"
+                )
+                cap_label = (
+                    f"All layers vs. effective cap (÷{safety_factor:.1f})"
+                    if safety_factor > 1.01
+                    else "All layers (global cap)"
+                )
+                cap_desc = (
+                    f"Sum vs. effective limit ({effective_limit:,} = "
+                    f"raw {raw_limit:,} ÷ {safety_factor:.1f})."
+                    if safety_factor > 1.01
+                    else "Sum vs. context_token_limit — what the provider sees."
                 )
                 layer_table.add_section()
                 layer_table.add_row(
                     "[bold]TOTAL[/bold]",
-                    "[bold]All layers (global cap)[/bold]",
+                    f"[bold]{cap_label}[/bold]",
                     f"[bold]{total_tokens}/{context_limit}[/bold]",
                     f"[bold {total_color}]{total_pct}%[/bold {total_color}]",
-                    "[dim]Sum vs. context_token_limit — what the provider sees.[/dim]",
+                    f"[dim]{cap_desc}[/dim]",
                 )
                 console.print(layer_table)
             except Exception:
@@ -163,6 +201,8 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
             "context_layers": layer_stats,
             "context_total_tokens": total_tokens,
             "context_limit_tokens": context_limit,
+            "context_limit_tokens_raw": raw_limit,
+            "context_safety_factor": round(safety_factor, 3),
             "context_fill_pct": total_pct,
         },
     )
@@ -179,6 +219,7 @@ LIST_TARGETS = (
     "scratchpad",
     "L0",
     "L1",
+    "L1C",
     "L1B",
     "L2",
     "L3",
@@ -189,6 +230,7 @@ _LIST_TARGETS_LOWER = {t.lower(): t for t in LIST_TARGETS}
 _LAYER_BUILDERS = {
     "L0": (None, "System prompt"),  # composed via compose_base_system_prompt()
     "L1": ("_build_workspace_context_files", "Workspace files"),
+    "L1C": ("_build_folder_context_block", "Workspace file tree"),
     "L1B": ("_build_skills_block", "Installed skills"),
     "L2": (None, "Conversation summary"),  # straight off session_manager
     "L3": ("_build_active_goal_context", "Active goal"),

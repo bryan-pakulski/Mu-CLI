@@ -38,9 +38,9 @@ def session():
 
 
 def test_layer_budget_vars_cover_l1_through_l4b():
-    """Every layer with a per-layer budget (L1, L1B, L2, L3, L4B)
+    """Every layer with a per-layer budget (L1, L1C, L1B, L2, L3, L4B)
     has an entry. L4 removed from system prompt; L5 intentionally absent."""
-    assert set(LAYER_BUDGET_VARS.keys()) == {"L1", "L1B", "L2", "L3", "L4B"}
+    assert set(LAYER_BUDGET_VARS.keys()) == {"L1", "L1C", "L1B", "L2", "L3", "L4B"}
     for layer_id, (var_name, _label, _desc) in LAYER_BUDGET_VARS.items():
         assert var_name, f"{layer_id} has empty variable name"
 
@@ -87,6 +87,7 @@ def test_set_layer_is_case_insensitive(session):
     "layer,expected_var",
     [
         ("L1", "workspace_context_max_chars"),
+        ("L1C", "folder_context_max_chars"),
         ("L1B", "skills_max_chars"),
         ("L2", "conversation_summary_char_limit"),
         ("L3", "active_goal_context_char_limit"),
@@ -181,9 +182,9 @@ def test_get_layer_no_id_lists_all_budgets(session):
     result = mc.dispatch(session, "/get layer", allow_prompt=False)
     assert result.ok
     budgets = result.data["layer_budgets"]
-    assert len(budgets) == 5
+    assert len(budgets) == 6
     layer_ids = {row["layer"] for row in budgets}
-    assert layer_ids == {"L1", "L1B", "L2", "L3", "L4B"}
+    assert layer_ids == {"L1", "L1C", "L1B", "L2", "L3", "L4B"}
 
 
 def test_get_layer_l5_explains_no_budget(session):

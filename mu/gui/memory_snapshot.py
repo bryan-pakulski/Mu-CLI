@@ -64,13 +64,14 @@ _logger = logging.getLogger(__name__)
 
 # Canonical layer order — matches the assembly in
 # mu/session/context.py:inject_hierarchical_context.
-_LAYER_ORDER: Tuple[str, ...] = ("L0", "L1", "L1B", "L2", "L3", "L4B", "L5")
+_LAYER_ORDER: Tuple[str, ...] = ("L0", "L1", "L1C", "L1B", "L2", "L3", "L4B", "L5")
 
 # A distinct hue per layer (HSL degrees) so bands are visually identifiable.
 # Spread around the wheel; L5 (the volatile history) lands on red.
 LAYER_HUES: Dict[str, int] = {
     "L0": 210,   # blue  — system prompt (stable)
     "L1": 135,   # green — workspace files
+    "L1C": 150,  # green-teal — workspace file tree (paths only)
     "L1B": 168,  # teal  — installed skills
     "L2": 280,   # purple — conversation summary
     "L3": 25,    # orange — active goal
@@ -344,6 +345,20 @@ def build_memory_snapshot(
         context_limit = 0
     if context_limit <= 0:
         context_limit = sum(int((by_id.get(lid, {}) or {}).get("maximum") or 0) for lid in _LAYER_ORDER)
+    # The raw window (context_token_limit) is the provider's real capacity,
+    # but the compactor fires on the drift-corrected effective ceiling (raw
+    # ÷ safety/drift factor — 2.5 for Ollama). Size the map against the
+    # SAME effective ceiling so the Memory Map's fill matches /memory, the
+    # splash banner, and the compactor's actual trigger — not the raw
+    # window, which made Ollama look half-empty while emergency compaction
+    # was already firing. No-op for providers with no safety factor.
+    context_limit_raw = context_limit
+    try:
+        from mu.session.budgets import drift_corrected_context_limit
+
+        context_limit = max(1, int(drift_corrected_context_limit(session)))
+    except Exception:  # noqa: BLE001
+        pass
 
     fill_pct = round(100.0 * total_tokens / context_limit, 1) if context_limit > 0 else 0.0
 
@@ -475,6 +490,7 @@ def build_memory_snapshot(
         "total_tokens": total_tokens,
         "token_source": token_source,
         "context_limit": context_limit,
+        "context_limit_raw": context_limit_raw,
         "free_tokens": free_tokens,
         "fill_pct": fill_pct,
         "updated_at": None,

@@ -33,6 +33,11 @@ LAYER_BUDGET_VARS: Dict[str, Tuple[str, str, str]] = {
         "Workspace files",
         "AGENTS.md / CLAUDE.md / .mu/CONTEXT.md per attached folder",
     ),
+    "L1C": (
+        "folder_context_max_chars",
+        "Workspace file tree",
+        "Workspace file tree (paths only, no diffs); contents read on demand",
+    ),
     "L1B": (
         "skills_max_chars",
         "Installed skills",

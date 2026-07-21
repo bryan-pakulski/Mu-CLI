@@ -130,9 +130,9 @@ def test_build_series_drift(run):
     assert [d["iter"] for d in drift] == [0, 1, 2]
     assert drift[0]["drift_pct"] == 20.0
     assert drift[1]["drift_pct"] == 37.5
-    # layers_stacked has all seven layer keys, length 3 each
+    # layers_stacked has all eight layer keys, length 3 each
     assert set(s["layers_stacked"].keys()) == {
-        "l0", "l1", "l1b", "l2", "l3", "l4b", "l5"
+        "l0", "l1", "l1c", "l1b", "l2", "l3", "l4b", "l5"
     }
     assert len(s["layers_stacked"]["l5"]) == 3
 
@@ -206,6 +206,40 @@ def test_build_series_latency(run):
     assert [p["wall_ms"] for p in lat] == [120, 200, 90]
 
 
+def test_build_series_attributes_request_spikes(tmp_path):
+    records = _fixture()
+    records.insert(2, {
+        "type": "request", "run_id": "run_abc123", "iter": 0,
+        "token_estimate": 1600,
+        "component_tokens": {"system": 500, "user": 100, "assistant": 0,
+            "tool_calls": 0, "tool_results": 800, "files_images": 0,
+            "other": 0, "tool_schemas": 200},
+        "messages": [{"index": 0, "role": "tool", "bytes": 3200, "tokens": 800,
+            "part_details": [{"index": 0, "type": "tool_result", "tool_name": "read_file",
+                "bytes": 3200, "tokens": 800}]}],
+    })
+    records.insert(5, {
+        "type": "request", "run_id": "run_abc123", "iter": 1,
+        "token_estimate": 11600,
+        "component_tokens": {"system": 500, "user": 100, "assistant": 0,
+            "tool_calls": 0, "tool_results": 10800, "files_images": 0,
+            "other": 0, "tool_schemas": 200},
+        "messages": [{"index": 4, "role": "tool", "bytes": 43200, "tokens": 10800,
+            "part_details": [{"index": 0, "type": "tool_result", "tool_name": "bash",
+                "bytes": 43200, "tokens": 10800}]}],
+    })
+    parsed = parse_trace(_write_fixture(tmp_path, records))
+    series = build_series(parsed)
+
+    assert len(series["context_attribution"]) == 2
+    spike = series["top_context_spikes"][0]
+    assert spike["iter"] == 1
+    assert spike["delta"] == 10000
+    assert spike["growth_source"] == "tool_results"
+    assert spike["growth_tokens"] == 10000
+    assert "bash" in spike["largest_item"]["label"]
+
+
 def test_build_series_tool_error_codes(tmp_path):
     # A tool that errors should accumulate error_code counts in the histogram.
     records = [
@@ -243,7 +277,7 @@ def test_build_trace_snapshot(run):
     snap = build_trace_snapshot(run, cols=128)
     # 3 iters < 128 → no downsample, 3 columns.
     assert snap["meta"]["rendered_cols"] == 3
-    assert len(snap["grid"]) == 7  # seven layers
+    assert len(snap["grid"]) == 8  # eight layers (incl. L1C)
     for row in snap["grid"]:
         assert len(row) == 3
     assert len(snap["drift_strip"]) == 3

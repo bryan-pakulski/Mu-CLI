@@ -86,7 +86,24 @@ def _estimate_messages_tokens(messages) -> int:
     return total
 
 
-def _preflight_context_check(session, system_prompt, messages, turn_start_index=None):
+def _estimate_tools_tokens(tools) -> int:
+    """Estimate tool definitions, which are part of every agentic request."""
+    if not tools:
+        return 0
+    payload = [
+        {
+            "name": getattr(tool, "name", ""),
+            "description": getattr(tool, "description", ""),
+            "parameters": getattr(tool, "parameters", {}) or {},
+        }
+        for tool in tools
+    ]
+    return estimate_tokens(json.dumps(payload, sort_keys=True, default=str))
+
+
+def _preflight_context_check(
+    session, system_prompt, messages, turn_start_index=None, tools=None
+):
     """Emergency-compact history if the assembled prompt exceeds the
     provider's context window.
 
@@ -125,7 +142,8 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
 
     prompt_tokens = estimate_tokens(system_prompt)
     msg_tokens = _estimate_messages_tokens(messages)
-    total = prompt_tokens + msg_tokens
+    tool_tokens = _estimate_tools_tokens(tools)
+    total = prompt_tokens + msg_tokens + tool_tokens
     # Stash the cl100k estimate of the assembled prompt for the cold-cache
     # drift calibration in the response handler: when Ollama's
     # prompt_eval_count is a strong full-prompt signal (>= half the cl100k
@@ -145,7 +163,7 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
         "Emergency compaction triggered.",
         total, context_limit, response_reserve, max_prompt, overshoot,
     )
-    emergency_budget = max(512, max_prompt - prompt_tokens)
+    emergency_budget = max(512, max_prompt - prompt_tokens - tool_tokens)
     base_keep_recent = resolve_keep_recent(session, emergency=True)
     # R3 / FM-8: even emergency compaction must respect the per-turn
     # tool-result floor so tool results just received stay verbatim.
@@ -194,7 +212,7 @@ def _preflight_context_check(session, system_prompt, messages, turn_start_index=
         )[:-1]
 
         new_msg_tokens = _estimate_messages_tokens(messages)
-        new_total = prompt_tokens + new_msg_tokens
+        new_total = prompt_tokens + new_msg_tokens + tool_tokens
         if new_total <= max_prompt:
             logger.info(
                 "Emergency compaction round %d complete: messages %d -> %d tokens.",
@@ -302,6 +320,7 @@ def _calibrate_drift_from_response(session, response) -> None:
 def _aggressive_compact_for_overflow(
     session, system_prompt, messages, *,
     overflow_error=None,
+    tools=None,
     keep_recent: int = 4,
     margin: float = 0.20,
     lift_floor: bool = False,
@@ -355,7 +374,7 @@ def _aggressive_compact_for_overflow(
     # The system prompt already carries L1–L4 (inject_hierarchical_context),
     # so the non-history cl100k cost is just the system prompt; the rest of
     # the budget is the L5 history ceiling the compaction loop gates on.
-    non_history_cl100k = estimate_tokens(system_prompt)
+    non_history_cl100k = estimate_tokens(system_prompt) + _estimate_tools_tokens(tools)
     budget = max(512, target_full_cl100k - non_history_cl100k)
 
     logger.warning(
@@ -487,6 +506,7 @@ def _generate_with_overflow_recovery(
             _aggressive_compact_for_overflow(
                 session, system_prompt, messages, overflow_error=exc,
                 keep_recent=keep_recent, margin=margin, lift_floor=lift_floor,
+                tools=tools,
             )
             recent_history = session._prepare_runtime_history(
                 turn_start_index=turn_start_index,
@@ -498,6 +518,7 @@ def _generate_with_overflow_recovery(
             # Final pre-flight (re-checks + may compact more) before the retry.
             system_prompt, messages = _preflight_context_check(
                 session, system_prompt, messages, turn_start_index=turn_start_index,
+                tools=tools,
             )
 
 
@@ -839,16 +860,12 @@ def run_turn(session, text):
             logger.debug(
                 f"Using agent_mode={session.variables.get('agent_mode', 'default')}"
             )
-
-            if session.ui:
-                with session.ui.show_status(
-                    "Scanning monitored folders for changes..."
-                ):
-                    folder_initial_xml = (
-                        session.folder_context.get_initial_context_xml()
-                    )
-                    folder_diff_xml = session.folder_context.get_context_diff_xml()
-                    workspace_context = f"{folder_initial_xml}\n\n{folder_diff_xml}"
+            # L1C now carries the workspace file tree (paths only) as a
+            # budgeted layer (see _inject_hierarchical_context), so the
+            # non-agentic branch no longer appends a raw folder dump to the
+            # system-prompt base (L0) — that was the unbounded growth that
+            # bloated L0. workspace_context stays empty here; the L1C layer
+            # is cached per turn alongside _turn_workspace_block below.
 
     base_system_prompt = session.system_instruction
     if active_mode == "feature":
@@ -980,6 +997,11 @@ def run_turn(session, text):
 
     session._turn_workspace_block = build_workspace_context_files(session)
     session._turn_skills_block = session._build_skills_block(announce=True)
+    # L1C (workspace file tree, paths only) — cached per turn and refreshed
+    # mid-turn only when a tool adds/removes files (see the in-loop refresh
+    # below). Bounded by folder_context_max_chars; no diffs are injected,
+    # so it can no longer balloon the system-prompt base.
+    session._turn_folder_context_block = session._build_folder_context_block()
     # The pre-injection persona text (system_instruction + mode prompt +
     # workspace_context + resumption block). Reused as the base for every
     # per-iteration system-prompt rebuild.
@@ -988,6 +1010,7 @@ def run_turn(session, text):
         base_persona_prompt,
         cached_workspace=session._turn_workspace_block,
         cached_skills=session._turn_skills_block,
+        cached_folder_context=session._turn_folder_context_block,
     )
 
     recent_history = session._prepare_runtime_history()
@@ -1209,6 +1232,7 @@ def run_turn(session, text):
                 base_persona_prompt,
                 cached_workspace=session._turn_workspace_block,
                 cached_skills=session._turn_skills_block,
+                cached_folder_context=session._turn_folder_context_block,
             )
             if session.variables.get("memory_enabled", True):
                 active_mode_for_mem = str(
@@ -1262,6 +1286,7 @@ def run_turn(session, text):
             dynamic_system_prompt, messages = _preflight_context_check(
                 session, dynamic_system_prompt, messages,
                 turn_start_index=turn_start_index,
+                tools=(active_tools if (session.folder_context.folders and session.agentic) else None),
             )
             # Capture the estimate at the same seam as the provider request.
             # The trace event is written after the response is archived, so
@@ -1270,6 +1295,9 @@ def run_turn(session, text):
             request_token_estimate = (
                 estimate_tokens(dynamic_system_prompt)
                 + _estimate_messages_tokens(messages)
+                + _estimate_tools_tokens(
+                    active_tools if (session.folder_context.folders and session.agentic) else None
+                )
             )
             try:
                 from mu.trace.emitter import build_request_record, get_emitter
@@ -1430,22 +1458,38 @@ def run_turn(session, text):
                 )
 
             if session.ui:
-                # Live real-prompt estimate for visibility. response.input_tokens
-                # is Ollama's cached prompt_eval_count delta (often tiny in a
-                # warm loop), so it UNDER-reports the real prompt that the model
-                # actually received. The drift-corrected cl100k estimate is the
-                # representative fill — shown here so a "prompt too long" is
-                # never a surprise hidden behind a near-zero In count.
+                # Canonical prompt-size line. The drift-corrected cl100k
+                # estimate (real_est) is the one number that's a meaningful
+                # prompt size on EVERY provider: for frontier providers
+                # effective_drift_ratio == 1.0 so it collapses to the cl100k
+                # estimate (which agrees with response.input_tokens, the
+                # full prompt they report); for Ollama, response.input_tokens
+                # is the streamed prompt_eval_count — the non-cached prompt
+                # DELTA, near-zero in a warm loop and NOT the prompt size.
+                # So: lead with the provider's real In when it's a reliable
+                # full-prompt signal (frontier), and lead with ~Real est
+                # (labeling In as a cached delta) when it isn't (Ollama).
+                # This keeps the TUI headline consistent with the trace's
+                # `prompt_tokens_real_est` and the GUI Memory Map fill.
                 try:
                     from mu.session.budgets import effective_drift_ratio as _eff_drift
                     _cl100k_est = int(getattr(session, "_last_prompt_cl100k_est", 0) or 0)
-                    _real_est = int(_cl100k_est * _eff_drift(session)) if _cl100k_est else 0
+                    _drift = float(_eff_drift(session))
+                    _real_est = int(_cl100k_est * _drift) if _cl100k_est else 0
                 except Exception:  # noqa: BLE001
+                    _drift = 1.0
                     _real_est = 0
-                _real_str = f" | ~Real est: {_real_est}" if _real_est else ""
+                if _drift > 1.01:
+                    _lead = (
+                        f"~Real est {_real_est}" if _real_est else "~Real est n/a"
+                    )
+                    _in_part = f" | In (cached δ) {response.input_tokens}"
+                else:
+                    _lead = f"In {response.input_tokens}"
+                    _in_part = ""
                 session.ui.show_info(
-                    f"Tokens: In {response.input_tokens} | Out {response.output_tokens} | "
-                    f"Total {response.total_tokens}{_real_str} {cost_str}"
+                    f"Tokens: {_lead}{_in_part} | Out {response.output_tokens} | "
+                    f"Total {response.total_tokens}{cost_str}"
                 )
 
             # Run tracer: emit the per-iteration record at the post-response seam
@@ -2321,16 +2365,14 @@ def run_turn(session, text):
                         "recoverage stall check failed", exc_info=True
                     )
 
-            # --- Event-driven workspace diff injection ---
-            # If any tool in this iteration modified files, inject a diff
-            # of workspace changes (vs initial snapshots) into the persona
-            # prompt for the NEXT iteration. Because the per-iteration
-            # system prompt is rebuilt from `base_persona_prompt` (with
-            # fresh L2/L3), patching the persona carries the diff forward
-            # until files change again. This ensures the model always sees
-            # current file state without periodic full rebuilds. Zero
-            # stale windows: the diff only appears when files actually
-            # change. If no files were modified, no diff is injected.
+            # --- Event-driven L1C (workspace file tree) refresh ---
+            # L1C is now tree-only (paths, no diffs). The tree only changes
+            # when files are added or removed, so a content-only edit makes
+            # this rebuild a no-op (the path set is unchanged) — but a write
+            # to a NEW path adds it to the tree, and a delete removes it, so
+            # we still rebuild on any file-modifying tool result to keep the
+            # model's file map current. Bounded by folder_context_max_chars;
+            # no more unbounded L0 growth from injected diffs.
             _files_changed_this_iter = False
             for _part in tool_result_parts:
                 _res = _part.get("tool_result")
@@ -2339,19 +2381,12 @@ def run_turn(session, text):
                     break
             if _files_changed_this_iter and session.folder_context:
                 try:
-                    _diff_xml = session.folder_context.get_context_diff_xml()
-                    if _diff_xml:
-                        base_persona_prompt = (
-                            base_persona_prompt.rsplit(
-                                "\n\nWorkspace changes since turn start:",
-                                1
-                            )[0]
-                            + "\n\nWorkspace changes since turn start:\n"
-                            + _diff_xml
-                        )
+                    session._turn_folder_context_block = (
+                        session._build_folder_context_block()
+                    )
                 except Exception:
                     pass
-            # --- End event-driven diff injection ---
+            # --- End event-driven L1C refresh ---
 
             if loop_detection_enabled and iteration_tool_exact_fingerprints:
                 exact_seq = " -> ".join(iteration_tool_exact_fingerprints)

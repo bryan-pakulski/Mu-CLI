@@ -469,11 +469,12 @@ def test_recovery_escalation_ladder_compacts_harder_each_retry():
     orig = lb._aggressive_compact_for_overflow
 
     def spy(sess, sp, msgs, *, overflow_error=None, keep_recent=4,
-            margin=0.20, lift_floor=False):
+            margin=0.20, lift_floor=False, tools=None):
         compact_calls.append((keep_recent, round(margin, 2), lift_floor))
         return orig(
             sess, sp, msgs, overflow_error=overflow_error,
             keep_recent=keep_recent, margin=margin, lift_floor=lift_floor,
+            tools=tools,
         )
 
     lb._aggressive_compact_for_overflow = spy

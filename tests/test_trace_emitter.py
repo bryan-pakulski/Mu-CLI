@@ -206,3 +206,36 @@ def test_build_iter_record_drift_sign():
     # With total_est=0 and actual=200, drift = (200-0)/200*100 = 100.0
     assert rec["context"]["drift_pct"] == 100.0
     assert rec["context"]["prompt_tokens_actual"] == 200
+
+
+def test_request_manifest_attributes_context_components():
+    from mu.trace.emitter import build_request_record
+    from providers.base import Message, ToolDefinition
+
+    messages = [
+        Message(role="user", parts=[MessagePart(type="text", text="inspect this")]),
+        Message(role="assistant", parts=[MessagePart(
+            type="tool_call", tool_name="read_file", tool_args={"path": "large.py"}
+        )]),
+        Message(role="tool", parts=[MessagePart(
+            type="tool_result", tool_name="read_file", tool_result="x" * 4000
+        )]),
+    ]
+    tools = [ToolDefinition(
+        name="read_file", description="Read a file",
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+    )]
+    record = build_request_record(
+        iteration=7, system_prompt="system rules", messages=messages,
+        tools=tools, token_estimate=1234,
+    )
+
+    assert record["component_tokens"]["system"] > 0
+    assert record["component_tokens"]["user"] > 0
+    assert record["component_tokens"]["tool_calls"] > 0
+    assert record["component_tokens"]["tool_results"] > 500
+    assert record["component_tokens"]["tool_schemas"] > 0
+    assert record["tool_schema_bytes"] > 0
+    assert record["messages"][2]["parts"] == 1
+    assert record["messages"][2]["part_details"][0]["type"] == "tool_result"
+    assert record["messages"][2]["part_details"][0]["tokens"] > 500

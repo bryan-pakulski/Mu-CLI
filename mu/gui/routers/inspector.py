@@ -179,6 +179,7 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "retrieval_top_k",
             "workspace_context_max_chars",
             "workspace_context_files",
+            "folder_context_max_chars",
             "skills_max_chars",
             "skills_mode",
             "collation_enabled",

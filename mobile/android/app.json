@@ -9,6 +9,7 @@
     "newArchEnabled": true,
     "android": {
       "package": "com.mucli.mobile",
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0F172A"
@@ -18,6 +19,17 @@
       "bundleIdentifier": "com.mucli.mobile",
       "supportsTablet": true
     },
-    "assetBundlePatterns": ["**/*"]
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-font",
+      "expo-system-ui"
+    ]
   }
 }

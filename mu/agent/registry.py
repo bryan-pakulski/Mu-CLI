@@ -94,6 +94,12 @@ class SubagentRecord:
     tracker_agent_id: Optional[str] = None
     started_at: float = field(default_factory=time.monotonic)
     finished_at: Optional[float] = None
+    # Signaled exactly once when the child reaches a terminal state
+    # (done / killed / error). Lets a parent block on a single
+    # ``await_subagent`` call instead of busy-polling ``snapshot()`` and
+    # burning parent iterations (which trips loop detection). See
+    # ``SubagentRegistry.wait``.
+    done_event: threading.Event = field(default_factory=threading.Event)
     # running | done | killed | error
     status: str = "running"
     summary: str = ""
@@ -308,6 +314,7 @@ class SubagentRegistry:
                 record.status = "error"
                 record.error = str(exc)
                 record.finished_at = time.monotonic()
+            record.done_event.set()
             lifecycle.close()
             self._close_tracker(record, tool_count=0, summary="", error=str(exc), status="error")
             return
@@ -347,6 +354,7 @@ class SubagentRegistry:
             record.kill_reason = kill_reason
             record.history_length = len(getattr(child.session_manager, "history", []))
             record.finished_at = time.monotonic()
+        record.done_event.set()
         lifecycle.close()
 
         self._close_tracker(
@@ -457,6 +465,43 @@ class SubagentRegistry:
     def snapshot_all(self) -> List[Dict[str, Any]]:
         return [self.snapshot(tid) for tid in [r.task_id for r in self.list()]]
 
+    # ----------------------------------------------------------- blocking wait
+
+    def wait(self, task_id: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Block the caller until the child reaches a terminal state or
+        ``timeout`` seconds elapse, then return its snapshot.
+
+        This is the blocking counterpart to ``snapshot``: instead of the
+        parent busy-polling ``poll_subagent`` (one tool call per
+        iteration, which trips loop detection after
+        ``loop_detection_repeat_threshold`` repeats), the parent issues a
+        single ``await_subagent`` tool call that blocks here. The parent's
+        agent-loop iteration does not advance while blocked, so no
+        repeated-tool-sequence fingerprint accumulates.
+
+        ``timeout`` semantics mirror ``threading.Event.wait``:
+          * ``None``  — block forever (the tool layer always passes a
+            finite timeout, but the registry primitive itself is unbounded).
+          * ``0``     — non-blocking probe: returns the current snapshot
+            immediately (running or terminal).
+          * ``N``     — wake after N seconds if the child is still running;
+            the returned snapshot then has ``status == "running"`` and the
+            caller decides whether to re-await, kill, or continue.
+
+        Returns the ``missing`` snapshot for an unknown ``task_id`` and
+        the current snapshot immediately for an already-terminal child.
+        Safe to call concurrently with ``cancel`` — ``cancel`` sets the
+        event so this wakes promptly.
+        """
+        with self._lock:
+            rec = self._records.get(task_id)
+        if rec is None:
+            return {"status": "missing", "task_id": task_id}
+        if rec.status != "running":
+            return self.snapshot(task_id)
+        rec.done_event.wait(timeout)
+        return self.snapshot(task_id)
+
     # ----------------------------------------------------------- control
 
     def cancel(self, task_id: str, *, grace_seconds: float = 5.0) -> Dict[str, Any]:
@@ -511,6 +556,9 @@ class SubagentRegistry:
             if thread is not None and not thread.is_alive():
                 break
             time.sleep(0.05)
+        # Wake any parent blocked in ``wait`` so it returns promptly with
+        # the killed snapshot rather than waiting out its own timeout.
+        rec.done_event.set()
         return self.snapshot(task_id)
 
     def shutdown(self) -> None:

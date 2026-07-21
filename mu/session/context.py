@@ -59,10 +59,17 @@ def _build_role_layer(role: str, session: Any) -> str:
         children = f"{n_active} child sub-agent(s) running" if n_active else "child sub-agents may be running"
         return (
             "You are the ORCHESTRATOR. You may spawn sub-agents for research, deep dives, and focused tasks.\n"
-            f"- {children}. Do NOT block waiting for them. Dispatch, continue other work, then poll.\n"
-            "- Use poll_subagent(task_id) to check progress / retrieve results. Use kill_subagent(task_id) to cancel a stuck or unneeded child.\n"
-            "- Sub-agents return summaries via poll. You synthesize their findings into the final response.\n"
-            "- You can extend a child that needs more time (keep polling) or kill one that is looping."
+            f"- {children}. To wait for a child without burning iterations, call "
+            "await_subagent(task_id, timeout=N) — it blocks your loop on a single "
+            "tool call and wakes when the child finishes OR the timer fires, so no "
+            "poll-loop warning triggers. Do NOT busy-poll poll_subagent in a tight "
+            "loop; use poll_subagent only for a quick non-blocking check when you "
+            "have other work to do meanwhile.\n"
+            "- Use await_subagent(task_id, timeout=...) to block until results are ready; "
+            "poll_subagent(task_id) for a quick non-blocking status check; "
+            "kill_subagent(task_id) to cancel a stuck or unneeded child.\n"
+            "- Sub-agents return summaries via await/poll. You synthesize their findings into the final response.\n"
+            "- You can extend a child that needs more time (re-await with a longer timeout) or kill one that is looping."
         )
     if role == "child":
         try:

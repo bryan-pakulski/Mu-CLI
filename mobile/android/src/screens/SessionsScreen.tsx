@@ -6,6 +6,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { Text, Card, Button, Skeleton, ErrorState, EmptyState } from '../components';
 import { sessionsApi, SessionSummary } from '../api/sessions';
+import { providersApi } from '../api/providers';
 import { spacing } from '../theme/tokens';
 
 export function SessionsScreen() {
@@ -45,7 +46,12 @@ export function SessionsScreen() {
 
   const switchSession = async (name: string) => {
     try {
-      await sessionsApi.focus(name);
+      const session = sessions.find(s => s.name === name);
+      if (session && !session.is_loaded) {
+        await sessionsApi.load(name);
+      } else {
+        await sessionsApi.focus(name);
+      }
       setActiveSession(name);
       load();
     } catch (e) {
@@ -75,10 +81,25 @@ export function SessionsScreen() {
   const createSession = async () => {
     if (!newName.trim()) return;
     try {
+      // Fetch current provider+model from server instead of guessing
+      let provider = activeProvider;
+      let model = activeModel;
+      if (!provider || !model) {
+        const cur = await providersApi.getCurrent();
+        provider = cur.provider;
+        model = cur.model;
+      }
+      if (!provider || !model) {
+        Alert.alert(
+          'No provider configured',
+          'Set a provider and model in the Providers screen first, then create a session.',
+        );
+        return;
+      }
       await sessionsApi.create(
         newName.trim(),
-        activeProvider || 'openai',
-        activeModel || 'gpt-4o',
+        provider,
+        model,
       );
       setActiveSession(newName.trim());
       setNewName('');

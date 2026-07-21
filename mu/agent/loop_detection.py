@@ -70,6 +70,12 @@ _BOOKKEEPING_TOOLS = frozenset(
         "get_course_state",
         "get_security_state",
         "get_due_reviews",
+        # Blocking sub-agent wait: the parent legitimately calls this
+        # repeatedly (await -> timeout -> re-await) while a child runs.
+        # Unlike poll_subagent (which stays fingerprinted so a busy-poll
+        # loop is still flagged), this is the sanctioned blocking wait,
+        # so it must not itself trip the repeated-sequence detector.
+        "await_subagent",
     }
 )
 

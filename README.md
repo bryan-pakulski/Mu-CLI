@@ -33,6 +33,19 @@ Run `mucli` to start. You'll get a session picker — choose `[+ New Session]` (
 explain how authentication works in this codebase
 ```
 
+## Mobile app
+
+Mucli has a mobile sister app to interact with the --gui sse session. Can be built under `mobile/android` using:
+
+```
+make prebuild
+make apk
+```
+
+and subsequently when an android device is connected to the computer:
+
+`install apk`
+
 ### Workflows
 - **Quick fix or question** — default mode. Just describe the change.
 - **Staged feature** — `/mode feature` breaks the work into approvable phases/tasks.
@@ -133,10 +146,6 @@ utils/            Config, runtime metrics, token estimator, citation
                   manager, anti-detection, helpers, logger
 ```
 
-No `core/` source — the refactor that collapsed the old `core/` + `mu/`
-two-package layout into a single `mu/` package is complete. See
-[refactor_roadmap.md](documentation/refactor_roadmap.md) for the history.
-
 ## Documentation
 See `documentation/`:
 - [`commands.md`](documentation/commands.md) — every slash command and its arguments
@@ -149,7 +158,6 @@ See `documentation/`:
 - [`tracing.md`](documentation/tracing.md) — run tracing & the Trace Analyzer dashboard (per-iteration context/drift/compaction/nudge/tool telemetry)
 - [`memory_guide.md`](documentation/memory_guide.md) — memory vs scratchpad
 - [`session_guide.md`](documentation/session_guide.md) — session memory architecture, history search, context-preservation (compaction floors, oversized-message handling)
-- [`refactor_roadmap.md`](documentation/refactor_roadmap.md) — history of the `core/` → `mu/` consolidation (complete; historical reference)
 - [`harness-investigation.md`](documentation/harness-investigation.md) — context-management roadmap (R1–R12) with implementation status
 
 Agent modes (one doc per mode):

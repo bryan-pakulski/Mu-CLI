@@ -209,11 +209,14 @@ def _envelope(
     description=(
         "Dispatch a child agent with an isolated session to perform a focused "
         "task ASYNCHRONOUSLY. Returns immediately with a task_id — the parent "
-        "loop is NOT blocked. Use `poll_subagent(task_id)` to check progress / "
-        "retrieve the final summary, and `kill_subagent(task_id)` to cancel a "
-        "stuck or unneeded child. Use for long-horizon side quests (research, "
-        "large refactors) so the parent context stays clean and the parent can "
-        "keep working while children run."
+        "loop is NOT blocked. To wait for results without busy-polling, call "
+        "`await_subagent(task_id, timeout=N)` — it blocks on a single tool call "
+        "and wakes when the child finishes or the timer fires (no poll-loop "
+        "warning). Use `poll_subagent(task_id)` for a quick non-blocking status "
+        "check, and `kill_subagent(task_id)` to cancel a stuck or unneeded child. "
+        "Use for long-horizon side quests (research, large refactors) so the "
+        "parent context stays clean and the parent can keep working while "
+        "children run."
     ),
     parameters={
         "type": "object",
@@ -534,9 +537,10 @@ def spawn_agent(args: Dict[str, Any], context) -> Dict[str, Any]:
         ok=True,
         message=(
             f"Dispatched sub-agent (task_id={record.task_id}, depth={child_depth}). "
-            "It is running in the background. Call poll_subagent to check "
-            "progress or retrieve the final summary; call kill_subagent to "
-            "cancel it."
+            "It is running in the background. To wait for it to finish without "
+            "burning iterations, call await_subagent(task_id, timeout=...) — it "
+            "blocks until the child finishes or the timer fires. Call poll_subagent "
+            "for a quick non-blocking status check; call kill_subagent to cancel it."
         ),
         data={
             "task_id": record.task_id,

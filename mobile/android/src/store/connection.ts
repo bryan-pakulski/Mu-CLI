@@ -18,7 +18,7 @@ export interface ConnectionState {
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
-  baseUrl: 'http://localhost:30311',
+  baseUrl: 'http://192.168.20.14:30311',
   activeSessionName: null,
   activeProvider: null,
   activeModel: null,
@@ -49,7 +49,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       if (raw) {
         const parsed = JSON.parse(raw);
         set({
-          baseUrl: parsed.baseUrl || 'http://localhost:30311',
+          baseUrl: (parsed.baseUrl && !parsed.baseUrl.includes('localhost') ? parsed.baseUrl : 'http://192.168.20.14:30311'),
           activeSessionName: parsed.activeSessionName || null,
           activeProvider: parsed.activeProvider || null,
           activeModel: parsed.activeModel || null,

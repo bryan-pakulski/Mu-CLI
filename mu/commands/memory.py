@@ -183,6 +183,74 @@ def _status(session: Any, allow_prompt: bool) -> CommandResult:
                     f"[dim]{cap_desc}[/dim]",
                 )
                 console.print(layer_table)
+
+                # --- Efficiency metrics (spec #12) ---
+                try:
+                    from mu.session.efficiency_metrics import (
+                        collect_efficiency_metrics,
+                    )
+
+                    eff = collect_efficiency_metrics(session)
+                    eff_table = Table(
+                        title="Tool-Output Efficiency (this turn)",
+                        box=box.SIMPLE,
+                    )
+                    eff_table.add_column("Metric", style="cyan")
+                    eff_table.add_column("Value", style="green", justify="right")
+                    eff_table.add_row(
+                        "Raw tool-output tokens",
+                        f"{eff.get('raw_tool_tokens', 0):,}",
+                    )
+                    eff_table.add_row(
+                        "Injected tool tokens",
+                        f"{eff.get('injected_tool_tokens', 0):,}",
+                    )
+                    eff_table.add_row(
+                        "Tokens saved (observed)",
+                        f"{eff.get('tokens_saved', 0):,}",
+                    )
+                    eff_table.add_row(
+                        "Compression ratio",
+                        f"{eff.get('compression_ratio', 0.0):.1%}",
+                    )
+                    eff_table.add_row(
+                        "Omitted (stored-ref) results",
+                        str(eff.get("omitted_results", 0)),
+                    )
+                    cache = eff.get("cache", {}) or {}
+                    eff_table.add_section()
+                    eff_table.add_row(
+                        "Cache locator hits",
+                        str(cache.get("locator_hits", 0)),
+                    )
+                    eff_table.add_row(
+                        "Cache disk fallback hits",
+                        str(cache.get("disk_hits", 0)),
+                    )
+                    eff_table.add_row(
+                        "Cache invalidations",
+                        str(cache.get("invalidations", 0)),
+                    )
+                    eff_table.add_row(
+                        "Cache evictions",
+                        str(cache.get("evictions", 0)),
+                    )
+                    eff_table.add_row(
+                        "Dup-read bytes avoided",
+                        f"{cache.get('dup_bytes_avoided', 0):,}",
+                    )
+                    eff_table.add_row(
+                        "Retrieval calls (recall/result_*)",
+                        str(eff.get("retrieval_calls", 0)),
+                    )
+                    if eff.get("tool_output_share"):
+                        eff_table.add_row(
+                            "Tool-output share of context",
+                            f"{eff.get('tool_output_share', 0.0):.1%}",
+                        )
+                    console.print(eff_table)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

@@ -206,25 +206,45 @@ def emit_tool(
     result_bytes: int = 0,
     path: str = "",
     preview: str = "",
+    # Tool-output / context-management telemetry (spec #12). Populated from
+    # the structured result's telemetry + cache_key by the loop-body call site.
+    # All optional + defaulted so older callers and missing data degrade
+    # gracefully (the parser treats absent fields as zero/None).
+    store_key: Optional[str] = None,
+    stored: bool = False,
+    raw_tokens: int = 0,
+    injected_tokens: int = 0,
+    delivery_mode: str = "",
+    omitted: bool = False,
+    compression_ratio: Optional[float] = None,
 ) -> None:
     """One-line per-tool emit for the post-execution capture site. Never raises."""
     try:
         em = get_emitter(session)
         if em is not None:
-            em.tool(
-                {
-                    "iter": iteration,
-                    "name": name,
-                    "arg_fp": arg_fp,
-                    "ok": ok,
-                    "error_code": error_code,
-                    "latency_ms": int(latency_ms or 0),
-                    "cache_hit": bool(cache_hit),
-                    "result_bytes": int(result_bytes or 0),
-                    "path": path,
-                    "preview": (preview or "")[:200],
-                }
-            )
+            rec = {
+                "iter": iteration,
+                "name": name,
+                "arg_fp": arg_fp,
+                "ok": ok,
+                "error_code": error_code,
+                "latency_ms": int(latency_ms or 0),
+                "cache_hit": bool(cache_hit),
+                "result_bytes": int(result_bytes or 0),
+                "path": path,
+                "preview": (preview or "")[:200],
+                "stored": bool(stored),
+                "omitted": bool(omitted),
+                "raw_tokens": int(raw_tokens or 0),
+                "injected_tokens": int(injected_tokens or 0),
+            }
+            if store_key:
+                rec["store_key"] = store_key
+            if delivery_mode:
+                rec["delivery_mode"] = delivery_mode
+            if compression_ratio is not None:
+                rec["compression_ratio"] = float(compression_ratio)
+            em.tool(rec)
     except Exception:  # noqa: BLE001
         pass
 

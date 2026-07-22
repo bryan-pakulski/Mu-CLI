@@ -459,10 +459,12 @@ def test_degrade_oldest_uses_16000_max_chars():
 
 
 def test_render_entries_for_llm_includes_cache_tag_and_larger_tool_result_cap():
-    """The summarizer renderer must (a) surface the [cache:KEY] tag so the
-    model knows a compacted tool result is recallable, and (b) cap a tool
-    result at the generous ~4000-char budget, NOT the old 300 — so the
-    model sees enough to choose what matters."""
+    """The summarizer renderer must surface the [cache:KEY] tag so the model
+    knows a compacted tool result is recallable. Spec #4/#5: when a part
+    carries a cache_key, it is rendered as a compact action record (decision
+    + outcome + cache tag) — the full raw is NOT replayed (it lives in the
+    durable store, recoverable via recall). Legacy prose (4000-char cap)
+    applies only to parts without a cache_key/envelope."""
     host = _Host()
     big = "PATH=/a/b/c.py RESULT=ok " * 200  # ~4800 chars of varied text
     entries = [
@@ -479,12 +481,12 @@ def test_render_entries_for_llm_includes_cache_tag_and_larger_tool_result_cap():
         }
     ]
     rendered = host._render_entries_for_llm(entries)
+    # The [cache:KEY] tag is preserved inside the action record.
     assert "[cache:abc123]" in rendered
-    # The old 300-char cap would have dropped everything after ~300 chars;
-    # 4000 lets the model see far more of the result.
-    assert len(rendered) > 1000
-    # And it's still capped (not the full ~4800).
-    assert "PATH=/a/b/c.py RESULT=ok " in rendered
+    assert "action: read_file" in rendered
+    # The full raw is NOT replayed into the summary (spec #5).
+    assert "PATH=/a/b/c.py RESULT=ok " not in rendered
+    assert len(rendered) < 300
 
 
 def test_roll_history_summary_segmented_advances_one_segment_per_call():

@@ -1,15 +1,15 @@
-import React from 'react';
-import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import React, { useState, useRef } from 'react';
+import { NavigationContainer, DarkTheme, DefaultTheme, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 
-import { Header } from '../components/Header';
+import { Header, type ViewPanel } from '../components/Header';
+import { SessionsDrawer } from '../components/SessionsDrawer';
+import { InspectorDrawer } from '../components/InspectorDrawer';
 
 import { ChatScreen } from '../screens/ChatScreen';
-import { SessionsScreen } from '../screens/SessionsScreen';
-import { SessionDetailScreen } from '../screens/SessionDetailScreen';
 import { MemoryScreen } from '../screens/MemoryScreen';
 import { FilesScreen } from '../screens/FilesScreen';
 import { SkillsScreen } from '../screens/SkillsScreen';
@@ -20,7 +20,6 @@ import { ConnectionScreen } from '../screens/ConnectionScreen';
 import { ModesScreen } from '../screens/ModesScreen';
 import { PromptsScreen } from '../screens/PromptsScreen';
 import { SystemPromptsScreen } from '../screens/SystemPromptsScreen';
-import { InspectorScreen } from '../screens/InspectorScreen';
 import { TeacherScreen } from '../screens/TeacherScreen';
 import { FeatureScreen } from '../screens/FeatureScreen';
 import { ResearchScreen } from '../screens/ResearchScreen';
@@ -29,16 +28,8 @@ import { LoopScreen } from '../screens/LoopScreen';
 import { DebugScreen } from '../screens/DebugScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-
-// ── Types ──────────────────────────────────────────────────────────
-export type ChatStackParamList = {
+export type RootStackParamList = {
   Chat: undefined;
-  Modes: undefined;
-  Prompts: undefined;
-  SystemPrompts: undefined;
-  Inspector: undefined;
   Teacher: undefined;
   Feature: undefined;
   Research: undefined;
@@ -46,111 +37,93 @@ export type ChatStackParamList = {
   Loop: undefined;
   Debug: undefined;
   History: undefined;
-};
-
-export type SessionsStackParamList = {
-  Sessions: undefined;
-  SessionDetail: undefined;
-};
-
-export type ToolsStackParamList = {
+  SystemPrompts: undefined;
   Memory: undefined;
   Files: undefined;
   Skills: undefined;
   Audio: undefined;
-};
-
-export type RunStackParamList = {
   Traces: undefined;
-};
-
-export type DataStackParamList = {
   Providers: undefined;
   Connection: undefined;
+  Modes: undefined;
+  Prompts: undefined;
 };
 
-export type RootTabParamList = {
-  Chat: undefined;
-  Sessions: undefined;
-  Tools: undefined;
-  Run: undefined;
-  Data: undefined;
+const Stack = createNativeStackNavigator<RootStackParamList>();
+const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
+
+const VIEW_TO_SCREEN: Record<string, keyof RootStackParamList> = {
+  teacher: 'Teacher',
+  feature: 'Feature',
+  research: 'Research',
+  security: 'Security',
+  loop: 'Loop',
+  debug: 'Debug',
+  history: 'History',
+  systemPrompts: 'SystemPrompts',
+  memory: 'Memory',
+  files: 'Files',
+  skills: 'Skills',
+  audio: 'Audio',
+  traces: 'Traces',
+  providers: 'Providers',
+  connection: 'Connection',
+  modes: 'Modes',
+  prompts: 'Prompts',
 };
 
-// ── Stack navigators per tab ───────────────────────────────────────
-const ChatStack = createNativeStackNavigator<ChatStackParamList>();
-const SessionsStack = createNativeStackNavigator<SessionsStackParamList>();
-const ToolsStack = createNativeStackNavigator<ToolsStackParamList>();
-const RunStack = createNativeStackNavigator<RunStackParamList>();
-const DataStack = createNativeStackNavigator<DataStackParamList>();
-const Tab = createBottomTabNavigator<RootTabParamList>();
+const PANEL_SCREENS: { name: keyof RootStackParamList; component: React.ComponentType }[] = [
+  { name: 'Teacher', component: TeacherScreen },
+  { name: 'Feature', component: FeatureScreen },
+  { name: 'Research', component: ResearchScreen },
+  { name: 'Security', component: SecurityScreen },
+  { name: 'Loop', component: LoopScreen },
+  { name: 'Debug', component: DebugScreen },
+  { name: 'History', component: HistoryScreen },
+  { name: 'SystemPrompts', component: SystemPromptsScreen },
+  { name: 'Memory', component: MemoryScreen },
+  { name: 'Files', component: FilesScreen },
+  { name: 'Skills', component: SkillsScreen },
+  { name: 'Audio', component: AudioScreen },
+  { name: 'Traces', component: TracesScreen },
+  { name: 'Providers', component: ProvidersScreen },
+  { name: 'Connection', component: ConnectionScreen },
+  { name: 'Modes', component: ModesScreen },
+  { name: 'Prompts', component: PromptsScreen },
+];
 
-function ChatStackNavigator() {
+function ChatScreenWithChrome() {
+  const [activeView, setActiveView] = useState<ViewPanel>('chat');
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+
+  const handleViewChange = (view: ViewPanel) => {
+    if (view === 'chat') {
+      setActiveView('chat');
+      return;
+    }
+    const screen = VIEW_TO_SCREEN[view];
+    if (screen) {
+      setActiveView(view);
+      navRef.current?.navigate(screen);
+    }
+  };
+
   return (
-    <ChatStack.Navigator>
-      <ChatStack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
-      <ChatStack.Screen name="Modes" component={ModesScreen} />
-      <ChatStack.Screen name="Prompts" component={PromptsScreen} />
-      <ChatStack.Screen name="SystemPrompts" component={SystemPromptsScreen} />
-      <ChatStack.Screen name="Inspector" component={InspectorScreen} />
-      <ChatStack.Screen name="Teacher" component={TeacherScreen} />
-      <ChatStack.Screen name="Feature" component={FeatureScreen} />
-      <ChatStack.Screen name="Research" component={ResearchScreen} />
-      <ChatStack.Screen name="Security" component={SecurityScreen} />
-      <ChatStack.Screen name="Loop" component={LoopScreen} />
-      <ChatStack.Screen name="Debug" component={DebugScreen} />
-      <ChatStack.Screen name="History" component={HistoryScreen} />
-    </ChatStack.Navigator>
+    <View style={{ flex: 1 }}>
+      <Header
+        activeView={activeView}
+        onViewChange={handleViewChange}
+        onOpenSessions={() => setSessionsOpen(true)}
+        onOpenInspector={() => setInspectorOpen(true)}
+      />
+      <ChatScreen />
+      <SessionsDrawer visible={sessionsOpen} onClose={() => setSessionsOpen(false)} />
+      <InspectorDrawer visible={inspectorOpen} onClose={() => setInspectorOpen(false)} />
+    </View>
   );
 }
 
-function SessionsStackNavigator() {
-  return (
-    <SessionsStack.Navigator>
-      <SessionsStack.Screen name="Sessions" component={SessionsScreen} options={{ headerShown: false }} />
-      <SessionsStack.Screen name="SessionDetail" component={SessionDetailScreen} />
-    </SessionsStack.Navigator>
-  );
-}
-
-function ToolsStackNavigator() {
-  return (
-    <ToolsStack.Navigator>
-      <ToolsStack.Screen name="Memory" component={MemoryScreen} options={{ headerShown: false }} />
-      <ToolsStack.Screen name="Files" component={FilesScreen} />
-      <ToolsStack.Screen name="Skills" component={SkillsScreen} />
-      <ToolsStack.Screen name="Audio" component={AudioScreen} />
-    </ToolsStack.Navigator>
-  );
-}
-
-function RunStackNavigator() {
-  return (
-    <RunStack.Navigator>
-      <RunStack.Screen name="Traces" component={TracesScreen} options={{ headerShown: false }} />
-    </RunStack.Navigator>
-  );
-}
-
-function DataStackNavigator() {
-  return (
-    <DataStack.Navigator>
-      <DataStack.Screen name="Providers" component={ProvidersScreen} options={{ headerShown: false }} />
-      <DataStack.Screen name="Connection" component={ConnectionScreen} />
-    </DataStack.Navigator>
-  );
-}
-
-// ── Tab icons ──────────────────────────────────────────────────────
-const tabIcons: Record<keyof RootTabParamList, { icon: keyof typeof Ionicons.glyphMap; label: string }> = {
-  Chat: { icon: 'chatbubble-outline', label: 'Chat' },
-  Sessions: { icon: 'folder-outline', label: 'Sessions' },
-  Tools: { icon: 'construct-outline', label: 'Tools' },
-  Run: { icon: 'analytics-outline', label: 'Run' },
-  Data: { icon: 'settings-outline', label: 'Data' },
-};
-
-// ── App Navigator ──────────────────────────────────────────────────
 export function AppNavigator() {
   const { colors, isDark } = useTheme();
 
@@ -161,26 +134,20 @@ export function AppNavigator() {
   navTheme.colors.text = colors.text;
 
   return (
-    <NavigationContainer theme={navTheme}>
-      <Header />
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarIcon: ({ color, size }) => {
-            const icon = tabIcons[route.name as keyof RootTabParamList]?.icon;
-            return <Ionicons name={icon || 'circle-outline'} size={size} color={color} />;
-          },
-          tabBarActiveTintColor: colors.accent,
-          tabBarInactiveTintColor: colors.textDim,
-          tabBarStyle: { backgroundColor: colors.bgLift, borderTopColor: colors.border },
-          headerShown: false,
-        })}
+    <NavigationContainer ref={navRef} theme={navTheme}>
+      <Stack.Navigator
+        screenOptions={{
+          headerStyle: { backgroundColor: colors.bgLift },
+          headerTintColor: colors.text,
+          headerShadowVisible: false,
+          headerBackTitle: 'Back',
+        }}
       >
-        <Tab.Screen name="Chat" component={ChatStackNavigator} />
-        <Tab.Screen name="Sessions" component={SessionsStackNavigator} />
-        <Tab.Screen name="Tools" component={ToolsStackNavigator} />
-        <Tab.Screen name="Run" component={RunStackNavigator} />
-        <Tab.Screen name="Data" component={DataStackNavigator} />
-      </Tab.Navigator>
+        <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />
+        {PANEL_SCREENS.map(({ name, component: Comp }) => (
+          <Stack.Screen key={name} name={name} component={Comp} options={{ title: name }} />
+        ))}
+      </Stack.Navigator>
     </NavigationContainer>
   );
 }

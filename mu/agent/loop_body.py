@@ -828,6 +828,21 @@ def run_turn(session, text):
         # tool on demand instead of pre-injected snippets.
         if session.agentic:
             active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
+            # Spec #9: phased exposure — when lazy_tools_enabled, exclude
+            # specialist-phase tools not in the active phase set (+ any the
+            # model loaded via load_tools). Default off → no filtering.
+            if session.variables.get("lazy_tools_enabled", False):
+                try:
+                    from mu.tools.descriptors import filter_tools_by_phase
+
+                    _phases = list(
+                        session.variables.get("active_tool_phases", ["core"])
+                        or ["core"]
+                    )
+                    _phases += list(getattr(session, "_loaded_tool_phases", []) or [])
+                    active_tools = filter_tools_by_phase(active_tools, _phases)
+                except Exception:  # noqa: BLE001
+                    pass
             tool_desc_str = "\n".join(
                 [f"{t.name} - {t.description}" for t in active_tools]
             )
@@ -919,6 +934,55 @@ def run_turn(session, text):
         session.tool_result_cache.max_entries = _tc_entries
         session.tool_result_cache.max_bytes = _tc_bytes
     except Exception:
+        pass
+    # Reset per-turn efficiency accumulators (spec #12) so each turn's
+    # metrics reflect that turn only.
+    try:
+        from mu.session.efficiency_metrics import reset_per_turn_accumulators
+
+        reset_per_turn_accumulators(session)
+    except Exception:  # noqa: BLE001
+        pass
+    # Attach the durable result store (spec #1/#11): full raw tool results
+    # are written through to disk so they survive LRU eviction and session
+    # restarts, and are retrievable via recall()/result_* ops. One store per
+    # run, keyed by the trace run_id so results co-locate with their trace.
+    try:
+        from mu.session.result_store import ResultStore
+        from mu.trace.emitter import get_emitter, new_run_id
+
+        if (
+            session.variables.get("result_store_enabled", True)
+            and getattr(session, "result_store", None) is None
+        ):
+            _run_id = new_run_id()
+            try:
+                _tr = get_emitter(session)
+                if _tr is not None and getattr(_tr, "run_id", None):
+                    _run_id = _tr.run_id
+            except Exception:  # noqa: BLE001
+                pass
+            session.result_store = ResultStore(
+                _run_id,
+                max_bytes=int(
+                    session.variables.get("result_store_max_bytes", 16 * 1024 * 1024)
+                    or 16 * 1024 * 1024
+                ),
+                gc_age_days=int(
+                    session.variables.get("result_store_gc_age_days", 7) or 7
+                ),
+            )
+            session.tool_result_cache.set_store(session.result_store)
+            # Sync content-hash freshness flag from config (spec #7/#8).
+            session.tool_result_cache.content_hash_enabled = bool(
+                session.variables.get("cache_content_hash_enabled", True)
+            )
+            # Best-effort GC of stale run dirs once per session.
+            try:
+                session.result_store.gc()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
         pass
     # Run tracer: emit the run_start header once, and tag this turn-start
     # compaction so the trace can record it (drained at the post-response seam).
@@ -1037,6 +1101,18 @@ def run_turn(session, text):
     max_iterations = session.variables.get("max_iterations", 50)
     iteration = 0
     active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
+    # Spec #9: phased exposure (see the earlier filter site for details).
+    if session.variables.get("lazy_tools_enabled", False):
+        try:
+            from mu.tools.descriptors import filter_tools_by_phase
+
+            _phases = list(
+                session.variables.get("active_tool_phases", ["core"]) or ["core"]
+            )
+            _phases += list(getattr(session, "_loaded_tool_phases", []) or [])
+            active_tools = filter_tools_by_phase(active_tools, _phases)
+        except Exception:  # noqa: BLE001
+            pass
 
     total_in = 0
     total_out = 0
@@ -1857,6 +1933,37 @@ def run_turn(session, text):
 
             def _auto_recall_or_execute(part_idx: int, part) -> Any:
                 _tool_start_times[part_idx] = time.monotonic()
+                # Range-memo dedup (spec #7): if this exact range of an
+                # unchanged file was already supplied this session, emit a
+                # compact marker instead of re-injecting the content. The
+                # marker offers the cache_key for recall, so the model can
+                # still pull the content back if it was compacted away.
+                if session.variables.get("read_dedup_enabled", True):
+                    try:
+                        rr = session.tool_result_cache.lookup_read_range(
+                            part.tool_name, part.tool_args
+                        )
+                    except Exception:
+                        rr = None
+                    if rr is not None:
+                        ck = str(rr.get("cache_key", "") or "")
+                        rng = rr.get("range")
+                        _auto_recall_hits[part_idx] = ck
+                        if session.ui:
+                            try:
+                                session.ui.show_info(
+                                    f"  [Dedup: {part.tool_name} range {rng} "
+                                    f"already supplied — cache_key={ck}]"
+                                )
+                            except Exception:
+                                pass
+                        return (
+                            f"[dedup: {part.tool_name} — file unchanged; this "
+                            f"range was already read this session "
+                            f"(cache_key={ck}). Call recall({ck}) or "
+                            f"result_range/result_search if you need the content "
+                            f"again; otherwise continue with what you have.]"
+                        )
                 hit = None
                 try:
                     hit = session.tool_result_cache.lookup_by_locator(
@@ -2138,59 +2245,24 @@ def run_turn(session, text):
                 if _lifecycle is not None:
                     try:
                         _lifecycle.record_tool_call(
-                            part.tool_name, part.tool_args, source_result
+                            part.tool_name,
+                            part.tool_args,
+                            source_result,
+                            cache_hit=bool(_auto_recall_hits.get(i)),
                         )
                     except Exception:
                         logger.debug(
                             "lifecycle record_tool_call failed", exc_info=True
                         )
-                if session.variables.get("structured_tool_results", True):
-                    if raw_result != source_result:
-                        _, unwrapped_source = session._unwrap_tool_envelope(
-                            source_result
-                        )
-                        source_text = str(unwrapped_source)
-                        result = session._build_structured_tool_result(
-                            part.tool_name,
-                            part.tool_args,
-                            raw_result,
-                            execution_source="session",
-                        )
-                        result["data"] = {
-                            "collated": True,
-                            "pending_items": len(session.collation_buffer.entries),
-                            "source_char_count": len(source_text),
-                            "source_line_count": len(source_text.splitlines()),
-                        }
-                        result["telemetry"].update(
-                            {
-                                "delivery_mode": "collated",
-                                "visible_char_count": len(str(raw_result)),
-                            }
-                        )
-                    else:
-                        result = session._build_structured_tool_result(
-                            part.tool_name,
-                            part.tool_args,
-                            source_result,
-                            execution_source="session",
-                        )
-                else:
-                    result = raw_result
-
-                session._sync_feature_state_for_tool(
-                    part.tool_name,
-                    part.tool_args,
-                    source_result,
-                    result,
-                )
-                # Store full result in tool result cache before compression.
-                # Cache the RAW source_result (original tool output), not the
-                # structured `result` envelope — when collation transforms
-                # the result, `result` contains metadata like
-                # {"collated": True, "source_char_count": 4500} which is
-                # useless to recall().  source_result has the actual file
-                # content / search output the model needs to recover.
+                # Store full result in tool result cache BEFORE building the
+                # structured envelope so the compact observation (spec #2/#10)
+                # can embed the stored_ref cache_key. Cache the RAW
+                # source_result (original tool output), not the structured
+                # `result` envelope — when collation transforms the result,
+                # `result` contains metadata like {"collated": True, ...} which
+                # is useless to recall(). source_result has the actual file
+                # content / search output the model needs to recover. The
+                # store also write-throughs to the durable ResultStore (spec #11).
                 #
                 # If the collation branch already cached this result (and
                 # stamped the key into the placeholder), reuse that key so
@@ -2223,6 +2295,88 @@ def run_turn(session, text):
                                 result=source_result,
                             )
                 except Exception:
+                    pass
+
+                # Range-memo bookkeeping (spec #7): record the supplied range
+                # so a later overlapping read of the unchanged file dedups.
+                # On writes, invalidate the memo for that path so the next
+                # read re-executes against fresh content.
+                try:
+                    if part.tool_name in {
+                        "write_file", "apply_diff", "search_and_replace_file"
+                    }:
+                        _wpath = part.tool_args.get("filename") if isinstance(
+                            part.tool_args, dict
+                        ) else None
+                        if _wpath:
+                            session.tool_result_cache.invalidate_path(_wpath)
+                    elif cache_key is not None and session.variables.get(
+                        "read_dedup_enabled", True
+                    ):
+                        session.tool_result_cache.record_read_range(
+                            part.tool_name, part.tool_args, cache_key
+                        )
+                except Exception:
+                    pass
+
+                if session.variables.get("structured_tool_results", True):
+                    if raw_result != source_result:
+                        _, unwrapped_source = session._unwrap_tool_envelope(
+                            source_result
+                        )
+                        source_text = str(unwrapped_source)
+                        result = session._build_structured_tool_result(
+                            part.tool_name,
+                            part.tool_args,
+                            raw_result,
+                            execution_source="session",
+                            cache_key=cache_key,
+                        )
+                        result["data"] = {
+                            "collated": True,
+                            "pending_items": len(session.collation_buffer.entries),
+                            "source_char_count": len(source_text),
+                            "source_line_count": len(source_text.splitlines()),
+                        }
+                        result["telemetry"].update(
+                            {
+                                "delivery_mode": "collated",
+                                "visible_char_count": len(str(raw_result)),
+                            }
+                        )
+                    else:
+                        result = session._build_structured_tool_result(
+                            part.tool_name,
+                            part.tool_args,
+                            source_result,
+                            execution_source="session",
+                            cache_key=cache_key,
+                        )
+                else:
+                    result = raw_result
+
+                session._sync_feature_state_for_tool(
+                    part.tool_name,
+                    part.tool_args,
+                    source_result,
+                    result,
+                )
+
+                # Efficiency metrics (spec #12): fold this result's telemetry
+                # into the per-turn accumulators, and count retrieval-tool
+                # calls (recall + result_* family) for the retrieval rate.
+                try:
+                    from mu.session.efficiency_metrics import (
+                        accumulate_tool_result,
+                        is_retrieval_tool,
+                    )
+
+                    accumulate_tool_result(session, result)
+                    if is_retrieval_tool(part.tool_name):
+                        session._eff_retrievals = int(
+                            getattr(session, "_eff_retrievals", 0)
+                        ) + 1
+                except Exception:  # noqa: BLE001
                     pass
 
                 tool_result_parts.append(
@@ -2268,6 +2422,30 @@ def run_turn(session, text):
                         _res_preview = str(source_result or "")[:200]
                     except Exception:  # noqa: BLE001
                         _res_preview = ""
+                    # Efficiency telemetry (spec #12): pull the observation
+                    # transform's per-result metrics off the structured envelope
+                    # so the trace tool record + efficiency panel can show raw vs
+                    # injected tokens, delivery mode, omitted, and the store_key.
+                    _eff_raw = 0
+                    _eff_inj = 0
+                    _eff_mode = ""
+                    _eff_omitted = False
+                    _eff_cr = None
+                    if isinstance(result, dict):
+                        _tele = result.get("telemetry") or {}
+                        if isinstance(_tele, dict):
+                            _eff_raw = int(_tele.get("raw_token_count") or 0)
+                            _eff_inj = int(_tele.get("injected_token_count") or 0)
+                            _eff_mode = str(_tele.get("delivery_mode") or "")
+                            _crv = _tele.get("compression_ratio")
+                            if _crv is not None:
+                                try:
+                                    _eff_cr = float(_crv)
+                                except Exception:  # noqa: BLE001
+                                    _eff_cr = None
+                        _rd = result.get("data")
+                        if isinstance(_rd, dict):
+                            _eff_omitted = bool(_rd.get("omitted"))
                     emit_tool(
                         session,
                         iteration=iteration,
@@ -2283,6 +2461,13 @@ def run_turn(session, text):
                         result_bytes=len(str(source_result or "")),
                         path=_tok_path,
                         preview=_res_preview,
+                        store_key=cache_key or None,
+                        stored=bool(cache_key),
+                        raw_tokens=_eff_raw,
+                        injected_tokens=_eff_inj,
+                        delivery_mode=_eff_mode,
+                        omitted=_eff_omitted,
+                        compression_ratio=_eff_cr,
                     )
                 except Exception:  # noqa: BLE001 — telemetry must not break the loop
                     pass

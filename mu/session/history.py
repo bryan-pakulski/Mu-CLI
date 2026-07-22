@@ -199,6 +199,11 @@ class HistoryMixin:
         "identifiers VERBATIM.\n"
         "- When a tool result is summarized, KEEP its [cache:KEY] tag so "
         "the full original result can be recalled later — do not drop it.\n"
+        "- Tool results appear as compact `[action: ...]` records preserving "
+        "the tool, args, ok/fail status, modified files, error_code, and "
+        "cache_key. Preserve the modified_files and any unresolved error_code "
+        "from these records; the full raw output is recoverable via recall "
+        "and does NOT need to be re-summarized.\n"
         "- Do NOT add commentary outside the sections you choose.\n"
         "- Be concise but complete. Target 200-600 words.\n"
     )
@@ -309,20 +314,35 @@ class HistoryMixin:
                         f"args={_shorten_tool_args(part.get('tool_args', {}))}"
                     )
                 elif part_type == "tool_result":
-                    result = str(part.get("tool_result", "")).strip().replace("\n", " ")
-                    if len(result) > _COMPACT_RENDER_TOOL_RESULT_CHARS:
-                        result = result[: _COMPACT_RENDER_TOOL_RESULT_CHARS - 3] + "..."
-                    if result:
-                        # cache_key tag: the full tool result lives in the
-                        # tool-result sidecar cache and can be recalled by key,
-                        # so the summarizer need not preserve every byte — it
-                        # just marks the result as recallable.
-                        cache_key = part.get("cache_key")
-                        cache_tag = f"[cache:{cache_key}] " if cache_key else ""
-                        parts_text.append(
-                            f"tool_result:{part.get('tool_name', 'tool')} => "
-                            f"{cache_tag}{result}"
-                        )
+                    # Action record (spec #4/#5): when the part carries a
+                    # cache_key or a structured envelope, render a compact
+                    # one-line record preserving the decision, outcome,
+                    # modified_files, error_code, and cache_key — far less
+                    # for the summarizer to process than a 4000-char clip,
+                    # and more faithful (no truncation of the middle). The
+                    # full raw is recoverable via recall(cache_key).
+                    from mu.session.action_record import (
+                        is_action_record_eligible,
+                        render_action_record,
+                    )
+
+                    if is_action_record_eligible(part):
+                        parts_text.append(render_action_record(part))
+                    else:
+                        result = str(part.get("tool_result", "")).strip().replace("\n", " ")
+                        if len(result) > _COMPACT_RENDER_TOOL_RESULT_CHARS:
+                            result = result[: _COMPACT_RENDER_TOOL_RESULT_CHARS - 3] + "..."
+                        if result:
+                            # cache_key tag: the full tool result lives in the
+                            # tool-result sidecar cache and can be recalled by key,
+                            # so the summarizer need not preserve every byte — it
+                            # just marks the result as recallable.
+                            cache_key = part.get("cache_key")
+                            cache_tag = f"[cache:{cache_key}] " if cache_key else ""
+                            parts_text.append(
+                                f"tool_result:{part.get('tool_name', 'tool')} => "
+                                f"{cache_tag}{result}"
+                            )
                 elif part_type == "file":
                     file_ref = part.get("file_ref", {})
                     parts_text.append(

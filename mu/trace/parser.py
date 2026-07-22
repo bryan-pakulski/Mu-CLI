@@ -499,12 +499,22 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
     # --- tool histogram + per-tool latency series ---
     tool_hist: Dict[str, Dict[str, Any]] = {}
     tool_latency: Dict[str, List[Dict[str, Any]]] = {}
+    # Per-iteration efficiency accumulation (spec #12): raw vs injected
+    # tool-output tokens, omitted/stored/retrieval counts.
+    eff_by_iter: Dict[int, Dict[str, Any]] = {}
+    retrieval_tool_names = {
+        "recall", "result_range", "result_head", "result_tail",
+        "result_search", "result_diagnostics", "result_json_path",
+        "compare_results",
+    }
     for tr in run.tools:
         name = str(tr.get("name") or "unknown")
         h = tool_hist.setdefault(
             name,
             {"name": name, "count": 0, "ok": 0, "error": 0, "latency_sum": 0.0,
-             "cache_hits": 0, "result_bytes_sum": 0, "error_codes": {}},
+             "cache_hits": 0, "result_bytes_sum": 0, "error_codes": {},
+             "stored": 0, "omitted": 0, "raw_tokens_sum": 0,
+             "injected_tokens_sum": 0},
         )
         h["count"] += 1
         if tr.get("ok"):
@@ -517,21 +527,62 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
         if tr.get("cache_hit"):
             h["cache_hits"] += 1
         h["result_bytes_sum"] += _num(tr.get("result_bytes"))
+        if tr.get("stored"):
+            h["stored"] += 1
+        if tr.get("omitted"):
+            h["omitted"] += 1
+        h["raw_tokens_sum"] += _num(tr.get("raw_tokens"))
+        h["injected_tokens_sum"] += _num(tr.get("injected_tokens"))
         tool_latency.setdefault(name, []).append(
             {
                 "iter": tr.get("iter"),
                 "latency_ms": _num(tr.get("latency_ms")),
                 "ok": bool(tr.get("ok")),
                 "cache_hit": bool(tr.get("cache_hit")),
+                "omitted": bool(tr.get("omitted")),
+                "stored": bool(tr.get("stored")),
+                "raw_tokens": _num(tr.get("raw_tokens")),
+                "injected_tokens": _num(tr.get("injected_tokens")),
             }
         )
+        # Efficiency accumulation per iteration.
+        _ei = _iter_of(tr.get("iter"))
+        e = eff_by_iter.setdefault(
+            _ei,
+            {"iter": tr.get("iter"), "raw_tokens": 0, "injected_tokens": 0,
+             "tool_calls": 0, "omitted": 0, "stored": 0, "retrievals": 0,
+             "cache_hits": 0},
+        )
+        e["raw_tokens"] += _num(tr.get("raw_tokens"))
+        e["injected_tokens"] += _num(tr.get("injected_tokens"))
+        e["tool_calls"] += 1
+        if tr.get("omitted"):
+            e["omitted"] += 1
+        if tr.get("stored"):
+            e["stored"] += 1
+        if tr.get("cache_hit"):
+            e["cache_hits"] += 1
+        if name in retrieval_tool_names:
+            e["retrievals"] += 1
     for h in tool_hist.values():
         c = max(1, h["count"])
         h["avg_latency_ms"] = round(h["latency_sum"] / c, 2)
         h["cache_hit_rate"] = round(h["cache_hits"] / c, 3)
         h["avg_result_bytes"] = int(h["result_bytes_sum"] / c)
+        h["stored_rate"] = round(h["stored"] / c, 3)
+        h["omitted_rate"] = round(h["omitted"] / c, 3)
+        h["avg_raw_tokens"] = int(h["raw_tokens_sum"] / c)
+        h["avg_injected_tokens"] = int(h["injected_tokens_sum"] / c)
+        raw = h["raw_tokens_sum"]
+        h["tokens_saved"] = max(0, raw - h["injected_tokens_sum"])
+        h["compression_ratio"] = (
+            round((raw - h["injected_tokens_sum"]) / raw, 3) if raw > 0 else 0.0
+        )
     for name, series in tool_latency.items():
         tool_hist[name]["latency_series"] = series
+    efficiency_series = [
+        eff_by_iter[k] for k in sorted(eff_by_iter.keys())
+    ]
 
     # --- compaction timeline ---
     compaction_timeline = []
@@ -601,6 +652,7 @@ def build_series(run: TraceRun) -> Dict[str, Any]:
         "tokens": tokens,
         "latency": latency,
         "tool_histogram": list(tool_hist.values()),
+        "efficiency": efficiency_series,
         "compaction_timeline": compaction_timeline,
         "nudge_timeline": nudge_timeline,
         "nudge_efficacy": nudge_efficacy,
@@ -705,6 +757,57 @@ def _redundant_reads(run: TraceRun) -> List[Dict[str, Any]]:
 # ----------------------------------------------------------- overview summary
 
 
+def _build_efficiency_summary(
+    run: TraceRun, series: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Aggregate the per-iteration efficiency series into run-wide totals and
+    merge in the cache counters the session stamped on ``turn_end.efficiency``
+    (spec #12). Tolerates older traces that carry none of these fields."""
+    eff_series = series.get("efficiency") or []
+    total_raw = sum(_num(e.get("raw_tokens")) for e in eff_series)
+    total_injected = sum(_num(e.get("injected_tokens")) for e in eff_series)
+    total_saved = max(0, total_raw - total_injected)
+    omitted = sum(1 for e in eff_series if e.get("omitted"))
+    stored = sum(_num(e.get("stored")) for e in eff_series)
+    retrievals = sum(_num(e.get("retrievals")) for e in eff_series)
+    tool_calls = sum(_num(e.get("tool_calls")) for e in eff_series)
+    peak_raw = max((_num(e.get("raw_tokens")) for e in eff_series), default=0)
+
+    out: Dict[str, Any] = {
+        "raw_tokens": int(total_raw),
+        "injected_tokens": int(total_injected),
+        "tokens_saved": int(total_saved),
+        "compression_ratio": (
+            round(total_saved / total_raw, 3) if total_raw > 0 else 0.0
+        ),
+        "omitted_results": int(omitted),
+        "stored_results": int(stored),
+        "retrieval_calls": int(retrievals),
+        "tool_calls": int(tool_calls),
+        "retrieval_rate": (
+            round(retrievals / tool_calls, 3) if tool_calls > 0 else 0.0
+        ),
+        "peak_raw_tokens": int(peak_raw),
+    }
+
+    # Merge cache counters from turn_end.efficiency (written by
+    # collect_efficiency_metrics at turn end). Present on traces recorded
+    # after the spec-#12 wiring; absent on older traces.
+    te_eff = ((run.turn_end or {}).get("efficiency") or {}) if run.turn_end else {}
+    cache = te_eff.get("cache") or {}
+    if cache:
+        out["cache"] = {
+            "evictions": int(cache.get("evictions", 0)),
+            "invalidations": int(cache.get("invalidations", 0)),
+            "disk_hits": int(cache.get("disk_hits", 0)),
+            "dup_bytes_avoided": int(cache.get("dup_bytes_avoided", 0)),
+            "locator_hits": int(cache.get("locator_hits", 0)),
+        }
+    if te_eff.get("tool_output_share") is not None:
+        out["tool_output_share"] = float(te_eff.get("tool_output_share") or 0.0)
+    return out
+
+
 def build_summary(run: TraceRun, series: Dict[str, Any]) -> Dict[str, Any]:
     """Overview cards: totals, peaks, counts by type — the at-a-glance read."""
     # Drift stats use only reliable readings — Ollama warm-cache iters
@@ -801,6 +904,12 @@ def build_summary(run: TraceRun, series: Dict[str, Any]) -> Dict[str, Any]:
         "redundant_reads": len(series["redundant_reads"]),
         "status": (run.turn_end or {}).get("status", "running"),
         "bytes": run.bytes,
+        # Tool-output efficiency (spec #12). Run-wide aggregates from the
+        # per-iteration efficiency series, merged with the cache counters
+        # the session stamped on turn_end.efficiency (evictions /
+        # invalidations / disk_hits / locator_hits / dup_bytes_avoided) when
+        # present.
+        "efficiency": _build_efficiency_summary(run, series),
     }
 
 

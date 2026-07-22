@@ -141,22 +141,34 @@ def summarize_message_parts(
                 f"args={_shorten_tool_args(part.get('tool_args', {}))}"
             )
         elif p_type == "tool_result":
-            raw_result = part.get("tool_result", "")
-            if isinstance(raw_result, dict):
-                result = str(
-                    raw_result.get("summary") or raw_result.get("raw", "")
-                )
-            else:
-                result = str(raw_result)
-            result = result.strip().replace("\n", " ")
-            # Include cache key tag if present so model can recall full result
-            cache_key = part.get("cache_key")
-            cache_tag = f"[cache:{cache_key}] " if cache_key else ""
-            if len(result) > 500:
-                result = f"{result[:497]}..."
-            summaries.append(
-                f"tool_result:{part.get('tool_name')} => {cache_tag}{result}"
+            # Action record (spec #4/#5): for cache_key'd / structured results,
+            # emit a compact one-line record (decision + outcome + files +
+            # error + cache_key) instead of a 500-char prose clip. The full
+            # raw is recoverable via recall(cache_key).
+            from mu.session.action_record import (
+                is_action_record_eligible,
+                render_action_record,
             )
+
+            if is_action_record_eligible(part):
+                summaries.append(render_action_record(part))
+            else:
+                raw_result = part.get("tool_result", "")
+                if isinstance(raw_result, dict):
+                    result = str(
+                        raw_result.get("summary") or raw_result.get("raw", "")
+                    )
+                else:
+                    result = str(raw_result)
+                result = result.strip().replace("\n", " ")
+                # Include cache key tag if present so model can recall full result
+                cache_key = part.get("cache_key")
+                cache_tag = f"[cache:{cache_key}] " if cache_key else ""
+                if len(result) > 500:
+                    result = f"{result[:497]}..."
+                summaries.append(
+                    f"tool_result:{part.get('tool_name')} => {cache_tag}{result}"
+                )
         elif p_type == "file":
             fr = part.get("file_ref", {})
             summaries.append(

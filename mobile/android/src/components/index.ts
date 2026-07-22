@@ -11,3 +11,5 @@ export { EmptyState } from './EmptyState';
 export { ErrorState } from './ErrorState';
 export { BottomSheet } from './BottomSheet';
 export { Header } from './Header';
+export { SessionsDrawer } from './SessionsDrawer';
+export { InspectorDrawer } from './InspectorDrawer';

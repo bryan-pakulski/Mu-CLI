@@ -219,6 +219,81 @@ VARIABLE_SCHEMA = {
         "type": int,
         "default": 524288,
     },
+    "result_store_enabled": {
+        # Spec #1/#11: persist full raw tool results to disk under
+        # $MUCLI_HOME/results/<run_id>/ so they survive LRU eviction and
+        # session restarts and are retrievable via recall()/result_* ops. The
+        # in-memory ToolResultCache is the hot layer; this is the durable
+        # authoritative raw-output record (the trace stays telemetry-only).
+        "type": bool,
+        "default": True,
+    },
+    "result_store_max_bytes": {
+        # Per-run byte cap for the durable result store. Oldest stored keys
+        # are pruned when exceeded.
+        "type": int,
+        "default": 16777216,
+    },
+    "result_store_gc_age_days": {
+        # Drop result-store run directories older than this many days on
+        # session start. 0 disables GC.
+        "type": int,
+        "default": 7,
+    },
+    "tool_result_inline_budget": {
+        # Spec #10: tokens of raw tool output kept inline in the model
+        # context at delivery. Results at or below this stay verbatim; larger
+        # results are replaced by a compact observation + stored_ref + an
+        # explicit omission note. Small results cost nothing extra.
+        "type": int,
+        "default": 256,
+    },
+    "tool_result_failure_budget": {
+        # Spec #10: failures may use more space than routine success. Budget
+        # applied to error results before they fall back to observation.
+        "type": int,
+        "default": 1024,
+    },
+    "tool_inline_budgets": {
+        # Per-tool overrides for `tool_result_inline_budget`, keyed by tool
+        # name. e.g. {"bash": 400}. Absent tools use the global default.
+        "type": dict,
+        "default": {},
+    },
+    "read_dedup_enabled": {
+        # Spec #7: content-hash freshness + range memo so re-reading an
+        # unchanged file (or an already-supplied range) returns a compact
+        # "already supplied, recall key K" note instead of re-injecting.
+        "type": bool,
+        "default": True,
+    },
+    "cache_content_hash_enabled": {
+        # Spec #7/#8: validate cached read results by content hash in
+        # addition to mtime+size, closing the same-size/same-mtime blind spot.
+        "type": bool,
+        "default": True,
+    },
+    "lazy_tools_enabled": {
+        # Spec #9: phased tool exposure. When True, only tools whose `phase`
+        # is in `active_tool_phases` (plus any the model loaded via
+        # `load_tools`) appear in the schema — shrinking per-request
+        # schema bytes. Default False → all tools exposed (current behavior).
+        "type": bool,
+        "default": False,
+    },
+    "active_tool_phases": {
+        # Spec #9: phases always exposed when `lazy_tools_enabled` is True.
+        # "core" covers the always-on read/write/memory/session/agent tools.
+        "type": list,
+        "default": ["core"],
+    },
+    "efficiency_metrics_enabled": {
+        # Spec #12: collect per-turn efficiency metrics (compression, cache
+        # rates, retrieval rate, tool-output share) and emit them in the
+        # `turn_end` trace record + the /memory panel.
+        "type": bool,
+        "default": True,
+    },
     "recoverage_stall_threshold": {
         # Context-gathering stall detection (Fix #12): number of consecutive
         # iterations that re-read files already read this turn WITHOUT a

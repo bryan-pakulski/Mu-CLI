@@ -63,7 +63,8 @@ function traceApp() {
                   latency: [],
                   tool_histogram: [], compaction_timeline: [], nudge_timeline: [],
                   nudge_efficacy: [], redundant_reads: [], subagent_timeline: [],
-                  memory_series: [], context_attribution: [], top_context_spikes: [] },
+                  memory_series: [], context_attribution: [], top_context_spikes: [],
+                  efficiency: [] },
         iters: [],
         tools: [],
         snapshot: { grid: [], drift_strip: [], xs: [], compaction_cols: [],
@@ -155,6 +156,26 @@ function traceApp() {
             }
         },
 
+        async clearRun() {
+            if (!this.runId || this.session) return;
+            if (!window.confirm("Clear this trace run? This deletes the JSONL file.")) return;
+            try {
+                const r = await fetch("/api/traces/" + encodeURIComponent(this.runId), {
+                    method: "DELETE",
+                });
+                if (!r.ok) { window.alert("Clear failed: " + r.status); return; }
+                this.summary = null;
+                this.series = {};
+                this.iters = [];
+                this.tools = [];
+                this.snapshot = {};
+                this.runId = "";
+                await this.loadRuns();
+            } catch (e) {
+                window.alert("Clear failed: " + e);
+            }
+        },
+
         async loadRun() {
             if (!this.runId) { this.summary = null; return; }
             this.loading = true;
@@ -219,23 +240,97 @@ function traceApp() {
             return Math.max(0, Math.min(this.xStart, Math.max(0, total - cnt)));
         },
         _winCount(total) { return Math.min(this.xCount, total); },
+        // The shared [xStart, xStart+xCount) window is positional over `iters`.
+        // Full-length per-iter series (context, tokens, …) have one entry per
+        // iter, so a positional slice lands exactly on the visible window.
+        // But two series are NOT one-per-iter:
+        //   • efficiency — only iters that made tool calls (sparse), and
+        //   • the heat strip's snapshot.xs — downsampled to `cols` columns
+        //     server-side, so its length ≠ n on long runs.
+        // Slicing those positionally clamps to their own shorter length, so
+        // they stop panning (freeze) and desync from the other charts. Window
+        // them by ITER NUMBER instead: keep the entries whose `iter` falls in
+        // the current window's iter range, so they scroll in lockstep.
+        _iterBounds() {
+            const all = this.iters || [];
+            const n = all.length;
+            if (!n) return [-Infinity, Infinity];
+            const s = this._winStart(n), c = this._winCount(n);
+            const lo = all[s] != null ? all[s].iter : -Infinity;
+            const hi = all[Math.min(n - 1, s + c - 1)] != null
+                ? all[Math.min(n - 1, s + c - 1)].iter : Infinity;
+            return [lo, hi];
+        },
         _view(arr) {
             if (!arr || !arr.length) return [];
-            const t = arr.length, s = this._winStart(t);
-            return arr.slice(s, s + this._winCount(t));
+            const n = (this.iters || []).length;
+            if (arr.length === n) {            // full per-iter series: positional == iter window
+                const s = this._winStart(n);
+                return arr.slice(s, s + this._winCount(n));
+            }
+            const [lo, hi] = this._iterBounds();   // sparse/downsampled: window by iter
+            return arr.filter(d => d.iter != null && d.iter >= lo && d.iter <= hi);
         },
         _resetWindow() {
-            this.xStart = 0;
-            this.xCount = Math.min(this.VIEW_CAP, (this.iters || []).length);
+            const total = (this.iters || []).length;
+            this.xCount = Math.min(this.VIEW_CAP, total);
+            // Start at the latest iterations (RHS): the most recent work is the
+            // default point of interest. When the whole run fits in the window
+            // (total ≤ xCount) xStart is 0 and covers everything.
+            this.xStart = Math.max(0, total - this.xCount);
+            this._updatePanCursors();
         },
         xScrollMax() { return Math.max(0, this.totalIters() - this.xCount); },
-        xScrollStep() { return Math.max(1, Math.floor(this.totalIters() / 200)); },
-        onXScroll(e) {
-            // Read the slider's value directly (x-model may not have applied
-            // yet depending on listener order) — clamp + re-render.
-            const v = Number((e && e.target ? e.target.value : this.xStart) || 0);
-            this.xStart = Math.max(0, Math.min(v, this.xScrollMax()));
-            this.renderAll();
+        // Pannable when the run exceeds the visible window. Dragging any chart
+        // shifts the shared [xStart, xStart+xCount) window (see _attachPan); all
+        // charts redraw together because they all slice through _view.
+        _pannable() { return this.totalIters() > this.xCount; },
+        _updatePanCursors() {
+            const pannable = this._pannable();
+            const cur = pannable ? "grab" : "default";
+            document.querySelectorAll(".trace-canvas").forEach(cv => { cv.style.cursor = cur; });
+        },
+        _attachPan(cv) {
+            if (cv._panAttached) return;
+            cv._panAttached = true;
+            cv.addEventListener("mousedown", (e) => this._onPanDown(e, cv));
+        },
+        _onPanDown(e, cv) {
+            if (!this._pannable()) return;        // nothing to pan — let click through
+            e.preventDefault();
+            this._dragCV = cv;
+            this._dragStartClientX = e.clientX;
+            this._dragStartXStart = this.xStart;
+            this._dragMoved = false;
+            this.hoverRef = null; this.hoverIdx = null; this.readHover = null;  // drop hover chip while panning
+            cv.style.cursor = "grabbing";
+            // Track on the window so the drag continues even when the cursor
+            // leaves the canvas; remove on mouseup to avoid leaks.
+            const move = (ev) => this._onPanMove(ev);
+            const up = (ev) => {
+                window.removeEventListener("mousemove", move);
+                window.removeEventListener("mouseup", up);
+                this._onPanUp(ev);
+            };
+            window.addEventListener("mousemove", move);
+            window.addEventListener("mouseup", up);
+        },
+        _onPanMove(ev) {
+            if (!this._dragCV) return;
+            const cv = this._dragCV;
+            const dx = ev.clientX - this._dragStartClientX;
+            if (Math.abs(dx) > 4) this._dragMoved = true;   // distinguish drag from click
+            // pixels per visible iter — uniform across charts (the window spans
+            // xCount iters over the canvas width).
+            const ppi = Math.max(1, (cv.clientWidth || 1) / Math.max(1, this.xCount));
+            const iters = Math.round(dx / ppi);             // drag right → show earlier iters
+            const maxStart = this.xScrollMax();
+            const ns = Math.max(0, Math.min(this._dragStartXStart - iters, maxStart));
+            if (ns !== this.xStart) { this.xStart = ns; this.renderAll(); }
+        },
+        _onPanUp() {
+            this._dragCV = null;
+            this._updatePanCursors();
         },
         // Label for the scrollbar: "iters A–B of N" in actual iter numbers.
         xScrollLabel() {
@@ -246,6 +341,68 @@ function traceApp() {
             const a = all[s] ? all[s].iter : "?";
             const b = all[Math.min(n - 1, s + c - 1)] ? all[Math.min(n - 1, s + c - 1)].iter : "?";
             return "iters " + a + "–" + b + " / " + n;
+        },
+        // Scrollbar thumb: width = window's share of the run, left = its
+        // position within the scrollable range. Bound via :style so Alpine
+        // re-renders it reactively on every xStart change.
+        thumbStyle() {
+            const total = this.totalIters();
+            if (!total) return { display: "none" };
+            const wPct = (this.xCount / total) * 100;
+            const max = this.xScrollMax();
+            const lPct = max > 0 ? (this.xStart / max) * (100 - wPct) : 0;
+            return { width: wPct + "%", left: lPct + "%" };
+        },
+        // Drag the thumb to pan (same shared xStart as chart drag).
+        onScrollThumbDown(e) {
+            if (!this._pannable()) return;
+            e.preventDefault(); e.stopPropagation();
+            const track = this.$refs.xscrollTrack;
+            const rect = track.getBoundingClientRect();
+            const total = this.totalIters(), max = this.xScrollMax();
+            const thumbW = (this.xCount / total) * rect.width;
+            const usable = Math.max(1, rect.width - thumbW);   // px the thumb can travel
+            const start = this.xStart, startClientX = e.clientX;
+            const move = (ev) => {
+                const dx = ev.clientX - startClientX;
+                const ns = Math.max(0, Math.min(start + Math.round((dx / usable) * max), max));
+                if (ns !== this.xStart) { this.xStart = ns; this.renderAll(); }
+            };
+            const up = () => {
+                window.removeEventListener("mousemove", move);
+                window.removeEventListener("mouseup", up);
+            };
+            window.addEventListener("mousemove", move);
+            window.addEventListener("mouseup", up);
+        },
+        // Click the track (not the thumb) to jump — centers the window on
+        // the click, like a native scrollbar.
+        onScrollTrackClick(e) {
+            if (!this._pannable()) return;
+            if (e.target.classList && e.target.classList.contains("trace-xscroll-thumb")) return;
+            const track = this.$refs.xscrollTrack;
+            const rect = track.getBoundingClientRect();
+            const frac = (e.clientX - rect.left) / Math.max(1, rect.width);  // 0..1
+            const center = Math.round(frac * this.totalIters());
+            const max = this.xScrollMax();
+            const ns = Math.max(0, Math.min(center - Math.floor(this.xCount / 2), max));
+            if (ns !== this.xStart) { this.xStart = ns; this.renderAll(); }
+        },
+        // Horizontal wheel / trackpad scroll over any chart pans the shared
+        // window too — trackpad horizontal swipe (deltaX) or shift+wheel.
+        _attachWheel(cv) {
+            if (cv._wheelAttached) return;
+            cv._wheelAttached = true;
+            cv.addEventListener("wheel", (e) => {
+                if (!this._pannable()) return;
+                const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
+                if (!dx) return;
+                e.preventDefault();
+                const step = Math.max(1, Math.round(this.xCount * 0.1));
+                const max = this.xScrollMax();
+                const ns = Math.max(0, Math.min(this.xStart + (dx > 0 ? step : -step), max));
+                if (ns !== this.xStart) { this.xStart = ns; this.renderAll(); }
+            }, { passive: false });
         },
         errorCodes(h) { return Object.entries(h.error_codes || {}); },
         selectedToolSeries() {
@@ -511,6 +668,8 @@ function traceApp() {
                   label: it => `in ${this.fmtNum(it.in)} · out ${this.fmtNum(it.out)} tok` },
                 { ref: "latCanvas", pad: { l: 56, r: 12 }, key: "latency",
                   label: it => `${this.fmtMs(it.wall_ms)} wall` },
+                { ref: "effCanvas", pad: { l: 56, r: 12 }, key: "efficiency",
+                  label: it => `${this.fmtNum(it.raw_tokens)} raw · ${this.fmtNum(it.injected_tokens)} inj · ${this.fmtNum((it.raw_tokens || 0) - (it.injected_tokens || 0))} saved tok` },
             ];
             for (const c of cfgs) {
                 const cv = this.$refs[c.ref]; if (!cv) continue;
@@ -520,6 +679,10 @@ function traceApp() {
                     if (this.hoverRef === c.ref) { this.hoverRef = null; this.hoverIdx = null; this.renderAll(); }
                 });
                 cv.addEventListener("click", (e) => {
+                    // A drag on the chart pans the shared window (see _onPanDown);
+                    // swallow the trailing click so a pan doesn't also jump the
+                    // conversation view to an arbitrary iter.
+                    if (this._dragMoved) { this._dragMoved = false; return; }
                     const idx = this._hoverIdxAt(e, cv); if (idx == null) return;
                     const s = this._view(this.series[c.key] || []); if (s[idx]) this.selectIter(s[idx].iter);
                 });
@@ -535,6 +698,13 @@ function traceApp() {
                     if (this.hoverRef === "readCanvas") { this.hoverRef = null; this.readHover = null; this.renderAll(); }
                 });
             }
+            // Drag-to-pan: every per-iter chart shares one [xStart, xStart+
+            // xCount) window, so a single drag handler per canvas pans them all
+            // together (each slices through _view, all redrawn by renderAll).
+            document.querySelectorAll(".trace-canvas").forEach(cv => {
+                this._attachPan(cv);
+                this._attachWheel(cv);
+            });
         },
         _hoverIdxAt(e, cv) {
             const c = cv._cfg; const rect = cv.getBoundingClientRect();
@@ -547,6 +717,7 @@ function traceApp() {
             return Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
         },
         _onHoverMove(e, cv) {
+            if (this._dragCV) return;                  // dragging pans; don't chase hover
             const idx = this._hoverIdxAt(e, cv); if (idx == null) return;
             this.hoverRef = cv._cfg.ref; this.hoverIdx = idx; this.renderAll();
         },
@@ -580,6 +751,7 @@ function traceApp() {
             this.renderTokens();
             this.renderLatency();
             this.renderTool();
+            this.renderEfficiency();
         },
 
         renderAttribution() {
@@ -648,7 +820,6 @@ function traceApp() {
             const ctxAll = this.series.context || [];
             const ctxData = this._view(ctxAll);
             if (!ctxData.length) { this._empty(ctx, w, h, "no context data"); return; }
-            const limit = this.summary ? this.summary.context_limit : 0;
             // The solid line is the provider's *reported* prompt size
             // (`actual`) — the ground truth, which can never exceed the model's
             // context window. The old code plotted the drift-corrected
@@ -664,7 +835,7 @@ function traceApp() {
             // estimate is still surfaced in the hover tooltip + the dedicated
             // drift chart. `total_est` is the raw cl100k estimate.
             // y-scale is from the FULL series so it stays stable as you pan.
-            const maxAll = ctxAll.flatMap(d => [d.actual, d.total_est]).concat(limit || 0);
+            const maxAll = ctxAll.flatMap(d => [d.actual, d.total_est]);
             const max = Math.max(1, ...maxAll) * 1.08;
             this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: ctxData.map(d => d.iter), unit: "tokens" });
 
@@ -684,21 +855,6 @@ function traceApp() {
             };
             line("actual", PALETTE.actual, []);
             line("total_est", PALETTE.est, [4, 3]);
-
-            // context_limit reference — draw on-chart, or an off-chart label
-            if (limit > 0) {
-                if (limit <= max) {
-                    const y = pad.t + plotH - (limit / max) * plotH;
-                    ctx.strokeStyle = PALETTE.limit; ctx.setLineDash([2, 3]);
-                    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
-                    ctx.setLineDash([]);
-                } else {
-                    ctx.fillStyle = "rgba(220,100,100,0.7)";
-                    ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
-                    ctx.textAlign = "right"; ctx.textBaseline = "top";
-                    ctx.fillText("limit " + this.fmtNum(limit) + " tok (off-chart ↑)", w - pad.r - 2, pad.t + 2);
-                }
-            }
 
             this._compactionMarks(ctx, w, h, pad, n);
             this._runMarks(ctx, w, h, pad, ctxData);
@@ -729,13 +885,22 @@ function traceApp() {
             const layers = meta.layers || [];
             const labels = meta.labels || {};
             const xsAll = snap.xs || [];
-            const ws = this._winStart(xsAll.length), cnt = this._winCount(xsAll.length);
-            const xs = xsAll.slice(ws, ws + cnt);
+            // The snapshot is downsampled to `cols` columns server-side, so
+            // xsAll.length ≠ n on long runs. Window by iter number (not
+            // position) so the strip pans in lockstep with the other charts
+            // instead of clamping to its own shorter length and freezing.
+            const [lo, hi] = this._iterBounds();
+            const keep = [];
+            for (let ci = 0; ci < xsAll.length; ci++) {
+                const it = xsAll[ci];
+                if (it != null && it >= lo && it <= hi) keep.push(ci);
+            }
+            const xs = keep.map(ci => xsAll[ci]);
             const gridAll = snap.grid || [];
-            const grid = gridAll.map(row => (row || []).slice(ws, ws + cnt));
-            const driftStrip = (snap.drift_strip || []).slice(ws, ws + cnt);
-            const compCols = (snap.compaction_cols || []).map(ci => ci - ws).filter(ci => ci >= 0 && ci < cnt);
-            if (!grid.length || !layers.length) { this._empty(ctx, w, h, "no layer data"); return; }
+            const grid = gridAll.map(row => keep.map(ci => (row || [])[ci] || 0));
+            const driftStrip = keep.map(ci => (snap.drift_strip || [])[ci] || 128);
+            const compCols = (snap.compaction_cols || []).map(ci => keep.indexOf(ci)).filter(ci => ci >= 0);
+            if (!grid.length || !layers.length || !xs.length) { this._empty(ctx, w, h, "no layer data"); return; }
 
             const driftH = 14, gap = 3;
             const pad = { l: 96, r: 12, t: 6, b: 16 };
@@ -1031,6 +1196,7 @@ function traceApp() {
         },
 
         _onReadHover(e, cv) {
+            if (this._dragCV) return;                  // dragging pans; don't chase hover
             const g = cv._geom; if (!g) return;
             const rect = cv.getBoundingClientRect();
             const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -1215,6 +1381,56 @@ function traceApp() {
             if (this.hoverRef === "tokCanvas" && this.hoverIdx != null) {
                 const it = tk[this.hoverIdx];
                 this._drawHover(ctx, w, h, pad, n, this.hoverIdx, "in " + this.fmtNum(it.in) + " / out " + this.fmtNum(it.out));
+            }
+        },
+
+        // Tool-output efficiency: raw tool tokens (amber) vs injected tokens
+        // (green). The amber band between the raw line and the green area is
+        // tokens kept out of context by storing raw externally + observing.
+        effSummary() {
+            return (this.summary && this.summary.efficiency) || {};
+        },
+        renderEfficiency() {
+            const s = this._setupCanvas("effCanvas"); if (!s) return;
+            const { ctx, w, h } = s; const t = this._theme();
+            ctx.clearRect(0, 0, w, h);
+            this._curRef = "effCanvas";
+            const effAll = this.series.efficiency || [];
+            const eff = this._view(effAll);
+            const n = eff.length;
+            if (!n) { this._empty(ctx, w, h, "no tool-output efficiency data"); return; }
+            const pad = { l: 56, r: 12, t: 16, b: 20 };
+            const max = Math.max(1, ...effAll.map(d => Math.max(d.raw_tokens || 0, d.injected_tokens || 0))) * 1.1;
+            const plotH = h - pad.t - pad.b;
+            this._drawAxes(ctx, w, h, pad, { min: 0, max }, { xs: eff.map(d => d.iter), unit: "tokens" });
+            const x = i => this._iterX(i, n, pad, w);
+            const y = v => pad.t + plotH - ((v || 0) / max) * plotH;
+            // injected tokens — filled area (what actually entered context)
+            ctx.fillStyle = "rgba(126,201,107,0.32)";
+            ctx.strokeStyle = PALETTE.tokOut; ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) { ctx.lineTo(x(i), y(eff[i].injected_tokens)); }
+            ctx.lineTo(x(n - 1), pad.t + plotH); ctx.lineTo(x(0), pad.t + plotH);
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) { const px = x(i); const py = y(eff[i].injected_tokens); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+            ctx.stroke();
+            // raw tokens — line above (what would have entered without observing)
+            ctx.strokeStyle = PALETTE.actual; ctx.lineWidth = 1.6; ctx.setLineDash([5, 3]);
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) { const px = x(i); const py = y(eff[i].raw_tokens); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+            ctx.stroke(); ctx.setLineDash([]);
+            this._runMarks(ctx, w, h, pad, eff);
+            // legend
+            ctx.font = "10px " + (getComputedStyle(document.body).fontFamily);
+            ctx.textAlign = "left"; ctx.textBaseline = "top";
+            ctx.fillStyle = PALETTE.actual; ctx.fillText("┄ raw (would-be)", w - pad.r - 150, 2);
+            ctx.fillStyle = PALETTE.tokOut; ctx.fillText("● injected (kept)", w - pad.r - 70, 2);
+            if (this.hoverRef === "effCanvas" && this.hoverIdx != null) {
+                const it = eff[this.hoverIdx];
+                const saved = (it.raw_tokens || 0) - (it.injected_tokens || 0);
+                this._drawHover(ctx, w, h, pad, n, this.hoverIdx,
+                    this.fmtNum(it.raw_tokens) + " raw · " + this.fmtNum(it.injected_tokens) + " inj · " + this.fmtNum(saved) + " saved");
             }
         },
 

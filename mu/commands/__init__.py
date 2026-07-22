@@ -145,6 +145,7 @@ def _load_command_modules() -> None:
     from . import research  # noqa: F401 — registers /research
     from . import feature  # noqa: F401 — registers /feature
     from . import teach  # noqa: F401 — registers /teach
+    from . import trace  # noqa: F401 — registers /trace clear/list
     from . import shell  # noqa: F401 — registers /bash, /sh, /!
     from . import goal  # noqa: F401 — registers /goal
     from . import prompts  # noqa: F401 — registers /prompts

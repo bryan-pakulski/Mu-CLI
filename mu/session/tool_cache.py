@@ -71,6 +71,37 @@ class ToolResultCache:
         # alongside `store` / eviction; cleared entries are pruned lazily
         # by `lookup_by_locator` (missing key → no hit) and on eviction.
         self._locator_index: "Dict[str, str]" = {}
+        # Durable on-disk store (spec #1/#11) — write-through from `store`,
+        # read-back fallback for `recall` + the bounded retrieval ops. None
+        # when disabled; the cache then behaves exactly as before (in-memory
+        # LRU only).
+        self._store: Any = None
+        # Efficiency-metric counters (spec #12). Read and reset by the
+        # efficiency-metrics aggregator each turn.
+        self.evictions = 0
+        self.invalidations = 0
+        self.disk_hits = 0
+        self.dup_bytes_avoided = 0
+        self.locator_hits = 0
+        # Content-hash freshness (spec #7/#8). When True, locator entries
+        # record a sha256 of the source file so `lookup_by_locator` can
+        # catch the same-mtime/same-size-but-changed blind spot. Default
+        # True; the session flips this from `cache_content_hash_enabled`.
+        self.content_hash_enabled = True
+        # Range-memo for read dedup (spec #7): path → {content_hash, ranges}.
+        self._range_memo: "Dict[str, dict]" = {}
+
+    # ---------------------------------------------------------------- store
+
+    def set_store(self, store: Any) -> None:
+        """Attach a durable ``ResultStore`` (spec #1/#11). After this, ``store``
+        writes full raw results through to disk and ``recall`` / the bounded
+        retrieval ops fall back to disk on a memory miss."""
+        self._store = store
+
+    @property
+    def store(self) -> Any:
+        return self._store
 
     # ------------------------------------------------------------------ key
 
@@ -121,12 +152,41 @@ class ToolResultCache:
         """Extract the on-disk path an arg dict refers to, if any."""
         if not isinstance(tool_args, dict):
             return None
-        path = tool_args.get("path")
-        if isinstance(path, str) and path:
-            return path
-        # search_* tools key the directory under `path` too; fall back to any
-        # string arg named like a path.
+        # Different read tools key the path under different arg names:
+        # read_file/search_*/list_dir → `path` or `filename`;
+        # get_chunk → `file`.
+        for key in ("path", "filename", "file"):
+            path = tool_args.get(key)
+            if isinstance(path, str) and path:
+                return path
         return None
+
+    @staticmethod
+    def _content_hash(path: str) -> Optional[str]:
+        """sha256 of the file at ``path``, sampled for large files to bound
+        cost (spec #7/#8). Files ≤ 4 MB are hashed fully; larger files are
+        hashed from first/middle/last 512 KB chunks — a freshness check
+        supplementing exact mtime+size, not a security boundary. Returns
+        None if the file can't be read."""
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                SAMPLE = 512 * 1024
+                if size <= 4 * 1024 * 1024:
+                    fh.seek(0)
+                    return hashlib.sha256(fh.read()).hexdigest()
+                # Sampled: head, middle, tail.
+                chunks = []
+                fh.seek(0)
+                chunks.append(fh.read(SAMPLE))
+                fh.seek(size // 2)
+                chunks.append(fh.read(SAMPLE))
+                fh.seek(max(0, size - SAMPLE))
+                chunks.append(fh.read(SAMPLE))
+                return hashlib.sha256(b"".join(chunks)).hexdigest()
+        except OSError:
+            return None
 
     # ---------------------------------------------------------------- store
 
@@ -185,6 +245,10 @@ class ToolResultCache:
             for loc, k in list(self._locator_index.items()):
                 if k == ev_key:
                     del self._locator_index[loc]
+            self.evictions += 1
+            # The durable store retains the evicted entry on disk — that is the
+            # whole point of the sidecar (spec #11): memory eviction must not
+            # lose the raw result, only demote it to disk-backed recall.
 
         # If already present (same key), remove old entry so we re-insert at end
         if key in self._cache:
@@ -198,6 +262,14 @@ class ToolResultCache:
         # verifies the cached tool_name before trusting the pointer, so a
         # collision degrades to a linear-scan fallback, never a wrong key.
         self._result_index[rhash] = key
+        # Write-through to the durable store (spec #1/#11). Best-effort: a
+        # disk failure leaves the in-memory entry intact and the caller
+        # proceeds with the in-context observation + cache_key as before.
+        if self._store is not None:
+            try:
+                self._store.put(key, tool_name, None, result)
+            except Exception:  # noqa: BLE001
+                pass
         return key
 
     # ------------------------------------------------------- store with args
@@ -223,6 +295,15 @@ class ToolResultCache:
         key = self.store(call_id, tool_name, result, force=force)
         if key is None:
             return None
+        # Re-write the durable index entry WITH args so the on-disk record
+        # carries the tool args (the plain `store` write-through passes
+        # None). Best-effort; the in-memory cache is the source of truth for
+        # the hot path.
+        if self._store is not None:
+            try:
+                self._store.put(key, tool_name, tool_args, result)
+            except Exception:  # noqa: BLE001
+                pass
         locator = self._locator_for(tool_name, tool_args)
         if locator is not None:
             self._locator_index[locator] = key
@@ -236,6 +317,12 @@ class ToolResultCache:
                 except OSError:
                     entry["mtime"] = None
                     entry["size"] = None
+                # Content-hash freshness (spec #7/#8) — strengthens mtime+size
+                # against the same-mtime/same-size-different-content blind spot.
+                if self.content_hash_enabled:
+                    entry["content_hash"] = self._content_hash(path)
+                else:
+                    entry["content_hash"] = None
         return key
 
     # ------------------------------------------------------------ auto-recall
@@ -275,9 +362,25 @@ class ToolResultCache:
             except OSError:
                 return None
             if st.st_mtime != cached_mtime or st.st_size != cached_size:
+                self.invalidations += 1
+                # File changed → drop the stale locator entry so a later call
+                # re-executes and re-caches the fresh content.
+                self._locator_index.pop(locator, None)
                 return None  # file changed since cached read
+            # Content-hash freshness (spec #7/#8): catches the rare
+            # same-mtime/same-size-but-content-changed case (e.g. an editor
+            # that rewrites in place without bumping mtime). On mismatch,
+            # invalidate and fall through to re-execution.
+            cached_hash = entry.get("content_hash")
+            if self.content_hash_enabled and cached_hash is not None:
+                cur_hash = self._content_hash(path)
+                if cur_hash is not None and cur_hash != cached_hash:
+                    self.invalidations += 1
+                    self._locator_index.pop(locator, None)
+                    return None
         # LRU touch
         self._cache.move_to_end(key)
+        self.locator_hits += 1
         return {
             "tool_name": entry["tool_name"],
             "result": entry["result"],
@@ -285,20 +388,149 @@ class ToolResultCache:
             "cache_hit": True,
         }
 
+    # ----------------------------------------------------- range memo (spec #7)
+
+    @staticmethod
+    def _range_key(tool_args: Any) -> Optional[tuple]:
+        """Normalize a read tool's args into (path, (start, end)) for the
+        range memo. ``read_file`` (whole file) → (filename, (1, None)).
+        ``get_chunk`` → (file, (start_line, end_line)). None otherwise."""
+        if not isinstance(tool_args, dict):
+            return None
+        path = ToolResultCache._path_arg(tool_args)
+        if path is None:
+            return None
+        if "start_line" in tool_args or "end_line" in tool_args:
+            start = tool_args.get("start_line", 1)
+            end = tool_args.get("end_line", None)
+            return (path, (start, end))
+        # Whole-file read.
+        return (path, (1, None))
+
+    def record_read_range(self, tool_name: str, tool_args: Any, key: str) -> None:
+        """Record that a range of ``path`` was supplied (cache key ``key``),
+        keyed by the file's current content_hash so a later overlapping read
+        of an unchanged file can dedup. Best-effort."""
+        try:
+            rk = self._range_key(tool_args)
+            if rk is None:
+                return
+            path, (start, end) = rk
+            ch = self._content_hash(path) if self.content_hash_enabled else None
+            memo = self._range_memo.get(path)
+            if memo is None or memo.get("content_hash") != ch:
+                # New file or changed content → reset the memo for this path.
+                memo = {"content_hash": ch, "ranges": {}}
+                self._range_memo[path] = memo
+            memo["ranges"][(start, end)] = key
+        except Exception:  # noqa: BLE001
+            pass
+
+    def lookup_read_range(self, tool_name: str, tool_args: Any) -> Optional[dict]:
+        """If an unchanged file's requested range was already supplied this
+        session, return ``{"cache_key": key, "range": (s, e)}`` so the caller
+        can emit a dedup marker instead of re-injecting the content. None on
+        any miss / stale / error."""
+        try:
+            rk = self._range_key(tool_args)
+            if rk is None:
+                return None
+            path, (start, end) = rk
+            memo = self._range_memo.get(path)
+            if memo is None:
+                return None
+            # File must be unchanged since the memo was recorded.
+            if self.content_hash_enabled and memo.get("content_hash") is not None:
+                cur = self._content_hash(path)
+                if cur is None or cur != memo["content_hash"]:
+                    # File changed → drop the stale memo.
+                    self._range_memo.pop(path, None)
+                    self.invalidations += 1
+                    return None
+            key = memo["ranges"].get((start, end))
+            if key is None:
+                return None
+            self.dup_bytes_avoided += 1
+            return {"cache_key": key, "range": (start, end)}
+        except Exception:  # noqa: BLE001
+            return None
+
+    def invalidate_path(self, path: str) -> None:
+        """Drop any range memo / locator entries pointing at ``path`` (call
+        after a write to that path so a subsequent read re-executes)."""
+        try:
+            self._range_memo.pop(path, None)
+            # Drop locator entries whose args reference this path.
+            for loc in [l for l in self._locator_index if f'"{path}"' in l]:
+                self._locator_index.pop(loc, None)
+        except Exception:  # noqa: BLE001
+            pass
+
     # ---------------------------------------------------------------- recall
 
     def recall(self, key: str) -> Optional[dict]:
-        """Fetch a cached result by key.  Returns None if missing/evicted."""
+        """Fetch a cached result by key. Memory first; on a miss, fall back
+        to the durable store (spec #1/#11) so a result evicted from the
+        in-memory LRU is still recallable. Returns None if missing everywhere."""
         entry = self._cache.get(key)
-        if entry is None:
+        if entry is not None:
+            self._cache.move_to_end(key)
+            return {
+                "tool_name": entry["tool_name"],
+                "result": entry["result"],
+                "cache_key": key,
+            }
+        if self._store is not None:
+            try:
+                payload = self._store.get(key)
+            except Exception:  # noqa: BLE001
+                payload = None
+            if payload is not None:
+                self.disk_hits += 1
+                return {
+                    "tool_name": payload.get("tool_name", ""),
+                    "result": payload.get("result"),
+                    "cache_key": key,
+                    "from_disk": True,
+                }
+        return None
+
+    # ----------------------------------------------------- bounded retrieval
+
+    def line_range(self, key: str, start: int, end: int) -> Optional[str]:
+        if self._store is None:
             return None
-        # LRU touch
-        self._cache.move_to_end(key)
-        return {
-            "tool_name": entry["tool_name"],
-            "result": entry["result"],
-            "cache_key": key,
-        }
+        return self._store.line_range(key, start, end)
+
+    def head(self, key: str, n: int = 20) -> Optional[str]:
+        if self._store is None:
+            return None
+        return self._store.head(key, n)
+
+    def tail(self, key: str, n: int = 20) -> Optional[str]:
+        if self._store is None:
+            return None
+        return self._store.tail(key, n)
+
+    def search(self, key: str, query: str, max_matches: int = 20) -> Optional[str]:
+        if self._store is None:
+            return None
+        return self._store.search(key, query, max_matches)
+
+    def diagnostics(self, key: str, max_lines: int = 40) -> Optional[str]:
+        if self._store is None:
+            return None
+        return self._store.diagnostics(key, max_lines)
+
+    def json_path(self, key: str, pointer: str) -> Any:
+        if self._store is None:
+            return None
+        return self._store.json_path(key, pointer)
+
+    def compare(self, key_a: str, key_b: str) -> Optional[str]:
+        if self._store is None:
+            return None
+        return self._store.compare(key_a, key_b)
 
     # ------------------------------------------------------------ introspect
 
@@ -308,6 +540,16 @@ class ToolResultCache:
             {"key": k, "tool": v["tool_name"], "size": v["size_bytes"]}
             for k, v in self._cache.items()
         ]
+
+    def metrics_snapshot(self) -> Dict[str, int]:
+        """Efficiency counters (spec #12). Caller resets after reading."""
+        return {
+            "evictions": int(self.evictions),
+            "invalidations": int(self.invalidations),
+            "disk_hits": int(self.disk_hits),
+            "dup_bytes_avoided": int(self.dup_bytes_avoided),
+            "locator_hits": int(self.locator_hits),
+        }
 
     # --------------------------------------------------------------- utility
 
@@ -323,3 +565,6 @@ class ToolResultCache:
         self._current_bytes = 0
         self._result_index.clear()
         self._locator_index.clear()
+        # Don't clear the durable store — it is the authoritative record
+        # (spec #11). Counters are read/reset by the metrics aggregator, not
+        # here, so a clear mid-turn doesn't lose efficiency history.

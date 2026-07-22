@@ -10,6 +10,7 @@ the ``mucli trace`` CLI share one code path.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
@@ -126,3 +127,11 @@ async def get_trace_summary(run_id: str) -> Dict[str, Any]:
     run = await asyncio.to_thread(parse_trace, path)
     series = await asyncio.to_thread(build_series, run)
     return await asyncio.to_thread(build_summary, run, series)
+
+
+@router.delete("/{run_id}")
+async def delete_trace(run_id: str) -> Dict[str, Any]:
+    """Delete one trace run's JSONL file. 404 if the run_id is unknown."""
+    path = _find_trace(run_id)
+    await asyncio.to_thread(os.remove, path)
+    return {"ok": True}

@@ -41,6 +41,9 @@
                                 <button class="feature-action-btn"
                                         @click.stop="$store.feature.unarchiveFeature(f.feature_id)"
                                         title="Unarchive">↩</button>
+                                <button class="feature-action-btn"
+                                        @click.stop="$store.feature.previewFeature(f.feature_id)"
+                                        title="View archived feature">👁</button>
                                 <button class="feature-action-btn feature-action-delete"
                                         @click.stop="$store.confirm.ask(
                                             'Permanently delete \'' + f.feature_id + '\'?',
@@ -98,6 +101,14 @@
 
     <!-- header -->
     <div class="panel-head" x-show="$store.feature.plan">
+        <!-- read-only preview banner -->
+        <div class="preview-banner" x-show="$store.feature.previewMode"
+             style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-1);margin-bottom:var(--space-2)">
+            <span class="mono" style="font-size:12px;color:var(--text-muted)">read-only preview — archived feature</span>
+            <button class="feature-action-btn"
+                    @click.stop="$store.feature.exitPreview()"
+                    title="Back to feature list">←</button>
+        </div>
         <div class="panel-subject" style="display:flex;align-items:center;gap:var(--space-2)">
             <span x-text="$store.feature.plan && ($store.feature.plan.feature_name || $store.feature.plan.feature_id)"></span>
             <button class="feature-action-btn feature-action-unload"
@@ -155,6 +166,7 @@
                      @dragover.prevent="$event.currentTarget.classList.add('drop-target')"
                      @dragleave="$event.currentTarget.classList.remove('drop-target')"
                      @drop.prevent="(() => {
+                       if ($store.feature.previewMode) return;
                         $event.currentTarget.classList.remove('drop-target');
                         const tid = $store.feature.dragTaskId;
                         $store.feature.dragTaskId = null;
@@ -187,7 +199,7 @@
                                     'is-done': (task.status || '').toLowerCase() === 'completed'
                                 }">
                                 <div class="task-row"
-                                     draggable="true"
+                                     :draggable="$store.feature.previewMode ? false : true"
                                      @click="$store.feature.toggleTask(task.id)"
                                      @dragstart="$store.feature.dragTaskId = task.id; $event.currentTarget.classList.add('dragging')"
                                      @dragend="$event.currentTarget.classList.remove('dragging')"
@@ -220,7 +232,7 @@
                                             <template x-for="(crit, idx) in (task.exit_criteria || [])" :key="idx">
                                                 <li class="exit-criteria-item"
                                                     :class="{ verified: $store.feature.isVerified(task, crit) }"
-                                                    @click.stop="$store.feature.toggleExitCriterion(task.id, idx)">
+                                                    @click.stop="!$store.feature.previewMode && $store.feature.toggleExitCriterion(task.id, idx)">
                                                     <span class="status-glyph"
                                                           x-text="$store.feature.isVerified(task, crit) ? '✓' : '○'"></span>
                                                     <span x-text="crit"></span>

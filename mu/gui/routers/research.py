@@ -64,10 +64,14 @@ async def get_research_state(request: Request) -> Dict[str, Any]:
         }
     sm = session.session_manager
 
-    # Sources from the process-global CitationManager.
+    # Sources from the CitationManager.  Hydrate the singleton from the
+    # active session's persisted snapshot first, so the GUI always sees
+    # *this* session's sources — not stale state left over from a
+    # different session that happened to share the same Python process.
     sources: List[Dict[str, Any]] = []
     bibliography = ""
     try:
+        sm.restore_research_sources()
         from utils.citation_manager import get_citation_manager
         cm = get_citation_manager()
         sources = [_source_to_dict(s) for s in cm.get_all_sources()]

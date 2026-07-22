@@ -72,6 +72,8 @@ def tool(
     result_mode: str = "json",
     error_mode: str = "text_error",
     summary_builder: Optional[str] = None,
+    phase: str = "core",
+    group: str = "",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator that registers a handler as a tool in the registry.
 
@@ -125,6 +127,8 @@ def tool(
             handler_key=name,
             error_mode=error_mode,
             summary_builder=summary_builder,
+            phase=phase,
+            group=group,
         )
         _REGISTRY[name] = descriptor
         _HANDLERS[name] = func

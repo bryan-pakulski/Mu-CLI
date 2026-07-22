@@ -698,6 +698,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.teacher_registry = {}
         self.active_course_id = None
         self.research_sources = []
+        self.restore_research_sources()
         self.conversation_summary = ""
         self.summary_anchor = 0
         self.history = []

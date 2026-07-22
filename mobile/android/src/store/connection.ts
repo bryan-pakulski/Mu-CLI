@@ -9,10 +9,12 @@ export interface ConnectionState {
   activeProvider: string | null;
   activeModel: string | null;
   isConnected: boolean;
+  yolo: boolean;
   setBaseUrl: (url: string) => void;
   setActiveSession: (name: string | null) => void;
   setActiveProviderModel: (provider: string | null, model: string | null) => void;
   setConnected: (connected: boolean) => void;
+  setYolo: (yolo: boolean) => void;
   loadFromStorage: () => Promise<void>;
   saveToStorage: () => Promise<void>;
 }
@@ -23,6 +25,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   activeProvider: null,
   activeModel: null,
   isConnected: false,
+  yolo: false,
 
   setBaseUrl: (url: string) => {
     set({ baseUrl: url.replace(/\/$/, '') });
@@ -43,6 +46,11 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     set({ isConnected: connected });
   },
 
+  setYolo: (yolo: boolean) => {
+    set({ yolo });
+    get().saveToStorage();
+  },
+
   loadFromStorage: async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -53,6 +61,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
           activeSessionName: parsed.activeSessionName || null,
           activeProvider: parsed.activeProvider || null,
           activeModel: parsed.activeModel || null,
+          yolo: parsed.yolo || false,
         });
       }
     } catch {
@@ -70,6 +79,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
           activeSessionName: state.activeSessionName,
           activeProvider: state.activeProvider,
           activeModel: state.activeModel,
+          yolo: state.yolo,
         }),
       );
     } catch {

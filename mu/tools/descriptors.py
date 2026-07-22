@@ -38,6 +38,12 @@ class ToolDescriptor:
     handler_key: str
     error_mode: str = "text_error"
     summary_builder: str | None = None
+    # Phased exposure (spec #9): "core" tools are always exposed; specialist
+    # phases ("feature", "research", "security", ...) are filtered out of
+    # the schema unless `lazy_tools_enabled` is on AND the phase is active.
+    # Default "core" so untagged tools stay visible under the phase filter.
+    phase: str = "core"
+    group: str = ""
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,8 @@ def _build_descriptor(
     handler_key: str,
     error_mode: str = "text_error",
     summary_builder: str | None = None,
+    phase: str = "core",
+    group: str = "",
 ) -> ToolDescriptor:
     return ToolDescriptor(
         definition=definition,
@@ -69,6 +77,8 @@ def _build_descriptor(
         handler_key=handler_key,
         error_mode=error_mode,
         summary_builder=summary_builder,
+        phase=phase,
+        group=group,
     )
 
 
@@ -97,6 +107,26 @@ def build_tool_context(
 TOOLS: list[ToolDefinition] = []
 TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {}
 TOOL_DESCRIPTOR_OVERRIDES: dict[str, dict] = {}
+
+
+def filter_tools_by_phase(tools, active_phases) -> list:
+    """Spec #9: keep only tools whose descriptor ``phase`` is in
+    ``active_phases``. Tools without a registered descriptor (phase defaults
+    to "core") always pass. Used by the loop's ``active_tools`` filter when
+    ``lazy_tools_enabled`` is on; a no-op when all phases are active."""
+    try:
+        phases = set(active_phases or ["core"])
+        if "core" not in phases:
+            phases.add("core")
+        out = []
+        for t in tools:
+            desc = TOOL_DESCRIPTORS.get(t.name)
+            phase = desc.phase if desc is not None else "core"
+            if phase in phases:
+                out.append(t)
+        return out
+    except Exception:  # noqa: BLE001
+        return list(tools)
 
 
 _COLLATED_TOOL_NAMES = {

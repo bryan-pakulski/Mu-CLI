@@ -104,9 +104,19 @@ class SubagentLifecycleManager:
         return True
 
     def record_tool_call(
-        self, tool_name: str, tool_args: Any, raw_result: Any
+        self,
+        tool_name: str,
+        tool_args: Any,
+        raw_result: Any,
+        *,
+        cache_hit: bool = False,
     ) -> None:
-        """Record one tool call + its result and recompute stuck/stall."""
+        """Record one tool call + its result and recompute stuck/stall.
+
+        ``cache_hit`` marks a result served from the tool-result cache
+        (auto-recall or the read-dedup marker) — such a call produced no
+        novel output by definition, so it counts as a stall regardless of
+        the marker text (which differs from the original content)."""
         if not self.enabled or self._done.is_set():
             return
         with self._lock:
@@ -122,7 +132,7 @@ class SubagentLifecycleManager:
                 self._consecutive_repeats = 1
                 self._last_args_fingerprint = fp
 
-            novel = self._is_novel(raw_result)
+            novel = False if cache_hit else self._is_novel(raw_result)
             if novel:
                 self._consecutive_stalls = 0
             else:

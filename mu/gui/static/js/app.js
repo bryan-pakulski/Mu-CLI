@@ -1541,8 +1541,10 @@ document.addEventListener("alpine:init", () => {
         dragTaskId: null,
         // Search/filter query for the feature list.
         searchQuery: '',
+        previewMode: false,
 
         async load() {
+            this.previewMode = false;
             try {
                 const r = await fetch("/api/feature/state");
                 const d = await r.json();
@@ -1722,6 +1724,38 @@ document.addEventListener("alpine:init", () => {
         async switchFeature(featureId) {
             if (!featureId) return;
             await this.loadFeature(featureId);
+        },
+        async previewFeature(id) {
+            if (!id) return;
+            try {
+                const r = await fetch(`/api/feature/${encodeURIComponent(id)}/preview`);
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    Alpine.store("toast").show(data.detail || `Preview failed (${r.status})`, "error");
+                    return;
+                }
+                const d = await r.json();
+                this.plan = d.plan || null;
+                this.active = !!d.active;
+                this.metadataPath = d.metadata_path || null;
+                this.previewMode = true;
+                // Seed phase open/closed defaults for preview
+                const phases = (this.plan && this.plan.phase_columns) || [];
+                for (const phase of phases) {
+                    const key = String(phase.id);
+                    if (this.openPhases[key] === undefined) {
+                        this.openPhases[key] = true;
+                    }
+                }
+            } catch (e) {
+                console.error("feature.previewFeature", e);
+                Alpine.store("toast").show("Preview failed — network error", "error");
+            }
+        },
+        exitPreview() {
+            this.previewMode = false;
+            this.plan = null;
+            this.load();
         },
 
         showCreateModal: false,

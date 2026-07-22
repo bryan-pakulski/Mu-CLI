@@ -55,8 +55,15 @@
     padding: var(--space-3);
 }
 .trace-card--warn { border-color: rgba(220, 160, 60, 0.55); background: rgba(220, 160, 60, 0.06); }
+.trace-card--good { border-color: rgba(126, 201, 107, 0.55); background: rgba(126, 201, 107, 0.06); }
+.trace-card--cache { border-color: rgba(91, 155, 208, 0.45); background: rgba(91, 155, 208, 0.05); }
 .tc-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
 .tc-val { font-size: 18px; font-weight: 600; margin-top: 2px; font-family: var(--mono); }
+
+/* Tool-output efficiency badges on histogram rows */
+.th-badge { padding: 0 5px; border-radius: 3px; font-size: 10px; line-height: 16px; white-space: nowrap; }
+.th-badge--saved { background: rgba(224, 160, 60, 0.16); color: rgba(224, 160, 60, 0.95); border: 1px solid rgba(224, 160, 60, 0.4); }
+.th-badge--stored { background: rgba(91, 155, 208, 0.16); color: rgba(120, 170, 210, 0.95); border: 1px solid rgba(91, 155, 208, 0.4); }
 
 /* Canvases */
 .trace-canvas-wrap { width: 100%; overflow: hidden; }
@@ -238,8 +245,26 @@
     font-size: 11px; color: var(--text-dim);
 }
 .trace-xscroll-label { font-family: var(--mono); color: var(--text-soft); min-width: 130px; }
-.trace-xscroll-range { flex: 1; max-width: 760px; cursor: pointer; }
 .trace-xscroll-hint { font-size: 10px; color: var(--text-dimmer); white-space: nowrap; }
+/* Scrollbar track + thumb: drag the thumb or click the track to pan the
+   shared X window (same xStart the chart drag moves). Thumb width = the
+   window's share of the run; left = its position in the scrollable range. */
+.trace-xscroll-track {
+    position: relative; flex: 1 1 auto; min-width: 120px;
+    height: 12px; cursor: pointer;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.trace-xscroll-thumb {
+    position: absolute; top: 0; bottom: 0;
+    min-width: 18px;
+    background: var(--text-dim);
+    border-radius: 6px;
+    cursor: grab;
+}
+.trace-xscroll-thumb:hover { background: var(--text-soft); }
+.trace-xscroll-thumb:active { cursor: grabbing; }
 
 /* ---- Tall lists/tables: scroll instead of stretching the page ---- */
 /* Wrap wide tables in .trace-scroll so the header stays pinned while the

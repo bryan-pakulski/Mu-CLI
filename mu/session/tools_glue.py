@@ -29,7 +29,7 @@ Tests covering these paths live in `tests/test_mu_agent_session_integration.py`
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 
 # ---------------------------------------------------------------- hook-fire dispatch
@@ -175,6 +175,7 @@ def build_structured_tool_result(
     raw_result: Any,
     *,
     execution_source: str = "session",
+    cache_key: Optional[str] = None,
 ) -> dict:
     """Wrap a raw tool result in the structured envelope the history
     stores (summary, args, raw, error_code, modified_files, telemetry).
@@ -182,7 +183,16 @@ def build_structured_tool_result(
     Per-tool branches add typed `data` fields when callers want
     structured access (`read_file` → `char_count`, `list_dir` → parsed
     tree, etc.). For un-recognized tools, `data` is left empty and the
-    raw text-preview lives in `summary`."""
+    raw text-preview lives in `summary`.
+
+    Spec #1/#2/#10 — budget-thresholded observation: when the raw result
+    exceeds its inline token budget, the full ``raw`` is dropped from the
+    in-context envelope and replaced by a compact observation (excerpt,
+    diagnostics, counts) plus ``stored_ref`` pointing at the durable
+    ResultStore. Small results stay verbatim. ``cache_key`` (the durable
+    store key) must be supplied so the observation can embed the
+    reference; when it is None the observation degrades to keeping the
+    raw inline (no store backing)."""
     from mu.tools._envelope import infer_tool_error_code
     from mu.session.helpers import _shorten_tool_args
     from mu.session.messages import clip_preview
@@ -194,6 +204,7 @@ def build_structured_tool_result(
         if isinstance(envelope, dict)
         else infer_tool_error_code(tool_name, raw_text)
     )
+    is_error = error_code is not None
     structured = {
         "tool_name": tool_name,
         "ok": (
@@ -265,7 +276,61 @@ def build_structured_tool_result(
     elif tool_name in _MEMORY_TOOL_NAMES:
         structured["data"] = {"preview": clip_preview(raw_text, 220)}
 
+    # ---- Budget-thresholded observation (spec #1/#2/#10) -----------------
+    _apply_observation_transform(session, structured, raw_text, cache_key, is_error)
     return structured
+
+
+def _apply_observation_transform(
+    session: Any,
+    structured: dict,
+    raw_text: str,
+    cache_key: Optional[str],
+    is_error: bool,
+) -> None:
+    """Drop the full ``raw`` from the in-context envelope when it exceeds the
+    inline token budget, replacing it with a compact observation + stored_ref.
+    Small results stay verbatim. Best-effort: any failure leaves ``raw`` in
+    place (the safe, pre-change behaviour)."""
+    try:
+        from mu.tools._observe import build_observation, resolve_inline_budget, RETRIEVABLE_VIA
+        from utils.token_estimator import estimate_tokens
+
+        variables = getattr(session, "variables", {}) or {}
+        tool_name = structured["tool_name"]
+        raw_tokens = int(estimate_tokens(raw_text) or 0)
+        budget = resolve_inline_budget(tool_name, is_error, variables)
+        structured["telemetry"]["raw_token_count"] = raw_tokens
+        structured["telemetry"]["inline_budget"] = budget
+        if raw_tokens <= budget:
+            structured["data"]["omitted"] = False
+            structured["telemetry"]["injected_token_count"] = raw_tokens
+            return
+        if not cache_key:
+            # No store backing → keep raw inline (can't offer a stored_ref).
+            structured["data"]["omitted"] = False
+            structured["telemetry"]["injected_token_count"] = raw_tokens
+            return
+        obs, note = build_observation(
+            tool_name, None, raw_text, structured["data"],
+            budget_tokens=budget, is_error=is_error,
+        )
+        structured["data"] = obs
+        structured["data"]["stored_ref"] = cache_key
+        structured["data"]["retrievable_via"] = RETRIEVABLE_VIA
+        structured["data"]["omission_note"] = note
+        structured["raw"] = None  # full raw NOT in context (spec #1/#11)
+        structured["telemetry"]["delivery_mode"] = "observed"
+        # Injected token estimate: the observation dict (no raw) + summary.
+        injected = int(estimate_tokens(str(structured["data"])) or 0) + int(
+            estimate_tokens(structured.get("summary") or "") or 0
+        )
+        structured["telemetry"]["injected_token_count"] = injected
+        structured["telemetry"]["compression_ratio"] = round(
+            (raw_tokens - injected) / max(1, raw_tokens), 3
+        )
+    except Exception:  # noqa: BLE001 — never break the loop over a budget bug
+        structured.setdefault("data", {})["omitted"] = False
 
 
 # ---------------------------------------------------------------- feature-state sync

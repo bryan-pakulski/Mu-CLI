@@ -11,6 +11,7 @@ import hashlib
 from copy import deepcopy
 from collections import defaultdict
 from datetime import datetime
+from typing import Optional
 
 from mu.agent.approval import build_approval_prompt, collect_approval_plans, ApprovalPlan
 from mu.agent.collation import CollationBuffer
@@ -1025,6 +1026,7 @@ class Session:
         raw_result,
         *,
         execution_source: str = "session",
+        cache_key: Optional[str] = None,
     ):
         """Structured-envelope builder. Body moved to
         `mu/session/tools_glue.py:build_structured_tool_result`."""
@@ -1036,6 +1038,7 @@ class Session:
             tool_args,
             raw_result,
             execution_source=execution_source,
+            cache_key=cache_key,
         )
 
     def _record_hook_abort(self, point: str, abort_result) -> None:
@@ -1432,6 +1435,23 @@ class Session:
                 _em = get_emitter(self)
                 if _em is not None and not _em._closed:
                     _summary = getattr(self, "_trace_turn_summary", {}) or {}
+                    # Efficiency metrics (spec #12): compression, cache rates,
+                    # retrieval rate, tool-output share. Folded into turn_end.
+                    _eff = {}
+                    try:
+                        from mu.session.efficiency_metrics import (
+                            collect_efficiency_metrics,
+                        )
+
+                        _eff = collect_efficiency_metrics(
+                            self,
+                            tool_calls_this_turn=_summary.get("tool_calls", 0),
+                            retrieval_calls_this_turn=int(
+                                getattr(self, "_eff_retrievals", 0)
+                            ),
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                     _em.turn_end(
                         {
                             "status": _summary.get("status", "unknown"),
@@ -1443,6 +1463,7 @@ class Session:
                             "error": _summary.get("error"),
                             "session_totals": _summary.get("session_totals", {}),
                             "iters": _em.iter_count,
+                            "efficiency": _eff,
                         }
                     )
                     _em.close()

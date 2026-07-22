@@ -86,14 +86,29 @@ def test_effective_drift_ratio_ratchets_up_when_learned_worse():
     assert effective_drift_ratio(session) == 3.2
 
 
-def test_effective_drift_ratio_ignores_learned_below_static():
-    """An optimistic observation (drift < static) can never make the gates
-    less conservative than the baked-in static factor."""
+def test_effective_drift_ratio_corrects_downward_below_static():
+    """An observed drift below the static factor (cl100k over-counts for this
+    content) lowers the effective ratio — the static factor is a seed, not a
+    permanent floor. This is the fix for the permanent 2.5x Ollama inflation
+    that made the Memory Map report ~96% full for a ~38%-full session."""
     from mu.session.budgets import effective_drift_ratio, update_observed_drift
 
     session = _make_session(_DriftProvider(factor=2.5))
     update_observed_drift(session, 1.4)
-    assert effective_drift_ratio(session) == 2.5
+    assert effective_drift_ratio(session) == 1.4
+
+
+def test_effective_drift_ratio_floors_at_one_when_cl100k_overcounts():
+    """A sub-1.0 observation (real tokens < cl100k estimate) is captured in the
+    EWMA but the effective ratio floors at 1.0 — never assume cl100k over-
+    counts by more than it does, so the gates never get less conservative
+    than 'trust cl100k verbatim'."""
+    from mu.session.budgets import effective_drift_ratio, update_observed_drift
+
+    session = _make_session(_DriftProvider(factor=2.5))
+    update_observed_drift(session, 0.83)
+    assert session._observed_drift_ratio == 0.83
+    assert effective_drift_ratio(session) == 1.0
 
 
 def test_effective_drift_ratio_clamps_pathological_observation():
@@ -109,9 +124,9 @@ def test_effective_drift_ratio_clamps_pathological_observation():
 # ----------------------------------------------------------- drift_corrected_context_limit
 
 
-def test_drift_corrected_limit_unchanged_when_drift_at_or_below_static():
-    """When learned drift hasn't exceeded the static factor, the corrected
-    limit equals resolve_context_limit (already ÷static). No double-shrink."""
+def test_drift_corrected_limit_unchanged_when_drift_equals_static():
+    """When learned drift equals the static factor, the corrected limit equals
+    resolve_context_limit (already ÷static). No double-shrink, no grow."""
     from mu.session.budgets import (
         drift_corrected_context_limit,
         resolve_context_limit,
@@ -122,8 +137,66 @@ def test_drift_corrected_limit_unchanged_when_drift_at_or_below_static():
     update_observed_drift(session, 2.5)  # exactly static
     assert drift_corrected_context_limit(session) == resolve_context_limit(session)
 
-    update_observed_drift(session, 1.8)  # below static -> floored
-    assert drift_corrected_context_limit(session) == resolve_context_limit(session)
+
+def test_drift_corrected_limit_grows_when_learned_below_static():
+    """When observed drift is below the static factor, the corrected limit
+    grows back toward the raw window (limit * static / eff). This is the fix
+    for the Memory Map fill% staying pinned at ~96%: with a 0.83x real drift
+    the limit grows from raw/2.5 to raw/1.0, so fill drops to its true ~38%."""
+    from mu.session.budgets import (
+        drift_corrected_context_limit,
+        resolve_context_limit,
+        update_observed_drift,
+    )
+
+    session = _make_session(_DriftProvider(window=32_768, factor=2.5))
+    static_limit = resolve_context_limit(session)  # 32768 / 2.5 = 13107
+    update_observed_drift(session, 1.25)  # half the static factor
+    corrected = drift_corrected_context_limit(session)
+    # static/eff = 2.5/1.25 = 2.0 -> double the static-factored limit, but
+    # capped at the raw window (32768): int(13107 * 2.0) = 26214.
+    assert corrected > static_limit
+    assert corrected == max(1024, int(static_limit * 2.5 / 1.25))
+
+
+def test_drift_corrected_limit_capped_at_raw_window_when_cl100k_overcounts():
+    """A sub-1.0 effective ratio (floored at 1.0) grows the limit back toward
+    the raw window (limit * static / 1.0) — never beyond it."""
+    from mu.session.budgets import (
+        drift_corrected_context_limit,
+        resolve_context_limit,
+        update_observed_drift,
+    )
+
+    session = _make_session(_DriftProvider(window=32_768, factor=2.5))
+    static_limit = resolve_context_limit(session)  # int(32768 / 2.5) = 13107
+    update_observed_drift(session, 0.83)  # cl100k over-counts -> floored at 1.0
+    corrected = drift_corrected_context_limit(session)
+    # int(13107 * 2.5 / 1.0) = int(32767.5) = 32767 — within rounding of raw.
+    assert corrected == max(1024, int(static_limit * 2.5 / 1.0))
+    assert corrected <= 32_768  # never exceeds the raw window
+
+
+def test_drift_fill_matches_true_real_fill_after_downward_correction():
+    """End-to-end pin of the reported blowup: a 512k window, 2.5x static
+    factor, a cl100k estimate of 196k, and a measured real drift of 0.83.
+    Before the fix the Memory Map showed 196k / (512k/2.5) = 96%. After the
+    fix the effective ratio floors at 1.0, the corrected limit grows to the
+    raw 512k, and fill is 196k / 512k = ~38% — the true real-token fill."""
+    from mu.session.budgets import (
+        drift_corrected_context_limit,
+        effective_drift_ratio,
+        update_observed_drift,
+    )
+
+    session = _make_session(_DriftProvider(window=512_000, factor=2.5))
+    cl100k_total = 196_355
+    update_observed_drift(session, 0.83)
+    assert effective_drift_ratio(session) == 1.0
+    corrected_limit = drift_corrected_context_limit(session)
+    assert corrected_limit == 512_000
+    fill_pct = round(100 * cl100k_total / corrected_limit)
+    assert fill_pct == 38, fill_pct  # not 96
 
 
 def test_drift_corrected_limit_shrinks_when_learned_worse():

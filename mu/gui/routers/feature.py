@@ -520,6 +520,38 @@ async def unarchive_feature(request: Request, feature_id: str) -> Dict[str, Any]
     return {"ok": True, "features": _features_list(sm)}
 
 
+@router.get("/{feature_id}/preview")
+async def preview_feature(request: Request, feature_id: str) -> Dict[str, Any]:
+    """Read-only preview of any feature (including archived) without activating it."""
+    session = request.app.state.session_by_name()
+    if session is None:
+        raise HTTPException(status_code=412, detail="no session active")
+    sm = session.session_manager
+    feature_id = _slugify_feature_id(feature_id)
+
+    record = (sm.feature_registry or {}).get(feature_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Feature '{feature_id}' not found.")
+
+    plan = _hydrate_plan(record)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No plan data found for this feature.")
+
+    summary = summarize_feature_plan(plan)
+    summary["phase_columns"] = _kanban_phases(summary)
+    summary["read_only"] = True
+    summary["preview_feature_id"] = feature_id
+
+    return {
+        "active": True,
+        "active_feature_id": sm.active_feature_id,
+        "plan": summary,
+        "features": _features_list(sm),
+        "metadata_path": plan.metadata_path or None,
+        "read_only": True,
+    }
+
+
 class CreateTaskBody(BaseModel):
     title: str
     objectives: List[str] = []

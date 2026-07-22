@@ -171,12 +171,22 @@ def _static_safety_factor(session: Any) -> float:
 def effective_drift_ratio(session: Any) -> float:
     """The cl100k→real-token drift multiplier the compactor should assume.
 
-    Floors at the provider's static ``compaction_safety_factor`` (the
-    conservative default baked into ``resolve_context_limit``) and ratchets
-    UP when the observed drift learned from overflow recoveries / cold-cache
-    calibration is worse. Never goes below the static factor, so a missing or
-    optimistic measurement can't make the proactive gates less conservative
-    than today's behaviour.
+    The provider's static ``compaction_safety_factor`` (baked into
+    ``resolve_context_limit``) is a *seed*: it is returned only while no
+    reliable drift observation has been recorded, so a cold session stays
+    conservative (e.g. Ollama's 2.5x until proven otherwise). Once a
+    measurement arrives — from an overflow 400's ground-truth real token
+    count or a cold-cache ``prompt_eval_count`` — the *learned* ratio wins
+    in both directions: it ratchets UP when the real drift is worse than
+    the seed, and DOWN (to a floor of 1.0) when cl100k over-counts.
+
+    The previous implementation floored at the static factor, which made the
+    2.5x Ollama assumption permanent: a session whose real drift was ~0.83x
+    (cl100k over-counting, evidenced by a consistently negative
+    ``drift_pct``) still reported ``real_est = cl100k * 2.5`` and a Memory
+    Map fill% of ~96%, even though the true fill was ~38%. The reactive
+    overflow backstop + EWMA smoothing protect against a single spurious
+    low reading making the proactive gates too lax.
     """
     static = _static_safety_factor(session)
     learned = getattr(session, "_observed_drift_ratio", None)
@@ -186,44 +196,54 @@ def effective_drift_ratio(session: Any) -> float:
         learned = float(learned)
     except (TypeError, ValueError):
         return static
-    return max(static, max(1.0, learned))
+    return max(1.0, learned)
 
 
 def drift_corrected_context_limit(session: Any) -> int:
-    """``resolve_context_limit`` (already divided by the static safety factor)
-    further divided when the *observed* drift exceeds the static factor.
+    """The real-token context ceiling the compactor and fill% should use.
 
-    The static factor in ``resolve_context_limit`` assumes a fixed drift
-    (2.5 for Ollama). Real drift varies ~2.2–3.2x by content; when the
-    observed drift exceeds the static factor the proactive compaction gates
-    (turn-start roll, auto-hook, preflight) fire too late — the real prompt
-    overflows before the cl100k gate trips. This replaces the static divisor
-    with the learned one when the learned is worse, so those gates fire at
-    the right point. No-op when observed drift is at or below the static
-    factor (or when there is no static factor).
+    ``resolve_context_limit`` divides the raw window by the static safety
+    factor (2.5 for Ollama) as a conservative default. This replaces that
+    static divisor with the *learned* effective drift ratio in both
+    directions:
+
+    * learned drift > static → the real tokenizer diverges worse than the
+      seed assumed, so the ceiling shrinks (``limit * static / eff``).
+    * learned drift < static → cl100k over-counts for this content, so the
+      ceiling grows back toward the raw window. Previously the ceiling was
+      pinned at ``raw / static`` forever, which made the Memory Map report
+      ~96% full for a session whose true fill was ~38%.
+    * no measurement yet → ``effective_drift_ratio`` returns the static
+      factor, so ``limit * static / eff == limit`` (no change; stays
+      conservative until a reliable reading lands).
+
+    For providers with no safety factor (OpenAI/Gemini) this is a no-op.
     """
     limit = resolve_context_limit(session)  # already / static_sf
     static = _static_safety_factor(session)
     if static <= 1.0:
         return limit
     eff = effective_drift_ratio(session)
-    if eff > static:
-        return max(1024, int(limit * static / eff))
-    return limit
+    if eff <= 0:
+        return limit
+    return max(1024, int(limit * static / eff))
 
 
 def update_observed_drift(session: Any, observed: float) -> None:
     """EWMA-smooth a real-token drift observation onto the session.
 
-    ``observed`` is ``real_tokens / cl100k_tokens`` (clamped to [1.0, 6.0]).
-    Weight 0.5 blends a new observation with the prior so a single outlier
-    doesn't whip the ratio, while still tracking a genuine shift in content
-    type. The proactive compaction gates read this via
+    ``observed`` is ``real_tokens / cl100k_tokens`` (clamped to [0.5, 6.0]).
+    Values below 1.0 mean cl100k over-counts for this content (the provider's
+    real tokenizer produces fewer tokens than cl100k estimates); capturing
+    them lets ``effective_drift_ratio`` correct the previously-permanent 2.5x
+    Ollama floor downward. Weight 0.5 blends a new observation with the prior
+    so a single outlier doesn't whip the ratio, while still tracking a genuine
+    shift in content type. The proactive compaction gates read this via
     ``effective_drift_ratio``; the reactive overflow path and the cold-cache
     response calibration write it.
     """
     try:
-        observed = max(1.0, min(6.0, float(observed)))
+        observed = max(0.5, min(6.0, float(observed)))
     except (TypeError, ValueError):
         return
     prev = getattr(session, "_observed_drift_ratio", None)

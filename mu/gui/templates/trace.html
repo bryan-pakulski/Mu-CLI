@@ -46,6 +46,7 @@
                 </template>
             </select>
             <button class="trace-btn" @click="session ? loadSession() : loadRuns()" title="refresh">↻</button>
+            <button class="trace-btn" @click="clearRun()" x-show="runId && !session" title="clear this run">🗑</button>
             <button class="trace-btn trace-theme-btn" @click="toggleTheme()"
                     :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
                     aria-label="Toggle theme">
@@ -65,14 +66,22 @@
 
     <main class="trace-main" x-show="!loading && summary" style="display:none;">
 
-        <!-- X pan window: charts cap at ~100 iters in view; drag to pan the
-             rest. Hidden when the whole run fits in the window. -->
+        <!-- X pan window: charts cap at ~100 iters in view. Drag any chart
+             left/right, drag the scrollbar thumb, click the track, or
+             horizontal-scroll (trackpad / shift+wheel) to pan the shared
+             window (all charts move together); click a chart to jump the
+             conversation view to that iter. The run opens on the latest
+             iterations (RHS). Hidden when the whole run fits in the window. -->
         <div class="trace-xscroll" x-show="totalIters() > xCount">
             <span class="trace-xscroll-label" x-text="xScrollLabel()"></span>
-            <input type="range" class="trace-xscroll-range" x-model.number="xStart"
-                   :min="0" :max="xScrollMax()" :step="xScrollStep()"
-                   @input="onXScroll($event)">
-            <span class="trace-xscroll-hint">drag to pan · click any chart to jump</span>
+            <div class="trace-xscroll-track"
+                 x-ref="xscrollTrack"
+                 @mousedown="onScrollTrackClick($event)">
+                <div class="trace-xscroll-thumb"
+                     :style="thumbStyle()"
+                     @mousedown.stop="onScrollThumbDown($event)"></div>
+            </div>
+            <span class="trace-xscroll-hint">drag chart or bar · click to jump · ⇧+scroll</span>
         </div>
 
         <!-- 1. Overview cards -->
@@ -130,9 +139,9 @@
                 <button class="trace-info-btn" @click.stop="toggleInfo('ctx')" :class="{open: infoOpen==='ctx'}" title="What this panel shows">ⓘ</button>
                 <div class="trace-info-popout" x-show="infoOpen==='ctx'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
                     <div class="tip-title">Context growth</div>
-                    <p><b>Shows:</b> top — the harness's cl100k_base <em>estimate</em> (dashed) vs the provider's <em>reported</em> prompt tokens (solid) per iteration, with the context limit and compaction events marked. Bottom — a heat strip of which context layer (L0–L5) dominates each iteration, plus a diverging drift strip.</p>
+                    <p><b>Shows:</b> top — the harness's cl100k_base <em>estimate</em> (dashed) vs the provider's <em>reported</em> prompt tokens (solid) per iteration, with compaction events marked. Bottom — a heat strip of which context layer (L0–L5) dominates each iteration, plus a diverging drift strip.</p>
                     <p><b>Why:</b> suspect #1 lives here. If the estimate diverges from actual, the compaction budget (computed in cl100k tokens) fires at the wrong point. The heat strip shows <i>which layer</i> is eating the budget — usually L5 history ballooning.</p>
-                    <p><b>Read:</b> the solid line is the provider's own count — it can never exceed the context window, so it is the honest "how full is the prompt." For Ollama in a warm loop the solid line is the non-cached prompt <i>delta</i> (near-zero = cache hit), not the full prompt; the dashed cl100k line is the harness's fill view in that case. The drift-corrected real estimate and drift ratio are in the hover tooltip; the drift chart carries the estimate-error diagnosis. Blue verticals = compaction. If the limit line is off-chart, its value is printed top-right.</p>
+                    <p><b>Read:</b> the solid line is the provider's own count — it can never exceed the context window, so it is the honest "how full is the prompt." For Ollama in a warm loop the solid line is the non-cached prompt <i>delta</i> (near-zero = cache hit), not the full prompt; the dashed cl100k line is the harness's fill view in that case. The drift-corrected real estimate and drift ratio are in the hover tooltip; the drift chart carries the estimate-error diagnosis. Blue verticals = compaction.</p>
                 </div>
             </h2>
             <div class="trace-canvas-wrap">
@@ -253,6 +262,12 @@
                             <span x-text="h.avg_latency_ms + 'ms'"></span>
                             <span x-text="'cache ' + (h.cache_hit_rate * 100).toFixed(0) + '%'"></span>
                             <span x-text="fmtNum(h.avg_result_bytes) + 'B'"></span>
+                            <span class="th-badge th-badge--saved" x-show="h.omitted > 0"
+                                  x-text="'omit ' + h.omitted + '·' + ((h.compression_ratio || 0) * 100).toFixed(0) + '%'"
+                                  :title="h.omitted + ' results observed (raw stored externally, compact observation in context) · ' + ((h.compression_ratio || 0) * 100).toFixed(0) + '% compression'"></span>
+                            <span class="th-badge th-badge--stored" x-show="h.stored > 0"
+                                  x-text="'stored ' + h.stored"
+                                  title="Results written to the durable ResultStore, recallable via recall()/result_*"></span>
                             <span class="th-codes" x-show="h.error > 0" x-text="errorCodes(h).map(([k,v]) => k + '×' + v).join('  ')"></span>
                         </div>
                     </div>
@@ -263,6 +278,47 @@
                  :title="selectedTool ? selectedTool + ' latency per iter' : ''">
                 <canvas x-ref="toolCanvas" class="trace-canvas" width="1200" height="140"></canvas>
             </div>
+        </section>
+
+        <!-- 6b. Tool-output efficiency -->
+        <section class="trace-section">
+            <h2 class="trace-h2">Tool-output efficiency <span class="trace-sub">store raw externally, observe compactly, retrieve on demand</span>
+                <button class="trace-info-btn" @click.stop="toggleInfo('eff')" :class="{open: infoOpen==='eff'}" title="What this panel shows">ⓘ</button>
+                <div class="trace-info-popout" x-show="infoOpen==='eff'" x-transition.opacity.duration.120ms @click.outside="infoOpen=null">
+                    <div class="tip-title">Tool-output efficiency</div>
+                    <p><b>Shows:</b> per iteration, raw tool-output tokens (amber, what the tool <em>would have</em> injected) vs. injected tokens (green, the compact observation actually placed in context). The amber band between them is tokens saved by storing raw externally.</p>
+                    <p><b>Why:</b> the headline metric for tool-output management. A wide amber gap means large results (build logs, file reads, searches) are being observed rather than bloating context; a thin gap means results were small enough to stay verbatim. The cards total the run: compression ratio, tokens saved, results omitted/stored, and retrieval rate.</p>
+                    <p><b>Read:</b> hover the chart for per-iter numbers. <b>compression ratio</b> = tokens_saved ÷ raw_tokens. <b>retrieval rate</b> = recall/result_* calls ÷ total tool calls — too low with many omitted results may mean stored output isn't being recalled before re-running. Cache counters (evictions/invalidations/disk hits/locator hits) come from the tool-result cache.</p>
+                </div>
+            </h2>
+            <div class="trace-cards">
+                <div class="trace-card"><div class="tc-label">raw tool tokens</div><div class="tc-val" x-text="fmtNum(effSummary().raw_tokens)"></div></div>
+                <div class="trace-card"><div class="tc-label">injected tokens</div><div class="tc-val" x-text="fmtNum(effSummary().injected_tokens)"></div></div>
+                <div class="trace-card" :class="{'trace-card--good': effSummary().tokens_saved > 0}"><div class="tc-label">tokens saved</div><div class="tc-val" x-text="fmtNum(effSummary().tokens_saved)"></div></div>
+                <div class="trace-card" :class="{'trace-card--good': effSummary().compression_ratio >= 0.1, 'trace-card--warn': effSummary().raw_tokens > 0 && effSummary().compression_ratio < 0.05}"><div class="tc-label">compression ratio</div><div class="tc-val" x-text="(effSummary().compression_ratio * 100).toFixed(0) + '%'"></div></div>
+                <div class="trace-card"><div class="tc-label">omitted results</div><div class="tc-val" x-text="effSummary().omitted_results"></div></div>
+                <div class="trace-card"><div class="tc-label">stored results</div><div class="tc-val" x-text="effSummary().stored_results"></div></div>
+                <div class="trace-card"><div class="tc-label">retrieval rate</div><div class="tc-val" x-text="(effSummary().retrieval_rate * 100).toFixed(0) + '%'"></div></div>
+                <div class="trace-card"><div class="tc-label">peak raw / iter</div><div class="tc-val" x-text="fmtNum(effSummary().peak_raw_tokens)"></div></div>
+                <template x-if="effSummary().cache">
+                    <div class="trace-card trace-card--cache"><div class="tc-label">cache: evict / inval</div>
+                        <div class="tc-val"><span x-text="(effSummary().cache||{}).evictions || 0"></span> / <span x-text="(effSummary().cache||{}).invalidations || 0"></span></div></div>
+                </template>
+                <template x-if="effSummary().cache">
+                    <div class="trace-card trace-card--cache"><div class="tc-label">cache: disk / locator hits</div>
+                        <div class="tc-val"><span x-text="(effSummary().cache||{}).disk_hits || 0"></span> / <span x-text="(effSummary().cache||{}).locator_hits || 0"></span></div></div>
+                </template>
+                <template x-if="effSummary().cache">
+                    <div class="trace-card trace-card--cache"><div class="tc-label">dup bytes avoided</div><div class="tc-val" x-text="fmtNum((effSummary().cache||{}).dup_bytes_avoided || 0) + 'B'"></div></div>
+                </template>
+                <template x-if="effSummary().tool_output_share != null">
+                    <div class="trace-card"><div class="tc-label">tool-output share</div><div class="tc-val" x-text="(effSummary().tool_output_share * 100).toFixed(0) + '%'"></div></div>
+                </template>
+            </div>
+            <div class="trace-canvas-wrap" x-show="series.efficiency && series.efficiency.length">
+                <canvas x-ref="effCanvas" class="trace-canvas" width="1200" height="180"></canvas>
+            </div>
+            <p class="trace-muted" x-show="!series.efficiency || !series.efficiency.length">No tool-output efficiency data recorded (older trace or no tool calls).</p>
         </section>
 
         <!-- 7. Read-state heatmap -->

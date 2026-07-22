@@ -809,3 +809,334 @@ def recall(args: Dict[str, Any], context) -> str:
             "Re-run the original tool call if needed."
         )
     return _json.dumps(result, default=str, indent=2)
+
+# ---------------------------------------------------------------- bounded retrieval (spec #6)
+#
+# A family of read-only ops over the durable ResultStore / ToolResultCache.
+# Each takes a `cache_key` (the stored_ref embedded in a compact observation)
+# and returns a bounded slice of the stored raw — so the model can pull exact
+# details back into context without re-running the original tool. Results are
+# themselves subject to the observation transform if they exceed the inline
+# budget.
+
+
+def _cache_for(context):
+    session = getattr(context, "session", None)
+    if session is None or not hasattr(session, "tool_result_cache"):
+        return None, "Error: No tool result cache available on this session."
+    return session.tool_result_cache, None
+
+
+def _require_key(args):
+    key = args.get("cache_key", "")
+    if not key:
+        return None, "Error: cache_key argument is required."
+    return key, None
+
+
+@tool(
+    name="result_range",
+    description=(
+        "Retrieve a line range [start_line, end_line] from a stored tool result "
+        "(cache_key from a stored_ref). 1-indexed, inclusive. Use instead of "
+        "re-running read_file/get_chunk when the full result is already stored."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key": {"type": "string", "description": "Stored result key."},
+            "start_line": {"type": "integer", "description": "1-indexed start line (inclusive)."},
+            "end_line": {"type": "integer", "description": "1-indexed end line (inclusive)."},
+        },
+        "required": ["cache_key", "start_line", "end_line"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def result_range(args: Dict[str, Any], context) -> str:
+    cache, err = _cache_for(context)
+    if err:
+        return err
+    key, err = _require_key(args)
+    if err:
+        return err
+    start = int(args.get("start_line", 1))
+    end = int(args.get("end_line", start))
+    out = cache.line_range(key, start, end)
+    if out is None:
+        return f"Cache key '{key}' not found or evicted."
+    return out
+
+
+@tool(
+    name="result_head",
+    description=(
+        "Retrieve the first N lines of a stored tool result (cache_key from a "
+        "stored_ref). Default 20 lines."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key": {"type": "string", "description": "Stored result key."},
+            "lines": {"type": "integer", "description": "Number of lines (default 20)."},
+        },
+        "required": ["cache_key"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def result_head(args: Dict[str, Any], context) -> str:
+    cache, err = _cache_for(context)
+    if err:
+        return err
+    key, err = _require_key(args)
+    if err:
+        return err
+    n = int(args.get("lines", 20))
+    out = cache.head(key, n)
+    if out is None:
+        return f"Cache key '{key}' not found or evicted."
+    return out
+
+
+@tool(
+    name="result_tail",
+    description=(
+        "Retrieve the last N lines of a stored tool result (cache_key from a "
+        "stored_ref). Default 20 lines."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key": {"type": "string", "description": "Stored result key."},
+            "lines": {"type": "integer", "description": "Number of lines (default 20)."},
+        },
+        "required": ["cache_key"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def result_tail(args: Dict[str, Any], context) -> str:
+    cache, err = _cache_for(context)
+    if err:
+        return err
+    key, err = _require_key(args)
+    if err:
+        return err
+    n = int(args.get("lines", 20))
+    out = cache.tail(key, n)
+    if out is None:
+        return f"Cache key '{key}' not found or evicted."
+    return out
+
+
+@tool(
+    name="result_search",
+    description=(
+        "Search a stored tool result (cache_key) for a query string; returns "
+        "grouped matches with line numbers. Use instead of re-running a search "
+        "tool when the raw output is already stored."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key": {"type": "string", "description": "Stored result key."},
+            "query": {"type": "string", "description": "Substring or pattern to find."},
+            "max_matches": {"type": "integer", "description": "Cap on matches (default 20)."},
+        },
+        "required": ["cache_key", "query"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def result_search(args: Dict[str, Any], context) -> str:
+    cache, err = _cache_for(context)
+    if err:
+        return err
+    key, err = _require_key(args)
+    if err:
+        return err
+    query = args.get("query", "")
+    if not query:
+        return "Error: query argument is required."
+    max_m = int(args.get("max_matches", 20))
+    out = cache.search(key, query, max_matches=max_m)
+    if out is None:
+        return f"Cache key '{key}' not found or evicted."
+    return out
+
+
+@tool(
+    name="result_diagnostics",
+    description=(
+        "Extract unique error/warning/traceback lines from a stored tool result "
+        "(cache_key). Deduped, noise dropped. Use to inspect why a stored bash/"
+        "build/test result failed without pulling the full log back into context."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key": {"type": "string", "description": "Stored result key."},
+            "max_lines": {"type": "integer", "description": "Cap on diagnostic lines (default 12)."},
+        },
+        "required": ["cache_key"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def result_diagnostics(args: Dict[str, Any], context) -> str:
+    cache, err = _cache_for(context)
+    if err:
+        return err
+    key, err = _require_key(args)
+    if err:
+        return err
+    max_l = int(args.get("max_lines", 12))
+    out = cache.diagnostics(key, max_lines=max_l)
+    if out is None:
+        return f"Cache key '{key}' not found or evicted."
+    if not out:
+        return "No diagnostic lines found."
+    return out
+
+
+@tool(
+    name="result_json_path",
+    description=(
+        "Extract a value from a stored JSON tool result (cache_key) via a JSON "
+        "pointer (e.g. /data/matches/0/file). Returns the targeted slice only."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key": {"type": "string", "description": "Stored result key."},
+            "pointer": {"type": "string", "description": "JSON pointer path (e.g. /data/0/file)."},
+        },
+        "required": ["cache_key", "pointer"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def result_json_path(args: Dict[str, Any], context) -> str:
+    cache, err = _cache_for(context)
+    if err:
+        return err
+    key, err = _require_key(args)
+    if err:
+        return err
+    pointer = args.get("pointer", "")
+    if not pointer:
+        return "Error: pointer argument is required."
+    out = cache.json_path(key, pointer)
+    if out is None:
+        return f"Cache key '{key}' not found, evicted, or pointer not present."
+    return out
+
+
+@tool(
+    name="compare_results",
+    description=(
+        "Produce a unified diff between two stored tool results (cache_key_a, "
+        "cache_key_b). Use to compare two reads of the same file or two search "
+        "runs without re-running either tool."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "cache_key_a": {"type": "string", "description": "First stored result key."},
+            "cache_key_b": {"type": "string", "description": "Second stored result key."},
+        },
+        "required": ["cache_key_a", "cache_key_b"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+)
+def compare_results(args: Dict[str, Any], context) -> str:
+    cache, err = _cache_for(context)
+    if err:
+        return err
+    a = args.get("cache_key_a", "")
+    b = args.get("cache_key_b", "")
+    if not a or not b:
+        return "Error: both cache_key_a and cache_key_b are required."
+    out = cache.compare(a, b)
+    if out is None:
+        return f"One or both cache keys ('{a}', '{b}') not found or evicted."
+    if not out:
+        return "Results are identical."
+    return out
+
+
+# ---------------------------------------------------------------- phased tool exposure (spec #9)
+
+
+@tool(
+    name="load_tools",
+    description=(
+        "Activate a specialist tool phase (e.g. 'research', 'security', "
+        "'feature', 'teacher') so its tools appear in your schema. Use when "
+        "lazy_tools_enabled is on and you need a specialist tool that isn't "
+        "in the core phase. Core tools are always available."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "phase": {
+                "type": "string",
+                "description": "The tool phase to activate (e.g. research, security).",
+            },
+        },
+        "required": ["phase"],
+    },
+    requires_approval=False,
+    execution_kind="memory",
+    preview_policy="none",
+    server_policy="session_only",
+    result_mode="raw",
+    phase="core",
+)
+def load_tools(args: Dict[str, Any], context) -> str:
+    session = getattr(context, "session", None)
+    phase = str(args.get("phase", "")).strip().lower()
+    if not phase:
+        return "Error: phase argument is required."
+    if session is None:
+        return "Error: no session available."
+    loaded = set(getattr(session, "_loaded_tool_phases", []) or [])
+    loaded.add(phase)
+    session._loaded_tool_phases = sorted(loaded)
+    # Count how many tools are now newly exposed in this phase.
+    try:
+        from mu.tools.descriptors import TOOL_DESCRIPTORS
+
+        count = sum(
+            1 for d in TOOL_DESCRIPTORS.values() if d.phase == phase
+        )
+    except Exception:  # noqa: BLE001
+        count = 0
+    return (
+        f"Activated tool phase '{phase}'. {count} tool(s) tagged with that "
+        f"phase will appear in the next request's schema. Active phases: "
+        f"{', '.join(sorted(loaded))}."
+    )

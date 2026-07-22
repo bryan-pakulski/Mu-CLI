@@ -17,6 +17,7 @@ import { useConnectionStore } from '../store/connection';
 import { chatApi } from '../api/chat';
 import { subscribeToEvents, SSESubscription } from '../api/sse';
 import { modesApi, ModeInfo } from '../api/modes';
+import { inspectorApi, InspectorVariableGroup } from '../api/inspector';
 import { Text, Button, Card, Skeleton, EmptyState, ErrorState } from '../components';
 import { BottomSheet } from '../components/BottomSheet';
 import { spacing } from '../theme/tokens';
@@ -41,6 +42,10 @@ export function ChatScreen() {
   const [modeSheetOpen, setModeSheetOpen] = useState(false);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [activeMode, setActiveMode] = useState<string | null>(null);
+  const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
+  const [varGroups, setVarGroups] = useState<InspectorVariableGroup[]>([]);
+  const [varsLoading, setVarsLoading] = useState(false);
+  const connection = useConnectionStore();
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const sseSubRef = useRef<SSESubscription | null>(null);
   const msgIdRef = useRef(0);
@@ -161,6 +166,19 @@ export function ChatScreen() {
     }
   };
 
+  const loadVariables = useCallback(async () => {
+    setVarsLoading(true);
+    try {
+      const res = await inspectorApi.getVariables();
+      setVarGroups(res.groups);
+    } catch { /* ignore */ }
+    setVarsLoading(false);
+  }, []);
+
+  const setVariable = async (key: string, value: unknown) => {
+    try { await inspectorApi.setVariable(key, value); } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     return () => { sseSubRef.current?.close(); };
   }, []);
@@ -271,6 +289,7 @@ export function ChatScreen() {
           colors={colors}
           insets={insets}
           onModePress={() => { loadModes(); setModeSheetOpen(true); }}
+          onSettingsPress={() => { loadVariables(); setSettingsSheetOpen(true); }}
         />
         <ModeBottomSheet
           visible={modeSheetOpen}
@@ -278,6 +297,15 @@ export function ChatScreen() {
           modes={modes}
           activeMode={activeMode}
           onSelect={selectMode}
+          colors={colors}
+        />
+        <SettingsBottomSheet
+          visible={settingsSheetOpen}
+          onClose={() => setSettingsSheetOpen(false)}
+          varGroups={varGroups}
+          varsLoading={varsLoading}
+          connection={connection}
+          onSetVariable={setVariable}
           colors={colors}
         />
       </SafeAreaView>
@@ -316,6 +344,7 @@ export function ChatScreen() {
           colors={colors}
           insets={insets}
           onModePress={() => { loadModes(); setModeSheetOpen(true); }}
+          onSettingsPress={() => { loadVariables(); setSettingsSheetOpen(true); }}
         />
         <ModeBottomSheet
           visible={modeSheetOpen}
@@ -323,6 +352,15 @@ export function ChatScreen() {
           modes={modes}
           activeMode={activeMode}
           onSelect={selectMode}
+          colors={colors}
+        />
+        <SettingsBottomSheet
+          visible={settingsSheetOpen}
+          onClose={() => setSettingsSheetOpen(false)}
+          varGroups={varGroups}
+          varsLoading={varsLoading}
+          connection={connection}
+          onSetVariable={setVariable}
           colors={colors}
         />
       </KeyboardAvoidingView>
@@ -339,13 +377,17 @@ interface ComposerProps {
   colors: any;
   insets: { bottom: number };
   onModePress: () => void;
+  onSettingsPress: () => void;
 }
 
-function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, onModePress }: ComposerProps) {
+function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, onModePress, onSettingsPress }: ComposerProps) {
   return (
     <View style={[styles.composer, { backgroundColor: colors.bgLift, paddingBottom: insets.bottom }]}>
       <TouchableOpacity onPress={onModePress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Ionicons name="options-outline" size={24} color={colors.textDim} style={{ paddingHorizontal: 8 }} />
+      </TouchableOpacity>
+      <TouchableOpacity onPress={onSettingsPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <Ionicons name="settings-outline" size={24} color={colors.textDim} style={{ paddingHorizontal: 8 }} />
       </TouchableOpacity>
       <TextInput
         value={input}
@@ -433,4 +475,67 @@ const styles = StyleSheet.create({
   composer: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
   input: { flex: 1, borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, maxHeight: 120, minHeight: 44 },
   sendBtn: { padding: 8, minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' },
+  settingsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, minHeight: 44 },
+  settingsSection: { marginTop: 12, marginBottom: 4 },
+  settingsLabel: { fontSize: 12, color: '#94a3b8', marginBottom: 4 },
+  varValue: { fontSize: 12, color: '#94a3b8' },
 });
+
+// Session settings BottomSheet — provider/model info + variables
+interface SettingsBottomSheetProps {
+  visible: boolean;
+  onClose: () => void;
+  varGroups: InspectorVariableGroup[];
+  varsLoading: boolean;
+  connection: { activeProvider: string | null; activeModel: string | null; yolo: boolean };
+  onSetVariable: (key: string, value: unknown) => void;
+  colors: any;
+}
+
+function SettingsBottomSheet({ visible, onClose, varGroups, varsLoading, connection, colors }: SettingsBottomSheetProps) {
+  return (
+    <BottomSheet visible={visible} onClose={onClose} title="Session Settings">
+      <View style={styles.settingsSection}>
+        <Text variant="sm" style={{ fontWeight: '600', marginBottom: 8 }}>Current Session</Text>
+        <View style={styles.settingsRow}>
+          <Text variant="xs" style={{ color: colors.textDim }}>Provider</Text>
+          <Text variant="sm">{connection.activeProvider || '—'}</Text>
+        </View>
+        <View style={styles.settingsRow}>
+          <Text variant="xs" style={{ color: colors.textDim }}>Model</Text>
+          <Text variant="sm">{connection.activeModel || '—'}</Text>
+        </View>
+        <View style={styles.settingsRow}>
+          <Text variant="xs" style={{ color: colors.textDim }}>YOLO</Text>
+          <Text variant="sm">{connection.yolo ? 'On' : 'Off'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.settingsSection}>
+        <Text variant="sm" style={{ fontWeight: '600', marginBottom: 8 }}>Variables</Text>
+        {varsLoading ? (
+          <Text variant="xs" style={{ color: colors.textDim }}>Loading…</Text>
+        ) : varGroups.length === 0 ? (
+          <Text variant="xs" style={{ color: colors.textDim }}>No variables configured</Text>
+        ) : (
+          varGroups.map(group => (
+            <View key={group.name} style={{ marginBottom: 12 }}>
+              <Text variant="xs" style={{ fontWeight: '500', marginBottom: 4 }}>{group.name}</Text>
+              {group.variables.map(v => (
+                <View key={v.key} style={styles.settingsRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text variant="xs" style={{ color: colors.text }}>{v.key}</Text>
+                    <Text variant="xs" style={styles.varValue}>{v.help}</Text>
+                  </View>
+                  <Text variant="xs" style={{ color: v.is_default ? colors.textDim : colors.accent }}>
+                    {String(v.value)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ))
+        )}
+      </View>
+    </BottomSheet>
+  );
+}

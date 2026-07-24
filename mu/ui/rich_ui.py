@@ -5,6 +5,8 @@ import select
 import sys
 import threading
 import time
+
+from utils.threads import NamedThread
 from rich import box
 from rich.align import Align
 from rich.console import Console, Group
@@ -722,7 +724,7 @@ class RichUI:
                     except Exception:
                         pass
 
-        watcher = threading.Thread(target=_watch, daemon=True)
+        watcher = NamedThread(target=_watch, daemon=True, name="rich-ui-watcher")
         watcher.start()
         return watcher
 

@@ -137,6 +137,25 @@ def _handle_create_feature(args: dict, context: ToolExecutionContext) -> str:
     session = context.session
     if not session:
         return "Error: This tool requires an active session context."
+
+    # Duplicate-feature guard: refuse if a non-archived feature already exists.
+    registry = getattr(session.session_manager, "feature_registry", None) or {}
+    existing_active = [
+        (fid, rec.get("feature_name", fid))
+        for fid, rec in registry.items()
+        if isinstance(rec, dict) and not rec.get("archived")
+    ]
+    if existing_active:
+        active_list = ", ".join(f"{name} (id={fid})" for fid, name in existing_active)
+        return json.dumps({
+            "ok": False,
+            "error": (
+                f"An active feature already exists: {active_list}. "
+                "Use the existing feature instead of creating a duplicate. "
+                "If you want to start fresh, archive or delete the existing feature first."
+            ),
+        })
+
     feature_name = str(args.get("feature_name", "")).strip()
     feature_request = str(args.get("feature_request", "")).strip()
     feature_id = str(args.get("feature_id", "")).strip() or None
@@ -209,6 +228,18 @@ def _handle_create_phases(args: dict, context: ToolExecutionContext) -> str:
     if not metadata_path or not os.path.exists(metadata_path):
         return "Error: Feature metadata not found."
 
+    # Approval gate: refuse to create phases on an unapproved feature.
+    plan = load_feature_plan(metadata_path)
+    if not getattr(plan, "approved", False):
+        return json.dumps({
+            "ok": False,
+            "error": (
+                "Feature plan has not been approved yet. "
+                "Call approve_feature_task or use the /feature approve flow before "
+                "creating phases or tasks. The plan must be approved by the user first."
+            ),
+        })
+
     plan = create_feature_phases(
         metadata_path,
         phases,
@@ -243,6 +274,19 @@ def _handle_create_task(args: dict, context: ToolExecutionContext) -> str:
     metadata_path = feature_state.get("metadata_path", "")
     if not metadata_path or not os.path.exists(metadata_path):
         return "Error: Feature metadata not found."
+
+    # Approval gate: refuse to create tasks on an unapproved feature.
+    plan_check = load_feature_plan(metadata_path)
+    if not getattr(plan_check, "approved", False):
+        return json.dumps({
+            "ok": False,
+            "error": (
+                "Feature plan has not been approved yet. "
+                "Call approve_feature_task or use the /feature approve flow before "
+                "creating phases or tasks. The plan must be approved by the user first."
+            ),
+        })
+
     title = str(args.get("title", "")).strip()
     exit_criteria = args.get("exit_criteria", [])
     if not title:
@@ -543,6 +587,24 @@ def _handle_create_feature_task(args: dict, context: ToolExecutionContext) -> st
     session = context.session
     if not session:
         return "Error: This tool requires an active session context."
+
+    # Duplicate-feature guard: refuse if a non-archived feature already exists.
+    registry = getattr(session.session_manager, "feature_registry", None) or {}
+    existing_active = [
+        (fid, rec.get("feature_name", fid))
+        for fid, rec in registry.items()
+        if isinstance(rec, dict) and not rec.get("archived")
+    ]
+    if existing_active:
+        active_list = ", ".join(f"{name} (id={fid})" for fid, name in existing_active)
+        return json.dumps({
+            "ok": False,
+            "error": (
+                f"An active feature already exists: {active_list}. "
+                "Use the existing feature instead of creating a duplicate. "
+                "If you want to start fresh, archive or delete the existing feature first."
+            ),
+        })
 
     feature_name = args.get("feature_name", "").strip()
     feature_request = args.get("feature_request", "").strip()
@@ -869,6 +931,18 @@ def _handle_update_task_status(args: dict, context: ToolExecutionContext) -> str
     )
     if not metadata_path:
         return "Error: Feature metadata not found."
+
+    # Approval gate: refuse to update tasks on an unapproved feature.
+    approval_check = load_feature_plan(metadata_path)
+    if not getattr(approval_check, "approved", False):
+        return json.dumps({
+            "ok": False,
+            "error": (
+                "Feature plan has not been approved yet. "
+                "Call approve_feature_task or use the /feature approve flow before "
+                "updating task status. The plan must be approved by the user first."
+            ),
+        })
 
     if verified_exit_criteria is not None and not isinstance(verified_exit_criteria, list):
         return "Error: verified_exit_criteria must be an array when provided."

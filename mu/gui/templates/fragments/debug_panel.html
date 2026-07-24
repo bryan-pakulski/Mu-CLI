@@ -54,6 +54,7 @@
                     <div class="hypothesis-detail"
                          x-show="$store.debug.isHypothesisExpanded(h.id)"
                          x-transition.opacity.duration.120ms>
+                        <div class="hypothesis-full-content" x-text="h.content"></div>
                         <div class="mono muted" x-show="h.source" x-text="'source: ' + h.source"></div>
                         <div class="mono muted" x-text="$store.debug.formatTimestamp(h.updated_at)"></div>
                     </div>

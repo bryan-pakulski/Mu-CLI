@@ -31,6 +31,8 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+
+from utils.threads import NamedThread
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -285,7 +287,7 @@ class SubagentRegistry:
 
     def launch(self, record: SubagentRecord, task: str) -> None:
         """Start the daemon thread that runs the child."""
-        thread = threading.Thread(
+        thread = NamedThread(
             target=self._run_child,
             args=(record, task),
             daemon=True,

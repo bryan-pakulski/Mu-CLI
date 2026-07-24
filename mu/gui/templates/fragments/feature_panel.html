@@ -100,7 +100,7 @@
     </div>
 
     <!-- header -->
-    <div class="panel-head" x-show="$store.feature.plan">
+    <div class="panel-head" x-show="$store.feature.plan && !$store.feature.showFeatureBrowser">
         <!-- read-only preview banner -->
         <div class="preview-banner" x-show="$store.feature.previewMode"
              style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-1);margin-bottom:var(--space-2)">
@@ -110,6 +110,9 @@
                     title="Back to feature list">←</button>
         </div>
         <div class="panel-subject" style="display:flex;align-items:center;gap:var(--space-2)">
+            <button class="feature-action-btn"
+                    @click.stop="$store.feature.showFeatureBrowser = !$store.feature.showFeatureBrowser"
+                    title="Browse features">←</button>
             <span x-text="$store.feature.plan && ($store.feature.plan.feature_name || $store.feature.plan.feature_id)"></span>
             <button class="feature-action-btn feature-action-unload"
                     @click.stop="$store.feature.unloadFeature($store.feature.plan && $store.feature.plan.feature_id)"
@@ -135,26 +138,83 @@
                     (($store.feature.plan && $store.feature.plan.task_count) || 1)
                  ) + '%;'"></div>
         </div>
-        <div class="feature-strip"
-             x-show="($store.feature.features || []).filter(f => !f.archived).length > 1">
-            <template x-for="f in ($store.feature.features || []).filter(f => !f.archived)" :key="f.feature_id">
-                <button class="course-chip"
-                        :class="{ active: f.is_active }"
-                        @click="!f.is_active && $store.feature.loadFeature(f.feature_id)"
-                        :title="f.feature_id + ' (' + (f.status || '?') + ')'">
-                    <span class="mono" x-text="f.feature_id"></span>
-                    <span class="feature-action-btn feature-action-unload"
-                          x-show="f.is_active"
-                          @click.stop="$store.feature.unloadFeature(f.feature_id)"
-                          title="Unload active feature">↗</span>
-                </button>
-            </template>
+    </div>
+
+    <!-- browse overlay: shows feature list when showFeatureBrowser is true -->
+    <div class="feature-browse-overlay" x-show="$store.feature.showFeatureBrowser && $store.feature.plan"
+         x-transition.opacity.duration.200ms
+         style="position:absolute;inset:0;background:var(--bg-elevated);z-index:10;overflow-y:auto;padding:var(--space-3)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2)">
+            <h3 class="label-mono">features</h3>
+            <button class="feature-action-btn"
+                    @click.stop="$store.feature.showFeatureBrowser = false"
+                    title="Close browser">×</button>
         </div>
+        <div class="feature-list-header" style="margin-bottom:var(--space-2)">
+            <input type="text"
+                   class="feature-search"
+                   placeholder="search…"
+                   x-model="$store.feature.searchQuery"
+                   @click.stop
+                   @keydown.stop />
+            <button class="feature-archive-toggle"
+                    :class="{ active: $store.feature.showArchived }"
+                    x-show="$store.feature.archivedCount() > 0"
+                    @click="$store.feature.showArchived = !$store.feature.showArchived"
+                    x-text="$store.feature.showArchived
+                        ? 'active'
+                        : 'archive (' + $store.feature.archivedCount() + ')'"
+                    title="Toggle archived features"></button>
+        </div>
+        <template x-for="f in $store.feature.filteredFeatures()" :key="f.feature_id">
+            <div class="feature-row" :class="{ 'is-archived': f.archived }">
+                <span class="feature-name" x-text="f.feature_name || f.feature_id"></span>
+                <span class="feature-id mono muted" x-text="f.feature_id"></span>
+                <span class="feature-status-tag"
+                      :class="'st-' + (f.is_active ? 'active' : (f.status || 'unknown').toLowerCase().replace(/ /g, '_'))"
+                      x-text="f.is_active ? 'active' : (f.status || '?')"></span>
+                <div class="feature-row-actions">
+                    <template x-if="!f.archived && !f.is_active">
+                        <div class="feature-row-actions-inner">
+                            <button class="feature-action-btn"
+                                    @click.stop="$store.feature.switchFeature(f.feature_id)"
+                                    title="Load">▶</button>
+                            <button class="feature-action-btn"
+                                    @click.stop="$store.feature.archiveFeature(f.feature_id)"
+                                    title="Archive">⌂</button>
+                        </div>
+                    </template>
+                    <template x-if="f.archived">
+                        <div class="feature-row-actions-inner">
+                            <button class="feature-action-btn"
+                                    @click.stop="$store.feature.unarchiveFeature(f.feature_id)"
+                                    title="Unarchive">↩</button>
+                            <button class="feature-action-btn"
+                                    @click.stop="$store.feature.previewFeature(f.feature_id)"
+                                    title="View archived feature">👁</button>
+                            <button class="feature-action-btn feature-action-delete"
+                                    @click.stop="$store.confirm.ask(
+                                        'Permanently delete \'' + f.feature_id + '\'?',
+                                        $event,
+                                        () => $store.feature.deleteFeature(f.feature_id),
+                                        {danger:true}
+                                    )"
+                                    title="Delete permanently">×</button>
+                        </div>
+                    </template>
+                    <template x-if="!f.archived && f.is_active">
+                        <div class="feature-row-actions-inner">
+                            <span class="mono muted" style="font-size:11px">loaded</span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </template>
     </div>
 
     <!-- vertical phase kanban: each phase is a collapsible row, tasks
          stack inside, click a task to drill into its detail -->
-    <div class="phase-kanban" x-show="$store.feature.plan">
+    <div class="phase-kanban" x-show="$store.feature.plan && !$store.feature.showFeatureBrowser">
         <div class="empty-row"
              x-show="!$store.feature.phaseColumns().length">
             no phases proposed yet
@@ -258,7 +318,7 @@
 
     <!-- event log -->
     <section class="panel-section"
-             x-show="$store.feature.plan && $store.feature.recentEvents().length"
+             x-show="$store.feature.plan && !$store.feature.showFeatureBrowser && $store.feature.recentEvents().length"
              :class="{ open: $store.feature.openSections.events }">
         <button class="panel-section-head"
                 @click="$store.feature.toggleSection('events')"
@@ -283,7 +343,7 @@
 
     <!-- review records -->
     <section class="panel-section"
-             x-show="$store.feature.plan && $store.feature.reviews().length"
+             x-show="$store.feature.plan && !$store.feature.showFeatureBrowser && $store.feature.reviews().length"
              :class="{ open: $store.feature.openSections.reviews }">
         <button class="panel-section-head"
                 @click="$store.feature.toggleSection('reviews')"
@@ -306,7 +366,7 @@
 
     <!-- diagnostic footer -->
     <div class="panel-footnote muted mono"
-         x-show="$store.feature.metadataPath"
+         x-show="$store.feature.metadataPath && !$store.feature.showFeatureBrowser"
          :title="'Plan data read from ' + $store.feature.metadataPath"
          x-text="'↳ ' + $store.feature.metadataPath"></div>
 

@@ -75,9 +75,19 @@ The markdown phase files remain the day-to-day execution surface, while the JSON
 
 ## Engine Lifecycle
 
-### 1. Planning (staged tools)
+### 0. Propose (TEXT ONLY, no tool calls)
 
-The agent should use the staged planning tools when operating in feature mode:
+The agent MUST present the full plan as text in chat before making any tool calls. This includes:
+
+- Feature name and description
+- Phase breakdown with titles and goals
+- Per-phase tasks with objectives, action points, and exit criteria
+
+The agent waits for the user to explicitly approve (e.g. "approved", "go ahead", "looks good") before proceeding. This prevents duplicate features from premature tool calls and allows easy tweaks before persistence.
+
+### 1. Planning (staged tools — after approval only)
+
+After explicit user approval, the agent uses the staged planning tools to persist the plan:
 
 1. `create_feature` (Stage 1: plan shell + requirements),
 2. `create_phases` (Stage 2: epics/phases),
@@ -85,7 +95,7 @@ The agent should use the staged planning tools when operating in feature mode:
 
 Legacy compatibility still exists for `create_feature_task`, but staged calls are the default contract.
 
-After plan creation, the agent should stop and ask the user for approval.
+The agent must NOT call these tools until the user has approved the plan text in chat.
 
 ### 2. Approval
 
@@ -214,6 +224,7 @@ itself advances phases, raises blockers, and runs review via the tools.
 Feature mode prompts should instruct the agent to:
 
 - always use the feature plan engine,
+- **present the plan as text in chat BEFORE calling any feature creation tools** — do not call `create_feature`, `create_feature_task`, `create_phases`, or `create_task` until the user has explicitly approved,
 - gather read-only investigation context into the collation buffer before acting when a phase requires substantial discovery,
 - store short-lived file targets, hypotheses, and verification checklists in the scratchpad during a phase,
 - call `flush` once enough context has been gathered so implementation decisions are based on the complete collected context,
@@ -226,9 +237,11 @@ Feature mode prompts should instruct the agent to:
 ## Recommended Harness Flow
 
 1. User requests a feature.
-2. Agent runs in feature mode and creates the phased plan (`create_feature` → `create_phases` → `create_task`).
-3. User reviews and approves the plan (`approve_feature_task` tool, `POST /api/feature/{feature_id}/approve`, or the `/feature` approval flow).
-4. Agent advances phase-by-phase in feature mode, updating task status via `update_task_status` and the `/api/feature/tasks/{task_id}/transition` endpoint; the UI reads `GET /api/feature/state` between turns.
-5. If the agent hits a missing requirement, it calls `raise_blocker` and pauses for user input; the user supplies context and the agent resumes.
-6. Once all phases are complete, the agent runs review (`review_all_completed_tasks` or `/feature review auto`).
-7. If review passes, report completion; if it fails, the agent reopens the relevant tasks and continues until the plan satisfies its exit criteria.
+2. Agent designs the plan as text in chat — feature name, phases, tasks, objectives, exit criteria. No tool calls yet.
+3. User reviews and approves the plan text.
+4. After approval, agent creates the feature using tool calls (`create_feature` → `create_phases` → `create_task`).
+5. User confirms plan approval via `approve_feature_task` tool, `POST /api/feature/{feature_id}/approve`, or the `/feature` approval flow.
+6. Agent advances phase-by-phase in feature mode, updating task status via `update_task_status` and the `/api/feature/tasks/{task_id}/transition` endpoint; the UI reads `GET /api/feature/state` between turns.
+7. If the agent hits a missing requirement, it calls `raise_blocker` and pauses for user input; the user supplies context and the agent resumes.
+8. Once all phases are complete, the agent runs review (`review_all_completed_tasks` or `/feature review auto`).
+9. If review passes, report completion; if it fails, the agent reopens the relevant tasks and continues until the plan satisfies its exit criteria.

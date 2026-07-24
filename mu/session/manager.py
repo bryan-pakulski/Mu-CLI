@@ -465,6 +465,12 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         feature_id = _slugify_feature_id(feature_id)
         record = deepcopy(feature)
         record["feature_id"] = feature_id
+        # Preserve created_at from existing registry entry (if any)
+        existing = self.feature_registry.get(feature_id)
+        if isinstance(existing, dict) and existing.get("created_at"):
+            record["created_at"] = existing["created_at"]
+        elif not record.get("created_at"):
+            record["created_at"] = time.time()
         record["updated_at"] = float(
             record.get("updated_at", time.time()) or time.time()
         )
@@ -552,6 +558,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 "next_phase": None,
             },
             "blocker": None,
+            "created_at": time.time(),
             "updated_at": time.time(),
         }
         with open(metadata_path, "w", encoding="utf-8") as handle:

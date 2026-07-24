@@ -25,6 +25,8 @@ from mu.tools._bounds import check_bounds as _check_bounds
 from utils.citation_manager import SourceType, register_source
 from utils.logger import logger
 
+from utils.threads import NamedThread
+
 
 @tool(
     name="assess_source",
@@ -170,7 +172,7 @@ def _run_with_timeout(func, *, timeout: float, label: str):
         except BaseException as exc:  # noqa: BLE001
             error_box.append(exc)
 
-    thread = threading.Thread(target=_runner, daemon=True, name=label)
+    thread = NamedThread(target=_runner, daemon=True, name=label)
     thread.start()
     thread.join(timeout=timeout)
     if thread.is_alive():

@@ -4,7 +4,7 @@ import json
 from mu.tools._dispatcher import execute_tool, TOOL_HANDLERS
 from mu.tools.descriptors import ToolExecutionContext, TOOLS
 from mu.tools._bounds import check_bounds as _check_bounds
-from mu.tools.feature.handlers import _handle_create_feature_task
+from mu.tools.feature.handlers import _handle_create_feature_task, _handle_approve_feature_task
 from mu.tools.research.handlers import stackoverflow_search, web_search
 from mu.tools.workspace.handlers import read_file
 from mu.workspace.folder_context import FolderContext
@@ -354,6 +354,16 @@ def test_create_feature_create_phases_create_task_staged_flow(tmp_path):
     assert create_payload["ok"] is True
     assert create_payload["feature_id"] == "staged_feature"
 
+    # Approve the feature plan before creating phases/tasks
+    approve_result = execute_tool(
+        "approve_feature_task",
+        {"approved": True},
+        ctx,
+        session=session,
+    )
+    approve_payload = json.loads(approve_result)
+    assert approve_payload["ok"] is True
+
     phases_result = execute_tool(
         "create_phases",
         {
@@ -526,6 +536,9 @@ def test_update_task_status_requires_verified_exit_criteria_for_completion(tmp_p
         tool_ctx,
     )
 
+    # Approve the feature before updating task status
+    _handle_approve_feature_task({"approved": True}, tool_ctx)
+
     result = execute_tool(
         "update_task_status",
         {"task_id": 1, "status": "completed"},
@@ -557,6 +570,9 @@ def test_update_task_status_persists_incremental_verified_exit_criteria(tmp_path
         },
         tool_ctx,
     )
+
+    # Approve the feature before updating task status
+    _handle_approve_feature_task({"approved": True}, tool_ctx)
 
     first = execute_tool(
         "update_task_status",
@@ -609,6 +625,9 @@ def test_update_task_status_recovers_missing_feature_metadata_path(tmp_path):
         "metadata_path": "",
     }
 
+    # Approve the feature before updating task status
+    _handle_approve_feature_task({"approved": True}, tool_ctx)
+
     result = execute_tool(
         "update_task_status",
         {"task_id": 1, "status": "in_progress"},
@@ -641,6 +660,10 @@ def test_apply_diff_requires_approved_proposal_in_review_mode(tmp_path):
         },
         tool_ctx,
     )
+
+    # Approve the feature before updating task status
+    _handle_approve_feature_task({"approved": True}, tool_ctx)
+
     execute_tool(
         "update_task_status",
         {

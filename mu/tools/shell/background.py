@@ -35,6 +35,8 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+
+from utils.threads import NamedThread
 from typing import Deque, Dict, List, Optional
 
 
@@ -114,17 +116,20 @@ class BackgroundTaskRegistry:
         with self._lock:
             self._tasks[task.task_id] = task
 
-        threading.Thread(
+        NamedThread(
+            name=f"bg-stdout-{task.task_id}",
             target=self._pump_stream,
             args=(task, proc.stdout, task.stdout_buf),
             daemon=True,
         ).start()
-        threading.Thread(
+        NamedThread(
+            name=f"bg-stderr-{task.task_id}",
             target=self._pump_stream,
             args=(task, proc.stderr, task.stderr_buf),
             daemon=True,
         ).start()
-        threading.Thread(
+        NamedThread(
+            name=f"bg-reap-{task.task_id}",
             target=self._reap,
             args=(task,),
             daemon=True,

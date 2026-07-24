@@ -1541,6 +1541,7 @@ document.addEventListener("alpine:init", () => {
         dragTaskId: null,
         // Search/filter query for the feature list.
         searchQuery: '',
+        showFeatureBrowser: false,
         previewMode: false,
 
         async load() {
@@ -1717,13 +1718,38 @@ document.addEventListener("alpine:init", () => {
         },
         async deleteFeature(id)    { return this._action(id, "",           "DELETE", "Delete");    },
         async unloadFeature(id)    { return this._action(id, "/unload",    "POST",   "Unload");    },
-        async loadFeature(id)      { return this._action(id, "/load",      "POST",   "Load");      },
+        async loadFeature(id)      {
+            if (!id) return;
+            // If a loop session is active, warn the user before switching features
+            if (Alpine.store('loop').loopActive) {
+                let confirmed = false;
+                await new Promise(resolve => {
+                    Alpine.store('confirm').ask(
+                        'A session is running. Switching features will pause it. Continue?',
+                        null,
+                        () => { confirmed = true; resolve(); },
+                        { danger: true }
+                    );
+                    // Fallback: if confirm popover is dismissed without action (cancel),
+                    // resolve immediately so we don't hang.
+                    const watch = setInterval(() => {
+                        if (!Alpine.store('confirm').open) {
+                            clearInterval(watch);
+                            resolve();
+                        }
+                    }, 150);
+                });
+                if (!confirmed) return;
+            }
+            return this._action(id, "/load", "POST", "Load");
+        },
         async archiveFeature(id)   { return this._action(id, "/archive",   "POST",   "Archive");   },
         async unarchiveFeature(id) { return this._action(id, "/unarchive", "POST",   "Unarchive"); },
         async approveFeature(id)   { return this._action(id, "/approve",   "POST",   "Approve");   },
         async switchFeature(featureId) {
             if (!featureId) return;
             await this.loadFeature(featureId);
+            this.showFeatureBrowser = false;
         },
         async previewFeature(id) {
             if (!id) return;
@@ -1755,6 +1781,7 @@ document.addEventListener("alpine:init", () => {
         exitPreview() {
             this.previewMode = false;
             this.plan = null;
+            this.showFeatureBrowser = true;
             this.load();
         },
 

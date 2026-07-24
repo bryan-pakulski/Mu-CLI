@@ -12,9 +12,11 @@ from .citation_manager import (
     get_citation,
     compile_bibliography,
 )
+from .threads import NamedThread, set_os_thread_name
 
 __all__ = [
     "CitationManager",
+    "NamedThread",
     "Source",
     "SourceType",
     "get_citation_manager",
@@ -22,4 +24,5 @@ __all__ = [
     "register_source",
     "get_citation",
     "compile_bibliography",
+    "set_os_thread_name",
 ]

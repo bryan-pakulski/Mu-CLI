@@ -38,6 +38,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
+from utils.threads import NamedThread
+
 
 class SubagentLifecycleManager:
     """Per-child progress signal tracker + stuck/stall/runtime detector."""
@@ -204,7 +206,7 @@ class SubagentLifecycleManager:
                 pass
             self.cancel("runtime_exceeded")
 
-        threading.Thread(target=_watch, daemon=True, name="subagent-watchdog").start()
+        NamedThread(target=_watch, daemon=True, name="subagent-watchdog").start()
 
 
 __all__ = ["SubagentLifecycleManager"]

@@ -197,10 +197,11 @@ def _features_list(sm) -> List[Dict[str, Any]]:
                 "status": record.get("status"),
                 "is_active": fid == sm.active_feature_id,
                 "archived": bool(record.get("archived")),
+                "created_at": record.get("created_at") or 0,
                 "updated_at": record.get("updated_at"),
             }
         )
-    out.sort(key=lambda f: (f["archived"], not f["is_active"], str(f["feature_id"] or "")))
+    out.sort(key=lambda f: (f["archived"], not f["is_active"], -(f["created_at"] or 0)))
     return out
 
 

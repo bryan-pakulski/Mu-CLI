@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Card, Text } from '../components';
+import { WorkspaceSettingsSheet } from '../components/WorkspaceSettingsSheet';
+import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -14,6 +16,25 @@ export type WorkspaceScreenProps = NativeStackScreenProps<RootStackParamList, 'W
 export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
   const { colors, spacing } = useTheme();
   const { activeSessionName, activeProvider, activeModel, isConnected } = useConnectionStore();
+  const [workspaces, setWorkspaces] = useState<string[]>([]);
+  const [workspaceEditorOpen, setWorkspaceEditorOpen] = useState(false);
+
+  const loadWorkspaces = useCallback(async () => {
+    if (!activeSessionName) {
+      setWorkspaces([]);
+      return;
+    }
+    try {
+      const response = await sessionsApi.getWorkspace(activeSessionName);
+      setWorkspaces(response.workspaces || []);
+    } catch {
+      setWorkspaces([]);
+    }
+  }, [activeSessionName]);
+
+  useEffect(() => {
+    loadWorkspaces();
+  }, [loadWorkspaces]);
 
   return (
     <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: colors.bg }]}>
@@ -43,6 +64,19 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
               </Text>
             </View>
           </View>
+          <View style={[styles.workspaceRow, { borderTopColor: colors.border }]}>
+            <Ionicons name="folder-outline" size={17} color={colors.textDim} />
+            <Text variant="xs" dim style={styles.workspacePath} numberOfLines={1} ellipsizeMode="middle">
+              {workspaces.length > 0
+                ? workspaces.length === 1 ? workspaces[0] : `${workspaces[0]} +${workspaces.length - 1}`
+                : 'No workspace attached'}
+            </Text>
+            {activeSessionName ? (
+              <TouchableOpacity onPress={() => setWorkspaceEditorOpen(true)} style={[styles.editButton, { backgroundColor: colors.bgHover }]}>
+                <Text variant="xs" style={{ fontWeight: '600' }}>Edit</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </Card>
 
         <View style={styles.categoryList}>
@@ -67,6 +101,12 @@ export function WorkspaceScreen({ navigation }: WorkspaceScreenProps) {
           ))}
         </View>
       </ScrollView>
+      <WorkspaceSettingsSheet
+        visible={workspaceEditorOpen}
+        sessionName={activeSessionName}
+        onClose={() => setWorkspaceEditorOpen(false)}
+        onSaved={setWorkspaces}
+      />
     </SafeAreaView>
   );
 }
@@ -78,6 +118,9 @@ const styles = StyleSheet.create({
   pageSubtitle: { marginTop: 4, marginBottom: 24, maxWidth: 320 },
   sessionCard: { marginBottom: 24 },
   sessionHeader: { flexDirection: 'row', alignItems: 'center' },
+  workspaceRow: { marginTop: 15, paddingTop: 13, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  workspacePath: { flex: 1 },
+  editButton: { minHeight: 34, borderRadius: 11, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   brandMark: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   brandGlyph: { fontSize: 22, fontWeight: '700' },
   sessionCopy: { flex: 1, marginHorizontal: 12 },

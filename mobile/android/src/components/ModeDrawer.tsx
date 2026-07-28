@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { modesApi, ModeInfo } from '../api/modes';
 import { useTheme } from '../theme/ThemeContext';
 import { DebugScreen } from '../screens/DebugScreen';
-import { FeatureScreen } from '../screens/FeatureScreen';
+import { FeatureExplorerScreen } from '../screens/FeatureExplorerScreen';
 import { LoopScreen } from '../screens/LoopScreen';
 import { ResearchScreen } from '../screens/ResearchScreen';
 import { SecurityScreen } from '../screens/SecurityScreen';
@@ -27,7 +27,7 @@ export type ModeDrawerProps = {
 
 const MODE_COMPONENTS: Record<string, React.ComponentType | undefined> = {
   debug: DebugScreen,
-  feature: FeatureScreen,
+  feature: FeatureExplorerScreen,
   loop: LoopScreen,
   research: ResearchScreen,
   security: SecurityScreen,

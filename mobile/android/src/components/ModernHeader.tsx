@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
+import { AdvancedSettingsSheet } from './AdvancedSettingsSheet';
 import { ModernBottomSheet } from './ModernBottomSheet';
 import { Text } from './Text';
-import { sessionsApi } from '../api/sessions';
 
 export type ModernHeaderProps = {
   onOpenSessions: () => void;
@@ -34,9 +34,9 @@ export function ModernHeader({
     isConnected,
     yolo,
     setYolo,
-    setActiveSession,
   } = useConnectionStore();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const sessionTitle = activeSessionName || 'New session';
   const sessionMeta = [activeProvider, activeModel].filter(Boolean).join(' · ') || (isConnected ? 'Connected' : 'Connect to MuCLI');
@@ -44,16 +44,6 @@ export function ModernHeader({
   const openFromMenu = (action: () => void) => {
     setMenuOpen(false);
     action();
-  };
-
-  const startNewSession = async () => {
-    try {
-      await sessionsApi.unloadActive();
-      setActiveSession(null);
-      setMenuOpen(false);
-    } catch (error) {
-      Alert.alert('Could not start a new session', String(error));
-    }
   };
 
   return (
@@ -134,6 +124,15 @@ export function ModernHeader({
           <MenuRow icon="grid-outline" label="Workspace tools" detail="Context, workflows, and runtime controls" onPress={() => openFromMenu(onOpenWorkspace)} />
         </SettingsSection>
 
+        <SettingsSection title="ADVANCED">
+          <MenuRow
+            icon="options-outline"
+            label="Session variables"
+            detail={activeSessionName ? 'Grouped runtime overrides for this session' : 'Load a session to edit variables'}
+            onPress={() => openFromMenu(() => setAdvancedOpen(true))}
+          />
+        </SettingsSection>
+
         <SettingsSection title="APPEARANCE">
           <ToggleRow
             icon={isDark ? 'moon-outline' : 'sunny-outline'}
@@ -148,10 +147,8 @@ export function ModernHeader({
           <MenuRow icon="analytics-outline" label="Session trace" detail="Context, tokens, tools, latency, and compaction" onPress={() => openFromMenu(onOpenTraces)} />
         </SettingsSection>
 
-        <SettingsSection title="ACTIONS">
-          <MenuRow icon="add-circle-outline" label="Start new session" detail="Unload the current session" onPress={startNewSession} />
-        </SettingsSection>
       </ModernBottomSheet>
+      <AdvancedSettingsSheet visible={advancedOpen} onClose={() => setAdvancedOpen(false)} />
     </>
   );
 }

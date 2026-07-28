@@ -10,7 +10,7 @@ import os
 import shutil
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 import utils.config as _config
 
@@ -54,6 +54,85 @@ def _read_session_data(name: str) -> Dict[str, Any] | None:
             return json.load(fh)
     except (OSError, ValueError):
         return None
+
+
+
+def _normalize_workspace_paths(values: Any) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, list):
+        raise HTTPException(status_code=400, detail="workspaces must be a list of directory paths")
+
+    normalized: list[str] = []
+    for raw in values:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        path = os.path.abspath(os.path.expanduser(value))
+        if not os.path.isdir(path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Workspace path is not a directory: {path}",
+            )
+        if path not in normalized:
+            normalized.append(path)
+    return normalized
+
+
+def _workspace_paths_for(request: Request, name: str) -> list[str]:
+    session = request.app.state.sessions.get(name)
+    if session is not None:
+        folder_context = getattr(session, "folder_context", None)
+        return list(getattr(folder_context, "folders", []) or [])
+
+    data = _read_session_data(name)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Session '{name}' not found.")
+    folder_context = data.get("folder_context") or {}
+    return list(folder_context.get("folders") or [])
+
+
+def _suggest_workspace_paths(raw_path: str, limit: int) -> Dict[str, Any]:
+    raw = str(raw_path or "").strip()
+    expanded = os.path.expanduser(raw or "~")
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(os.getcwd(), expanded)
+    resolved = os.path.abspath(expanded)
+
+    if not raw:
+        base_dir = resolved
+        prefix = ""
+    elif raw.endswith(os.sep):
+        base_dir = resolved
+        prefix = ""
+    elif os.path.isdir(resolved):
+        base_dir = resolved
+        prefix = ""
+    else:
+        base_dir = os.path.dirname(resolved) or os.getcwd()
+        prefix = os.path.basename(resolved)
+
+    suggestions: list[str] = []
+    try:
+        with os.scandir(base_dir) as entries:
+            for entry in entries:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                if entry.name.startswith(".") and not prefix.startswith("."):
+                    continue
+                if prefix and not entry.name.lower().startswith(prefix.lower()):
+                    continue
+                suggestions.append(os.path.abspath(entry.path))
+    except (OSError, PermissionError):
+        suggestions = []
+
+    suggestions.sort(key=lambda value: value.lower())
+    return {
+        "query": raw,
+        "resolved_path": resolved,
+        "exists": os.path.isdir(resolved),
+        "suggestions": suggestions[:limit],
+    }
 
 
 def _busy_session_names(request: Request) -> set[str]:
@@ -138,6 +217,7 @@ async def active_session(request: Request, session_name: Optional[str] = None):
         "external_last_at": float(getattr(watcher, "external_last_at", 0.0)),
         "is_busy": is_busy,
         "is_current": sm.current_session_name == state.current_session_name,
+        "workspaces": list(getattr(session.folder_context, "folders", []) or []),
     }
 
 
@@ -172,6 +252,58 @@ async def get_history(request: Request, session_name: Optional[str] = None):
                 )
         turns.append({"index": idx, "role": role, "parts": parts_out})
     return {"name": sm.current_session_name, "turns": turns}
+
+
+@router.get("/workspaces/suggest")
+async def suggest_workspaces(
+    path: str = Query(default=""),
+    limit: int = Query(default=12, ge=1, le=30),
+):
+    """Suggest host directories while creating or editing a workspace."""
+    return await asyncio.to_thread(_suggest_workspace_paths, path, limit)
+
+
+@router.get("/{name}/workspace")
+async def get_session_workspace(name: str, request: Request):
+    return {"name": name, "workspaces": _workspace_paths_for(request, name)}
+
+
+@router.put("/{name}/workspace")
+async def update_session_workspace(name: str, request: Request, payload: Dict[str, Any]):
+    values = payload.get("workspaces", payload.get("workspace", []))
+    workspaces = _normalize_workspace_paths(values)
+    state = request.app.state
+    session = state.sessions.get(name)
+
+    if session is not None:
+        if state.session_busy_for(name).is_set():
+            raise HTTPException(
+                status_code=409,
+                detail="Workspace cannot be changed while the session is running.",
+            )
+        with state.session_lock_for(name):
+            folder_context = session.folder_context
+            for current in list(folder_context.folders):
+                folder_context.remove_folder(current)
+            for workspace in workspaces:
+                if not folder_context.add_folder(workspace):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Could not attach workspace: {workspace}",
+                    )
+            session.session_manager.save_history(folder_context)
+        return {"ok": True, "name": name, "workspaces": list(folder_context.folders)}
+
+    data = _read_session_data(name)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Session '{name}' not found.")
+    folder_context = dict(data.get("folder_context") or {})
+    folder_context["folders"] = workspaces
+    data["folder_context"] = folder_context
+    session_path = os.path.join(_config.HISTORY_DIR, "sessions", name, "session.json")
+    with open(session_path, "w") as fh:
+        json.dump(data, fh, indent=2)
+    return {"ok": True, "name": name, "workspaces": workspaces}
 
 
 @router.post("")

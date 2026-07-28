@@ -20,9 +20,10 @@ import { NewSessionSheet } from './NewSessionSheet';
 export type SwipeSessionsDrawerProps = {
   visible: boolean;
   onClose: () => void;
+  createRequestToken?: number;
 };
 
-export function SwipeSessionsDrawer({ visible, onClose }: SwipeSessionsDrawerProps) {
+export function SwipeSessionsDrawer({ visible, onClose, createRequestToken = 0 }: SwipeSessionsDrawerProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { activeSessionName, setActiveSession, setActiveProviderModel } = useConnectionStore();
@@ -60,6 +61,10 @@ export function SwipeSessionsDrawer({ visible, onClose }: SwipeSessionsDrawerPro
     if (visible) load();
   }, [load, visible]);
 
+  useEffect(() => {
+    if (createRequestToken > 0) setCreateOpen(true);
+  }, [createRequestToken]);
+
   const switchSession = async (session: SessionSummary) => {
     try {
       if (!session.is_loaded) await sessionsApi.load(session.name);
@@ -89,6 +94,11 @@ export function SwipeSessionsDrawer({ visible, onClose }: SwipeSessionsDrawerPro
         text: 'Unload',
         onPress: async () => {
           await sessionsApi.unload(session.name);
+          if (activeSessionName === session.name) {
+            setActiveSession(null);
+            setActiveProviderModel(null, null);
+            onClose();
+          }
           load();
         },
       },

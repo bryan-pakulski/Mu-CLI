@@ -35,6 +35,18 @@ export interface CreateSessionOptions {
   ollamaApiKey?: string;
 }
 
+export interface WorkspaceSuggestionResponse {
+  query: string;
+  resolved_path: string;
+  exists: boolean;
+  suggestions: string[];
+}
+
+export interface WorkspaceDetailsResponse {
+  name: string;
+  workspaces: string[];
+}
+
 // API
 export const sessionsApi = {
   list: () => api.get<SessionListResponse>('/api/sessions'),
@@ -42,6 +54,12 @@ export const sessionsApi = {
     api.get<Record<string, unknown>>('/api/sessions/active', { query: { session_name: sessionName } }),
   getHistory: (sessionName?: string) =>
     api.get<SessionHistoryResponse>('/api/sessions/current/history', { query: { session_name: sessionName } }),
+  suggestWorkspaces: (path: string, limit: number = 12) =>
+    api.get<WorkspaceSuggestionResponse>('/api/sessions/workspaces/suggest', { query: { path, limit } }),
+  getWorkspace: (name: string) =>
+    api.get<WorkspaceDetailsResponse>(`/api/sessions/${encodeURIComponent(name)}/workspace`),
+  updateWorkspace: (name: string, workspaces: string[]) =>
+    api.put<WorkspaceDetailsResponse>(`/api/sessions/${encodeURIComponent(name)}/workspace`, { workspaces }),
   create: (name: string, provider: string, model: string, workspace?: string, options?: CreateSessionOptions) =>
     api.post<Record<string, unknown>>('/api/sessions', {
       name,

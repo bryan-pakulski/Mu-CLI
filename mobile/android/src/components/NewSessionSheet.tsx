@@ -16,6 +16,7 @@ import { ProviderInfo, providersApi } from '../api/providers';
 import { sessionsApi } from '../api/sessions';
 import { useTheme } from '../theme/ThemeContext';
 import { Text } from './Text';
+import { WorkspacePathField } from './WorkspacePathField';
 
 export type NewSessionSheetProps = {
   visible: boolean;
@@ -180,16 +181,12 @@ export function NewSessionSheet({ visible, onClose, onCreated }: NewSessionSheet
           {nameError ? <Text variant="xs" style={{ color: colors.error, marginTop: 6 }}>{nameError}</Text> : null}
 
           <FieldLabel label="Workspace" optional />
-          <TextInput
+          <WorkspacePathField
             value={workspace}
             onChangeText={setWorkspace}
-            autoCapitalize="none"
-            autoCorrect={false}
             placeholder="/home/user/dev/project"
-            placeholderTextColor={colors.textDim}
-            style={[styles.input, { color: colors.text, backgroundColor: colors.bgLift }]}
           />
-          <Text variant="xs" dim style={styles.help}>The path must exist on the MuCLI host, not on the phone.</Text>
+          <Text variant="xs" dim style={styles.help}>Type to browse folders on the MuCLI host.</Text>
 
           <SectionLabel label="Provider" />
           {loadingProviders ? (

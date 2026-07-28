@@ -1,4 +1,4 @@
-// Design tokens — a restrained neutral palette with one indigo accent.
+// Design tokens — aligned with the warm, low-contrast MuCLI web GUI palette.
 
 export const spacing = {
   xs: 4,
@@ -45,39 +45,39 @@ export type ThemeColors = {
 };
 
 export const lightColors: ThemeColors = {
-  bg: '#F7F7F8',
-  bgLift: '#FFFFFF',
-  bgHover: '#EFEFF1',
-  text: '#171717',
-  textDim: '#6F6F74',
-  textSoft: '#3F3F46',
-  accent: '#5B5BD6',
-  accentSoft: '#ECECFF',
-  accentText: '#FFFFFF',
-  border: '#E5E5E8',
-  borderStrong: '#D2D2D7',
-  success: '#15803D',
-  warning: '#B45309',
-  error: '#DC2626',
-  info: '#2563EB',
+  bg: '#FAF8F5',
+  bgLift: '#F3F0EB',
+  bgHover: '#EBE7E0',
+  text: '#2B2B2B',
+  textDim: '#999999',
+  textSoft: '#6B6B6B',
+  accent: '#555555',
+  accentSoft: '#E8E3DB',
+  accentText: '#FAF8F5',
+  border: '#E7E2DA',
+  borderStrong: '#D9D2C8',
+  success: '#587A5C',
+  warning: '#9A6A28',
+  error: '#C8455D',
+  info: '#667A8E',
 };
 
 export const darkColors: ThemeColors = {
-  bg: '#0F1012',
-  bgLift: '#18191C',
-  bgHover: '#23252A',
-  text: '#F5F5F6',
-  textDim: '#A1A1AA',
-  textSoft: '#D4D4D8',
-  accent: '#8B8BF5',
-  accentSoft: '#29294B',
-  accentText: '#0F1012',
-  border: '#2B2D31',
-  borderStrong: '#41434A',
-  success: '#4ADE80',
-  warning: '#FBBF24',
-  error: '#F87171',
-  info: '#60A5FA',
+  bg: '#1A1814',
+  bgLift: '#221F1A',
+  bgHover: '#2A2722',
+  text: '#D4D0C8',
+  textDim: '#6B6860',
+  textSoft: '#9C998F',
+  accent: '#B0ACA0',
+  accentSoft: '#302D27',
+  accentText: '#1A1814',
+  border: '#2C2924',
+  borderStrong: '#3A3630',
+  success: '#8CAA83',
+  warning: '#C6A15B',
+  error: '#D98787',
+  info: '#8EA4B8',
 };
 
 export type Theme = {

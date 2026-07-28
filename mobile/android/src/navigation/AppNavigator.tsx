@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { NavigationContainer, DarkTheme, DefaultTheme, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View } from 'react-native';
@@ -9,7 +9,9 @@ import { ConnectionPrompt } from '../components/ConnectionPrompt';
 import { EdgeSwipeView } from '../components/EdgeSwipeView';
 import { ModeDrawer } from '../components/ModeDrawer';
 import { ModernHeader } from '../components/ModernHeader';
+import { SessionStartPrompt } from '../components/SessionStartPrompt';
 import { SwipeSessionsDrawer } from '../components/SwipeSessionsDrawer';
+import { sessionsApi } from '../api/sessions';
 import { useConnectionStore } from '../store/connection';
 
 import { ChatScreen } from '../screens/ChatScreen';
@@ -19,14 +21,14 @@ import { MemoryScreen } from '../screens/MemoryScreen';
 import { FilesScreen } from '../screens/FilesScreen';
 import { SkillsScreen } from '../screens/SkillsScreen';
 import { AudioScreen } from '../screens/AudioScreen';
-import { SessionTraceScreen } from '../screens/SessionTraceScreen';
+import { SessionTraceScreenV2 } from '../screens/SessionTraceScreenV2';
 import { ProvidersScreen } from '../screens/ProvidersScreen';
 import { ConnectionScreen } from '../screens/ConnectionScreen';
 import { ModesScreen } from '../screens/ModesScreen';
 import { PromptsScreen } from '../screens/PromptsScreen';
 import { SystemPromptsScreen } from '../screens/SystemPromptsScreen';
 import { TeacherScreen } from '../screens/TeacherScreen';
-import { FeatureScreen } from '../screens/FeatureScreen';
+import { FeatureExplorerScreen } from '../screens/FeatureExplorerScreen';
 import { ResearchScreen } from '../screens/ResearchScreen';
 import { SecurityScreen } from '../screens/SecurityScreen';
 import { LoopScreen } from '../screens/LoopScreen';
@@ -65,7 +67,7 @@ const PANEL_SCREENS: {
   component: React.ComponentType;
 }[] = [
   { name: 'Teacher', title: 'Teacher', component: TeacherScreen },
-  { name: 'Feature', title: 'Feature plans', component: FeatureScreen },
+  { name: 'Feature', title: 'Feature plans', component: FeatureExplorerScreen },
   { name: 'Research', title: 'Research', component: ResearchScreen },
   { name: 'Security', title: 'Security', component: SecurityScreen },
   { name: 'Loop', title: 'Loop', component: LoopScreen },
@@ -76,7 +78,7 @@ const PANEL_SCREENS: {
   { name: 'Files', title: 'Files', component: FilesScreen },
   { name: 'Skills', title: 'Skills', component: SkillsScreen },
   { name: 'Audio', title: 'Audio', component: AudioScreen },
-  { name: 'Traces', title: 'Session trace', component: SessionTraceScreen },
+  { name: 'Traces', title: 'Session trace', component: SessionTraceScreenV2 },
   { name: 'Providers', title: 'Providers', component: ProvidersScreen },
   { name: 'Connection', title: 'Connection', component: ConnectionScreen },
   { name: 'Modes', title: 'Modes', component: ModesScreen },
@@ -84,32 +86,62 @@ const PANEL_SCREENS: {
 ];
 
 function ChatScreenWithChrome() {
-  const isConnected = useConnectionStore(state => state.isConnected);
+  const { isConnected, activeSessionName, setActiveSession } = useConnectionStore();
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [createRequestToken, setCreateRequestToken] = useState(0);
 
   const openSessions = useCallback(() => setSessionsOpen(true), []);
-  const openMode = useCallback(() => setModeOpen(true), []);
+  const openMode = useCallback(() => {
+    if (activeSessionName) setModeOpen(true);
+  }, [activeSessionName]);
+  const createSession = useCallback(() => {
+    setSessionsOpen(false);
+    setCreateRequestToken(value => value + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!isConnected) return;
+    let cancelled = false;
+    sessionsApi.list()
+      .then(response => {
+        if (cancelled) return;
+        const current = response.current && response.loaded.includes(response.current)
+          ? response.current
+          : null;
+        if (current !== activeSessionName) setActiveSession(current);
+      })
+      .catch(() => {
+        // The connection screen owns transport errors.
+      });
+    return () => { cancelled = true; };
+  }, [activeSessionName, isConnected, setActiveSession]);
 
   return (
     <EdgeSwipeView onSwipeFromLeft={openSessions} onSwipeFromRight={openMode}>
       <View style={{ flex: 1 }}>
         <ModernHeader
           onOpenSessions={openSessions}
-          onOpenWorkspace={() => navRef.current?.navigate('Workspace')}
-          onOpenTraces={() => navRef.current?.navigate('Traces')}
+          onOpenWorkspace={() => activeSessionName ? navRef.current?.navigate('Workspace') : openSessions()}
+          onOpenTraces={() => activeSessionName ? navRef.current?.navigate('Traces') : openSessions()}
           onOpenConnection={() => navRef.current?.navigate('Connection')}
-          onOpenModes={() => navRef.current?.navigate('Modes')}
+          onOpenModes={() => activeSessionName ? navRef.current?.navigate('Modes') : openSessions()}
           onOpenProviders={() => navRef.current?.navigate('Providers')}
         />
-        {isConnected ? (
+        {!isConnected ? (
+          <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />
+        ) : activeSessionName ? (
           <ChatScreen />
         ) : (
-          <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />
+          <SessionStartPrompt onLoadSession={openSessions} onCreateSession={createSession} />
         )}
-        <SwipeSessionsDrawer visible={sessionsOpen} onClose={() => setSessionsOpen(false)} />
+        <SwipeSessionsDrawer
+          visible={sessionsOpen}
+          onClose={() => setSessionsOpen(false)}
+          createRequestToken={createRequestToken}
+        />
         <ModeDrawer
-          visible={modeOpen}
+          visible={Boolean(activeSessionName) && modeOpen}
           onClose={() => setModeOpen(false)}
           onOpenModes={() => navRef.current?.navigate('Modes')}
         />

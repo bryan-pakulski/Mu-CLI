@@ -56,6 +56,8 @@ export interface InspectorVariable {
   value: unknown;
   is_default: boolean;
   help: string;
+  secret?: boolean;
+  is_set?: boolean;
 }
 
 export interface InspectorVariableGroup {

@@ -1,0 +1,133 @@
+name: Build container mode artifacts
+
+on:
+  push:
+    branches:
+      - chatgpt/container-mode-v9-artifact
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Expand implementation bundle
+        run: |
+          base64 -d .mucli-container-mode/bundle.tar.gz.b64 > /tmp/mucli-helper.tar.gz
+          tar -xzf /tmp/mucli-helper.tar.gz
+
+      - name: Apply implementation
+        run: python .mucli-container-mode/apply.py
+
+      - name: Install Python project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Validate Python and patches
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/mucli-artifacts
+          git diff --check 2>&1 | tee /tmp/mucli-artifacts/git-diff-check.txt
+          python -m compileall -q mu utils tests 2>&1 | tee /tmp/mucli-artifacts/python-compile.txt
+          pytest -q \
+            tests/test_artifact_registry.py \
+            tests/test_artifact_tool_policy.py \
+            tests/test_container_commands.py \
+            tests/test_container_registry.py \
+            tests/test_session_type_capabilities.py \
+            2>&1 | tee /tmp/mucli-artifacts/pytest.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/android/package-lock.json
+
+      - name: Validate Android TypeScript
+        working-directory: mobile/android
+        run: |
+          npm ci
+          npm run typecheck 2>&1 | tee /tmp/mucli-artifacts/android-typecheck.txt
+
+      - name: Generate patches
+        env:
+          BASE_SHA: 4a97a7c2fd9df47c8165cda577d7e152a103b908
+        run: |
+          set -e
+          CORE_PATHS=(
+            utils/config.py
+            mu/tools mu/artifact mu/container
+            mu/agent/loop_body.py
+            mu/session/manager.py mu/session/session.py mu/session/context.py
+            mu/commands/session.py mucli.py
+            mu/gui/app.py mu/gui/routers/sessions.py mu/gui/routers/chat.py
+            mu/gui/routers/inspector.py mu/gui/routers/artifacts.py mu/gui/routers/containers.py
+            tests/test_artifact_registry.py tests/test_artifact_tool_policy.py
+            tests/test_container_commands.py tests/test_container_registry.py
+            tests/test_session_type_capabilities.py
+          )
+          UI_PATHS=(
+            mu/gui/static/js/app.js mu/gui/static/css/app.css
+            mu/gui/templates/fragments/chat.html
+            mobile/android/src
+            documentation/session_guide.md documentation/security.md
+            documentation/container_mode.md documentation/container_security.md
+          )
+          git diff --binary "$BASE_SHA" -- "${CORE_PATHS[@]}" > /tmp/mucli-artifacts/mucli-container-mode-core-v9.diff
+          git diff --binary "$BASE_SHA" -- "${UI_PATHS[@]}" > /tmp/mucli-artifacts/mucli-container-mode-ui-v9.diff
+          git diff --binary "$BASE_SHA" -- . \
+            ':(exclude).mucli-container-mode/**' \
+            ':(exclude).github/workflows/container-mode-build.yml' \
+            > /tmp/mucli-artifacts/mucli-container-mode-v9.diff
+
+      - name: Build full repository archives
+        run: |
+          set -e
+          rm -rf .mucli-container-mode .github/workflows/container-mode-build.yml
+          mkdir -p /tmp/mucli-full/Mu-CLI-container-mode-v9
+          rsync -a --exclude='.git' ./ /tmp/mucli-full/Mu-CLI-container-mode-v9/
+          (cd /tmp/mucli-full && zip -qr /tmp/mucli-artifacts/Mu-CLI-container-mode-v9.zip Mu-CLI-container-mode-v9)
+          tar -C /tmp/mucli-full -czf /tmp/mucli-artifacts/Mu-CLI-container-mode-v9.tar.gz Mu-CLI-container-mode-v9
+          cat > /tmp/mucli-artifacts/IMPLEMENTATION.md <<'EOF'
+          # MuCLI Container Mode v9
+
+          Baseline: `4a97a7c2fd9df47c8165cda577d7e152a103b908`
+
+          Includes session-type capability filtering, artifact registry and clients,
+          native in-container MuCLI worker, host supervisor, authenticated prompt/event
+          bridge, default-deny host firewall policy, explicit mounts, shared-container
+          lifecycle, dynamic mounts, Android session-type controls, web/mobile artifact
+          UI, documentation, and focused tests.
+
+          The original `--internal` network proposal was revised: Docker internal
+          networks have no Internet gateway, so selective provider egress is enforced
+          with a normal isolated bridge and host `DOCKER-USER` rules instead.
+          EOF
+          (cd /tmp/mucli-artifacts && sha256sum * > SHA256SUMS.txt)
+
+      - name: Commit finished source
+        run: |
+          git config user.name 'ChatGPT Container Mode Builder'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'Implement MuCLI container mode and artifact registry [skip ci]'
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mucli-container-mode-v9
+          path: /tmp/mucli-artifacts
+          if-no-files-found: error
+          retention-days: 30

@@ -1,5 +1,27 @@
 import { api } from './client';
 
+export type SessionType = 'chat' | 'workspace' | 'container';
+
+export interface ContainerMount {
+  host_path: string;
+  container_path: string;
+  mode: 'ro' | 'rw';
+}
+
+export interface ContainerCreateOptions {
+  containerName: string;
+  dockerfile?: string;
+  mounts?: ContainerMount[];
+  egressAllow?: string[];
+  egressDeny?: string[];
+}
+
+export interface ContainerDefaultsResponse {
+  dockerfile: string;
+  egress_allow: string[];
+  egress_deny: string[];
+}
+
 // Types
 export interface SessionSummary {
   name: string;
@@ -8,6 +30,8 @@ export interface SessionSummary {
   is_busy: boolean;
   modified_at: string;
   modified_unix: number;
+  session_type?: SessionType;
+  container_name?: string | null;
 }
 
 export interface SessionListResponse {
@@ -30,9 +54,11 @@ export interface SessionHistoryResponse {
 }
 
 export interface CreateSessionOptions {
+  sessionType?: SessionType;
   ollamaMode?: 'local' | 'cloud';
   ollamaHost?: string;
   ollamaApiKey?: string;
+  container?: ContainerCreateOptions;
 }
 
 export interface WorkspaceSuggestionResponse {
@@ -49,6 +75,7 @@ export interface WorkspaceDetailsResponse {
 
 // API
 export const sessionsApi = {
+  getContainerDefaults: () => api.get<ContainerDefaultsResponse>('/api/container-defaults'),
   list: () => api.get<SessionListResponse>('/api/sessions'),
   getActive: (sessionName?: string) =>
     api.get<Record<string, unknown>>('/api/sessions/active', { query: { session_name: sessionName } }),
@@ -66,10 +93,16 @@ export const sessionsApi = {
       provider,
       model,
       activate: true,
+      session_type: options?.sessionType || 'workspace',
       workspace,
       ollama_mode: options?.ollamaMode,
       ollama_host: options?.ollamaHost,
       ollama_api_key: options?.ollamaApiKey,
+      container_name: options?.container?.containerName,
+      dockerfile: options?.container?.dockerfile,
+      mounts: options?.container?.mounts,
+      egress_allow: options?.container?.egressAllow,
+      egress_deny: options?.container?.egressDeny,
     }),
   load: (name: string, provider?: string, model?: string) =>
     api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/load`, { provider, model }),
@@ -79,4 +112,8 @@ export const sessionsApi = {
   detachActive: () => api.post<Record<string, unknown>>('/api/sessions/active/detach'),
   unload: (name: string) => api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/unload`),
   delete: (name: string) => api.delete<void>(`/api/sessions/${encodeURIComponent(name)}`),
+  getContainer: (name: string) =>
+    api.get<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/container`),
+  addContainerMount: (name: string, mount: ContainerMount) =>
+    api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/container/mount`, mount),
 };

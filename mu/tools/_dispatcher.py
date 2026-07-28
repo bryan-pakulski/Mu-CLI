@@ -164,6 +164,27 @@ def dispatch(
             )
         )
 
+    # Capability filtering is enforced again at dispatch time so a stale model
+    # tool call or direct programmatic invocation cannot bypass the provider
+    # schema filter used by the agent loop.
+    from mu.tools.capabilities import is_tool_allowed, normalize_session_type
+
+    runtime_variables = variables or getattr(session, "variables", {}) or {}
+    session_type = normalize_session_type(runtime_variables.get("session_type"))
+    if not is_tool_allowed(tool_name, session_type):
+        return json.dumps(
+            _build_tool_envelope(
+                tool_name=tool_name,
+                ok=False,
+                error_code="session_type_forbidden",
+                message=(
+                    f"Tool {tool_name!r} is unavailable in {session_type!r} "
+                    "session type."
+                ),
+                telemetry={"session_type": session_type},
+            )
+        )
+
     if not isinstance(args, dict):
         return json.dumps(
             _build_tool_envelope(

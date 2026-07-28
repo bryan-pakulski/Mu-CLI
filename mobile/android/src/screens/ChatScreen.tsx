@@ -19,6 +19,7 @@ import { inspectorApi, InspectorVariableGroup } from '../api/inspector';
 import { Text, Button, Card, Skeleton, EmptyState, ErrorState } from '../components';
 import { BottomSheet } from '../components/BottomSheet';
 import { GeneratingIndicator } from '../components/GeneratingIndicator';
+import { ArtifactStrip } from '../components/ArtifactStrip';
 import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
 import { spacing } from '../theme/tokens';
 
@@ -185,6 +186,7 @@ export function ChatScreen() {
           actionLabel={activeMode ? `Mode: ${activeMode}` : 'Select Mode'}
           onAction={() => { loadModes(); setModeSheetOpen(true); }}
         />
+        <ArtifactStrip sessionName={activeSessionName} />
         <Composer
           input={input}
           setInput={setInput}
@@ -254,9 +256,12 @@ export function ChatScreen() {
             ) : null
           }
           ListFooterComponent={
-            streaming && waitingForFirstToken ? (
-              <GeneratingIndicator label={sseConnected ? activityLabel : 'Reconnecting to session'} />
-            ) : null
+            <View>
+              <ArtifactStrip sessionName={activeSessionName} />
+              {streaming && waitingForFirstToken ? (
+                <GeneratingIndicator label={sseConnected ? activityLabel : 'Reconnecting to session'} />
+              ) : null}
+            </View>
           }
         />
         <Composer

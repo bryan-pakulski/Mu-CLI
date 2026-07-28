@@ -246,6 +246,31 @@ class Session:
         self.tool_stats = self.session_manager.tool_stats
         self.feature_state = self.session_manager.get_feature_state()
         self.variables = self.session_manager.variables
+        # Artifacts are intentionally self-managed outside session.json. Build
+        # the registry lazily so old sessions load without migrations.
+        try:
+            from mu.artifact import ArtifactRegistry
+            from utils.config import HISTORY_DIR
+
+            session_dir = os.path.join(
+                HISTORY_DIR, "sessions", self.session_manager.current_session_name
+            )
+            self.artifact_registry = ArtifactRegistry(session_dir)
+        except Exception:
+            self.artifact_registry = None
+        try:
+            from mu.container.registry import ContainerRegistry
+
+            self.container_ref = next(
+                (
+                    ref
+                    for ref in ContainerRegistry().list_containers()
+                    if self.session_manager.current_session_name in ref.attached_sessions
+                ),
+                None,
+            )
+        except Exception:
+            self.container_ref = None
         setattr(
             self.folder_context,
             "feature_metadata_dir",

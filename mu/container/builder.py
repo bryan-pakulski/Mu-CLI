@@ -1,0 +1,260 @@
+"""Image build and container creation for MuCLI workers."""
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import secrets
+from pathlib import Path
+from typing import Callable, Iterable
+from urllib.parse import urlparse
+
+from utils.config import HISTORY_DIR
+
+from .docker_cli import CommandRunner, ContainerRuntimeError, OutputCallback, run_with_output
+from .network import DEFAULT_EGRESS_ALLOW, create_isolated_network, teardown_network
+from .ref import ContainerRef, MountSpec
+from .registry import ContainerRegistry
+
+ProgressCallback = Callable[[str, str], None]
+
+
+def _report(progress: ProgressCallback | None, stage: str, message: str) -> None:
+    if progress is not None:
+        progress(stage, message)
+
+
+_PROVIDER_ENV_KEYS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OLLAMA_API_KEY",
+    "OLLAMA_HOST",
+)
+
+
+def container_slug(name: str) -> str:
+    value = re.sub(r"[^a-z0-9_.-]+", "-", str(name or "").strip().lower()).strip("-.")
+    if not value:
+        raise ValueError("container name is required")
+    return value[:48]
+
+
+def _default_source_path() -> str:
+    # mu/container/builder.py -> repository root
+    return str(Path(__file__).resolve().parents[2])
+
+
+def default_dockerfile() -> str:
+    """Return the maintained MuCLI worker Dockerfile template."""
+    return Path(__file__).with_name("Dockerfile.mucli").read_text(encoding="utf-8")
+
+
+def provider_environment() -> dict[str, str]:
+    return {key: os.environ[key] for key in _PROVIDER_ENV_KEYS if os.environ.get(key)}
+
+
+def build_create_command(
+    ref: ContainerRef,
+    *,
+    environment: dict[str, str] | None = None,
+) -> list[str]:
+    command = [
+        "docker",
+        "create",
+        "--name",
+        ref.name,
+        "--hostname",
+        ref.name,
+        "--network",
+        ref.network_name,
+        "--restart",
+        "unless-stopped",
+        "--cap-drop",
+        "NET_ADMIN",
+        "--cap-drop",
+        "SYS_ADMIN",
+        "--cap-drop",
+        "SYS_PTRACE",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--pids-limit",
+        "2048",
+        "--add-host",
+        "host.docker.internal:host-gateway",
+        "--label",
+        "io.mucli.managed=true",
+        "--label",
+        f"io.mucli.container={ref.name}",
+    ]
+    if ref.root_volume:
+        command += ["-v", f"{ref.root_volume}:{ref.container_volume}:rw"]
+    for session_name in ref.attached_sessions:
+        session_dir = os.path.join(HISTORY_DIR, "sessions", session_name)
+        os.makedirs(session_dir, exist_ok=True)
+        command += [
+            "-v",
+            f"{session_dir}:{ref.container_volume}/sessions/{session_name}:rw",
+        ]
+    if ref.workspace_volume:
+        command += ["-v", f"{ref.workspace_volume}:/workspace:rw"]
+    for mount in ref.mounts:
+        command += ["-v", f"{mount.host_path}:{mount.container_path}:{mount.mode}"]
+    env = {
+        "MUCLI_CONTAINER_MODE": "1",
+        "MUCLI_CONTAINER_NAME": ref.name,
+        "MUCLI_SUPERVISOR_URL": ref.supervisor_url,
+        "MUCLI_WORKER_TOKEN": ref.worker_token,
+        "MUCLI_EGRESS_ALLOW": __import__("json").dumps(ref.egress_allow),
+        "MUCLI_EGRESS_DENY": __import__("json").dumps(ref.egress_deny),
+        "MUCLI_WORKSPACES": __import__("json").dumps(
+            list(dict.fromkeys(["/workspace", *[mount.container_path for mount in ref.mounts]]))
+        ),
+        **(environment or {}),
+    }
+    for key, value in env.items():
+        if value:
+            command += ["-e", f"{key}={value}"]
+    command.append(ref.image)
+    return command
+
+
+def build_container(
+    name: str,
+    dockerfile_content: str | None = None,
+    *,
+    base_image: str | None = None,
+    template_name: str | None = None,
+    mounts: Iterable[MountSpec | dict] | None = None,
+    egress_allow: list[str] | None = None,
+    egress_deny: list[str] | None = None,
+    mucli_source_path: str | None = None,
+    supervisor_url: str = "http://host.docker.internal:30311",
+    session_name: str | None = None,
+    registry: ContainerRegistry | None = None,
+    runner: CommandRunner | None = None,
+    start: bool = True,
+    progress: ProgressCallback | None = None,
+    output: OutputCallback | None = None,
+) -> ContainerRef:
+    runner = runner or CommandRunner()
+    registry = registry or ContainerRegistry()
+    _report(progress, "checking_docker", "Checking Docker and container configuration…")
+    docker = runner.require("docker")
+    slug = container_slug(name)
+    managed_name = slug if slug.startswith("mucli-") else f"mucli-{slug}"
+    source_path = os.path.abspath(mucli_source_path or _default_source_path())
+    if not os.path.isdir(source_path):
+        raise ValueError(f"MuCLI source directory does not exist: {source_path}")
+
+    content = dockerfile_content if dockerfile_content is not None else default_dockerfile()
+    dockerfile_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    if base_image:
+        dockerfile_hash = f"template:{hashlib.sha256(base_image.encode('utf-8')).hexdigest()}"
+    container_dir = os.path.join(registry.root, managed_name)
+    os.makedirs(container_dir, exist_ok=True)
+    dockerfile_path = os.path.join(container_dir, "Dockerfile")
+    Path(dockerfile_path).write_text(content, encoding="utf-8")
+    image = str(base_image or f"mucli/{slug}:{dockerfile_hash[:12]}")
+    network_name = f"{managed_name}-net"
+    root_volume = f"{managed_name}-home"
+    workspace_volume = f"{managed_name}-workspace"
+    parsed_mounts = [
+        item if isinstance(item, MountSpec) else MountSpec.from_dict(item)
+        for item in (mounts or [])
+    ]
+
+    ref = ContainerRef(
+        container_id="",
+        name=managed_name,
+        image=image,
+        dockerfile_hash=dockerfile_hash,
+        mounts=parsed_mounts,
+        egress_allow=list(dict.fromkeys(egress_allow or DEFAULT_EGRESS_ALLOW)),
+        egress_deny=list(dict.fromkeys(egress_deny or [])),
+        network_name=network_name,
+        session_volume=(
+            os.path.join(os.path.abspath(os.path.expanduser(HISTORY_DIR)), "sessions", session_name)
+            if session_name else ""
+        ),
+        container_volume="/root/.mucli",
+        worker_token=secrets.token_urlsafe(32),
+        supervisor_url=supervisor_url.rstrip("/"),
+        status="building",
+        attached_sessions=[session_name] if session_name else [],
+        root_volume=root_volume,
+        workspace_volume=workspace_volume,
+        template_name=str(template_name or ""),
+        standalone=session_name is None,
+    )
+    registry.upsert(ref)
+
+    policy = None
+    try:
+        if base_image:
+            _report(progress, "using_template", f"Using template image {base_image}…")
+            run_with_output(
+                runner, [docker, "image", "inspect", "--format", "{{.Id}}", base_image], output_callback=output
+            )
+        else:
+            _report(progress, "building_image", "Building the MuCLI worker image…")
+            run_with_output(
+                runner,
+                [docker, "build", "--pull", "-t", image, "-f", dockerfile_path, source_path],
+                output_callback=output,
+            )
+        _report(progress, "creating_storage", "Creating persistent container storage…")
+        run_with_output(
+            runner, [docker, "volume", "create", root_volume], output_callback=output
+        )
+        run_with_output(
+            runner, [docker, "volume", "create", workspace_volume], output_callback=output
+        )
+        host_ports: list[int] = []
+        if ref.supervisor_url:
+            parsed_supervisor = urlparse(ref.supervisor_url)
+            host_ports.append(
+                parsed_supervisor.port
+                or (443 if parsed_supervisor.scheme == "https" else 80)
+            )
+        if os.environ.get("OLLAMA_HOST", "").startswith(("http://host.docker.internal", "http://172.")):
+            host_ports.append(urlparse(os.environ["OLLAMA_HOST"]).port or 11434)
+        _report(progress, "configuring_network", "Applying the isolated network and egress policy…")
+        policy = create_isolated_network(
+            network_name,
+            ref.egress_allow,
+            egress_deny=ref.egress_deny,
+            host_allow_ports=host_ports,
+            runner=runner,
+            output_callback=output,
+        )
+        ref.network_subnet = policy.subnet
+        _report(progress, "creating_container", "Creating the worker container…")
+        create_cmd = build_create_command(ref, environment=provider_environment())
+        create_cmd[0] = docker
+        result = run_with_output(runner, create_cmd, output_callback=output)
+        ref.container_id = result.stdout.strip() or (f"dry-{managed_name}" if runner.dry_run else "")
+        if start:
+            _report(progress, "starting_worker", "Starting the MuCLI worker…")
+            run_with_output(
+                runner, [docker, "start", managed_name], output_callback=output
+            )
+            ref.status = "running"
+        else:
+            ref.status = "stopped"
+        registry.upsert(ref)
+        _report(progress, "worker_ready", "Worker started; attaching the session…")
+        return ref
+    except Exception:
+        ref.status = "error"
+        registry.upsert(ref)
+        try:
+            runner.run([docker, "rm", "-f", managed_name], check=False)
+            runner.run([docker, "volume", "rm", workspace_volume], check=False)
+            runner.run([docker, "volume", "rm", root_volume], check=False)
+        except Exception:
+            pass
+        if policy is not None:
+            teardown_network(network_name, policy.subnet, runner=runner)
+        raise

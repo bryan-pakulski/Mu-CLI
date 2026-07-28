@@ -144,6 +144,7 @@ _VARIABLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "behavior",
         (
+            "session_type",
             "agent_mode",
             "session_goal",
             "yolo",

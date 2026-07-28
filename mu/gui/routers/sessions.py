@@ -8,13 +8,153 @@ import glob
 import json
 import os
 import shutil
+import time
 from typing import Any, Dict, Optional
 
+from mu.container.docker_cli import ContainerRuntimeError
+from mu.container.network import DEFAULT_EGRESS_ALLOW
+from mu.tools.capabilities import normalize_session_type
+
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 import utils.config as _config
 
 router = APIRouter()
+
+
+def _set_container_creation_status(
+    request: Request,
+    name: str,
+    *,
+    stage: str,
+    message: str,
+    state: str = "running",
+    detail: str | None = None,
+    reset_output: bool = False,
+) -> Dict[str, Any]:
+    app_state = request.app.state
+    lock = getattr(app_state, "container_creation_lock", None)
+    statuses = getattr(app_state, "container_creation_status", None)
+    if statuses is None:
+        statuses = {}
+        app_state.container_creation_status = statuses
+
+    def update() -> Dict[str, Any]:
+        previous = statuses.get(name) if isinstance(statuses.get(name), dict) else {}
+        logs = [] if reset_output else list(previous.get("logs") or [])
+        next_seq = 1 if reset_output else int(previous.get("next_log_seq") or 1)
+        payload: Dict[str, Any] = {
+            "name": name,
+            "state": state,
+            "stage": stage,
+            "message": message,
+            "updated_at": time.time(),
+            "logs": logs,
+            "next_log_seq": next_seq,
+        }
+        if detail:
+            payload["detail"] = detail
+        statuses[name] = payload
+        return dict(payload)
+
+    if lock is None:
+        return update()
+    with lock:
+        return update()
+
+
+def _append_container_creation_output(
+    request: Request,
+    name: str,
+    stream: str,
+    text: str,
+) -> None:
+    """Append one redacted command/stdout/stderr record to live status."""
+    value = str(text or "").rstrip("\r\n")
+    if not value:
+        return
+    app_state = request.app.state
+    lock = getattr(app_state, "container_creation_lock", None)
+    statuses = getattr(app_state, "container_creation_status", None)
+    if statuses is None:
+        statuses = {}
+        app_state.container_creation_status = statuses
+
+    def append() -> None:
+        status = statuses.setdefault(
+            name,
+            {
+                "name": name,
+                "state": "running",
+                "stage": "queued",
+                "message": "Waiting for container creation to start…",
+                "updated_at": time.time(),
+                "logs": [],
+                "next_log_seq": 1,
+            },
+        )
+        logs = status.setdefault("logs", [])
+        seq = int(status.get("next_log_seq") or 1)
+        logs.append(
+            {
+                "seq": seq,
+                "stream": stream if stream in {"command", "stdout", "stderr"} else "stdout",
+                "text": value[:12000],
+                "at": time.time(),
+            }
+        )
+        # Bound polling payloads while retaining enough Docker output to debug.
+        if len(logs) > 1200:
+            del logs[: len(logs) - 1200]
+        status["next_log_seq"] = seq + 1
+        status["updated_at"] = time.time()
+
+    if lock is None:
+        append()
+    else:
+        with lock:
+            append()
+
+
+def _get_container_creation_status(
+    request: Request,
+    name: str,
+    *,
+    after: int = 0,
+) -> Dict[str, Any]:
+    app_state = request.app.state
+    statuses = getattr(app_state, "container_creation_status", {})
+    lock = getattr(app_state, "container_creation_lock", None)
+
+    def read() -> Dict[str, Any] | None:
+        value = statuses.get(name)
+        if not isinstance(value, dict):
+            return None
+        payload = dict(value)
+        payload["logs"] = [
+            dict(item)
+            for item in (value.get("logs") or [])
+            if int(item.get("seq") or 0) > after
+        ]
+        return payload
+
+    if lock is None:
+        value = read()
+    else:
+        with lock:
+            value = read()
+    if value is not None:
+        return value
+    return {
+        "name": name,
+        "state": "idle",
+        "stage": "idle",
+        "message": "Waiting for container creation to start…",
+        "updated_at": 0.0,
+        "logs": [],
+        "next_log_seq": 1,
+    }
 
 
 def _session_dirs() -> list[str]:
@@ -35,6 +175,9 @@ def _summarize(
         mtime = os.path.getmtime(path)
     except OSError:
         mtime = 0.0
+    data = _read_session_data(name) or {}
+    variables = data.get("variables") or {}
+    container_config = data.get("container_config") or {}
     return {
         "name": name,
         "is_current": name == current,
@@ -42,6 +185,8 @@ def _summarize(
         "is_busy": name in busy_names,
         "modified_at": datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
         "modified_unix": mtime,
+        "session_type": normalize_session_type(variables.get("session_type")),
+        "container_name": container_config.get("container_name"),
     }
 
 
@@ -213,12 +358,30 @@ async def active_session(request: Request, session_name: Optional[str] = None):
         "history_length": len(sm.history),
         "tokens": dict(sm.token_counts),
         "agent_mode": session.variables.get("agent_mode", "default"),
+        "session_type": normalize_session_type(
+            session.variables.get("session_type", "workspace")
+        ),
+        "container": (
+            session.container_ref.to_dict(include_secret=False)
+            if getattr(session, "container_ref", None) is not None
+            else None
+        ),
         "external_active": bool(getattr(watcher, "external_active", False)),
         "external_last_at": float(getattr(watcher, "external_last_at", 0.0)),
         "is_busy": is_busy,
         "is_current": sm.current_session_name == state.current_session_name,
         "workspaces": list(getattr(session.folder_context, "folders", []) or []),
     }
+
+
+@router.get("/creation-status/{name}")
+async def container_creation_status(
+    name: str,
+    request: Request,
+    after: int = Query(default=0, ge=0),
+):
+    """Return live progress and output added after the supplied sequence."""
+    return _get_container_creation_status(request, name, after=after)
 
 
 @router.get("/current/history")
@@ -306,24 +469,114 @@ async def update_session_workspace(name: str, request: Request, payload: Dict[st
     return {"ok": True, "name": name, "workspaces": workspaces}
 
 
+async def _run_container_creation_job(
+    request: Request,
+    *,
+    name: str,
+    provider: str,
+    model: str,
+    ollama_vars: Dict[str, Any],
+    container_config: Dict[str, Any],
+) -> None:
+    """Build and load a container session after the create request returns."""
+
+    def report_progress(stage: str, message: str) -> None:
+        _set_container_creation_status(
+            request,
+            name,
+            stage=stage,
+            message=message,
+        )
+
+    def report_output(stream: str, text: str) -> None:
+        _append_container_creation_output(request, name, stream, text)
+
+    container_started = False
+    try:
+        await asyncio.to_thread(
+            request.app.state.container_supervisor.create,
+            container_name=container_config["container_name"],
+            session_name=name,
+            dockerfile=container_config["dockerfile"],
+            template_name=container_config.get("template_name"),
+            mounts=container_config["mounts"],
+            egress_allow=container_config["egress_allow"],
+            egress_deny=container_config["egress_deny"],
+            supervisor_url=f"http://host.docker.internal:{request.app.state.port}",
+            progress=report_progress,
+            output=report_output,
+        )
+        container_started = True
+        _set_container_creation_status(
+            request,
+            name,
+            stage="loading_session",
+            message="Container is running; loading the MuCLI session…",
+        )
+        load_payload: Dict[str, Any] = {"provider": provider, "model": model}
+        load_payload.update(ollama_vars)
+        await load_session(name, request, payload=load_payload)
+        _set_container_creation_status(
+            request,
+            name,
+            stage="ready",
+            message="Container session is ready.",
+            state="ready",
+        )
+    except Exception as exc:  # keep the status endpoint alive for diagnostics
+        detail = str(getattr(exc, "detail", None) or exc)
+        report_output("stderr", detail)
+        if not container_started:
+            session_dir = os.path.join(_config.HISTORY_DIR, "sessions", name)
+            shutil.rmtree(session_dir, ignore_errors=True)
+        _set_container_creation_status(
+            request,
+            name,
+            stage="failed",
+            message="Container creation failed.",
+            state="error",
+            detail=detail,
+        )
+    finally:
+        tasks = getattr(request.app.state, "container_creation_tasks", {})
+        tasks.pop(name, None)
+
+
 @router.post("")
 async def create_session(request: Request, payload: Dict[str, Any]):
     name = str(payload.get("name") or "").strip()
     provider = str(payload.get("provider") or "").strip() or None
     model = str(payload.get("model") or "").strip() or None
     activate = bool(payload.get("activate", True))
+    background_container = bool(payload.get("background_container", False))
+    session_type = normalize_session_type(payload.get("session_type"))
 
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
     if not provider or not model:
         raise HTTPException(status_code=400, detail="provider and model are required")
     if _read_session_data(name) is not None:
+        status = _get_container_creation_status(request, name)
+        tasks = getattr(request.app.state, "container_creation_tasks", {})
+        if name in tasks and status.get("state") == "running":
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "ok": True,
+                    "name": name,
+                    "active": False,
+                    "session_type": "container",
+                    "creation_state": status.get("stage", "running"),
+                },
+            )
         raise HTTPException(
             status_code=409,
             detail=f"Session '{name}' already exists. Load it instead.",
         )
 
     workspace = str(payload.get("workspace") or "").strip()
+    if session_type == "chat":
+        workspace = ""
     if workspace:
         workspace = os.path.expanduser(workspace)
         if not os.path.isdir(workspace):
@@ -332,68 +585,159 @@ async def create_session(request: Request, payload: Dict[str, Any]):
                 detail=f"Workspace path is not a directory: {workspace}",
             )
 
-    if not activate:
-        data: Dict[str, Any] = {
-            "history": [],
-            "provider_config": {"provider": provider, "model": model},
-        }
-        if workspace:
-            data["folder_context"] = {"folders": [workspace]}
-        ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
-        if ollama_vars:
-            # Seed into the persisted variables so the first load starts
-            # on the chosen endpoint (e.g. cloud + key) without an extra
-            # switch round-trip.
-            data["variables"] = ollama_vars
-        path = os.path.join(_config.HISTORY_DIR, "sessions", name)
-        os.makedirs(path, exist_ok=True)
-        with open(os.path.join(path, "session.json"), "w") as fh:
-            json.dump(data, fh, indent=2)
-        return {"ok": True, "name": name, "active": False}
-
     ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
-    # Persist the connection selection *before* building the session.  Model
-    # discovery during build must use the same endpoint as the welcome modal;
-    # otherwise an OLLAMA_API_KEY can make a locally selected model appear to
-    # be missing from ollama.com before the later variable sync runs.
+    variables: Dict[str, Any] = {**ollama_vars, "session_type": session_type}
+    if session_type == "container":
+        variables.update({"yolo": True, "strict_mode": False})
+
     data: Dict[str, Any] = {
         "history": [],
         "provider_config": {"provider": provider, "model": model},
+        "variables": variables,
     }
-    if ollama_vars:
-        data["variables"] = ollama_vars
+    if workspace and session_type == "workspace":
+        data["folder_context"] = {"folders": [workspace]}
+
+    container_config: Dict[str, Any] | None = None
+    if session_type == "container":
+        container_name = str(payload.get("container_name") or f"mucli-{name}").strip()
+        mounts = [item for item in (payload.get("mounts") or []) if isinstance(item, dict)]
+        egress_allow = [
+            str(item).strip()
+            for item in (payload.get("egress_allow") or DEFAULT_EGRESS_ALLOW)
+            if str(item).strip()
+        ]
+        egress_deny = [
+            str(item).strip()
+            for item in (payload.get("egress_deny") or [])
+            if str(item).strip()
+        ]
+        container_config = {
+            "container_name": container_name,
+            "dockerfile": payload.get("dockerfile") or None,
+            "template_name": str(payload.get("template_name") or "") or None,
+            "mounts": mounts,
+            "egress_allow": egress_allow,
+            "egress_deny": egress_deny,
+        }
+        data["container_config"] = container_config
+
     path = os.path.join(_config.HISTORY_DIR, "sessions", name)
     os.makedirs(path, exist_ok=True)
     with open(os.path.join(path, "session.json"), "w") as fh:
         json.dump(data, fh, indent=2)
 
+    if container_config is not None:
+        _set_container_creation_status(
+            request,
+            name,
+            stage="queued",
+            message="Container configuration saved; waiting for Docker…",
+            reset_output=True,
+        )
+
+    if not activate:
+        return {
+            "ok": True,
+            "name": name,
+            "active": False,
+            "session_type": session_type,
+        }
+
+    if container_config is not None:
+        if background_container:
+            tasks = getattr(request.app.state, "container_creation_tasks", None)
+            if tasks is None:
+                tasks = {}
+                request.app.state.container_creation_tasks = tasks
+            task = asyncio.create_task(
+                _run_container_creation_job(
+                    request,
+                    name=name,
+                    provider=provider,
+                    model=model,
+                    ollama_vars=ollama_vars,
+                    container_config=container_config,
+                ),
+                name=f"mucli-container-create-{name}",
+            )
+            tasks[name] = task
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "ok": True,
+                    "name": name,
+                    "active": False,
+                    "session_type": session_type,
+                    "creation_state": "queued",
+                },
+            )
+
+        await _run_container_creation_job(
+            request,
+            name=name,
+            provider=provider,
+            model=model,
+            ollama_vars=ollama_vars,
+            container_config=container_config,
+        )
+        status = _get_container_creation_status(request, name)
+        if status.get("state") == "error":
+            raise HTTPException(
+                status_code=500,
+                detail=status.get("detail") or "Container creation failed.",
+            )
+        ref = request.app.state.container_supervisor.container_for_session(name)
+        return {
+            "ok": True,
+            "name": name,
+            "active": True,
+            "loaded": True,
+            "session_type": session_type,
+            "container": ref.to_dict(include_secret=False) if ref else None,
+        }
+
     load_payload: Dict[str, Any] = {"provider": provider, "model": model}
     load_payload.update(ollama_vars)
-    result = await load_session(name, request, payload=load_payload)
+    try:
+        result = await load_session(name, request, payload=load_payload)
+    except Exception:
+        raise
 
-    if workspace:
+    if workspace and session_type == "workspace":
         session = request.app.state.session_by_name(name)
         if session:
             session.folder_context.add_folder(workspace)
             session.session_manager.save_history(session.folder_context)
 
-    return result
-
+    return {
+        **result,
+        "session_type": session_type,
+        "container": (
+            request.app.state.container_supervisor.container_for_session(name).to_dict(include_secret=False)
+            if session_type == "container"
+            else None
+        ),
+    }
 
 @router.post("/{name}/load")
 async def load_session(name: str, request: Request, payload: Dict[str, Any] | None = None):
-    """Load `name` into the daemon and focus it. Idempotent — if
-    already loaded, just focuses without rebuilding the Session."""
+    """Load and focus a host session mirror; attach its worker when container-backed."""
     payload = payload or {}
-    provider = (str(payload.get("provider") or "").strip() or None)
-    model = (str(payload.get("model") or "").strip() or None)
-
+    provider = str(payload.get("provider") or "").strip() or None
+    model = str(payload.get("model") or "").strip() or None
     state = request.app.state
 
-    # Already loaded? Just focus it.
     if name in state.sessions:
         state.current_session_name = name
-        return {"ok": True, "name": name, "active": True, "loaded": True}
+        session = state.sessions[name]
+        return {
+            "ok": True,
+            "name": name,
+            "active": True,
+            "loaded": True,
+            "session_type": normalize_session_type(session.variables.get("session_type")),
+        }
 
     existing = _read_session_data(name)
     if existing is None and (not provider or not model):
@@ -408,22 +752,56 @@ async def load_session(name: str, request: Request, payload: Dict[str, Any] | No
                 status_code=400,
                 detail="Session has no saved provider; supply provider and model.",
             )
+        provider = provider or saved.get("provider")
+        model = model or saved.get("model")
+
+    variables = (existing or {}).get("variables") or {}
+    session_type = normalize_session_type(variables.get("session_type"))
+    container_config = (existing or {}).get("container_config") or {}
+    container_ref = None
+    if session_type == "container":
+        config = container_config
+        try:
+            container_ref = await asyncio.to_thread(
+                state.container_supervisor.create,
+                container_name=str(config.get("container_name") or f"mucli-{name}"),
+                session_name=name,
+                dockerfile=config.get("dockerfile"),
+                template_name=config.get("template_name"),
+                mounts=config.get("mounts") or [],
+                egress_allow=config.get("egress_allow") or DEFAULT_EGRESS_ALLOW,
+                egress_deny=config.get("egress_deny") or [],
+                supervisor_url=f"http://host.docker.internal:{state.port}",
+            )
+        except (ContainerRuntimeError, OSError, ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=500, detail=f"Container load failed: {exc}") from exc
 
     try:
-        await asyncio.to_thread(
-            state.load_session, name=name, provider=provider, model=model
-        )
+        await asyncio.to_thread(state.load_session, name=name, provider=provider, model=model)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # Seed ollama mode/host/key supplied by the GUI (welcome modal) onto
-    # the freshly-built session so a cloud session starts on ollama.com.
+    session = state.session_by_name(name)
     ollama_vars = _ollama_seed_vars(payload) if provider == "ollama" else {}
     if ollama_vars:
-        _apply_ollama_vars(state.session_by_name(name), ollama_vars)
+        _apply_ollama_vars(session, ollama_vars)
+    if session is not None:
+        session.session_manager.container_config = dict(container_config or {})
+        session.variables["session_type"] = session_type
+        if session_type == "container":
+            session.variables.update({"yolo": True, "strict_mode": False})
+            session.container_ref = container_ref
+        session.session_manager.save_history(session.folder_context)
+        session.sync_runtime_state()
 
-    return {"ok": True, "name": name, "active": True, "loaded": True}
-
+    return {
+        "ok": True,
+        "name": name,
+        "active": True,
+        "loaded": True,
+        "session_type": session_type,
+        "container": container_ref.to_dict(include_secret=False) if container_ref else None,
+    }
 
 @router.post("/{name}/focus")
 async def focus_session(name: str, request: Request):
@@ -456,6 +834,7 @@ async def unload_active_session(request: Request):
             )
         with state.session_lock_for(cur):
             state.unload_session(name=cur)
+        state.container_supervisor.detach(cur, stop_if_idle=True)
     return {"ok": True, "active": False}
 
 
@@ -488,6 +867,7 @@ async def unload_named_session(name: str, request: Request):
         )
     with state.session_lock_for(name):
         state.unload_session(name=name)
+    state.container_supervisor.detach(name, stop_if_idle=True)
     return {"ok": True, "unloaded": name}
 
 
@@ -502,5 +882,6 @@ async def delete_session(name: str, request: Request):
     session_dir = os.path.join(_config.HISTORY_DIR, "sessions", name)
     if not os.path.isdir(session_dir):
         raise HTTPException(status_code=404, detail=f"Session '{name}' not found.")
+    state.container_supervisor.detach(name, stop_if_idle=True)
     shutil.rmtree(session_dir, ignore_errors=True)
     return {"ok": True}

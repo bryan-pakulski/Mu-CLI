@@ -175,6 +175,23 @@
         </div>
     </template>
 
+    <div class="artifact-strip"
+         x-show="$store.chat.currentName && $store.artifacts.current.length"
+         x-effect="$store.artifacts.load($store.chat.currentName)">
+        <div class="artifact-label">artifacts</div>
+        <template x-for="a in $store.artifacts.current" :key="a.artifact_id">
+            <div class="artifact-chip">
+                <a :href="a.download_url" download>
+                    <span class="artifact-icon">↓</span>
+                    <span class="artifact-name" x-text="a.name"></span>
+                    <span class="artifact-size" x-text="$store.artifacts.formatSize(a.size)"></span>
+                </a>
+                <button type="button" title="Delete artifact"
+                        @click="$store.artifacts.remove(a.artifact_id, $store.chat.currentName)">×</button>
+            </div>
+        </template>
+    </div>
+
     <!-- Inline pending prompts: each entry in the prompts queue renders
          as its own chat item. They sit at the bottom of the chat flow
          instead of a centered modal so the rest of the conversation

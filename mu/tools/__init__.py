@@ -333,6 +333,13 @@ def _load_builtin_tools() -> None:
             "mu.tools: failed to load prompt tool package: %s", exc
         )
     try:
+        from . import artifact as _artifact_tools  # noqa: F401 — registers upload_artifact/list_artifacts
+    except Exception as exc:  # pragma: no cover — defensive
+        import logging
+        logging.getLogger("mucli").warning(
+            "mu.tools: failed to load artifact tool package: %s", exc
+        )
+    try:
         from . import session as _session_tools  # noqa: F401 — registers search_history
     except Exception as exc:  # pragma: no cover — defensive
         import logging

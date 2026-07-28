@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}μcli — containers{% endblock %}
+{% block body %}
+<link rel="stylesheet" href="/static/css/containers.css">
+<div class="container-manager" id="container-manager">
+    <header class="container-manager-header">
+        <div>
+            <a href="/" class="container-back">← sessions</a>
+            <h1>Container environments</h1>
+            <p>Manage Docker workers independently of MuCLI sessions, open a shell, and capture reusable templates.</p>
+        </div>
+        <button class="primary" id="create-environment-button">create environment</button>
+    </header>
+
+    <section class="manager-section">
+        <div class="manager-section-head"><h2>Environments</h2><button id="refresh-containers">refresh</button></div>
+        <div id="container-empty" class="manager-empty">No managed environments.</div>
+        <div id="container-list" class="manager-grid"></div>
+    </section>
+
+    <section class="manager-section">
+        <div class="manager-section-head"><h2>Templates</h2><span class="muted">Snapshots used as a base for new environments</span></div>
+        <div id="template-empty" class="manager-empty">No templates yet.</div>
+        <div id="template-list" class="manager-grid manager-grid-templates"></div>
+    </section>
+
+    <div class="manager-modal" id="create-modal" hidden>
+        <div class="manager-modal-card manager-modal-wide">
+            <header><div><h2>Create environment</h2><p>Standalone containers are not tied to a session.</p></div><button data-close="create-modal">×</button></header>
+            <div class="manager-form">
+                <label>Name<input id="environment-name" placeholder="research-box"></label>
+                <label>Base<select id="environment-source"><option value="dockerfile">Dockerfile</option><option value="template">Template</option></select></label>
+                <label id="template-select-row" hidden>Template<select id="environment-template"></select></label>
+                <div id="dockerfile-row" class="manager-editor-row">
+                    <button id="edit-dockerfile" class="manager-expand-card"><span><strong>Dockerfile</strong><small id="dockerfile-summary">editable worker image</small></span><span>expand ↗</span></button>
+                </div>
+                <label>Bind mounts<textarea id="environment-mounts" rows="3" placeholder="/host/project:/workspace/project:rw"></textarea></label>
+                <button id="edit-network" class="manager-expand-card"><span><strong>Network policy</strong><small id="network-summary">default allowlist · empty blocklist</small></span><span>expand ↗</span></button>
+                <label class="manager-check"><input type="checkbox" id="environment-start" checked> Start after creation</label>
+                <div id="environment-error" class="manager-error"></div>
+            </div>
+            <footer><button data-close="create-modal">cancel</button><button class="primary" id="submit-environment">create</button></footer>
+        </div>
+    </div>
+
+    <div class="manager-modal" id="editor-modal" hidden>
+        <div class="manager-modal-card manager-editor-modal">
+            <header><h2 id="editor-title">Editor</h2><button data-close="editor-modal">×</button></header>
+            <div id="dockerfile-editor-panel"><textarea id="environment-dockerfile" spellcheck="false"></textarea></div>
+            <div id="network-editor-panel" hidden>
+                <label>Allowed domains<textarea id="environment-allow" rows="10"></textarea></label>
+                <label>Blocked domains<textarea id="environment-deny" rows="10" placeholder="one domain per line"></textarea></label>
+                <p class="muted">Blocklist entries override the allowlist.</p>
+            </div>
+            <footer><button class="primary" data-close="editor-modal">done</button></footer>
+        </div>
+    </div>
+
+    <div class="manager-modal" id="progress-modal" hidden>
+        <div class="manager-modal-card">
+            <header><div><h2 id="progress-title">Creating environment</h2><p id="progress-message">Queued…</p></div></header>
+            <div class="manager-progress"><span class="container-creation-spinner"></span><span id="progress-stage">queued</span></div>
+            <details id="progress-output"><summary>Docker output</summary><pre id="progress-log"></pre></details>
+            <footer><button id="close-progress" hidden>close</button></footer>
+        </div>
+    </div>
+
+    <div class="manager-modal" id="snapshot-modal" hidden>
+        <div class="manager-modal-card">
+            <header><h2>Create template</h2><button data-close="snapshot-modal">×</button></header>
+            <label>Template name<input id="snapshot-name" placeholder="python-data-science"></label>
+            <label>Description<input id="snapshot-description" placeholder="Configured Python and analysis tools"></label>
+            <p class="muted">Templates capture the container filesystem and image configuration. Mounted session, home, and workspace volumes are not included. Provider secrets and worker tokens are cleared.</p>
+            <input type="hidden" id="snapshot-container">
+            <div class="manager-error" id="snapshot-error"></div>
+            <footer><button data-close="snapshot-modal">cancel</button><button class="primary" id="submit-snapshot">snapshot</button></footer>
+        </div>
+    </div>
+
+    <div class="manager-modal" id="shell-modal" hidden>
+        <div class="manager-modal-card manager-shell-modal">
+            <header><div><h2 id="shell-title">Shell</h2><p>Commands run directly inside the selected container.</p></div><button id="close-shell">×</button></header>
+            <pre id="shell-output" class="manager-shell-output"></pre>
+            <form id="shell-form" class="manager-shell-input"><span>$</span><input id="shell-command" autocomplete="off" spellcheck="false" autofocus></form>
+        </div>
+    </div>
+</div>
+<script src="/static/js/containers.js"></script>
+{% endblock %}

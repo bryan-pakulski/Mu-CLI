@@ -47,12 +47,18 @@ from mu.agent.retry import is_context_overflow_error, parse_overflow_token_count
 from mu.feature.engine import refresh_and_persist_feature_plan, summarize_feature_plan
 from mu.tools._dispatcher import execute_tool
 from mu.tools._envelope import infer_tool_error_code
+from mu.tools.capabilities import (
+    filter_tools_for_session_type,
+    normalize_session_type,
+    tools_enabled_without_workspace,
+)
 from mu.trace.emitter import emit_nudge, emit_tool
 from mu.tools.descriptors import COLLATED_TOOLS, TOOLS
 from providers.base import FileReference, ImageData, Message, MessagePart
 from utils.config import (
     NUDGE_EMPTY_RESPONSE,
     NUDGE_EMPTY_RESPONSE_CHILD,
+    SESSION_TYPE_PROMPTS,
     calculate_cost,
 )
 from utils.helpers import display_image_in_terminal, get_safe_mime_type
@@ -822,12 +828,23 @@ def run_turn(session, text):
         session.ui.render_message("user", text)
 
     workspace_context = ""
+    session_type = normalize_session_type(
+        session.variables.get("session_type", "workspace")
+    )
+    expose_tools = bool(
+        session.agentic
+        and (
+            session.folder_context.folders
+            or tools_enabled_without_workspace(session_type)
+        )
+    )
 
-    if session.folder_context.folders:
+    if session.folder_context.folders or tools_enabled_without_workspace(session_type):
         # L4B auto-retrieval removed — model uses retrieve_relevant_context
         # tool on demand instead of pre-injected snippets.
         if session.agentic:
             active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
+            active_tools = filter_tools_for_session_type(active_tools, session_type)
             # Spec #9: phased exposure — when lazy_tools_enabled, exclude
             # specialist-phase tools not in the active phase set (+ any the
             # model loaded via load_tools). Default off → no filtering.
@@ -869,8 +886,15 @@ def run_turn(session, text):
                 or _get_base_prompt()
             )
 
-            # Providers automatically generated tool prompts so don't need to be embedded into the system prompt
-            workspace_context = f"{agentic_system_base}\n\n### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
+            type_instruction = SESSION_TYPE_PROMPTS.get(session_type, "")
+            # Providers generate the machine-readable tool declaration. The
+            # human-readable capability boundary remains in L0 so the model
+            # understands where it is executing and why tools differ.
+            workspace_context = (
+                f"{agentic_system_base}\n\n"
+                f"### SESSION TYPE: {session_type.upper()}\n{type_instruction}\n\n"
+                f"### CURRENT STRATEGY MODE: {agent_mode.upper()}\n{mode_instruction}"
+            )
         else:
             logger.debug(
                 f"Using agent_mode={session.variables.get('agent_mode', 'default')}"
@@ -1101,6 +1125,8 @@ def run_turn(session, text):
     max_iterations = session.variables.get("max_iterations", 50)
     iteration = 0
     active_tools = [t for t in TOOLS if t.name not in session.disabled_tools]
+    active_tools = filter_tools_for_session_type(active_tools, session_type)
+    provider_tools = active_tools if expose_tools else None
     # Spec #9: phased exposure (see the earlier filter site for details).
     if session.variables.get("lazy_tools_enabled", False):
         try:
@@ -1113,6 +1139,7 @@ def run_turn(session, text):
             active_tools = filter_tools_by_phase(active_tools, _phases)
         except Exception:  # noqa: BLE001
             pass
+    provider_tools = active_tools if expose_tools else None
 
     total_in = 0
     total_out = 0
@@ -1362,7 +1389,7 @@ def run_turn(session, text):
             dynamic_system_prompt, messages = _preflight_context_check(
                 session, dynamic_system_prompt, messages,
                 turn_start_index=turn_start_index,
-                tools=(active_tools if (session.folder_context.folders and session.agentic) else None),
+                tools=(provider_tools),
             )
             # Capture the estimate at the same seam as the provider request.
             # The trace event is written after the response is archived, so
@@ -1372,7 +1399,7 @@ def run_turn(session, text):
                 estimate_tokens(dynamic_system_prompt)
                 + _estimate_messages_tokens(messages)
                 + _estimate_tools_tokens(
-                    active_tools if (session.folder_context.folders and session.agentic) else None
+                    provider_tools
                 )
             )
             try:
@@ -1382,7 +1409,7 @@ def run_turn(session, text):
                     _request_emitter.request(build_request_record(
                         iteration=iteration, system_prompt=dynamic_system_prompt,
                         messages=messages,
-                        tools=active_tools if (session.folder_context.folders and session.agentic) else None,
+                        tools=provider_tools,
                         token_estimate=request_token_estimate,
                     ))
             except Exception:
@@ -1407,9 +1434,7 @@ def run_turn(session, text):
                         messages=messages,
                         system_prompt=dynamic_system_prompt,
                         thinking=session.thinking,
-                        tools=active_tools
-                        if (session.folder_context.folders and session.agentic)
-                        else None,
+                        tools=provider_tools,
                         turn_start_index=turn_start_index,
                     )
             else:

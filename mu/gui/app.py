@@ -36,8 +36,10 @@ from .deps import require_session  # re-exported
 from .memory_snapshot import LIVE_RESOLUTION, build_memory_snapshot
 from .prompts import PromptStore
 from .routers import (
+    artifacts as artifacts_router,
     audio as audio_router,
     chat,
+    containers as containers_router,
     debug as debug_router,
     feature as feature_router,
     files as files_router,
@@ -56,6 +58,7 @@ from .routers import (
     traces as traces_router,
 )
 from .watcher import SessionWatcher
+from mu.container import ContainerSupervisor
 from .web_ui import WebUI
 
 # Hook registry + context for the live memory-snapshot push. Imported
@@ -239,6 +242,11 @@ def create_app(
     # Fallbacks used when no session is active (so routers don't blow up).
     app.state._fallback_lock = threading.Lock()
     app.state._fallback_busy = threading.Event()
+    app.state.container_creation_status: Dict[str, Dict[str, Any]] = {}
+    app.state.container_creation_lock = threading.Lock()
+    app.state.container_creation_tasks: Dict[str, asyncio.Task] = {}
+    app.state.container_environment_jobs: Dict[str, Dict[str, Any]] = {}
+    app.state.container_environment_tasks: Dict[str, asyncio.Task] = {}
 
     # ---- shared infra -------------------------------------------------
     app.state.bus = bus
@@ -249,6 +257,10 @@ def create_app(
     app.state.load_session = lambda **kw: _load_session(app, **kw)
     app.state.unload_session = lambda **kw: _unload_session(app, **kw)
     app.state.watcher = SessionWatcher(app)
+    # Lazy with respect to Docker: constructing the supervisor only reads its
+    # JSON registry. Docker/iptables are touched when a container session is
+    # explicitly created, loaded, mounted, stopped, or removed.
+    app.state.container_supervisor = ContainerSupervisor()
 
     # Resolver helpers exposed on app.state so routers don't have to
     # import the module-level functions.
@@ -266,6 +278,8 @@ def create_app(
     app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
     app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
+    app.include_router(artifacts_router.router, prefix="/api/sessions", tags=["artifacts"])
+    app.include_router(containers_router.router, tags=["containers"])
     app.include_router(providers_router.router, prefix="/api/providers", tags=["providers"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(modes.router, prefix="/api/modes", tags=["modes"])
@@ -308,6 +322,7 @@ def create_app(
             {
                 "session_name": sm.current_session_name if sm else "",
                 "agent_mode": session.variables.get("agent_mode", "default") if session else "default",
+                "session_type": session.variables.get("session_type", "workspace") if session else "workspace",
                 "provider": session.provider.name if session and session.provider else "",
                 "model": session.provider.model_name if session and session.provider else "",
                 "session_active": session is not None,
@@ -347,6 +362,13 @@ def create_app(
     @app.on_event("shutdown")
     async def _stop_watcher():
         app.state.watcher.stop()
+        tasks = list(app.state.container_creation_tasks.values())
+        tasks += list(app.state.container_environment_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        app.state.container_supervisor.shutdown()
 
     return app
 

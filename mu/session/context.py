@@ -244,11 +244,17 @@ def inject_hierarchical_context(
     # folder_context_max_chars, so the compactor and the /memory table see
     # it. The model reads file contents on demand via read_file/get_chunk.
     # Cached per turn; refreshed mid-turn only on file add/remove.
-    folder_context_block = (
-        cached_folder_context
-        if cached_folder_context is not None
-        else session._build_folder_context_block()
-    )
+    session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
+    if session_type == "container":
+        from mu.container.context import build_container_context
+
+        folder_context_block = build_container_context(session)
+    else:
+        folder_context_block = (
+            cached_folder_context
+            if cached_folder_context is not None
+            else session._build_folder_context_block()
+        )
     if folder_context_block:
         fc_limit = max(
             0,
@@ -258,8 +264,8 @@ def inject_hierarchical_context(
             ),
         )
         layers.append(
-            "LAYER 1C — Workspace file tree:\n"
-            f"[budget: {fc_limit} chars | tree-only, no diffs]\n"
+            ("LAYER 1C — Container sandbox:\n" if session_type == "container" else "LAYER 1C — Workspace file tree:\n")
+            + f"[budget: {fc_limit} chars | tree-only, no diffs]\n"
             + folder_context_block
         )
 

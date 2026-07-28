@@ -114,6 +114,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.research_sources: list[dict] = []
         self.tool_stats = _empty_tool_stats()
         self.variables = DEFAULT_VARIABLES.copy()
+        self.container_config: dict[str, Any] = {}
 
         if session_name:
             self._load_session(session_name)
@@ -155,6 +156,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         self.active_course_id = None
         self.research_sources = []
         self.tool_stats = _empty_tool_stats()
+        self.container_config = {}
         self.variables.update(DEFAULT_VARIABLES)
 
         data = self.read_session_data(name)
@@ -170,6 +172,12 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                     self.summary_anchor = data.get("summary_anchor", 0)
                     self.protected_indices = set(data.get("protected_indices", []))
                     self.provider_config = data.get("provider_config", {})
+                    saved_container_config = data.get("container_config", {})
+                    self.container_config = (
+                        dict(saved_container_config)
+                        if isinstance(saved_container_config, dict)
+                        else {}
+                    )
                     self.collation_buffer = CollationBuffer.from_dict(
                         data.get("collation_buffer", {})
                     )
@@ -374,6 +382,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
                 "provider_config": self.provider_config,
                 "folder_context": self.folder_context.to_dict(),
                 "variables": self.variables,
+                "container_config": self.container_config,
                 "collation_buffer": self.collation_buffer.to_dict(),
                 "task_memory": self.task_memory.to_dict(),
                 "turn_scratchpad": self.turn_scratchpad.to_dict(),
@@ -686,7 +695,7 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
             self.ui.show_info(f"Switched to session: '{name}'")
         self.view_history()
 
-    def new_session(self, name=None, provider_name=None, model_name=None):
+    def new_session(self, name=None, provider_name=None, model_name=None, session_type="workspace"):
         logger.info(
             f"Creating new session: {name} (provider={provider_name}, model={model_name})"
         )
@@ -720,6 +729,13 @@ class SessionManager(HistoryMixin, HistorySearchMixin):
         }
         self.variables.clear()
         self.variables.update(DEFAULT_VARIABLES)
+        self.container_config = {}
+        from mu.tools.capabilities import normalize_session_type
+
+        self.variables["session_type"] = normalize_session_type(session_type)
+        if self.variables["session_type"] == "container":
+            self.variables["yolo"] = True
+            self.variables["strict_mode"] = False
         self.save_history()
         if self.ui:
             self.ui.show_info(f"Started new session: '{name}'")

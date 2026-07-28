@@ -426,11 +426,23 @@ class InputHandler:
                 "clear": None,
             }
         )
+        container_completer = NestedCompleter.from_nested_dict(
+            {
+                "list": None, "create": None, "start": None, "stop": None,
+                "restart": None, "shell": None, "attach": None, "detach": None,
+                "snapshot": None, "remove": None,
+            }
+        )
+        template_completer = NestedCompleter.from_nested_dict(
+            {"list": None, "snapshot": None, "use": None, "delete": None}
+        )
         session_subcommand_completer = NestedCompleter.from_nested_dict(
             {
                 "list": None,
                 "load": session_completer,
-                "new": None,
+                "new": NestedCompleter.from_nested_dict({
+                    "--type": {"chat": None, "workspace": None, "container": None}
+                }),
                 "delete": session_completer,
             }
         )
@@ -469,6 +481,9 @@ class InputHandler:
             "/clear": None,
             "/history": NestedCompleter.from_nested_dict({"clear": None, "show": None}),
             "/session": session_subcommand_completer,
+            "/container": container_completer,
+            "/template": template_completer,
+            "/templates": template_completer,
             "/continue": None,
             # manual compaction (focus is free-form text — no subcommands)
             "/compact": None,

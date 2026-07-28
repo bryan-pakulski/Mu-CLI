@@ -1,5 +1,6 @@
 <div class="welcome" x-data="welcomeView()" x-init="load()">
     <h1>μcli</h1>
+    <div class="welcome-tools"><a class="subtle" href="/containers">manage containers & templates →</a></div>
     <p class="lede">
         Pick a session below to resume, or create a new one.
         Providers read credentials from
@@ -15,7 +16,7 @@
                 <div class="row">
                     <span class="name" x-text="s.name"
                           :title="'last modified: ' + (s.modified_at || '')"></span>
-                    <span class="meta" x-text="s.modified_at"></span>
+                    <span class="meta" x-text="(s.session_type || 'workspace') + ' · ' + (s.modified_at || '')"></span>
                     <button class="subtle" @click="load_session(s.name)"
                             :title="'Load session ' + s.name">load</button>
                     <button @click="$store.confirm.ask('Delete session \'' + s.name + '\'?', $event, () => remove(s.name), {danger:true})"
@@ -28,8 +29,22 @@
     <h4 class="label-mono">Create new</h4>
     <form @submit.prevent="createSession()">
         <div class="form-row">
+            <label>type</label>
+            <div class="session-type-picker" role="radiogroup" aria-label="Session type">
+                <template x-for="option in sessionTypes" :key="option.value">
+                    <button type="button" class="session-type-option"
+                            :class="{ active: form.sessionType === option.value }"
+                            @click="form.sessionType = option.value"
+                            :title="option.detail">
+                        <span x-text="option.label"></span>
+                        <small x-text="option.detail"></small>
+                    </button>
+                </template>
+            </div>
+        </div>
+        <div class="form-row">
             <label>name</label>
-            <input type="text" x-model="form.name" placeholder="my-project" required>
+            <input type="text" x-model="form.name" @input="syncContainerName()" placeholder="my-project" required>
         </div>
         <div class="form-row">
             <label>provider</label>
@@ -78,7 +93,7 @@
         </div>
         <div x-show="modelError" style="color:var(--text-dim);font-size:11.5px;margin-top:-4px;margin-bottom:8px;"
              x-text="'could not list models: ' + modelError + ' — type one above.'"></div>
-        <div class="form-row">
+        <div class="form-row" x-show="form.sessionType === 'workspace'" x-cloak>
             <label>workspace</label>
             <div style="display:flex;gap:4px;flex:1;">
                 <input type="text" x-model="form.workspace" placeholder="~/my-project (optional)" style="flex:1;">
@@ -87,37 +102,239 @@
                         title="Browse for folder">browse</button>
             </div>
         </div>
-        <p style="color:var(--text-dim);font-size:11.5px;line-height:1.5;margin:-4px 0 12px 0;">
-            Without a workspace the agent runs in chat-only mode.
+        <p x-show="form.sessionType === 'workspace'" x-cloak
+           style="color:var(--text-dim);font-size:11.5px;line-height:1.5;margin:-4px 0 12px 0;">
+            Workspace sessions execute file and shell tools on this host and use normal approval controls.
         </p>
+        <p x-show="form.sessionType === 'chat'" x-cloak
+           style="color:var(--text-dim);font-size:11.5px;line-height:1.5;margin:-4px 0 12px 0;">
+            Chat sessions have no filesystem or shell tools. Research, memory, and artifact tools remain available.
+        </p>
+        <div x-show="form.sessionType === 'container'" x-cloak class="container-create-fields">
+            <div class="form-row">
+                <label>container</label>
+                <input type="text" x-model="form.containerName" placeholder="mucli-my-project">
+            </div>
+            <div class="form-row container-config-row">
+                <label>Dockerfile</label>
+                <button type="button" class="container-config-card" @click="openEditor('dockerfile')">
+                    <span>
+                        <strong>Worker image template</strong>
+                        <small x-text="`${lineCount(form.dockerfile)} lines · click to edit`"></small>
+                    </span>
+                    <span class="container-config-action">expand ↗</span>
+                </button>
+            </div>
+            <div class="form-row form-row-top">
+                <label>mounts</label>
+                <textarea x-model="form.mountsText" rows="4"
+                          placeholder="/host/project:/workspace/project:rw&#10;/host/data:/data:ro"></textarea>
+            </div>
+            <p class="container-create-help">One bind mount per line: <code>host:container[:ro|rw]</code>.</p>
+            <div class="form-row container-config-row">
+                <label>network</label>
+                <button type="button" class="container-config-card" @click="openEditor('network')">
+                    <span>
+                        <strong>Egress policy</strong>
+                        <small x-text="`${lineCount(form.egressAllow)} allowed · ${lineCount(form.egressDeny)} blocked`"></small>
+                    </span>
+                    <span class="container-config-action">expand ↗</span>
+                </button>
+            </div>
+            <p class="container-create-help">Blocklist entries override the allowlist. All other forwarded egress is denied.</p>
+        </div>
+        <div class="container-creation-status" x-show="creationState !== 'idle'" x-cloak
+             role="status" aria-live="polite" aria-atomic="false">
+            <div class="container-creation-summary">
+                <span class="container-creation-spinner" x-show="creating" aria-hidden="true"></span>
+                <span class="container-creation-state-icon" x-show="!creating"
+                      x-text="creationState === 'ready' ? '✓' : '!'" aria-hidden="true"></span>
+                <div class="container-creation-copy">
+                    <strong x-text="creationTitle"></strong>
+                    <span x-text="creationStatus"></span>
+                    <small x-text="creationElapsed + 's elapsed'"></small>
+                </div>
+            </div>
+            <details class="container-creation-output" x-show="creationLogs.length"
+                     :open="creationLogsOpen"
+                     @toggle="creationLogsOpen = $event.target.open">
+                <summary>
+                    <span>Docker output</span>
+                    <small x-text="creationLogs.length + ' lines'"></small>
+                </summary>
+                <div class="container-creation-log" x-ref="creationLog">
+                    <template x-for="entry in creationLogs" :key="entry.seq">
+                        <div class="container-log-line" :class="'is-' + entry.stream">
+                            <span class="container-log-stream" x-text="entry.stream"></span>
+                            <span class="container-log-text" x-text="entry.text"></span>
+                        </div>
+                    </template>
+                </div>
+            </details>
+        </div>
         <div class="actions">
             <span class="err" x-text="error"></span>
-            <button type="submit" class="primary">create & load</button>
+            <button type="submit" class="primary" :disabled="creating">
+                <span x-show="!creating">create & load</span>
+                <span x-show="creating" x-cloak>creating container…</span>
+            </button>
         </div>
     </form>
+
+    <div class="container-editor-backdrop" x-show="editorModal" x-cloak
+         x-transition.opacity.duration.150ms
+         @click.self="closeEditor()" @keydown.escape.window="closeEditor()">
+        <section class="container-editor-modal" role="dialog" aria-modal="true"
+                 :aria-label="editorModal === 'dockerfile' ? 'Edit Dockerfile' : 'Edit network policy'">
+            <header class="container-editor-header">
+                <div>
+                    <strong x-text="editorModal === 'dockerfile' ? 'Dockerfile' : 'Network policy'"></strong>
+                    <span x-text="editorModal === 'dockerfile'
+                        ? 'The maintained worker template is loaded and editable.'
+                        : 'Allow only required domains; blocklist entries take precedence.'"></span>
+                </div>
+                <button type="button" class="icon-btn" @click="closeEditor()" aria-label="Close editor">×</button>
+            </header>
+            <div class="container-editor-body" x-show="editorModal === 'dockerfile'">
+                <textarea x-ref="dockerfileEditor" x-model="form.dockerfile" spellcheck="false"
+                          aria-label="Dockerfile contents"></textarea>
+            </div>
+            <div class="container-editor-body container-network-editor" x-show="editorModal === 'network'">
+                <label>
+                    <span>Allowlist</span>
+                    <small>One domain or IPv4 address per line.</small>
+                    <textarea x-model="form.egressAllow" spellcheck="false"
+                              placeholder="api.openai.com&#10;ollama.com"></textarea>
+                </label>
+                <label>
+                    <span>Blocklist</span>
+                    <small>Optional. Matching entries are removed from the allowlist.</small>
+                    <textarea x-model="form.egressDeny" spellcheck="false"
+                              placeholder="telemetry.example.com"></textarea>
+                </label>
+            </div>
+            <footer class="container-editor-footer">
+                <button type="button" class="primary" @click="closeEditor()">done</button>
+            </footer>
+        </section>
+    </div>
 </div>
 
 <script>
+const DEFAULT_CONTAINER_DOCKERFILE = String.raw`FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    MUCLI_CONTAINER_MODE=1 \
+    PYTHONPATH=/opt/mucli
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git patch python3 python3-pip python3-venv ripgrep fd-find \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . /opt/mucli
+RUN python3 -m pip install --break-system-packages --no-cache-dir -r /opt/mucli/requirements.txt
+
+WORKDIR /workspace
+EXPOSE 9090
+ENTRYPOINT ["python3", "-m", "mu.container.worker"]
+`;
+
 function welcomeView() {
     return {
         sessions: [],
         providers: [],
         models: [],
+        sessionTypes: [
+            { value: "chat", label: "Chat", detail: "No file or shell tools" },
+            { value: "workspace", label: "Workspace", detail: "Host tools with approvals" },
+            { value: "container", label: "Container", detail: "Native tools in Docker" },
+        ],
         modelError: null,
         error: null,
+        creating: false,
+        creationTitle: "Creating container",
+        creationStatus: "Preparing container configuration…",
+        creationState: "idle",
+        creationElapsed: 0,
+        creationStartedAt: 0,
+        creationPoll: null,
+        creationLogs: [],
+        creationLogSeq: 0,
+        creationLogsOpen: false,
+        editorModal: null,
         form: {
             name: "", provider: "", model: "", workspace: "",
+            sessionType: "workspace", containerName: "", dockerfile: DEFAULT_CONTAINER_DOCKERFILE, mountsText: "",
+            egressAllow: [
+                "api.openai.com",
+                "api.anthropic.com",
+                "generativelanguage.googleapis.com",
+                "github.com",
+                "api.github.com",
+                "raw.githubusercontent.com",
+                "pypi.org",
+                "files.pythonhosted.org",
+                "archive.ubuntu.com",
+                "security.ubuntu.com",
+            ].join("\n"),
+            egressDeny: "",
             ollamaMode: "local", ollamaApiKey: "", ollamaKeySet: false,
         },
         async load() {
-            const [sR, pR] = await Promise.all([
+            const [sR, pR, cR] = await Promise.all([
                 fetch("/api/sessions"),
                 fetch("/api/providers"),
+                fetch("/api/container-defaults"),
             ]);
             this.sessions = (await sR.json()).sessions || [];
             this.providers = (await pR.json()).providers || [];
+            if (cR.ok) {
+                const defaults = await cR.json();
+                this.form.dockerfile = defaults.dockerfile || this.form.dockerfile;
+                this.form.egressAllow = (defaults.egress_allow || []).join("\n") || this.form.egressAllow;
+                this.form.egressDeny = (defaults.egress_deny || []).join("\n");
+            }
             const ollama = this.providers.find(p => p.name === "ollama");
             this.form.ollamaKeySet = !!(ollama && ollama.cloud_key_set);
+        },
+        lineCount(value) {
+            const lines = String(value || "").split(/\r?\n/).filter(line => line.trim());
+            return lines.length;
+        },
+        openEditor(kind) {
+            this.editorModal = kind;
+            if (kind === "dockerfile") {
+                this.$nextTick(() => this.$refs.dockerfileEditor?.focus());
+            }
+        },
+        closeEditor() {
+            this.editorModal = null;
+        },
+        syncContainerName() {
+            const slug = (this.form.name || "")
+                .trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");
+            if (!this.form.containerName || this.form.containerName.startsWith("mucli-")) {
+                this.form.containerName = slug ? `mucli-${slug}` : "";
+            }
+        },
+        parseMounts() {
+            const mounts = [];
+            for (const raw of (this.form.mountsText || "").split(/\r?\n/)) {
+                const line = raw.trim();
+                if (!line) continue;
+                const parts = line.split(":");
+                if (parts.length < 2) throw new Error(`invalid mount: ${line}`);
+                const mode = ["ro", "rw"].includes(parts[parts.length - 1]) ? parts.pop() : "rw";
+                const host_path = parts.shift();
+                const container_path = parts.join(":");
+                if (!host_path || !container_path.startsWith("/")) {
+                    throw new Error(`invalid mount: ${line}`);
+                }
+                mounts.push({ host_path, container_path, mode });
+            }
+            return mounts;
         },
         async onProviderChange() {
             this.form.model = "";
@@ -175,30 +392,190 @@ function welcomeView() {
             }
             location.reload();
         },
+        applyCreationStatus(status) {
+            if (!status || status.state === "idle") return status;
+            this.creationState = status.state || this.creationState;
+            this.creationStatus = status.detail
+                ? `${status.message} ${status.detail}`
+                : (status.message || this.creationStatus);
+            if (status.state === "ready") this.creationTitle = "Container ready";
+            if (status.state === "error") {
+                this.creationTitle = "Container creation failed";
+                this.creationLogsOpen = true;
+            }
+            const incoming = Array.isArray(status.logs) ? status.logs : [];
+            if (incoming.length) {
+                const known = new Set(this.creationLogs.map(entry => Number(entry.seq)));
+                for (const entry of incoming) {
+                    const seq = Number(entry.seq || 0);
+                    if (!known.has(seq)) this.creationLogs.push(entry);
+                    if (seq > this.creationLogSeq) this.creationLogSeq = seq;
+                }
+                if (this.creationLogs.length > 1200) {
+                    this.creationLogs.splice(0, this.creationLogs.length - 1200);
+                }
+                if (this.creationLogsOpen) {
+                    this.$nextTick(() => {
+                        const log = this.$refs.creationLog;
+                        if (log) log.scrollTop = log.scrollHeight;
+                    });
+                }
+            }
+            return status;
+        },
+        async refreshCreationStatus(name) {
+            const r = await fetch(
+                `/api/sessions/creation-status/${encodeURIComponent(name)}?after=${this.creationLogSeq}`,
+                { cache: "no-store" },
+            );
+            if (!r.ok) throw new Error(`status request failed (${r.status})`);
+            return this.applyCreationStatus(await r.json());
+        },
+        startCreationMonitor(name) {
+            this.stopCreationMonitor();
+            this.creating = true;
+            this.creationState = "running";
+            this.creationTitle = "Creating container";
+            this.creationStatus = "Sending the container configuration to MuCLI…";
+            this.creationStartedAt = Date.now();
+            this.creationElapsed = 0;
+            this.creationLogs = [];
+            this.creationLogSeq = 0;
+            this.creationLogsOpen = false;
+            this.creationPoll = window.setInterval(() => {
+                this.creationElapsed = Math.max(
+                    0,
+                    Math.floor((Date.now() - this.creationStartedAt) / 1000),
+                );
+            }, 250);
+        },
+        stopCreationMonitor() {
+            if (this.creationPoll !== null) {
+                window.clearInterval(this.creationPoll);
+                this.creationPoll = null;
+            }
+        },
+        async waitForContainerCreation(name) {
+            const deadline = Date.now() + (30 * 60 * 1000);
+            let connectionFailures = 0;
+            while (Date.now() < deadline) {
+                try {
+                    const status = await this.refreshCreationStatus(name);
+                    connectionFailures = 0;
+                    if (status.state === "ready" || status.state === "error") return status;
+                } catch (cause) {
+                    connectionFailures += 1;
+                    this.creationStatus = `Status connection interrupted (${connectionFailures}); retrying…`;
+                    if (connectionFailures >= 20) throw cause;
+                }
+                await new Promise(resolve => window.setTimeout(resolve, 750));
+            }
+            throw new Error("container creation timed out after 30 minutes");
+        },
         async createSession() {
+            if (this.creating) return;
             this.error = null;
             const body = {
                 name: this.form.name,
                 provider: this.form.provider,
                 model: this.form.model,
+                session_type: this.form.sessionType,
                 activate: true,
+                background_container: this.form.sessionType === "container",
             };
-            if (this.form.workspace.trim()) body.workspace = this.form.workspace.trim();
+            if (this.form.sessionType === "workspace" && this.form.workspace.trim()) {
+                body.workspace = this.form.workspace.trim();
+            }
+            if (this.form.sessionType === "container") {
+                try {
+                    body.container_name = this.form.containerName.trim() || `mucli-${this.form.name.trim()}`;
+                    if (this.form.dockerfile.trim()) body.dockerfile = this.form.dockerfile;
+                    body.mounts = this.parseMounts();
+                    body.egress_allow = (this.form.egressAllow || "")
+                        .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+                    body.egress_deny = (this.form.egressDeny || "")
+                        .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+                } catch (e) {
+                    this.error = String(e);
+                    return;
+                }
+            }
             if (this.form.provider === "ollama") {
                 body.ollama_mode = this.form.ollamaMode;
                 body.ollama_host =
                     this.form.ollamaMode === "cloud" ? "https://ollama.com" : "";
                 if (this.form.ollamaApiKey) body.ollama_api_key = this.form.ollamaApiKey;
             }
-            const r = await fetch("/api/sessions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-            });
+            const isContainer = this.form.sessionType === "container";
+            const sessionName = this.form.name.trim();
+            if (isContainer) this.startCreationMonitor(sessionName);
+            let r;
+            try {
+                r = await fetch("/api/sessions", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+            } catch (cause) {
+                if (!isContainer) {
+                    this.error = `create failed: ${cause}`;
+                    return;
+                }
+                // The server may have accepted the background job before the
+                // browser connection was interrupted. Poll the authoritative
+                // status endpoint instead of discarding a live Docker build.
+                this.creationStatus = "Creation request disconnected; checking background status…";
+                try {
+                    const status = await this.waitForContainerCreation(sessionName);
+                    this.stopCreationMonitor();
+                    this.creating = false;
+                    if (status.state === "ready") {
+                        location.reload();
+                        return;
+                    }
+                    this.error = status.detail || status.message || String(cause);
+                    return;
+                } catch (_) {
+                    this.stopCreationMonitor();
+                    this.creating = false;
+                    this.creationState = "error";
+                    this.creationTitle = "Container creation failed";
+                    this.creationStatus = String(cause);
+                    this.error = `create failed: ${cause}`;
+                    return;
+                }
+            }
+            const responseBody = await r.json().catch(() => ({}));
             if (!r.ok) {
-                const d = await r.json().catch(() => ({}));
-                this.error = d.detail || `create failed (${r.status})`;
+                this.stopCreationMonitor();
+                this.creating = false;
+                this.creationState = isContainer ? "error" : "idle";
+                this.creationTitle = "Container creation failed";
+                this.creationStatus = responseBody.detail || `create failed (${r.status})`;
+                this.error = this.creationStatus;
                 return;
+            }
+            if (isContainer) {
+                try {
+                    const status = await this.waitForContainerCreation(sessionName);
+                    this.stopCreationMonitor();
+                    this.creating = false;
+                    if (status.state === "error") {
+                        this.error = status.detail || status.message || "Container creation failed.";
+                        return;
+                    }
+                    this.creationState = "ready";
+                    this.creationTitle = "Container ready";
+                    this.creationStatus = "Opening the new session…";
+                } catch (cause) {
+                    this.stopCreationMonitor();
+                    this.creating = false;
+                    this.creationState = "error";
+                    this.creationTitle = "Container creation failed";
+                    this.creationStatus = String(cause);
+                    this.error = String(cause);
+                    return;
+                }
             }
             location.reload();
         },

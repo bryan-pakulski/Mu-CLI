@@ -1,0 +1,85 @@
+"""Session-type capability policy.
+
+``session_type`` is deliberately orthogonal to ``agent_mode``.  The former
+controls where tools execute and which capabilities exist; the latter controls
+the workflow prompt.
+"""
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Any
+
+VALID_SESSION_TYPES = frozenset({"chat", "workspace", "container"})
+
+# Keep conversational sessions useful without exposing host filesystem/process
+# capabilities.  Artifact tools are safe because they write only to the
+# session-owned registry directory.
+CHAT_TOOLS = frozenset(
+    {
+        "web_search",
+        "url_grounding",
+        "arxiv_search",
+        "doi_resolve",
+        "reddit_search",
+        "stackoverflow_search",
+        "hackernews_search",
+        "read_document",
+        "assess_source",
+        "save_memory",
+        "search_memory",
+        "list_memory",
+        "search_history",
+        "ask_user_choice",
+        "set_session_goal",
+        "upload_artifact",
+        "list_artifacts",
+    }
+)
+
+SESSION_TYPE_TOOLS: dict[str, frozenset[str] | None] = {
+    "chat": CHAT_TOOLS,
+    "workspace": None,
+    "container": None,
+}
+
+
+def normalize_session_type(value: Any) -> str:
+    """Return a supported session type, defaulting safely to ``workspace``."""
+    normalized = str(value or "workspace").strip().lower()
+    return normalized if normalized in VALID_SESSION_TYPES else "workspace"
+
+
+def allowed_tools(session_type: str) -> frozenset[str] | None:
+    """Return the allowed tool names; ``None`` means all registered tools."""
+    return SESSION_TYPE_TOOLS[normalize_session_type(session_type)]
+
+
+def is_tool_allowed(tool_name: str, session_type: str) -> bool:
+    allowed = allowed_tools(session_type)
+    return allowed is None or str(tool_name) in allowed
+
+
+def filter_tools_for_session_type(
+    tools: Iterable[Any], session_type: str
+) -> list[Any]:
+    allowed = allowed_tools(session_type)
+    if allowed is None:
+        return list(tools)
+    return [tool for tool in tools if getattr(tool, "name", "") in allowed]
+
+
+def tools_enabled_without_workspace(session_type: str) -> bool:
+    """Whether provider tool schemas may be exposed without attached folders."""
+    return normalize_session_type(session_type) in {"chat", "container"}
+
+
+__all__ = [
+    "CHAT_TOOLS",
+    "SESSION_TYPE_TOOLS",
+    "VALID_SESSION_TYPES",
+    "allowed_tools",
+    "filter_tools_for_session_type",
+    "is_tool_allowed",
+    "normalize_session_type",
+    "tools_enabled_without_workspace",
+]

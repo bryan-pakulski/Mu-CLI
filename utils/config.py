@@ -15,6 +15,28 @@ SESSION_DIR = os.path.join(HISTORY_DIR, "sessions")
 LOG_DIR = os.path.join(HISTORY_DIR, "logs")
 DEFAULT_SESSION_NAME = "default"
 
+VALID_SESSION_TYPES = ("chat", "workspace", "container")
+SESSION_TYPE_PROMPTS = {
+    "chat": (
+        "You are in CHAT session type. Host filesystem and shell tools are not "
+        "available. Respond conversationally and use research/memory tools when "
+        "useful. Do not attempt file, workspace, shell, or process operations."
+    ),
+    "workspace": (
+        "You are in WORKSPACE session type. File and shell tools execute on the "
+        "MuCLI host and must remain within explicitly attached workspace folders. "
+        "Use approval-required behavior for modifying actions unless the user has "
+        "explicitly enabled an override."
+    ),
+    "container": (
+        "You are in CONTAINER session type. The complete agent loop and tools run "
+        "inside a disposable Docker sandbox. You may install software inside the "
+        "container. Only explicit mounts reach the host, outbound traffic is "
+        "host-firewall allowlisted, and deliverables must be published with "
+        "upload_artifact so the user can download them."
+    ),
+}
+
 if not os.path.exists(HISTORY_DIR):
     os.makedirs(HISTORY_DIR)
 if not os.path.exists(LOG_DIR):
@@ -87,6 +109,10 @@ VARIABLE_SCHEMA = {
         "type": str,
         "default": "default",
     },  # Agent mode, determines the initial system prompt
+    "session_type": {
+        "type": str,
+        "default": "workspace",
+    },  # chat | workspace | container
     "ollama_host": {
         "type": str,
         "default": "",

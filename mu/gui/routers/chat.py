@@ -231,6 +231,27 @@ async def send_message(request: Request, payload: Dict[str, Any]):
         )
         return {"accepted": True, "kind": "command", "session_name": name}
 
+    session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
+    if session_type == "container":
+        busy.set()
+        try:
+            await asyncio.to_thread(
+                request.app.state.container_supervisor.send,
+                name,
+                text,
+                provider=session.provider.name,
+                model=session.provider.model_name,
+                agent_mode=str(session.variables.get("agent_mode", "default")),
+                system_instruction=session.system_instruction,
+            )
+        except Exception as exc:
+            busy.clear()
+            await bus.publish(
+                {"kind": "error", "text": f"container send failed: {exc}", "session_name": name}
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"accepted": True, "kind": "container", "session_name": name}
+
     lock = request.app.state.session_lock_for(name)
 
     def _run():
@@ -262,6 +283,16 @@ async def interrupt(request: Request, payload: Optional[Dict[str, Any]] = None):
         session_name = (payload.get("session_name") or "").strip() or None
     session = _resolve_session(request, session_name)
     name = session.session_manager.current_session_name
+
+    session_type = str(session.variables.get("session_type", "workspace") or "workspace").lower()
+    if session_type == "container":
+        try:
+            result = await asyncio.to_thread(
+                request.app.state.container_supervisor.interrupt, name
+            )
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     tid = _agent_threads.get(name)
     if tid is None:

@@ -150,6 +150,7 @@ def _load_command_modules() -> None:
     from . import goal  # noqa: F401 — registers /goal
     from . import prompts  # noqa: F401 — registers /prompts
     from . import compact  # noqa: F401 — registers /compact
+    from . import container  # noqa: F401 — registers /container, /template
 
 
 _load_command_modules()

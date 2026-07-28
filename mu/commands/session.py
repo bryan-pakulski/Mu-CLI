@@ -11,6 +11,9 @@ sub-commands group related operations:
 """
 
 from typing import Any
+import shlex
+
+from mu.tools.capabilities import normalize_session_type
 
 from . import CommandResult, command
 
@@ -129,8 +132,31 @@ def _queue_session_resumption_briefing(session: Any) -> None:
     session.queue_resumption_briefing("\n".join(fragments))
 
 
-def _new_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
-    target_name = name.strip() if name else None
+def _parse_new_args(raw: str) -> tuple[str | None, str]:
+    parts = shlex.split(raw or "")
+    session_type = "workspace"
+    name: str | None = None
+    index = 0
+    while index < len(parts):
+        part = parts[index]
+        if part == "--type" and index + 1 < len(parts):
+            session_type = normalize_session_type(parts[index + 1])
+            index += 2
+            continue
+        if part.startswith("--type="):
+            session_type = normalize_session_type(part.split("=", 1)[1])
+            index += 1
+            continue
+        if name is None:
+            name = part
+        index += 1
+    return name, session_type
+
+
+def _new_session(session: Any, raw: str, allow_prompt: bool) -> CommandResult:
+    target_name, session_type = _parse_new_args(raw)
+    # Container sessions are created through the same command in the TUI and
+    # walk through container selection, Dockerfile, mounts, and network policy.
 
     has_provider = bool(
         getattr(session.provider, "name", None)
@@ -167,6 +193,7 @@ def _new_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         target_name,
         session.provider.name,
         session.provider.model_name,
+        session_type=session_type,
     )
     if session.provider.name == "ollama" and selected_ollama_mode:
         session.variables["ollama_mode"] = selected_ollama_mode
@@ -175,6 +202,12 @@ def _new_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         session.session_manager.save_history(session.folder_context)
     session.staged_files = []
     session.sync_runtime_state()
+    if session_type == "container":
+        from mu.container.tui import configure_tui_container, ensure_tui_container
+
+        if allow_prompt:
+            configure_tui_container(session)
+        ensure_tui_container(session)
 
     ui = getattr(session, "ui", None)
     if ui is not None and hasattr(ui, "set_variables"):
@@ -189,7 +222,10 @@ def _new_session(session: Any, name: str, allow_prompt: bool) -> CommandResult:
         except ImportError:
             pass
 
-    msg = f"Started new session: {session.session_manager.current_session_name}"
+    msg = (
+        f"Started new session: {session.session_manager.current_session_name} "
+        f"(type={session_type})"
+    )
     return CommandResult(ok=True, message=msg)
 
 
@@ -207,7 +243,7 @@ def _delete_session(session: Any, name: str, allow_prompt: bool) -> CommandResul
 
 @command(
     "/session",
-    help="Manage saved sessions: list, load <name>, new [name], delete <name>.",
+    help="Manage saved sessions: list, load <name>, new [--type chat|workspace|container] [name], delete <name>.",
 )
 def session_cmd(session: Any, args: str, *, allow_prompt: bool = True) -> CommandResult:
     raw = (args or "").strip()

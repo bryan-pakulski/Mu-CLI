@@ -30,6 +30,7 @@ from mu.feature.engine import (
 from mu.tools._dispatcher import execute_tool
 from mu.ui.rich_ui import RichUI
 from utils.config import AGENT_MODE_METADATA, _DEFAULT_CONTEXT_TOKEN_LIMIT
+from mu.tools.capabilities import normalize_session_type
 
 console = Console()
 
@@ -671,6 +672,7 @@ def print_splash(session):
 
     sys_status = "SET" if session.system_instruction else "NONE"
     agent_mode = session.variables.get("agent_mode", "default")
+    session_type = session.variables.get("session_type", "workspace")
     mode_meta = AGENT_MODE_METADATA.get(str(agent_mode), {})
     mode_description = mode_meta.get("description", "")
     yolo_status = "ON" if session.variables.get("yolo", False) else "OFF"
@@ -694,6 +696,7 @@ def print_splash(session):
     [bold magenta]System:[/bold magenta]   {sys_status}                                
     [bold magenta]Model:[/bold magenta]    [bold cyan]{session.provider.model_name}[/bold cyan]       
     [bold magenta]Thinking:[/bold magenta] [bold cyan]{session.thinking}[/bold cyan] | [bold magenta]Agentic:[/bold magenta] [bold cyan]{session.agentic}[/bold cyan] | [bold magenta]YOLO:[/bold magenta] [bold cyan]{yolo_status}[/bold cyan]
+    [bold magenta]Type:[/bold magenta]     [bold cyan]{session_type}[/bold cyan]
     [bold magenta]Mode:[/bold magenta]     [bold cyan]{agent_mode}[/bold cyan] — {mode_description}
     [bold magenta]Workspace:[/bold magenta][bold green] {folder_list}[/bold green]
 """
@@ -1006,6 +1009,9 @@ def sync_provider_settings(session):
 
 def build_session(args, ui, allow_prompt=True):
     session_manager = SessionManager(ui=ui, session_name=args.session)
+    created_new_session = False
+    requested_session_type = getattr(args, "session_type", None)
+    selected_session_type = normalize_session_type(requested_session_type)
     if ui and hasattr(ui, "set_variables"):
         ui.set_variables(session_manager.variables)
     
@@ -1017,6 +1023,12 @@ def build_session(args, ui, allow_prompt=True):
 
     if allow_prompt and not args.session:
         action, session_name = choose_session(session_manager)
+        if action == "new" and requested_session_type is None:
+            selected_session_type = Prompt.ask(
+                "Session type",
+                choices=["chat", "workspace", "container"],
+                default="workspace",
+            )
         if action == "load":
             session_manager.switch_session(session_name)
             provider_config = session_manager.provider_config
@@ -1052,8 +1064,12 @@ def build_session(args, ui, allow_prompt=True):
                 allow_prompt=allow_prompt,
             )
             session_manager.new_session(
-                session_name, provider.name, provider.model_name
+                session_name,
+                provider.name,
+                provider.model_name,
+                session_type=selected_session_type,
             )
+            created_new_session = True
     else:
         provider = None
         provider_name = args.provider
@@ -1125,11 +1141,22 @@ def build_session(args, ui, allow_prompt=True):
     except ImportError:
         pass
 
-    if args.workspace:
+    if allow_prompt and session.variables.get("session_type") == "container":
+        from mu.container.tui import configure_tui_container, ensure_tui_container
+
+        if created_new_session or not getattr(session.session_manager, "container_config", None):
+            configure_tui_container(session)
+        ensure_tui_container(session)
+
+    if args.workspace and session.variables.get("session_type") == "workspace":
         for workspace in args.workspace:
             session.folder_context.add_folder(workspace)
         session.session_manager.save_history(session.folder_context)
-    elif not session.folder_context.folders and allow_prompt:
+    elif (
+        not session.folder_context.folders
+        and allow_prompt
+        and session.variables.get("session_type") == "workspace"
+    ):
         try:
             from prompt_toolkit import prompt as _pt_prompt
             from prompt_toolkit.completion import PathCompleter as _PathCompleter
@@ -1300,6 +1327,13 @@ def main():
         help="Load the specified saved session instead of prompting.",
     )
     parser.add_argument(
+        "--session-type",
+        dest="session_type",
+        choices=["chat", "workspace", "container"],
+        default=None,
+        help="Capability boundary for a newly created session.",
+    )
+    parser.add_argument(
         "--workspace",
         action="append",
         default=[],
@@ -1468,7 +1502,12 @@ def main():
                         break
                     continue
 
-                send_result = session.send_message(user_input)
+                if session.variables.get("session_type") == "container":
+                    from mu.container.tui import send_tui_container_message
+
+                    send_result = send_tui_container_message(session, user_input)
+                else:
+                    send_result = session.send_message(user_input)
                 if send_result.get("status") == "interrupted":
                     console.print(
                         "[dim]Execution paused. Type /continue to resume, or enter a new prompt to re-guide the agent.[/dim]"
@@ -1476,6 +1515,13 @@ def main():
                 refresh_memory_hud(session, ui)
 
             except KeyboardInterrupt:
+                if session.variables.get("session_type") == "container":
+                    try:
+                        from mu.container.tui import interrupt_tui_container
+
+                        interrupt_tui_container(session)
+                    except Exception:
+                        pass
                 console.print("\n(Interrupted. Type /quit to exit)")
             except EOFError:
                 console.print("\nGoodbye!")
@@ -1485,6 +1531,12 @@ def main():
         # tasks so nothing outlives the session. No-op when none are active.
         try:
             session.shutdown()
+        except Exception:
+            pass
+        try:
+            from mu.container.tui import shutdown_tui_container
+
+            shutdown_tui_container(session)
         except Exception:
             pass
 

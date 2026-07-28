@@ -762,6 +762,58 @@ document.addEventListener("alpine:init", () => {
         },
     });
 
+    Alpine.store("artifacts", {
+        bySession: {},
+        loading: false,
+        loadedName: null,
+        get current() {
+            const name = Alpine.store("chat").currentName;
+            return (name && this.bySession[name]) || [];
+        },
+        async load(name, force = false) {
+            const target = name || Alpine.store("chat").currentName;
+            if (!target) return;
+            if (!force && this.loadedName === target && this.bySession[target]) return;
+            this.loading = true;
+            try {
+                const r = await fetch(`/api/sessions/${encodeURIComponent(target)}/artifacts`);
+                if (!r.ok) return;
+                const d = await r.json();
+                this.bySession[target] = d.artifacts || [];
+                this.loadedName = target;
+            } finally {
+                this.loading = false;
+            }
+        },
+        add(artifact, name) {
+            if (!artifact || !artifact.artifact_id) return;
+            const target = name || Alpine.store("chat").currentName;
+            if (!target) return;
+            const items = this.bySession[target] || [];
+            this.bySession[target] = [artifact, ...items.filter(a => a.artifact_id !== artifact.artifact_id)];
+            this.loadedName = target;
+        },
+        async remove(artifactId, name) {
+            const target = name || Alpine.store("chat").currentName;
+            if (!target) return;
+            const r = await fetch(
+                `/api/sessions/${encodeURIComponent(target)}/artifacts/${encodeURIComponent(artifactId)}`,
+                { method: "DELETE" },
+            );
+            if (r.ok) {
+                this.bySession[target] = (this.bySession[target] || []).filter(
+                    a => a.artifact_id !== artifactId
+                );
+            }
+        },
+        formatSize(bytes) {
+            const n = Number(bytes) || 0;
+            if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+            if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+            return `${n} B`;
+        },
+    });
+
     // ── Slash command completion ───────────────────────────────
     //
     // Multi-level: command → subcommand → dynamic args (sessions,
@@ -777,6 +829,7 @@ document.addEventListener("alpine:init", () => {
         _subTree: {
             "/history":       { subs: ["clear", "show"] },
             "/session":       { subs: ["list", "load", "new", "delete"],
+                                nested: { new: { subs: ["--type"], nested: { "--type": { subs: ["chat", "workspace", "container"] } } } },
                                 dynamic: { load: "sessions", delete: "sessions" } },
             "/workspace":     { subs: ["folder", "file", "clear"],
                                 nested: {
@@ -3908,6 +3961,9 @@ function routeEvent(ev) {
         case "thinking_delta": chat.addThinking(ev.text || "", name); break;
         case "tool_result":
             chat.addToolResult(ev.tool_name || "", ev.text || "", name);
+            break;
+        case "artifact_created":
+            Alpine.store("artifacts").add(ev.artifact, name);
             break;
         case "info": chat.addInfo(ev.text || "", null, name); break;
         case "error":

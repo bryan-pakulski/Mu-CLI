@@ -346,3 +346,9 @@ gitignore), `tests/test_tools.py` (workspace boundary + `..`
 traversal), `tests/test_mu_spawn_agent.py` (depth cap, plan-mode block,
 tool whitelist), `tests/test_mu_agent_plan_mode.py` (plan-mode hook),
 `tests/test_security_mode.py` (audit engine).
+
+## Container-mode trust boundary
+
+Container sessions do not mount the Docker socket, do not use privileged mode, and drop network-administration and host-administration capabilities. Host bind mounts are explicit. Each shared worker receives only the session directories attached to it. Outbound forwarding is default-denied in the host `DOCKER-USER` chain and container-to-host traffic is separately restricted in `INPUT`.
+
+User-supplied Dockerfiles still execute through the host Docker build service and therefore carry the normal trust implications of `docker build`. Static hostname-to-IP firewall rules must be refreshed when a provider rotates addresses. Docker's embedded DNS can reveal queried hostnames; the policy blocks non-allowlisted TCP destinations but is not a content-filtering DNS proxy. See [Container security](container_security.md) for the complete model and operational requirements.

@@ -1,5 +1,4 @@
-// Design tokens — single source of truth for spacing, type, radii, colors.
-// One accent color (indigo #6366F1), neutral gray ramp, semantic state colors.
+// Design tokens — a restrained neutral palette with one indigo accent.
 
 export const spacing = {
   xs: 4,
@@ -22,8 +21,8 @@ export const typography = {
 } as const;
 
 export const radii = {
-  sm: 6,
-  lg: 12,
+  sm: 10,
+  lg: 18,
   pill: 999,
 } as const;
 
@@ -46,39 +45,39 @@ export type ThemeColors = {
 };
 
 export const lightColors: ThemeColors = {
-  bg: '#FFFFFF',
-  bgLift: '#F8FAFC',
-  bgHover: '#F1F5F9',
-  text: '#0F172A',
-  textDim: '#64748B',
-  textSoft: '#334155',
-  accent: '#6366F1',
-  accentSoft: '#E0E7FF',
+  bg: '#F7F7F8',
+  bgLift: '#FFFFFF',
+  bgHover: '#EFEFF1',
+  text: '#171717',
+  textDim: '#6F6F74',
+  textSoft: '#3F3F46',
+  accent: '#5B5BD6',
+  accentSoft: '#ECECFF',
   accentText: '#FFFFFF',
-  border: '#E2E8F0',
-  borderStrong: '#CBD5E1',
-  success: '#16A34A',
-  warning: '#D97706',
+  border: '#E5E5E8',
+  borderStrong: '#D2D2D7',
+  success: '#15803D',
+  warning: '#B45309',
   error: '#DC2626',
   info: '#2563EB',
 };
 
 export const darkColors: ThemeColors = {
-  bg: '#0F172A',
-  bgLift: '#1E293B',
-  bgHover: '#334155',
-  text: '#F1F5F9',
-  textDim: '#64748B',
-  textSoft: '#CBD5E1',
-  accent: '#6366F1',
-  accentSoft: '#312E81',
-  accentText: '#FFFFFF',
-  border: '#334155',
-  borderStrong: '#475569',
-  success: '#22C55E',
+  bg: '#0F1012',
+  bgLift: '#18191C',
+  bgHover: '#23252A',
+  text: '#F5F5F6',
+  textDim: '#A1A1AA',
+  textSoft: '#D4D4D8',
+  accent: '#8B8BF5',
+  accentSoft: '#29294B',
+  accentText: '#0F1012',
+  border: '#2B2D31',
+  borderStrong: '#41434A',
+  success: '#4ADE80',
   warning: '#FBBF24',
-  error: '#EF4444',
-  info: '#3B82F6',
+  error: '#F87171',
+  info: '#60A5FA',
 };
 
 export type Theme = {

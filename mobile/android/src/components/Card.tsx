@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, ViewStyle } from 'react-native';
+import { View, ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 
 export type CardProps = {
@@ -17,14 +17,12 @@ export function Card({ children, style, elevated }: CardProps) {
           backgroundColor: colors.bgLift,
           borderRadius: radii.lg,
           padding: spacing.base,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.border,
         },
         elevated && {
           shadowColor: '#000',
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: 8 },
           elevation: 3,
         },
         style,

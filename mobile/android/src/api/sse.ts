@@ -27,7 +27,7 @@ export function subscribeToEvents(handlers: SSEHandlers): SSESubscription {
 
   const es = new EventSource(url, {
     headers: { Accept: 'text/event-stream' },
-    pollingInterval: 0,
+    pollingInterval: 3000,
   });
 
   es.addEventListener('open', () => {

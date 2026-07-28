@@ -1,20 +1,25 @@
-import React, { useState, useRef } from 'react';
+import React, { useCallback, useState } from 'react';
 import { NavigationContainer, DarkTheme, DefaultTheme, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import type { WorkspaceCategoryId } from './workspace';
 
-import { Header, type ViewPanel } from '../components/Header';
-import { SessionsDrawer } from '../components/SessionsDrawer';
-import { InspectorDrawer } from '../components/InspectorDrawer';
+import { ConnectionPrompt } from '../components/ConnectionPrompt';
+import { EdgeSwipeView } from '../components/EdgeSwipeView';
+import { ModeDrawer } from '../components/ModeDrawer';
+import { ModernHeader } from '../components/ModernHeader';
+import { SwipeSessionsDrawer } from '../components/SwipeSessionsDrawer';
+import { useConnectionStore } from '../store/connection';
 
 import { ChatScreen } from '../screens/ChatScreen';
+import { WorkspaceScreen } from '../screens/WorkspaceScreen';
+import { WorkspaceCategoryScreen } from '../screens/WorkspaceCategoryScreen';
 import { MemoryScreen } from '../screens/MemoryScreen';
 import { FilesScreen } from '../screens/FilesScreen';
 import { SkillsScreen } from '../screens/SkillsScreen';
 import { AudioScreen } from '../screens/AudioScreen';
-import { TracesScreen } from '../screens/TracesScreen';
+import { SessionTraceScreen } from '../screens/SessionTraceScreen';
 import { ProvidersScreen } from '../screens/ProvidersScreen';
 import { ConnectionScreen } from '../screens/ConnectionScreen';
 import { ModesScreen } from '../screens/ModesScreen';
@@ -30,6 +35,8 @@ import { HistoryScreen } from '../screens/HistoryScreen';
 
 export type RootStackParamList = {
   Chat: undefined;
+  Workspace: undefined;
+  WorkspaceCategory: { categoryId: WorkspaceCategoryId; title: string };
   Teacher: undefined;
   Feature: undefined;
   Research: undefined;
@@ -52,100 +59,102 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const navRef = React.createRef<NavigationContainerRef<RootStackParamList>>();
 
-const VIEW_TO_SCREEN: Record<string, keyof RootStackParamList> = {
-  teacher: 'Teacher',
-  feature: 'Feature',
-  research: 'Research',
-  security: 'Security',
-  loop: 'Loop',
-  debug: 'Debug',
-  history: 'History',
-  systemPrompts: 'SystemPrompts',
-  memory: 'Memory',
-  files: 'Files',
-  skills: 'Skills',
-  audio: 'Audio',
-  traces: 'Traces',
-  providers: 'Providers',
-  connection: 'Connection',
-  modes: 'Modes',
-  prompts: 'Prompts',
-};
-
-const PANEL_SCREENS: { name: keyof RootStackParamList; component: React.ComponentType }[] = [
-  { name: 'Teacher', component: TeacherScreen },
-  { name: 'Feature', component: FeatureScreen },
-  { name: 'Research', component: ResearchScreen },
-  { name: 'Security', component: SecurityScreen },
-  { name: 'Loop', component: LoopScreen },
-  { name: 'Debug', component: DebugScreen },
-  { name: 'History', component: HistoryScreen },
-  { name: 'SystemPrompts', component: SystemPromptsScreen },
-  { name: 'Memory', component: MemoryScreen },
-  { name: 'Files', component: FilesScreen },
-  { name: 'Skills', component: SkillsScreen },
-  { name: 'Audio', component: AudioScreen },
-  { name: 'Traces', component: TracesScreen },
-  { name: 'Providers', component: ProvidersScreen },
-  { name: 'Connection', component: ConnectionScreen },
-  { name: 'Modes', component: ModesScreen },
-  { name: 'Prompts', component: PromptsScreen },
+const PANEL_SCREENS: {
+  name: Exclude<keyof RootStackParamList, 'Chat' | 'Workspace' | 'WorkspaceCategory'>;
+  title: string;
+  component: React.ComponentType;
+}[] = [
+  { name: 'Teacher', title: 'Teacher', component: TeacherScreen },
+  { name: 'Feature', title: 'Feature plans', component: FeatureScreen },
+  { name: 'Research', title: 'Research', component: ResearchScreen },
+  { name: 'Security', title: 'Security', component: SecurityScreen },
+  { name: 'Loop', title: 'Loop', component: LoopScreen },
+  { name: 'Debug', title: 'Debug', component: DebugScreen },
+  { name: 'History', title: 'History', component: HistoryScreen },
+  { name: 'SystemPrompts', title: 'System prompts', component: SystemPromptsScreen },
+  { name: 'Memory', title: 'Memory', component: MemoryScreen },
+  { name: 'Files', title: 'Files', component: FilesScreen },
+  { name: 'Skills', title: 'Skills', component: SkillsScreen },
+  { name: 'Audio', title: 'Audio', component: AudioScreen },
+  { name: 'Traces', title: 'Session trace', component: SessionTraceScreen },
+  { name: 'Providers', title: 'Providers', component: ProvidersScreen },
+  { name: 'Connection', title: 'Connection', component: ConnectionScreen },
+  { name: 'Modes', title: 'Modes', component: ModesScreen },
+  { name: 'Prompts', title: 'Pending prompts', component: PromptsScreen },
 ];
 
 function ChatScreenWithChrome() {
-  const [activeView, setActiveView] = useState<ViewPanel>('chat');
+  const isConnected = useConnectionStore(state => state.isConnected);
   const [sessionsOpen, setSessionsOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
 
-  const handleViewChange = (view: ViewPanel) => {
-    if (view === 'chat') {
-      setActiveView('chat');
-      return;
-    }
-    const screen = VIEW_TO_SCREEN[view];
-    if (screen) {
-      setActiveView(view);
-      navRef.current?.navigate(screen);
-    }
-  };
+  const openSessions = useCallback(() => setSessionsOpen(true), []);
+  const openMode = useCallback(() => setModeOpen(true), []);
 
   return (
-    <View style={{ flex: 1 }}>
-      <Header
-        activeView={activeView}
-        onViewChange={handleViewChange}
-        onOpenSessions={() => setSessionsOpen(true)}
-        onOpenInspector={() => setInspectorOpen(true)}
-      />
-      <ChatScreen />
-      <SessionsDrawer visible={sessionsOpen} onClose={() => setSessionsOpen(false)} />
-      <InspectorDrawer visible={inspectorOpen} onClose={() => setInspectorOpen(false)} />
-    </View>
+    <EdgeSwipeView onSwipeFromLeft={openSessions} onSwipeFromRight={openMode}>
+      <View style={{ flex: 1 }}>
+        <ModernHeader
+          onOpenSessions={openSessions}
+          onOpenWorkspace={() => navRef.current?.navigate('Workspace')}
+          onOpenTraces={() => navRef.current?.navigate('Traces')}
+          onOpenConnection={() => navRef.current?.navigate('Connection')}
+          onOpenModes={() => navRef.current?.navigate('Modes')}
+          onOpenProviders={() => navRef.current?.navigate('Providers')}
+        />
+        {isConnected ? (
+          <ChatScreen />
+        ) : (
+          <ConnectionPrompt onConnect={() => navRef.current?.navigate('Connection')} />
+        )}
+        <SwipeSessionsDrawer visible={sessionsOpen} onClose={() => setSessionsOpen(false)} />
+        <ModeDrawer
+          visible={modeOpen}
+          onClose={() => setModeOpen(false)}
+          onOpenModes={() => navRef.current?.navigate('Modes')}
+        />
+      </View>
+    </EdgeSwipeView>
   );
 }
 
 export function AppNavigator() {
   const { colors, isDark } = useTheme();
-
-  const navTheme = isDark ? DarkTheme : DefaultTheme;
-  navTheme.colors.background = colors.bg;
-  navTheme.colors.card = colors.bgLift;
-  navTheme.colors.border = colors.border;
-  navTheme.colors.text = colors.text;
+  const baseTheme = isDark ? DarkTheme : DefaultTheme;
+  const navTheme = {
+    ...baseTheme,
+    colors: {
+      ...baseTheme.colors,
+      background: colors.bg,
+      card: colors.bg,
+      border: colors.border,
+      text: colors.text,
+      primary: colors.accent,
+    },
+  };
 
   return (
     <NavigationContainer ref={navRef} theme={navTheme}>
       <Stack.Navigator
         screenOptions={{
-          headerStyle: { backgroundColor: colors.bgLift },
+          animation: 'slide_from_right',
+          contentStyle: { backgroundColor: colors.bg },
+          headerStyle: { backgroundColor: colors.bg },
           headerTintColor: colors.text,
           headerShadowVisible: false,
-          headerBackTitle: 'Back',
+          headerBackTitle: '',
+          headerTitleStyle: { fontSize: 17, fontWeight: '600' },
         }}
       >
         <Stack.Screen name="Chat" component={ChatScreenWithChrome} options={{ headerShown: false }} />
-        {PANEL_SCREENS.map(({ name, component: Comp }) => (
-          <Stack.Screen key={name} name={name} component={Comp} options={{ title: name }} />
+        <Stack.Screen name="Workspace" component={WorkspaceScreen} options={{ title: 'Workspace' }} />
+        <Stack.Screen
+          name="WorkspaceCategory"
+          component={WorkspaceCategoryScreen}
+          options={({ route }: { route: { params: RootStackParamList['WorkspaceCategory'] } }) => ({ title: route.params.title })}
+        />
+        {PANEL_SCREENS.map(({ name, title, component: Comp }) => (
+          <Stack.Screen key={name} name={name} component={Comp} options={{ title }} />
         ))}
       </Stack.Navigator>
     </NavigationContainer>

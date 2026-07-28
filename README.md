@@ -173,3 +173,9 @@ Agent modes (one doc per mode):
 ```bash
 make test
 ```
+
+## ROADMAP
+
+- Android app integration
+- Docker environment mode, sessions => image 
+- Authentication for hosting

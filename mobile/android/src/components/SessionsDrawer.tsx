@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, Modal, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
 import { sessionsApi, SessionSummary } from '../api/sessions';
@@ -12,6 +13,7 @@ export type SessionsDrawerProps = {
 };
 
 export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { activeSessionName, setActiveSession } = useConnectionStore();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -91,10 +93,10 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.overlay}>
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
-        <View style={[styles.drawer, { backgroundColor: colors.bgLift }]}>
+        <View style={[styles.drawer, { backgroundColor: colors.bg, paddingTop: Math.max(insets.top, 16) }]}>
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
             <Text style={[styles.title, { color: colors.text }]}>Sessions</Text>
             <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.closeBtn}>
@@ -120,7 +122,7 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
                 style={[
                   styles.row,
                   { borderBottomColor: colors.border },
-                  activeSessionName === item.name && { backgroundColor: colors.bg },
+                  activeSessionName === item.name && { backgroundColor: colors.bgHover },
                 ]}
               >
                 <View style={[styles.statusDot, { backgroundColor: statusColor(item) }]} />
@@ -158,28 +160,32 @@ export function SessionsDrawer({ visible, onClose }: SessionsDrawerProps) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
   },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.32)',
   },
   drawer: {
-    width: '80%',
-    maxWidth: 340,
-    paddingTop: 44,
+    width: '88%',
+    maxWidth: 380,
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    shadowOffset: { width: 8, height: 0 },
+    elevation: 8,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingVertical: 16,
+    borderBottomWidth: 0,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 22,
+    fontWeight: '700',
   },
   closeBtn: {
     minHeight: 44,
@@ -192,7 +198,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     minHeight: 52,
-    borderBottomWidth: 0.5,
+    borderBottomWidth: 0,
+    borderRadius: 14,
+    marginHorizontal: 8,
+    marginBottom: 4,
     gap: 8,
   },
   statusDot: {
@@ -216,7 +225,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     padding: 16,
-    borderTopWidth: 1,
+    borderTopWidth: 0,
   },
   newBtn: {
     flexDirection: 'row',
@@ -224,7 +233,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 14,
     minHeight: 44,
   },
   newBtnText: {

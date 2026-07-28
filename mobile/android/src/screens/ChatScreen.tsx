@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   FlatList,
@@ -14,31 +14,31 @@ import * as Clipboard from 'expo-clipboard';
 import Markdown from 'react-native-markdown-display';
 import { useTheme } from '../theme/ThemeContext';
 import { useConnectionStore } from '../store/connection';
-import { chatApi } from '../api/chat';
-import { subscribeToEvents, SSESubscription } from '../api/sse';
 import { modesApi, ModeInfo } from '../api/modes';
 import { inspectorApi, InspectorVariableGroup } from '../api/inspector';
 import { Text, Button, Card, Skeleton, EmptyState, ErrorState } from '../components';
 import { BottomSheet } from '../components/BottomSheet';
+import { GeneratingIndicator } from '../components/GeneratingIndicator';
+import { useChatSession, type ChatMessage } from '../hooks/useChatSession';
 import { spacing } from '../theme/tokens';
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'thinking';
-  text: string;
-  turnId?: string;
-  streaming?: boolean;
-}
 
 export function ChatScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { activeSessionName } = useConnectionStore();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const {
+    messages,
+    streaming,
+    waitingForFirstToken,
+    historyLoading,
+    activityLabel,
+    sseConnected,
+    error,
+    sendMessage,
+    stop,
+    retry,
+  } = useChatSession(activeSessionName);
   const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [waitingForFirstToken, setWaitingForFirstToken] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [modeSheetOpen, setModeSheetOpen] = useState(false);
   const [modes, setModes] = useState<ModeInfo[]>([]);
   const [activeMode, setActiveMode] = useState<string | null>(null);
@@ -47,105 +47,12 @@ export function ChatScreen() {
   const [varsLoading, setVarsLoading] = useState(false);
   const connection = useConnectionStore();
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
-  const sseSubRef = useRef<SSESubscription | null>(null);
-  const msgIdRef = useRef(0);
-
-  const nextId = () => `msg-${++msgIdRef.current}`;
-
-  const appendAssistantDelta = useCallback((turnId: string, delta: string) => {
-    setMessages(prev => {
-      const idx = prev.findIndex(m => m.turnId === turnId && m.role === 'assistant');
-      if (idx >= 0) {
-        const updated = [...prev];
-        updated[idx] = { ...updated[idx], text: updated[idx].text + delta, streaming: true };
-        return updated;
-      }
-      return [...prev, { id: nextId(), role: 'assistant', text: delta, turnId, streaming: true }];
-    });
-  }, []);
-
-  const finalizeAssistant = useCallback((turnId: string) => {
-    setMessages(prev => prev.map(m =>
-      m.turnId === turnId && m.role === 'assistant' ? { ...m, streaming: false } : m,
-    ));
-    setStreaming(false);
-    setWaitingForFirstToken(false);
-  }, []);
 
   const send = async () => {
     const text = input.trim();
     if (!text || streaming) return;
     setInput('');
-    setError(null);
-    setStreaming(true);
-    setWaitingForFirstToken(true);
-
-    const userMsg: ChatMessage = { id: nextId(), role: 'user', text };
-    setMessages(prev => [...prev, userMsg]);
-
-    // Subscribe to SSE BEFORE sending so we don't miss early events
-    if (sseSubRef.current) sseSubRef.current.close();
-    sseSubRef.current = subscribeToEvents({
-      onMessage: (event) => {
-        const kind = event.kind as string;
-        if (kind === 'assistant_delta') {
-          setWaitingForFirstToken(false);
-          appendAssistantDelta(String(event.turn_id), String(event.text));
-        } else if (kind === 'assistant_end' || kind === 'turn_complete') {
-          if (event.turn_id) finalizeAssistant(String(event.turn_id));
-          else finalizeAssistant('__done__');
-        } else if (kind === 'error') {
-          setError(String(event.text || 'Stream error'));
-          setStreaming(false);
-          setWaitingForFirstToken(false);
-        }
-      },
-      onError: (e) => {
-        setError(e.message);
-        setStreaming(false);
-        setWaitingForFirstToken(false);
-      },
-    });
-
-    try {
-      await chatApi.send(text, activeSessionName || undefined);
-    } catch (e) {
-      setError(String(e));
-      setStreaming(false);
-      setWaitingForFirstToken(false);
-      sseSubRef.current?.close();
-    }
-  };
-
-  const stop = async () => {
-    try {
-      await chatApi.interrupt(activeSessionName || undefined);
-    } catch { /* best effort */ }
-    sseSubRef.current?.close();
-    setStreaming(false);
-    setWaitingForFirstToken(false);
-    setMessages(prev => prev.map(m => m.streaming ? { ...m, streaming: false } : m));
-  };
-
-  const retry = () => {
-    setError(null);
-    // Re-subscribe and reload session history if available
-    if (sseSubRef.current) sseSubRef.current.close();
-    sseSubRef.current = subscribeToEvents({
-      onMessage: (event) => {
-        const kind = event.kind as string;
-        if (kind === 'assistant_delta') {
-          setWaitingForFirstToken(false);
-          appendAssistantDelta(String(event.turn_id), String(event.text));
-        } else if (kind === 'assistant_end' || kind === 'turn_complete') {
-          if (event.turn_id) finalizeAssistant(String(event.turn_id));
-        } else if (kind === 'error') {
-          setError(String(event.text || 'Stream error'));
-          setStreaming(false);
-          setWaitingForFirstToken(false);
-        }
-      },
-    });
+    await sendMessage(text);
   };
 
   const loadModes = useCallback(async () => {
@@ -161,9 +68,7 @@ export function ChatScreen() {
       await modesApi.set(name);
       setActiveMode(name);
       setModeSheetOpen(false);
-    } catch (e) {
-      setError(String(e));
-    }
+    } catch { /* hook will surface session errors */ }
   };
 
   const loadVariables = useCallback(async () => {
@@ -179,10 +84,6 @@ export function ChatScreen() {
     try { await inspectorApi.setVariable(key, value); } catch { /* ignore */ }
   };
 
-  useEffect(() => {
-    return () => { sseSubRef.current?.close(); };
-  }, []);
-
   const copyMessage = (text: string) => {
     Clipboard.setStringAsync(text);
   };
@@ -196,22 +97,16 @@ export function ChatScreen() {
         styles.msgRow,
         isUser ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' },
       ]}>
-        <View style={[
-          styles.msgBubble,
-          {
-            backgroundColor: isUser ? colors.accent : colors.bgLift,
-            maxWidth: '85%',
-          },
-        ]}>
-          {isAssistant && (
-            <View style={styles.msgHeader}>
-              <TouchableOpacity onPress={() => copyMessage(item.text)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="copy-outline" size={16} color={colors.textDim} />
-              </TouchableOpacity>
-            </View>
-          )}
+        <View
+          style={[
+            styles.msgBubble,
+            isUser
+              ? { backgroundColor: colors.bgHover, maxWidth: '84%' }
+              : { backgroundColor: 'transparent', maxWidth: '100%', paddingHorizontal: 0 },
+          ]}
+        >
           {isUser ? (
-            <Text style={{ color: colors.accentText }}>{item.text}</Text>
+            <Text style={{ color: colors.text }}>{item.text}</Text>
           ) : (
             <Markdown
               style={markdownStyles(colors)}
@@ -219,10 +114,10 @@ export function ChatScreen() {
                 fence: (node) => {
                   const code = node.content;
                   return (
-                    <View key={node.key} style={styles.codeBlock}>
+                    <View key={node.key} style={[styles.codeBlock, { backgroundColor: colors.bgHover }]}>
                       <View style={styles.codeBlockHeader}>
                         <TouchableOpacity onPress={() => copyMessage(code)} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
-                          <Ionicons name="copy-outline" size={16} color={colors.textDim} />
+                          <Ionicons name="copy-outline" size={15} color={colors.textDim} />
                         </TouchableOpacity>
                       </View>
                       <Text variant="sm" style={{ color: colors.textSoft, fontFamily: 'monospace' }}>
@@ -234,10 +129,10 @@ export function ChatScreen() {
                 code_block: (node) => {
                   const code = node.content;
                   return (
-                    <View key={node.key} style={styles.codeBlock}>
+                    <View key={node.key} style={[styles.codeBlock, { backgroundColor: colors.bgHover }]}>
                       <View style={styles.codeBlockHeader}>
                         <TouchableOpacity onPress={() => copyMessage(code)} hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
-                          <Ionicons name="copy-outline" size={16} color={colors.textDim} />
+                          <Ionicons name="copy-outline" size={15} color={colors.textDim} />
                         </TouchableOpacity>
                       </View>
                       <Text variant="sm" style={{ color: colors.textSoft, fontFamily: 'monospace' }}>
@@ -258,12 +153,21 @@ export function ChatScreen() {
               {item.text}
             </Markdown>
           )}
+          {isAssistant && item.text.length > 0 && (
+            <TouchableOpacity
+              onPress={() => copyMessage(item.text)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.copyButton}
+            >
+              <Ionicons name="copy-outline" size={14} color={colors.textDim} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
   };
 
-  if (error && messages.length === 0) {
+  if (error && messages.length === 0 && !historyLoading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
         <ErrorState message={error} onRetry={retry} />
@@ -271,12 +175,13 @@ export function ChatScreen() {
     );
   }
 
-  if (messages.length === 0 && !waitingForFirstToken) {
+  if (messages.length === 0 && !waitingForFirstToken && !historyLoading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
         <EmptyState
-          title="No messages yet"
-          message="Send a message to start chatting"
+          icon="sparkles-outline"
+          title="What should we build?"
+          message="Ask MuCLI to inspect, explain, debug, or change your workspace."
           actionLabel={activeMode ? `Mode: ${activeMode}` : 'Select Mode'}
           onAction={() => { loadModes(); setModeSheetOpen(true); }}
         />
@@ -324,14 +229,33 @@ export function ChatScreen() {
           data={messages}
           keyExtractor={item => item.id}
           renderItem={renderMessage}
-          contentContainerStyle={{ padding: spacing.base, paddingBottom: 80 }}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          contentContainerStyle={styles.messageList}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: messages.length > 0 })}
           onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          ListFooterComponent={
-            waitingForFirstToken ? (
-              <View style={{ padding: spacing.sm }}>
-                <Skeleton height={20} style={{ marginBottom: 4, width: '70%' }} />
+          ListHeaderComponent={
+            error && messages.length > 0 ? (
+              <View style={[styles.inlineError, { backgroundColor: colors.bgHover }]}>
+                <Ionicons name="warning-outline" size={15} color={colors.error} />
+                <Text variant="xs" style={{ color: colors.textSoft, flex: 1 }}>{error}</Text>
+                <TouchableOpacity onPress={retry} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text variant="xs" style={{ color: colors.accent, fontWeight: '600' }}>Retry</Text>
+                </TouchableOpacity>
               </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            historyLoading ? (
+              <View style={styles.historyLoading}>
+                <Skeleton height={18} style={{ marginBottom: 10, width: '72%' }} />
+                <Skeleton height={18} style={{ marginBottom: 10, width: '88%' }} />
+                <Skeleton height={18} style={{ width: '56%' }} />
+              </View>
+            ) : null
+          }
+          ListFooterComponent={
+            streaming && waitingForFirstToken ? (
+              <GeneratingIndicator label={sseConnected ? activityLabel : 'Reconnecting to session'} />
             ) : null
           }
         />
@@ -380,31 +304,50 @@ interface ComposerProps {
   onSettingsPress: () => void;
 }
 
-function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, onModePress, onSettingsPress }: ComposerProps) {
+function Composer({ input, setInput, onSend, onStop, streaming, colors, insets, onModePress }: ComposerProps) {
   return (
-    <View style={[styles.composer, { backgroundColor: colors.bgLift, paddingBottom: insets.bottom }]}>
-      <TouchableOpacity onPress={onModePress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Ionicons name="options-outline" size={24} color={colors.textDim} style={{ paddingHorizontal: 8 }} />
-      </TouchableOpacity>
-      <TouchableOpacity onPress={onSettingsPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-        <Ionicons name="settings-outline" size={24} color={colors.textDim} style={{ paddingHorizontal: 8 }} />
+    <View
+      style={[
+        styles.composer,
+        {
+          backgroundColor: colors.bgLift,
+          borderColor: colors.border,
+          marginBottom: Math.max(insets.bottom, 8),
+        },
+      ]}
+    >
+      <TouchableOpacity
+        onPress={onModePress}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={[styles.composerIconButton, { backgroundColor: colors.bgHover }]}
+      >
+        <Ionicons name="options-outline" size={18} color={colors.textDim} />
       </TouchableOpacity>
       <TextInput
         value={input}
         onChangeText={setInput}
-        placeholder="Message…"
+        placeholder="Message MuCLI"
         placeholderTextColor={colors.textDim}
         multiline
-        style={[styles.input, { color: colors.text, borderColor: colors.border }]}
+        style={[styles.input, { color: colors.text }]}
         editable={!streaming}
       />
       {streaming ? (
-        <TouchableOpacity onPress={onStop} style={styles.sendBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Ionicons name="stop-circle" size={28} color={colors.error} />
+        <TouchableOpacity
+          onPress={onStop}
+          style={[styles.sendBtn, { backgroundColor: colors.bgHover }]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="stop" size={17} color={colors.error} />
         </TouchableOpacity>
       ) : (
-        <TouchableOpacity onPress={onSend} disabled={!input.trim()} style={styles.sendBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Ionicons name="send" size={24} color={input.trim() ? colors.accent : colors.textDim} />
+        <TouchableOpacity
+          onPress={onSend}
+          disabled={!input.trim()}
+          style={[styles.sendBtn, { backgroundColor: input.trim() ? colors.accent : colors.bgHover }]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="arrow-up" size={19} color={input.trim() ? colors.accentText : colors.textDim} />
         </TouchableOpacity>
       )}
     </View>
@@ -452,29 +395,49 @@ function ModeBottomSheet({ visible, onClose, modes, activeMode, onSelect, colors
 
 function markdownStyles(colors: any) {
   return {
-    body: { color: colors.text, fontSize: 15, lineHeight: 22 },
-    paragraph: { marginTop: 0, marginBottom: 8 },
-    heading1: { fontSize: 22, fontWeight: '700' as const, marginTop: 12, marginBottom: 8 },
-    heading2: { fontSize: 20, fontWeight: '700' as const, marginTop: 10, marginBottom: 6 },
-    heading3: { fontSize: 18, fontWeight: '600' as const, marginTop: 8, marginBottom: 4 },
-    code_inline: { backgroundColor: colors.bgHover, borderRadius: 3, paddingHorizontal: 4 },
-    fence: { backgroundColor: colors.bgHover, borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8 },
-    code_block: { backgroundColor: colors.bgHover, borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8 },
+    body: { color: colors.text, fontSize: 15, lineHeight: 23 },
+    paragraph: { marginTop: 0, marginBottom: 9 },
+    heading1: { fontSize: 21, fontWeight: '700' as const, marginTop: 12, marginBottom: 8 },
+    heading2: { fontSize: 19, fontWeight: '700' as const, marginTop: 10, marginBottom: 6 },
+    heading3: { fontSize: 17, fontWeight: '600' as const, marginTop: 8, marginBottom: 4 },
+    code_inline: { backgroundColor: colors.bgHover, borderRadius: 4, paddingHorizontal: 4 },
+    fence: { backgroundColor: colors.bgHover, borderRadius: 10, padding: 12, marginTop: 8, marginBottom: 8 },
+    code_block: { backgroundColor: colors.bgHover, borderRadius: 10, padding: 12, marginTop: 8, marginBottom: 8 },
     link: { color: colors.accent, textDecorationLine: 'underline' as const },
-    blockquote: { borderLeftWidth: 3, borderLeftColor: colors.border, paddingLeft: 12, marginLeft: 0, marginTop: 8, marginBottom: 8 },
-    list_item: { marginTop: 4, marginBottom: 4 },
+    blockquote: { borderLeftWidth: 2, borderLeftColor: colors.borderStrong, paddingLeft: 12, marginLeft: 0, marginTop: 8, marginBottom: 8 },
+    list_item: { marginTop: 3, marginBottom: 3 },
   };
 }
 
 const styles = StyleSheet.create({
-  msgRow: { flexDirection: 'row', marginBottom: spacing.sm },
-  msgBubble: { borderRadius: 12, padding: spacing.sm },
-  msgHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4, minHeight: 20 },
-  codeBlock: { borderRadius: 6, padding: 12, marginVertical: 4 },
-  codeBlockHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
-  input: { flex: 1, borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, maxHeight: 120, minHeight: 44 },
-  sendBtn: { padding: 8, minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' },
+  messageList: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 96 },
+  msgRow: { flexDirection: 'row', marginBottom: 14 },
+  msgBubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  copyButton: { alignSelf: 'flex-start', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  codeBlock: { borderRadius: 10, padding: 12, marginVertical: 5 },
+  codeBlockHeader: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 3 },
+  inlineError: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 14 },
+  historyLoading: { paddingTop: 22, paddingHorizontal: 4 },
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 5,
+    marginHorizontal: 10,
+    marginTop: 6,
+    padding: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+  },
+  composerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  input: { flex: 1, borderWidth: 0, paddingHorizontal: 8, paddingVertical: 9, maxHeight: 120, minHeight: 40 },
+  sendBtn: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center' },
   settingsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, minHeight: 44 },
   settingsSection: { marginTop: 12, marginBottom: 4 },
   settingsLabel: { fontSize: 12, color: '#94a3b8', marginBottom: 4 },

@@ -31,19 +31,19 @@ export function Button({
   const { colors, spacing, radii, typography } = useTheme();
 
   const baseStyle: ViewStyle = {
-    minHeight: 44,
+    minHeight: 46,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.base,
     paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    opacity: disabled ? 0.5 : 1,
+    opacity: disabled ? 0.45 : 1,
   };
 
   const variantStyles: Record<string, ViewStyle> = {
     primary: { backgroundColor: colors.accent },
-    secondary: { backgroundColor: colors.bgHover, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    secondary: { backgroundColor: colors.bgHover },
     ghost: { backgroundColor: 'transparent' },
     danger: { backgroundColor: colors.error },
   };
@@ -53,10 +53,11 @@ export function Button({
 
   return (
     <TouchableOpacity
+      accessibilityRole="button"
       onPress={onPress}
       disabled={disabled || loading}
       style={[baseStyle, variantStyles[variant], style]}
-      activeOpacity={0.7}
+      activeOpacity={0.72}
     >
       {loading && <ActivityIndicator size="small" color={textColor} style={{ marginRight: 8 }} />}
       <RNText style={[{ color: textColor, fontSize: fontSpec.fontSize, fontWeight: '600' }, textStyle]}>

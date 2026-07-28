@@ -29,6 +29,12 @@ export interface SessionHistoryResponse {
   turns: SessionHistoryTurn[];
 }
 
+export interface CreateSessionOptions {
+  ollamaMode?: 'local' | 'cloud';
+  ollamaHost?: string;
+  ollamaApiKey?: string;
+}
+
 // API
 export const sessionsApi = {
   list: () => api.get<SessionListResponse>('/api/sessions'),
@@ -36,8 +42,17 @@ export const sessionsApi = {
     api.get<Record<string, unknown>>('/api/sessions/active', { query: { session_name: sessionName } }),
   getHistory: (sessionName?: string) =>
     api.get<SessionHistoryResponse>('/api/sessions/current/history', { query: { session_name: sessionName } }),
-  create: (name: string, provider: string, model: string, workspace?: string) =>
-    api.post<Record<string, unknown>>('/api/sessions', { name, provider, model, activate: true, workspace }),
+  create: (name: string, provider: string, model: string, workspace?: string, options?: CreateSessionOptions) =>
+    api.post<Record<string, unknown>>('/api/sessions', {
+      name,
+      provider,
+      model,
+      activate: true,
+      workspace,
+      ollama_mode: options?.ollamaMode,
+      ollama_host: options?.ollamaHost,
+      ollama_api_key: options?.ollamaApiKey,
+    }),
   load: (name: string, provider?: string, model?: string) =>
     api.post<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(name)}/load`, { provider, model }),
   focus: (name: string) =>

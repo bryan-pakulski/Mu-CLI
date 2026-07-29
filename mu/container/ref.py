@@ -7,7 +7,7 @@ from typing import Any
 
 
 DEFAULT_WORKER_PORT = 30312
-WORKER_PROTOCOL_VERSION = 2
+WORKER_PROTOCOL_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,7 @@ class ContainerRef:
     network_name: str = ""
     network_subnet: str = ""
     proxy_name: str = ""
+    proxy_ip: str = ""
     proxy_port: int = 3128
     proxy_image: str = ""
     egress_network_name: str = ""

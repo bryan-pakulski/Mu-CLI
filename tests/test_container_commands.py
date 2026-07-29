@@ -13,6 +13,7 @@ def test_create_command_has_no_privileged_or_docker_socket():
         mounts=[MountSpec("/host/project", "/workspace/project", "ro")],
         network_name="mucli-demo-net",
         proxy_name="mucli-demo-proxy",
+        proxy_ip="172.31.0.2",
         proxy_port=3128,
         egress_network_name="mucli-demo-net-egress",
         session_volume="/home/user/.mucli/sessions/demo",
@@ -30,8 +31,9 @@ def test_create_command_has_no_privileged_or_docker_socket():
     assert "mucli-demo-home:/root/.mucli:rw" in command
     assert "/root/.mucli/sessions/demo:rw" in joined
     assert "/host/project:/workspace/project:ro" in command
-    assert "HTTP_PROXY=http://mucli-demo-proxy:3128" in command
-    assert "HTTPS_PROXY=http://mucli-demo-proxy:3128" in command
+    assert "HTTP_PROXY=http://172.31.0.2:3128" in command
+    assert "HTTPS_PROXY=http://172.31.0.2:3128" in command
+    assert "MUCLI_PROXY_URL=http://172.31.0.2:3128" in command
 
 
 def test_network_policy_uses_internal_bridge_and_unprivileged_proxy():
@@ -52,6 +54,7 @@ def test_network_policy_uses_internal_bridge_and_unprivileged_proxy():
     assert "--user 65534:65534" in proxy_create
     assert not any("iptables" in command or "sudo" in command for command in flattened)
     assert policy.proxy_name == "mucli-demo-proxy"
+    assert policy.proxy_ip == "172.31.0.2"
     assert policy.egress_network_name == "mucli-demo-net-egress"
     assert policy.subnet == "172.31.0.0/24"
 

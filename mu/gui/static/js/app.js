@@ -3981,6 +3981,15 @@ function routeEvent(ev) {
         case "prompt_resolved":
         case "prompt_cancelled": break;
         case "turn_complete":
+            // A terminal error is carried on turn_complete as well as the
+            // immediate error event so reconnecting clients cannot remain
+            // stuck in a busy state or lose the failure detail.
+            if (ev.result && ev.result.status === "error" && ev.result.error) {
+                const previousError = chat._lastByRole(slot, "error");
+                if (!previousError || previousError.text !== String(ev.result.error)) {
+                    chat.addError(String(ev.result.error), name);
+                }
+            }
             // Tokens are global (current session's totals) — only update
             // the meter when the focused session is the one that completed.
             if (isFocused && ev.result && ev.result.tokens) {

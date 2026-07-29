@@ -301,6 +301,12 @@ export function useChatSession(activeSessionName: string | null) {
       setStreaming(false);
       setWaitingForFirstToken(false);
       setActivityLabel('Thinking');
+      const result = event.result && typeof event.result === 'object'
+        ? event.result as Record<string, unknown>
+        : null;
+      if (result?.status === 'error' && result.error) {
+        setError(String(result.error));
+      }
       void loadHistory(false);
       return;
     }

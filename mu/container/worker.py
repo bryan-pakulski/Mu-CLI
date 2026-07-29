@@ -6,6 +6,7 @@ import ctypes
 import json
 import logging
 import os
+import socket
 import threading
 import traceback
 import uuid
@@ -235,6 +236,24 @@ def _authorize(token: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid worker token")
 
 
+def _proxy_readiness() -> tuple[bool, str]:
+    raw = os.getenv("MUCLI_PROXY_URL", "").strip()
+    if not raw:
+        return True, "disabled"
+    from urllib.parse import urlparse
+
+    parsed = urlparse(raw)
+    host = parsed.hostname or ""
+    port = int(parsed.port or 3128)
+    if not host:
+        return False, "proxy URL has no host"
+    try:
+        with socket.create_connection((host, port), timeout=0.75):
+            return True, f"{host}:{port}"
+    except OSError as exc:
+        return False, f"{host}:{port}: {exc}"
+
+
 def _build_session(request: SendRequest):
     existing = _sessions.get(request.session_name)
     if existing is not None:
@@ -309,11 +328,15 @@ def _run_turn(session, request: SendRequest) -> None:
 @app.get("/health")
 def health(x_mucli_worker_token: str | None = Header(default=None)):
     _authorize(x_mucli_worker_token)
+    proxy_ready, proxy_detail = _proxy_readiness()
+    if not proxy_ready:
+        raise HTTPException(status_code=503, detail=f"egress proxy unavailable: {proxy_detail}")
     return {
         "ok": True,
         "container_name": os.getenv("MUCLI_CONTAINER_NAME", ""),
         "sessions": sorted(_sessions),
         "busy": sorted(name for name, event in _busy.items() if event.is_set()),
+        "proxy": proxy_detail,
     }
 
 

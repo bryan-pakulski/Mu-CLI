@@ -274,13 +274,29 @@ async def send_message(request: Request, payload: Dict[str, Any]):
                     {"kind": "history_refresh", "session_name": name}
                 )
             except Exception as exc:
+                error_text = f"container send failed: {exc}"
                 await bus.publish(
                     {
                         "kind": "error",
-                        "text": f"container send failed: {exc}",
+                        "text": error_text,
                         "session_name": name,
                     }
                 )
+                # Error events normally clear clients immediately. A terminal
+                # event also protects reconnecting web/mobile clients from
+                # remaining indefinitely busy after a worker failure.
+                await bus.publish(
+                    {
+                        "kind": "turn_complete",
+                        "result": {
+                            "ok": False,
+                            "status": "error",
+                            "error": error_text,
+                        },
+                        "session_name": name,
+                    }
+                )
+                await bus.publish({"kind": "history_refresh", "session_name": name})
             finally:
                 busy.clear()
 

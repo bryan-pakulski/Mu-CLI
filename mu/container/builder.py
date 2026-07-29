@@ -68,10 +68,14 @@ def template_overlay_dockerfile(base_image: str) -> str:
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     MUCLI_CONTAINER_MODE=1 \\
-    PYTHONPATH=/opt/mucli
+    PYTHONPATH=/opt/mucli \\
+    TIKTOKEN_CACHE_DIR=/opt/mucli/.cache/tiktoken
 
 COPY . /opt/mucli
 RUN python3 -m pip install --break-system-packages --no-cache-dir -r /opt/mucli/requirements.txt
+
+# MUCLI_TIKTOKEN_PREWARM_V1: keep token estimation offline at runtime.
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && python3 -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 WORKDIR /workspace
 EXPOSE {DEFAULT_WORKER_PORT}
@@ -81,6 +85,23 @@ ENTRYPOINT [\"python3\", \"-m\", \"mu.container.worker\"]
 
 def provider_environment() -> dict[str, str]:
     return {key: os.environ[key] for key in _PROVIDER_ENV_KEYS if os.environ.get(key)}
+
+
+_TIKTOKEN_RUNTIME_LAYER = r'''
+
+# MUCLI_TIKTOKEN_PREWARM_V1: keep token estimation offline at runtime.
+ENV TIKTOKEN_CACHE_DIR=/opt/mucli/.cache/tiktoken
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" \\
+    && python3 -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+'''
+
+
+def prepare_worker_dockerfile(content: str) -> str:
+    """Ensure every editable worker Dockerfile contains the offline tokenizer cache."""
+    value = str(content or "").rstrip()
+    if "MUCLI_TIKTOKEN_PREWARM_V1" in value:
+        return value + "\n"
+    return value + _TIKTOKEN_RUNTIME_LAYER + "\n"
 
 
 def build_create_command(
@@ -129,16 +150,20 @@ def build_create_command(
         command += ["-v", f"{ref.workspace_volume}:/workspace:rw"]
     for mount in ref.mounts:
         command += ["-v", f"{mount.host_path}:{mount.container_path}:{mount.mode}"]
+    proxy_host = ref.proxy_ip or ref.proxy_name
+    proxy_url = f"http://{proxy_host}:{ref.proxy_port}" if proxy_host else ""
     env = {
         "MUCLI_CONTAINER_MODE": "1",
         "MUCLI_CONTAINER_NAME": ref.name,
         "MUCLI_SUPERVISOR_URL": ref.supervisor_url,
         "MUCLI_WORKER_TOKEN": ref.worker_token,
         "MUCLI_WORKER_PORT": str(ref.worker_port),
-        "HTTP_PROXY": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
-        "HTTPS_PROXY": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
-        "http_proxy": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
-        "https_proxy": (f"http://{ref.proxy_name}:{ref.proxy_port}" if ref.proxy_name else ""),
+        "MUCLI_PROXY_URL": proxy_url,
+        "HTTP_PROXY": proxy_url,
+        "HTTPS_PROXY": proxy_url,
+        "http_proxy": proxy_url,
+        "https_proxy": proxy_url,
+        "TIKTOKEN_CACHE_DIR": "/opt/mucli/.cache/tiktoken",
         "NO_PROXY": "localhost,127.0.0.1,::1",
         "no_proxy": "localhost,127.0.0.1,::1",
         "MUCLI_EGRESS_ALLOW": __import__("json").dumps(ref.egress_allow),
@@ -183,7 +208,7 @@ def build_container(
     if not os.path.isdir(source_path):
         raise ValueError(f"MuCLI source directory does not exist: {source_path}")
 
-    content = (
+    content = prepare_worker_dockerfile(
         template_overlay_dockerfile(base_image)
         if base_image
         else (dockerfile_content if dockerfile_content is not None else default_dockerfile())
@@ -283,6 +308,7 @@ def build_container(
         )
         ref.network_subnet = policy.subnet
         ref.proxy_name = policy.proxy_name
+        ref.proxy_ip = policy.proxy_ip
         ref.proxy_port = policy.proxy_port
         ref.proxy_image = policy.proxy_image
         ref.egress_network_name = policy.egress_network_name

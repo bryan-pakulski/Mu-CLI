@@ -19,6 +19,7 @@ DEFAULT_EGRESS_ALLOW = [
     "api.anthropic.com",
     "generativelanguage.googleapis.com",
     "ollama.com",
+    "openaipublic.blob.core.windows.net",
 ]
 DEFAULT_PROXY_PORT = 3128
 
@@ -54,6 +55,7 @@ class NetworkPolicy:
     rules: list[list[str]] = field(default_factory=list)
     host_rules: list[list[str]] = field(default_factory=list)
     proxy_name: str = ""
+    proxy_ip: str = ""
     proxy_port: int = DEFAULT_PROXY_PORT
     proxy_image: str = ""
     egress_network_name: str = ""
@@ -70,6 +72,7 @@ class NetworkPolicy:
             "rules": self.rules,
             "host_rules": self.host_rules,
             "proxy_name": self.proxy_name,
+            "proxy_ip": self.proxy_ip,
             "proxy_port": self.proxy_port,
             "proxy_image": self.proxy_image,
             "egress_network_name": self.egress_network_name,
@@ -232,6 +235,25 @@ def create_isolated_network(
         run_with_output(runner, start_command, output_callback=output_callback)
         commands.append(start_command)
 
+        proxy_inspect = run_with_output(
+            runner,
+            [
+                docker,
+                "inspect",
+                "-f",
+                f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
+                proxy_name,
+            ],
+            output_callback=output_callback,
+        )
+        proxy_ip = (
+            "172.31.0.2" if runner.dry_run else str(proxy_inspect.stdout or "").strip()
+        )
+        if not proxy_ip:
+            raise ContainerRuntimeError(
+                f"egress proxy {proxy_name!r} is not attached to {network_name!r}"
+            )
+
         return NetworkPolicy(
             name=network_name,
             network_id=network_id,
@@ -241,6 +263,7 @@ def create_isolated_network(
             host_allow_ports=compatibility_ports,
             rules=commands,
             proxy_name=proxy_name,
+            proxy_ip=proxy_ip,
             proxy_port=DEFAULT_PROXY_PORT,
             proxy_image=image,
             egress_network_name=egress_name,

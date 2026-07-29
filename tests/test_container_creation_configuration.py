@@ -18,6 +18,7 @@ def test_container_defaults_include_editable_worker_template():
     assert payload["dockerfile"].startswith("FROM ubuntu:24.04")
     assert 'ENTRYPOINT ["python3", "-m", "mu.container.worker"]' in payload["dockerfile"]
     assert "api.openai.com" in payload["egress_allow"]
+    assert "openaipublic.blob.core.windows.net" in payload["egress_allow"]
     assert payload["egress_deny"] == []
 
 

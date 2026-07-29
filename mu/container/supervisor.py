@@ -167,10 +167,18 @@ class ContainerSupervisor:
         restore_sessions: list[str] = []
         if existing is not None:
             exists, _running = self._container_state(existing.name)
+            actual_proxy_ip = (
+                self._network_ip(existing.proxy_name, existing.network_name)
+                if exists and existing.proxy_name and existing.network_name
+                else ""
+            )
             if (
                 existing.status == "error"
                 or not exists
                 or not existing.proxy_name
+                or not existing.proxy_ip
+                or not actual_proxy_ip
+                or actual_proxy_ip != existing.proxy_ip
                 or int(existing.worker_protocol or 0) < WORKER_PROTOCOL_VERSION
                 or int(existing.worker_port or 0) < DEFAULT_WORKER_PORT
             ):
@@ -245,6 +253,22 @@ class ContainerSupervisor:
             return False, False
         return True, inspect.stdout.strip().lower() == "true"
 
+    def _network_ip(self, container_name: str, network_name: str) -> str:
+        if not container_name or not network_name:
+            return ""
+        docker = self.runner.require("docker")
+        result = self.runner.run(
+            [
+                docker,
+                "inspect",
+                "-f",
+                f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
+                container_name,
+            ],
+            check=False,
+        )
+        return str(result.stdout or "").strip() if result.returncode == 0 else ""
+
     def _discard_stale_registration(self, ref: ContainerRef) -> None:
         """Remove registry/network state before rebuilding a managed worker.
 
@@ -279,6 +303,18 @@ class ContainerSupervisor:
             )
         if not running:
             self.runner.run([self.runner.require("docker"), "start", ref.proxy_name])
+        proxy_ip = self._network_ip(ref.proxy_name, ref.network_name)
+        if not proxy_ip:
+            raise ContainerRuntimeError(
+                f"egress proxy {ref.proxy_name!r} is not attached to {ref.network_name!r}; "
+                "reload the session to rebuild its network"
+            )
+        if not ref.proxy_ip or proxy_ip != ref.proxy_ip:
+            raise ContainerRuntimeError(
+                f"egress proxy address changed for {ref.name}: "
+                f"registered={ref.proxy_ip or 'missing'} current={proxy_ip}; "
+                "reload the session to rebuild the worker"
+            )
 
     def ensure_running(self, ref: ContainerRef) -> ContainerRef:
         exists, running = self._container_state(ref.name)
@@ -605,6 +641,7 @@ class ContainerSupervisor:
             "egress_deny": list(ref.egress_deny),
             "network_isolation": "internal-proxy" if ref.proxy_name else "legacy",
             "proxy_name": ref.proxy_name or None,
+            "proxy_ip": ref.proxy_ip or None,
         }
 
     def detach_session(
@@ -644,6 +681,7 @@ class ContainerSupervisor:
             "MUCLI_CONTAINER_NAME", "MUCLI_EGRESS_ALLOW",
             "MUCLI_EGRESS_DENY", "MUCLI_WORKSPACES",
             "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+            "MUCLI_PROXY_URL", "TIKTOKEN_CACHE_DIR",
             "NO_PROXY", "no_proxy",
         )
         commit_command = [docker, "commit"]

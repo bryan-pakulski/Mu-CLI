@@ -23,6 +23,8 @@ class FakeRunner:
             return CommandResult(command, 1, "", "No such container")
         if command[1:3] == ["network", "inspect"]:
             return CommandResult(command, 1, "", "No such network")
+        if command[1:3] == ["inspect", "-f"] and "NetworkSettings.Networks" in command[3]:
+            return CommandResult(command, 0, "172.31.0.2\n", "")
         return CommandResult(command, 0, "", "")
 
 
@@ -34,6 +36,7 @@ def make_ref(name: str = "mucli-demo") -> ContainerRef:
         dockerfile_hash="hash",
         network_name=f"{name}-net",
         proxy_name=f"{name}-proxy",
+        proxy_ip="172.31.0.2",
         egress_network_name=f"{name}-net-egress",
         worker_token="secret",
         status="error",

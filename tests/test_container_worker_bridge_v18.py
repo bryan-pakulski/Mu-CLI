@@ -30,6 +30,7 @@ def make_ref(name: str, *, port: int = DEFAULT_WORKER_PORT) -> ContainerRef:
         dockerfile_hash="hash",
         network_name=f"{name}-net",
         proxy_name=f"{name}-proxy",
+        proxy_ip="172.31.0.2",
         worker_token="secret",
         worker_port=port,
         worker_protocol=WORKER_PROTOCOL_VERSION,
@@ -220,3 +221,38 @@ def test_prevalidated_provider_path_avoids_model_discovery():
     assert 'getattr(args, "provider_prevalidated", False)' in source
     branch = source.split('getattr(args, "provider_prevalidated", False)', 1)[1][:900]
     assert "init_provider(" in branch
+
+
+def test_worker_runtime_uses_proxy_ip_and_offline_tiktoken_cache():
+    ref = make_ref("mucli-proxy")
+    command = build_create_command(ref)
+    assert "HTTP_PROXY=http://172.31.0.2:3128" in command
+    assert "MUCLI_PROXY_URL=http://172.31.0.2:3128" in command
+    dockerfile = (ROOT / "mu/container/Dockerfile.mucli").read_text(encoding="utf-8")
+    assert "MUCLI_TIKTOKEN_PREWARM_V1" in dockerfile
+    assert "tiktoken.get_encoding('cl100k_base')" in dockerfile
+    assert "TIKTOKEN_CACHE_DIR=/opt/mucli/.cache/tiktoken" in dockerfile
+
+
+def test_gui_container_failure_emits_terminal_event():
+    source = (ROOT / "mu/gui/routers/chat.py").read_text(encoding="utf-8")
+    failure_branch = source.split('error_text = f"container send failed:', 1)[1][:1400]
+    assert '"kind": "error"' in failure_branch
+    assert '"kind": "turn_complete"' in failure_branch
+    assert '"kind": "history_refresh"' in failure_branch
+
+
+def test_current_protocol_forces_proxy_ip_migration():
+    assert WORKER_PROTOCOL_VERSION >= 3
+    legacy = make_ref("mucli-legacy")
+    legacy.proxy_ip = ""
+    legacy.worker_protocol = WORKER_PROTOCOL_VERSION - 1
+    assert legacy.worker_protocol < WORKER_PROTOCOL_VERSION
+
+
+def test_web_and_mobile_render_terminal_container_errors():
+    web = (ROOT / "mu/gui/static/js/app.js").read_text(encoding="utf-8")
+    mobile = (ROOT / "mobile/android/src/hooks/useChatSession.ts").read_text(encoding="utf-8")
+    assert 'ev.result.status === "error"' in web
+    assert "result?.status === 'error'" in mobile
+    assert "setError(String(result.error))" in mobile

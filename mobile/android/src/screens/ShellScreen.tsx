@@ -36,6 +36,7 @@ export function ShellScreen() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const inputRef = useRef<TextInput>(null);
   const outputBuf = useRef<string[]>([]);
 
   const appendOutput = useCallback((text: string) => {
@@ -136,6 +137,10 @@ export function ShellScreen() {
     ws.send(line);
     appendOutput(`$ ${input}\n`);
     setInput('');
+    // Re-focus to keep keyboard open after send.
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
   }, [input, appendOutput]);
 
   const clear = useCallback(() => {
@@ -268,6 +273,7 @@ export function ShellScreen() {
           <View style={styles.inputBar}>
             <Text style={styles.prompt}>$</Text>
             <TextInput
+              ref={inputRef}
               style={styles.input}
               value={input}
               onChangeText={setInput}
@@ -276,6 +282,7 @@ export function ShellScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="send"
+              blurOnSubmit={false}
               onSubmitEditing={send}
               editable={connected}
             />

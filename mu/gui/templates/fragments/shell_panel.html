@@ -2,7 +2,7 @@
        data-mode="shell"
        x-show="$store.mode.active === 'shell'"
        x-transition.opacity.duration.200ms
-       x-effect="$store.mode.active === 'shell' && $store.shell.load()">
+       x-init="$watch('$store.mode.active', (val) => { if (val === 'shell') $store.shell.load(); else $store.shell.disconnect(); })">
     <div class="shell-panel-head">
         <div>
             <span class="label-mono">Shell</span>

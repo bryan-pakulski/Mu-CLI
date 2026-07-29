@@ -840,10 +840,15 @@ document.addEventListener("alpine:init", () => {
         connecting: false,
         error: null,
         _socket: null,
+        _loaded: false,
+        _intentional_close: false,
 
         async load() {
-            // Called when the shell panel becomes active (via setView).
-            // Resolve the current session's container name, then connect.
+            // Called when the shell panel becomes active (via $watch on
+            // $store.mode.active).  Guard against double-load: if we're
+            // already connected or a load is in-flight, skip.
+            if (this._loaded) return;
+            this._loaded = true;
             if (this._socket) this.disconnect();
             this.output = "";
             this.error = null;
@@ -866,6 +871,7 @@ document.addEventListener("alpine:init", () => {
 
         connect() {
             if (!this.containerName) return;
+            this._intentional_close = false;
             this.connecting = true;
             this.connected = false;
             const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -887,7 +893,9 @@ document.addEventListener("alpine:init", () => {
                 this.connecting = false;
                 this.connected = false;
                 if (this._socket === socket) {
-                    this.output += "\n[shell disconnected]\n";
+                    if (!this._intentional_close) {
+                        this.output += "\n[shell disconnected]\n";
+                    }
                     this._socket = null;
                 }
             };
@@ -907,12 +915,14 @@ document.addEventListener("alpine:init", () => {
         },
 
         disconnect() {
+            this._intentional_close = true;
             if (this._socket) {
                 this._socket.close();
                 this._socket = null;
             }
             this.connected = false;
             this.connecting = false;
+            this._loaded = false;
         },
 
         clear() {

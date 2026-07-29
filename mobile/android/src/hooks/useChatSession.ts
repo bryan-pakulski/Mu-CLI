@@ -62,6 +62,10 @@ export function useChatSession(activeSessionName: string | null) {
   const historyRequestRef = useRef<{ sessionName: string; promise: Promise<void> } | null>(null);
   const externalWriteAtRef = useRef(0);
   const completionProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Fallback: if history_refresh doesn't arrive within 3s after
+  // turn_complete, force a history reload. Safety net for server
+  // bugs or network issues that drop the event.
+  const historyFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -206,7 +210,15 @@ export function useChatSession(activeSessionName: string | null) {
       } else {
         setWaitingForFirstToken(false);
         setActivityLabel('Thinking');
-        if (wasBusy || sawExternalWrite || historyHydratedRef.current !== activeSessionName) {
+        // When SSE is connected, skip loadHistory on busy→not-busy
+        // transitions. The server emits a `history_refresh` SSE event
+        // after persisting the session, which triggers the reload at
+        // the right time. Calling loadHistory here races the server
+        // save and replaces live messages with stale history — the
+        // view-flash / missing-final-output bug.
+        if (wasBusy && sseConnectedRef.current) {
+          // SSE will deliver history_refresh; skip.
+        } else if (sawExternalWrite || historyHydratedRef.current !== activeSessionName) {
           await loadHistory(false);
         }
       }
@@ -325,7 +337,18 @@ export function useChatSession(activeSessionName: string | null) {
         setError(String(result.error));
       }
       setArtifactRevision(value => value + 1);
-      void loadHistory(false);
+      // Do NOT call loadHistory here. The server may not have persisted
+      // the final assistant message yet, so loadHistory would replace
+      // the live-streamed message with stale history (missing the last
+      // turn) — causing the screen to flash and the final output to
+      // vanish. Instead, wait for the `history_refresh` SSE event,
+      // which the server emits after the session is safely persisted.
+      // Safety net: if history_refresh doesn't arrive in 3s, force reload.
+      if (historyFallbackRef.current) clearTimeout(historyFallbackRef.current);
+      historyFallbackRef.current = setTimeout(() => {
+        historyFallbackRef.current = null;
+        void loadHistory(false);
+      }, 3000);
       return;
     }
 
@@ -335,6 +358,10 @@ export function useChatSession(activeSessionName: string | null) {
     }
 
     if (kind === 'history_refresh') {
+      if (historyFallbackRef.current) {
+        clearTimeout(historyFallbackRef.current);
+        historyFallbackRef.current = null;
+      }
       setArtifactRevision(value => value + 1);
       if (!busyRef.current) void loadHistory(false);
       return;
@@ -354,7 +381,9 @@ export function useChatSession(activeSessionName: string | null) {
       setStreaming(false);
       setWaitingForFirstToken(false);
       setError(String(event.text || 'Agent error'));
-      void loadHistory(false);
+      // Same as turn_complete: skip loadHistory when SSE connected.
+      // The server will emit history_refresh after persisting.
+      if (!sseConnectedRef.current) void loadHistory(false);
     }
   }, [activeSessionName, appendAssistantDelta, appendUserMessage, finalizeAssistant, loadHistory, syncSessionState]);
 
@@ -371,6 +400,14 @@ export function useChatSession(activeSessionName: string | null) {
       historyHydratedRef.current = null;
       externalWriteAtRef.current = 0;
       setArtifactRevision(value => value + 1);
+      if (completionProbeRef.current) {
+        clearTimeout(completionProbeRef.current);
+        completionProbeRef.current = null;
+      }
+      if (historyFallbackRef.current) {
+        clearTimeout(historyFallbackRef.current);
+        historyFallbackRef.current = null;
+      }
     }
     setSseConnected(false);
 
@@ -413,6 +450,10 @@ export function useChatSession(activeSessionName: string | null) {
       if (completionProbeRef.current) {
         clearTimeout(completionProbeRef.current);
         completionProbeRef.current = null;
+      }
+      if (historyFallbackRef.current) {
+        clearTimeout(historyFallbackRef.current);
+        historyFallbackRef.current = null;
       }
       subscriptionRef.current?.close();
       subscriptionRef.current = null;

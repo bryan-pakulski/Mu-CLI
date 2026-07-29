@@ -1079,6 +1079,14 @@ GUI_VIEW_PANELS = [
         "needs_workspace": True,
     },
     {
+        "name": "artifacts",
+        "display_name": "Artifacts",
+        "description": (
+            "Download, inspect, refresh, and remove deliverables published "
+            "by the agent for the active session."
+        ),
+    },
+    {
         "name": "trace",
         "display_name": "Trace Analyzer",
         "description": (

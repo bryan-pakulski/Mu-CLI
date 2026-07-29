@@ -236,6 +236,14 @@ def build_structured_tool_result(
     }
     if isinstance(envelope, dict):
         structured["telemetry"]["tool_envelope"] = envelope
+        envelope_artifacts = envelope.get("artifacts")
+        if isinstance(envelope_artifacts, list):
+            structured["artifacts"] = [
+                dict(item) for item in envelope_artifacts if isinstance(item, dict)
+            ]
+        envelope_data = envelope.get("data")
+        if isinstance(envelope_data, dict):
+            structured["data"] = dict(envelope_data)
 
     if tool_name == "read_file":
         structured["data"] = {
@@ -271,6 +279,11 @@ def build_structured_tool_result(
         }
         if filename:
             structured["modified_files"] = [filename]
+    elif tool_name in {"upload_artifact", "list_artifacts"}:
+        if isinstance(envelope, dict):
+            descriptor = envelope.get("artifact")
+            if isinstance(descriptor, dict):
+                structured["data"]["artifact"] = dict(descriptor)
     elif tool_name in _FEATURE_MODE_TOOL_NAMES:
         structured["data"] = session._parse_json_result(raw_text)
     elif tool_name in _MEMORY_TOOL_NAMES:

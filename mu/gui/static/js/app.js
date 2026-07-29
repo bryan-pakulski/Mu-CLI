@@ -776,11 +776,16 @@ document.addEventListener("alpine:init", () => {
             if (!force && this.loadedName === target && this.bySession[target]) return;
             this.loading = true;
             try {
-                const r = await fetch(`/api/sessions/${encodeURIComponent(target)}/artifacts`);
-                if (!r.ok) return;
+                const r = await fetch(`/api/sessions/${encodeURIComponent(target)}/artifacts?_ts=${Date.now()}`, { cache: "no-store" });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    throw new Error(d.detail || `artifact load failed (${r.status})`);
+                }
                 const d = await r.json();
                 this.bySession[target] = d.artifacts || [];
                 this.loadedName = target;
+            } catch (error) {
+                Alpine.store("toast").show(String(error), "error");
             } finally {
                 this.loading = false;
             }
@@ -1074,7 +1079,7 @@ document.addEventListener("alpine:init", () => {
         realMode: "default",
         modes: [],
         views: [],
-        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory", "files"],
+        panelModes: ["teacher", "feature", "research", "security", "loop", "debug", "history", "systemPrompts", "memory", "files", "artifacts"],
         async load() {
             const r = await fetch("/api/modes");
             const data = await r.json();

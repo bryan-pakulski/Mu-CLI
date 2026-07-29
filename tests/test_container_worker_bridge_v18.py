@@ -198,10 +198,10 @@ def test_gui_container_turn_uses_background_sync_bridge():
 
 
 def test_web_artifact_panel_is_visible_when_empty():
-    source = (ROOT / "mu/gui/templates/fragments/chat.html").read_text(encoding="utf-8")
-    assert 'class="artifact-panel"' in source
-    assert "No artifacts have been published" in source
-    assert "artifacts.current.length" not in source.split('class="artifact-panel"', 1)[0][-200:]
+    source = (ROOT / "mu/gui/templates/fragments/artifacts_panel.html").read_text(encoding="utf-8")
+    assert 'data-mode="artifacts"' in source
+    assert "No artifacts yet" in source
+    assert "$store.artifacts.current.length" in source
 
 
 def test_default_worker_image_uses_30312():

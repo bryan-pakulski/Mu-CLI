@@ -69,6 +69,68 @@ class WorkerBridgeUI(BaseUI):
             # history remains authoritative and will be recovered on reconnect.
             pass
 
+    def publish_artifact(
+        self,
+        *,
+        name: str,
+        source_path: str | None = None,
+        content: str | bytes | None = None,
+        mime_type: str = "application/octet-stream",
+    ) -> dict[str, Any]:
+        if not self.supervisor_url:
+            raise RuntimeError("container supervisor URL is unavailable")
+        if (source_path is None) == (content is None):
+            raise RuntimeError("provide exactly one of source_path or content")
+        params = {
+            "session_name": self.session_name,
+            "container_name": self.container_name,
+            "name": str(name or ""),
+            "mime_type": str(mime_type or "application/octet-stream"),
+        }
+        headers = {"X-MuCLI-Worker-Token": self.token}
+        if source_path is not None:
+            with open(source_path, "rb") as handle:
+                chunks = iter(lambda: handle.read(1024 * 1024), b"")
+                response = self._client.post(
+                    f"{self.supervisor_url}/api/container-worker/artifacts",
+                    params=params,
+                    content=chunks,
+                    headers=headers,
+                    timeout=None,
+                )
+        else:
+            payload = (
+                content.encode("utf-8")
+                if isinstance(content, str)
+                else bytes(content or b"")
+            )
+            response = self._client.post(
+                f"{self.supervisor_url}/api/container-worker/artifacts",
+                params=params,
+                content=payload,
+                headers=headers,
+                timeout=None,
+            )
+        response.raise_for_status()
+        data = response.json()
+        artifact = data.get("artifact") if isinstance(data, dict) else None
+        if not isinstance(artifact, dict) or not artifact.get("artifact_id"):
+            raise RuntimeError("container supervisor returned an invalid artifact descriptor")
+        return artifact
+
+    def list_artifacts(self) -> list[dict[str, Any]]:
+        if not self.supervisor_url:
+            return []
+        response = self._client.get(
+            f"{self.supervisor_url}/api/sessions/{self.session_name}/artifacts",
+            params={"_ts": __import__("time").time_ns()},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        value = data.get("artifacts") if isinstance(data, dict) else []
+        return [dict(item) for item in value if isinstance(item, dict)]
+
     def render_message(self, role, content, model_name=None):
         text = str(content or "")
         if role == "assistant":

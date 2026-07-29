@@ -5,6 +5,7 @@ import asyncio
 import ipaddress
 import json
 import os
+import tempfile
 import time
 import uuid
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from mu.artifact import ArtifactRegistry
 from mu.container.builder import default_dockerfile
 from mu.container.docker_cli import ContainerRuntimeError
 from mu.container.network import DEFAULT_EGRESS_ALLOW
@@ -452,7 +454,9 @@ async def worker_event(
 ):
     supervisor = request.app.state.container_supervisor
     container_name = str(payload.get("container_name") or "")
-    if not supervisor.validate_token(container_name, x_mucli_worker_token or ""):
+    if not supervisor.validate_token(
+        container_name, x_mucli_worker_token or ""
+    ):
         raise HTTPException(status_code=401, detail="invalid worker token")
     event = dict(payload)
     event.pop("container_name", None)
@@ -470,6 +474,78 @@ async def worker_event(
     return {"ok": True}
 
 
+@router.post("/api/container-worker/artifacts")
+async def worker_artifact(
+    request: Request,
+    session_name: str,
+    container_name: str,
+    name: str,
+    mime_type: str = "application/octet-stream",
+    x_mucli_worker_token: str | None = Header(default=None),
+):
+    """Persist a worker artifact directly into the host session registry.
+
+    The host registry is authoritative. This control-plane upload remains
+    reliable even if an older or manually recreated worker is missing the
+    nested session bind mount under ``/root/.mucli``.
+    """
+    supervisor = request.app.state.container_supervisor
+    if not supervisor.validate_token(
+        container_name, x_mucli_worker_token or ""
+    ):
+        raise HTTPException(status_code=401, detail="invalid worker token")
+    ref = supervisor.container_for_session(session_name)
+    if ref is None or ref.name != container_name:
+        raise HTTPException(
+            status_code=403, detail="session is not attached to this worker"
+        )
+
+    safe_session = str(session_name or "").strip()
+    if not safe_session or os.path.basename(safe_session) != safe_session:
+        raise HTTPException(status_code=400, detail="invalid session name")
+    session_dir = os.path.join(_config.HISTORY_DIR, "sessions", safe_session)
+    if not os.path.isdir(session_dir):
+        raise HTTPException(status_code=404, detail="session not found")
+
+    registry = ArtifactRegistry(session_dir)
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > registry.max_bytes:
+                raise HTTPException(status_code=413, detail="artifact exceeds maximum size")
+        except ValueError:
+            pass
+
+    fd, incoming_path = tempfile.mkstemp(prefix="artifact-upload-", dir=session_dir)
+    total = 0
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            async for chunk in request.stream():
+                total += len(chunk)
+                if total > registry.max_bytes:
+                    raise HTTPException(status_code=413, detail="artifact exceeds maximum size")
+                handle.write(chunk)
+        artifact = registry.add(
+            name=name,
+            source_path=incoming_path,
+            mime_type=mime_type,
+        )
+    finally:
+        try:
+            os.unlink(incoming_path)
+        except FileNotFoundError:
+            pass
+
+    await request.app.state.bus.publish(
+        {
+            "kind": "artifact_created",
+            "artifact": artifact,
+            "session_name": safe_session,
+        }
+    )
+    return {"ok": True, "artifact": artifact}
+
+
 @router.post("/api/container-worker/prompt")
 async def worker_prompt(
     request: Request,
@@ -479,11 +555,15 @@ async def worker_prompt(
     supervisor = request.app.state.container_supervisor
     container_name = str(payload.get("container_name") or "")
     session_name = str(payload.get("session_name") or "")
-    if not supervisor.validate_token(container_name, x_mucli_worker_token or ""):
+    if not supervisor.validate_token(
+        container_name, x_mucli_worker_token or ""
+    ):
         raise HTTPException(status_code=401, detail="invalid worker token")
     ref = supervisor.container_for_session(session_name)
     if ref is None or ref.name != container_name:
-        raise HTTPException(status_code=403, detail="session is not attached to this worker")
+        raise HTTPException(
+            status_code=403, detail="session is not attached to this worker"
+        )
 
     prompt = dict(payload.get("prompt") or {})
     prompt["session_name"] = session_name

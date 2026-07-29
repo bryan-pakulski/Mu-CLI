@@ -175,44 +175,7 @@
         </div>
     </template>
 
-    <section class="artifact-panel"
-             x-show="$store.chat.currentName"
-             x-data="{ open: false }"
-             x-effect="$store.artifacts.load($store.chat.currentName)">
-        <button type="button" class="artifact-panel-header"
-                @click="open = !open"
-                :aria-expanded="open">
-            <span class="artifact-panel-title">
-                <span class="artifact-panel-caret" :class="{ open: open }">›</span>
-                <span>Artifacts</span>
-            </span>
-            <span class="artifact-panel-meta"
-                  x-text="$store.artifacts.loading ? 'loading…' : ($store.artifacts.current.length + ' available')"></span>
-        </button>
-        <div class="artifact-panel-body" x-show="open" x-transition.opacity.duration.160ms>
-            <div class="artifact-panel-actions">
-                <span>Files published by the agent appear here.</span>
-                <button type="button" class="subtle"
-                        @click.stop="$store.artifacts.load($store.chat.currentName, true)">refresh</button>
-            </div>
-            <div class="artifact-empty" x-show="!$store.artifacts.loading && !$store.artifacts.current.length">
-                No artifacts have been published for this session yet.
-            </div>
-            <div class="artifact-strip" x-show="$store.artifacts.current.length">
-                <template x-for="a in $store.artifacts.current" :key="a.artifact_id">
-                    <div class="artifact-chip">
-                        <a :href="a.download_url" download>
-                            <span class="artifact-icon">↓</span>
-                            <span class="artifact-name" x-text="a.name"></span>
-                            <span class="artifact-size" x-text="$store.artifacts.formatSize(a.size)"></span>
-                        </a>
-                        <button type="button" title="Delete artifact"
-                                @click="$store.artifacts.remove(a.artifact_id, $store.chat.currentName)">×</button>
-                    </div>
-                </template>
-            </div>
-        </div>
-    </section>
+
 
     <!-- Inline pending prompts: each entry in the prompts queue renders
          as its own chat item. They sit at the bottom of the chat flow

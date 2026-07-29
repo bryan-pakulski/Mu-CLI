@@ -1,0 +1,46 @@
+<aside class="mode-panel artifacts-panel"
+       data-mode="artifacts"
+       x-show="$store.mode.active === 'artifacts'"
+       x-transition.opacity.duration.200ms
+       x-effect="$store.mode.active === 'artifacts' && $store.artifacts.load($store.chat.currentName)">
+    <div class="artifacts-panel-head">
+        <div>
+            <span class="label-mono">Artifacts</span>
+            <p>Session deliverables published by the agent.</p>
+        </div>
+        <button type="button" class="icon-btn"
+                @click="$store.artifacts.load($store.chat.currentName, true)"
+                :disabled="$store.artifacts.loading"
+                title="Refresh artifacts" aria-label="Refresh artifacts">↻</button>
+    </div>
+
+    <div class="artifacts-panel-status">
+        <span x-show="$store.artifacts.loading">Refreshing…</span>
+        <span x-show="!$store.artifacts.loading"
+              x-text="$store.artifacts.current.length + ($store.artifacts.current.length === 1 ? ' artifact' : ' artifacts')"></span>
+    </div>
+
+    <div class="panel-empty artifacts-panel-empty"
+         x-show="!$store.artifacts.loading && !$store.artifacts.current.length">
+        <h3>No artifacts yet</h3>
+        <p class="muted">When the agent calls <code>upload_artifact</code>, the file appears here immediately.</p>
+    </div>
+
+    <div class="artifacts-list" x-show="$store.artifacts.current.length">
+        <template x-for="a in $store.artifacts.current" :key="a.artifact_id">
+            <div class="artifact-row">
+                <a class="artifact-row-main" :href="a.download_url" download
+                   :title="'Download ' + a.name">
+                    <span class="artifact-row-icon">↓</span>
+                    <span class="artifact-row-copy">
+                        <strong x-text="a.name"></strong>
+                        <span x-text="$store.artifacts.formatSize(a.size) + ' · ' + (a.mime_type || 'file')"></span>
+                    </span>
+                </a>
+                <button type="button" class="artifact-row-delete"
+                        title="Delete artifact" aria-label="Delete artifact"
+                        @click.stop="$store.confirm.ask('Delete artifact \'' + a.name + '\'?', $event, () => $store.artifacts.remove(a.artifact_id, $store.chat.currentName), {danger:true})">×</button>
+            </div>
+        </template>
+    </div>
+</aside>

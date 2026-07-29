@@ -86,24 +86,58 @@ def _registry(context):
 )
 def upload_artifact_tool(args: dict[str, Any], context) -> str:
     try:
-        descriptor = _registry(context).add(
-            name=str(args.get("name") or ""),
-            source_path=_validated_source_path(args, context),
-            content=(args.get("content") if "content" in args else None),
-            mime_type=str(args.get("mime_type") or "application/octet-stream"),
-        )
         session = getattr(context, "session", None)
+        variables = (
+            getattr(session, "variables", None)
+            or getattr(context, "variables", None)
+            or {}
+        )
+        session_type = normalize_session_type(
+            variables.get("session_type", "workspace")
+        )
+        source_path = _validated_source_path(args, context)
+        content = args.get("content") if "content" in args else None
+        mime_type = str(args.get("mime_type") or "application/octet-stream")
+        name = str(args.get("name") or "")
         ui = getattr(context, "ui", None) or getattr(session, "ui", None)
-        event = {"kind": "artifact_created", "artifact": descriptor}
-        try:
-            if ui is not None and hasattr(ui, "publish"):
-                ui.publish(event)
-            elif ui is not None and hasattr(ui, "_publish"):
-                ui._publish(event)
-        except Exception:
-            # Registry persistence is authoritative; a missed live event is
-            # recovered when clients refetch the artifact list.
-            pass
+
+        # In a container worker the host owns the authoritative artifact
+        # registry. Publishing over the authenticated control plane avoids
+        # relying on a nested session bind mount being present and means web
+        # and mobile can list the artifact immediately.
+        host_published = (
+            session_type == "container"
+            and ui is not None
+            and hasattr(ui, "publish_artifact")
+        )
+        if host_published:
+            descriptor = ui.publish_artifact(
+                name=name,
+                source_path=source_path,
+                content=content,
+                mime_type=mime_type,
+            )
+        else:
+            descriptor = _registry(context).add(
+                name=name,
+                source_path=source_path,
+                content=content,
+                mime_type=mime_type,
+            )
+
+        # Host-side container publishing already emits artifact_created after
+        # the registry write. Other runtimes retain the existing live event.
+        if not host_published:
+            event = {"kind": "artifact_created", "artifact": descriptor}
+            try:
+                if ui is not None and hasattr(ui, "publish"):
+                    ui.publish(event)
+                elif ui is not None and hasattr(ui, "_publish"):
+                    ui._publish(event)
+            except Exception:
+                # Registry persistence is authoritative; a missed live event is
+                # recovered when clients refetch the artifact list.
+                pass
         return json.dumps(
             {
                 "ok": True,
@@ -113,7 +147,7 @@ def upload_artifact_tool(args: dict[str, Any], context) -> str:
             },
             indent=2,
         )
-    except (ArtifactError, OSError) as exc:
+    except (ArtifactError, OSError, RuntimeError) as exc:
         return json.dumps({"ok": False, "error": str(exc), "artifacts": []}, indent=2)
 
 
@@ -128,7 +162,20 @@ def upload_artifact_tool(args: dict[str, Any], context) -> str:
 )
 def list_artifacts_tool(_args: dict[str, Any], context) -> str:
     try:
-        artifacts = _registry(context).list()
+        session = getattr(context, "session", None)
+        variables = (
+            getattr(session, "variables", None)
+            or getattr(context, "variables", None)
+            or {}
+        )
+        session_type = normalize_session_type(
+            variables.get("session_type", "workspace")
+        )
+        ui = getattr(context, "ui", None) or getattr(session, "ui", None)
+        if session_type == "container" and ui is not None and hasattr(ui, "list_artifacts"):
+            artifacts = ui.list_artifacts()
+        else:
+            artifacts = _registry(context).list()
         return json.dumps({"ok": True, "artifacts": artifacts}, indent=2)
-    except (ArtifactError, OSError) as exc:
+    except (ArtifactError, OSError, RuntimeError) as exc:
         return json.dumps({"ok": False, "error": str(exc), "artifacts": []}, indent=2)
